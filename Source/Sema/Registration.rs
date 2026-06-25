@@ -1074,6 +1074,7 @@ pub(crate) fn register_struct(
             fields,
             methods: HashMap::new(),
             single_use: s.is_single_use,
+            columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
         },
     );
     legacy.insert(

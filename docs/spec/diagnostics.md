@@ -329,8 +329,11 @@ before continuing.
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
 | E1104 | sema  | `#layout(c)` struct contains a growable field (D-REPRC1) |
-| E1105 | sema  | `#layout(…)` variant not yet supported (D-REPRC1 reserved) |
+| E1105 | sema  | `#layout(packed)` / `#layout(align(N))` not yet supported (D-REPRC1 reserved) |
 | E1106 | sema  | `.detach()` called on a task that captured a `view` borrow (D-DETACH1) — the view may outlive the caller |
+| E1107 | sema  | `columnar [T]` per-container layout prefix is reserved (D-SOA2C) |
+| E1108 | sema  | list method not yet supported on a `#layout(columnar)` list (D-SOA1) |
+| E1109 | sema  | partial `#layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
 | E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
@@ -488,7 +491,10 @@ CLI.
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
 | E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy` or `share` to the task instead of a `view`. |
 | E1104 | `#layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#layout(c)` if C interop is not required. |
-| E1105 | `#layout(packed)`, `#layout(align(N))`, or `#layout(columnar)` written on a struct. | Only `#layout(c)` is implemented in this release; the other variants are reserved for future milestones. | Use `#layout(c)` for C-compatible layout, or omit `#layout` for the default. |
+| E1105 | `#layout(packed)` or `#layout(align(N))` written on a struct. | The supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays); `packed`/`align` are reserved for future milestones. | Use `#layout(c)` or `#layout(columnar)`, or omit `#layout` for the default. |
+| E1107 | The per-container layout prefix `columnar [T]` was written in a type. | A per-use columnar override isn't built yet — only the whole-struct form `#layout(columnar) struct …` ships in v1 (D-SOA2C reserves this spelling). | Put `#layout(columnar)` on the `struct` declaration instead. |
+| E1108 | A list method (e.g. `.map`, `.filter`, `.sort`, `.pop`, `.remove`, `.get`) was called on a `#layout(columnar)` list. | v1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled. | Drop `#layout(columnar)` from the struct to use the full list API, or rewrite the operation with indexing and a loop. |
+| E1109 | A partial columnar annotation `#layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#layout(columnar)` to convert the whole struct. |
 | L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |

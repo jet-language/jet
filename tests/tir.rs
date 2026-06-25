@@ -4420,3 +4420,103 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "43\n-1\n3\na\nb\nc\n60\n");
 }
+
+// --- D-SOA1 / D-SOA2A-D: `#layout(columnar)` struct-of-arrays --------------
+
+/// Compile a program to Rust (front end only) for source-level assertions.
+fn compile_rust(name: &str, src: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("jet_tir_test_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join(format!("{name}.jet"));
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    jet::compile_with_path(src, &shown)
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected:\n{}",
+                jet::render_diagnostics(&shown, src, &diags)
+            )
+        })
+        .rust
+}
+
+const COLUMNAR_PROG: &str = "\
+#layout(columnar)
+struct P {
+    x: Float
+    mass: Float
+}
+fn total(ps: [P]) -> Float {
+    s := 0.0
+    loop p in ps {
+        s = s + p.mass
+    }
+    return s
+}
+fn main() {
+    ps: [P] := [P { x: 0.0, mass: 1.0 }, P { x: 1.0, mass: 2.0 }]
+    ps.push(P { x: 2.0, mass: 3.0 })
+    print(ps.len())
+    print(ps[2].x)
+    print(ps[1].mass)
+    print(total(ps))
+}
+";
+
+/// The whole columnar surface (construct, push, len, index-read, field-read,
+/// iterate) compiles and runs with AoS-identical behavior.
+#[test]
+fn columnar_list_core_surface_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("tir_columnar_core", COLUMNAR_PROG);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3\n2.0\n2.0\n6.0\n");
+}
+
+/// Codegen emits the struct-of-arrays storage type and routes the list ops
+/// through it — and emits ZERO `unsafe` (I1 golden grep).
+#[test]
+fn columnar_lowers_to_struct_of_arrays_no_unsafe() {
+    let rust = compile_rust("tir_columnar_gen", COLUMNAR_PROG);
+    assert!(
+        rust.contains("struct user_P_columns"),
+        "expected a generated struct-of-arrays type"
+    );
+    assert!(
+        rust.contains("from_aos") && rust.contains("gather_at") && rust.contains("iter_aos"),
+        "expected the columnar inherent API in the output"
+    );
+    // I1: no `unsafe` anywhere in generated columnar code.
+    assert!(
+        !rust.contains("unsafe"),
+        "columnar codegen must emit no `unsafe`"
+    );
+}
+
+/// D-SOA2D: serialization is transparent — a columnar `[S]` encodes identically
+/// to the array-of-structs form.
+#[test]
+fn columnar_serialization_is_transparent() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.encoding.json as json
+#[Codable]
+#layout(columnar)
+struct Pt { a: Int, b: Int }
+#[Codable]
+struct PlainPt { a: Int, b: Int }
+fn main() {
+    cs: [Pt] := [Pt { a: 1, b: 2 }, Pt { a: 3, b: 4 }]
+    ps: [PlainPt] := [PlainPt { a: 1, b: 2 }, PlainPt { a: 3, b: 4 }]
+    print(json.to_string(cs) == json.to_string(ps))
+    print(json.to_string(cs))
+}
+";
+    let (code, stdout) = build_and_run("tir_columnar_serde", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "true\n[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]\n");
+}

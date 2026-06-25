@@ -352,6 +352,10 @@ pub(crate) enum TStmt {
         var2: Option<String>,
         collection_str: String,
         method_kind: Option<TForInMethod>,
+        /// D-SOA1: the collection is a `#layout(columnar)` list — iterate via
+        /// `({coll}).iter_aos()` (yields owned gathered `S`) instead of
+        /// `({coll}).iter().cloned()`. Always `false` for the map/method forms.
+        columnar: bool,
         body: Vec<TStmt>,
     },
     /// c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picked the
@@ -588,6 +592,24 @@ pub(crate) enum TExprKind {
     /// element is lowered as-is (the AST path applies no clone/coercion at the
     /// literal site — `emit_expr` per element).
     ListLit(Vec<TExpr>),
+    /// D-SOA1: a list literal whose element is a `#layout(columnar)` struct `S`.
+    /// Lowers to `user_<S>_columns::from_aos(vec![…])` — the elements build the
+    /// array-of-structs, then `from_aos` distributes them across the columns.
+    /// `columns_ty` is the resolved `user_<S>_columns` Rust path.
+    ColumnarListLit { columns_ty: String, elems: Vec<TExpr> },
+    /// D-SOA1: index-read `xs[i]` on a columnar list — gathers the logical `S`
+    /// from the columns at `i` (bounds-checked, same panic as `jet_index_vec`).
+    /// Lowers to `(base).gather_at(i, file, line)`.
+    ColumnarGather { base: Box<TExpr>, index: Box<TExpr>, line: usize },
+    /// D-SOA1: a fused `xs[i].field` field-read on a columnar list — reads
+    /// directly from the field's column (`jet_index_vec(&(base).user_<field>, i,
+    /// …)`), the cache-friendly fast path (no whole-`S` gather).
+    ColumnarColumnRead {
+        base: Box<TExpr>,
+        index: Box<TExpr>,
+        column_rust: String,
+        line: usize,
+    },
     /// c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). The generated
     /// struct name (`JetTup_<hash>`) and the CANONICAL field order are resolved at
     /// lowering from the literal's sema-attached `Type::Tuple`; each field's value is
@@ -5308,6 +5330,21 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     init.ty = fl.clone();
                 }
             }
+            // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
+            // with an Int placeholder element type (no element to infer from), so it
+            // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
+            // columnar empty constructor `user_<S>_columns::from_aos(vec![])` using
+            // the binding's declared type.
+            if let Some(decl @ Type::List(inner)) = &b.ty {
+                if let Some(columns_ty) = cx.columnar_list_type(inner) {
+                    if matches!(&init.kind, TExprKind::ListLit(es) if es.is_empty()) {
+                        init = TExpr {
+                            ty: decl.clone(),
+                            kind: TExprKind::ColumnarListLit { columns_ty, elems: Vec::new() },
+                        };
+                    }
+                }
+            }
             // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — an escaping FnMut
             // lambda binding gets `let mut` AND an `as <fn-trait(mut)>` init coercion +
             // a `: <fn-trait(mut)>` annotation. Decided here from `Lambda.meta`.
@@ -5496,12 +5533,22 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         .locals
                         .insert(v2.clone(), (mangle(v2), v2_ty));
                 }
+                // D-SOA1: a single-binding loop over a columnar list iterates the
+                // gathered AoS view (`iter_aos`), not `Vec::iter` (which the columns
+                // type doesn't expose).
+                let columnar = var2.is_none()
+                    && method_kind.is_none()
+                    && coll_elem_ty
+                        .as_ref()
+                        .map(|t| cx.columnar_list_type(t).is_some())
+                        .unwrap_or(false);
                 TStmt::ForIn {
                     label: label_name(label),
                     var: var.clone(),
                     var2: var2.as_ref().map(|(n, _)| n.clone()),
                     collection_str,
                     method_kind,
+                    columnar,
                     body: lower_stmts(body, cx, &mut branch),
                 }
             }
@@ -7077,6 +7124,33 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                 }
             }
+            // D-SOA1: a fused `xs[i].field` where `xs` is a columnar list reads the
+            // field's column directly (`jet_index_vec(&(base).user_<field>, i, …)`),
+            // the cache-friendly path — no whole-`S` gather. The result is the same
+            // owned, bounds-checked field value the AoS form would produce.
+            if let Expr::Index { base, index, span, kind } = receiver.as_ref() {
+                if matches!(kind, IndexKind::List) {
+                    let base_t = lower_expr(base, cx, env);
+                    if let Type::List(elem) = &base_t.ty {
+                        if cx.columnar_list_type(elem).is_some() {
+                            let field_ty =
+                                struct_field_type(cx, elem, member).unwrap_or(Type::Int);
+                            let index_t = lower_expr(index, cx, env);
+                            let line =
+                                crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                            return TExpr {
+                                ty: field_ty,
+                                kind: TExprKind::ColumnarColumnRead {
+                                    base: Box::new(base_t),
+                                    index: Box::new(index_t),
+                                    column_rust: mangle(member).to_string(),
+                                    line,
+                                },
+                            };
+                        }
+                    }
+                }
+            }
             let recv = lower_expr(receiver, cx, env);
             let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
             // A field of a CORE struct (`ProcessResult.code`, `JsonError.message`, …) is
@@ -7158,6 +7232,13 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::ListLit(elems, _) => {
             let telems: Vec<TExpr> = elems.iter().map(|e| lower_expr(e, cx, env)).collect();
             let elem_ty = telems.first().map(|e| e.ty.clone()).unwrap_or(Type::Int);
+            // D-SOA1: a list of a columnar struct builds via `from_aos`.
+            if let Some(columns_ty) = cx.columnar_list_type(&elem_ty) {
+                return TExpr {
+                    ty: Type::List(Box::new(elem_ty)),
+                    kind: TExprKind::ColumnarListLit { columns_ty, elems: telems },
+                };
+            }
             TExpr {
                 ty: Type::List(Box::new(elem_ty)),
                 kind: TExprKind::ListLit(telems),
@@ -7238,6 +7319,21 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 _ => Type::Int,
             };
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
+            // columns. (A fused `xs[i].field` is handled in the `Field` arm before
+            // this point — that path reads a single column directly.)
+            if let Type::List(elem) = &base_t.ty {
+                if cx.columnar_list_type(elem).is_some() {
+                    return TExpr {
+                        ty: result_ty,
+                        kind: TExprKind::ColumnarGather {
+                            base: Box::new(base_t),
+                            index: Box::new(index_t),
+                            line,
+                        },
+                    };
+                }
+            }
             TExpr {
                 ty: result_ty,
                 kind: TExprKind::Index {
@@ -9321,6 +9417,7 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             var2,
             collection_str,
             method_kind,
+            columnar,
             body,
         } => {
             let lbl = tir_label_prefix(label);
@@ -9387,11 +9484,18 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
                         ));
                     }
                     None => {
+                        // D-SOA1: a columnar list iterates `iter_aos()` (owned S, no
+                        // `.cloned()`); a plain list iterates `iter().cloned()`.
+                        let iter_form = if *columnar {
+                            format!("({}).iter_aos()", collection_str)
+                        } else {
+                            format!("({}).iter().cloned()", collection_str)
+                        };
                         out.push_str(&format!(
-                            "{}{}for _jet_item in ({}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+                            "{}{}for _jet_item in {} {{\n    {}let {} = _jet_item;\n",
                             pad,
                             lbl,
-                            collection_str,
+                            iter_form,
                             pad,
                             mangle(var)
                         ));
@@ -9936,6 +10040,30 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             } else {
                 format!("vec![{}]", parts)
             }
+        }
+        // D-SOA1: a columnar list literal → `user_<S>_columns::from_aos(vec![…])`.
+        TExprKind::ColumnarListLit { columns_ty, elems } => {
+            let parts = elems
+                .iter()
+                .map(|e| emit_tir_expr(e, cx))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}::from_aos(vec![{}])", columns_ty, parts)
+        }
+        // D-SOA1: `xs[i]` on a columnar list → bounds-checked gather of the logical S.
+        TExprKind::ColumnarGather { base, index, line } => {
+            let b = emit_tir_expr(base, cx);
+            let i = emit_tir_expr(index, cx);
+            format!("({}).gather_at({}, {:?}, {})", b, i, cx.file, line)
+        }
+        // D-SOA1: `xs[i].field` on a columnar list → direct column read.
+        TExprKind::ColumnarColumnRead { base, index, column_rust, line } => {
+            let b = emit_tir_expr(base, cx);
+            let i = emit_tir_expr(index, cx);
+            format!(
+                "jet_index_vec(&({}).{}, {}, {:?}, {})",
+                b, column_rust, i, cx.file, line
+            )
         }
         // c109 Phase 23: a named-tuple literal → `JetTup_<hash> { user_<f>: <v>, … }`.
         // Mirrors `emit_expr`'s `TupleLit` arm byte-for-byte (fields canonical-ordered,

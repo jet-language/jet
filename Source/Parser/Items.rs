@@ -2206,8 +2206,10 @@ impl<'a> Parser<'a> {
         matches!(&self.peek3().kind, TokKind::LParen)
     }
 
-    /// D-REPRC1: parse `#layout(variant) [pub] struct Name { … }`.
-    /// Only `c` is supported; `packed`, `align`, `columnar` parse-and-error.
+    /// D-REPRC1 / D-SOA1: parse `#layout(variant) [pub] struct Name { … }`.
+    /// `c` (C-compatible) and `columnar` (struct-of-arrays) are supported;
+    /// `packed`, `align` parse-and-error; the partial form `columnar: f, g`
+    /// (D-SOA2B) is rejected (deferred post-v1).
     fn layout_struct_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
         let attr_start = self.peek().span;
         self.bump(); // consume `#`
@@ -2215,17 +2217,27 @@ impl<'a> Parser<'a> {
         debug_assert_eq!(attr_name, Syntax::ATTR_LAYOUT);
         self.expect(TokKind::LParen, "after `#layout`")?;
         let (variant, variant_span) = self.expect_ident("inside `#layout(…)`")?;
+        // D-SOA2B: partial columnar (`#layout(columnar: x, y)`) is deferred — a
+        // `:` after the variant is the partial form. Reject with a clear message.
+        if variant == Syntax::LAYOUT_COLUMNAR && matches!(&self.peek().kind, TokKind::Colon) {
+            let colon_span = self.peek().span;
+            return Err(Diagnostic::error(
+                "E1109",
+                "partial `#layout(columnar: …)` isn't supported yet".to_string(),
+                "v1 supports whole-struct columnar only — every field becomes a column".to_string(),
+                "write `#layout(columnar)` to convert the whole struct".to_string(),
+                Some(Span::new(variant_span.start, colon_span.end)),
+            ));
+        }
         let layout = match variant.as_str() {
             v if v == Syntax::LAYOUT_C => Some(crate::AST::StructLayout::C),
-            v if v == Syntax::LAYOUT_PACKED
-                || v == Syntax::LAYOUT_ALIGN
-                || v == Syntax::LAYOUT_COLUMNAR =>
-            {
+            v if v == Syntax::LAYOUT_COLUMNAR => Some(crate::AST::StructLayout::Columnar),
+            v if v == Syntax::LAYOUT_PACKED || v == Syntax::LAYOUT_ALIGN => {
                 return Err(Diagnostic::error(
                     "E1105",
                     format!("`#layout({})` is reserved and not yet supported", v),
-                    "only `#layout(c)` is implemented in this release".to_string(),
-                    "use `#layout(c)` for C-compatible layout, or omit `#layout` for the default".to_string(),
+                    "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
+                    "use `#layout(c)` or `#layout(columnar)`, or omit `#layout` for the default".to_string(),
                     Some(variant_span),
                 ));
             }
@@ -2233,8 +2245,8 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E1105",
                     format!("`#layout({})` isn't a known layout variant", variant),
-                    "the supported variants are: `c` (C-compatible layout)".to_string(),
-                    "write `#layout(c)` for C-compatible layout".to_string(),
+                    "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
+                    "write `#layout(c)` or `#layout(columnar)`".to_string(),
                     Some(variant_span),
                 ));
             }

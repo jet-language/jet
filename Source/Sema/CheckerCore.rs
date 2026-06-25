@@ -587,6 +587,30 @@ impl<'a> Checker<'a> {
                             Some(Type::List(_)) => *kind = IndexKind::List,
                             _ => {}
                         }
+                        // D-SOA1: index-WRITE through a columnar list (`xs[i] = …`)
+                        // is deferred — v1 supports index-READ, field-read, `len`,
+                        // `is_empty`, `push`, and iteration. Reject rather than
+                        // miscompile (the columns type has no `IndexMut`).
+                        if let Some(Type::List(inner)) = &base_ty {
+                            if let Type::Named(elem) = inner.as_ref() {
+                                if self.registry.is_columnar(elem) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E1108",
+                                        format!(
+                                            "writing through `[ ]` isn't supported on a columnar list `{}` yet",
+                                            Type::List(inner.clone()).show()
+                                        ),
+                                        "`#layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred".to_string(),
+                                        format!(
+                                            "drop `#layout(columnar)` from `{}` to assign through `[ ]`, or rebuild the list with `push`",
+                                            elem
+                                        ),
+                                        Some(*span),
+                                    ));
+                                    return;
+                                }
+                            }
+                        }
                         // Writing through `[ ]` changes the owner: the root
                         // name must be changeable and not under a `for` borrow.
                         if matches!(base_ty, Some(Type::Map { .. }) | Some(Type::List(_))) {
@@ -699,6 +723,43 @@ impl<'a> Checker<'a> {
                     // receiver as `mut self`" / "make it changeable" fix (owner Q1).
                     LValue::Field { base, field, span } => {
                         self.borrow_ctx = true;
+                        // D-SOA1: `xs[i].field = …` where `xs` is a columnar list
+                        // would write into a throwaway gathered value, not the
+                        // column — reject (field-WRITE on a columnar element is
+                        // deferred; reads are supported). Detected off the index
+                        // base's root binding type (the common `local[i].f` form).
+                        if let Expr::Index { base: ib, .. } = base.as_ref() {
+                            let columnar_elem = expr_root_ident(ib)
+                                .and_then(|root| self.lookup(root))
+                                .and_then(|info| match &info.ty {
+                                    Type::List(inner) => match inner.as_ref() {
+                                        Type::Named(elem)
+                                            if self.registry.is_columnar(elem) =>
+                                        {
+                                            Some(elem.clone())
+                                        }
+                                        _ => None,
+                                    },
+                                    _ => None,
+                                });
+                            if let Some(elem) = columnar_elem {
+                                self.diags.push(Diagnostic::error(
+                                    "E1108",
+                                    format!(
+                                        "writing `{}[i].{}` isn't supported on a columnar list yet",
+                                        expr_root_ident(ib).unwrap_or("xs"),
+                                        field
+                                    ),
+                                    "`#layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred".to_string(),
+                                    format!(
+                                        "drop `#layout(columnar)` from `{}` to write fields in place, or rebuild the element with `push`",
+                                        elem
+                                    ),
+                                    Some(*span),
+                                ));
+                                return;
+                            }
+                        }
                         let base_ty = self.infer(base);
                         // Validate the field exists and get its type (emits E0302 on a
                         // bad field). The value's type must match the field type (E0108).

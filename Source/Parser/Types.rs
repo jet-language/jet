@@ -332,6 +332,22 @@ impl<'a> Parser<'a> {
                     args: vec![elem],
                 }
             }
+            // D-SOA2C: reserve the per-container prefix spelling `columnar [T]` (a
+            // future per-use layout override). Parse-and-reserve only — nothing
+            // ships; reject with a clear "reserved" message.
+            TokKind::Ident(n)
+                if n == Syntax::LAYOUT_COLUMNAR
+                    && matches!(self.peek2().kind, TokKind::LBracket) =>
+            {
+                let kw_span = self.peek().span;
+                return Err(Diagnostic::error(
+                    "E1107",
+                    "the `columnar [T]` per-container layout form is reserved".to_string(),
+                    "a per-use columnar override isn't built yet — only the whole-struct form ships".to_string(),
+                    "put `#layout(columnar)` on the `struct` declaration instead".to_string(),
+                    Some(kw_span),
+                ));
+            }
             TokKind::KwFn => self.fn_type(None)?,
             // D-EFF2: a callback effect bound rides the front of a function type —
             // `#Pure fn(T) -> U` (the callback must be pure) or `#(Net) fn(T) -> U`

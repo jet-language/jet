@@ -1,0 +1,69 @@
+// D-SOA1 / D-SOA2A=C: `#layout(columnar)` — cache-friendly struct-of-arrays.
+// A `[Particle]` of a columnar struct is stored one Vec per field (x's, y's, …)
+// instead of one struct per slot. The logical API is unchanged: you build,
+// index, read fields, take `len`, `push`, and iterate exactly as a plain `[T]`.
+// Only the memory layout differs. Whole-struct columnar only in v1 (D-SOA2B).
+//
+// D-SOA2D: the layout is serialization-transparent — `json.to_string` of a
+// columnar list is byte-identical to the array-of-structs form.
+
+use core.encoding.json as json
+
+#[Codable]
+#layout(columnar)
+struct Particle {
+    x: Float
+    y: Float
+    mass: Float
+}
+
+// Same fields, default (array-of-structs) layout — the transparency baseline.
+#[Codable]
+struct PlainParticle {
+    x: Float
+    y: Float
+    mass: Float
+}
+
+fn total_mass(ps: [Particle]) -> Float {
+    sum := 0.0
+    loop p in ps {
+        sum = sum + p.mass
+    }
+    return sum
+}
+
+fn main() {
+    // Construct a columnar list with an ordinary list literal.
+    ps: [Particle] := [
+        Particle { x: 0.0, y: 0.0, mass: 1.0 },
+        Particle { x: 1.0, y: 2.0, mass: 3.0 },
+    ]
+
+    // Push grows every column together.
+    ps.push(Particle { x: 4.0, y: 5.0, mass: 6.0 })
+
+    print(ps.len())          // 3
+
+    // Index-read yields a whole gathered Particle.
+    third @= ps[2]
+    print(third.x)           // 4.0
+
+    // Field-read goes straight to the field's column (the cache-friendly path).
+    print(ps[1].y)           // 2.0
+
+    // Iteration produces each logical Particle.
+    print(total_mass(ps))    // 10.0
+
+    // Serialization transparency: identical output for columnar vs plain.
+    plain: [PlainParticle] := [
+        PlainParticle { x: 0.0, y: 0.0, mass: 1.0 },
+        PlainParticle { x: 1.0, y: 2.0, mass: 3.0 },
+        PlainParticle { x: 4.0, y: 5.0, mass: 6.0 },
+    ]
+    columnar_json @= json.to_string(ps)
+    plain_json @= json.to_string(plain)
+    print(columnar_json)
+    require(columnar_json == plain_json, "columnar layout must serialize identically to AoS")
+    print("serialization transparent")
+}

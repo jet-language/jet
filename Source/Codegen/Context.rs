@@ -35,6 +35,10 @@ pub(crate) struct Cx {
     /// Recursive-type edges that need `Box<…>` in Rust (`(owner, edge_key)`).
     pub(crate) boxed_edges: HashSet<(String, String)>,
     pub(crate) cloneable: HashSet<String>,
+    /// D-SOA1: struct names declared `#layout(columnar)`. A `[S]` of such a
+    /// struct lowers to the generated `user_<S>_columns` struct-of-arrays type;
+    /// `rust_type` maps the list type and the list ops route to its inherent API.
+    pub(crate) columnar: HashSet<String>,
     pub(crate) comparable: HashSet<String>,
     /// S55: explicit `derive Comparable;` → PartialOrd in Rust.
     pub(crate) partial_ord: HashSet<String>,
@@ -180,6 +184,31 @@ impl Cx {
         }
     }
 
+    /// D-SOA1: is `name` a `#layout(columnar)` struct (local or imported)? The
+    /// columnar set only carries local structs; an imported columnar struct is
+    /// not tracked, so `[ImportedColumnar]` still lowers AoS — acceptable for v1
+    /// (columnar lists don't cross module boundaries in the shipped examples).
+    pub(crate) fn is_columnar_struct(&self, name: &str) -> bool {
+        self.columnar.contains(name)
+    }
+
+    /// D-SOA1: if `inner` is a `#layout(columnar)` struct type, the Rust path of
+    /// its generated struct-of-arrays type (`user_<S>_columns`, module-prefixed
+    /// like the struct itself). `None` for any non-columnar element.
+    pub(crate) fn columnar_list_type(&self, inner: &Type) -> Option<String> {
+        if let Type::Named(name) = inner {
+            if self.is_columnar_struct(name) {
+                return Some(if self.foreign_types.contains_key(name.as_str()) {
+                    let rust_mod = &self.foreign_types[name.as_str()];
+                    format!("{}{}::user_{name}_columns", self.root_prefix, rust_mod)
+                } else {
+                    format!("user_{name}_columns")
+                });
+            }
+        }
+        None
+    }
+
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         match ty {
             Type::Int => "i64".to_string(),
@@ -191,6 +220,11 @@ impl Cx {
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
             Type::Char => "char".to_string(),
+            // D-SOA1: a `[S]` of a `#layout(columnar)` struct lowers to the
+            // generated struct-of-arrays type `user_<S>_columns`, not `Vec<S>`.
+            Type::List(inner) if self.columnar_list_type(inner).is_some() => {
+                self.columnar_list_type(inner).unwrap()
+            }
             Type::List(inner) => format!("Vec<{}>", self.rust_type(inner)),
             Type::Map { key, value } => format!(
                 "std::collections::BTreeMap<{}, {}>",
@@ -424,6 +458,7 @@ pub(crate) fn build_cx_items(
         variant_owner: HashMap::new(),
         boxed_edges: HashSet::new(),
         cloneable: HashSet::new(),
+        columnar: HashSet::new(),
         comparable: HashSet::new(),
         partial_ord: HashSet::new(),
         src: src.to_string(),
@@ -477,6 +512,9 @@ pub(crate) fn build_cx_items(
             }
             Item::Struct(s) => {
                 cx.type_names.insert(s.name.clone());
+                if s.layout == Some(crate::AST::StructLayout::Columnar) {
+                    cx.columnar.insert(s.name.clone());
+                }
                 cx.struct_fields.insert(
                     s.name.clone(),
                     s.fields

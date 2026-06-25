@@ -897,11 +897,17 @@ pub struct Param {
     pub default: Option<Box<Expr>>,
 }
 
-/// D-REPRC1 (ratified; D-REPRC1 = B): the variant of `#layout(…)` on a struct.
+/// D-REPRC1 / D-SOA1 (ratified): the variant of `#layout(…)` on a struct.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructLayout {
-    /// `#layout(c)` → `#[repr(C)]` on the generated Rust struct.
+    /// `#layout(c)` → `#[repr(C)]` on the generated Rust struct. (D-REPRC1=B)
     C,
+    /// D-SOA1 / D-SOA2A=C: `#layout(columnar)` → a `[S]` collection is stored
+    /// struct-of-arrays (one `Vec` per field) instead of array-of-structs. The
+    /// logical `S` value and field-access syntax are unchanged; only the memory
+    /// layout of the `[S]` collection differs (cache-friendly). Whole-struct only
+    /// in v1 (D-SOA2B=A).
+    Columnar,
 }
 
 /// D-ATTR2 / D-SERDE2–8: one `#[Name]` or `#[Name(arg, …)]` bracket marker.

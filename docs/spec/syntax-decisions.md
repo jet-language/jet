@@ -2316,24 +2316,36 @@ not a warning. UNBLOCKED. (c77)
 **D-SOA2A — the `soa` layout keyword is renamed `columnar`** *(ratified 2026-06-22, option
 C)*: the layout keyword inside `#layout(…)` is **`columnar`** (Arrow/Parquet column-store
 term, self-defining, no concurrency-vocabulary collision). This **renames the ratified
-D-SOA1 `#layout(soa)` to `#layout(columnar)`** (see the amended D-SOA1 entry). Implementation
-stays deferred post-v1 (Later tier). (c78)
+D-SOA1 `#layout(soa)` to `#layout(columnar)`** (see the amended D-SOA1 entry).
+**IMPLEMENTED (c78).** (c78)
 
 **D-SOA2B — whole-struct columnar only in v1** *(ratified 2026-06-22, option A)*:
 `#layout(columnar)` converts every field; partial annotation (`#layout(columnar: x, y)`)
-is deferred — two memory regions need new ownership/aliasing surface. Deferred post-v1.
-(c78)
+is deferred — two memory regions need new ownership/aliasing surface. **IMPLEMENTED (c78):
+the partial form is rejected at parse time (E1109).** (c78)
 
 **D-SOA2C — reserve the per-container prefix-keyword spelling** *(ratified 2026-06-22,
 option A)*: reserve `columnar [Particle]` (prefix keyword on a list type) for a future
 per-use layout override; a layout is a storage modifier, not a type parameter, so the
-generic-style `Columnar<T>` form is not reserved. Pure grammar reservation; nothing ships
-today. Deferred post-v1. (c78)
+generic-style `Columnar<T>` form is not reserved. **IMPLEMENTED (c78): `columnar [T]` in
+type position is parse-and-reserved (E1107); nothing ships behind it.** (c78)
 
 **D-SOA2D — `#layout(columnar)` is serialization-transparent** *(ratified 2026-06-22, option
 A)*: serialization sees the logical struct; output is identical with or without the layout
 attribute. `#layout` is a memory concern only; columnar serialization (e.g. Arrow IPC) is a
-purpose-built serializer, not the default `#[Serialize]`. Deferred post-v1. (c78)
+purpose-built serializer, not the default `#[Serialize]`. **IMPLEMENTED (c78): the columnar
+storage type's `Encode`/`Decode`/`JetShow` delegate to the gathered AoS form, so
+`json.to_string` output is byte-identical with or without the attribute.** (c78)
+
+**D-SOA1 implementation note (c78).** Whole-struct columnar storage ships end-to-end:
+parser→sema→codegen. A `[S]` of a `#layout(columnar)` struct lowers to a generated
+`user_<S>_columns` struct-of-arrays (one `Vec` per field) with a logical-`Vec` inherent API.
+**v1 list surface on a columnar `[S]`:** construct (list literal incl. empty), index-read
+(`xs[i]` gathers an `S`), field-read (`xs[i].f` reads the field's column directly — the
+cache-friendly path), `len`, `is_empty`, `push`, and iteration (`loop p in xs`). **Deferred
+(E1108, rejected — never miscompiled):** the functional/mutation surface (`map`, `filter`,
+`sort`, `pop`, `remove`, `insert`, `get`, `first`, `last`, …), slicing `xs[a..b]`,
+index-write `xs[i] = …`, and field-write `xs[i].f = …`. Codegen emits zero `unsafe` (I1).
 
 **D-TEST1 — a parameterized `#Test fn` is a property test** *(ratified 2026-06-22, option
 B)*: an `#Test fn` with parameters is a property test (inputs generated from the parameter

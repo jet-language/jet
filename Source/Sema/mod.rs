@@ -67,6 +67,10 @@ pub(crate) enum TypeDef {
         /// Values of this type must be consumed exactly once (E0140/E0141) and
         /// may not be aliased (E0142).
         single_use: bool,
+        /// D-SOA1 / D-SOA2A=C: `#layout(columnar)` was present. A `[S]` of this
+        /// struct is stored struct-of-arrays; sema gates the list-op surface to
+        /// the v1-supported subset (E1108) and codegen lowers it columnar.
+        columnar: bool,
     },
     Enum {
         #[allow(dead_code)] // stored for future duplicate-name diagnostics
@@ -102,6 +106,12 @@ impl TypeRegistry {
             Some(TypeDef::Struct { fields, .. }) => Some(fields.as_slice()),
             _ => None,
         }
+    }
+
+    /// D-SOA1: true when `name` is a `#layout(columnar)` struct (its `[name]`
+    /// collections are stored struct-of-arrays).
+    fn is_columnar(&self, name: &str) -> bool {
+        matches!(self.types.get(name), Some(TypeDef::Struct { columnar: true, .. }))
     }
 
     fn enum_variants(&self, name: &str) -> Option<&HashMap<String, (Span, VariantPayload)>> {

@@ -1985,7 +1985,29 @@ impl<'a> Checker<'a> {
             }
         }
         match base_ty {
-            Type::List(inner) => Some(Type::List(inner)),
+            Type::List(inner) => {
+                // D-SOA1: slicing a columnar list is deferred (v1 core surface is
+                // index/field/len/push/iterate); reject rather than miscompile.
+                if let Type::Named(elem) = inner.as_ref() {
+                    if self.registry.is_columnar(elem) {
+                        self.diags.push(Diagnostic::error(
+                            "E1108",
+                            format!(
+                                "slicing isn't supported on a columnar list `{}` yet",
+                                Type::List(inner.clone()).show()
+                            ),
+                            "`#layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                            format!(
+                                "drop `#layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
+                                elem
+                            ),
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                }
+                Some(Type::List(inner))
+            }
             Type::String => Some(Type::String),
             other => {
                 self.diags.push(Diagnostic::error(
@@ -2485,6 +2507,38 @@ impl<'a> Checker<'a> {
                         }
                         return msig.return_type.clone();
                     }
+                }
+            }
+        }
+        // D-SOA1: a `[S]` of a `#layout(columnar)` struct is stored
+        // struct-of-arrays. v1 supports the core list surface (construct,
+        // index-read, field-read, `len`, `is_empty`, `push`, iterate); the rest
+        // is deferred — reject the method with a clear message rather than
+        // silently miscompiling on columnar storage.
+        if let Type::List(inner) = &recv_ty {
+            if let Type::Named(elem) = inner.as_ref() {
+                if self.registry.is_columnar(elem)
+                    && !matches!(method, "len" | "is_empty" | "push")
+                    && Collections::builtin_method_return(&recv_ty, method, args.len(), false).is_some()
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E1108",
+                        format!(
+                            "`.{}()` isn't supported on a columnar list `{}` yet",
+                            method,
+                            recv_ty.show()
+                        ),
+                        "`#layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                        format!(
+                            "drop `#layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
+                            elem, method
+                        ),
+                        Some(span),
+                    ));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
                 }
             }
         }
