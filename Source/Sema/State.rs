@@ -441,6 +441,7 @@ impl<'a> StateCtx<'a> {
             | Expr::Bool(..)
             | Expr::Char(..)
             | Expr::Absent(_)
+            | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
             | Expr::Lambda(_) => {}
         }

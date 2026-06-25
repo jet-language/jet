@@ -557,6 +557,19 @@ impl<'a> Checker<'a> {
                 self.check_pattern_test(subject, pattern, *span);
                 Some(Type::Bool)
             }
+            // D-SIMD2: a reduce-op marker is only meaningful inside `v.reduce(#Op)`.
+            // The reduce method consumes it before reaching here; a bare/misplaced
+            // marker is a usage error.
+            Expr::ReduceMarker(name, span) => {
+                self.diags.push(Diagnostic::error(
+                    "E2510",
+                    format!("`#{}` is only valid inside a lane `.reduce(…)`", name),
+                    "a reduce-op marker names the fold operation; it isn't a value on its own".to_string(),
+                    "write `v.reduce(#Add)` / `#Mul` / `#Min` / `#Max`".to_string(),
+                    Some(*span),
+                ));
+                None
+            }
             Expr::Todo { expected_type, .. } => {
                 // D-TOOL2 (E2-M11): `todo` is a typed hole — valid in any
                 // position. Fill the expected-type field so codegen can print
@@ -1927,6 +1940,34 @@ impl<'a> Checker<'a> {
                 }
                 Some((**value).clone())
             }
+            // D-SIMD2: `v[i]` lane access on a SIMD lane type returns the lane scalar.
+            // (A user type sharing the name `F32x4` would be a non-indexable struct,
+            // falling to the default E0505 arm.)
+            Type::Named(n) if is_simd_lane_type(n) && !self.registry.contains(n) => {
+                let lane_name = n.clone();
+                *kind = IndexKind::Lane(lane_name.clone());
+                if idx_ty != Type::Int {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!("lane indexes must be {}, not {}", Type::Int.show(), idx_ty.show()),
+                        "a SIMD lane is read by position with a whole-number index starting at 0".to_string(),
+                        "use an Int index, like `v[0]`".to_string(),
+                        Some(index.span()),
+                    ));
+                } else if let Expr::Int(num, _, _) = index.as_ref() {
+                    let lanes = math_arity(&lane_name) as i64;
+                    if *num < 0 || *num >= lanes {
+                        self.diags.push(Diagnostic::error(
+                            "E0965",
+                            format!("lane {} is out of range for `{}` ({} lanes)", num, lane_name, lanes),
+                            format!("the valid lanes for `{}` are 0 through {}", lane_name, lanes - 1),
+                            format!("use a lane index between 0 and {}", lanes - 1),
+                            Some(index.span()),
+                        ));
+                    }
+                }
+                Some(math_scalar_ty(&lane_name))
+            }
             Type::String => {
                 self.diags.push(Diagnostic::error(
                     "E0503",
@@ -2323,6 +2364,33 @@ impl<'a> Checker<'a> {
                     return self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                 }
             }
+            // D-SIMD2 / D-LINALG1: a STATIC method on a built-in math type —
+            // `F32x4.splat(x)` / `Vec3.from_array([…])`. The arg is elaborated
+            // against the method's expected type (so a literal becomes the
+            // component type / the `[T#N]` bridge).
+            if is_math_type(type_name) && !self.registry.contains(type_name) {
+                if let Some(ret) = math_static_return(type_name, method, args.len()) {
+                    if let Some(want) = math_static_arg_ty(type_name, method) {
+                        if let Some(arg) = args.first_mut() {
+                            let old = self.expected_type.replace(want.clone());
+                            let got = self.infer(&mut arg.expr);
+                            self.expected_type = old;
+                            if let Some(g) = got {
+                                if g != want {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0128",
+                                        format!("`{}.{}()` expects a `{}`, got `{}`", type_name, method, want.name(), g.name()),
+                                        format!("`{}.{}` builds a `{}` from a `{}`", type_name, method, type_name, want.name()),
+                                        format!("pass a `{}` value", want.name()),
+                                        Some(arg.expr.span()),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    return Some(ret);
+                }
+            }
         }
         self.borrow_ctx = true;
         let recv_ty = self.infer(receiver)?;
@@ -2492,6 +2560,75 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(handle_ty);
                     return result;
                 }
+            }
+        }
+        // D-SIMD2 / D-LINALG1: methods on the built-in math value types
+        // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(#Max)`, `m.matmul(n)`).
+        // Operator overloading on this closed family is blessed; named methods are
+        // the rest of the surface. Set `recv_type_out` so codegen routes to the
+        // math-method op (TIR handle-method path).
+        if let Type::Named(math_ty) = &recv_ty {
+            if is_math_type(math_ty) && !self.registry.contains(math_ty) {
+                let math_ty = math_ty.clone();
+                // `reduce(#Op)` — the sole arg is a reduce-op marker, validated here.
+                if method == "reduce" && is_simd_lane_type(&math_ty) {
+                    if args.len() != 1 {
+                        self.diags.push(Diagnostic::error(
+                            "E2510",
+                            format!("`reduce` takes one reduce-op marker, got {}", args.len()),
+                            "a lane reduction names its operation with a marker".to_string(),
+                            "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
+                            Some(span),
+                        ));
+                    } else if let Expr::ReduceMarker(op, mspan) = &args[0].expr {
+                        if !simd_reduce_markers().contains(&op.as_str()) {
+                            self.diags.push(Diagnostic::error(
+                                "E2510",
+                                format!("`#{}` isn't a reduce operation", op),
+                                "a lane reduction folds the lanes with one of a fixed set of operations".to_string(),
+                                "use `#Add`, `#Mul`, `#Min`, or `#Max`".to_string(),
+                                Some(*mspan),
+                            ));
+                        }
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E2510",
+                            "`reduce` takes a reduce-op marker, not a value".to_string(),
+                            "the operation is named with a marker so the fold is explicit".to_string(),
+                            "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                        self.infer(&mut args[0].expr);
+                    }
+                    *recv_type_out = Some(math_ty.clone());
+                    return Some(math_scalar_ty(&math_ty));
+                }
+                if let Some(ret) = math_method_return(&math_ty, method, args.len()) {
+                    // Check each arg against its expected type (so a literal
+                    // elaborates), then return the method's result type.
+                    for arg in args.iter_mut() {
+                        let want = math_method_arg_ty(&math_ty, method);
+                        let old = self.expected_type.take();
+                        if let Some(w) = &want { self.expected_type = Some(w.clone()); }
+                        let got = self.infer(&mut arg.expr);
+                        self.expected_type = old;
+                        if let (Some(w), Some(g)) = (&want, &got) {
+                            if g != w {
+                                self.diags.push(Diagnostic::error(
+                                    "E0128",
+                                    format!("`.{}()` on `{}` expects a `{}`, got `{}`", method, math_ty, w.name(), g.name()),
+                                    format!("`{}.{}(…)` operates on a `{}`", math_ty, method, w.name()),
+                                    format!("pass a `{}` value", w.name()),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
+                        }
+                    }
+                    *recv_type_out = Some(math_ty.clone());
+                    return Some(ret);
+                }
+                // A math type but an unknown method — fall through to the generic
+                // "no such method" path below, which prints a teaching diagnostic.
             }
         }
         if let Type::Named(n) = &recv_ty {
@@ -2906,6 +3043,32 @@ impl<'a> Checker<'a> {
                 return Some(Type::Bool);
             }
             // Implicit coercion check (non-arithmetic, non-eq): handled at assignment.
+        }
+
+        // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math
+        // family (lane + linalg types). Element-wise `+`/`-`/`*`/`/`, scalar-free
+        // matrix×vector, and `==`/`!=`. Runs before the builtin numeric match (a
+        // math type isn't `is_numeric`, so the builtin path would reject it).
+        {
+            // A user struct sharing a math name isn't part of the closed family;
+            // skip the math-operator path so it gets the normal operator handling.
+            let lname = match &lt { Type::Named(n) if !self.registry.contains(n) => n.clone(), _ => String::new() };
+            let rname = match &rt { Type::Named(n) if !self.registry.contains(n) => n.clone(), _ => String::new() };
+            if is_math_type(&lname) || is_math_type(&rname) {
+                if let Some(result) = math_binop_result(op, &lname, &rname) {
+                    return Some(result);
+                }
+                // A math operand with an unsupported operator/operand pairing — a
+                // teaching diagnostic (the closed family has fixed operators).
+                self.diags.push(Diagnostic::error(
+                    "E2511",
+                    format!("operator `{}` isn't defined between `{}` and `{}`", op.spell(), lt.name(), rt.name()),
+                    "the built-in math types support element-wise `+`/`-` (and `/` for lanes), `*` (element-wise, or matrix×vector), and `==`".to_string(),
+                    "check the operands are the same lane/vector type, or use a method like `.dot()`/`.matmul()`".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
         }
 
         match op {
@@ -3327,6 +3490,60 @@ impl<'a> Checker<'a> {
             if let Some((fn_name, mod_idx)) = self.unqualified_file.get(&call.name).cloned() {
                 let result = self.infer_import_call(mod_idx, &fn_name, call.name_span, call.name_span, &mut call.args);
                 return Some(result);
+            }
+        }
+
+        // D-SIMD2 / D-LINALG1: `F32x4(a,b,c,d)` / `Vec3(x,y,z)` / `Mat3(…)` —
+        // positional construction of a built-in math value type. Each argument is
+        // elaborated against the component type (so `1.0` becomes `F32` for a
+        // `F32x4`) and checked in order; arity is fixed by the type.
+        if self.funcs.get(&call.name).is_none() && !self.registry.contains(&call.name) {
+            if let Some(arg_types) = math_constructor_arg_types(&call.name) {
+                let arity = arg_types.len();
+                if call.args.len() != arity {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        format!(
+                            "`{}` takes exactly {} component{}, got {}",
+                            call.name,
+                            arity,
+                            if arity == 1 { "" } else { "s" },
+                            call.args.len()
+                        ),
+                        format!(
+                            "`{}` is a built-in {} type — construct it from its {} components",
+                            call.name,
+                            if is_simd_lane_type(&call.name) { "SIMD lane" } else { "linear-algebra" },
+                            arity
+                        ),
+                        format!("write `{}({})`", call.name, vec!["…"; arity].join(", ")),
+                        Some(call.name_span),
+                    ));
+                    for a in call.args.iter_mut() { self.infer(&mut a.expr); }
+                    return Some(Some(Type::Named(call.name.clone())));
+                }
+                for (i, want) in arg_types.iter().enumerate() {
+                    let old = self.expected_type.replace(want.clone());
+                    let got = self.infer(&mut call.args[i].expr);
+                    self.expected_type = old;
+                    if let Some(at) = got {
+                        if at != *want {
+                            self.diags.push(Diagnostic::error(
+                                "E0128",
+                                format!(
+                                    "component {} of `{}` must be `{}`, got `{}`",
+                                    i + 1, call.name, want.name(), at.name()
+                                ),
+                                format!(
+                                    "every component of `{}` is a `{}`", call.name, want.name()
+                                ),
+                                format!("write a `{}` value here", want.name()),
+                                Some(call.args[i].expr.span()),
+                            ));
+                        }
+                    }
+                }
+                return Some(Some(Type::Named(call.name.clone())));
             }
         }
 

@@ -474,6 +474,11 @@ pub(crate) enum TExprKind {
     ConstInline(String),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call { name: String, args: Vec<TCallArg> },
+    /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
+    /// `Vec3(x,y,z)` / `Mat3(…)`, or a static method `F32x4.splat(x)` /
+    /// `Vec3.from_array(a)`. Emits the prelude free function `{root}jet_math_<T>_<fn>(…)`
+    /// (`_new` for the constructor) with plainly-lowered float/array args.
+    MathBuiltin { type_name: String, func: String, args: Vec<TExpr> },
     /// `print(x)` — the one builtin the subset covers.
     Print(Box<TExpr>),
     /// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare call
@@ -639,6 +644,14 @@ pub(crate) enum TExprKind {
         index: Box<TExpr>,
         is_map: bool,
         line: usize,
+    },
+    /// D-SIMD2: `v[i]` lane access on a SIMD lane type. Lowers to the bounds-checked
+    /// prelude helper `{root}jet_math_<T>_lane(&v, i, file, line)`.
+    MathLaneIndex {
+        lane_ty: String,
+        base: Box<TExpr>,
+        index: Box<TExpr>,
+        line: u32,
     },
     /// c109 Phase 5: an inclusive copy slice `coll[a..b]` (`Expr::Slice`). Lowers
     /// to the `jet_slice_vec` helper. `line` is the source line for the bounds
@@ -1275,6 +1288,11 @@ pub(crate) enum THandleOp {
     /// is a pre-rendered boxed-closure string (`emit_router_handler` reproduction, resolved
     /// at lowering). `verb` is the uppercase HTTP method literal.
     HttpRouterRegister { verb: &'static str, handler: String },
+    /// D-SIMD2 / D-LINALG1: an INSTANCE method on a built-in math value type. Emits
+    /// the prelude free function `{root}jet_math_<type>_<method>(&(recv), <args>)`
+    /// (e.g. `jet_math_Vec3_dot(&(v), w)`, `jet_math_F32x4_sum(&(v))`). `reduce`
+    /// carries the validated marker op so the right fold function is named.
+    MathMethod { type_name: String, method: String, reduce_op: Option<String> },
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -3136,6 +3154,11 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // it when the name is a known distinct type, not shadowed by a local.
             let is_distinct_ctor = !locals.contains(&c.name)
                 && cx.distinct_types.contains_key(&c.name);
+            // D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
+            // `Vec3(x,y,z)` / `Mat3(…)`. Lowers to the prelude `jet_math_<T>_new(…)`.
+            let is_math_ctor = !locals.contains(&c.name)
+                && crate::Sema::is_math_type(&c.name)
+                && !cx.type_names.contains(&c.name);
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s
             // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
@@ -3162,7 +3185,7 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
             // and codegen never reads `CallArg.label` (`emit_call_args` is purely
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
-            (is_print || is_ambient_input || is_require || is_require_eq || is_panic || is_plain_fn || is_distinct_ctor || is_extern || is_unqual_inline || is_unqual_file)
+            (is_print || is_ambient_input || is_require || is_require_eq || is_panic || is_plain_fn || is_distinct_ctor || is_math_ctor || is_extern || is_unqual_inline || is_unqual_file)
                 && c.args.iter().all(|a| {
                     // c109 Phase 6b: a `Shared<T>` arg auto-cloning the Arc
                     // (`shared_auto_clone`) is COVERED for the plain-fn / distinct-ctor /
@@ -3441,6 +3464,9 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // inner value (if any) is in-subset — they lower to `Some(x)` / `None`.
         Expr::Present(inner, _) => expr_in_subset(inner, cx, locals),
         Expr::Absent(_) => true,
+        // D-SIMD2: a reduce-op marker `#Op`. Only appears inside `v.reduce(#Op)`; the
+        // method lowering consumes it (it never emits on its own), so it is in-subset.
+        Expr::ReduceMarker(_, _) => true,
         // c109 Phase 23: a `#Todo` typed hole. Covered when sema filled the expected
         // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
         // the AST path so the TIR never guesses the `(unknown)` fallback.
@@ -3858,6 +3884,19 @@ fn method_call_in_subset(
     // fires identically. They join `handle_method_op`.) Disjoint from
     // the numeric shape (a handle name isn't numeric) and the instance/static shapes
     // (a handle name isn't a covered struct/enum).
+    // D-SIMD2 / D-LINALG1: a method on a built-in math value type (and NOT a user
+    // type sharing the name). Admitted when the receiver + args are in-subset.
+    if let Some(handle) = recv_type {
+        if crate::Sema::is_math_type(handle) && !cx.type_names.contains(handle) {
+            let is_reduce = method == "reduce" && crate::Sema::is_simd_lane_type(handle);
+            if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
+                return expr_in_subset(receiver, cx, locals)
+                    && args
+                        .iter()
+                        .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+            }
+        }
+    }
     if let Some(handle) = recv_type {
         if handle_method_op(handle, method, args.len()).is_some() {
             return expr_in_subset(receiver, cx, locals)
@@ -4047,6 +4086,17 @@ fn static_method_call_in_subset(
 ) -> bool {
     if locals.contains(type_name) {
         return false;
+    }
+    // D-SIMD2 / D-LINALG1: a static method on a built-in math type (`F32x4.splat(x)`,
+    // `Vec3.from_array([…])`). Admitted when the (type, method, nargs) names a covered
+    // static and every arg is in-subset.
+    if crate::Sema::is_math_type(type_name)
+        && !cx.type_names.contains(type_name)
+        && crate::Sema::math_static_return(type_name, method, args.len()).is_some()
+    {
+        return args
+            .iter()
+            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // c109 Phase 25: a STATIC constructor `Type.new(args)` is the Phase-7 static-call
     // shape (`recv_type == None`, receiver a covered type-name ident, `(Type, "new") ∈
@@ -4627,6 +4677,9 @@ fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleO
         ("HttpResponse", "status", 0) => THandleOp::HttpRespField("status"),
         ("HttpResponse", "body", 0) => THandleOp::HttpRespField("body"),
         ("HttpResponse", "header", 1) => THandleOp::HttpRespHeader,
+        // D-SIMD2 / D-LINALG1 math methods are handled by a dedicated gate + lowering
+        // block (user-type-aware via `cx.type_names`), NOT here — `handle_method_op`
+        // has no `cx`, and a user struct may share a math name.
         _ => return None,
     })
 }
@@ -6657,8 +6710,19 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let overflow = arith_overflow || shift_overflow;
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
             // A comparison/logical op yields Bool; arithmetic keeps the operand type.
+            // D-SIMD2 / D-LINALG1: a math-type operator's result follows the closed
+            // family's rule (e.g. `Mat3 * Vec3 → Vec3`), not the left operand — read
+            // it from the same sema table so the node's `ty` stays honest.
             let ty = if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
                 Type::Bool
+            } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
+                let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
+                let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
+                if lm || rm {
+                    crate::Sema::math_binop_result(*op, ln, rn).unwrap_or_else(|| lhs.ty.clone())
+                } else {
+                    lhs.ty.clone()
+                }
             } else {
                 lhs.ty.clone()
             };
@@ -6879,6 +6943,23 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         },
                     };
                 }
+            }
+            // D-SIMD2 / D-LINALG1: a built-in math-type constructor. Plainly lower the
+            // float components and emit `{root}jet_math_<T>_new(…)`.
+            if !env.locals.contains_key(&call.name)
+                && crate::Sema::is_math_type(&call.name)
+                && !cx.type_names.contains(&call.name)
+            {
+                let targs: Vec<TExpr> =
+                    call.args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                return TExpr {
+                    ty: Type::Named(call.name.clone()),
+                    kind: TExprKind::MathBuiltin {
+                        type_name: call.name.clone(),
+                        func: "new".to_string(),
+                        args: targs,
+                    },
+                };
             }
             // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
             // decided here, totally — via the shared `lower_one_call_arg` (the single
@@ -7339,13 +7420,26 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Index { base, index, span, kind } => {
             let base_t = lower_expr(base, cx, env);
             let index_t = lower_expr(index, cx, env);
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            // D-SIMD2: `v[i]` lane access on a SIMD lane type → a bounds-checked lane
+            // read. The result is the lane scalar; sema resolved `IndexKind::Lane`.
+            if let IndexKind::Lane(lane_ty) = kind {
+                return TExpr {
+                    ty: crate::Sema::math_scalar_ty(lane_ty),
+                    kind: TExprKind::MathLaneIndex {
+                        lane_ty: lane_ty.clone(),
+                        base: Box::new(base_t),
+                        index: Box::new(index_t),
+                        line: line as u32,
+                    },
+                };
+            }
             let result_ty = match &base_t.ty {
                 Type::List(elem) => (**elem).clone(),
                 Type::Map { value, .. } => (**value).clone(),
                 Type::FixedList { elem, .. } => (**elem).clone(),
                 _ => Type::Int,
             };
-            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
             // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
             // columns. (A fused `xs[i].field` is handled in the `Field` arm before
             // this point — that path reads a single column directly.)
@@ -8248,6 +8342,44 @@ fn lower_method_call(
     // into a total `THandleOp` (reproducing the handle arms of `emit_builtin_method`),
     // so emit makes no type decision (I3). Args lowered PLAINLY (`arg(i)` = raw
     // `emit_expr`). The return type is the total sema handle-table fact.
+    // D-SIMD2 / D-LINALG1: a method on a built-in math value type. Resolve the
+    // reduce-op marker (which is NOT a lowerable expression) here so emit makes no
+    // decision (I3). The return type is the total sema math-method fact.
+    if let Some(handle) = recv_type {
+        if crate::Sema::is_math_type(handle) && !cx.type_names.contains(handle) {
+            let is_reduce = method == "reduce" && crate::Sema::is_simd_lane_type(handle);
+            if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
+                let recv_t = lower_expr(receiver, cx, env);
+                let (reduce_op, value_args): (Option<String>, Vec<TExpr>) = if is_reduce {
+                    let op = match args.first().map(|a| &a.expr) {
+                        Some(Expr::ReduceMarker(name, _)) => name.clone(),
+                        _ => "Add".to_string(),
+                    };
+                    (Some(op), Vec::new())
+                } else {
+                    (None, args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect())
+                };
+                let ty = if is_reduce {
+                    crate::Sema::math_scalar_ty(handle)
+                } else {
+                    crate::Sema::math_method_return(handle, method, args.len())
+                        .unwrap_or_else(unit_type)
+                };
+                return TExpr {
+                    ty,
+                    kind: TExprKind::HandleMethod {
+                        recv: Box::new(recv_t),
+                        op: THandleOp::MathMethod {
+                            type_name: handle.to_string(),
+                            method: method.to_string(),
+                            reduce_op,
+                        },
+                        args: value_args,
+                    },
+                };
+            }
+        }
+    }
     if let Some(handle) = recv_type {
         if let Some(op) = handle_method_op(handle, method, args.len()) {
             let recv_t = lower_expr(receiver, cx, env);
@@ -8283,6 +8415,36 @@ fn lower_method_call(
         let Expr::Ident(type_name, _) = receiver else {
             unreachable!("gate proved static receiver is a type-name ident");
         };
+        // D-SIMD2 / D-LINALG1: a static method on a built-in math type → the prelude
+        // free function `{root}jet_math_<T>_<method>(args)`.
+        if crate::Sema::is_math_type(type_name) && !cx.type_names.contains(type_name) {
+            if let Some(ret) = crate::Sema::math_static_return(type_name, method, args.len()) {
+                let bridge = crate::Sema::math_static_arg_ty(type_name, method);
+                let targs: Vec<TExpr> = args
+                    .iter()
+                    .map(|a| {
+                        let mut t = lower_expr(&a.expr, cx, env);
+                        // D-FIXARR1 bridge: a `[..]` literal arg to `from_array` lowered
+                        // as a growable list; re-tag it to the `[T#N]` fixed array so emit
+                        // produces `[e1, …]` (a Rust stack array), not `vec![…]`.
+                        if let Some(fl @ Type::FixedList { .. }) = &bridge {
+                            if matches!(t.ty, Type::List(_)) && matches!(t.kind, TExprKind::ListLit(_)) {
+                                t.ty = fl.clone();
+                            }
+                        }
+                        t
+                    })
+                    .collect();
+                return TExpr {
+                    ty: ret,
+                    kind: TExprKind::MathBuiltin {
+                        type_name: type_name.clone(),
+                        func: method.to_string(),
+                        args: targs,
+                    },
+                };
+            }
+        }
         let sig = cx
             .method_sigs
             .get(&(type_name.clone(), method.to_string()))
@@ -9741,6 +9903,19 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
         }
+        // D-SIMD2 / D-LINALG1: a math constructor / static method → the prelude free
+        // function `{root}jet_math_<T>_<func>(args)`. Args are plain values (floats or
+        // a `[T#N]` array) — no borrow/clone decisions.
+        TExprKind::MathBuiltin { type_name, func, args } => {
+            let parts: Vec<String> = args.iter().map(|a| emit_tir_expr(a, cx)).collect();
+            format!(
+                "{}jet_math_{}_{}({})",
+                cx.root_prefix,
+                type_name,
+                func,
+                parts.join(", ")
+            )
+        }
         // c109 Phase 6: the synthetic `.clone()`. Mirrors `emit_method_call`'s
         // `clone` early return: `(recv).clone()`, no deref/borrow decision (the
         // receiver was already lowered to the place the AST path would clone).
@@ -10146,6 +10321,15 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }
         }
+        // D-SIMD2: `v[i]` lane read → the bounds-checked prelude helper.
+        TExprKind::MathLaneIndex { lane_ty, base, index, line } => {
+            let b = emit_tir_expr(base, cx);
+            let i = emit_tir_expr(index, cx);
+            format!(
+                "{}jet_math_{}_lane(&({}), {}, {:?}, {})",
+                cx.root_prefix, lane_ty, b, i, cx.file, line
+            )
+        }
         // c109 Phase 5: `coll[a..b]` → `jet_slice_vec`. Mirrors the AST `Expr::Slice`.
         TExprKind::Slice { base, start, end, line } => {
             let b = emit_tir_expr(base, cx);
@@ -10423,6 +10607,22 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "{}jet_http_router_register(&mut ({}), \"{}\".to_string(), {}, {})",
                     root, recv, verb, a(0), handler
                 ),
+                // D-SIMD2 / D-LINALG1: a math-type instance method → the prelude free
+                // function `jet_math_<type>_<method>(&(recv), <args>)`. `reduce`
+                // dispatches on the validated marker op. All take `&recv` (immutable;
+                // these types are value semantics — every op returns a fresh value).
+                THandleOp::MathMethod { type_name, method, reduce_op } => {
+                    let fname = match reduce_op {
+                        Some(op) => format!("jet_math_{}_reduce_{}", type_name, op.to_lowercase()),
+                        None => format!("jet_math_{}_{}", type_name, method),
+                    };
+                    let mut call = format!("{}{}(&({})", root, fname, recv);
+                    for i in 0..args.len() {
+                        call.push_str(&format!(", {}", a(i)));
+                    }
+                    call.push(')');
+                    call
+                }
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at

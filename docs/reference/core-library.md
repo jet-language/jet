@@ -250,6 +250,75 @@ fn main() {
 
 ---
 
+### Linear algebra — `Vec2`/`Vec3`/`Vec4`, `Mat3`/`Mat4` (D-LINALG1)
+
+Built-in value types — no import. Components are `Float` (F64); matrices are
+column-major. Operators `+`/`-` are element-wise, `*` is element-wise on vectors
+(Hadamard) / matrix-multiply on matrices, and `Mat * Vec` transforms a vector.
+
+```jet
+fn main() {
+    a: Vec3 @= Vec3(1.0, 2.0, 3.0)
+    b: Vec3 @= Vec3(4.0, 5.0, 6.0)
+    sum: Vec3 @= a + b
+    print(a.dot(b))                 // 32.0
+    print(a.cross(b).to_array())    // [-3.0, 6.0, -3.0]
+    print(Vec3(0.0, 3.0, 4.0).length())   // 5.0
+
+    scale: Mat3 @= Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    out: Vec3 @= scale * Vec3(1.0, 2.0, 3.0)
+    print(out.to_array())           // [2.0, 4.0, 6.0]
+}
+```
+
+| Item | Notes |
+|------|-------|
+| `Vec2`/`Vec3`/`Vec4(x, …)` | Positional construction from `Float` components |
+| `Mat3`/`Mat4(m0, …)` | N*N components, column-major |
+| `T.splat(x)` / `T.from_array(a)` | Fill all components / build from `[Float#N]` |
+| `v.dot(w)` | Scalar dot product |
+| `v.cross(w)` | Cross product (`Vec3` only) → `Vec3` |
+| `v.length()` / `v.normalize()` | Euclidean length / unit vector |
+| `m.matmul(n)` / `m.transpose()` | Matrix product / transpose |
+| `m.transform(v)` | Same as `m * v` |
+| `v.to_array()` | Round-trip out to `[Float#N]` (D-FIXARR1 bridge) |
+| `+` `-` `*` | Element-wise (vectors); `*` = matmul (matrices) / transform (`Mat*Vec`) |
+
+---
+
+### SIMD lanes — `F32x4`, `F64x2` (D-SIMD1/D-SIMD2)
+
+Built-in portable lane types — no import. `F32x4` holds four `F32` lanes, `F64x2`
+two `F64`. Element-wise `+`/`-`/`*`/`/` run across every lane at once; `v[i]`
+reads a lane; reductions fold the lanes. On the pinned stable toolchain these
+lower to a safe scalar-array fallback (no intrinsics, no `std::simd` gate) — a
+portable-SIMD backend can replace it later behind the same surface.
+
+```jet
+fn main() {
+    v: F32x4 @= F32x4(1.0, 2.0, 3.0, 4.0)
+    w: F32x4 @= F32x4(10.0, 20.0, 30.0, 40.0)
+    s: F32x4 @= v + w
+    print(s.to_array())             // [11.0, 22.0, 33.0, 44.0]
+    print(v[2])                     // 3.0
+    print(v.sum())                  // 10.0
+    print(v.reduce(#Max))           // 4.0
+    print(F32x4.splat(7.0).to_array())   // [7.0, 7.0, 7.0, 7.0]
+}
+```
+
+| Item | Notes |
+|------|-------|
+| `F32x4(a, b, c, d)` / `F64x2(a, b)` | Positional lane construction |
+| `T.splat(x)` / `T.from_array(a)` | One scalar in every lane / build from `[F32#4]`·`[F64#2]` |
+| `v[i]` | Read lane `i` (bounds-checked) |
+| `+` `-` `*` `/` | Element-wise across all lanes |
+| `v.sum()` `v.product()` `v.min()` `v.max()` | Named reductions → lane scalar |
+| `v.reduce(#Add)` `#Mul` `#Min` `#Max` | General reduce by op marker |
+| `v.to_array()` | Round-trip out to `[F32#4]` / `[F64#2]` |
+
+---
+
 ### `core.random` — random numbers
 
 ```jet

@@ -132,6 +132,7 @@ pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<Stri
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Absent(_)
+        | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. } => {}
         Expr::Str(parts, _) => {
             for p in parts.iter_mut() {
@@ -1158,6 +1159,24 @@ pub(crate) fn collect_core_lvalue(lv: &LValue, imports: &HashMap<String, String>
 }
 
 pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+    // D-SIMD2 / D-LINALG1: a built-in math type used anywhere (constructor, static
+    // method, or instance method on a math-typed receiver-by-name) pulls in the
+    // CoreLib prelude that defines the `jet_math_*` helpers. Detect it syntactically;
+    // a math-type *constructor* call and a static `T.method(...)` both surface the
+    // type NAME, which is enough to require the prelude.
+    match expr {
+        Expr::Call(c) if is_math_type(&c.name) => {
+            used.insert("core.math::__mathtypes__".to_string());
+        }
+        Expr::MethodCall { receiver, .. } => {
+            if let Expr::Ident(n, _) = receiver.as_ref() {
+                if is_math_type(n) {
+                    used.insert("core.math::__mathtypes__".to_string());
+                }
+            }
+        }
+        _ => {}
+    }
     match expr {
         Expr::PtrFromAddr { addr, .. } => collect_core_expr(addr, imports, used),
         Expr::MethodCall {
@@ -1329,6 +1348,7 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
         | Expr::Char(_, _)
         | Expr::Ident(_, _)
         | Expr::Absent(_)
+        | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. } => {}
     }
 }

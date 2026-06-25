@@ -110,6 +110,14 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
         "DataTree" => Some("DataTree"),
         "DecodeError" => Some("DecodeError"),
+        // D-SIMD2 / D-LINALG1: built-in math value types (lane + linalg structs).
+        "F32x4" => Some("F32x4"),
+        "F64x2" => Some("F64x2"),
+        "Vec2" => Some("Vec2"),
+        "Vec3" => Some("Vec3"),
+        "Vec4" => Some("Vec4"),
+        "Mat3" => Some("Mat3"),
+        "Mat4" => Some("Mat4"),
         _ => None,
     }
 }
@@ -280,7 +288,12 @@ impl Cx {
             Type::Named(name) if args_handle_rust_type(name).is_some() => {
                 format!("{}{}", self.root_prefix, args_handle_rust_type(name).unwrap())
             }
-            Type::Named(name) if core_rust_type_name(name).is_some() => {
+            // A user struct/enum sharing a built-in Core type name (e.g. a user
+            // `Vec3`) wins — it keeps its own `user_<Name>` lowering. Only fall to the
+            // built-in jet_std struct when the name is NOT a user type.
+            Type::Named(name)
+                if core_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
+            {
                 format!(
                     "{}jet_std::{}",
                     self.root_prefix,

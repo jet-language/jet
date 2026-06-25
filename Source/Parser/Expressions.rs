@@ -832,6 +832,25 @@ impl<'a> Parser<'a> {
                 let span = Span::new(start, inner.span().end);
                 return Ok(Expr::Tainted(Box::new(inner), span));
             }
+            TokKind::Hash
+                if matches!(
+                    self.toks.get(self.pos + 1).map(|t| &t.kind),
+                    // Any `#Ident` reaching here is past the `#Todo`/`#Tainted`
+                    // expression markers handled above, so in expression position it
+                    // is a SIMD reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max`
+                    // (D-SIMD2). Parse it generically; sema validates the closed set
+                    // and the `.reduce(…)` position (E2510), giving a teaching error
+                    // for a typo like `#Avg` instead of a bare parse error.
+                    Some(TokKind::Ident(n))
+                        if n != Syntax::KW_TODO && n != Syntax::KW_TAINTED
+                ) =>
+            {
+                let start = self.bump().span.start; // `#`
+                let tok = self.bump(); // the op name
+                let name = if let TokKind::Ident(n) = &tok.kind { n.clone() } else { String::new() };
+                let span = Span::new(start, tok.span.end);
+                return Ok(Expr::ReduceMarker(name, span));
+            }
             TokKind::Ident(name) if name == Syntax::FOREIGN_TODO => {
                 // S14: bare lowercase `todo` is the retired spelling (E0054).
                 let t = self.bump();

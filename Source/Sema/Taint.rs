@@ -164,6 +164,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Bool(..)
             | Expr::Char(..)
             | Expr::Absent(_)
+            | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
             | Expr::Lambda(_) => false,
         }
@@ -272,6 +273,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Char(..)
             | Expr::Ident(..)
             | Expr::Absent(_)
+            | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. } => {}
         }
     }

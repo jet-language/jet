@@ -1504,12 +1504,15 @@ pub enum LValue {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum IndexKind {
     #[default]
     Unknown,
     List,
     Map,
+    /// D-SIMD2: `v[i]` lane access on a SIMD lane type (`F32x4`/`F64x2`). Lowers to a
+    /// bounds-checked lane read `{root}jet_math_<T>_lane(&v, i, file, line)`.
+    Lane(String),
 }
 
 /// `for i in 1..10` vs `for x in xs` (M5).
@@ -1796,6 +1799,12 @@ pub enum Expr {
         /// The expected type, as a display string — filled by sema.
         expected_type: Option<String>,
     },
+    /// D-SIMD2 (ratified 2026-06-24): a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max`,
+    /// valid ONLY as the sole argument to a SIMD lane `.reduce(#Op)`. The string is
+    /// the marker name (without `#`). Sema validates the marker set and that it sits
+    /// in a `reduce` arg; codegen lowers it as part of the reduce call (the marker
+    /// node never emits on its own).
+    ReduceMarker(String, Span),
     /// S31: `subject == pattern` (stored as dedicated node for sema/codegen).
     PatternTest {
         subject: Box<Expr>,
@@ -1888,6 +1897,7 @@ impl Expr {
             | Expr::Present(_, s)
             | Expr::Absent(s)
             | Expr::Todo { span: s, .. }
+            | Expr::ReduceMarker(_, s)
             | Expr::Ok(_, s)
             | Expr::Err(_, s)
             | Expr::Try(_, s, _)

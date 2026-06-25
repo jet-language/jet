@@ -281,6 +281,28 @@ pub const CLOCK_TYPE: &str = "Clock";
 /// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
 pub const RNG_TYPE: &str = "Rng";
 
+/// D-SIMD1/D-SIMD2 (ratified 2026-06-24): the built-in portable SIMD lane types.
+/// `F32x4` is four `F32` lanes, `F64x2` is two `F64` lanes. Constructor
+/// `F32x4(a,b,c,d)`, splat `F32x4.splat(x)`, lane index `v[i]`, element-wise
+/// `+`/`-`/`*`/`/`, reduce `v.sum()` / `v.reduce(#Max)`, and the `[F32#4]` bridge
+/// `from_array`/`to_array`. A closed compiler-provided family (no user `+`); ops
+/// lower to a scalar-array fallback (the pinned stable rustc has no `std::simd`),
+/// memory-safe by construction (I1) — no `std::simd`-feature gate, no intrinsics.
+pub const SIMD_F32X4_TYPE: &str = "F32x4";
+pub const SIMD_F64X2_TYPE: &str = "F64x2";
+
+/// D-LINALG1 (ratified 2026-06-24): the built-in linear-algebra value types.
+/// Vectors `Vec2`/`Vec3`/`Vec4` and square matrices `Mat3`/`Mat4` (column-major,
+/// `F64` components). Methods `.dot()`/`.cross()` (Vec3 only)/`.matmul()`, plus
+/// `.length()`/`.normalize()`; element-wise `+`/`-`, scalar `*`, and `Mat * Vec`.
+/// A closed compiler-provided family — the user-facing aliases over the generic
+/// `Vec<N>`/`Matrix<M,N>` substrate. Plain std math (no `unsafe`).
+pub const LINALG_VEC2_TYPE: &str = "Vec2";
+pub const LINALG_VEC3_TYPE: &str = "Vec3";
+pub const LINALG_VEC4_TYPE: &str = "Vec4";
+pub const LINALG_MAT3_TYPE: &str = "Mat3";
+pub const LINALG_MAT4_TYPE: &str = "Mat4";
+
 /// D-TERM1 (ratified 2026-06-22): the Core module that provides key reading.
 /// `use core.term as term` — exposes `term.read_key() -> Key`.
 pub const CORE_TERM_MODULE: &str = "core.term";

@@ -4520,3 +4520,81 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "true\n[{\"a\":1,\"b\":2},{\"a\":3,\"b\":4}]\n");
 }
+
+/// D-LINALG1: vector + matrix math (constructors, dot/cross, operators,
+/// matrix-vector transform) compiles and runs with the right results.
+#[test]
+fn linalg_vectors_and_matrices() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    a: Vec3 @= Vec3(1.0, 2.0, 3.0)
+    b: Vec3 @= Vec3(4.0, 5.0, 6.0)
+    print(a.dot(b))
+    c: Vec3 @= a + b
+    print(c.to_array())
+    print(a.cross(b).to_array())
+    scale: Mat3 @= Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    out: Vec3 @= scale * a
+    print(out.to_array())
+}
+";
+    let (code, stdout) = build_and_run("tir_linalg", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "32.0\n[5.0, 7.0, 9.0]\n[-3.0, 6.0, -3.0]\n[2.0, 4.0, 6.0]\n"
+    );
+}
+
+/// D-SIMD2: SIMD lane construction, element-wise operators, splat, lane index,
+/// reductions (named + `reduce(#Op)`), and the `[F32#4]` array bridge.
+#[test]
+fn simd_lanes_ops_and_reductions() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    v: F32x4 @= F32x4(1.0, 2.0, 3.0, 4.0)
+    w: F32x4 @= F32x4(10.0, 20.0, 30.0, 40.0)
+    s: F32x4 @= v + w
+    print(s.to_array())
+    print(v[2])
+    print(v.sum())
+    print(v.reduce(#Max))
+    print(v.reduce(#Mul))
+    print(F32x4.splat(5.0).to_array())
+    d: F64x2 @= F64x2.from_array([1.5, 2.5])
+    print(d.sum())
+}
+";
+    let (code, stdout) = build_and_run("tir_simd", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "[11.0, 22.0, 33.0, 44.0]\n3.0\n10.0\n4.0\n24.0\n[5.0, 5.0, 5.0, 5.0]\n4.0\n"
+    );
+}
+
+/// A user struct named `Vec3` (a built-in math name) keeps its own semantics —
+/// the built-in family yields to user types (no silent hijack).
+#[test]
+fn user_type_shadows_builtin_math_name() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Vec3 { x: Int, y: Int }
+fn main() {
+    v: Vec3 := Vec3 { x: 3, y: 4 }
+    print(v.x)
+    print(v.y)
+}
+";
+    let (code, stdout) = build_and_run("tir_user_vec3", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3\n4\n");
+}

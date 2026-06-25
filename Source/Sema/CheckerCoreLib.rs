@@ -1190,6 +1190,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Key"
         // D-SERDE2: the format-agnostic value tree + typed-decode error.
         | "DataTree" | "DecodeError"
+        // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
+        | "F32x4" | "F64x2"
+        | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1379,6 +1382,179 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("body".to_string(), str_ty),
             ("headers".to_string(), map_ty),
         ]),
+        _ => None,
+    }
+}
+
+/// D-SIMD2 / D-LINALG1: is `name` a built-in math value type (lane or linalg)?
+pub(crate) fn is_math_type(name: &str) -> bool {
+    is_simd_lane_type(name) || is_linalg_type(name)
+}
+
+/// D-SIMD2: a portable SIMD lane type (`F32x4`/`F64x2`).
+pub(crate) fn is_simd_lane_type(name: &str) -> bool {
+    matches!(name, "F32x4" | "F64x2")
+}
+
+/// D-LINALG1: a linear-algebra value type (vectors + square matrices).
+pub(crate) fn is_linalg_type(name: &str) -> bool {
+    matches!(name, "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4")
+}
+
+/// The scalar component type of a math value type. SIMD lanes carry their named
+/// float width (`F32x4` → `F32`/`Float32`, `F64x2` → `Float`); linalg types are
+/// all `F64`/`Float`.
+pub(crate) fn math_scalar_ty(name: &str) -> Type {
+    match name {
+        "F32x4" => Type::Float32,
+        _ => Type::Float,
+    }
+}
+
+/// The number of scalar slots in the positional constructor / `from_array` bridge.
+/// Lanes: lane count. Vectors: dimension. Matrices: N*N (column-major flat).
+pub(crate) fn math_arity(name: &str) -> usize {
+    match name {
+        "F32x4" => 4,
+        "F64x2" => 2,
+        "Vec2" => 2,
+        "Vec3" => 3,
+        "Vec4" => 4,
+        "Mat3" => 9,
+        "Mat4" => 16,
+        _ => 0,
+    }
+}
+
+/// D-SIMD2 / D-LINALG1: type-check a positional constructor `T(a, b, …)` for a
+/// built-in math type. The arg types are bound by `expected` so a literal `1.0`
+/// elaborates to the component type (`F32` for `F32x4`). Returns the field types
+/// the caller must check each argument against; arity is `math_arity(name)`.
+pub(crate) fn math_constructor_arg_types(name: &str) -> Option<Vec<Type>> {
+    if !is_math_type(name) {
+        return None;
+    }
+    let scalar = math_scalar_ty(name);
+    // `from_array`-style construction of a matrix takes its N*N components in
+    // column-major order; vectors/lanes take one scalar per slot.
+    Some(vec![scalar; math_arity(name)])
+}
+
+/// D-SIMD2 / D-LINALG1: the `[T#N]` fixed-list bridge type for a math value type,
+/// used by `T.from_array([..])` / `v.to_array()`. `None` for non-math types.
+pub(crate) fn math_array_bridge_ty(name: &str) -> Option<Type> {
+    if !is_math_type(name) {
+        return None;
+    }
+    Some(Type::FixedList {
+        elem: Box::new(math_scalar_ty(name)),
+        len: math_arity(name) as u64,
+    })
+}
+
+/// D-SIMD2 / D-LINALG1: type-check an INSTANCE method `recv.method(args)` on a
+/// built-in math type. `Some(Some(t))` → returns `t`; `Some(None)` → not a method
+/// (caller falls through to its normal "no such method" diagnostic).
+pub(crate) fn math_method_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
+    let float = Type::Float;
+    let scalar = math_scalar_ty(name);
+    let self_ty = Type::Named(name.to_string());
+    if is_simd_lane_type(name) {
+        return match (method, n_args) {
+            // Reductions collapse the lanes to a single scalar of the lane width.
+            ("sum" | "product" | "min" | "max", 0) => Some(scalar),
+            ("reduce", 1) => Some(scalar),
+            // `[F32#4]` round-trip out.
+            ("to_array", 0) => math_array_bridge_ty(name),
+            _ => None,
+        };
+    }
+    // linalg
+    match name {
+        "Vec2" | "Vec3" | "Vec4" => match (method, n_args) {
+            ("dot", 1) => Some(float),
+            // cross product is only defined for 3-vectors.
+            ("cross", 1) if name == "Vec3" => Some(self_ty),
+            ("length", 0) => Some(float),
+            ("normalize", 0) => Some(self_ty),
+            ("to_array", 0) => math_array_bridge_ty(name),
+            _ => None,
+        },
+        "Mat3" | "Mat4" => match (method, n_args) {
+            ("matmul", 1) => Some(self_ty.clone()),
+            ("transpose", 0) => Some(self_ty),
+            // `m * v` is the operator path; `transform` is the named method form.
+            ("transform", 1) => Some(Type::Named(
+                if name == "Mat3" { "Vec3" } else { "Vec4" }.to_string(),
+            )),
+            ("to_array", 0) => math_array_bridge_ty(name),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// D-SIMD2 / D-LINALG1: type-check a STATIC method `T.method(args)` on a math
+/// type. Only `splat` (lanes/vectors) and `from_array` are provided.
+pub(crate) fn math_static_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
+    if !is_math_type(name) {
+        return None;
+    }
+    let self_ty = Type::Named(name.to_string());
+    match (method, n_args) {
+        ("splat", 1) => Some(self_ty),
+        ("from_array", 1) => Some(self_ty),
+        _ => None,
+    }
+}
+
+/// D-SIMD2 / D-LINALG1: the argument type a static method expects.
+pub(crate) fn math_static_arg_ty(name: &str, method: &str) -> Option<Type> {
+    match method {
+        "splat" => Some(math_scalar_ty(name)),
+        "from_array" => math_array_bridge_ty(name),
+        _ => None,
+    }
+}
+
+/// D-SIMD2 / D-LINALG1: the argument type an instance method expects (for the
+/// single-arg methods). `None` means "no fixed arg type" (e.g. nullary methods).
+pub(crate) fn math_method_arg_ty(name: &str, method: &str) -> Option<Type> {
+    let self_ty = Type::Named(name.to_string());
+    match (name, method) {
+        (_, "dot") | (_, "cross") => Some(self_ty),
+        (_, "matmul") => Some(self_ty),
+        ("Mat3", "transform") => Some(Type::Named("Vec3".to_string())),
+        ("Mat4", "transform") => Some(Type::Named("Vec4".to_string())),
+        // `reduce(#Op)` takes a reduce-op marker, checked specially by the caller.
+        _ => None,
+    }
+}
+
+/// D-SIMD2: the closed set of reduce-op markers accepted by `v.reduce(#Op)`.
+pub(crate) fn simd_reduce_markers() -> &'static [&'static str] {
+    &["Add", "Mul", "Min", "Max"]
+}
+
+/// D-SIMD2 / D-LINALG1: type-check a binary operator between two math values.
+/// Returns the result type, or `None` if the op isn't defined for these operands.
+/// Operator overloading is blessed on this closed built-in family ONLY.
+pub(crate) fn math_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Type> {
+    use crate::AST::BinOp;
+    let same = lt == rt;
+    match op {
+        // Element-wise add/sub require identical types.
+        BinOp::Add | BinOp::Sub if same && is_math_type(lt) => Some(Type::Named(lt.to_string())),
+        // Multiplication: lane×lane / vec×vec element-wise; matrix×vector transform.
+        BinOp::Mul => match (lt, rt) {
+            (a, b) if a == b && is_math_type(a) => Some(Type::Named(a.to_string())),
+            ("Mat3", "Vec3") => Some(Type::Named("Vec3".to_string())),
+            ("Mat4", "Vec4") => Some(Type::Named("Vec4".to_string())),
+            _ => None,
+        },
+        // Division: lane÷lane element-wise (linalg has no `/`).
+        BinOp::Div if same && is_simd_lane_type(lt) => Some(Type::Named(lt.to_string())),
+        BinOp::Eq | BinOp::Ne if same && is_math_type(lt) => Some(Type::Bool),
         _ => None,
     }
 }

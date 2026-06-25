@@ -781,6 +781,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Bool(..)
         | Expr::Char(..)
         | Expr::Absent(_)
+        | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. } => None,
     }
 }

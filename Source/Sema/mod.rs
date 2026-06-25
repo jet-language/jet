@@ -97,7 +97,7 @@ pub(crate) struct TypeRegistry {
 }
 
 impl TypeRegistry {
-    fn contains(&self, name: &str) -> bool {
+    pub(crate) fn contains(&self, name: &str) -> bool {
         self.types.contains_key(name)
     }
 

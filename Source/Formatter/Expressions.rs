@@ -421,6 +421,8 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::Absent(_) => self.write("null"),
+            // D-SIMD2: a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max` (inside `.reduce(…)`).
+            Expr::ReduceMarker(name, _) => self.write(&format!("#{}", name)),
             Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
             Expr::PatternTest {
                 subject, pattern, ..
