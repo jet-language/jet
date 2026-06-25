@@ -725,6 +725,22 @@ pub const KW_TRANSACT: &str = "Transact";
 /// NO new keyword (library form, I7 untouched).
 pub const TXN_ON_COMMIT: &str = "on_commit";
 
+/// D-TXN-ROLLBACK (ratified 2026-06-25, layer 3): the explicit rollback-hook
+/// method on a transaction handle — `order.on_rollback(() => { … })`. The exact
+/// mirror of `on_commit`: Drop-backed (D-DEFER1 model), runs LIFO on a
+/// `?`-failure/rollback and is dropped (not run) on a clean commit. A value handled
+/// by an explicit `on_rollback` is the author's to undo, so it is NOT auto-snapshot
+/// (layer 1) — they took control and skip the perf cost. NO new keyword (library
+/// form, I7 untouched).
+pub const TXN_ON_ROLLBACK: &str = "on_rollback";
+
+/// D-TXN-ROLLBACK (ratified 2026-06-25, layer 2): the trait a type may derive/impl
+/// to customize how a mutated value is snapshotted and restored inside a `#Transact`
+/// block (e.g. a cheap diff instead of a full deep copy). When a mutated value's
+/// type implements `Rollback`, the auto-snapshot (layer 1) uses it instead of a
+/// generic clone. A user-derivable trait name (I7).
+pub const TRAIT_ROLLBACK: &str = "Rollback";
+
 /// D-TXN4: the type of a transaction handle bound by `#Transact(name)`. An
 /// opaque sema-only handle; erased in codegen (I3).
 pub const TXN_HANDLE_TYPE: &str = "Transaction";

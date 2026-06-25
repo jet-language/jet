@@ -913,6 +913,61 @@ impl<'a> Checker<'a> {
                 return Some(Type::Named("TransactionGuard".to_string()));
             }
         }
+        // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a
+        // `#Transact` handle — the exact mirror of `on_commit`. A zero-parameter
+        // lambda, Drop-backed, run LIFO on a `?`-failure/rollback and dropped on a
+        // clean commit. Returns the same `TransactionGuard` handle.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == crate::Syntax::TXN_HANDLE_TYPE && method == crate::Syntax::TXN_ON_ROLLBACK {
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!(
+                            "`{}` takes one lambda, got {}",
+                            crate::Syntax::TXN_ON_ROLLBACK,
+                            args.len()
+                        ),
+                        "a rollback hook registers a single undo lambda".to_string(),
+                        format!("write `{}.{}(() => {{ … }})`", "<handle>", crate::Syntax::TXN_ON_ROLLBACK),
+                        Some(span),
+                    ));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return Some(Type::Named("TransactionGuard".to_string()));
+                }
+                let lam_ty = self.infer(&mut args[0].expr);
+                match &lam_ty {
+                    Some(Type::Fn { params, .. }) => {
+                        if !params.is_empty() {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!(
+                                    "`{}` needs a zero-parameter lambda, got {} parameter{}",
+                                    crate::Syntax::TXN_ON_ROLLBACK,
+                                    params.len(),
+                                    if params.len() == 1 { "" } else { "s" }
+                                ),
+                                "the hook body takes no arguments — it captures what it needs via closure".to_string(),
+                                format!("write `<handle>.{}(() => {{ … }})` with no parameters", crate::Syntax::TXN_ON_ROLLBACK),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{}` needs a lambda, not {}", crate::Syntax::TXN_ON_ROLLBACK, other.show()),
+                            "a rollback hook runs a lambda only when the transaction rolls back".to_string(),
+                            format!("write `<handle>.{}(() => {{ … }})`", crate::Syntax::TXN_ON_ROLLBACK),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
+                    None => {}
+                }
+                *recv_type_out = Some(handle_ty.clone());
+                return Some(Type::Named("TransactionGuard".to_string()));
+            }
+        }
         // E2-M7: method calls on streaming file handles (D-IO2).
         if let Type::Named(handle_ty) = &recv_ty {
             if let Some(ret) = file_handle_method_return(handle_ty, method, args.len(), span, &mut self.diags) {

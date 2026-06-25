@@ -608,23 +608,38 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         // transaction guard, emit the body, then `commit()` on the clean fall-through
         // path. An early `?`/`return` skips `commit()`, so registered `on_commit` hooks
         // drop un-run (D-TXN3). Codegen is dumb (I3): no effect/rollback machinery here.
-        TStmt::Transact { handle, body } => {
+        TStmt::Transact { handle, snapshots, body } => {
             let inner = indent + 1;
             let inner_pad = "    ".repeat(inner);
             out.push_str(&format!("{}{{\n", pad));
-            match handle {
-                // A named transaction: open the guard, emit the body, commit on the
-                // clean fall-through path (an early `?`/`return` skips it).
+            // A named handle uses its mangled name; a bare block with auto-snapshots
+            // needs a synthesized handle to register the snapshot restores on. A bare
+            // block with neither handle nor snapshots erases to a plain block (its only
+            // job was the D-TXN2 ceiling).
+            let effective_handle: Option<String> = match handle {
+                Some(h) => Some(h.clone()),
+                None if !snapshots.is_empty() => Some("__jet_txn".to_string()),
+                None => None,
+            };
+            match &effective_handle {
                 Some(handle) => {
                     out.push_str(&format!(
                         "{}let mut {} = {}jet_transaction();\n",
                         inner_pad, handle, cx.root_prefix
                     ));
+                    // D-TXN-ROLLBACK layer 1: snapshot each mutated root BEFORE the
+                    // body runs, so the captured clone is the pre-mutation state. On a
+                    // `?`-failure the guard's Drop restores them LIFO; on commit they
+                    // drop un-run.
+                    for place_ref in snapshots {
+                        out.push_str(&format!(
+                            "{}{}jet_txn::snapshot(&mut {}, {});\n",
+                            inner_pad, cx.root_prefix, handle, place_ref
+                        ));
+                    }
                     emit_tir_stmts(body, cx, out, inner);
                     out.push_str(&format!("{}{}.commit();\n", inner_pad, handle));
                 }
-                // A bare `#Transact { … }` with no handle has no `on_commit` hooks, so
-                // it erases to a plain block (its only job was the D-TXN2 ceiling).
                 None => emit_tir_stmts(body, cx, out, inner),
             }
             out.push_str(&format!("{}}}\n", pad));
@@ -1530,6 +1545,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             // only after `commit()` (the `JetTransaction` prelude type).
             TCoreClosureKind::OnCommit { handle, closure } => {
                 format!("{}.on_commit(Box::new({}))", handle, closure)
+            }
+            // D-TXN-ROLLBACK (layer 3): the rollback-hook registration, run LIFO on a
+            // `?`-failure and dropped un-run on commit (the `JetTransaction` prelude type).
+            TCoreClosureKind::OnRollback { handle, closure } => {
+                format!("{}.on_rollback(Box::new({}))", handle, closure)
             }
             // D-REACT1=B: a derived value recomputed from its signals.
             TCoreClosureKind::ReactiveDerived { closure } => {

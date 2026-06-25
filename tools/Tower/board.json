@@ -1,12 +1,12 @@
 {
-  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better\n- Use Jai-style build system\n- Cross platform raylib builtin\n- Consider how to improve using concepts from Zig build system\n- Cleanup old std.mem syntax (Ptr<T>)\n- Relook what labeled ref field in struct\n- Relook original ownership model - outdated example\n- Relook if switch statements -> 07_switch still uses || to check multiple patterns on the input var -> should be | with || for additional expressions alongside the pattern\n- Jet fmt should not drop parenthesis used for visual/functional grouping\n- Use Jai . operator for Enum \"expansion\" and maybe for implied constructors?",
+  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better\n- Use Jai-style build system\n- Cross platform native raylib builtin\n- Consider how to improve using concepts from Zig build system\n- Cleanup old std.mem syntax (Ptr<T>)\n- Relook what labeled ref field in struct\n- Relook original ownership model - outdated example\n- Relook if switch statements -> 07_switch still uses || to check multiple patterns on the input var -> should be | with || for additional expressions alongside the pattern\n- Jet fmt should not drop parenthesis used for visual/functional grouping\n- Use Jai . operator for Enum \"expansion\" and maybe for implied constructors?",
   "cards": [
     {
       "id": "c26",
       "type": "idea",
       "title": "Arena allocator compiler inference (far horizon)",
       "body": "Compiler infers arena placement.",
-      "stage": "frozen",
+      "stage": "planning",
       "plan": "arena-allocator-inference",
       "notes": [
         {
@@ -19,7 +19,7 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-25T11:32:51.404Z",
       "priority": "P2",
       "workOrder": null
     },
@@ -494,7 +494,7 @@
       "type": "idea",
       "title": "Scoped transactions (#transact rollback semantics)",
       "body": "#transact {} surface is ratified (S82); decide rollback semantics: per-type opt-in Rollback trait, reverse-chain on ?-failure, commit on success. After D-EFF1.",
-      "stage": "building",
+      "stage": "done",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-TXN1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -515,12 +515,18 @@
         {
           "t": "[sweep] D-TXN-ROLLBACK ratified C-layered: auto-snapshot default + Rollback trait (expert) + explicit tx.on_rollback (expert). Unblocked → building.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep] D-TXN-ROLLBACK=C(layered) shipped: layer 1 auto-snapshot (clones every root local/param the #Transact block ASSIGNS, restores LIFO on ?-failure — magic by default) + layer 3 explicit tx.on_rollback(()=>{}) (Drop-backed mirror of on_commit, runs on failure path). The one raw-pointer snapshot-restore is confined to the vetted jet_txn prelude module (stripped from golden like jet_mem), never user code. Layer 2 (Rollback trait method shape) deferred → ballot D-ROLLBACK-TRAIT (trait name reserved). Deferred corners: ~self-method-only mutation + deep-alias not auto-snapshotted; on_rollback composes with (not suppresses) layer-1 snapshots. example 110 (6 paths), effects 47/47.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
       "updated": "2026-06-25",
-      "decisions": [],
-      "plan": "transact-rollback-semantics",
+      "decisions": [
+        "D-ROLLBACK-TRAIT"
+      ],
+      "plan": null,
       "priority": "P2",
       "workOrder": null
     },
@@ -529,7 +535,7 @@
       "type": "idea",
       "title": "Visible uninitialization (uninit / ---)",
       "body": "Jai-borrowed: expert opt-out of safe auto-fill for raw speed; read-before-write stays a compile error (the Jet-vs-Jai safety line). Lowers to Rust MaybeUninit. Gated behind use core.mem (S58).",
-      "stage": "frozen",
+      "stage": "planning",
       "decisions": [
         "D-UNINIT1"
       ],
@@ -560,7 +566,7 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-25T11:33:27.742Z",
       "plan": "visible-uninit",
       "priority": "P2",
       "workOrder": null
@@ -603,7 +609,7 @@
       "type": "task",
       "title": "`benchmark` target support",
       "body": "Build the benchmark target backend (reserved by D-TGT2). Until then `benchmark` is a reserved manifest keyword that errors with no-backend.",
-      "stage": "frozen",
+      "stage": "planning",
       "plan": null,
       "notes": [
         {
@@ -612,7 +618,7 @@
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-25T11:35:16.906Z",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -622,7 +628,7 @@
       "type": "task",
       "title": "`plugin` target support",
       "body": "Build the plugin target backend + loader (reserved by D-TGT2). Until then `plugin` is a reserved manifest keyword that errors with no-backend.",
-      "stage": "frozen",
+      "stage": "planning",
       "plan": null,
       "notes": [
         {
@@ -631,7 +637,7 @@
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-25T11:35:14.161Z",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -1276,7 +1282,7 @@
       "type": "task",
       "title": "Inline CoreLib execution in the REPL interpreter",
       "body": "REPL v2 (c55) shipped; this is its one deferred fork. The comptime tree-walker resolves core calls (math.sqrt) across REPL inputs but cant execute them inline (E0956) — only :run/native does. Teach Source/Comptime/ to run the curated-pure CoreLib surface inline, reusing the D-CTCORE1 whitelist so inline-executable == comptime-legal. Large (interpreter, every core module). Plan: repl-inline-core-exec.md.",
-      "stage": "frozen",
+      "stage": "planning",
       "plan": "repl-inline-core-exec",
       "notes": [
         {
@@ -1285,7 +1291,7 @@
         }
       ],
       "created": "2026-06-24T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-25T11:35:07.328Z",
       "priority": "P2",
       "workOrder": null
     },
@@ -1540,7 +1546,7 @@
       "type": "feature",
       "title": "Debugger step 2: native DAP/lldb backend (full-feature stepping + editor wiring)",
       "body": "D-DBG3 step 2 (the in-session command surface shipped in c52 over the interpreter). Remaining: a native backend that steps the FULL feature set the interpreter declines (E2203: FFI, tasks, #Unsafe, native std), the D-DBG2 --raw-frames expert view, and editor DAP wiring (VS Code/Zed). The ratified command vocabulary (step/next/continue/finish/break/print/locals/backtrace) is fixed and reused; only the native backend + protocol transport remain.",
-      "stage": "backlog",
+      "stage": "planning",
       "plan": "dap-debugger",
       "notes": [
         {
@@ -1549,7 +1555,7 @@
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-25",
+      "updated": "2026-06-25T11:36:54.318Z",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -1582,7 +1588,7 @@
       "type": "feature",
       "title": "Package signing tier A (Ed25519) — gated on c96 registry",
       "body": "D-PKGSIGN1 tier A (opt-in Ed25519 author signing): native Ed25519/SHA-512 ring primitives (I6, only SHA-256 today), Sign.rs, LockedPackage.signature, jet keygen + jet key backup, publish auto-keygen on first publish, fetch-time signature verify, require_signed enforcement (per-registry, OFF by default). Every surface needs the registry-publish key-distribution handshake (TOFU pinning via the index) that c96 owns — build once c96 (publish/registry) lands. The checksum floor (tier B, E1204) + vendor/audit/SBOM already shipped in c122.",
-      "stage": "backlog",
+      "stage": "frozen",
       "plan": "package-ecosystem-trust",
       "notes": [
         {
@@ -1591,7 +1597,7 @@
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-25",
+      "updated": "2026-06-25T11:36:40.629Z",
       "decisions": [],
       "priority": "P2",
       "workOrder": null,
@@ -1623,7 +1629,7 @@
       "type": "idea",
       "title": "Multi-character type-param names mangle wrong in codegen/TIR",
       "body": "Pre-existing (surfaced by c136): Generics::is_type_var_name only recognizes a SINGLE uppercase letter as a type variable, so a multi-char param like `Kind` in a field type mangles to user_Kind (treated as a concrete type) instead of the generic param. Single-letter params (T, K) work fully. Fix is_type_var_name + the TIR/codegen paths to recognize the declared type-param set rather than the single-letter heuristic.",
-      "stage": "backlog",
+      "stage": "planning",
       "plan": null,
       "notes": [
         {
@@ -1632,7 +1638,7 @@
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-25",
+      "updated": "2026-06-25T11:37:34.610Z",
       "decisions": [],
       "priority": "P2",
       "workOrder": null

@@ -1,6 +1,6 @@
 # Owner ballot results
 
-_submitted 2026-06-25 10:10_
+_submitted 2026-06-25 11:29_
 
 Decisions captured from Tower. Tell Claude **"go"** to ratify these
 into syntax-decisions.md, strip the cards, and implement the plans.
@@ -228,3 +228,10 @@ Decision: **A**
 
 **D-STATE-TRANS** — the transition-fn marker + arrow glyph
 Decision: **A**
+
+**D-JIT2** — where the Cranelift dependency physically lives
+Decision: **A**
+Comment: Let's go with A, but have the JIT included by default with a no jit kind of flag to opt out (but named better than that)
+
+**D-STATE-DECL** — how is the state set declared? `state Reservation { … }` block
+Decision: **B**

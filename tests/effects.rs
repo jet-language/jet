@@ -525,6 +525,105 @@ fn main() {
     assert!(!rust.contains("unsafe"), "transaction codegen must contain no `unsafe`");
 }
 
+/// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` — the mirror of
+/// `on_commit`. A zero-param lambda on a `#Transact` handle compiles clean and lowers
+/// to a boxed rollback hook on the transaction guard.
+#[test]
+fn transact_on_rollback_ok() {
+    let src = r#"
+fn main() {
+    #Transact(tx) {
+        print("work");
+        tx.on_rollback(() => { print("undo"); });
+    }
+}
+"#;
+    assert!(codes(src).is_empty(), "on_rollback should compile: {:?}", codes(src));
+    let rust = jet::compile(src).expect("compiles").rust;
+    assert!(rust.contains(".on_rollback(Box::new("), "expected a boxed rollback hook: {}", rust);
+}
+
+/// D-TXN-ROLLBACK (layer 3): `on_rollback` needs a zero-parameter lambda (E0104),
+/// exactly like `on_commit`.
+#[test]
+fn transact_on_rollback_needs_zero_param_lambda() {
+    let src = r#"
+fn main() {
+    #Transact(tx) {
+        tx.on_rollback((n: Int) => { print("{n}"); });
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0104"), "on_rollback with a param should be E0104: {:?}", codes(src));
+}
+
+/// D-TXN-ROLLBACK (layer 1): a value mutated inside a `#Transact` block is
+/// auto-snapshotted on entry — the generated Rust calls the `jet_txn::snapshot`
+/// prelude helper against the transaction guard for the mutated root.
+#[test]
+fn transact_auto_snapshot_mutated_value() {
+    let src = r#"
+enum Fail { Bad }
+fn transfer(from: ~Int, to: ~Int, amount: Int) -> Int ? Fail {
+    #Transact(tx) {
+        from -= amount;
+        to += amount;
+        if amount > 100 {
+            return err(Fail.Bad);
+        }
+    }
+    return ok(amount);
+}
+fn main() {
+    a: Int := 100
+    b: Int := 0
+    n @= transfer(~a, ~b, 40) ?? (-1)
+    print("{n}")
+}
+"#;
+    assert!(codes(src).is_empty(), "auto-snapshot transfer should compile: {:?}", codes(src));
+    let rust = jet::compile(src).expect("compiles").rust;
+    assert!(rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_from))"),
+        "expected an auto-snapshot of the mutated `from`: {}", rust);
+    assert!(rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_to))"),
+        "expected an auto-snapshot of the mutated `to`: {}", rust);
+}
+
+/// D-TXN-ROLLBACK (layer 1): the auto-snapshot mechanism's one vetted raw-pointer
+/// writeback lives ONLY inside the `mod jet_txn` prelude module — never in user code.
+#[test]
+fn transact_auto_snapshot_unsafe_only_in_prelude() {
+    let src = r#"
+enum Fail { Bad }
+fn bump(x: ~Int) -> Int ? Fail {
+    #Transact(tx) {
+        x += 1;
+        return err(Fail.Bad);
+    }
+    return ok(0);
+}
+fn main() { a: Int := 0; n @= bump(~a) ?? (-1); print("{n}"); }
+"#;
+    let rust = jet::compile(src).expect("compiles").rust;
+    // The only `unsafe` is inside `mod jet_txn { … }`. Strip it and assert none remain.
+    let stripped = {
+        let start = rust.find("mod jet_txn").expect("jet_txn module present (snapshot used)");
+        let bytes = rust.as_bytes();
+        let (mut depth, mut seen, mut i, mut end) = (0usize, false, start, rust.len());
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => { depth += 1; seen = true; }
+                b'}' => { depth -= 1; if seen && depth == 0 { end = i + 1; break; } }
+                _ => {}
+            }
+            i += 1;
+        }
+        format!("{}{}", &rust[..start], &rust[end..])
+    };
+    assert!(!stripped.contains("unsafe"),
+        "auto-snapshot `unsafe` must be confined to `mod jet_txn`: {}", stripped);
+}
+
 /// D-TXN4: a bare `#Transact { … }` with no handle stays legal (no hooks).
 #[test]
 fn transact_bare_no_handle_ok() {

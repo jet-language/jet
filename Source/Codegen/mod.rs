@@ -279,6 +279,42 @@ fn strip_unused_mem_prelude(out: String) -> String {
     s
 }
 
+/// D-TXN-ROLLBACK layer 1: the `jet_txn` module carries the auto-snapshot
+/// restore mechanism, whose Drop-backed writeback uses one vetted raw-pointer
+/// deref (sound: the transaction guard outlives nothing it points at). A program
+/// that never auto-snapshots a `#Transact` value must carry no `unsafe`, so strip
+/// `mod jet_txn { … }` whenever nothing references `jet_txn::` — exactly like
+/// `strip_unused_mem_prelude`.
+fn strip_unused_txn_prelude(out: String) -> String {
+    let Some(start) = out.find("mod jet_txn") else {
+        return out;
+    };
+    let bytes = out.as_bytes();
+    let mut depth = 0usize;
+    let mut seen = false;
+    let mut end = out.len();
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => { depth += 1; seen = true; }
+            b'}' => {
+                depth -= 1;
+                if seen && depth == 0 { end = i + 1; break; }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let used = out[..start].contains("jet_txn::") || out[end..].contains("jet_txn::");
+    if used {
+        return out;
+    }
+    let mut s = out[..start].to_string();
+    let rest = out[end..].trim_start_matches('\n');
+    s.push_str(rest);
+    s
+}
+
 /// D-TERM1: the `jet_term_unix` and `jet_term_windows` platform modules each
 /// carry vetted `unsafe` for terminal I/O FFI. Strip them (along with the
 /// `jet_term_enter`/`jet_term_leave`/`jet_term_read_key` dispatch functions and
@@ -406,7 +442,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             emit_func(&cx, f, &mut out);
         }
     }
-    strip_unused_term_prelude(strip_unused_mem_prelude(out))
+    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
@@ -500,7 +536,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main(&tests, &mut out);
-    strip_unused_term_prelude(strip_unused_mem_prelude(out))
+    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
 }
 
 /// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
@@ -738,7 +774,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
-    strip_unused_term_prelude(strip_unused_mem_prelude(out))
+    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
@@ -849,7 +885,7 @@ pub fn emit_bundle_tests_cov(bundle: &ProgramBundle, link: Option<&FfiLink>, cov
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main_cov(&tests, &mut out, coverage);
-    strip_unused_term_prelude(strip_unused_mem_prelude(out))
+    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
@@ -1017,5 +1053,5 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    }\n");
     }
     out.push_str("}\n");
-    strip_unused_term_prelude(strip_unused_mem_prelude(out))
+    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
 }

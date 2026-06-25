@@ -2341,6 +2341,17 @@ pub(crate) fn method_call_in_subset(
             && matches!(&args[0].expr, Expr::Lambda(_))
             && expr_in_subset(&args[0].expr, cx, locals);
     }
+    // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` — the mirror of
+    // `on_commit`, same in-subset shape (a literal zero-param lambda on a handle sema
+    // typed `Transaction`).
+    if method == Syntax::TXN_ON_ROLLBACK
+        && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE)
+    {
+        return args.len() == 1
+            && args[0].label.is_none()
+            && matches!(&args[0].expr, Expr::Lambda(_))
+            && expr_in_subset(&args[0].expr, cx, locals);
+    }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
     // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.
     // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the

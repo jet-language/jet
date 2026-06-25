@@ -161,6 +161,90 @@ pub(crate) fn lower_view_return(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt 
     }
 }
 
+/// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere
+/// in a `#Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
+/// auto-snapshotted at block entry and restored on a `?`-failure. Recurses through
+/// nested control flow (if/while/for/switch/loop/region/etc.) but stops at:
+///   • nested `#Transact` blocks — they establish their own rollback scope; and
+///   • lambda bodies — a deferred execution context (the same reason `on_commit`
+///     lambdas escape the enclosing transaction's effect check).
+/// Each root is recorded once, in first-seen order. v1 covers assignment targets,
+/// the clearly-analyzable, fully-correct case; mutation reached *only* through a
+/// `~self` method call (no assignment) or a deep alias is the documented deferred
+/// corner (D-TXN-ROLLBACK). This is a syntactic over-approximation filtered by the
+/// caller to roots in scope at block entry.
+fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
+    fn push(out: &mut Vec<String>, name: &str) {
+        if !out.iter().any(|n| n == name) {
+            out.push(name.to_string());
+        }
+    }
+    /// The root local ident of an assignable place, if any.
+    fn lvalue_root(lv: &LValue) -> Option<&str> {
+        match lv {
+            LValue::Local { name, .. } => Some(name),
+            LValue::Index { base, .. } | LValue::Field { base, .. } => expr_root(base),
+        }
+    }
+    fn expr_root(e: &Expr) -> Option<&str> {
+        match e {
+            Expr::Ident(name, _) => Some(name),
+            Expr::Field(base, _, _) => expr_root(base),
+            Expr::Index { base, .. } => expr_root(base),
+            _ => None,
+        }
+    }
+    for s in body {
+        match s {
+            Stmt::Assign { target, .. } => {
+                if let Some(root) = lvalue_root(target) {
+                    push(out, root);
+                }
+            }
+            Stmt::If(ifs) => walk_if(ifs, out),
+            Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. } => collect_txn_mut_roots(body, out),
+            Stmt::Switch { arms, else_body, .. } => {
+                for arm in arms {
+                    collect_txn_mut_roots(&arm.body, out);
+                }
+                if let Some(eb) = else_body {
+                    collect_txn_mut_roots(eb, out);
+                }
+            }
+            Stmt::ComptimeIf { then_body, else_body, .. } => {
+                collect_txn_mut_roots(then_body, out);
+                if let Some(eb) = else_body {
+                    collect_txn_mut_roots(eb, out);
+                }
+            }
+            // A nested `#Transact` owns its own rollback scope — don't pull its
+            // mutations up into the enclosing block.
+            Stmt::Transact { .. } => {}
+            // Other statements (Expr/Val/Return/Break/…) introduce no assignment
+            // targets we snapshot at block entry. (A `~self` mutating method call
+            // hides inside `Stmt::Expr` — the documented deferred corner.)
+            _ => {}
+        }
+    }
+    fn walk_if(ifs: &crate::AST::IfStmt, out: &mut Vec<String>) {
+        collect_txn_mut_roots(&ifs.then_body, out);
+        match &ifs.else_branch {
+            Some(crate::AST::ElseBranch::ElseIf(inner)) => walk_if(inner, out),
+            Some(crate::AST::ElseBranch::Else(body)) => collect_txn_mut_roots(body, out),
+            None => {}
+        }
+    }
+}
+
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
     cx.src[..offset.min(cx.src.len())].bytes().filter(|&b| b == b'\n').count() + 1
@@ -993,8 +1077,23 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 );
                 h
             });
+            // D-TXN-ROLLBACK layer 1 (auto-snapshot): collect the root local names
+            // assigned anywhere in the block (recursing into nested control flow, but
+            // NOT into nested `#Transact` blocks or lambda bodies — those own their
+            // own rollback scope / are deferred). Snapshot only roots ALREADY in scope
+            // at block entry (params / outer locals): a local declared inside the block
+            // needs no snapshot, since rollback discards it when the block scope ends.
+            // Each becomes `&mut <place>` so the prelude can clone+restore it.
+            let mut roots: Vec<String> = Vec::new();
+            collect_txn_mut_roots(body, &mut roots);
+            let snapshots: Vec<String> = roots
+                .iter()
+                .filter(|r| env.locals.contains_key(*r))
+                .map(|r| format!("&mut {}", env.place_of(r)))
+                .collect();
             TStmt::Transact {
                 handle,
+                snapshots,
                 body: lower_stmts(body, cx, env),
             }
         }
@@ -3131,6 +3230,33 @@ pub(crate) fn lower_method_call(
                 ty: Type::Named("TransactionGuard".to_string()),
                 kind: TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::OnCommit { handle, closure },
+                },
+            };
+        }
+    }
+    // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a `#Transact`
+    // handle — the exact mirror of `on_commit`. Lower to
+    // `<handle>.on_rollback(Box::new(move || { … }))`; the Drop-backed run-on-rollback
+    // semantics live in the `JetTransaction` prelude type.
+    if method == Syntax::TXN_ON_ROLLBACK
+        && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE)
+    {
+        let handle = match receiver {
+            Expr::Ident(name, _) => mangle(name),
+            other => emit_tir_expr(&lower_expr(other, cx, env), cx),
+        };
+        if let Some(crate::AST::Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
+            let tl = lower_lambda(lam, cx, env);
+            let inner = format!("move |{}| {}", tl.params.join(", "), tl.body);
+            let closure = if tl.prep.is_empty() {
+                inner
+            } else {
+                format!("{{ {} {} }}", tl.prep, inner)
+            };
+            return TExpr {
+                ty: Type::Named("TransactionGuard".to_string()),
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::OnRollback { handle, closure },
                 },
             };
         }

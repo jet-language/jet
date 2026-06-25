@@ -112,6 +112,7 @@ fn examples_compile_and_run() {
             }
             // Strip all vetted prelude modules (order doesn't matter).
             let s = strip_mod(&rust_code, "jet_mem");
+            let s = strip_mod(&s, "jet_txn");
             let s = strip_mod(&s, "jet_term_unix");
             let mut s = strip_mod(&s, "jet_term_windows");
             // Strip every C-FFI wrapper module (`user___c_<lib>` and the cache

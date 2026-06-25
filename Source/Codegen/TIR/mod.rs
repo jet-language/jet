@@ -431,8 +431,15 @@ pub(crate) enum TStmt {
     /// codegen is dumb (I3): effects/transaction state are a compile-time fact.
     Transact {
         /// The mangled Rust name of the transaction handle (`user_<name>`), or `None`
-        /// for a bare `#Transact { … }` with no handle (no `on_commit` hooks).
+        /// for a bare `#Transact { … }` with no handle (no `on_commit`/`on_rollback`
+        /// hooks). When `snapshots` is non-empty a handle is synthesized even for a
+        /// bare block, so the auto-snapshot has a transaction to register on.
         handle: Option<String>,
+        /// D-TXN-ROLLBACK layer 1: each entry is a `&mut <place>` expression for a
+        /// root local the block mutates and that was in scope at entry. Emitted at
+        /// block entry as `jet_txn::snapshot(&mut <handle>, <place_ref>)` — clone the
+        /// pre-state, restore it on a `?`-failure (Drop-backed, LIFO).
+        snapshots: Vec<String>,
         body: Vec<TStmt>,
     },
 }
@@ -941,6 +948,9 @@ pub(crate) enum TCoreClosureKind {
     Guard { closure: String },
     /// D-TXN3: `<handle>.on_commit(<lambda>)` → `<handle>.on_commit(Box::new(<closure>))`.
     OnCommit { handle: String, closure: String },
+    /// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(<lambda>)` →
+    /// `<handle>.on_rollback(Box::new(<closure>))`. Mirror of `OnCommit`.
+    OnRollback { handle: String, closure: String },
     /// D-REACT1=B: `reactive.derived(<lambda>)` → `{root}jet_std::JetDerived::new(<closure>)`.
     ReactiveDerived { closure: String },
     /// D-REACT1=B: `reactive.effect(<lambda>)` → `{root}jet_std::jet_reactive_effect(<closure>)`.

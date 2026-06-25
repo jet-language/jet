@@ -25,215 +25,104 @@ it's time to decide it.
 
 ## Open decisions
 
-_Two cards open for the owner: **D-STATE-DECL** (typestate state vocabulary — loose tags vs enum) in the D-STATE1 scratch section below, and **D-JIT2** (where the Cranelift dependency physically lives)._
+_One card open for the owner: **D-ROLLBACK-TRAIT** — the `Rollback` trait method shape (deferred from D-TXN-ROLLBACK layer 2). Card below. (The earlier batch is recorded in syntax-decisions.md.)_
 
 ---
 
-# Ballot scratch — D-STATE1 typestate surface spelling forks
+### D-ROLLBACK-TRAIT — the `Rollback` trait's method shape (layer 2)
 
-D-STATE1 (=A) is ratified: *typestate via transitioning tags — a fn takes the old
-state tag and returns the next; wrong-state call = compile error E0150; tags erase,
-zero runtime cost.* The **mechanism** is pinned. What the one-line ratification does
-NOT pin is the exact owner-facing **spelling** of three surface elements. Per the
-syntax-decision protocol I built the clearly-implied core (E0150, erasing tags,
-forward state dataflow) using the established marker idioms, and queue the spellings
-below for owner confirmation. The implemented spellings are the defaults; nothing
-about the mechanism changes if the owner picks an alternative — only the lexer/parser
-spelling and a re-bless.
+**Gist:** What methods does a type write/derive to customize how a `#Transact` block snapshots and restores it, instead of the default deep clone?
 
-The state *value-fact prefix* (`#Pending res`) is NOT in question — it is the
-ratified D-QUAL1/D-TAINT1 value-fact-rides-the-value idiom (`#Tainted expr`),
-already shipped. Only the two fn-modifier markers and the arrow glyph below are forks.
-
----
-
-### D-STATE-DECL — how is the state set declared? `state Reservation { … }` block (rec B — owner-directed 2026-06-25)
-
-**Owner's direction (2026-06-25):** "Isn't one of the markers called `#State`? For D-STATE-DECL we could just do option B with `state Reservation { Pending, Confirmed, CheckedIn }`." Adopted as the recommendation. Two clarifications it settles:
-
-1. **`#State` vs `state` is cohesion, not collision.** Yes — `#State(CheckedIn) fn` is the ratified require-state *marker* (D-STATE-REQ=A). A bare `state Reservation { … }` *declaration* shares the word on purpose, and it's the **same bare-keyword-declaration vs `#`-marker split Jet already uses everywhere**: `tag Foo {}` declares / `#Tainted` marks; `struct Foo {}` declares / `#Codable` marks. So the three read as one family — **`state` declares the set, `#State(X)` requires one, `#Transition(A -> B)` moves between them.** One word, three consistent forms.
-
-2. **Why a dedicated block and not an enum.** (Background, since the earlier reframe weighed an `enum`/`comptime enum` vocabulary.) An `enum` is conceptually a *runtime value* type; using it purely as an erasing typestate vocabulary is a semantic stretch (you'd need a `comptime enum` qualifier to signal "this one has no runtime form"). A purpose-built `state TypeName { … }` says exactly what it is, ties the set to the type it governs by name, erases by definition, and pairs cleanly with `#State`/`#Transition`. It costs one small new keyword — worth it for the cohesion and for not overloading `enum`. (If a user *does* want a queryable/serializable runtime value, that's a plain `enum` + runtime `match` — a different tool, already supported.)
-
-**Gist:** A typestate type names its states in a dedicated `state TypeName { … }` block; the `#State`/`#Transition` markers reference those names.
-
-**Story.** Earl models a reservation lifecycle. He wants the set `{ Pending, Confirmed, CheckedIn }` named in one place, tied to `Reservation`, so a typo (`#Transition(Pending -> Confrimed)`) is caught and "is there a dead-end state?" can be asked — without maintaining a list that drifts from the transitions. `state Reservation { … }` is that one place, and it reads as "these are Reservation's states."
+**Story.** Dana maintains a 200k-row in-memory ledger inside a `#Transact` block. The default auto-snapshot (D-TXN-ROLLBACK layer 1) deep-clones the whole table on entry — correct, but it doubles her memory and stalls the hot path. She wants to say "snapshot me cheaply: just record the row indices I'm about to touch, and on rollback put those rows back" — a diff, not a copy. Layer 2 is the seam for that: a `Rollback` trait her type implements (or derives) that the block calls instead of the generic clone.
 
 **In the wild:**
 ```jet
-// Option B (recommended): a dedicated state-set declaration, tied to the type by name
-state Reservation { Pending, Confirmed, CheckedIn }
+// Dana's ledger wants a cheap diff-snapshot instead of a full clone.
+struct Ledger { rows: [Row] }
 
-struct Reservation { guest: String }
+// ...some Rollback impl here — SHAPE IS THE QUESTION...
 
-impl Reservation {
-    #Transition(_ -> Pending)          fn book(guest: String) -> Reservation { return Reservation { guest: guest } }
-    #Transition(Pending -> Confirmed)  fn pay(self: ^Reservation) -> Reservation { return self }
-    #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation { return self }
-    #State(CheckedIn)                  fn room_key(self) -> String { return "key for {self.guest}" }
+fn post(ledger: ~Ledger, batch: [Entry]) -> Int ? PostError {
+    #Transact(tx) {
+        ledger.apply(batch)          // mutates ledger; the block uses Ledger's
+        if !ledger.balanced() {      // Rollback impl (a diff) instead of a deep clone
+            return err(PostError.Unbalanced)
+        }
+    }
+    return ok(batch.len())
 }
-// `#Transition(Pending -> Confrimed)` → error: Confrimed is not a state of Reservation
-// the bounded set also lets the checker warn on a state with no outgoing transition (dead end)
 ```
 
-**Other languages:** Rust's type-state pattern has no declaration (each state is a marker type; the set is implicit in which `Reservation<S>` impls exist). Statechart libraries (XState/TS, Stateless/C#) declare the whole machine up front for exhaustiveness + diagrams. `state TypeName { … }` is the lightweight middle: one named set tied to the type, no separate machine table.
+**Other languages:**
+```rust
+// Rust has no transaction trait; people hand-roll a guard that stores an undo closure,
+// or a `Clone` snapshot. Diff-based undo is always bespoke.
+```
+```text
+// Databases: a write-ahead log / undo log records *deltas*; rollback replays them in
+// reverse. That is conceptually layer-2-as-diff. STM (Haskell/Clojure) snapshots the
+// whole TVar set and discards on retry — layer-1-as-clone. Jet wants both available.
+```
 
-**Tradeoffs:** (subagent-reviewed)
+**What is already shipped (not in question):** layer 1 (auto deep-clone snapshot of every mutated in-scope root) and layer 3 (`tx.on_rollback(() => {…})`, the by-hand undo) are fully built and runnable in `examples/features/110_transact.jet`. The `Rollback` trait NAME is reserved (`Source/Syntax.rs::TRAIT_ROLLBACK`). Only the trait's method shape + derive semantics are open.
 
-| Option | How states are named | New keyword | Exhaustiveness (typo / dead-end) | Reads as |
-|---|---|---|---|---|
-| A loose `tag`s (shipped) | each state a standalone `tag`, set implicit in the markers | none | only the normal undefined-tag error | scattered; no "these are the states" home |
-| B `state Reservation { … }` block (recommended) | one declaration, tied to the type by name | one (`state`) | yes — bounded set; flags typo'd + dead-end states | "Reservation's states are …"; cohesive with `#State`/`#Transition` |
+**Tradeoffs:**
 
-- **Option A — loose `tag`s define the set (shipped today).**
+| Option | Snapshot type | Restore call | Derive does | Cost when unused | Footgun |
+|--------|--------------|--------------|-------------|------------------|---------|
+| A — paired `snapshot`/`restore`, assoc. snapshot type | author-chosen `Snapshot` | `restore(self, snap)` | field-wise clone snapshot | none (only on `impl`/`derive`) | author must keep snap consistent with self |
+| B — single `rollback(mut self, snapshot)` + `snapshot(self) -> Self` | `Self` (a clone) | `rollback(self, prev)` | clone + assign | none | snapshot is whole-self → no cheaper than layer 1 |
+| C — undo-log: `record(self, tx)` registers deltas | n/a (deltas live in tx) | n/a (tx replays) | nothing useful | none | most powerful, most rope |
+
+**Worked example of every option:**
+
+- **Option A — paired methods with an associated snapshot type (recommended).** The type names its own (possibly small) snapshot representation.
 ```jet
-tag Pending {}                       // three independent tags; the set is whatever the markers happen to mention
-tag Confirmed {}
-tag CheckedIn {}
+trait Rollback {
+    type Snapshot
+    fn snapshot(self) -> Snapshot          // capture pre-state (may be a cheap diff)
+    fn restore(self: ~Self, snap: Snapshot) // put it back on rollback
+}
+impl Rollback for Ledger {
+    type Snapshot = [Int]                  // just the touched row indices
+    fn snapshot(self) -> [Int] { return self.dirty_indices() }
+    fn restore(self: ~Ledger, snap: [Int]) { self.revert_rows(snap) }
+}
+// The block calls ledger.snapshot() on entry, ledger.restore(snap) on `?`-failure.
 ```
 
-- **Option B — a `state TypeName { … }` declaration. (recommended — owner-directed)**
+- **Option B — single combined shape, snapshot is always `Self`.** Simplest, but the snapshot is a whole-self clone, so it gives layer 1's cost back; only the *restore* is customizable.
 ```jet
-state Reservation { Pending, Confirmed, CheckedIn }   // one named, grouped, typo-checked, type-scoped set
-// `state` declares · `#State(X)` requires · `#Transition(A -> B)` moves — one family
+trait Rollback {
+    fn snapshot(self) -> Self
+    fn rollback(self: ~Self, prev: Self)
+}
+impl Rollback for Counter {
+    fn snapshot(self) -> Counter { return self }     // clone
+    fn rollback(self: ~Counter, prev: Counter) { self.n = prev.n }
+}
 ```
 
-**Recommendation:** **B** — `state Reservation { … }`. It gives the grouping, typo-catching, and dead-end detection the card wanted; ties the set to its type by name; erases by definition (pure compile-time, no runtime discriminant); and forms one coherent `state` / `#State` / `#Transition` family rather than overloading `enum`. The one new keyword is small and purpose-fit. The shipped feature uses loose tags (A); moving to `state { }` is a contained change — add the `state` declaration (parse + register the bounded set, in the declaration family alongside `tag`/`struct`), and re-point the `#State`/`#Transition` marker resolver at it (the E0150 gate, dataflow, and erasure are unchanged). Say ratify and I'll build it.
-
-**Owner Q (D-STATE-DECL):** ratify **B** = `state TypeName { … }`? (One sub-choice if yes: should an unreachable / dead-end state be a hard error or a warning — I'd default it to a warning so a partial machine still compiles during development.)
-
----
-
-**Also still open upstream (named, not blocking the value-prefix core):**
-D-QUAL4 — plain value-tag *type-position* spelling (`#Tag Type` vs `Type #Tag`). The
-typestate core above never writes a state in a type position (states ride the value and
-the markers), so it does not depend on D-QUAL4. If the owner later wants a state written
-in a signature type (`fn f(r: Reservation #Pending)`), that rides D-QUAL4.
-
----
-
-### D-JIT2 — where the Cranelift dependency physically lives (rec A — board card c139)
-
-_Rides D-JITDEP1 (Cranelift already approved, runtime-side; I6 holds). This decides ONLY where the crate physically sits so I6 ("zero external crates in the compiler") stays machine-checkable, not the runtime design (settled: production is AOT, the JIT is the resident dev-loop tier)._
-
-**Gist:** D-JITDEP1 approved the Cranelift JIT dep "never in compiler `Source/`," but the repo is one crate — so decide whether the wall is a new `jet-jit` workspace crate (A), a cfg-gated I6 carve-out in the one crate (B), or an out-of-tree optional component (C).
-
-**Story.** Walter maintains the Jet toolchain and runs the I6 check in CI: zero external crates in the compiler. The team wants Cranelift to power fast `jet serve` hot-swap. Walter needs to know where the Cranelift dependency physically goes so that a `cargo tree` (or a lockfile grep) on the compiler still shows nothing external — that the I6 wall is something CI can *prove*, not a comment everyone promises to honor.
-
-**In the wild:**
-```shell
-# The I6 guarantee Walter wants to keep machine-checkable, with Cranelift in the tree somewhere:
-$ cargo tree -p jet | grep -i cranelift        # must print NOTHING for I6 to hold
-$ jet serve                                     # but this dev loop needs the Cranelift JIT
-  watching src/ … hot-swap on save (Cranelift tier-1)
+- **Option C — undo-log: the type registers deltas on the transaction handle.** Maximum power (true WAL), maximum rope; needs the `tx` handle threaded into the trait method.
+```jet
+trait Rollback {
+    fn record(self, tx: ~Transaction)   // push reverse-deltas onto tx's undo stack
+}
+impl Rollback for Ledger {
+    fn record(self, tx: ~Transaction) {
+        for i in self.dirty_indices() {
+            old @= self.rows[i].clone()
+            tx.on_rollback(() => { self.rows[i] = old })   // reuse layer 3
+        }
+    }
+}
 ```
 
-**Other languages:** Rust's own toolchain isolates codegen backends as separate crates (`rustc_codegen_cranelift`, `rustc_codegen_gcc`) behind a stable interface, swapped in at build/run time — the workspace-member model (A). LLVM-based toolchains link the backend as an external library (closer to B/C). Go ships a single self-contained toolchain with its backend in-tree (no external dep to wall off — not Jet's situation, since Cranelift is third-party). The cross-toolchain norm for a *third-party* backend is a separate crate behind a stable seam (A).
+**Recommendation:** Option A — an associated `Snapshot` type with paired `snapshot`/`restore` is the only one that delivers layer 2's whole point (a snapshot *cheaper* than a deep clone) while staying a plain trait the block dispatches on; B can't beat layer 1, and C is layer 3 wearing a trait. A `derive Rollback` would emit the field-wise full-clone impl (snapshot = `Self`), i.e. exactly layer 1 but now overridable.
 
-**Tradeoffs:** (subagent-reviewed)
+**Owner Q 1:** Should `derive Rollback` exist at all, or is the whole point that you only reach for `Rollback` when the default clone is too expensive (so it's impl-only)? (If derive == layer 1, derive may be redundant.)
 
-| Option | Where Cranelift lives | I6 for the compiler crate | Default `jet serve` UX | Fits frozen c140/c141 successors |
-|---|---|---|---|---|
-| A workspace member `jet-jit/` | own crate, behind `--features jit` | enforced — lockfile-provable | works out of the box | yes — successors are more members behind the same seam |
-| B cfg-gated carve-out in the one crate | `Source/Jit/`, off-by-default `jit` feature | documented exception, not enforced | works out of the box | yes, but each successor widens the carve-out |
-| C out-of-tree optional component | separate installed component | untouched (strongest isolation) | degraded — JIT not present by default | yes, but each successor is another install |
-
-**The problem.** D-JITDEP1 approved Cranelift as a runtime-side dep and said it must
-"never [be] in compiler `Source/`" — I6 holds. But the analogy it draws is to D-REGEX1,
-and that analogy does not fit cleanly: the `regex` dep lives inside a **Jet Core
-sub-library** (Jet-language code that compiles to Rust and pulls the crate as a normal
-package dep). The Cranelift JIT is **not** Jet-language code — it is Rust that consumes
-the compiler's TIR, holds executable memory, and satisfies the `JitBackend` trait
-(`Source/JitBackend.rs`). It is part of the toolchain, not a shipped Core package.
-
-And there is a hard structural fact: **the repo is a single crate today** (one root
-`Cargo.toml`, `name = "jet"`, no `[workspace]`, no members). `Source/JitBackend.rs` is
-`pub mod JitBackend` in that one crate. So "Cranelift not in `Source/`" cannot mean
-"a different file in the same crate" — a dep in `Cargo.toml` is reachable from every
-file in the crate; the I6 wall would be by-convention only, not enforced. We need the
-owner to pick how the wall is actually drawn.
-
-The runtime semantics are settled (D-JITDEP1): production is AOT; the JIT is the
-resident dev-loop tier only. This ballot is **only** about *where the crate dependency
-sits* so that I6 ("zero external crates in the compiler") stays true and enforceable.
-
----
-
-- **Option A — new workspace member `jet-jit/` (own crate, owns the Cranelift dep). (recommended)**
-Convert the repo to a Cargo workspace. `Source/` becomes the `jet` crate and stays
-dep-free. A new sibling crate (e.g. `jit/`, crate name `jet-jit`) depends on Cranelift
-and on `jet` (for the `JitBackend` trait + a TIR view), and implements `CraneliftBackend`.
-The `jet` binary depends on `jet-jit` only behind a `--features jit` flag, so a default
-`cargo build` of the compiler still pulls zero crates.
-
-```
-Cargo.toml            # [workspace] members = ["jet", "jit"]  (or keep Source/ as crate "jet")
-Source/               # crate "jet" — I6: std-only, ENFORCED (no cranelift in its deps)
-  JitBackend.rs       #   trait seam (unchanged) + a TIR accessor for backends
-jit/
-  Cargo.toml          # depends on cranelift-*, and on jet
-  src/lib.rs          # impl JitBackend for CraneliftBackend
-```
-
-- I6 stays literally true and *machine-checkable*: `Source/`/crate `jet` has no
-  Cranelift in its dependency tree; a CI grep on the `jet` crate's lockfile proves it.
-- Matches R7 ("backend is swappable; nothing outside codegen/driver knows the target")
-  and the existing seam design (a second `impl JitBackend` with zero caller churn).
-- The frozen successors (c140 bytecode VM, c141 native JIT) become *additional*
-  workspace members swapped in behind the same trait — no `Source/` churn ever.
-- Cost: a one-time workspace conversion (jetpack bin, zed wasm crate, test layout must
-  still build). The TIR must expose a stable, crate-visible accessor for `jet-jit` to
-  read — today TIR types are `pub(crate)` inside `jet`, so a small surfaced view is new
-  work.
-- Consequence to weigh: this is the only option that keeps I6 an *enforced* invariant
-  rather than a documented promise.
-
-- **Option B — explicit, scoped I6 carve-out; Cranelift dep in the one crate behind a feature.**
-Keep the single crate. Add `cranelift-*` to `Cargo.toml` under an off-by-default
-`jit` feature; `CraneliftBackend` lives in `Source/` (e.g. `Source/Jit/Cranelift.rs`)
-gated `#[cfg(feature = "jit")]`. Amend I6's text to name a standing, owner-signed
-runtime-tier exception (exactly as D-REGEX1 carved one for `regex`).
-
-```shell
-$ cargo build                          # default: no jit feature → zero external crates
-$ cargo build --features jit           # pulls cranelift-* into the one `jet` crate
-$ cargo tree -p jet | grep cranelift   # now prints cranelift — I6 true only by convention/feature audit
-```
-
-- Smallest diff; no workspace conversion; TIR stays `pub(crate)` and is reached directly.
-- The JIT backend sits next to the TIR it lowers — arguably the most natural place.
-- Cost: I6 stops being literally true for the compiler crate. The wall is "off by
-  default + cfg-gated," enforced by convention and a feature audit, not by crate
-  boundaries. Every future "can this crate go in `Source/`?" question now points at a
-  precedent that says yes-with-a-flag. This is the carve-out the prompt names as
-  option (b), and it is a real softening of I6.
-
-- **Option C — `jet-jit` as an out-of-tree optional toolchain component (plugin).**
-`jet-jit` is its own crate (as in A) but NOT a workspace member built by default — it is
-an optional component the user installs (`jetpack add-component jit` / a separate build)
-and the `jet` binary loads/links only when present. I6 is untouched; the compiler never
-even references Cranelift.
-
-```shell
-$ jet serve
-  note: JIT component not installed — `jet serve` runs on the tier-0 interpreter
-        install the fast path: jetpack add-component jit
-$ jetpack add-component jit            # separate build, version-skew managed against the jet binary
-$ jet serve                            # now Cranelift-backed
-```
-
-- Strongest I6 isolation; the JIT is opt-in toolchain surface, philosophically "expert
-  tier."
-- Cost: most plumbing — a component/loading story, version-skew management between the
-  `jet` binary and the JIT component, and a worse default dev-loop UX (the headline
-  feature of D-JITDEP1 is *fast `jet serve`*, which a non-default component undercuts).
-- Likely over-engineered for a dev-loop accelerator that should "just work."
-
----
-
-**Recommendation:** **A** — a `jet-jit/` workspace member is the only option that keeps I6 *machine-checkable* (a CI grep of the `jet` crate's lockfile proves zero external crates), matches R7 (swappable backend behind a stable seam) and the existing `JitBackend` design, and lets the frozen successors (c140 bytecode VM, c141 native JIT) slot in as more members behind the same trait with zero `Source/` churn. Its one cost is a one-time workspace conversion — vetted as low-disruption: the `jet` and `jetpack` bins stay in-crate, the `editors/zed/wasm-src` crate is standalone and untouched, and only a small stable TIR accessor (TIR types are `pub(crate)` today) is new work. **B** is the lightest diff but converts I6 from an enforced wall to a documented promise (every future "can this dep go in the compiler?" then cites it). **C** maximizes isolation but makes the JIT a non-default component, undercutting D-JITDEP1's whole point (fast `jet serve` that just works).
-
-**Owner Q (D-JIT2):** confirm **A** (workspace member — I6 stays provable), or pick **B** if you'd rather keep one crate and accept I6 as a documented, feature-gated exception.
+**Owner Q 2:** Under Option A, when restore runs (transaction guard Drop, no `?` allowed), what happens if `restore` itself fails? Proposed: `restore` must be total (no `?`); a fallible restore is a design smell the checker rejects.
 
 ---
 

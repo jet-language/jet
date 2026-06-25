@@ -324,24 +324,36 @@ impl<F: FnOnce()> Drop for JetScopeGuard<F> {
         if let Some(f) = self.f.take() { f(); }
     }
 }
-// ── D-TXN1–D-TXN4 (ratified 2026-06-24): #Transact transaction blocks ─────────
+// ── D-TXN1–D-TXN4 + D-TXN-ROLLBACK (2026-06-24/25): #Transact transaction blocks
 // A `#Transact(tx) { … }` block lowers to:
 //   { let mut tx = jet_transaction(); <body>; tx.commit(); }
-// `tx.on_commit(() => { … })` lowers to `tx.on_commit(Box::new(move || { … }))`.
-// The registered hooks run LIFO in Drop — but only if `commit()` ran. A `?`-failure
-// (or any early return) inside the block skips `commit()`, so the hooks are dropped
-// un-run (D-TXN3): irreversible post-commit work happens only on a clean commit.
+//
+// Three Drop-backed hook stacks, each LIFO (mirroring scope-guard drop order):
+//   • commit hooks   (`tx.on_commit(() => …)`, D-TXN3) — run only if `commit()` ran.
+//   • rollback hooks (`tx.on_rollback(() => …)`, D-TXN-ROLLBACK layer 3) — run only
+//     if `commit()` did NOT run (a `?`-failure / early return undoes the block).
+//   • auto-snapshots (D-TXN-ROLLBACK layer 1) — restore closures captured at the
+//     point of mutation; run only if `commit()` did NOT run, restoring the pre-state.
+//
+// A `?`-failure (or any early return) inside the block skips `commit()`, so on Drop:
+//   committed   → commit hooks fire LIFO; rollback hooks + snapshots are dropped un-run.
+//   uncommitted → snapshots restore (LIFO) then rollback hooks fire (LIFO); commit
+//                 hooks are dropped un-run.
 // Purely safe std Rust; no runtime effect machinery (I3).
 struct JetTransaction {
     hooks: Vec<Box<dyn FnOnce()>>,
+    undo: Vec<Box<dyn FnOnce()>>,
     committed: bool,
 }
 fn jet_transaction() -> JetTransaction {
-    JetTransaction { hooks: Vec::new(), committed: false }
+    JetTransaction { hooks: Vec::new(), undo: Vec::new(), committed: false }
 }
 impl JetTransaction {
     fn on_commit(&mut self, f: Box<dyn FnOnce()>) {
         self.hooks.push(f);
+    }
+    fn on_rollback(&mut self, f: Box<dyn FnOnce()>) {
+        self.undo.push(f);
     }
     fn commit(&mut self) {
         self.committed = true;
@@ -350,11 +362,42 @@ impl JetTransaction {
 impl Drop for JetTransaction {
     fn drop(&mut self) {
         if self.committed {
-            // LIFO: reverse registration order, mirroring scope-guard drop order.
+            // Clean commit: run commit hooks LIFO; undo stack is dropped un-run.
             while let Some(f) = self.hooks.pop() {
                 f();
             }
+        } else {
+            // Rollback path (`?`-failure / early return): restore auto-snapshots
+            // and run explicit rollback hooks, both LIFO; commit hooks drop un-run.
+            // `undo` holds both kinds interleaved in registration order, so a single
+            // LIFO drain mirrors the source order they were established in.
+            while let Some(f) = self.undo.pop() {
+                f();
+            }
         }
+    }
+}
+// D-TXN-ROLLBACK layer 1 (auto-snapshot): the snapshot/restore mechanism lives in a
+// vetted prelude module, mirroring `jet_mem`. `jet_txn_snapshot` clones the
+// pre-mutation state of a place and registers a Drop-backed restore on the
+// transaction's undo stack; on a `?`-failure the guard's Drop writes the clone back.
+// The raw-pointer writeback is sound because the transaction guard is declared after
+// the place and dropped before it (LIFO scope teardown), so the place is always live
+// when restore runs. The compiler picks WHICH places to snapshot (I3); this module is
+// just the dumb runtime. Stripped from the golden memory-safety check like `jet_mem`.
+mod jet_txn {
+    use super::JetTransaction;
+    /// Snapshot `*place` (a `Clone` of its pre-mutation state) and register a restore
+    /// closure on `tx`'s undo stack. Restores on rollback; dropped un-run on commit.
+    pub(crate) fn snapshot<T: Clone + 'static>(tx: &mut JetTransaction, place: &mut T) {
+        let saved = place.clone();
+        let raw: *mut T = place;
+        tx.on_rollback(Box::new(move || {
+            // `raw` points at a local that outlives the transaction guard; the
+            // guard's Drop (the caller) runs before that local is dropped.
+            let slot: &mut T = unsafe { &mut *raw };
+            *slot = saved;
+        }));
     }
 }
 trait user_Serialize { fn to_json(&self) -> String; }
