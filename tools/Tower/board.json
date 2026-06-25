@@ -192,6 +192,10 @@
         {
           "t": "[sweep 2026-06-25] plan written+vetted; benchmark TARGET points the shipped #Bench/jet bench engine (c121) at a package entry — no new mechanism (I8). No open decision → ready.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] Built + merged to master, full suite green. `target: benchmark` now parses to Target::Benchmark and runs the package's #Bench regions via the existing `jet bench` engine (no new mechanism, I8); `plugin` stays reserved (c81). Example examples/features/123_bench_target + golden. (stage left 'ready' — no 'done' stage; archive when convenient.)",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
@@ -365,6 +369,10 @@
         {
           "t": "[sweep 2026-06-25] verified — inline pure-core executor already shipped (c98); remaining gap is plumbing the live core_imports map into the comptime path. No open decision → ready.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] Built + merged, full suite green. core_imports is now threaded into run_repl_step/Interp, so D-CTCORE1-whitelisted core calls (math.sqrt etc.) execute inline in the REPL/comptime path (was E0956); non-whitelisted I/O calls still rejected. 5 tests in tests/repl.rs. (stage left 'ready' — archive when convenient.)",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-24T00:00:00Z",
@@ -518,6 +526,10 @@
         {
           "t": "[sweep 2026-06-25] plan written+vetted; root cause Generics.rs:117 is_type_var_name single-letter heuristic; declared param set is in hand at all sites. Clean no-decision fix → ready.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] Fixed + merged, full suite green. Multi-char type params (Kind/Elem/…) are now recognized via the declared type-param set across sema+codegen (Generics/Traits unify_types, Codegen Context struct_type_params/current_type_params, TIR subset), not the single-letter name heuristic; single-letter cases unchanged. 3 tests in tests/generics.rs. (stage left 'ready' — archive when convenient.)",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-25",
@@ -540,6 +552,10 @@
         },
         {
           "t": "[sweep 2026-06-25] plan written+vetted; root cause lower.rs:862-870 field-store arm; mirror lower_enum_arg clone predicate. Clean no-decision fix (I2/E0507) → ready.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] Fixed (I2 violation) + merged, full suite green. A borrowed non-scalar param assigned to a field/local now clones (new TStmt::Assign.clone_value, predicate mirrors lower_enum_arg) instead of moving out of a shared ref (was rustc E0507 → I2 breach). Test tests/tir.rs borrow_field_clone. (stage left 'ready' — archive when convenient.)",
           "at": "2026-06-25"
         }
       ],
@@ -754,6 +770,10 @@
         {
           "t": "[sweep 2026-06-25] plan written; proposed R11 in guarantee-form (matches #[Codable] reality + owner intent; superset of strict re-parse). The derive output-mechanism fork lives in c155/D-METADERIVE1. No open decision → ready.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] Done + merged. D-CTCODEGEN1=A is now standing architecture rule R11 in docs/spec/architecture.md (generated code re-enters lexer→parser→sema as a typed source fragment; no AST injection past the sema gatekeeper; errors pin at the user trigger; #[Codable] already follows it, required for S56 derives). (stage left 'ready' — archive when convenient.)",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-25",
@@ -799,6 +819,10 @@
       "notes": [
         {
           "t": "[sweep 2026-06-25] Created — D-STATE-DECL=B + D-STATE-TRANS=A ratified with no tracking card. Plan written+vetted: `state` confirmed FREE keyword; core typestate ships; migrate example 113 + wrong-state fixture to the block. No open owner decision → ready.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] Built + merged, full suite green. `state TypeName { … }` declaration block (D-STATE-DECL=B) parses + validates #State/#Transition markers against the declared set; new diagnostics E0151 (unknown state) + L0151 (dead-end-state warning) coded in diagnostics.md + ui snapshots; erases in codegen (zero runtime); example 113 migrated to the block. Keyword `state` registered in Syntax.rs (I7). (stage left 'ready' — archive when convenient.)",
           "at": "2026-06-25"
         }
       ],
