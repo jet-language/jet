@@ -1,6 +1,6 @@
 # Owner ballot results
 
-_submitted 2026-06-25 11:29_
+_submitted 2026-06-25 11:55_
 
 Decisions captured from Tower. Tell Claude **"go"** to ratify these
 into syntax-decisions.md, strip the cards, and implement the plans.
@@ -235,3 +235,6 @@ Comment: Let's go with A, but have the JIT included by default with a no jit kin
 
 **D-STATE-DECL** — how is the state set declared? `state Reservation { … }` block
 Decision: **B**
+
+**D-ROLLBACK-TRAIT** — the `Rollback` trait's method shape
+Decision: **A**
