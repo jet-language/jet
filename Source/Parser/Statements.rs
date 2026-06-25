@@ -352,11 +352,10 @@ impl<'a> Parser<'a> {
         body
     }
 
-    /// D-UNINIT1 (opt C): parse `#Uninit name: Type` — a binding with no
-    /// initializer, gated by `use core.mem` (the gate is checked in sema).
-    /// The type annotation is required; an initializer is rejected here.
-    /// Not yet wired into `stmt` — see the note in the `TokKind::Hash` arm.
-    #[allow(dead_code)]
+    /// D-UNINIT1 (ratified 2026-06-21, opt C): parse `#Uninit name: Type` — a binding
+    /// with no initializer, gated by `use core.mem` (E0424, checked in sema). The type
+    /// annotation is required (E0421); an initializer is rejected here (E0422). Codegen
+    /// lowers to `MaybeUninit::uninit().assume_init()` after sema proves write-before-read.
     fn uninit_binding(&mut self) -> Result<Stmt, Diagnostic> {
         let hash_span = self.peek().span;
         self.bump(); // `#`
@@ -758,10 +757,12 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::Hash => {
-                // D-UNINIT1 (opt C): `#Uninit name: Type` parsing is implemented in
-                // `uninit_binding` but NOT yet wired here — it stays unexposed until
-                // the sema write-before-read proof (E0420) and MaybeUninit codegen land,
-                // so no mis-compiling/unsafe path exists. See sidequests/visible-uninit.md.
+                // D-UNINIT1 (ratified 2026-06-21, opt C): `#Uninit name: Type` — an
+                // uninitialized binding. Sema proves write-before-read (E0420); codegen
+                // lowers to MaybeUninit. Gated by `use core.mem` (checked in sema, E0424).
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNINIT) {
+                    return self.uninit_binding();
+                }
                 // D-CTX1 (ratified 2026-06-22): `#Context(field: value) { … }`.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
                     return self.at_context_stmt();

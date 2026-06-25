@@ -1024,16 +1024,23 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 #[allow(unreachable_patterns)]
                 Some(_) => false,
                 None => {
+                    // D-UNINIT1 (ratified 2026-06-21, opt C): an `#Uninit` binding needs no
+                    // init expression to be in-subset — lower.rs emits
+                    // `MaybeUninit::uninit().assume_init()` verbatim (the placeholder
+                    // `Expr::Int(0, …)` init is never evaluated or lowered).
+                    //
                     // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. Sema
                     // evaluates the value into `b.ct` and the AST `emit_let` emits it as
                     // literal data (`let <name>[: <ty>] = <ct.serialize()>;`) — the runtime
                     // `init` expr is NEVER emitted, so it need not be in-subset. Covered
-                    // whenever the resolved value is present (`b.ct.is_some()`); the literal
-                    // serialization is total. `b.uninit` cannot co-occur with comptime.
-                    let ok = if b.is_comptime {
-                        !b.uninit && b.ct.is_some()
+                    // whenever the resolved value is present (`b.ct.is_some()`).
+                    // `b.uninit` cannot co-occur with comptime or pattern.
+                    let ok = if b.uninit {
+                        true
+                    } else if b.is_comptime {
+                        b.ct.is_some()
                     } else {
-                        !b.uninit && expr_in_subset(&b.init, cx, locals)
+                        expr_in_subset(&b.init, cx, locals)
                     };
                     // The binding's name is in scope for subsequent statements.
                     locals.insert(b.name.clone());

@@ -128,9 +128,12 @@ fn examples_compile_and_run() {
             s
         };
         // Examples that exercise the gated `unsafe` tier (`#Unsafe` blocks /
-        // `#Unsafe fn`). Their generated `unsafe` is allowed, but ONLY in the
-        // gated block/fn form — never ungated (I1).
-        if stem == "48_lowlevel" || stem == "100_rawptr" || stem == "121_single_use_discard" {
+        // `#Unsafe fn`, or `#Uninit` which lowers to `MaybeUninit::uninit().assume_init()`
+        // inside an inline `unsafe { }` block). Their generated `unsafe` is allowed, but
+        // ONLY in the gated block/fn form — never ungated (I1).
+        if stem == "48_lowlevel" || stem == "100_rawptr" || stem == "121_single_use_discard"
+            || stem == "123_uninit"
+        {
             assert!(
                 user_code.contains("unsafe"),
                 "the low-level example {} should exercise the gated `unsafe` tier",

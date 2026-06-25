@@ -641,6 +641,21 @@ span is embedded in the message (Jet file + line + function name).
 | E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. | The program hit a `panic`, `require`, or `require_eq` call that failed, or a bounds/key check triggered at runtime. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; the source line and locals show what values were in play. |
 | E3002 | `error propagated from: {fn} ({file}:{line}) via ?` — an error-return trace entry appended when a `?` re-raises an error. | Each `?` that propagates an error adds a frame, making the full error path visible. | Follow the trace from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 
+## Uninitialized binding diagnostics (D-UNINIT1)
+
+`#Uninit name: Type` opts out of automatic zero-fill for a single binding. It is
+gated by `use core.mem` (E0424) and restricted to plain-data types (E0423). The
+compiler proves, by forward dataflow, that every read follows a write on all
+control-flow paths (E0420). Codegen lowers to `MaybeUninit::uninit().assume_init()`.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared `#Uninit`, so it holds no value until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
+| E0421 | `` `#Uninit` needs a type annotation ``. | An uninitialized binding has no value to infer its type from, so the type must be written. | Write `` `#Uninit {name}: <Type>` ``, e.g. `` `#Uninit buffer: [4096]U8` ``. |
+| E0422 | `` `#Uninit` has no initializer ``. | `` `#Uninit` declares a binding you fill in later; it cannot also be given a value here ``. | Drop the initializer — write `` `#Uninit {name}: <Type>` `` and write to `{name}` before reading it. |
+| E0423 | `` `#Uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
+| E0424 | `` `#Uninit` needs the low-level memory tier ``. | `` `#Uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
+
 ## Low-level tier diagnostics (E2-M13, S58)
 
 The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an
