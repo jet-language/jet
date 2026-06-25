@@ -485,6 +485,11 @@ pub(crate) enum TExprKind {
     MathBuiltin { type_name: String, func: String, args: Vec<TExpr> },
     /// `print(x)` — the one builtin the subset covers.
     Print(Box<TExpr>),
+    /// D-LIN1-DROP (ratified 2026-06-25): `drop(x)` — deliberately discard a
+    /// value (a `#SingleUse` value's audited terminal consumption). Lowers to a
+    /// plain `drop(arg)` in Rust: a move-to-nowhere whose `Drop` runs. No
+    /// `unsafe` is emitted (I3) — the `#Unsafe` gate is a sema-only audit.
+    Drop(Box<TExpr>),
     /// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare call
     /// (no module alias) lowering to `{root}jet_std_io_input(None|Some(&(prompt)))`,
     /// byte-for-byte the `emit_call` ambient-input branch (Source/Codegen/Expression.rs

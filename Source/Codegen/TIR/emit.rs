@@ -742,6 +742,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Print(arg) => {
             format!("println!(\"{{}}\", ({}).jet_show())", emit_tir_expr(arg, cx))
         }
+        // D-LIN1-DROP: `drop(x)` → Rust's safe `drop(x)`; the value moves in and
+        // its `Drop` runs. No `unsafe` — the audit is sema-side (the `#Unsafe`
+        // gate). The arg was lowered as a plain place/value (a move).
+        TExprKind::Drop(arg) => {
+            format!("drop({})", emit_tir_expr(arg, cx))
+        }
         // c109 Phase 25: ambient prelude `input(...)`, byte-for-byte the `emit_call`
         // ambient-input branch (Source/Codegen/Expression.rs): a bare call with NO arg
         // emits `{root}jet_std_io_input(None)`; with a prompt arg `{root}jet_std_io_input(Some(&(arg)))`.

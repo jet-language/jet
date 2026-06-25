@@ -140,3 +140,44 @@ fn main() {
 "#;
     assert!(codes(src).is_empty(), "a #Sanitizer fn must compile and run: {:?}", codes(src));
 }
+
+// --- D-TAINT-SAN (ratified 2026-06-25): bare `sanitizer fn` teaching error ---
+
+/// Bare lowercase `sanitizer fn` is the retired spelling → E0059, pointing at
+/// the PascalCase marker `#Sanitizer fn` (mirrors `pure` → `#Pure` / E0053).
+#[test]
+fn bare_sanitizer_fn_is_e0059() {
+    let src = r#"
+sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
+fn main() {
+    print(clean("a b c"))
+}
+"#;
+    assert!(codes(src).contains(&"E0059"), "bare `sanitizer fn` must teach E0059: {:?}", codes(src));
+}
+
+/// The teaching error fires for `sanitizer pub fn` too (the modifier may precede
+/// `pub`), and recovery still parses the function as a sanitizer.
+#[test]
+fn bare_sanitizer_pub_fn_is_e0059() {
+    let src = r#"
+sanitizer pub fn clean(raw: String) -> String { return raw.split(" ")[0] }
+fn main() {
+    print(clean("a b c"))
+}
+"#;
+    assert!(codes(src).contains(&"E0059"), "bare `sanitizer pub fn` must teach E0059: {:?}", codes(src));
+}
+
+/// `sanitizer` as an ordinary identifier (a variable name) is unaffected — only
+/// the `sanitizer fn` modifier position triggers the teaching error.
+#[test]
+fn sanitizer_as_identifier_is_fine() {
+    let src = r#"
+fn main() {
+    sanitizer @= 3
+    print("{sanitizer}")
+}
+"#;
+    assert!(codes(src).is_empty(), "`sanitizer` as a binding name must be fine: {:?}", codes(src));
+}

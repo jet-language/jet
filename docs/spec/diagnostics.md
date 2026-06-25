@@ -119,6 +119,7 @@ before continuing.
 | E0056 | parse | teaching: `mut` capability keyword → `~` sigil (D-CAP7) |
 | E0057 | parse | teaching: `take` capability keyword → `^` sigil (D-CAP7) |
 | E0058 | parse | teaching: `view` return keyword → `&` sigil (D-CAP7) |
+| E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
 | E0984 | parse | teaching: `when` → `if subject { arm -> body }` (D-IF1) |
 | E0985 | parse | teaching: `val`/`var` keyword → `name @=`/`name :=` sigil (D-BIND2) |
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -161,6 +162,7 @@ before continuing.
 | E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |
 | E0141 | sema  | `#SingleUse` value consumed on only one `if` branch (D-LIN1) |
 | E0142 | sema  | `#SingleUse` value lent/shared instead of moved (D-LIN1) |
+| E0143 | sema  | `drop` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`~`) required at call site — write access not granted |

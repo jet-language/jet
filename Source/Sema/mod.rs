@@ -623,7 +623,7 @@ pub(crate) use State::{check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
 // `e0140_unconsumed` is referenced only within that module; the other two fire
 // from CheckerCore (E0141) and CheckerInfer (E0142).
-pub(crate) use CheckerOwnership::{e0141_unconsumed_branch, e0142_aliased};
+pub(crate) use CheckerOwnership::{e0141_unconsumed_branch, e0142_aliased, e0143_drop_unaudited};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Registration::{check, check_with_mode};

@@ -2038,6 +2038,20 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::Print(Box::new(arg)),
                 };
             }
+            // D-LIN1-DROP: `drop(x)` — discard the value (move-to-nowhere). Sema
+            // proved the discard is audited when the value is `#SingleUse`. Lowers
+            // to a plain `drop(arg)`; no `unsafe` (I3). Disjoint from a user `drop`
+            // fn or local of that name (`cx.sigs`/`env.locals` would be set then).
+            if call.name == Syntax::BUILTIN_DROP
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+            {
+                let arg = lower_expr(&call.args[0].expr, cx, env);
+                return TExpr {
+                    ty: unit_type(),
+                    kind: TExprKind::Drop(Box::new(arg)),
+                };
+            }
             // c109 Phase 26: the rich-runtime-report builtins (S36) — render the whole
             // emit string at lowering, byte-for-byte the AST helper. `require`/`panic`
             // are statement-position calls (a `()` result); the string is the `{ … }`

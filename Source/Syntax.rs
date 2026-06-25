@@ -727,6 +727,22 @@ pub const FOREIGN_TEST: &str = "test";
 pub const FOREIGN_PURE: &str = "pure";
 pub const FOREIGN_TODO: &str = "todo";
 
+/// D-TAINT-SAN (ratified 2026-06-25, option B): the taint-strip modifier is the
+/// PascalCase marker `#Sanitizer fn`. Bare lowercase `sanitizer` in fn-modifier
+/// position (`sanitizer fn …`) is the retired spelling, recognized only for the
+/// teaching error E0059 that points at `#Sanitizer`. An ordinary identifier named
+/// `sanitizer` elsewhere is unaffected.
+pub const FOREIGN_SANITIZER: &str = "sanitizer";
+
+/// D-LIN1-DROP (ratified 2026-06-25, option A): `drop(x)` is the deliberate
+/// discard of a `#SingleUse` value. Legal ONLY inside an `#Unsafe("reason")`
+/// region/fn — the `#Unsafe` reason IS the audit note (reuses D-UNSAFE2's audited
+/// gate). It satisfies the single-use consume duty by moving the value to nowhere;
+/// the value's Rust `Drop` runs. Outside an `#Unsafe` context it is E0143. Erased
+/// to a plain `drop(x)` in codegen (I3 — no `unsafe` emitted). Shadowed by any
+/// user-defined `drop` function or local.
+pub const BUILTIN_DROP: &str = "drop";
+
 /// D-TOOL4 (ratified 2026-06-16, E2-M11): snapshot testing builtin.
 /// `expect(value).snapshot()` records or compares a golden snapshot.
 pub const BUILTIN_EXPECT: &str = "expect";

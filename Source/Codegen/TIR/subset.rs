@@ -1764,6 +1764,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;
+            // D-LIN1-DROP: `drop(x)` — the discard builtin (exactly one arg, not
+            // shadowed by a user `drop` fn or local). Lowers to `TExprKind::Drop`.
+            let is_drop = c.name == Syntax::BUILTIN_DROP
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.len() == 1;
             // c109 Phase 26: the rich-runtime-report builtins `require(cond[, msg])`,
             // `require_eq(left, right)`, and `panic(msg)` (S36). Each is a bare
             // `Expr::Call` whose name is the builtin (not in `cx.sigs`, not shadowed by a
@@ -1871,7 +1877,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
             // and codegen never reads `CallArg.label` (`emit_call_args` is purely
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
-            (is_print || is_ambient_input || is_require || is_require_eq || is_panic || is_plain_fn || is_distinct_ctor || is_math_ctor || is_extern || is_unqual_inline || is_unqual_file)
+            (is_print || is_drop || is_ambient_input || is_require || is_require_eq || is_panic || is_plain_fn || is_distinct_ctor || is_math_ctor || is_extern || is_unqual_inline || is_unqual_file)
                 && c.args.iter().all(|a| {
                     // c109 Phase 6b: a `Shared<T>` arg auto-cloning the Arc
                     // (`shared_auto_clone`) is COVERED for the plain-fn / distinct-ctor /

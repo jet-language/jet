@@ -64,7 +64,14 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        // D-UNSAFE2 / D-LIN1-DROP: an `#Unsafe fn` body is an audited region just
+        // like an `#Unsafe { … }` block — its reason is the audit note. Mark the
+        // whole body unsafe so `drop(x)` of a `#SingleUse` value is permitted
+        // (and any other unsafe-gated operation is reachable directly).
+        let prev_unsafe = self.in_unsafe;
+        self.in_unsafe = self.in_unsafe || f.is_unsafe;
         self.check_block(&mut f.body, false);
+        self.in_unsafe = prev_unsafe;
         self.lint_unjoined_tasks_in_current_scope();
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).

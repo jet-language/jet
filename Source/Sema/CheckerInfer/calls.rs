@@ -1486,6 +1486,48 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
+        // D-LIN1-DROP (ratified 2026-06-25): `drop(x)` deliberately discards a
+        // value by moving it to nowhere — its `Drop` runs. The blessed use is to
+        // satisfy a `#SingleUse` value's consume duty when there is genuinely no
+        // job left to do; that decision must be audited, so `drop` of a
+        // `#SingleUse` value is legal only inside an `#Unsafe("reason")`
+        // region/fn (the reason IS the audit note) — otherwise E0143. Shadowed
+        // by any user `drop` fn or local of that name.
+        if call.name == Syntax::BUILTIN_DROP
+            && self.funcs.get(Syntax::BUILTIN_DROP).is_none()
+            && self.lookup(Syntax::BUILTIN_DROP).is_none()
+        {
+            if call.args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`{}` discards exactly one value", Syntax::BUILTIN_DROP),
+                    "`drop` throws a single value away, running its cleanup".to_string(),
+                    format!("e.g. {}(x)", Syntax::BUILTIN_DROP),
+                    Some(call.name_span),
+                ));
+                for a in call.args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return Some(None);
+            }
+            self.infer(&mut call.args[0].expr);
+            if let Expr::Ident(name, span) = &call.args[0].expr {
+                let single_use = self
+                    .lookup(name)
+                    .map(|info| info.single_use_span.is_some())
+                    .unwrap_or(false);
+                if single_use && !self.in_unsafe {
+                    self.diags.push(e0143_drop_unaudited(name, *span));
+                }
+                // The value is given away for real — discharges the consume duty
+                // (E0140/E0141) and prevents any later reuse (E0121). Mark it
+                // consumed even on the E0143 path so the unaudited-drop error is
+                // not buried under a cascade E0140 "unconsumed" at scope end.
+                self.mark_moved(name.clone(), *span);
+            }
+            return Some(None);
+        }
+
         // D-TOOL4 (E2-M11): `expect(x)` — test-only builtin that wraps a value
         // for snapshot testing. The expression `expect(x).snapshot()` is the
         // full form; `.snapshot()` is handled in the method-call path below.

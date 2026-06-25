@@ -164,6 +164,110 @@ fn main() {
     assert!(codes.contains(&"E0142".to_string()), "expected E0142, got {:?}", codes);
 }
 
+// --- D-LIN1-DROP (ratified 2026-06-25): the audited deliberate-discard hatch ---
+
+/// `drop(x)` inside an `#Unsafe("reason") { … }` block counts as the terminal
+/// consumption — the duty is discharged, so the program compiles cleanly.
+#[test]
+fn drop_inside_unsafe_block_satisfies_single_use() {
+    let codes = err_codes(
+        r#"
+fn main() {
+    db @= acquire("db")
+    #Unsafe("the resource is already gone; nothing to release") {
+        drop(db)
+    }
+}
+"#,
+    );
+    assert!(codes.is_empty(), "audited drop should compile, got {:?}", codes);
+}
+
+/// `drop(x)` inside an `#Unsafe fn` body is equally audited — the fn's reason IS
+/// the audit note, so a `#SingleUse` local it owns may be discarded with `drop`.
+#[test]
+fn drop_inside_unsafe_fn_satisfies_single_use() {
+    let codes = err_codes(
+        r#"
+#Unsafe("voids a freshly-acquired lock whose resource is already gone")
+fn void_one() {
+    db @= acquire("db")
+    drop(db)
+}
+fn main() {
+    #Unsafe("calling the audited voider") {
+        void_one()
+    }
+}
+"#,
+    );
+    assert!(codes.is_empty(), "drop in #Unsafe fn should compile, got {:?}", codes);
+}
+
+/// `drop(x)` of a `#SingleUse` value OUTSIDE any `#Unsafe` context → E0143,
+/// telling the user to wrap it in `#Unsafe("reason")`.
+#[test]
+fn drop_outside_unsafe_is_e0143() {
+    let codes = err_codes(
+        r#"
+fn main() {
+    db @= acquire("db")
+    drop(db)
+}
+"#,
+    );
+    assert!(codes.contains(&"E0143".to_string()), "expected E0143, got {:?}", codes);
+    // E0143 is the single, precise error — not buried under a cascade E0140.
+    assert!(!codes.contains(&"E0140".to_string()), "E0143 should not also report E0140: {:?}", codes);
+}
+
+/// After an audited `drop`, the value is gone: reusing it is E0121 (use-after-move).
+#[test]
+fn reuse_after_drop_is_e0121() {
+    let codes = err_codes(
+        r#"
+fn main() {
+    db @= acquire("db")
+    #Unsafe("done with it") {
+        drop(db)
+    }
+    release(^db)
+}
+"#,
+    );
+    assert!(codes.contains(&"E0121".to_string()), "expected E0121 after drop, got {:?}", codes);
+}
+
+/// A user-defined `drop` function shadows the builtin (it is not reserved).
+#[test]
+fn user_drop_fn_shadows_builtin() {
+    let codes = err_codes(
+        r#"
+fn drop(n: Int) -> Int {
+    return n + 1
+}
+fn main() {
+    db @= acquire("db")
+    release(^db)
+    x @= drop(41)
+    print("{x}")
+}
+"#,
+    );
+    assert!(codes.is_empty(), "user `drop` fn should shadow the builtin, got {:?}", codes);
+}
+
+/// `drop` erases to a plain Rust `drop(...)` — no `unsafe` in generated code (I1/I3).
+#[test]
+fn drop_erases_no_unsafe_in_codegen() {
+    let src = format!(
+        "{}\nfn main() {{ db @= acquire(\"db\"); #Unsafe(\"gone\") {{ drop(db) }} }}\n",
+        LOCK
+    );
+    let out = jet::compile(&src).expect("should compile");
+    assert!(out.rust.contains("drop("), "drop should lower to a Rust drop(...) call");
+}
+
 /// A `#SingleUse` enum gets the same treatment as a struct.
 #[test]
 fn single_use_enum_dropped_is_e0140() {

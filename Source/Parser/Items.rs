@@ -301,6 +301,16 @@ impl<'a> Parser<'a> {
                     self.diags.push(self.foreign_pure_diag(t.span));
                     self.func_with_purity(true).map(Item::Func)
                 }
+                // D-TAINT-SAN: bare lowercase `sanitizer fn` is the retired
+                // spelling of the taint-strip modifier (E0059). Point at
+                // `#Sanitizer`, then parse as if `#Sanitizer fn`.
+                TokKind::Ident(n)
+                    if n == Syntax::FOREIGN_SANITIZER && self.foreign_sanitizer_follows() =>
+                {
+                    let t = self.bump();
+                    self.diags.push(self.foreign_sanitizer_diag(t.span));
+                    self.func_with_modifiers(false, true).map(Item::Func)
+                }
                 TokKind::KwPub => match self.peek2().kind {
                     // D-REPRC1: `pub #layout(c) struct Name { … }`
                     TokKind::Hash if {
@@ -684,6 +694,32 @@ impl<'a> Parser<'a> {
     /// follows (so an ordinary identifier named `pure` is unaffected).
     fn foreign_pure_follows(&self) -> bool {
         matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// D-TAINT-SAN: bare lowercase `sanitizer` is the retired spelling of the
+    /// taint-strip modifier, recognized only when `fn`/`pub` follows (so an
+    /// ordinary identifier named `sanitizer` elsewhere is unaffected). The
+    /// modifier is now the marker `#Sanitizer` — point the user at it (E0059),
+    /// mirroring `pure` → `#Pure` (E0053).
+    fn foreign_sanitizer_follows(&self) -> bool {
+        matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    fn foreign_sanitizer_diag(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0059",
+            format!(
+                "the taint-strip modifier is written `#{}`, not bare `{}`",
+                Syntax::KW_SANITIZER,
+                Syntax::FOREIGN_SANITIZER
+            ),
+            format!(
+                "`#{}` is a marker, like every other `#`-tag, so the taint-strip contract draws the eye",
+                Syntax::KW_SANITIZER
+            ),
+            format!("write: #{} fn name() {{ ... }}", Syntax::KW_SANITIZER),
+            Some(span),
+        )
     }
 
     fn foreign_pure_diag(&self, span: Span) -> Diagnostic {
