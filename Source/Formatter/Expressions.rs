@@ -260,7 +260,9 @@ impl<'a> Fmt<'a> {
             Expr::Call(c) => self.fmt_call(c),
             Expr::Unary(op, inner, _) => {
                 let inner_prec = Prec::Unary;
-                if prec <= inner_prec {
+                // Wrap only when the surrounding slot binds tighter than this
+                // operator (e.g. a unary expr used as a `.method()` receiver).
+                if prec > inner_prec {
                     self.write("(");
                 }
                 match op {
@@ -268,13 +270,16 @@ impl<'a> Fmt<'a> {
                     UnOp::Not => self.write("!"),
                 }
                 self.fmt_expr(inner, inner_prec);
-                if prec <= inner_prec {
+                if prec > inner_prec {
                     self.write(")");
                 }
             }
             Expr::Binary(op, lhs, rhs, _) => {
                 let op_prec = Prec::of_bin(*op);
-                if prec <= op_prec {
+                // Wrap only when the surrounding slot binds tighter than this
+                // operator (e.g. `(a + b).method()`, `(a + b) * c`); equal-prec
+                // right-hand nesting is handled by `add_rhs` on the rhs slot.
+                if prec > op_prec {
                     self.write("(");
                 }
                 self.fmt_expr(lhs, op_prec);
@@ -282,7 +287,7 @@ impl<'a> Fmt<'a> {
                 self.write(op.spell());
                 self.write(" ");
                 self.fmt_expr(rhs, op_prec.add_rhs());
-                if prec <= op_prec {
+                if prec > op_prec {
                     self.write(")");
                 }
             }

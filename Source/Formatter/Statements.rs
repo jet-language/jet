@@ -250,7 +250,11 @@ impl<'a> Fmt<'a> {
     /// outermost expression in redundant parens. Precedence-required parens on
     /// nested sub-expressions are preserved by the normal `fmt_expr` rules.
     pub(super) fn fmt_cond(&mut self, cond: &Expr) {
-        self.fmt_expr(cond, Prec::Primary);
+        // A condition is its own statement slot, so it imposes no binding
+        // requirement: render at the lowest precedence so the outermost
+        // operator never gains redundant parens (precedence-required parens on
+        // nested sub-expressions are still added by `fmt_expr`).
+        self.fmt_expr(cond, Prec::OrFallback);
     }
 
     /// S68 (D-SG2): render an `if`-expression branch `{ stmts… value }`.

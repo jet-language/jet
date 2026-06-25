@@ -1462,16 +1462,20 @@
       "type": "idea",
       "title": "Bare-lambda arg to a user fn-param ICEs in codegen (closure param type)",
       "body": "Pre-existing, independent of D-EFF2: passing a bare lambda directly to a user-defined fn-typed parameter (e.g. run_each([…], (x) => {…})) ICEs in codegen — the closure parameter type is not emitted. Reproduces with NO effect annotation. Named callbacks work (the workaround used by examples). A real codegen bug worth fixing; surfaced by the D-EFF2 build agent.",
-      "stage": "backlog",
+      "stage": "done",
       "plan": null,
       "notes": [
         {
           "t": "[sweep] Captured from the D-EFF2 build agent so it is not lost. P2 codegen bug.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] bare lambda to a user fn-typed param: lower_lambda_expecting threads the fn-type param types into the closure so a bare param gets its Rust type (was an E0282 ICE, I2). Codegen-scoped (I3); collection-method by-ref path unchanged. example 119, closures test.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-24",
-      "updated": "2026-06-24",
+      "updated": "2026-06-25",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -1481,11 +1485,15 @@
       "type": "idea",
       "title": "jet fmt: panic on box-drawing unicode in comments + drops parens around (expr).method()",
       "body": "Two pre-existing formatter bugs surfaced by the c94 build agent: (1) jet fmt PANICS when a comment contains box-drawing unicode characters — a crash, not graceful. (2) fmt drops the parens around a parenthesized-receiver method call (expr).method(), which can change precedence/meaning. Both independent of c94 (avoided by restructuring the example). The marker/turbofish round-trip fix (committed ff497f8) did not cover these.",
-      "stage": "backlog",
+      "stage": "done",
       "plan": null,
       "notes": [
         {
           "t": "[sweep] Captured from c94 build agent. fmt correctness; the panic is P1 (crash), the paren-drop P2.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep] fmt: (a) line_of rounds byte offset to a char boundary before slicing source — no more panic on box-drawing unicode in comments; (b) flipped the INVERTED precedence test in the Unary/Binary formatter arms (was prec<=op_prec) that dropped needed parens, added spurious ones, and could CHANGE MEANING — now prec>op_prec; fixed fmt_cond which relied on the bug. 2 new fmt tests.",
           "at": "2026-06-25"
         }
       ],
@@ -1519,11 +1527,15 @@
       "type": "idea",
       "title": "E0964 diagnostic still suggests retired `var [T]` syntax",
       "body": "Surfaced by the c138 doc sweep: the live E0964 diagnostic (fixed_list_no_grow.stderr) tells users to widen with `var r: [T] = …`, but `var` is retired (bindings are @=/:=). Fix the diagnostic fix-text in Source/ and rebless the snapshot; diagnostics.md:462 was left consistent with the current snapshot. Small, mechanical.",
-      "stage": "backlog",
+      "stage": "done",
       "plan": null,
       "notes": [
         {
           "t": "[sweep] From c138. Source/ + snapshot rebless; one-line fix-text.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep] E0964 fix-text var->:= (e.g. r := [...]) + reblessed snapshot + diagnostics.md row.",
           "at": "2026-06-25"
         }
       ],

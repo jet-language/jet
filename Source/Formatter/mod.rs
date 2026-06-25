@@ -137,10 +137,16 @@ impl Prec {
 }
 
 fn line_of(src: &str, pos: usize) -> usize {
-    src[..pos.min(src.len())]
-        .bytes()
-        .filter(|&b| b == b'\n')
-        .count()
+    // `pos` is a byte offset that may originate from the formatted output
+    // (`is_trailing_comment_at`), so it can land mid-codepoint inside `src`
+    // when the source contains multibyte characters (e.g. box-drawing glyphs
+    // in a comment). Round down to the nearest char boundary before slicing so
+    // a valid input never panics (I2).
+    let mut end = pos.min(src.len());
+    while end > 0 && !src.is_char_boundary(end) {
+        end -= 1;
+    }
+    src[..end].bytes().filter(|&b| b == b'\n').count()
 }
 
 fn item_span_start(item: &Item, src: &str) -> usize {

@@ -3953,7 +3953,23 @@ pub(crate) fn lower_one_call_arg(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TCallArg {
-    let value = lower_expr(&a.expr, cx, env);
+    // A bare lambda flowing into a user fn-typed parameter takes its param
+    // types from that fn-type so codegen emits the Rust closure-param types
+    // rustc needs (c142). Other args lower normally.
+    let value = match (&a.expr, &conv) {
+        (Expr::Lambda(lam), Some((_, Type::Fn { params, .. }))) => {
+            let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+            TExpr {
+                ty: Type::Fn {
+                    params: Vec::new(),
+                    ret: None,
+                    effect_bound: None,
+                },
+                kind: TExprKind::Lambda(Box::new(tl)),
+            }
+        }
+        _ => lower_expr(&a.expr, cx, env),
+    };
     let clone = a.flags.implicit_clone;
     let arc_clone = a.flags.shared_auto_clone;
     // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
@@ -4332,6 +4348,22 @@ pub(crate) fn list_carries_trait(cx: &Cx, inner: &Type) -> bool {
 /// AST slot) and the params (place = mangled name, type from the annotation). The
 /// rendered closure body string is produced now so emit is a pure wrapper.
 pub(crate) fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
+    lower_lambda_expecting(lam, cx, env, None)
+}
+
+/// `lower_lambda`, but with the expected parameter types from the fn-typed slot
+/// this lambda flows into (a user fn-typed parameter). A bare lambda param
+/// (`(x) => …`, no annotation) takes its Rust type from there so codegen emits
+/// `move |user_x: i64| …` instead of an un-annotated `move |user_x| …` that
+/// rustc can't infer (c142). Builtin closure methods (`.each`/`.map`/…) keep
+/// passing `None`: their helper signatures drive the closure-param type (often
+/// by-ref), so annotating it would mismatch.
+pub(crate) fn lower_lambda_expecting(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: Option<&[Type]>,
+) -> TLambda {
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's env (outer locals + captures + params) and does NOT
     // leak into the enclosing fn — a NON-leaky boundary, so fork the panic replica.
@@ -4354,15 +4386,20 @@ pub(crate) fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
     for p in &lam.params {
         lam_env.bind(&p.name, mangle(&p.name), p.ty.clone());
     }
-    // The rendered param list: `name[: ty]`, exactly as `emit_lambda`.
+    // The rendered param list: `name[: ty]`, exactly as `emit_lambda`. A bare
+    // param (no annotation) falls back to the expected fn-type's param at the
+    // same position (c142), so a closure passed to a user fn-typed parameter
+    // always carries the Rust type rustc needs.
     let params: Vec<String> = lam
         .params
         .iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(i, p)| {
             let ty = p
                 .ty
-                .as_ref()
-                .map(|t| format!(": {}", cx.rust_type(t)))
+                .clone()
+                .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned())
+                .map(|t| format!(": {}", cx.rust_type(&t)))
                 .unwrap_or_default();
             format!("{}{}", mangle(&p.name), ty)
         })

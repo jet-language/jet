@@ -148,7 +148,9 @@ fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
         "expected bare equality case, got:\n{out}"
     );
     assert!(
-        out.contains("orange || (frozen != true) -> {"),
+        // `||` binds looser than `!=`, so no parens are needed (c143: the old
+        // formatter added spurious parens here via an inverted precedence test).
+        out.contains("orange || frozen != true -> {"),
         "expected mixed condition arm, got:\n{out}"
     );
     assert!(
@@ -709,4 +711,42 @@ struct Reservation {
         ],
         "typestate markers",
     );
+}
+
+#[test]
+fn fmt_box_drawing_comment_does_not_panic() {
+    // c143: a comment containing multibyte box-drawing glyphs, placed on its own
+    // line between two steps of a broken method chain, used to panic. The
+    // chain-break path measures the output's last-newline byte offset against
+    // the *source* (`is_trailing_comment_at` → `line_of`); with a multibyte
+    // glyph in the source that offset could land mid-codepoint and the raw slice
+    // panicked. fmt must never panic on valid input (I2). The box-drawing glyphs
+    // round-trip verbatim.
+    let src = "fn main() {\n    x @= foo()\n        // \u{2502}\u{250c}\u{2514}\u{2500}\n        .bar()\n    print(x)\n}\n";
+    let out = jet::format_source(src).expect("fmt should not panic on box-drawing comments");
+    assert!(out.contains('\u{250c}') && out.contains('\u{2502}'), "box glyphs dropped:\n{out}");
+    let twice = jet::format_source(&out).expect("box-drawing fmt must re-fmt");
+    assert_eq!(out, twice, "box-drawing fmt must be idempotent");
+}
+
+#[test]
+fn fmt_keeps_parens_around_binary_receiver() {
+    // c143(b): `(a + b).method()` must keep its parens — dropping them rebinds
+    // the `.method()` to `b` alone and changes the meaning. Likewise `(a + b) * c`
+    // must not become `a + b * c`.
+    let src = "fn main() {\n    c @= (1 + 2).to_string()\n    d @= (1 + 2) * 3\n    print(c)\n    print(d)\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed");
+    assert!(
+        out.contains("(1 + 2).to_string()"),
+        "parens around binary method receiver dropped:\n{out}"
+    );
+    assert!(
+        out.contains("(1 + 2) * 3"),
+        "parens around lower-prec binary operand dropped:\n{out}"
+    );
+    // The common case must NOT gain spurious parens.
+    let plain = jet::format_source("fn main() {\n    a @= 1 + 2 * 3\n    print(a)\n}\n").unwrap();
+    assert!(plain.contains("a @= 1 + 2 * 3"), "added spurious parens:\n{plain}");
+    let twice = jet::format_source(&out).expect("paren fmt must re-fmt");
+    assert_eq!(out, twice, "paren fmt must be idempotent");
 }

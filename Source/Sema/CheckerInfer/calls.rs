@@ -775,7 +775,7 @@ impl<'a> Checker<'a> {
                         recv_ty.show()
                     ),
                     "the length of `[T#N]` is fixed at compile time and cannot change".to_string(),
-                    "widen to `var r: [T] = ...` if you need a growable list".to_string(),
+                    "bind a growable list with `:=` (e.g. `r := [...]`) if you need to change its length".to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {

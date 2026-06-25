@@ -29,6 +29,34 @@ fn main() {
 }
 
 #[test]
+fn bare_lambda_to_fn_typed_param_emits_param_type() {
+    // c142: a bare lambda (no param annotation) passed to a user fn-typed param
+    // used to ICE — codegen emitted `move |user_x| …` with no Rust type, so
+    // rustc couldn't infer it. Sema now elaborates the param type from the
+    // expected fn-type back onto the AST so codegen emits it.
+    let src = r#"
+fn run_each(xs: [Int], f: fn(Int)) {
+    loop x in xs {
+        f(x)
+    }
+}
+
+fn main() {
+    run_each([1, 2, 3], (x) => {
+        print(x)
+    })
+}
+"#;
+    let out = jet::compile(src).expect("bare lambda to fn-typed param should compile");
+    assert!(!out.rust.contains("unsafe"), "invariant I1");
+    assert!(
+        out.rust.contains("user_x: i64"),
+        "bare lambda param must get its type from the fn-typed slot, got:\n{}",
+        out.rust
+    );
+}
+
+#[test]
 fn stored_callback_boxes() {
     let src = r#"
 fn twice(f: fn(Int) -> Int, x: Int) -> Int {
