@@ -3642,6 +3642,36 @@ fn main() {
     assert_eq!(stdout, "Rex\n");
 }
 
+/// c150: assigning a Read-convention (borrowed) non-Copy parameter into a struct
+/// field previously emitted `((*self)).user_rows = (*user_s)` — a move out of a
+/// shared reference (E0507, I2 violation). The fix clones the value when the RHS is
+/// a borrowed non-scalar ident, mirroring the `lower_enum_arg` predicate.
+#[test]
+fn borrow_field_clone() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Ledger {
+    rows: [Int]
+    fn put_back(~self, s: [Int]) {
+        self.rows = s
+    }
+}
+fn main() {
+    data: [Int] := [1, 2, 3]
+    ledger: Ledger := Ledger { rows: [] }
+    ledger.put_back(data)
+    print(ledger.rows[0])
+    print(ledger.rows[1])
+    print(ledger.rows[2])
+}
+";
+    let (code, stdout) = build_and_run("tir_borrow_field_clone", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n2\n3\n");
+}
+
 /// D-MUTSELF1: a `mut self` method that assigns a field in place — `self.field = v`
 /// and the compound `self.field += v` (S17) — lowers to `((*self)).field = …` on the
 /// `&mut Self` receiver. rustc accepts it (I2); the receiver mutates as written.

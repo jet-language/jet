@@ -203,8 +203,12 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 emit_tir_expr(init, cx),
             ));
         }
-        TStmt::Assign { place, op, value } => {
+        TStmt::Assign { place, op, value, clone_value } => {
             let v = emit_tir_expr(value, cx);
+            // c150: append `.clone()` when the value is a borrowed non-scalar (computed
+            // at lowering). `({v}).clone()` matches how other clone sites in the AST
+            // path parenthesise the receiver before the method call.
+            let v = if *clone_value { format!("({}).clone()", v) } else { v };
             match op {
                 Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.spell(), v)),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),

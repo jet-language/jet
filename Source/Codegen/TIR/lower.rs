@@ -835,11 +835,22 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Assign {
             target, op, value, ..
         } => match target {
-            LValue::Local { name, .. } => TStmt::Assign {
-                place: env.place_of(name),
-                op: *op,
-                value: lower_expr(value, cx, env),
-            },
+            LValue::Local { name, .. } => {
+                // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
+                // ident on the RHS would move out of a shared reference (E0507, I2).
+                let clone_value = if let Expr::Ident(vname, _) = value {
+                    env.is_borrowed(vname)
+                        && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                } else {
+                    false
+                };
+                TStmt::Assign {
+                    place: env.place_of(name),
+                    op: *op,
+                    value: lower_expr(value, cx, env),
+                    clone_value,
+                }
+            }
             // c109 Phase 5: `coll[i] = v`. The `IndexKind` is resolved by sema; carry
             // it as the total `is_map` fact (the gate excluded `Unknown`). No compound
             // op on an index lvalue (parser admits only `=`).
@@ -862,10 +873,19 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             LValue::Field { base, field, span } => {
                 let field_expr = Expr::Field(base.clone(), field.clone(), *span);
                 let place = emit_tir_expr(&lower_expr(&field_expr, cx, env), cx);
+                // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
+                // ident on the RHS would move out of a shared reference (E0507, I2).
+                let clone_value = if let Expr::Ident(vname, _) = value {
+                    env.is_borrowed(vname)
+                        && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                } else {
+                    false
+                };
                 TStmt::Assign {
                     place,
                     op: *op,
                     value: lower_expr(value, cx, env),
+                    clone_value,
                 }
             }
         },

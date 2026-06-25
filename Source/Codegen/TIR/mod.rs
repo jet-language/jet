@@ -239,6 +239,11 @@ pub(crate) enum TStmt {
         place: String,
         op: Option<BinOp>,
         value: TExpr,
+        /// c150: true when the value is a borrowed non-scalar ident (a `Read`-convention
+        /// non-Copy parameter in deref position). Assigning `(*user_s)` directly moves
+        /// out of a shared reference (E0507); emitting `((*user_s)).clone()` is correct.
+        /// Mirrors the `lower_enum_arg` clone predicate. False for scalars and owned values.
+        clone_value: bool,
     },
     Return(Option<TExpr>),
     /// c109 Phase 17: a `return <e>` from a `-> view T` function (a borrow). Reproduces
