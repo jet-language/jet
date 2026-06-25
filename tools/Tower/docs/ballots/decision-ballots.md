@@ -940,6 +940,60 @@ fn lookup(input: String) {        // `input` arrives #Tainted from the request
 
 ---
 
+### D-DET-CAPAPI — the method API for the deterministic `Clock` / `Rng` capabilities (rec A)
+
+**Gist:** D-DET1 ratified "supply deterministic `Clock`/`Rng` as injected capabilities" but did not pin the methods those handles expose. A minimal sensible API shipped so the feature is whole; this fork ratifies (or revises) the exact surface.
+
+**Story.** Priya writes a `#Pure` dice-roller and a `#Pure` retry-with-backoff. Both need time and randomness but must stay reproducible, so she takes a `Clock` and an `Rng` parameter (seeded by the caller). She needs to know the verbs: does she read the clock with `clock.now()`? advance it with `clock.tick(ms)` or `clock.advance(ms)`? draw an int with `rng.int(lo, hi)` (inclusive? half-open?) and a float with `rng.float()` (`[0,1)`?)? The current behavior is reproducible regardless, but the *spelling and ranges* are owner-facing and should be deliberate.
+
+**What shipped (the default to confirm or revise):**
+```jet
+use core.time as time;
+use core.random as random;
+
+#Pure fn roll(clock: Clock, rng: ~Rng) -> String {
+    ts  @= clock.now()        // current value in ms; pure read, no `~`
+    die @= rng.int(1, 6)      // inclusive [1,6]; advances the stream, needs `~Rng`
+    return "t={ts} rolled {die}"
+}
+
+fn main() {
+    c @= time.clock(1000)     // Clock seeded at 1000 ms
+    r := random.rng(42)       // Rng seeded at 42 (SplitMix64, std-only)
+    print(roll(c, ~r))
+    // clock.tick(ms) -> Int  advances the clock and returns the new value
+    // rng.float() -> Float   draws in [0.0, 1.0)
+}
+```
+- Constructors: `time.clock(seed: Int) -> Clock`, `random.rng(seed: Int) -> Rng` (both pure-callable; carry no ambient effect).
+- `Clock`: `now() -> Int` (read, no `~`), `tick(ms: Int) -> Int` (advance + read, needs `~`).
+- `Rng`: `int(lo: Int, hi: Int) -> Int` (inclusive), `float() -> Float` (`[0,1)`) — both advance the stream, need `~Rng`.
+
+**Open sub-questions:**
+1. **Clock advance verb** — `tick(ms)` (shipped) vs `advance(ms)` vs `set(ms)`-absolute vs offer both relative + absolute.
+2. **Clock read unit** — ms (shipped) vs ns vs a `Duration`/`Instant` value type (would need that type minted first).
+3. **`rng.int` range convention** — inclusive `[lo, hi]` (shipped, matches ambient `random.int`) vs half-open `[lo, hi)`.
+4. **Extra `Rng` draws** — ship `bool()`, `pick(list)`, `shuffle(~list)` now (mirroring ambient `random.*`), or keep the minimal `int`/`float` and add on evidence.
+5. **Are `Clock`/`Rng` the final type names** — vs `DetClock`/`SeededRng`, etc. (D-CASING1 PascalCase either way).
+
+**Other languages:** Most ecosystems inject determinism as a *value*, not ambient: Go threads `*rand.Rand` (seeded) and `clock.Clock` interfaces (e.g. `benbjohnson/clock`) through call sites; Rust's `rand` passes an `Rng` impl explicitly and test code uses `StdRng::seed_from_u64`; Java's `Random(seed)` / `Clock.fixed(...)` are constructed and passed. All converge on "construct seeded, pass by parameter, read through methods" — exactly D-DET1's model; they differ only on method names and range conventions (the sub-questions above).
+
+**Tradeoffs:**
+
+| Option | Surface | Pro | Con |
+|---|---|---|---|
+| **A — keep the shipped minimal set (recommended)** | `now`/`tick`, `int`/`float`; inclusive int; ms | smallest learnable surface; matches ambient `random.int` inclusivity; nothing speculative | experts may want `bool`/`pick`/`shuffle` and a `Duration` clock later |
+| **B — widen now** | + `rng.bool`/`pick`/`shuffle`, `clock.advance` absolute form, `Duration` reads | parity with ambient `random.*` + richer clock from day one | mints `Duration`/more API ahead of demand (I8 ratchet); larger snapshot surface |
+| **C — rename + re-spec ranges** | half-open `rng.int`, ns clock, `SeededRng`/`DetClock` names | aligns with Rust-style half-open ranges | diverges from ambient `random.int` (inclusive) → two conventions for one verb |
+
+**Recommendation:** **A** — keep the minimal `now`/`tick` + `int`/`float`, inclusive int range (consistent with the already-shipped ambient `random.int`), ms clock. It is whole, reproducible, and learnable; widen (`bool`/`pick`/`shuffle`, absolute clock, `Duration`) on real evidence per the simplicity ratchet (I8). The feature is fully built and shipped on this surface; only the names/ranges are held for the owner.
+
+**Owner Q (D-DET-CAPAPI):** Confirm the shipped minimal `Clock`/`Rng` API (A: `clock.now()`/`clock.tick(ms)`, `rng.int(lo,hi)` inclusive / `rng.float()` `[0,1)`, ms, names `Clock`/`Rng`), or revise via the five sub-questions above (verb, unit, range convention, extra draws, type names)? The injection path and `assume_deterministic` escape are built, tested, and shipped — only this method surface is open.
+
+---
+
+---
+
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
   `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor
