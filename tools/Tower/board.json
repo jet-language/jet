@@ -952,18 +952,22 @@
       "type": "task",
       "title": "Split largest compiler modules by responsibility",
       "body": "Carve large sema/parser/codegen files around stable responsibilities: inference, ownership/capabilities, purity/effects, pattern exhaustiveness, diagnostics construction, traits/generics, and lowering. Keep behavior unchanged while reducing future feature friction.",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P1",
       "workOrder": 6,
-      "plan": "split-compiler-modules",
+      "plan": null,
       "notes": [
         {
           "t": "Recommended after invariant gates are in place, so refactors have strong safety rails.",
           "at": "2026-06-22"
+        },
+        {
+          "t": "[sweep] Split the two largest Source/ files, behavior-preserving (full suite at EXACT baseline, single-threaded): TIR.rs (13011 lines) -> TIR/{mod,subset,lower,emit}.rs (function-grouping); CheckerInfer.rs (4148) -> CheckerInfer/{mod,expr,fallible,calls,binary}.rs (impl-continuation). Zero call-site churn (pub(crate) use super::* re-export glob). CheckerCoreLib.rs left unsplit: corelib.rs drift-guard reads its path via fs (would need a tests/ edit, out of scope).",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-24"
+      "updated": "2026-06-25"
     },
     {
       "id": "c120",
@@ -1473,6 +1477,25 @@
       "notes": [
         {
           "t": "[sweep] Split from c52 — ratified UX done, native backend is the larger remaining piece.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "decisions": [],
+      "priority": "P2",
+      "workOrder": null
+    },
+    {
+      "id": "c145",
+      "type": "idea",
+      "title": "E0964 diagnostic still suggests retired `var [T]` syntax",
+      "body": "Surfaced by the c138 doc sweep: the live E0964 diagnostic (fixed_list_no_grow.stderr) tells users to widen with `var r: [T] = …`, but `var` is retired (bindings are @=/:=). Fix the diagnostic fix-text in Source/ and rebless the snapshot; diagnostics.md:462 was left consistent with the current snapshot. Small, mechanical.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[sweep] From c138. Source/ + snapshot rebless; one-line fix-text.",
           "at": "2026-06-25"
         }
       ],
