@@ -399,10 +399,6 @@ fn field_default_rust(f: &Field) -> Option<String> {
 }
 
 fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
-    // Generic serde is gated in sema (E2413); only concrete types reach codegen.
-    if !s.type_params.is_empty() {
-        return;
-    }
     let enc = s.derives.iter().any(|(t, _)| t == Generics::ENCODE);
     let dec = s.derives.iter().any(|(t, _)| t == Generics::DECODE);
     if !enc && !dec {
@@ -410,10 +406,22 @@ fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
     }
     let style = container_rename_all(&s.serde_markers);
     let style = style.as_deref();
+    let tp_plain = Generics::type_param_rust_list(&s.type_params);
+    // D-SERDE9/10: the wire-reaching type params (those a non-skipped field type
+    // mentions) carry the injected serde bound; phantom/skip-only params don't.
+    let wire_types: Vec<&Type> = s
+        .fields
+        .iter()
+        .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP))
+        .map(|f| &f.ty)
+        .collect();
+    let clone_all = cx.cloneable.contains(&s.name);
+    let enc_header = serde_impl_header(&s.type_params, &wire_types, Generics::ENCODE, clone_all);
+    let dec_header = serde_impl_header(&s.type_params, &wire_types, Generics::DECODE, clone_all);
 
     if enc {
         out.push_str(&format!(
-            "impl user_Encode for user_{} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        let mut __o: Vec<(String, jet_std::DataTree)> = Vec::new();\n",
+            "impl{enc_header} user_Encode for user_{}{tp_plain} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        let mut __o: Vec<(String, jet_std::DataTree)> = Vec::new();\n",
             s.name
         ));
         for f in &s.fields {
@@ -449,7 +457,7 @@ fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
             .iter()
             .any(|f| serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN));
         out.push_str(&format!(
-            "impl user_Decode for user_{} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n",
+            "impl{dec_header} user_Decode for user_{}{tp_plain} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n",
             s.name
         ));
         // D-SERDE8: `#[DenyUnknownFields]` errors on a wire key the struct doesn't
@@ -506,6 +514,29 @@ fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
     }
 }
 
+/// D-SERDE9/10: the `impl<…>` generics clause for a generic serde impl, injecting
+/// the `Encode`/`Decode` bound on the wire-reaching params. Empty for a concrete
+/// type. `bound` is `Encode` or `Decode`. `clone_all` adds the structural `Clone`
+/// bound (on every param) that the generated type carries when it derives Clone —
+/// the serde impls must satisfy the same bound the struct/enum header declares.
+fn serde_impl_header(
+    params: &[crate::AST::TypeParam],
+    wire_types: &[&Type],
+    bound: &str,
+    clone_all: bool,
+) -> String {
+    if params.is_empty() {
+        return String::new();
+    }
+    let mut extra = Generics::rust_extra_serde_bounds(params, wire_types, bound);
+    if clone_all {
+        for (k, v) in Generics::rust_extra_clone_bounds(params) {
+            extra.entry(k).or_default().extend(v);
+        }
+    }
+    Generics::rust_type_param_list(params, &extra)
+}
+
 fn variant_wire_name(v: &Variant) -> String {
     serde_marker(&v.serde_markers, crate::Syntax::ATTR_RENAME)
         .and_then(marker_str_arg)
@@ -522,10 +553,25 @@ fn emit_enum_serde(cx: &Cx, e: &EnumDef, out: &mut String) {
     // `#[Untagged]` selects untagged. Internal/untagged are validated in sema.
     let tag = serde_marker(&e.serde_markers, crate::Syntax::ATTR_TAG).and_then(marker_str_arg);
     let untagged = serde_has(&e.serde_markers, crate::Syntax::ATTR_UNTAGGED);
+    let tp_plain = Generics::type_param_rust_list(&e.type_params);
+    // D-SERDE9/10: every variant payload type reaches the wire (enums have no
+    // field-level `#[Skip]`), so they all contribute wire-reaching params.
+    let wire_types: Vec<&Type> = e
+        .variants
+        .iter()
+        .flat_map(|v| match &v.payload {
+            VariantPayload::Unit => Vec::new(),
+            VariantPayload::Single(t, _) => vec![t],
+            VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
+        })
+        .collect();
+    let clone_all = cx.cloneable.contains(&e.name);
+    let enc_header = serde_impl_header(&e.type_params, &wire_types, Generics::ENCODE, clone_all);
+    let dec_header = serde_impl_header(&e.type_params, &wire_types, Generics::DECODE, clone_all);
 
     if enc {
         out.push_str(&format!(
-            "impl user_Encode for user_{} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n",
+            "impl{enc_header} user_Encode for user_{}{tp_plain} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n",
             e.name
         ));
         for v in &e.variants {
@@ -558,7 +604,7 @@ fn emit_enum_serde(cx: &Cx, e: &EnumDef, out: &mut String) {
     }
 
     if dec {
-        emit_enum_decode(cx, e, tag.as_deref(), untagged, out);
+        emit_enum_decode(cx, e, tag.as_deref(), untagged, &dec_header, &tp_plain, out);
     }
 }
 
@@ -624,9 +670,17 @@ fn named_pairs(fs: &[crate::AST::VariantField]) -> String {
         .join(", ")
 }
 
-fn emit_enum_decode(cx: &Cx, e: &EnumDef, tag: Option<&str>, untagged: bool, out: &mut String) {
+fn emit_enum_decode(
+    cx: &Cx,
+    e: &EnumDef,
+    tag: Option<&str>,
+    untagged: bool,
+    dec_header: &str,
+    tp_plain: &str,
+    out: &mut String,
+) {
     out.push_str(&format!(
-        "impl user_Decode for user_{} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n",
+        "impl{dec_header} user_Decode for user_{}{tp_plain} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n",
         e.name
     ));
     if untagged {
@@ -634,8 +688,8 @@ fn emit_enum_decode(cx: &Cx, e: &EnumDef, tag: Option<&str>, untagged: bool, out
         for v in &e.variants {
             let cons = decode_variant_from(cx, &e.name, v, "__t");
             out.push_str(&format!(
-                "        if let Ok(__r) = (|| -> Result<user_{}, jet_std::DecodeError> {{ Ok({}) }})() {{ return Ok(__r); }}\n",
-                e.name, cons
+                "        if let Ok(__r) = (|| -> Result<Self, jet_std::DecodeError> {{ Ok({}) }})() {{ return Ok(__r); }}\n",
+                cons
             ));
         }
         out.push_str(

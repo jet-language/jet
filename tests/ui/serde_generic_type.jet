@@ -1,8 +1,15 @@
-use core.encoding.json as json
+// D-SERDE9-12: generic `#[Codable]` is first-class (E2413 retired). `Wrap<T>`
+// reaches the wire through `value`, so the derive injects `T: Encode`/`T: Decode`.
+// `Id<K>`'s `K` is phantom (skip-only), so it serializes with no bound on `K`.
+#[Codable]
+struct Wrap<T> {
+    value: T
+}
 
 #[Codable]
-struct Box<T> {
-    value: T
+struct Id<K> {
+    raw: Int
+    #[Skip] marker: K?
 }
 
 fn main() {

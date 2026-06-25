@@ -418,7 +418,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         register_type_methods(&module.items, &mut st.registry, &mut diags);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
         st.trait_reg.register_items(&module.items, &mut diags);
-        // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2413)
+        // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2412)
         // now that the trait registry resolves field/variant types — keeps the emitted
         // `impl`s rustc-clean (I2).
         diags.extend(validate_serde_items(&module.items, &st.trait_reg));

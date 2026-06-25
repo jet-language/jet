@@ -544,11 +544,18 @@ to internal tagging (`{"type":"Click", …}`); `#[Untagged]` emits the payload a
 Unknown wire keys are ignored by default (forward-compatible); opt into strict
 checking with `#[DenyUnknownFields]`. Diagnostics: E2407 (`#[Rename]` non-string),
 E2408 (`#[Flatten]` non-struct), E2409 (bad `#[RenameAll]` style), E2410 (missing
-required field, runtime), E2411 (type isn't serializable), E2412 (unknown field,
-runtime), E2413 (generic serde not yet supported).
+required field, runtime), E2411 (type isn't serializable — also fires at the use
+site for a non-codable generic argument), E2412 (unknown field, runtime). E2413 is
+retired (D-SERDE12).
+
+Generic `#[Codable]` is first-class (D-SERDE9-12): the derive auto-injects
+`T: Encode`/`T: Decode` bounds on exactly the type params that reach the wire —
+the user never spells them. A phantom or `#[Skip]`-only param carries no serde
+bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
+non-codable type argument fails at the use site (E2411), not the definition.
 
 > The expert hand-impl path (`impl T: Encode { fn encode … }` over the `DataTree`
-> tree, D-SERDE2) and generic-type serde are future increments; see
+> tree, D-SERDE2) is a future increment; see
 > `tools/Tower/docs/sidequests/serde-model.md`.
 
 ---

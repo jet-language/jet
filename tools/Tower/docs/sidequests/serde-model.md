@@ -203,15 +203,25 @@ All blocking ballots ratified (batch 4) and built end-to-end:
   toml/yaml (flat typed decode/encode) — all routed through one `DataTree`.
 - **Diagnostics:** E2407 (rename non-string), E2408 (flatten non-struct), E2409 (bad rename_all),
   E2410 (missing required field, runtime), E2411 (non-serializable — also keeps generated `impl`s
-  rustc-clean, I2), E2412 (unknown field, runtime), E2413 (generic serde gated). Sema validation
-  pass in Bundle.rs. ui snapshots for the 5 compile-time codes; docs/spec/diagnostics.md rows added.
-- **Examples (I5):** `106_serde_derive`, `107_csv_typed`, `108_json_typed` (+ expected outputs);
-  golden-tested (rustc verifies every generated `impl`). Suite green (pre-existing arena.rs
-  parallel-harness flake aside).
+  rustc-clean, I2, and fires at the use site for a non-codable generic argument), E2412 (unknown
+  field, runtime). E2413 retired (D-SERDE12). Sema validation pass in Bundle.rs. ui snapshots for
+  the compile-time codes; docs/spec/diagnostics.md rows added.
+- **Examples (I5):** `106_serde_derive`, `107_csv_typed`, `108_json_typed`, `120_serde_generic`
+  (+ expected outputs); golden-tested (rustc verifies every generated `impl`). Suite green
+  (pre-existing arena.rs parallel-harness flake aside).
 
-**Not yet built (future increments):** generic-type serde (E2413-gated for now); hand-impl path
-(D-SERDE2 surface — `impl T: Encode { fn encode … }`, the `DataTree` fluent accessor D-SERDE-ACCESS);
-`#[Default(expr)]` beyond literals; variant-level `#[RenameAll]`; `#[Flatten]` map catch-all.
+**Generic-type serde (c136, D-SERDE9-12, done):** `#[Codable]`/`#[Encode]`/`#[Decode]` is
+first-class on generic structs and enums. The derive auto-injects `T: user_Encode`/`T: user_Decode`
+bounds on exactly the wire-reaching type params (those a non-`#[Skip]` field type mentions),
+reusing the `Generics::rust_extra_*_bounds` precedent; a phantom/skip-only param gets no serde
+bound (only structural `Clone`). The `TraitRegistry` records each Codable type's wire-param indices
+so a non-codable type argument fails at the **use** site (E2411), not the definition (keeps emitted
+`impl`s rustc-clean, I2). E2413 and its `type_params > 0` early-out / codegen bail are gone.
+
+**Not yet built (future increments):** the manual bound override `#[Bound(…)]` (D-SERDE11 reserved
+it; tracked as board card c147); hand-impl path (D-SERDE2 surface — `impl T: Encode { fn encode … }`,
+the `DataTree` fluent accessor D-SERDE-ACCESS); `#[Default(expr)]` beyond literals; variant-level
+`#[RenameAll]`; `#[Flatten]` map catch-all.
 
 ### (Historical) Remaining (next increment — the typed-derive heart) — was BLOCKED on owner ratification
 The internal layer (`DataValue` tree + `Serialize`/`Deserialize` traits + `EncodingError` +

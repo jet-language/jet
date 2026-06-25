@@ -458,3 +458,103 @@ fn core_module_items_covers_known_core_modules() {
         extra_in_items
     );
 }
+
+/// c136 / D-SERDE9-12: generic `#[Codable]` is first-class. The derive injects
+/// `T: Encode`/`T: Decode` on exactly the wire-reaching params (D-SERDE9/10); a
+/// phantom/skip-only param gets no serde bound (it still gets structural Clone).
+/// E2413 is retired (D-SERDE12).
+#[test]
+fn generic_codable_injects_wire_param_bounds() {
+    let out = compile_temp(
+        "generic_serde.jet",
+        r#"
+use core.encoding.json as json
+
+#[Codable]
+struct Wrap<T> {
+    value: T
+}
+
+#[Codable]
+struct Id<K> {
+    raw: Int
+    #[Skip] marker: K?
+}
+
+fn main() {
+    print("x")
+}
+"#,
+    );
+    let rs = &out.rust;
+    // D-SERDE9: the wire-reaching param T carries `user_Encode`/`user_Decode`.
+    assert!(
+        rs.contains("impl<T: user_Encode") && rs.contains("user_Encode for user_Wrap<T>"),
+        "Wrap's Encode impl must bound T: user_Encode\n{rs}"
+    );
+    assert!(
+        rs.contains("impl<T: user_Decode") && rs.contains("user_Decode for user_Wrap<T>"),
+        "Wrap's Decode impl must bound T: user_Decode\n{rs}"
+    );
+    // D-SERDE10: the phantom param K gets NO Encode/Decode bound (only Clone).
+    assert!(
+        rs.contains("impl<K: Clone> user_Encode for user_Id<K>"),
+        "Id's Encode impl must NOT bound K with user_Encode (phantom param)\n{rs}"
+    );
+    assert!(
+        rs.contains("impl<K: Clone> user_Decode for user_Id<K>"),
+        "Id's Decode impl must NOT bound K with user_Decode (phantom param)\n{rs}"
+    );
+    assert!(
+        !rs.contains("K: user_Encode") && !rs.contains("K: user_Decode"),
+        "phantom param K must never get a serde bound\n{rs}"
+    );
+}
+
+/// c136: a generic `#[Codable]` value round-trips through json encode/decode, and
+/// a phantom-param type serializes regardless of its phantom argument (D-SERDE10).
+#[test]
+fn generic_codable_round_trips() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping generic serde round-trip (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_gserde_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, _stderr) = build_and_run(
+        &dir,
+        "gserde",
+        r#"
+use core.encoding.json as json
+
+#[Codable]
+struct Wrap<T> {
+    value: T
+}
+
+#[Codable]
+struct Id<K> {
+    raw: Int
+    #[Skip] marker: K?
+}
+
+fn main() {
+    wi @= Wrap<Int> { value: 7 }
+    print(json.to_string(wi))
+    back @= json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
+    print(back.value)
+    id @= Id<Wrap<Int>> { raw: 9, marker: null }
+    print(json.to_string(id))
+    rid @= json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    print(rid.raw)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "generic serde program should run cleanly");
+    assert_eq!(stdout, "{\"value\":7}\n42\n{\"raw\":9}\n3\n");
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -462,6 +462,76 @@ pub fn rust_extra_jetshow_bounds(params: &[TypeParam]) -> HashMap<String, Vec<St
         .collect()
 }
 
+/// Collect every type-parameter name (drawn from `param_names`) that the type
+/// `ty` mentions anywhere in its structure. A type parameter `T` appears as
+/// `Type::Named("T")`; nested positions (`[T]`, `Map<String, T>`, `Box<T>`, …)
+/// count too.
+pub fn collect_type_param_mentions(ty: &Type, param_names: &HashSet<&str>, out: &mut HashSet<String>) {
+    match ty {
+        Type::Named(n) => {
+            if param_names.contains(n.as_str()) {
+                out.insert(n.clone());
+            }
+        }
+        Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+            collect_type_param_mentions(inner, param_names, out)
+        }
+        Type::FixedList { elem, .. } => collect_type_param_mentions(elem, param_names, out),
+        Type::Map { key, value } => {
+            collect_type_param_mentions(key, param_names, out);
+            collect_type_param_mentions(value, param_names, out);
+        }
+        Type::Result { ok, err } => {
+            collect_type_param_mentions(ok, param_names, out);
+            collect_type_param_mentions(err, param_names, out);
+        }
+        Type::Apply { args, .. } => {
+            for a in args {
+                collect_type_param_mentions(a, param_names, out);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, t) in fields {
+                collect_type_param_mentions(t, param_names, out);
+            }
+        }
+        Type::Fn { params, ret, .. } => {
+            for p in params {
+                collect_type_param_mentions(p, param_names, out);
+            }
+            if let Some(r) = ret {
+                collect_type_param_mentions(r, param_names, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// D-SERDE9/D-SERDE10: extra Rust serde bounds for a generic `#[Codable]`/
+/// `#[Encode]`/`#[Decode]` impl. The compiler injects `T: user_Encode` /
+/// `T: user_Decode` — never spelled by the user — for *exactly* the type params
+/// that reach the wire (D-SERDE10: those mentioned by some non-skipped field
+/// type in `wire_types`). A phantom/skip-only param gets no serde bound, so e.g.
+/// `Id<Kind>` serializes regardless of `Kind`.
+///
+/// `bound` is the serde trait name (`Encode`/`Decode`); it flows through
+/// `rust_type_param_list`'s builtin-trait mapping to `user_Encode`/`user_Decode`.
+pub fn rust_extra_serde_bounds(
+    params: &[TypeParam],
+    wire_types: &[&Type],
+    bound: &str,
+) -> HashMap<String, Vec<String>> {
+    let names: HashSet<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    let mut reaching: HashSet<String> = HashSet::new();
+    for ty in wire_types {
+        collect_type_param_mentions(ty, &names, &mut reaching);
+    }
+    reaching
+        .into_iter()
+        .map(|n| (n, vec![bound.to_string()]))
+        .collect()
+}
+
 pub fn type_param_rust_list(params: &[TypeParam]) -> String {
     if params.is_empty() {
         String::new()

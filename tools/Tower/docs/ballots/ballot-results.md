@@ -1,6 +1,6 @@
 # Owner ballot results
 
-_submitted 2026-06-25 10:07_
+_submitted 2026-06-25 10:10_
 
 Decisions captured from Tower. Tell Claude **"go"** to ratify these
 into syntax-decisions.md, strip the cards, and implement the plans.
@@ -222,3 +222,9 @@ Decision: **B**
 
 **D-PARSE-1** — correctness-sensitive formats: keep hand-rolled subsets, or let I6 bend?
 Decision: **C**
+
+**D-STATE-REQ** — the "this method requires state S" marker spelling
+Decision: **A**
+
+**D-STATE-TRANS** — the transition-fn marker + arrow glyph
+Decision: **A**

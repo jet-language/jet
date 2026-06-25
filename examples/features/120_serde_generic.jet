@@ -1,0 +1,32 @@
+// 120 — generic #[Codable] (D-SERDE9-12). The derive auto-adds `T: Encode`/
+// `T: Decode` bounds for the type params that reach the wire — the user never
+// spells them. `Wrap<T>` round-trips for any codable `T`; `Id<K>`'s `K` is
+// phantom (its only field is `#[Skip]`), so `Id` serializes regardless of `K`
+// (D-SERDE10) — the derive injects no Encode/Decode bound on `K`.
+use core.encoding.json as json
+
+#[Codable]
+struct Wrap<T> {
+    value: T
+}
+
+#[Codable]
+struct Id<K> {
+    raw: Int
+    #[Skip] marker: K?
+}
+
+fn main() {
+    wi @= Wrap<Int>{value: 7}
+    print(json.to_string(wi))
+    back @= json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad wrap")
+    print(back.value)
+    ws @= Wrap<String>{value: "hi"}
+    print(json.to_string(ws))
+    // Phantom param: K never reaches the wire, so Id<Wrap<Int>> encodes with no
+    // Encode bound on K. The #[Skip] field is omitted from the wire entirely.
+    id @= Id<Wrap<Int>>{raw: 9, marker: null}
+    print(json.to_string(id))
+    rid @= json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    print(rid.raw)
+}

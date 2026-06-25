@@ -1,0 +1,18 @@
+// D-SERDE11/12: a non-codable type argument to a generic `#[Codable]` fails at
+// the USE site (E2411), not at the definition. `Wrap<T>` is fine generically;
+// `Wrap<Plain>` isn't, because `Plain` has no wire form.
+use core.encoding.json as json
+
+#[Codable]
+struct Wrap<T> {
+    value: T
+}
+
+struct Plain {
+    n: Int
+}
+
+fn main() {
+    w @= Wrap<Plain> { value: Plain { n: 1 } }
+    print(json.to_string(w))
+}

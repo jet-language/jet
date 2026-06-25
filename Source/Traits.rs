@@ -22,6 +22,12 @@ pub struct TraitRegistry {
     pub fn_params: HashMap<String, Vec<TypeParam>>,
     pub derives: HashMap<String, HashSet<String>>,
     pub local_types: HashSet<String>,
+    /// D-SERDE9/10: for each Codable type, the indices of its type params that
+    /// reach the wire (a non-`#[Skip]` field type mentions them). Used at the use
+    /// site so a non-codable type argument fails there (E2411), not on the
+    /// emitted impl (I2). A param absent here is phantom/skip-only and is never
+    /// required to be codable — `Id<Kind>` serializes regardless of `Kind`.
+    pub serde_wire_params: HashMap<String, Vec<usize>>,
     pub local_traits: HashSet<String>,
     /// D-QUAL2: names declared with the `tag` keyword. A tag is a marker that
     /// erases at runtime and carries no methods, so it may not be `derive`d or
@@ -59,6 +65,24 @@ impl TraitRegistry {
                     self.local_types.insert(e.name.clone());
                     self.enum_params
                         .insert(e.name.clone(), e.type_params.clone());
+                    if !e.type_params.is_empty() {
+                        // D-SERDE9/10: every variant payload type reaches the wire.
+                        let wire_types: Vec<&Type> = e
+                            .variants
+                            .iter()
+                            .flat_map(|v| match &v.payload {
+                                crate::AST::VariantPayload::Unit => Vec::new(),
+                                crate::AST::VariantPayload::Single(t, _) => vec![t],
+                                crate::AST::VariantPayload::Named(fs) => {
+                                    fs.iter().map(|f| &f.ty).collect()
+                                }
+                            })
+                            .collect();
+                        self.serde_wire_params.insert(
+                            e.name.clone(),
+                            wire_param_indices(&e.type_params, &wire_types),
+                        );
+                    }
                     for (t, _) in &e.derives {
                         self.derives
                             .entry(e.name.clone())
@@ -146,6 +170,18 @@ impl TraitRegistry {
         if !s.type_params.is_empty() {
             self.struct_params
                 .insert(s.name.clone(), s.type_params.clone());
+            // D-SERDE9/10: record which params reach the wire (a non-`#[Skip]`
+            // field type mentions them) for use-site codability checks.
+            let wire_types: Vec<&Type> = s
+                .fields
+                .iter()
+                .filter(|f| {
+                    !f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_SKIP)
+                })
+                .map(|f| &f.ty)
+                .collect();
+            self.serde_wire_params
+                .insert(s.name.clone(), wire_param_indices(&s.type_params, &wire_types));
         }
         for (t, _) in &s.derives {
             self.derives
@@ -449,6 +485,23 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
         Type::Apply { .. } => true,
         _ => false,
     }
+}
+
+/// D-SERDE10: the indices of `params` that any of `wire_types` mentions — i.e.
+/// the type params that reach the wire. A param no field type mentions is
+/// phantom/skip-only and is omitted (it needs no serde bound).
+fn wire_param_indices(params: &[TypeParam], wire_types: &[&Type]) -> Vec<usize> {
+    let names: HashSet<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    let mut mentioned: HashSet<String> = HashSet::new();
+    for ty in wire_types {
+        Generics::collect_type_param_mentions(ty, &names, &mut mentioned);
+    }
+    params
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| mentioned.contains(&p.name))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 pub fn rust_type_name(ty: &Type) -> String {

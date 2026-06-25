@@ -308,8 +308,16 @@ impl<'a> Checker<'a> {
             Type::FixedList { elem, .. } => self.is_encodable(elem),
             Type::Map { key, value } => matches!(**key, Type::String) && self.is_encodable(value),
             Type::Named(n) => is_json_type_name(n) || self.trait_reg.implements_trait(n, crate::Generics::ENCODE),
-            // A generic instantiation is checked at its monomorphization site.
-            Type::Apply { .. } => true,
+            // D-SERDE9/10: a generic instantiation `Name<args>` is encodable when
+            // `Name` derives Encode and every type arg that reaches the wire is
+            // itself encodable. Phantom/skip-only params impose no obligation.
+            Type::Apply { name, args } => apply_serde_ok(
+                name,
+                args,
+                self.trait_reg,
+                crate::Generics::ENCODE,
+                &|t| self.is_encodable(t),
+            ),
             _ => false,
         }
     }
@@ -325,7 +333,13 @@ impl<'a> Checker<'a> {
             Type::FixedList { elem, .. } => self.is_decodable(elem),
             Type::Map { key, value } => matches!(**key, Type::String) && self.is_decodable(value),
             Type::Named(n) => self.trait_reg.implements_trait(n, crate::Generics::DECODE),
-            Type::Apply { .. } => true,
+            Type::Apply { name, args } => apply_serde_ok(
+                name,
+                args,
+                self.trait_reg,
+                crate::Generics::DECODE,
+                &|t| self.is_decodable(t),
+            ),
             _ => false,
         }
     }
@@ -2479,15 +2493,28 @@ pub(crate) fn e2409(style: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// E2413: serde derive on a generic type isn't supported yet.
-pub(crate) fn e2413(name: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E2413",
-        format!("`{name}` is generic, so it can't derive `Encode`/`Decode` yet"),
-        "the built-in serde derive walks concrete fields; generic (de)serialization isn't built yet".to_string(),
-        format!("make `{name}` concrete, or hand-write the (de)serialization for now"),
-        Some(span),
-    )
+/// D-SERDE9/10: `Name<args>` satisfies the serde `trait_name` when `Name` derives
+/// it (or is imported/non-local, hence trusted) and every type arg at a
+/// wire-reaching position satisfies it too (`elem_ok`). A phantom/skip-only param
+/// position imposes no obligation, so `Id<Kind>` is fine for any `Kind`.
+fn apply_serde_ok(
+    name: &str,
+    args: &[Type],
+    reg: &TraitRegistry,
+    trait_name: &str,
+    elem_ok: &dyn Fn(&Type) -> bool,
+) -> bool {
+    let head_ok = !reg.local_types.contains(name) || reg.implements_trait(name, trait_name);
+    if !head_ok {
+        return false;
+    }
+    match reg.serde_wire_params.get(name) {
+        // Local generic Codable type: only the wire-reaching args must be codable.
+        Some(idxs) => idxs.iter().all(|&i| args.get(i).map_or(true, |t| elem_ok(t))),
+        // No recorded wire params (imported/non-generic): trust every arg is fine
+        // only if each is codable — be conservative and check them all.
+        None => args.iter().all(|t| elem_ok(t)),
+    }
 }
 
 fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
@@ -2503,7 +2530,11 @@ fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
                 || !reg.local_types.contains(n)
                 || reg.implements_trait(n, crate::Generics::ENCODE)
         }
-        Type::Apply { .. } => true,
+        Type::Apply { name, args } => {
+            apply_serde_ok(name, args, reg, crate::Generics::ENCODE, &|t| {
+                is_encodable_ty(t, reg)
+            })
+        }
         _ => false,
     }
 }
@@ -2518,7 +2549,11 @@ fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         Type::Named(n) => {
             !reg.local_types.contains(n) || reg.implements_trait(n, crate::Generics::DECODE)
         }
-        Type::Apply { .. } => true,
+        Type::Apply { name, args } => {
+            apply_serde_ok(name, args, reg, crate::Generics::DECODE, &|t| {
+                is_decodable_ty(t, reg)
+            })
+        }
         _ => false,
     }
 }
@@ -2536,22 +2571,16 @@ fn marker_is_string_literal(m: &crate::AST::Marker) -> bool {
 }
 
 /// D-SERDE: validate serde markers on every `#[Codable]`/`#[Encode]`/`#[Decode]` type
-/// (E2407–E2413). Runs after the trait registry is built so field types resolve. This
+/// (E2407–E2412). Runs after the trait registry is built so field types resolve. This
 /// keeps generated code rustc-clean (I2): a field with no wire form is caught here, not
 /// by rustc on the emitted `impl`.
 pub(crate) fn validate_serde_items(items: &[crate::AST::Item], reg: &TraitRegistry) -> Vec<Diagnostic> {
     use crate::AST::Item;
     let mut out = Vec::new();
     for item in items {
-        let (name, name_span, derives, container, type_params): (
-            &str,
-            Span,
-            &[(String, Span)],
-            &[crate::AST::Marker],
-            usize,
-        ) = match item {
-            Item::Struct(s) => (&s.name, s.name_span, &s.derives, &s.serde_markers, s.type_params.len()),
-            Item::Enum(e) => (&e.name, e.name_span, &e.derives, &e.serde_markers, e.type_params.len()),
+        let (derives, container): (&[(String, Span)], &[crate::AST::Marker]) = match item {
+            Item::Struct(s) => (&s.derives, &s.serde_markers),
+            Item::Enum(e) => (&e.derives, &e.serde_markers),
             _ => continue,
         };
         let enc = derives.iter().any(|(t, _)| t == crate::Generics::ENCODE);
@@ -2559,10 +2588,10 @@ pub(crate) fn validate_serde_items(items: &[crate::AST::Item], reg: &TraitRegist
         if !enc && !dec {
             continue;
         }
-        if type_params > 0 {
-            out.push(e2413(name, name_span));
-            continue;
-        }
+        // D-SERDE12: generic `#[Codable]` is first-class — no `type_params > 0`
+        // gate. The per-field checks below run on generic types unchanged; a type
+        // param `T` reads as a non-local `Type::Named`, so it's trusted here and
+        // the codability obligation falls on the use site (E0905).
         // Container `#[RenameAll(style)]` casing menu (E2409).
         for m in container {
             if m.name == Syntax::ATTR_RENAME_ALL {
