@@ -279,7 +279,16 @@ pub const CLOCK_TYPE: &str = "Clock";
 /// type. A `#Pure fn` taking an `Rng` param may draw randomness **through it**
 /// (`rng.int(lo, hi)` / `rng.float()`) — reproducible from the caller's seed
 /// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
+/// D-DET-CAPAPI (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
+/// / `shuffle(~list)`, mirroring the ambient `random.*` set.
 pub const RNG_TYPE: &str = "Rng";
+
+/// D-DET-CAPAPI (ratified 2026-06-25): the deterministic `Duration` value type.
+/// A small std-only span of milliseconds, constructed via `time.ms(n)` /
+/// `time.secs(n)` (pure — no ambient effect, like `time.clock`). Read back with
+/// `duration.millis()`; the injected `Clock` advances by one via `clock.wait(d)`
+/// (relative), alongside the absolute `clock.advance(to_ms)`.
+pub const DURATION_TYPE: &str = "Duration";
 
 /// D-SIMD1/D-SIMD2 (ratified 2026-06-24): the built-in portable SIMD lane types.
 /// `F32x4` is four `F32` lanes, `F64x2` is two `F64` lanes. Constructor

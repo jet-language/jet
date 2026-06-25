@@ -1231,10 +1231,22 @@ pub(crate) enum THandleOp {
     ClockNow,
     /// D-DET1 Clock: `tick(ms)` → `{root}jet_clock_tick(&mut (recv), a0)` (advance + read).
     ClockTick,
+    /// D-DET-CAPAPI Clock: `advance(to_ms)` → `{root}jet_clock_advance(&mut (recv), a0)` (absolute set + read).
+    ClockAdvance,
+    /// D-DET-CAPAPI Clock: `wait(d)` → `{root}jet_clock_wait(&mut (recv), &(a0))` (advance by a Duration + read).
+    ClockWait,
     /// D-DET1 Rng: `int(lo, hi)` → `{root}jet_rng_int(&mut (recv), a0, a1)` (draw in [lo,hi]).
     RngInt,
     /// D-DET1 Rng: `float()` → `{root}jet_rng_float(&mut (recv))` (draw in [0,1)).
     RngFloat,
+    /// D-DET-CAPAPI Rng: `bool()` → `{root}jet_rng_bool(&mut (recv))` (coin draw).
+    RngBool,
+    /// D-DET-CAPAPI Rng: `pick(list)` → `{root}jet_rng_pick(&mut (recv), &(a0))` (uniform `T?`).
+    RngPick,
+    /// D-DET-CAPAPI Rng: `shuffle(~list)` → `{root}jet_rng_shuffle(&mut (recv), &mut (a0))` (in-place).
+    RngShuffle,
+    /// D-DET-CAPAPI Duration: `millis()` → `{root}jet_duration_millis(&(recv))` (span as ms).
+    DurationMillis,
     /// TcpListener: `accept()` → `{root}jet_net_tcp_accept(&(recv))`.
     TcpListenerAccept,
     /// TcpListener: `local_addr()` → `{root}jet_net_listener_local_addr(&(recv))`.

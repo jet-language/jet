@@ -188,3 +188,149 @@ fn main() {
         res.err()
     );
 }
+
+// ── D-DET-CAPAPI (ratified 2026-06-25): widened Clock / Rng surface ────────────
+//
+// Additive to the minimal set: `rng.bool()` / `rng.pick(list)` / `rng.shuffle(~list)`,
+// the absolute `clock.advance(to_ms)`, the `Duration`-based `clock.wait(d)`, and
+// the `Duration` value (`time.ms`/`time.secs`, `duration.millis()`). All stay
+// pure-callable through the injected, seeded handles.
+
+/// The widened `Rng` draws (`bool`/`pick`/`shuffle`) compile inside a `#Pure fn`.
+#[test]
+fn pure_fn_widened_rng_ok() {
+    let src = r#"
+use core.random as random;
+#Pure fn draws(rng: ~Rng) -> Bool {
+    flip := rng.bool()
+    xs := [1, 2, 3]
+    chosen := rng.pick(xs) ?? 0
+    deck := [9, 8, 7]
+    rng.shuffle(~deck)
+    return flip || chosen == 0
+}
+fn main() {
+    r := random.rng(7)
+    print("{draws(~r)}")
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_ok(), "widened Rng draws should compile: {:?}", res.err());
+}
+
+/// `rng.pick(list)` returns the element's optional type (`[String]` → `String?`).
+#[test]
+fn rng_pick_returns_element_option() {
+    let src = r#"
+use core.random as random;
+#Pure fn choose(rng: ~Rng) -> String {
+    cards := ["A", "K", "Q"]
+    return rng.pick(cards) ?? "none"
+}
+fn main() {
+    r := random.rng(1)
+    print("{choose(~r)}")
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_ok(), "rng.pick element typing should compile: {:?}", res.err());
+}
+
+/// Every `Rng` draw advances the stream, so a non-`~` receiver is rejected (E0202).
+#[test]
+fn rng_bool_needs_mut_receiver() {
+    let src = r#"
+use core.random as random;
+fn main() {
+    r @= random.rng(3)
+    b := r.bool()
+    print("{b}")
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_err(), "rng.bool() on a non-`~` rng must fail");
+    let diags = res.unwrap_err();
+    assert!(
+        diags.iter().any(|d| d.code == "E0202"),
+        "expected E0202, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+/// `rng.shuffle(deck)` without `~` on the list arg is rejected (E0202).
+#[test]
+fn rng_shuffle_needs_mut_list_arg() {
+    let src = r#"
+use core.random as random;
+fn main() {
+    r := random.rng(3)
+    deck := [1, 2, 3]
+    r.shuffle(deck)
+    print("{deck}")
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_err(), "rng.shuffle without `~` on the list must fail");
+    let diags = res.unwrap_err();
+    assert!(
+        diags.iter().any(|d| d.code == "E0202"),
+        "expected E0202, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+/// The widened `Clock` surface (`advance` / `wait`) compiles inside a `#Pure fn`.
+#[test]
+fn pure_fn_widened_clock_ok() {
+    let src = r#"
+use core.time as time;
+#Pure fn run(clock: ~Clock) -> Int {
+    base := clock.advance(5000)
+    span := time.secs(1)
+    return base + clock.wait(span)
+}
+fn main() {
+    c := time.clock(0)
+    print("{run(~c)}")
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_ok(), "widened Clock surface should compile: {:?}", res.err());
+}
+
+/// `clock.advance`/`clock.wait` move the clock, so a non-`~` receiver fails (E0202).
+#[test]
+fn clock_advance_needs_mut_receiver() {
+    let src = r#"
+use core.time as time;
+fn main() {
+    c @= time.clock(0)
+    n := c.advance(100)
+    print("{n}")
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_err(), "clock.advance() on a non-`~` clock must fail");
+    let diags = res.unwrap_err();
+    assert!(
+        diags.iter().any(|d| d.code == "E0202"),
+        "expected E0202, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+/// `Duration` constructors (`time.ms`/`time.secs`) and `duration.millis()` are
+/// pure — usable inside a `#Pure fn` (they mint a value, carry no ambient effect).
+#[test]
+fn pure_fn_duration_ok() {
+    let src = r#"
+use core.time as time;
+#Pure fn span_ms() -> Int {
+    d := time.secs(3)
+    return d.millis()
+}
+fn main() { print("{span_ms()}") }
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_ok(), "Duration value ops should be pure: {:?}", res.err());
+}

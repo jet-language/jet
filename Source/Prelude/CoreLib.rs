@@ -46,6 +46,14 @@ mod jet_std {
         pub state: u64,
     }
 
+    // D-DET-CAPAPI: a deterministic span of milliseconds. Minted by `time.ms(n)` /
+    // `time.secs(n)` (pure value constructors). The injected `Clock` advances by one
+    // with `clock.wait(d)`; read it back with `duration.millis()`. std-only (I6).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Duration {
+        pub ms: i64,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct JsonError {
         pub line: i64,
@@ -84,6 +92,9 @@ mod jet_std {
     }
     impl super::JetShow for Rng {
         fn jet_show(&self) -> String { format!("Rng {{ .. }}") }
+    }
+    impl super::JetShow for Duration {
+        fn jet_show(&self) -> String { format!("{}ms", self.ms) }
     }
     impl super::JetShow for JsonError {
         fn jet_show(&self) -> String { format!("line {}: {}", self.line, self.message) }
@@ -1068,6 +1079,16 @@ fn jet_clock_tick(c: &mut jet_std::Clock, ms: i64) -> i64 {
     c.now = c.now.wrapping_add(ms);
     c.now
 }
+// D-DET-CAPAPI: `clock.advance(to_ms)` sets the clock to an ABSOLUTE instant;
+// `clock.wait(d)` advances by a `Duration` (relative). Both return the new value.
+fn jet_clock_advance(c: &mut jet_std::Clock, to_ms: i64) -> i64 {
+    c.now = to_ms;
+    c.now
+}
+fn jet_clock_wait(c: &mut jet_std::Clock, d: &jet_std::Duration) -> i64 {
+    c.now = c.now.wrapping_add(d.ms);
+    c.now
+}
 fn jet_std_rng_new(seed: i64) -> jet_std::Rng {
     jet_std::Rng { state: seed as u64 }
 }
@@ -1089,6 +1110,36 @@ fn jet_rng_int(r: &mut jet_std::Rng, lo: i64, hi: i64) -> i64 {
 fn jet_rng_float(r: &mut jet_std::Rng) -> f64 {
     // 53-bit mantissa → [0, 1).
     (jet_det_rng_next(r) >> 11) as f64 / (1u64 << 53) as f64
+}
+// D-DET-CAPAPI: the widened deterministic draws — coin, uniform choice, in-place
+// Fisher–Yates shuffle. Each advances the SplitMix64 stream, so they are
+// reproducible from the seed and mirror the ambient `random.*` set.
+fn jet_rng_bool(r: &mut jet_std::Rng) -> bool {
+    (jet_det_rng_next(r) & 1) == 1
+}
+fn jet_rng_pick<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>) -> Option<T> {
+    if xs.is_empty() {
+        None
+    } else {
+        Some(xs[jet_rng_int(r, 0, xs.len() as i64 - 1) as usize].clone())
+    }
+}
+fn jet_rng_shuffle<T>(r: &mut jet_std::Rng, xs: &mut Vec<T>) {
+    let len = xs.len();
+    for i in (1..len).rev() {
+        let j = jet_rng_int(r, 0, i as i64) as usize;
+        xs.swap(i, j);
+    }
+}
+// D-DET-CAPAPI: `Duration` constructors + read. Pure value ops, ms-based.
+fn jet_std_duration_ms(n: i64) -> jet_std::Duration {
+    jet_std::Duration { ms: n }
+}
+fn jet_std_duration_secs(n: i64) -> jet_std::Duration {
+    jet_std::Duration { ms: n.wrapping_mul(1000) }
+}
+fn jet_duration_millis(d: &jet_std::Duration) -> i64 {
+    d.ms
 }
 
 fn jet_std_json_parse(text: &String) -> Result<jet_std::Json, jet_std::JsonError> {

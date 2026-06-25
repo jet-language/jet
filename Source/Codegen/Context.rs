@@ -104,6 +104,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
         "Rng" => Some("Rng"),
+        // D-DET-CAPAPI: deterministic `Duration` value.
+        "Duration" => Some("Duration"),
         "Closed" => Some("Closed"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),

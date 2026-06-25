@@ -52,6 +52,10 @@ pub fn builtin_method_return(
         // time/randomness THROUGH the handle is reproducible (caller seeded it).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => clock_method_return(method, arg_count),
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => rng_method_return(method, arg_count),
+        // D-DET-CAPAPI: `Duration.millis()` reads the span as ms.
+        Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
+            duration_method_return(method, arg_count)
+        }
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
         Type::Apply { name, args } if name == "Channel" => {
             channel_method_return(args, method, arg_count)
@@ -305,12 +309,20 @@ fn stopwatch_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 
 /// D-DET1: methods on the deterministic injected `Clock` capability.
 /// `clock.now()` reads the clock's current value (ms); `clock.tick(ms)` advances
-/// it and returns the new value. Reproducible — the clock starts from the seed
-/// the caller supplied to `time.clock(seed)` and only moves via explicit `tick`.
+/// it by a relative span and returns the new value. Reproducible — the clock
+/// starts from the seed the caller supplied to `time.clock(seed)` and only moves
+/// via explicit advances.
+///
+/// D-DET-CAPAPI widens the surface: `clock.advance(to_ms)` sets the clock to an
+/// ABSOLUTE instant (returns the new value); `clock.wait(d: Duration)` advances
+/// by a `Duration` (relative, returns the new value).
 fn clock_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("now", 0) => Some(Some(Type::Int)),
         ("tick", 1) => Some(Some(Type::Int)),
+        // D-DET-CAPAPI: absolute set + Duration-based advance.
+        ("advance", 1) => Some(Some(Type::Int)),
+        ("wait", 1) => Some(Some(Type::Int)),
         _ => None,
     }
 }
@@ -319,10 +331,32 @@ fn clock_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 /// `rng.int(lo, hi)` draws an Int in `[lo, hi]`; `rng.float()` draws a Float in
 /// `[0, 1)`. Reproducible — the stream is fixed by the seed passed to
 /// `random.rng(seed)`, so the same seed yields the same draws on every machine.
+///
+/// D-DET-CAPAPI widens the surface to mirror the ambient `random.*` set:
+/// `rng.bool()` draws a coin; `rng.pick(list)` returns a uniform `T?`;
+/// `rng.shuffle(~list)` shuffles in place (Fisher–Yates). `pick`/`shuffle` are
+/// generic, so their element-aware return types are resolved in the checker
+/// dispatch (Source/Sema/CheckerInfer/calls.rs) — the placeholders here keep the
+/// codegen totality path (lower.rs) honest.
 fn rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("int", 2) => Some(Some(Type::Int)),
         ("float", 0) => Some(Some(Type::Float)),
+        // D-DET-CAPAPI: coin draw.
+        ("bool", 0) => Some(Some(Type::Bool)),
+        // D-DET-CAPAPI: generic — element type refined in sema. `pick` → `T?`,
+        // `shuffle` → void. Placeholders (Int) here, refined by the dispatch.
+        ("pick", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("shuffle", 1) => Some(None),
+        _ => None,
+    }
+}
+
+/// D-DET-CAPAPI: methods on the deterministic `Duration` value. `millis()` reads
+/// the span back as an Int (the ms the `time.ms`/`time.secs` constructor minted).
+fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("millis", 0) => Some(Some(Type::Int)),
         _ => None,
     }
 }
@@ -387,11 +421,15 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             "push" | "pop" | "insert" | "remove" | "reverse" | "sort" | "sort_by" | "clear"
         ),
         Type::Map { .. } => matches!(method, "insert" | "remove" | "clear"),
-        // D-DET1: `clock.tick(ms)` advances the clock; `rng.int`/`rng.float` advance
-        // the PRNG stream — these need an edit-access (`~`) receiver. `clock.now()`
-        // is a pure read (no `~` required).
-        Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => method == "tick",
-        Type::Named(n) if n == crate::Syntax::RNG_TYPE => matches!(method, "int" | "float"),
+        // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
+        // `rng` draw advances the PRNG stream — these need an edit-access (`~`)
+        // receiver. `clock.now()` / `duration.millis()` are pure reads (no `~`).
+        Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => {
+            matches!(method, "tick" | "advance" | "wait")
+        }
+        Type::Named(n) if n == crate::Syntax::RNG_TYPE => {
+            matches!(method, "int" | "float" | "bool" | "pick" | "shuffle")
+        }
         _ => false,
     }
 }
@@ -487,6 +525,19 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Apply { name, .. } if name == crate::Syntax::TYPE_DERIVED => Some(vec![]),
+        // D-DET1/D-DET-CAPAPI: injected capability method args. `pick`/`shuffle` are
+        // generic ([T]) and handled element-aware in the checker dispatch — they are
+        // NOT routed here.
+        Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => match method {
+            "tick" | "advance" => Some(vec![Type::Int]),
+            "wait" => Some(vec![Type::Named(crate::Syntax::DURATION_TYPE.to_string())]),
+            _ => Some(vec![]),
+        },
+        Type::Named(n) if n == crate::Syntax::RNG_TYPE => match method {
+            "int" => Some(vec![Type::Int, Type::Int]),
+            _ => Some(vec![]),
+        },
+        Type::Named(n) if n == crate::Syntax::DURATION_TYPE => Some(vec![]),
         _ => None,
     }
 }

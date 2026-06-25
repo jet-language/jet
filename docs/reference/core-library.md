@@ -362,10 +362,18 @@ fn main() {
 }
 ```
 
+The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
+
 | `Rng` method | Returns | What it does |
 |--------------|---------|--------------|
 | `int(lo, hi)` | `Int` | Draw an Int in `[lo, hi]` (inclusive); advances the stream |
 | `float()` | `Float` | Draw a Float in `[0.0, 1.0)`; advances the stream |
+| `bool()` | `Bool` | Draw a coin; advances the stream |
+| `pick(xs)` | `T?` | Uniform element of `[T]`, or null if empty; advances the stream |
+| `shuffle(~xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
+
+Every draw — including `bool`/`pick`/`shuffle` — needs a `~Rng` receiver, and
+`shuffle` needs the list passed with `~` (it edits in place).
 
 ---
 
@@ -394,6 +402,8 @@ fn main() {
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
+| `ms(n)` | `Duration` | A `Duration` of `n` milliseconds (pure value; D-DET-CAPAPI) |
+| `secs(n)` | `Duration` | A `Duration` of `n` seconds (pure value; D-DET-CAPAPI) |
 
 **Test hook:** when the environment variable `LEX_TEST_EPOCH` is set to an
 integer, `time.now()` returns that value instead of the real clock. Tests use
@@ -417,7 +427,16 @@ fn main() {
 | `Clock` method | Returns | What it does |
 |----------------|---------|--------------|
 | `now()` | `Int` | The clock's current value in ms (read; no `~` needed) |
-| `tick(ms)` | `Int` | Advance the clock by `ms` and return the new value (needs `~Clock`) |
+| `tick(ms)` | `Int` | Advance the clock by `ms` (relative) and return the new value (needs `~Clock`) |
+| `advance(to_ms)` | `Int` | Set the clock to the **absolute** instant `to_ms` and return it (needs `~Clock`; D-DET-CAPAPI) |
+| `wait(d)` | `Int` | Advance the clock by a `Duration` `d` and return the new value (needs `~Clock`; D-DET-CAPAPI) |
+
+A `Duration` is a deterministic span of milliseconds minted by `time.ms(n)` /
+`time.secs(n)` (pure value constructors). Read it back with `d.millis()`.
+
+| `Duration` method | Returns | What it does |
+|-------------------|---------|--------------|
+| `millis()` | `Int` | The span in milliseconds (read) |
 
 **Expert escape — `assume_deterministic { … }`.** Inside a `#Pure fn`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)

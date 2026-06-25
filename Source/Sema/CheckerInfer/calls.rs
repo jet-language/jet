@@ -579,6 +579,78 @@ impl<'a> Checker<'a> {
         refined_ret
     }
 
+    /// D-DET-CAPAPI: the generic `Rng` draws — `rng.pick(list) -> T?` (uniform
+    /// choice; null on empty) and `rng.shuffle(~list)` (in-place Fisher–Yates).
+    /// Both advance the stream, so the `rng` receiver must have edit access (`~`);
+    /// `shuffle` edits its list in place, so the list arg must be `~` too. Mirrors
+    /// the ambient `random.pick`/`random.shuffle` (CheckerCoreLib).
+    fn finish_rng_generic(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        // The receiver must be a `~Rng` (every draw advances the stream).
+        if let Some(root) = expr_root_ident(receiver) {
+            let root = root.to_string();
+            if let Some(info) = self.lookup(&root) {
+                if !info.mutable {
+                    self.diags.push(Diagnostic::error(
+                        "E0202",
+                        format!(
+                            "cannot draw from `{}` — it does not have edit access (`~`); required before calling `.{}()`",
+                            root, method
+                        ),
+                        "every `Rng` draw advances the stream, so the receiver needs write access (`~`)".to_string(),
+                        format!("declare `{} {} ...` (or pass the rng as `~{}`)", root, Syntax::SIGIL_BIND_MUT, root),
+                        Some(receiver.span()),
+                    ));
+                }
+            }
+        }
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`.{}()` takes one list, got {}", method, args.len()),
+                "this `Rng` draw operates on a single list".to_string(),
+                format!("call `rng.{}(items)`", method),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return if method == "pick" { Some(Type::Option(Box::new(Type::Int))) } else { None };
+        }
+        // `shuffle` edits the list in place — the list arg needs `~`.
+        if method == "shuffle" && args[0].convention != AccessConvention::Write {
+            self.diags.push(Diagnostic::error(
+                "E0202",
+                "`shuffle` edits its list in place".to_string(),
+                "write access (`~`) is required; the list must be passed with `~`".to_string(),
+                "write `rng.shuffle(~items)`".to_string(),
+                Some(args[0].span),
+            ));
+        }
+        let ty = self.infer(&mut args[0].expr)?;
+        let Type::List(inner) = ty else {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`{}` needs a list, not {}", method, ty.show()),
+                format!("rng.{} operates on a `[T]`", method),
+                "pass a `[T]` value".to_string(),
+                Some(args[0].expr.span()),
+            ));
+            return if method == "pick" { Some(Type::Option(Box::new(Type::Int))) } else { None };
+        };
+        // `pick` returns `T?`; `shuffle` returns nothing.
+        if method == "pick" {
+            Some(Type::Option(inner))
+        } else {
+            None
+        }
+    }
+
 
     pub(crate) fn infer_method_call(
         &mut self,
@@ -923,7 +995,17 @@ impl<'a> Checker<'a> {
         // Set `recv_type_out` so codegen routes the call to the handle-method op
         // (TIR shape (h)) rather than failing the typed-IR subset check.
         if let Type::Named(handle_ty) = &recv_ty {
-            if matches!(handle_ty.as_str(), "Clock" | "Rng" | "Stopwatch") {
+            // D-DET-CAPAPI: `rng.pick(list)` / `rng.shuffle(~list)` are GENERIC — the
+            // element type comes from the `[T]` arg, mirroring the ambient
+            // `random.pick`/`random.shuffle`. Resolve element-aware here (the
+            // `builtin_method_return` table only carries Int placeholders).
+            if handle_ty == crate::Syntax::RNG_TYPE && matches!(method, "pick" | "shuffle") {
+                let handle_ty = handle_ty.clone();
+                let result = self.finish_rng_generic(receiver, method, args, span);
+                *recv_type_out = Some(handle_ty);
+                return result;
+            }
+            if matches!(handle_ty.as_str(), "Clock" | "Rng" | "Stopwatch" | "Duration") {
                 if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
                     let handle_ty = handle_ty.clone();
                     let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);

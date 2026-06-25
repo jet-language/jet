@@ -1388,10 +1388,27 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ClockTick => {
                     format!("{}jet_clock_tick(&mut ({}), {})", root, recv, a(0))
                 }
+                // D-DET-CAPAPI: absolute set + Duration advance; widened Rng; Duration read.
+                THandleOp::ClockAdvance => {
+                    format!("{}jet_clock_advance(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::ClockWait => {
+                    format!("{}jet_clock_wait(&mut ({}), &({}))", root, recv, a(0))
+                }
                 THandleOp::RngInt => {
                     format!("{}jet_rng_int(&mut ({}), {}, {})", root, recv, a(0), a(1))
                 }
                 THandleOp::RngFloat => format!("{}jet_rng_float(&mut ({}))", root, recv),
+                THandleOp::RngBool => format!("{}jet_rng_bool(&mut ({}))", root, recv),
+                THandleOp::RngPick => {
+                    format!("{}jet_rng_pick(&mut ({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::RngShuffle => {
+                    format!("{}jet_rng_shuffle(&mut ({}), &mut ({}))", root, recv, a(0))
+                }
+                THandleOp::DurationMillis => {
+                    format!("{}jet_duration_millis(&({}))", root, recv)
+                }
                 THandleOp::TcpListenerAccept => format!("{}jet_net_tcp_accept(&({}))", root, recv),
                 THandleOp::TcpListenerLocalAddr => {
                     format!("{}jet_net_listener_local_addr(&({}))", root, recv)
@@ -1757,6 +1774,9 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         ("core.time", "start") => format!("{}()", helper("jet_std_time_start")),
         // D-DET1: deterministic injected Clock capability constructor.
         ("core.time", "clock") => format!("{}({})", helper("jet_std_clock_new"), arg(0)),
+        // D-DET-CAPAPI: `Duration` constructors — pure value, ms/secs → ms span.
+        ("core.time", "ms") => format!("{}({})", helper("jet_std_duration_ms"), arg(0)),
+        ("core.time", "secs") => format!("{}({})", helper("jet_std_duration_secs"), arg(0)),
         // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms
         // (`Json` tree / `[[String]]` / `Map`) keep their existing helpers; the typed
         // forms route through the Encode/Decode model, distinguished by the lowered arg

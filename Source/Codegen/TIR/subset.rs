@@ -3326,8 +3326,15 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // D-DET1: deterministic injected Clock/Rng capability methods.
         ("Clock", "now", 0) => THandleOp::ClockNow,
         ("Clock", "tick", 1) => THandleOp::ClockTick,
+        // D-DET-CAPAPI: absolute set + Duration advance; the widened Rng draws; Duration read.
+        ("Clock", "advance", 1) => THandleOp::ClockAdvance,
+        ("Clock", "wait", 1) => THandleOp::ClockWait,
         ("Rng", "int", 2) => THandleOp::RngInt,
         ("Rng", "float", 0) => THandleOp::RngFloat,
+        ("Rng", "bool", 0) => THandleOp::RngBool,
+        ("Rng", "pick", 1) => THandleOp::RngPick,
+        ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
+        ("Duration", "millis", 0) => THandleOp::DurationMillis,
         ("TcpListener", "accept", 0) => THandleOp::TcpListenerAccept,
         ("TcpListener", "local_addr", 0) => THandleOp::TcpListenerLocalAddr,
         ("TcpStream", "read", 0) => THandleOp::TcpStreamRead,

@@ -1291,7 +1291,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
         // D-DET1: deterministic injected capability handles.
-        | "Clock" | "Rng"
+        // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
+        | "Clock" | "Rng" | "Duration"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines"
         // D-LSDIR1=A: directory entry value.
@@ -2008,6 +2009,12 @@ pub(crate) fn core_fixed_sig(
         ("core.time", "clock") => {
             Some((vec![(read, Type::Int)], Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))))
         }
+        // D-DET-CAPAPI: `time.ms(n)` / `time.secs(n)` mint a deterministic `Duration`
+        // value (pure — no ambient effect, like `time.clock`). The clock advances by
+        // one with `clock.wait(d)`; read it back with `duration.millis()`.
+        ("core.time", "ms" | "secs") => {
+            Some((vec![(read, Type::Int)], Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))))
+        }
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
         ("core.encoding.json", "parse") => Some((
@@ -2332,7 +2339,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-DET1: `rng` builds a deterministic injected RNG capability.
         "core.random" => &["int", "float", "pick", "shuffle", "seed", "rng"],
         // D-DET1: `clock` builds a deterministic injected Clock capability.
-        "core.time" => &["now", "sleep", "start", "clock"],
+        // D-DET-CAPAPI: `ms`/`secs` mint a deterministic `Duration` value.
+        "core.time" => &["now", "sleep", "start", "clock", "ms", "secs"],
         // D-ENC1: unified serialization. `core.encoding` is the library root (no direct
         // verbs — formats are submodules); each format submodule carries the verbs.
         "core.encoding" => &[],
