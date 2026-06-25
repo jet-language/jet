@@ -304,42 +304,50 @@ Then map `TOML::Value` → `DataTree` (`Integer→Int`, `Float→Float`,
   - scalars typed by the YAML core schema (`null/~`, `true/false`, int, float,
     str), single/double-quoted + plain + block scalars (`|`, `>`),
   - comments, `---` document markers.
-  - **D-ENC-YAML1 = A (owner, 2026-06-25):** support anchors/aliases (`&a`/`*a`)
+  - **D-ENC-YAML1 = A (RATIFIED 2026-06-25):** support anchors/aliases (`&a`/`*a`)
     + `---` document markers; **defer explicit/custom tags (`!!str`, `!MyType`)**
     to a separate frozen card (**c153**, full YAML 1.2). So c152's YAML scope is:
     block+flow maps/sequences, typed core scalars, block scalars (`|`/`>`),
-    comments, documents, anchors/aliases — NOT explicit tags. YAML is the biggest
-    single piece here. (Ratification pending the owner's "go" on the ballot batch.)
+    comments, documents, anchors/aliases — NOT explicit tags. On encode, anchors
+    are always expanded (lossless). YAML is the biggest single piece here.
 
-## Owner decision that gates the dynamic surface
+## The dynamic surface — RATIFIED (no longer a gate)
 
-**D-ENC-DYN1 — what does `toml.parse(text)` / `yaml.parse(text)` return with no
-target type?** Today it's `Map<String,String>` (flat, lossy). The typed
-`decode<T>` path can be made full *without* touching this — but leaving the
-dynamic path flat while the typed path is rich is incoherent. Options drafted in
-`decision-ballots.md`:
-  - **(A, recommended)** one shared dynamic value `Data` (the user-facing face of
-    `DataTree`) returned by toml/yaml `parse`; `json.parse` keeps its shipped
-    `JSON` enum. One dynamic-value vocabulary for the config formats.
-  - **(B)** a per-format dynamic enum (`Toml`, `Yaml`) mirroring `JSON`.
-  - **(C)** keep `parse` flat-`Map`; only `decode<T>` is full. (Rejected:
-    incoherent, keeps a lossy public surface.)
+**D-ENC-DYN1 = A+ (RATIFIED 2026-06-25): one underlying `Data` value, per-format
+type aliases.** Every format's untyped `parse` returns ONE shared rich dynamic
+value, `Data` — the user-facing face of the internal `DataTree`
+(`Data.Object/.Array/.Int/.Float/.Text/.Bool/.Null`) — replacing the flat
+`Map<String,String>`. For discoverability, `Json`/`Toml`/`Yaml`/`Csv` are **type
+aliases** over `Data` (`Json = Data`, …): `json.parse` is typed `Json`,
+`toml.parse` is typed `Toml`, etc., but they're the same structure, so there is
+one walker and one set of accessors to maintain (owner: "minimal code
+maintenance, but discoverability/usage is clear for beginners").
 
-## Build order (once D-ENC-DYN1 picked)
+**Migration (part of c152):** the shipped `JSON` enum collapses into `Data` (with
+`Json` as its alias) — a clean break, no parallel path. Examples 30/73/108 + the
+jsonfmt showcase migrate: `JSON.Text`→`Data.Text`/`Json.Text`, and integral
+numbers split (`Number`→`.Int`/`.Float`). `csv.parse` yields a shallow
+`Data.Array` of records (array-of-arrays, or array-of-objects when header-mapped).
 
-1. **TOML adapter full** (reuse `Source/Jetpack/TOML.rs`): parser→`DataTree`,
-   `DataTree`→TOML renderer, wire `toml.decode<T>` to the rich tree, update the
-   `core.encoding.toml` sema return type per D-ENC-DYN1.
-2. **YAML parser** (the big piece): full block+flow parser→`DataTree`, renderer,
-   `yaml.decode<T>`, sema return type. Scope per D-ENC-YAML1.
-3. **Migrate examples** 52_toml / 53_yaml / 54_encoding to exercise nested
+## Build order (decisions ratified — fully buildable, no gates)
+
+1. **`Data` value + aliases:** define the user-facing `Data` value (face of
+   `DataTree`) and the `Json`/`Toml`/`Yaml`/`Csv` type aliases; migrate
+   `json.parse` from the `JSON` enum to `Data` (re-bless JSON examples).
+2. **TOML adapter full** (reuse `Source/Jetpack/TOML.rs`): parser→`Data`,
+   `Data`→TOML renderer, wire `toml.decode<T>` to the rich tree, update the
+   `core.encoding.toml` sema return type to `Toml` (= `Data`).
+3. **YAML parser** (the big piece): full block+flow parser→`Data`, renderer,
+   `yaml.decode<T>`, sema return type `Yaml`. Scope per D-ENC-YAML1 (core +
+   anchors/aliases + documents; tags → frozen c153).
+4. **Migrate examples** 52_toml / 53_yaml / 54_encoding to exercise nested
    tables, arrays, typed values (today they show only flat key/value); re-bless
    goldens. Add `toml_typed` / `yaml_typed` mirroring `108_json_typed` (decode
    into a nested `#[Codable]` struct).
-4. **Diagnostics:** TOML/YAML parse errors get line+message (reuse the
+5. **Diagnostics:** TOML/YAML parse errors get line+message (reuse the
    `ParseError` shape from `Source/Jetpack/TOML.rs`); a malformed-document code in
    the E27xx encoding range, doc'd + ui-snapshotted.
-5. **Verify:** full `cargo test`; round-trip property (parse∘render≈identity) for
+6. **Verify:** full `cargo test`; round-trip property (parse∘render≈identity) for
    nested fixtures; confirm generated `impl`s stay rustc-clean (I2).
 
 ## Done criteria
