@@ -577,6 +577,24 @@ pub const KW_PURE: &str = "Pure";
 /// E0741. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Caps";
 
+/// D-SCAP1 (ratified 2026-06-21): the scoped-capability grant marker, written
+/// `#grant(Fs) { caps -> … }`. Grants (authorizes) the listed effect(s) inside
+/// the block through the first-class handle bound after `{` (here `caps`), and
+/// **revokes** the capability at scope end (RAII, S63) — the handle is bound only
+/// for the block. The dual of `#Caps` (which restricts): an effect used inside
+/// that the grant doesn't cover has no capability (E0712); letting the handle
+/// escape is E0711. Erased in codegen (I3). Lowercase per the ratified spelling.
+pub const KW_GRANT: &str = "grant";
+
+/// D-SCAP1: the `->` token between the grant handle and the block body —
+/// `#grant(Fs) { caps -> … }`.
+pub const GRANT_ARROW: &str = "->";
+
+/// D-SCAP1: the type of a capability handle bound by `#grant(…) { caps -> … }`.
+/// An opaque sema-only handle (authority to perform the granted effects); erased
+/// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
+pub const CAP_HANDLE_TYPE: &str = "Capability";
+
 /// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
 /// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an

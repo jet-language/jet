@@ -1556,6 +1556,7 @@ impl<'a> Parser<'a> {
                         Stmt::Unsafe { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
                         Stmt::Caps { span, .. } => span.end,
+                        Stmt::Grant { span, .. } => span.end,
                         Stmt::ComptimeIf { span, .. } => span.end,
                         Stmt::ContextBlock { span, .. } => span.end,
                         // D-TERM1 (ratified 2026-06-22): live block span end.

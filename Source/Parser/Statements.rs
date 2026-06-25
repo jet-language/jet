@@ -182,6 +182,52 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-SCAP1: parse a `#grant(Fs) { caps -> … }` scoped-capability grant region
+    /// in statement position. Cursor is on the `#` token. Effect names are bare
+    /// idents (sema validates them, E0119); `caps` binds the first-class
+    /// capability handle for the block. The dual of `#Caps`: `#grant` authorizes
+    /// the listed effects through the handle, RAII-revoked at scope end.
+    fn at_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // `#`
+        self.bump(); // `grant`
+        let lparen = self.peek().span;
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_GRANT))?;
+        let mut caps = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, span) = self.expect_ident("for an effect name")?;
+                caps.push((name, span));
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between effects in the list")?;
+            }
+        }
+        let rparen = self.peek().span;
+        self.expect(TokKind::RParen, &format!("to close the `#{}(…)` list", Syntax::KW_GRANT))?;
+        self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_GRANT))?;
+        // The capability handle binding: `{ caps -> … }`.
+        let (binding, binding_span) = self.expect_ident("for the capability handle name")?;
+        self.expect(
+            TokKind::Arrow,
+            &format!(
+                "after the `#{}` handle name (`#{}(…) {{ caps {} … }}`)",
+                Syntax::KW_GRANT, Syntax::KW_GRANT, Syntax::GRANT_ARROW
+            ),
+        )?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Grant {
+            caps,
+            caps_span: Span::new(lparen.start, rparen.end),
+            binding,
+            binding_span,
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement
     /// position. Cursor is on the `#` token. `name` binds a user-chosen
     /// transaction handle (any ident, mirroring `region r { … }`).
@@ -723,6 +769,10 @@ impl<'a> Parser<'a> {
                 // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
+                }
+                // D-SCAP1: `#grant(Fs) { caps -> … }` scoped-capability grant region.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_GRANT) {
+                    return self.at_grant_stmt();
                 }
                 // D-TXN1–D-TXN4: `#Transact(name) { … }` transaction block.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSACT) {

@@ -78,7 +78,7 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
-            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Transact { body: inner, .. } => {
+            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Grant { body: inner, .. } | Stmt::Transact { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);
             }
             // D-WHEN1: rewrite calls in both arms so sibling resolution works
@@ -1023,7 +1023,7 @@ pub(crate) fn collect_core_stmts(
                     collect_core_stmts(body, imports, used);
                 }
             }
-            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Transact { body, .. } => collect_core_stmts(body, imports, used),
+            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => collect_core_stmts(body, imports, used),
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
             // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).

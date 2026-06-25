@@ -1,0 +1,7 @@
+Error [E0711]: the capability `caps` can't escape its `#grant` block
+  --> tests/ui/grant_handle_escapes.jet:6:18
+    |
+  6 |         alias @= caps;
+    |                  ^^^^
+ Why: `#grant(…)` revokes the capability at the end of its block (RAII); returning, storing, or sharing `caps` would let a revoked authority outlive the grant
+ Fix: use `caps` only inside the `#grant` block, or perform the work there

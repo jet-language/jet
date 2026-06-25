@@ -2459,6 +2459,11 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
         // (E0741); codegen is dumb (I3). Check the body on the SAME `locals` (it leaks
         // like a region), reusing the covered `TStmt::Region` lowering.
         Stmt::Caps { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-SCAP1: a `#grant(Fs) { caps -> … }` scoped-capability grant erases to a
+        // plain Rust block (the grant/revoke is a compile-time capability fact, I3).
+        // The capability handle is sema-only — it is NOT emitted, so the body lowers
+        // exactly like `Stmt::Region`. Check the body on the SAME `locals`.
+        Stmt::Grant { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
         // The body leaks into the outer scope like a region; check it on the SAME `locals`.
         Stmt::Live { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
@@ -5531,6 +5536,12 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // on the SAME `&mut env` (its `let`s leak). Effects erase at codegen (I3); reuse the
         // `TStmt::Region` shape.
         Stmt::Caps { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // D-SCAP1: a `#grant(Fs) { caps -> … }` grant region. The capability handle
+        // is a compile-time-only fact (authority to perform the granted effects),
+        // erased here (I3); the body lowers on the SAME `&mut env` (its `let`s leak)
+        // into a plain `TStmt::Region` — byte-for-byte the `Stmt::Region`/`Stmt::Caps`
+        // shape. No runtime grant/revoke value, no `unsafe`.
+        Stmt::Grant { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1). Resolve each
         // field into an `(is_allocator, value)` guard at lowering, then lower the body on
         // the SAME `env` (it leaks like a region). Emit reproduces `emit_stmts`'s

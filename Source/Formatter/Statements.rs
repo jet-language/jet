@@ -170,6 +170,21 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-SCAP1: `#grant(Fs) { caps -> … }` scoped-capability grant region.
+            Stmt::Grant { caps, binding, body, .. } => {
+                let list = caps
+                    .iter()
+                    .map(|(n, _)| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.write(&format!(
+                    "#{}({}) {{ {} {}",
+                    Syntax::KW_GRANT, list, binding, Syntax::GRANT_ARROW
+                ));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-WHEN1 (ratified 2026-06-19): format like `if` with `comptime` lead.
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
                 self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));

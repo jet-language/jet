@@ -283,6 +283,150 @@ fn main() { work(); }
     assert!(!c.contains(&"E0740"), "unknown name should suppress E0740: {:?}", c);
 }
 
+// ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────
+
+/// D-SCAP1: a `#grant(Fs) { caps -> … }` whose body stays within the granted set
+/// compiles clean — the grant authorizes the listed effects.
+#[test]
+fn grant_within_set_ok() {
+    let src = r#"
+use core.fs as fs
+fn main() {
+    #grant(Fs, Io) { caps ->
+        text @= fs.read("x") ?? "";
+        print(text);
+    }
+}
+"#;
+    assert!(codes(src).is_empty(), "in-set grant should compile: {:?}", codes(src));
+}
+
+/// D-SCAP1: an effect used inside a `#grant(…)` that the grant doesn't authorize
+/// has no capability — E0712 (the dual of E0741).
+#[test]
+fn grant_out_of_set_is_e0712() {
+    let src = r#"
+use core.fs as fs
+fn main() {
+    #grant(Net) { caps ->
+        text @= fs.read("x") ?? "";
+        print(text);
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0712"), "expected E0712, got {:?}", codes(src));
+}
+
+/// D-SCAP1: the grant restriction is transitive — an effect reached only through
+/// a call still trips E0712.
+#[test]
+fn grant_transitive_is_e0712() {
+    let src = r#"
+use core.fs as fs
+fn helper(p: String) -> String { return fs.read(p) ?? ""; }
+fn main() {
+    #grant(Io) { caps ->
+        text @= helper("x");
+        print(text);
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0712"), "transitive Fs should trip E0712: {:?}", codes(src));
+}
+
+/// D-SCAP1: the capability handle may not escape its grant — aliasing it to
+/// another binding is E0711.
+#[test]
+fn grant_handle_alias_is_e0711() {
+    let src = r#"
+fn main() {
+    #grant(Io) { caps ->
+        alias @= caps;
+        print("hi");
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0711"), "aliasing the handle should be E0711: {:?}", codes(src));
+}
+
+/// D-SCAP1: not naming the handle anywhere (never escaping it) compiles clean —
+/// the grant is the authorizing context, the handle need not be used.
+#[test]
+fn grant_unused_handle_ok() {
+    let src = r#"
+fn main() {
+    #grant(Io) { caps ->
+        print("granted");
+    }
+}
+"#;
+    assert!(codes(src).is_empty(), "an unused grant handle should compile: {:?}", codes(src));
+}
+
+/// D-SCAP1: an unknown effect name in a `#grant(…)` list is E0119 (shared with
+/// `#Caps`/`#(…)`), and suppresses the E0712 subset check.
+#[test]
+fn grant_unknown_effect_is_e0119() {
+    let src = r#"
+fn main() {
+    #grant(Bogus) { caps ->
+        print("hi");
+    }
+}
+"#;
+    let c = codes(src);
+    assert!(c.contains(&"E0119"), "expected E0119, got {:?}", c);
+    assert!(!c.contains(&"E0712"), "unknown name should suppress E0712: {:?}", c);
+}
+
+/// I3: a `#grant(…)` region lowers to a plain lexical block — the generated Rust
+/// carries no capability machinery (no handle value, no grant/revoke), no effect
+/// annotation, and NO `unsafe`. The body runs unchanged.
+#[test]
+fn grant_region_erases_to_plain_block() {
+    let src = r#"
+fn main() {
+    #grant(Io) { caps ->
+        print("inside");
+    }
+    print("outside");
+}
+"#;
+    let rust = jet::compile(src).expect("compiles").rust;
+    assert!(!rust.contains("grant"), "generated Rust must not mention grant:\n{rust}");
+    assert!(!rust.contains("Capability"), "generated Rust must not mention the handle type:\n{rust}");
+    assert!(!rust.contains("#("), "generated Rust must carry no effect annotation:\n{rust}");
+    assert!(!rust.contains("unsafe"), "grant codegen must contain no `unsafe`:\n{rust}");
+    assert!(rust.contains("inside") && rust.contains("outside"), "region body must survive:\n{rust}");
+}
+
+/// I3 (D-SCAP1): a `#grant(…)` region lowers to the SAME plain Rust block as the
+/// already-erased `#Caps(…)` region — the grant carries no machinery `#Caps`
+/// doesn't, so swapping `#grant(E) { h -> … }` for `#Caps(E) { … }` is identical
+/// generated code (the handle is sema-only and erased).
+#[test]
+fn grant_lowers_like_caps_region() {
+    let granted = r#"
+fn main() {
+    #grant(Io) { caps ->
+        print("a");
+        print("b");
+    }
+}
+"#;
+    let caps = r#"
+fn main() {
+    #Caps(Io) {
+        print("a");
+        print("b");
+    }
+}
+"#;
+    let a = jet::compile(granted).expect("granted compiles").rust;
+    let b = jet::compile(caps).expect("caps compiles").rust;
+    assert_eq!(a, b, "a #grant region must lower identically to the erased #Caps region (I3)");
+}
+
 // ── Transactions (D-TXN1–D-TXN4) ──────────────────────────────────────────────
 
 /// D-TXN2: an irreversible Core effect (Fs) reached DIRECTLY inside a

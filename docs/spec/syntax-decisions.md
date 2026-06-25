@@ -1914,17 +1914,28 @@ Three value/effect-safety features, each **ratified as the target** but **gated*
 upstream decision still in the ballot — implementation is sequenced after the gate, no
 `src/` change until then.
 
-**D-SCAP1 — Scoped capabilities** *(ratified 2026-06-21, option A; gated on D-EFF1)*: a
-**capability is a first-class value** granted into a lexical scope —
-`#grant(fs) { caps -> … }` — and **revoked at scope end** by the RAII rule (S63). The
-capability authorizes its effect (`#fs`/`#net`) inside the scope; letting it escape
-(stored, returned, shared) is a compile error (**E0711**), and using an effect with no
-capability in scope is **E0712**. This is **authority to perform an effect**, distinct
-from the c06 value-ownership capabilities (`view`/`edit`/`take`/`share`); it generalizes
-the S58 `#Audit`/`#Unsafe` gate from "unsafe ops" to "any guarded power." **Gated on
-D-EFF1** (the effect system, c66) — the capability is what authorizes an effect region,
-so D-EFF1 must land first. Rejected: effect-tag-only capabilities with no value (option
-B — can't lend a power per-call).
+**D-SCAP1 — Scoped capabilities** *(ratified 2026-06-21, option A; gated on D-EFF1;
+**implemented 2026-06-24**)*: a **capability is a first-class value** granted into a
+lexical scope — `#grant(Fs) { caps -> … }` — and **revoked at scope end** by the RAII
+rule (S63). The capability authorizes its effect (`Fs`/`Net`/…) inside the scope; letting
+it escape (stored, returned, shared, captured) is a compile error (**E0711**), and using
+an effect with no capability in scope is **E0712**. This is **authority to perform an
+effect**, distinct from the c06 value-ownership capabilities
+(`view`/`edit`/`take`/`share`); it generalizes the S58 `#Audit`/`#Unsafe` gate from
+"unsafe ops" to "any guarded power." Rejected: effect-tag-only capabilities with no value
+(option B — can't lend a power per-call).
+
+**Implementation (2026-06-24).** `#grant(<effects>) { <handle> -> … }` is the dual of
+`#Caps`: where `#Caps` *restricts* a region to a set, `#grant` *authorizes* one and binds
+a first-class capability handle for the block (`KW_GRANT`, lowercase per the ratified
+spelling; `Stmt::Grant` in the AST). Built on the audited D-EFF1 region machinery
+(`RegionAccum`/`RegionSummary` carry a `grant` flag): the block is bounded to the granted
+set transitively — an effect reached inside that the grant omits has no backing
+capability and is **E0712** (the dual of E0741). The handle is a sema-only, unnameable
+type (`Capability`); it is erased in codegen (I3 — the grant lowers to a plain block, no
+runtime grant/revoke value, no `unsafe`). Escape of the handle past the block (return,
+store, alias, closure capture) is **E0711**. Snapshots `tests/ui/grant_out_of_set`
+(E0712) + `tests/ui/grant_handle_escapes` (E0711); example `effect_grant.jet`.
 
 **D-UNIT1 — Units of measure as a tag** *(ratified 2026-06-21, option B; gated on
 D-QUAL2)*: units are a **parameterised tag `#unit(usd)`** on a numeric type, declared in
@@ -2559,7 +2570,7 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-21 | D-QUAL2 | two qualifier kinds — `trait` (methods, dispatches) vs `tag` (no methods, erases); unblocks value-tags cluster | owner |
 | 2026-06-21 | D-UNINIT1 | `#uninit` binding marker, gated by `use core.mem`; write-before-read proof (E0420) | owner |
 | 2026-06-21 | D-REGEX1 | `jet.regex` on the Rust `regex` crate (owner-approved I6 bootstrap; native-ize before Epoch 3 ends) | owner |
-| 2026-06-21 | D-SCAP1 | scoped capabilities: `#grant(fs) { caps -> … }`, RAII-revoked (gated on D-EFF1) | owner |
+| 2026-06-21 | D-SCAP1 | scoped capabilities: `#grant(Fs) { caps -> … }`, RAII-revoked (gated on D-EFF1). **(impl 2026-06-24)** the dual of `#Caps` — a `#grant(<effects>) { <handle> -> … }` statement region (`KW_GRANT`) that authorizes the listed effects inside the block and binds a first-class capability handle, RAII-revoked at scope end (erased in codegen, I3). Like `#Caps`, the block is bounded to the granted set (transitively): an effect inside that the grant omits has no backing capability — **E0712** (the dual of E0741). The handle is sema-only and unnameable as a type; letting it escape (returned, stored, aliased, captured) is **E0711**. `tests/ui/grant_out_of_set` + `tests/ui/grant_handle_escapes`; `examples/features/effect_grant.jet`. | owner |
 | 2026-06-21 | D-UNIT1 | units as `#unit(usd)` tag + `9.99.usd` literal (gated on D-QUAL2) | owner |
 | 2026-06-21 | D-LIN1 | single-use values `#SingleUse` (renamed from `linear`; gated on D-QUAL2) | owner |
 | 2026-06-21 | D-TGT1 | `targets:` list replaces `kind:` (kind removed; greenfield) | owner |

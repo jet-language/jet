@@ -1223,6 +1223,25 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-SCAP1 (ratified 2026-06-21, opt A): a scoped-capability grant region
+    /// `#grant(Fs) { caps -> … }`. The listed effects are **authorized** inside
+    /// the block via the first-class handle `binding` (here `caps`), and the
+    /// capability is **revoked at scope end** by the RAII rule (S63) — the handle
+    /// is bound only for the block's extent. The dual of `#Caps`: `#Caps`
+    /// *restricts* a region to a set, `#grant` *authorizes* one. An effect used
+    /// inside the block that the grant doesn't cover has no capability backing it
+    /// (E0712); letting the handle escape (returned, stored, captured) is E0711.
+    /// A lexical scope emitted as a plain Rust block — the grant/revoke is a
+    /// compile-time capability fact, erased in codegen (I3).
+    Grant {
+        caps: Vec<(String, Span)>,
+        caps_span: Span,
+        /// The bound capability handle name (`caps` in `#grant(Fs) { caps -> … }`).
+        binding: String,
+        binding_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `comptime if <cond> { … } else { … }`.
     /// The condition is evaluated at compile time; only the selected arm is
     /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).

@@ -223,6 +223,12 @@ pub struct RegionAccum {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
+    /// D-SCAP1: true for a `#grant(…)` region (authorizes the listed effects via
+    /// a handle), false for a `#Caps(…)` region (restricts to the listed set).
+    /// Both share the subset machinery; the flag selects the diagnostic — an
+    /// out-of-set effect is E0712 (no capability) for a grant, E0741 (out of the
+    /// restriction) for caps.
+    pub grant: bool,
 }
 
 /// D-EFF1: a `#Caps(…) { … }` region's accumulated effects, checked (transitively)
@@ -234,8 +240,10 @@ pub struct RegionSummary {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// Span of the `#Caps(…)` list, for the diagnostic.
+    /// Span of the `#Caps(…)` / `#grant(…)` list, for the diagnostic.
     pub caps_span: Span,
+    /// D-SCAP1: a `#grant(…)` region (E0712 on overflow) vs `#Caps(…)` (E0741).
+    pub grant: bool,
 }
 
 /// Whole-program fixpoint: turn per-function summaries into transitive inferred
@@ -321,7 +329,11 @@ pub fn check_region_caps(
             }
             let over: EffectSet = inferred.difference(&region.caps).copied().collect();
             if !over.is_empty() {
-                diags.push(e0741(&over, &region.caps, region.caps_span));
+                if region.grant {
+                    diags.push(e0712(&over, &region.caps, region.caps_span));
+                } else {
+                    diags.push(e0741(&over, &region.caps, region.caps_span));
+                }
             }
         }
     }
@@ -343,6 +355,233 @@ pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
             crate::Syntax::KW_CAPS, caps_list
         ),
         format!("add `{}` to the `#{}(…)` list, or move that work outside the region", over_list, crate::Syntax::KW_CAPS),
+        Some(span),
+    )
+}
+
+/// D-SCAP1: detect whether the capability handle `handle` bound by a `#grant(…)`
+/// region escapes its block — returned, stored, passed, captured, or otherwise
+/// used as a value that outlives the scope. Returns the span of the first escape,
+/// or `None` if the handle is only ever used in place (as the receiver of a
+/// method call / field access / `?` on itself). The receiver of `handle.read(…)`
+/// is an in-place use (performing the granted effect); everything else — `return
+/// handle`, `x @= handle`, `f(handle)`, `[handle]`, a struct field, an `or`
+/// fallback — lets the revoked authority leak past the grant (E0711).
+pub fn grant_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
+    body.iter().find_map(|s| stmt_handle_escape(s, handle))
+}
+
+fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
+    use crate::AST::{ForKind, Stmt};
+    let block = |b: &[Stmt]| b.iter().find_map(|s| stmt_handle_escape(s, handle));
+    match stmt {
+        Stmt::Expr(e) => expr_handle_escape(e, handle),
+        Stmt::Val(b) => expr_handle_escape(&b.init, handle),
+        Stmt::Assign { value, .. } => expr_handle_escape(value, handle),
+        Stmt::Return(Some(e), _) => expr_handle_escape(e, handle),
+        Stmt::If(i) => expr_handle_escape(&i.cond, handle)
+            .or_else(|| block(&i.then_body))
+            .or_else(|| i.else_branch.as_ref().and_then(|e| else_handle_escape(e, handle))),
+        Stmt::While { cond, body, .. } => {
+            expr_handle_escape(cond, handle).or_else(|| block(body))
+        }
+        Stmt::For { kind, body, .. } => {
+            let coll = match kind {
+                ForKind::Range { start, end, step } => expr_handle_escape(start, handle)
+                    .or_else(|| expr_handle_escape(end, handle))
+                    .or_else(|| step.as_ref().and_then(|s| expr_handle_escape(s, handle))),
+                ForKind::In { collection } => expr_handle_escape(collection, handle),
+            };
+            coll.or_else(|| block(body))
+        }
+        Stmt::Switch { subject, arms, else_body, .. } => expr_handle_escape(subject, handle)
+            .or_else(|| {
+                arms.iter().find_map(|a| {
+                    expr_handle_escape(&a.cond, handle).or_else(|| block(&a.body))
+                })
+            })
+            .or_else(|| else_body.as_ref().and_then(|b| block(b))),
+        Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::Live { body, .. } => block(body),
+        Stmt::ComptimeIf { cond, then_body, else_body, .. } => expr_handle_escape(cond, handle)
+            .or_else(|| block(then_body))
+            .or_else(|| else_body.as_ref().and_then(|b| block(b))),
+        Stmt::ContextBlock { fields, body, .. } => fields
+            .iter()
+            .find_map(|(_, e, _)| expr_handle_escape(e, handle))
+            .or_else(|| block(body)),
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..)
+        | Stmt::Return(None, _) => None,
+    }
+}
+
+fn else_handle_escape(e: &crate::AST::ElseBranch, handle: &str) -> Option<Span> {
+    use crate::AST::ElseBranch;
+    match e {
+        ElseBranch::Else(stmts) => stmts.iter().find_map(|s| stmt_handle_escape(s, handle)),
+        ElseBranch::ElseIf(i) => expr_handle_escape(&i.cond, handle)
+            .or_else(|| i.then_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
+            .or_else(|| i.else_branch.as_ref().and_then(|e| else_handle_escape(e, handle))),
+    }
+}
+
+/// True when `e` is the bare handle ident (the root of an in-place chain). A bare
+/// reference to the handle is a *value-use* (escape) on its own; but as the
+/// receiver of a method call / field access / `?` / index it is an in-place use
+/// of the capability that does NOT carry it out of scope.
+fn is_bare_handle(e: &crate::AST::Expr, handle: &str) -> bool {
+    matches!(e, crate::AST::Expr::Ident(n, _) if n == handle)
+}
+
+/// The span of the first escaping use of `handle` in `e`, or `None`. A bare
+/// reference to the handle in value position is an escape; a method-call /
+/// field-access / `?` chain rooted at the handle is an in-place use, but the
+/// chain's arguments and indices are still scanned (they can carry it out).
+fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
+    use crate::AST::{EnumLitArg, Expr, OrFallback, StrPart};
+    match e {
+        // A bare value-position reference to the handle escapes.
+        Expr::Ident(n, span) if n == handle => Some(*span),
+        Expr::Ident(_, _) => None,
+        // A method call / field / `?` / deref / index whose receiver is the bare
+        // handle is an in-place use (performing the granted effect) — NOT an
+        // escape; but the call's args and the index are still scanned.
+        Expr::MethodCall { receiver, args, .. } if is_bare_handle(receiver, handle) => {
+            args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))
+        }
+        Expr::Field(receiver, _, _) if is_bare_handle(receiver, handle) => None,
+        Expr::OptField { base, .. } if is_bare_handle(base, handle) => None,
+        Expr::Try(receiver, _, _) if is_bare_handle(receiver, handle) => None,
+        Expr::Deref(receiver, _) if is_bare_handle(receiver, handle) => None,
+        Expr::Index { base, index, .. } if is_bare_handle(base, handle) => {
+            expr_handle_escape(index, handle)
+        }
+        Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _)
+        | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _) | Expr::Field(inner, _, _) => expr_handle_escape(inner, handle),
+        Expr::OptField { base, .. } => expr_handle_escape(base, handle),
+        Expr::Binary(_, l, r, _) => {
+            expr_handle_escape(l, handle).or_else(|| expr_handle_escape(r, handle))
+        }
+        Expr::Call(c) => c.args.iter().find_map(|a| expr_handle_escape(&a.expr, handle)),
+        Expr::CallValue { callee, args, .. } => expr_handle_escape(callee, handle)
+            .or_else(|| args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))),
+        Expr::MethodCall { receiver, args, .. } => expr_handle_escape(receiver, handle)
+            .or_else(|| args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))),
+        Expr::Index { base, index, .. } => {
+            expr_handle_escape(base, handle).or_else(|| expr_handle_escape(index, handle))
+        }
+        Expr::Slice { base, start, end, .. } => expr_handle_escape(base, handle)
+            .or_else(|| expr_handle_escape(start, handle))
+            .or_else(|| expr_handle_escape(end, handle)),
+        Expr::ListLit(elems, _) => elems.iter().find_map(|el| expr_handle_escape(el, handle)),
+        Expr::TupleLit(fields, _, _) => {
+            fields.iter().find_map(|(_, e)| expr_handle_escape(e, handle))
+        }
+        Expr::MapLit(entries, _) => entries
+            .iter()
+            .find_map(|(k, v)| expr_handle_escape(k, handle).or_else(|| expr_handle_escape(v, handle))),
+        Expr::StructLit { fields, .. } => {
+            fields.iter().find_map(|(_, _, f)| expr_handle_escape(f, handle))
+        }
+        Expr::EnumLit { args, .. } => args.iter().find_map(|a| match a {
+            EnumLitArg::Positional(e) => expr_handle_escape(e, handle),
+            EnumLitArg::Named { expr, .. } => expr_handle_escape(expr, handle),
+        }),
+        Expr::OrFallback { value, fallback, .. } => expr_handle_escape(value, handle).or_else(|| {
+            match fallback {
+                OrFallback::Value(e) => expr_handle_escape(e, handle),
+                OrFallback::Return(Some(e), _) => expr_handle_escape(e, handle),
+                _ => None,
+            }
+        }),
+        Expr::PatternTest { subject, .. } => expr_handle_escape(subject, handle),
+        Expr::Str(parts, _) => parts.iter().find_map(|p| match p {
+            StrPart::Interp(e) => expr_handle_escape(e, handle),
+            _ => None,
+        }),
+        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+            expr_handle_escape(cond, handle)
+                .or_else(|| expr_handle_escape(then_value, handle))
+                .or_else(|| expr_handle_escape(else_value, handle))
+                .or_else(|| then_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
+                .or_else(|| else_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
+        }
+        Expr::FanOut { callee, items, .. } => expr_handle_escape(callee, handle)
+            .or_else(|| items.iter().find_map(|e| expr_handle_escape(e, handle))),
+        Expr::PtrFromAddr { addr, .. } => expr_handle_escape(addr, handle),
+        // A lambda that captures the handle smuggles it out — the closure can
+        // outlive the grant. Count a reference unless a lambda param shadows the
+        // handle name (then it's a different binding, not a capture).
+        Expr::Lambda(l) => {
+            let shadowed = l.params.iter().any(|p| p.name == handle)
+                || l.take_names.iter().any(|(n, _)| n == handle);
+            if !shadowed && super::lambda_body_refs_name(&l.body, handle) {
+                Some(l.span)
+            } else {
+                None
+            }
+        }
+        Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Bool(..)
+        | Expr::Char(..)
+        | Expr::Absent(_)
+        | Expr::Todo { .. } => None,
+    }
+}
+
+/// E0712 (D-SCAP1): an effect used inside a `#grant(…)` region that the grant
+/// doesn't authorize — there is no capability in scope backing it. The dual of
+/// E0741: `#grant(…)` *authorizes* exactly the listed effects through its handle,
+/// so an effect reached inside (even through a call) that the grant omits has no
+/// capability to perform it.
+pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
+    let over_list = show_set(over);
+    let caps_list = if caps.is_empty() {
+        "no effects".to_string()
+    } else {
+        format!("`{}`", show_set(caps))
+    };
+    Diagnostic::error(
+        "E0712",
+        format!(
+            "this `#{}` region uses the effect `{}`, which it has no capability for",
+            crate::Syntax::KW_GRANT, over_list
+        ),
+        format!(
+            "`#{}(…)` grants only {}; an effect reached inside — even through a call — needs a capability in scope to perform it",
+            crate::Syntax::KW_GRANT, caps_list
+        ),
+        format!(
+            "add `{}` to the `#{}(…)` list, or move that work outside the grant",
+            over_list, crate::Syntax::KW_GRANT
+        ),
+        Some(span),
+    )
+}
+
+/// E0711 (D-SCAP1): the capability handle bound by a `#grant(…)` region escapes
+/// its scope — returned, stored in an outer binding, or captured by an escaping
+/// value. The capability is revoked at scope end (RAII, S63), so a reference that
+/// outlives the block would name a revoked authority.
+pub fn e0711(handle: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0711",
+        format!("the capability `{}` can't escape its `#{}` block", handle, crate::Syntax::KW_GRANT),
+        format!(
+            "`#{}(…)` revokes the capability at the end of its block (RAII); returning, storing, or sharing `{}` would let a revoked authority outlive the grant",
+            crate::Syntax::KW_GRANT, handle
+        ),
+        format!("use `{}` only inside the `#{}` block, or perform the work there", handle, crate::Syntax::KW_GRANT),
         Some(span),
     )
 }
