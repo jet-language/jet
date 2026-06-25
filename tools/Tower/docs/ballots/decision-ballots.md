@@ -1067,6 +1067,75 @@ in a signature type (`fn f(r: Reservation #Pending)`), that rides D-QUAL4.
 
 ---
 
+### D-PARSE-1 — correctness-sensitive formats: keep hand-rolled subsets, or let I6 bend? (rec A — board card c111)
+
+**Gist:** Jet hand-rolls JSON, TOML, SemVer, and C-prototype parsers as *subsets*
+to honor I6 (zero crates in the compiler). The audit found no safe duplication to
+merge — the real question is whether a hand-written subset silently mis-parsing a
+real-world file is acceptable, or whether one of: (A) document + enforce the subset
+with a clear diagnostic, (B) allow a vetted dependency per format, (C) build full
+native parsers. This decides where, if anywhere, I6 bends.
+
+**Story.** Mara points `jet` at a generated `nix build --json` blob whose number
+has an exponent the subset reader mis-rounds, and at a registry `version: "1.2.0+build.7"`
+whose `+build` metadata the SemVer subset silently drops — so two builds with
+different metadata compare equal. Nothing errors; the wrong answer just propagates.
+She'd rather Jet either parse it correctly or refuse it loudly.
+
+**In the wild (today, all three JSON readers + SemVer are subsets):**
+```shell
+# SemVer subset drops build metadata — these compare EQUAL today:
+$ jet pkg why widgets        # widgets pinned 1.2.0+build.7, candidate 1.2.0+build.9
+ok: 1.2.0+build.7 satisfies ^1.2.0      # silently ignores +build.* — wrong for reproducibility
+
+# jetpack.toml subset only knows [repo] [sources] [packages]:
+$ jet pkg sync
+# a [profile] table a user copied from a cargo-ish example: silently ignored, no error
+```
+
+**Other languages:** Rust ships `serde_json` / `semver` as first-party-blessed crates
+(std stays tiny; correctness lives in vetted external crates). Go puts `encoding/json`
+and `golang.org/x/mod/semver` *in/near std* — full parsers, no subset. Zig hand-rolls
+`std.json` but it is a *complete* parser, not a documented subset. No serious language
+ships a silently-lossy subset for a format it accepts from users.
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | I6 stance | Correctness of accepted inputs | Effort locus | One-path fit |
+|---|---|---|---|---|
+| A document + enforce subset, refuse out-of-subset (recommended) | I6 stays hard | correct *or* a clear refusal; never silent-wrong | diagnostics + docs per format; later unify 3 JSON readers onto one | strong — "great error + documented limit" is the I8 path |
+| B vetted dependency per format | I6 bends, owner-gated per dep | fully correct | replace subset with crate, delete subset | medium — first sanctioned compiler dep; precedent risk |
+| C full native parsers | I6 stays hard | fully correct | build complete JSON/TOML/SemVer in std-only Rust | strong on purity, large standing surface to maintain |
+
+- **Option A — keep subsets, but make them honest. (recommended)**
+```shell
+$ jet pkg why widgets
+error[E12xx]: version `1.2.0+build.7` uses build metadata Jet does not compare
+  Jet's version matcher supports `MAJOR.MINOR.PATCH[-pre]`; `+build` metadata
+  is not part of ordering and Jet will not guess.
+  fix: pin without `+build`, or open an issue to request full SemVer support
+```
+Then, as a *separate, reviewed* change (explicit behavior change, new snapshots),
+collapse the three JSON value models (`LSP/JSON`, `Jetpack/JSON`, stdlib `jet_std::Json`)
+onto the one stdlib parser + one escaper. That is the only consolidation worth doing
+and is out of scope for any behavior-preserving pass.
+
+- **Option B — bless a dependency for the correctness-critical format(s).**
+```toml
+# Cargo.toml (compiler) — owner-approved exception to I6, scoped + justified
+serde_json = "1"   # only for nix --json ingest; subset reader deleted
+```
+
+- **Option C — full native parsers, no deps, no subsets.** Most code, zero new
+deps, fully correct; largest maintained surface.
+
+**Recommendation:** A. It keeps I6 intact, fits the philosophy ("a great error +
+workaround beats a silent wrong answer"), and the only genuinely valuable cleanup —
+one JSON parser instead of three — rides along as a deliberate, snapshot-reviewed
+change rather than a risky "behavior-preserving" merge.
+
+---
+
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
   `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor

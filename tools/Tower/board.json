@@ -904,8 +904,8 @@
       "type": "task",
       "title": "Replace hand-rolled parsers where correctness matters",
       "body": "Audit finding: the zero-dependency rule has pushed correctness-sensitive protocol/config/version parsing into hand-written subsets. Decide where I6 should bend, or explicitly narrow the feature contracts. Evidence: Source/LSP/JSON.rs minimal JSON; Source/Jetpack/ManifestTOML.rs TOML subset; Source/Publish/SemVer.rs partial SemVer/ranges; Source/CBind.rs focused C prototype parser; Cargo.toml enforces std-only compiler deps.",
-      "stage": "ready",
-      "plan": "parser-correctness-policy",
+      "stage": "deciding",
+      "plan": "c111-parser-consolidation",
       "notes": [
         {
           "t": "Filed from serious-language credibility audit. Needs a dependency-policy decision, not just implementation cleanup.",
@@ -914,12 +914,19 @@
         {
           "t": "Plan added 2026-06-22: parser-correctness-policy. No open owner decision blocks the plan; next step is implementation on go.",
           "at": "2026-06-22"
+        },
+        {
+          "t": "[sweep] Audited all ad-hoc parsers (3 JSON readers, 4 JSON escapers, 2 unquote, SemVer/Lock/RefSpec, CBind, pack.jet/jetpack.toml/env.jet). NONE safely auto-replaceable — each has a distinct accepted-input/error/output contract; a forced merge would change behavior (I8). No code changed. The real question is owner-facing → ballot D-PARSE-1: subset parsers silently mis-parse (SemVer drops +build, TOML subset ignores unknown tables, JSON accepts lone surrogates) — refuse out-of-subset input loudly? Plan: c111-parser-consolidation.md.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-22",
+      "updated": "2026-06-25",
       "priority": "P2",
-      "workOrder": null
+      "workOrder": null,
+      "decisions": [
+        "D-PARSE-1"
+      ]
     },
     {
       "id": "c113",
