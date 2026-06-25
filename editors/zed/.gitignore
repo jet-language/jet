@@ -2,7 +2,12 @@ target/
 extension.toml
 wasm-src/target/
 wasm-src/Cargo.lock
-grammar-repo/.git/
+# grammar-repo/ is a generated build artifact: install.sh syncs it from the
+# authoritative source (editors/tree-sitter/), runs `tree-sitter generate`, and
+# git-inits + commits it locally with a per-machine GRAMMAR_REV. It must not be
+# tracked here (a committed gitlink pointer goes stale on every rebuild and
+# differs per machine). Regenerate it with: editors/zed/install.sh
+grammar-repo/
 grammars/jet/
 # Legacy artifacts from an earlier layout.
 Cargo.lock
