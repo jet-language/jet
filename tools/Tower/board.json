@@ -164,7 +164,7 @@
       "type": "idea",
       "title": "Scoped transactions (#transact rollback semantics)",
       "body": "#transact {} surface is ratified (S82); decide rollback semantics: per-type opt-in Rollback trait, reverse-chain on ?-failure, commit on success. After D-EFF1.",
-      "stage": "done",
+      "stage": "deciding",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-TXN1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -193,12 +193,17 @@
         {
           "t": "[recovery 2026-06-25] D-ROLLBACK-TRAIT ratified=A (paired snapshot/restore + associated `type Snapshot`), recorded in syntax-decisions.md, open ballot card stripped. BUILD GATE FOUND for layer 2: option A's `type Snapshot` associated type is non-functional today — `assoc_type_impls` is parsed and formatted but never resolved in sema/codegen (only the Formatter reads it; a trait method returning an associated type fails E0907 'doesn't match the trait signature'). D-LIB2 (generics v1: associated types, ratified 2026-06-17) was built parse-only. So shipping layer 2 requires FIRST completing associated-type resolution: sema signature substitution (`Item`→concrete) + codegen of `type X = Y` and `Self::X` in bounds/returns. Recommend a dedicated assoc-types build card sequenced ahead of layer 2. Layers 1+3 remain shipped. D-PARSE-1 is the other unblocked stream (no prerequisite gate).",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[handoff 2026-06-25] STATUS — layers 1+3 SHIPPED (example 110, suite green). Layer 2 (Rollback trait) NOT built: blocked on c149 (complete associated-type resolution), which is itself gated on decision D-ASSOC-NOW (sequence assoc-types vs D-PARSE-1; recommend B). NEXT ACTION once D-ASSOC-NOW resolves A/C: build c149, then layer 2 = trait recognition (assoc `type Snapshot` + snapshot/restore) + #Transact dispatch to custom snapshot/restore instead of deep clone + `derive Rollback` (Snapshot=Self) + example + snapshot tests; keep all unsafe in the jet_txn prelude (I1), rustc never speaks (I2). Stage moved done→deciding to reflect the unbuilt layer.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
       "updated": "2026-06-25",
       "decisions": [
-        "D-ROLLBACK-TRAIT"
+        "D-ROLLBACK-TRAIT",
+        "D-ASSOC-NOW"
       ],
       "plan": null,
       "priority": "P2",
@@ -329,13 +334,19 @@
         {
           "t": "[sweep] D-PARSE-1 ratified C: build FULL native std-only JSON/TOML/SemVer parsers (incl +build metadata) replacing lossy subsets; I6 stays hard. Unblocked → building.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[handoff 2026-06-25] STATUS — NOT started; ready to build (D-PARSE-1=C ratified, no gate). Plan: tools/Tower/docs/sidequests/c111-parser-consolidation.md. Independent of c149/c72; sequenced against them by decision D-ASSOC-NOW (recommend B = this card first). Build full std-only parsers one format at a time, each shipped complete with snapshot tests: SemVer (Source/Publish/SemVer.rs — add +build metadata + range ops) → JSON (collapse the 3 value models onto one shared jet_std::Json across LSP/Jetpack/diagnostics) → TOML (Source/Jetpack/ManifestTOML.rs — full tables/arrays, replace the 3-table subset). Behavior-changing: snapshot-pin the new accept/reject contracts.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
       "updated": "2026-06-25",
       "priority": "P2",
       "workOrder": null,
-      "decisions": []
+      "decisions": [
+        "D-ASSOC-NOW"
+      ]
     },
     {
       "id": "c113",
@@ -590,6 +601,27 @@
       "created": "2026-06-25",
       "updated": "2026-06-25T11:37:34.610Z",
       "decisions": [],
+      "priority": "P2",
+      "workOrder": null
+    },
+    {
+      "id": "c149",
+      "type": "idea",
+      "title": "Complete associated-type resolution (D-LIB2 generics v1)",
+      "body": "D-LIB2 (generics v1: associated types + default method bodies, ratified 2026-06-17) was built PARSE-ONLY: `assoc_types` on TraitDef and `assoc_type_impls` on ImplDef are parsed and formatted but never resolved in sema or codegen — only the Formatter reads them. A trait method whose return/param uses an associated type fails E0907 ('doesn't match the trait signature') because sema compares the trait's abstract type (e.g. `Item`) against the impl's concrete type literally. SCOPE: sema must substitute the impl's `type X = Concrete` during signature matching, method resolution, and return/param typing; codegen must emit the Rust associated-type binding and `Self::X` in bounds/returns. Hard prerequisite for c72 layer 2 (the Rollback trait's `type Snapshot`). Sequenced against D-PARSE-1 by decision D-ASSOC-NOW.",
+      "stage": "deciding",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[handoff 2026-06-25] Discovered while building c72 layer 2. NOT started. Gated on decision D-ASSOC-NOW (priority: assoc-types vs D-PARSE-1; recommend B = D-PARSE-1 first). REPRO today: trait `Container { type Item  fn first(self) -> Item }` + `impl Bag: Container { type Item = Int  fn first(self) -> Int { ... } }` fails E0907. FILES: Source/Parser/Items.rs (parse — done), Source/AST.rs (TraitDef.assoc_types ~L777, ImplDef.assoc_type_impls ~L1142), Source/Sema (signature-match needs assoc-type substitution), Source/Codegen (emit assoc binding + Self::X). BLOCKS c72 layer 2.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "decisions": [
+        "D-ASSOC-NOW"
+      ],
       "priority": "P2",
       "workOrder": null
     }
