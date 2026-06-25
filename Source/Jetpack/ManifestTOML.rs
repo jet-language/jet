@@ -16,11 +16,16 @@
 //! hello = "packages/hello/pkg.jet"
 //! ```
 //!
-//! Hand-written std-only (I6). Error model: every malformed line emits E1214;
-//! every unknown table/key emits E1215 with a did-you-mean suggestion. Parsing
-//! continues past errors so the caller sees all problems in one run.
+//! A schema layer over the full TOML 1.0 parser in [`super::TOML`] (std-only,
+//! I6): the generic parser owns all syntax (every value type, dotted/quoted
+//! keys, arrays, inline tables, multi-line strings, comments); this file
+//! validates the parsed statements against the three-table `jetpack.toml`
+//! schema. Error model: a TOML syntax error becomes E1214; an unknown table or
+//! key becomes E1215 with a did-you-mean suggestion. Parsing continues past
+//! errors so the caller sees all problems in one run.
 
 use crate::CLI::edit_distance;
+use crate::Jetpack::TOML;
 use crate::Syntax;
 use std::path::Path;
 
@@ -127,124 +132,145 @@ enum Table {
 
 /// Parse the content of a `jetpack.toml` file.
 ///
-/// Returns `(manifest, errors)`. Parsing continues past errors; the manifest
-/// holds whatever was valid. A `Table::Unknown` section silently skips all its
-/// key/value lines to avoid cascading E1215s for every entry under a bad table.
+/// Runs the full TOML parser, then validates the statements against the
+/// three-table schema. Returns `(manifest, errors)`; parsing continues past
+/// errors and the manifest holds whatever was valid. A syntax error or an
+/// unknown table header puts the parser into a skip state for that section so
+/// one bad header does not cascade E1215s across every entry beneath it.
 pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
     let mut manifest = JetpackToml::default();
     let mut errors: Vec<TomlError> = Vec::new();
+
+    let (items, syntax_errors) = TOML::parse(raw);
+    for e in syntax_errors {
+        errors.push(TomlError::e1214(e.line, &cap_sentence(&e.message)));
+    }
+
     let mut table = Table::None;
-
-    for (i, raw_line) in raw.lines().enumerate() {
-        let lineno = i + 1;
-        let line = raw_line.trim();
-
-        // Skip blank lines and comments.
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        // Table header: `[name]`
-        if line.starts_with('[') {
-            if !line.ends_with(']') {
-                errors.push(TomlError::e1214(
-                    lineno,
-                    "A table header must end with `]`.",
-                ));
-                table = Table::Unknown;
-                continue;
-            }
-            // Reject array-of-tables `[[…]]`.
-            if line.starts_with("[[") {
-                errors.push(TomlError::e1214(
-                    lineno,
-                    "`[[array]]` tables are not used in `jetpack.toml`.",
-                ));
-                table = Table::Unknown;
-                continue;
-            }
-            let name = line[1..line.len() - 1].trim();
-            table = match name {
-                t if t == Syntax::JTOML_TABLE_REPO => Table::Repo,
-                t if t == Syntax::JTOML_TABLE_SOURCES => Table::Sources,
-                t if t == Syntax::JTOML_TABLE_PACKAGES => Table::Packages,
-                unknown => {
-                    let suggest = closest_in(unknown, KNOWN_TABLES);
-                    errors.push(TomlError::e1215(lineno, "table", unknown, suggest));
-                    Table::Unknown
+    for item in &items {
+        match item {
+            TOML::Item::Header { path, array, line } => {
+                if *array {
+                    errors.push(TomlError::e1214(
+                        *line,
+                        "`[[…]]` array-of-tables are not used in `jetpack.toml`.",
+                    ));
+                    table = Table::Unknown;
+                    continue;
                 }
-            };
-            continue;
-        }
-
-        // Key = value line.
-        let Some((key_raw, val_raw)) = line.split_once('=') else {
-            errors.push(TomlError::e1214(
-                lineno,
-                "Expected `key = \"value\"` or a `[table]` header.",
-            ));
-            continue;
-        };
-        let key = key_raw.trim();
-        let val = unquote(val_raw.trim());
-
-        // Skip keys under unknown tables — we already emitted E1215 for the header.
-        if table == Table::Unknown {
-            continue;
-        }
-
-        // Top-level key before any table header.
-        if table == Table::None {
-            errors.push(TomlError::e1215(
-                lineno,
-                "key",
-                key,
-                None,
-            ));
-            continue;
-        }
-
-        match table {
-            Table::Repo => match key {
-                k if k == Syntax::JTOML_KEY_NAME => manifest.repo.name = Some(val),
-                k if k == Syntax::JTOML_KEY_VERSION => manifest.repo.version = Some(val),
-                unknown => {
-                    let suggest = closest_in(unknown, KNOWN_REPO_KEYS);
-                    errors.push(TomlError::e1215(lineno, "key", unknown, suggest));
+                // An empty path is the parser's marker for a malformed header;
+                // E1214 was already recorded, so just enter skip mode.
+                if path.is_empty() {
+                    table = Table::Unknown;
+                    continue;
                 }
-            },
-            Table::Sources => {
-                // Any key is a source name — no fixed vocabulary here.
-                if key.is_empty() {
-                    errors.push(TomlError::e1214(lineno, "Source name must not be empty."));
-                } else {
-                    manifest.sources.push((key.to_string(), val));
-                }
+                let name = path.join(".");
+                table = match path.as_slice() {
+                    [t] if t == Syntax::JTOML_TABLE_REPO => Table::Repo,
+                    [t] if t == Syntax::JTOML_TABLE_SOURCES => Table::Sources,
+                    [t] if t == Syntax::JTOML_TABLE_PACKAGES => Table::Packages,
+                    _ => {
+                        let suggest = if path.len() == 1 {
+                            closest_in(&name, KNOWN_TABLES)
+                        } else {
+                            None
+                        };
+                        errors.push(TomlError::e1215(*line, "table", &name, suggest));
+                        Table::Unknown
+                    }
+                };
             }
-            Table::Packages => {
-                // Any key is a package name.
-                if key.is_empty() {
-                    errors.push(TomlError::e1214(lineno, "Package name must not be empty."));
-                } else {
-                    manifest.packages.push((key.to_string(), val));
+            TOML::Item::KeyVal { path, value, line } => {
+                // Resolve the effective table and key. A dotted top-level key
+                // (`repo.name = …`) selects a table by its first segment.
+                let (target, key_parts): (Table, &[String]) =
+                    if table == Table::None && path.len() >= 2 {
+                        match path[0].as_str() {
+                            t if t == Syntax::JTOML_TABLE_REPO => (Table::Repo, &path[1..]),
+                            t if t == Syntax::JTOML_TABLE_SOURCES => (Table::Sources, &path[1..]),
+                            t if t == Syntax::JTOML_TABLE_PACKAGES => (Table::Packages, &path[1..]),
+                            _ => (Table::None, &path[..]),
+                        }
+                    } else {
+                        (table, &path[..])
+                    };
+                let key = key_parts.join(".");
+
+                match target {
+                    Table::Unknown => {} // header error already reported
+                    Table::None => {
+                        errors.push(TomlError::e1215(*line, "key", &key, None));
+                    }
+                    Table::Repo => {
+                        if key_parts.len() == 1 && key == Syntax::JTOML_KEY_NAME {
+                            match as_string(value, &key, *line) {
+                                Ok(s) => manifest.repo.name = Some(s),
+                                Err(e) => errors.push(e),
+                            }
+                        } else if key_parts.len() == 1 && key == Syntax::JTOML_KEY_VERSION {
+                            match as_string(value, &key, *line) {
+                                Ok(s) => manifest.repo.version = Some(s),
+                                Err(e) => errors.push(e),
+                            }
+                        } else {
+                            let suggest = if key_parts.len() == 1 {
+                                closest_in(&key, KNOWN_REPO_KEYS)
+                            } else {
+                                None
+                            };
+                            errors.push(TomlError::e1215(*line, "key", &key, suggest));
+                        }
+                    }
+                    Table::Sources | Table::Packages => {
+                        if key.is_empty() {
+                            errors.push(TomlError::e1214(*line, "An entry name must not be empty."));
+                            continue;
+                        }
+                        match as_string(value, &key, *line) {
+                            Ok(s) => {
+                                if target == Table::Sources {
+                                    manifest.sources.push((key, s));
+                                } else {
+                                    manifest.packages.push((key, s));
+                                }
+                            }
+                            Err(e) => errors.push(e),
+                        }
+                    }
                 }
             }
-            Table::None | Table::Unknown => unreachable!(),
         }
     }
 
+    errors.sort_by_key(|e| e.line);
     (manifest, errors)
 }
 
-/// Strip surrounding `"…"` from a TOML bare string value.
-/// If the value has no quotes, return it as-is (tolerates bare values).
-fn unquote(s: &str) -> String {
-    let s = s.trim();
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        s[1..s.len() - 1].replace("\\\"", "\"").replace("\\\\", "\\")
-    } else {
-        s.to_string()
+/// A `jetpack.toml` value field must be a string. Anything else (number, bool,
+/// array, …) is an E1214 with the offending key named.
+fn as_string(value: &TOML::Value, key: &str, line: usize) -> Result<String, TomlError> {
+    match value {
+        TOML::Value::String(s) => Ok(s.clone()),
+        _ => Err(TomlError::e1214(
+            line,
+            &format!("The value for `{key}` must be a quoted string."),
+        )),
     }
+}
+
+/// Capitalize the first letter and ensure a trailing period — turns a terse
+/// parser message into a diagnostic-voice sentence for the E1214 detail.
+fn cap_sentence(s: &str) -> String {
+    let mut chars = s.chars();
+    let mut out = match chars.next() {
+        Some(f) => f.to_uppercase().collect::<String>(),
+        None => return String::new(),
+    };
+    out.push_str(chars.as_str());
+    if !out.ends_with('.') {
+        out.push('.');
+    }
+    out
 }
 
 /// Load and parse `jetpack.toml` from `dir`. Returns `None` if the file
@@ -418,7 +444,7 @@ wordstats = \"packages/wordstats/pkg.jet\"
         let (_, errors) = parse(raw);
         let rendered = render_errors(path, &errors);
         let expected = "Error [E1214]: `jetpack.toml` line 2 is not a valid assignment \
-or table header. Expected `key = \"value\"` or a `[table]` header.\n";
+or table header. Expected `=` after key `bad`.\n";
         assert_eq!(rendered, expected);
     }
 
@@ -436,9 +462,27 @@ Check the allowed names for this table.\n";
     }
 
     #[test]
-    fn unquote_strips_quotes() {
-        assert_eq!(unquote("\"hello\""), "hello");
-        assert_eq!(unquote("hello"), "hello");
-        assert_eq!(unquote("\"a \\\"b\\\" c\""), "a \"b\" c");
+    fn full_toml_value_types_parse() {
+        // The schema only stores strings, but the full parser accepts every
+        // TOML construct under the recognized tables (escapes here prove the
+        // string value is unquoted + unescaped, not taken verbatim).
+        let m = ok("[repo]\nname = \"a\\tb\"\nversion = \"0.1.0\"\n");
+        assert_eq!(m.repo.name.as_deref(), Some("a\tb"));
+        assert_eq!(m.repo.version.as_deref(), Some("0.1.0"));
+    }
+
+    #[test]
+    fn dotted_top_level_key_selects_table() {
+        let m = ok("repo.name = \"acme\"\n");
+        assert_eq!(m.repo.name.as_deref(), Some("acme"));
+    }
+
+    #[test]
+    fn non_string_value_is_e1214() {
+        // `version = 1` is valid TOML (an integer) but the schema wants a string.
+        let es = errs("[repo]\nversion = 1\n");
+        assert_eq!(es.len(), 1);
+        assert_eq!(es[0].code, "E1214");
+        assert!(es[0].message.contains("must be a quoted string"), "{}", es[0].message);
     }
 }

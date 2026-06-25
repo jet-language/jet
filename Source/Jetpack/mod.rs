@@ -22,6 +22,7 @@ pub mod Provider;
 pub mod RefSpec;
 pub mod Shell;
 pub mod Store;
+pub mod TOML;
 
 /// Process entry point used by the `jetpack` binary.
 pub fn run(args: Vec<String>) -> i32 {
