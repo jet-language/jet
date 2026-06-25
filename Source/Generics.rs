@@ -161,18 +161,23 @@ pub fn sig_matches_trait(
     ret: &Option<Type>,
     is_view: bool,
     expected: &TraitMethodSig,
+    assoc: &HashMap<String, Type>,
 ) -> bool {
     if params.len() != expected.params.len() {
         return false;
     }
+    // D-LIB2: the trait signature may name an associated type (`Item`); resolve it
+    // to the impl's `type Item = Concrete` binding before comparing, so a concrete
+    // impl method matches the abstract trait method.
     for ((_, pt), ep) in params.iter().zip(&expected.params) {
-        if !types_equal_modulo_self(pt, &ep.ty) {
+        let exp_ty = substitute_type(&ep.ty, assoc);
+        if !types_equal_modulo_self(pt, &exp_ty) {
             return false;
         }
     }
     match (&ret, &expected.return_type) {
         (None, None) => !is_view && !expected.is_view_return,
-        (Some(r), Some(er)) => types_equal_modulo_self(r, er),
+        (Some(r), Some(er)) => types_equal_modulo_self(r, &substitute_type(er, assoc)),
         _ => false,
     }
 }
@@ -290,6 +295,31 @@ pub fn e0908(type_name: &str, trait_name: &str, span: Span) -> Diagnostic {
         format!("`{type_name}` already implements `{trait_name}`"),
         "each type may implement a trait only once".to_string(),
         "remove the duplicate `impl` block".to_string(),
+        Some(span),
+    )
+}
+
+/// D-LIB2: an `impl …: Trait` left one of the trait's associated types unbound.
+pub fn e0913(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0913",
+        format!(
+            "`impl …: {trait_name}` doesn't set {}",
+            missing
+                .iter()
+                .map(|m| format!("`type {m}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        format!("`{trait_name}` declares an associated type each impl must define"),
+        format!(
+            "add {} inside the impl block",
+            missing
+                .iter()
+                .map(|m| format!("`type {m} = …`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Some(span),
     )
 }

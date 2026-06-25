@@ -817,6 +817,10 @@ pub(crate) fn emit_trait_impl(
         type_name,
         tp
     ));
+    // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
+    for (name, _, ty) in &block.assoc_type_impls {
+        out.push_str(&format!("    type {} = {};\n", name, Traits::rust_type_name(ty)));
+    }
     for m in &block.methods {
         emit_trait_method(cx, type_name, m, out, 1);
     }
@@ -830,6 +834,10 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
         Generics::user_trait_rust(trait_name),
         i.type_name
     ));
+    // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
+    for (name, _, ty) in &i.assoc_type_impls {
+        out.push_str(&format!("    type {} = {};\n", name, Traits::rust_type_name(ty)));
+    }
     if let Some(field) = &i.delegation_field {
         // S62: delegation — emit forwarding methods directly to avoid the method
         // call mangling that the standard path applies (trait methods are not

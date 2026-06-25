@@ -289,6 +289,7 @@ before continuing.
 | E0910 | sema  | `#PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0912 | sema  | a frozen public capability signature drifted: a param a caller could pass by read now demands `~`/`^`/`&` in an `api: stable`/`api: explicit` library (c129, D-CAP8) |
+| E0913 | sema  | trait impl missing associated type (D-LIB2) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |

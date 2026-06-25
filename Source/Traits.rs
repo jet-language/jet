@@ -6,7 +6,7 @@ use crate::AST::{
 };
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
-    self, e0902, e0903, e0906, e0907, e0908, sig_matches_trait, substitute_type, unify_types,
+    self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type, unify_types,
     BUILTIN_TRAITS, COMPARABLE, DECODE, ENCODE, EQUATABLE, PRINTABLE, SERIALIZE,
 };
 use crate::Sema::FuncSig;
@@ -44,6 +44,8 @@ pub struct TraitRegistry {
 #[derive(Debug, Clone)]
 pub struct TraitInfo {
     pub methods: HashMap<String, TraitMethodSig>,
+    /// D-LIB2: associated type names declared in the trait body (`type Item`).
+    pub assoc_types: Vec<String>,
     pub span: Span,
 }
 
@@ -160,6 +162,7 @@ impl TraitRegistry {
             t.name.clone(),
             TraitInfo {
                 methods,
+                assoc_types: t.assoc_types.iter().map(|(n, _)| n.clone()).collect(),
                 span: t.name_span,
             },
         );
@@ -201,7 +204,14 @@ impl TraitRegistry {
                 let key = (i.type_name.clone(), trait_name.clone());
                 let _ = self.trait_impls.insert(key); // may already be there; ignore dup
             } else {
-                self.validate_trait_impl(&i.type_name, trait_name, &i.methods, i.type_span, diags);
+                self.validate_trait_impl(
+                    &i.type_name,
+                    trait_name,
+                    &i.methods,
+                    &i.assoc_type_impls,
+                    i.type_span,
+                    diags,
+                );
             }
         }
     }
@@ -222,6 +232,7 @@ impl TraitRegistry {
             type_name,
             &block.trait_name,
             &block.methods,
+            &block.assoc_type_impls,
             block.trait_span,
             diags,
         );
@@ -232,6 +243,7 @@ impl TraitRegistry {
         type_name: &str,
         trait_name: &str,
         methods: &[Func],
+        assoc_type_impls: &[(String, Span, Type)],
         span: Span,
         diags: &mut Vec<Diagnostic>,
     ) {
@@ -272,15 +284,37 @@ impl TraitRegistry {
             if !missing.is_empty() {
                 diags.push(e0906(trait_name, &missing, span));
             }
-            for m in methods {
-                if let Some(sig) = trait_info.methods.get(&m.name) {
-                    let params: Vec<_> = m
-                        .params
-                        .iter()
-                        .map(|p| (p.convention, p.ty.clone()))
-                        .collect();
-                    if !sig_matches_trait(&params, &m.return_type, m.is_view_return, sig) {
-                        diags.push(e0907(trait_name, &m.name, m.name_span));
+            // D-LIB2: an impl supplies a concrete type for each of the trait's
+            // associated types (`type Item = Int`). Resolve them so the abstract
+            // method signatures match the impl's concrete ones.
+            let assoc: HashMap<String, Type> = assoc_type_impls
+                .iter()
+                .filter(|(name, _, _)| trait_info.assoc_types.contains(name))
+                .map(|(name, _, ty)| (name.clone(), ty.clone()))
+                .collect();
+            // Every associated type the trait declares must be bound by the impl.
+            let missing_assoc: Vec<String> = trait_info
+                .assoc_types
+                .iter()
+                .filter(|n| !assoc.contains_key(*n))
+                .cloned()
+                .collect();
+            if !missing_assoc.is_empty() {
+                // An unbound associated type leaves method sigs unresolvable, which
+                // would spuriously trip E0907 on every method — report only E0913.
+                diags.push(e0913(trait_name, &missing_assoc, span));
+            } else {
+                for m in methods {
+                    if let Some(sig) = trait_info.methods.get(&m.name) {
+                        let params: Vec<_> = m
+                            .params
+                            .iter()
+                            .map(|p| (p.convention, p.ty.clone()))
+                            .collect();
+                        if !sig_matches_trait(&params, &m.return_type, m.is_view_return, sig, &assoc)
+                        {
+                            diags.push(e0907(trait_name, &m.name, m.name_span));
+                        }
                     }
                 }
             }
@@ -505,28 +539,36 @@ fn wire_param_indices(params: &[TypeParam], wire_types: &[&Type]) -> Vec<usize> 
 }
 
 pub fn rust_type_name(ty: &Type) -> String {
+    rust_type_name_assoc(ty, &HashSet::new())
+}
+
+/// Like `rust_type_name`, but renders a name in `assoc` (a trait's associated
+/// types) as `Self::Name` rather than `user_Name`. Used inside a `trait`
+/// declaration where `type Item` is in scope (D-LIB2).
+pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
     match ty {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
         Type::Bool => "bool".to_string(),
         Type::String => "String".to_string(),
         Type::Char => "char".to_string(),
-        Type::List(inner) => format!("Vec<{}>", rust_type_name(inner)),
+        Type::List(inner) => format!("Vec<{}>", rust_type_name_assoc(inner, assoc)),
         Type::Named(n) if n.is_empty() => "Self".to_string(),
+        Type::Named(n) if assoc.contains(n) => format!("Self::{n}"),
         Type::Named(n) => format!("user_{n}"),
         Type::Apply { name, args } => format!(
             "user_{name}<{}>",
             args.iter()
-                .map(rust_type_name)
+                .map(|a| rust_type_name_assoc(a, assoc))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
         Type::TraitObject(t) => format!("Box<dyn user_{t}>"),
-        Type::Option(inner) => format!("Option<{}>", rust_type_name(inner)),
+        Type::Option(inner) => format!("Option<{}>", rust_type_name_assoc(inner, assoc)),
         Type::Map { key, value } => format!(
             "std::collections::BTreeMap<{}, {}>",
-            rust_type_name(key),
-            rust_type_name(value)
+            rust_type_name_assoc(key, assoc),
+            rust_type_name_assoc(value, assoc)
         ),
         Type::Fn { .. } => "Box<dyn Fn()>".to_string(),
         _ => "()".to_string(),
@@ -535,6 +577,12 @@ pub fn rust_type_name(ty: &Type) -> String {
 
 pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
     out.push_str(&format!("pub trait user_{} {{\n", t.name));
+    // D-LIB2: declare each associated type; method sigs below render uses of it
+    // as `Self::Name`, and each impl emits `type Name = <concrete>;`.
+    let assoc: HashSet<String> = t.assoc_types.iter().map(|(n, _)| n.clone()).collect();
+    for (name, _) in &t.assoc_types {
+        out.push_str(&format!("    type {name};\n"));
+    }
     for m in &t.methods {
         // Thread is_view_return into the declared return type so the trait
         // declaration renders `-> &T`, matching the impl side's
@@ -544,7 +592,7 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
             .return_type
             .as_ref()
             .map(|t| {
-                let base = rust_type_name(t);
+                let base = rust_type_name_assoc(t, &assoc);
                 if m.is_view_return {
                     format!("&{base}")
                 } else {
@@ -572,7 +620,7 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
                     }
                 } else {
                     // Match the convention applied by emit_trait_method / rust_param_type.
-                    let base = rust_type_name(&p.ty);
+                    let base = rust_type_name_assoc(&p.ty, &assoc);
                     let rust_ty = match p.convention {
                         AccessConvention::Read
                         | AccessConvention::Infer
