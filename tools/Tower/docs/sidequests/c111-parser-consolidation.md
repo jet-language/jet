@@ -1,8 +1,41 @@
 # c111 — Replace hand-rolled parsers (audit + scoped plan)
 
-Status: **audit complete, no auto-consolidation applied** (by design — see verdict).
-Card has no ratified decision; the framing ("decide where I6 should bend, or
-narrow the feature contracts") is a policy question, not a cleanup task.
+Status: **DONE (2026-06-25)** — D-PARSE-1=C built end-to-end. The audit below is
+retained for context; the consolidation question it raised was resolved by the
+owner ratifying full native parsers (no lossy subsets, I6 stays hard).
+
+## D-PARSE-1 build (2026-06-25)
+
+Full native std-only parsers replacing every silently-lossy subset reader:
+
+- **SemVer** — `Source/Publish/SemVer.rs` rewritten to complete SemVer 2.0.0:
+  `+build` metadata (parsed, ignored in precedence), strict numeric identifiers,
+  full pre-release precedence, and the node-semver range grammar (`=` `>` `>=`
+  `<` `<=`, `^`, `~`, x-ranges, hyphen ranges, `||`). `VersionReq` normalizes to
+  an OR of comparator-sets; `intersects()` replaces the old Caret/Exact
+  disjointness heuristic in `Resolve.rs`. Tests in `Source/Publish/mod.rs`.
+- **JSON** — `Source/Prelude/CoreLib.rs` user-facing parser is now full RFC 8259
+  (exponents + strict number grammar, every escape incl. `\uXXXX` with
+  surrogate-pair combining, rejects invalid escapes / lone surrogates / raw
+  control chars with line + message); the renderer escapes all control chars.
+  `Source/LSP/JSON.rs` and `Source/Jetpack/JSON.rs` gained surrogate-pair
+  handling. End-to-end test `json_parser_is_rfc8259_complete` in `tests/corelib.rs`.
+- **TOML** — new `Source/Jetpack/TOML.rs` is a complete TOML 1.0 parser (all
+  value types, bare/quoted/dotted keys, arrays, inline tables, multi-line
+  strings, arrays-of-tables, comments, line-numbered statements with recovery).
+  `Source/Jetpack/ManifestTOML.rs` is now a thin schema validator over it,
+  preserving the `JetpackToml`/`load`/`render_errors` API and the E1214/E1215
+  contract; non-string schema values get a clear E1214 instead of silent
+  stringification.
+
+Full suite green (1107 passed, 0 failed). Three commits on `master`.
+
+---
+
+## Original audit (retained for context)
+
+The framing below ("decide where I6 should bend, or narrow the feature
+contracts") was the policy question; the owner answered it with D-PARSE-1=C.
 
 ## What was audited
 

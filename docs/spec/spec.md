@@ -960,7 +960,11 @@ evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
 (examples/features/86_comptime_parse.jet). Time stays
 unix milliseconds (`time.now()`); random is
 deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
-`json.parse`, `json.render`, and `json.render_pretty`. `jet.json` also exposes
+`json.parse`, `json.render`, and `json.render_pretty`. The parser is full
+RFC 8259 (D-PARSE-1): exponents and the strict number grammar, every escape
+including `\uXXXX` with surrogate-pair combining, and it rejects invalid
+escapes, lone surrogates, and raw control characters with a line + message —
+no silently-lossy subset. `jet.json` also exposes
 `json.decode` (D-JSON1-decode + D-JSON3=B): a lenient variant that coerces
 string values that look like numbers or booleans (`"8080"` → `8080`,
 `"true"` → `true`) and emits one structured log line per coercion to stderr
