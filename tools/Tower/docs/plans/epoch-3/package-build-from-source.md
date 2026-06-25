@@ -23,7 +23,7 @@ wave-1 rings.
    hangar store, hash-keyed for invalidation. Stays offline/deterministic like
    the existing pre-fetched flow (`jet build`/`run` never realize on demand).
 2. **M9 wave-2 as packages** — `jet.regex`, `jet.archive`, `jet.db`/sqlite ship
-   as ordinary packages consumed via `use` (U17), each with its own `pack.jet`.
+   as ordinary packages consumed via `use` (U17), each with its own `pkg.jet`.
    `jet.db`/sqlite also depends on the `jet bind` C-FFI backend (E2-M14).
 3. **Cache invalidation** — couples to the C-FFI Phase-3 header/cflags-hash
    regen, which is likewise deferred until the build step lands.

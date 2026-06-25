@@ -26,13 +26,13 @@ use core.io as io
 use core.env as env
 
 fn main() {
-    args :: io.args()
+    args @= io.args()
     if args.len() < 2 {
         io.eprint("usage: greet <name>")
         return
     }
-    name :: args.get(1) ?? return
-    greeting :: env.get("GREETING") ?? "hello"
+    name @= args.get(1) ?? return
+    greeting @= env.get("GREETING") ?? "hello"
     fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return
     print(fs.read("/tmp/greet.txt") ?? return)
 }
@@ -81,8 +81,8 @@ result — with `?`, `??`, or a pattern test:
 use core.fs as fs
 
 fn main() {
-    text :: fs.read("data.txt") ?? return   // stop on error
-    upper :: text.to_upper()
+    text @= fs.read("data.txt") ?? return   // stop on error
+    upper @= text.to_upper()
     fs.write("out.txt", upper) ?? panic("couldn't save")  // bug if this fails
 }
 ```
@@ -112,13 +112,13 @@ Whole-file helpers only (streaming I/O added in E2-M7). Paths are plain
 use core.fs as fs
 
 fn main() {
-    path :: "/tmp/notes.txt"
+    path @= "/tmp/notes.txt"
     fs.write(path, "hello\n") ?? return
     fs.append(path, "world\n") ?? return
     print(fs.read(path) ?? return)        // "hello\nworld\n"
     print(fs.exists(path))                // true
     print(fs.is_dir("/tmp"))              // true
-    names :: fs.list_dir("/tmp") ?? return
+    names @= fs.list_dir("/tmp") ?? return
     print(names.len())
 }
 ```
@@ -147,8 +147,8 @@ fn main() {
 use core.io as io
 
 fn main() {
-    args :: io.args()                    // [String]; index 0 is the program name
-    name :: io.input("your name? ") ?? return  // reads one line, strips newline
+    args @= io.args()                    // [String]; index 0 is the program name
+    name @= io.input("your name? ") ?? return  // reads one line, strips newline
     print("hi, {name}")
     io.eprint("(log) done")                 // like print, but to stderr
 }
@@ -177,10 +177,10 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 use core.env as env
 
 fn main() {
-    home :: env.home_dir()               // String? — may be null
-    mode :: env.get("MODE") ?? "dev"     // String? from the environment
+    home @= env.home_dir()               // String? — may be null
+    mode @= env.get("MODE") ?? "dev"     // String? from the environment
     env.set("MODE", "prod")              // set for child processes
-    here :: env.current_dir() ?? return  // current working directory
+    here @= env.current_dir() ?? return  // current working directory
     print(home ?? "(no home)")
     print(mode)
     print(here)
@@ -202,7 +202,7 @@ fn main() {
 use core.process as process
 
 fn main() {
-    result :: process.run(["echo", "hi"]) ?? return
+    result @= process.run(["echo", "hi"]) ?? return
     print(result.code)       // exit code as Int
     print(result.output)     // stdout as String
     print(result.errors)     // stderr as String
@@ -328,7 +328,7 @@ fn main() {
     random.seed(42)                         // make the sequence repeatable
     print(random.int(1, 6))                 // inclusive range (like dice)
     print(random.float())                   // 0.0 .. 1.0
-    items :: [10, 20, 30]
+    items @= [10, 20, 30]
     print(random.pick(items))               // one item, or null if list empty
     random.shuffle(mut items)               // shuffle in place
     print(items)
@@ -378,9 +378,9 @@ formatting (use `jet.time` for calendars).
 use core.time as time
 
 fn main() {
-    started :: time.now()                // milliseconds since 1970-01-01 UTC
+    started @= time.now()                // milliseconds since 1970-01-01 UTC
     time.sleep(100)                      // pause ~100 ms (blocking)
-    sw :: time.start()                   // Stopwatch
+    sw @= time.start()                   // Stopwatch
     time.sleep(50)
     print(sw.elapsed_millis())           // at least 50
     print(time.now() - started)
@@ -444,8 +444,8 @@ Every format speaks the same two verbs: `parse` (text → value) and `to_string`
 use core.encoding
 
 fn main() {
-    raw :: "{\"name\":\"jet\",\"ok\":true,\"n\":1.5}"
-    data :: encoding.json.parse(raw) ?? return
+    raw @= "{\"name\":\"jet\",\"ok\":true,\"n\":1.5}"
+    data @= encoding.json.parse(raw) ?? return
     print(encoding.json.to_string(data))           // compact one line
     print(encoding.json.to_string_pretty(data))    // indented
 
@@ -570,10 +570,10 @@ fn sum_range(first: Int, last: Int) -> Int {
 }
 
 fn main() {
-    a :: tasks.spawn(() => sum_range(1, 25))
-    b :: tasks.spawn(() => sum_range(26, 50))
-    c :: tasks.spawn(() => sum_range(51, 75))
-    d :: tasks.spawn(() => sum_range(76, 100))
+    a @= tasks.spawn(() => sum_range(1, 25))
+    b @= tasks.spawn(() => sum_range(26, 50))
+    c @= tasks.spawn(() => sum_range(51, 75))
+    d @= tasks.spawn(() => sum_range(76, 100))
     print(a.join() + b.join() + c.join() + d.join())
 }
 ```
@@ -584,9 +584,9 @@ Channels carry one type:
 use core.tasks as tasks
 
 fn main() {
-    ch: Channel<Int> :: tasks.channel()
-    sender :: ch.sender()
-    task :: tasks.spawn(take(sender) () => {
+    ch: Channel<Int> @= tasks.channel()
+    sender @= ch.sender()
+    task @= tasks.spawn(take(sender) () => {
         sender.send(42)
     })
     task.join()
@@ -625,10 +625,10 @@ range).
 use jet.regex as re
 
 fn main() {
-    text :: "order 42 shipped"
+    text @= "order 42 shipped"
     print(re.is_match("\\d+", text) ?? panic("bad pattern"))   // true
 
-    m :: re.match("(\\d+) shipped", text) ?? panic("bad pattern")
+    m @= re.match("(\\d+) shipped", text) ?? panic("bad pattern")
     if m == value(mat) {
         print(mat.group(0) ?? "")   // 42 shipped
         print(mat.group(1) ?? "")   // 42
@@ -681,9 +681,9 @@ re-runs every subscriber.
 use jet.reactive as reactive
 
 fn main() {
-    price :: reactive.signal(100)
-    qty   :: reactive.signal(2)
-    total :: reactive.derived(() => (price.get() * qty.get()))
+    price @= reactive.signal(100)
+    qty @= reactive.signal(2)
+    total @= reactive.derived(() => (price.get() * qty.get()))
     print(total.get())                       // 200
 
     reactive.effect(() => print(total.get()))  // prints 200 now
@@ -719,13 +719,13 @@ many values into one buffer and frees them all at once.
 use core.mem
 
 fn main() {
-    arena :: mem.Arena.new()             // or .new(capacity: 4096)
-    x :: arena.alloc(42)                 // x is a *view* into the arena
-    y :: arena.alloc("hi")
+    arena @= mem.Arena.new()             // or .new(capacity: 4096)
+    x @= arena.alloc(42)                 // x is a *view* into the arena
+    y @= arena.alloc("hi")
     print(x)
     print(y)
     arena.reset()                        // frees everything; buffer reused
-    z :: arena.alloc(7)
+    z @= arena.alloc(7)
     print(z)
 }
 ```
@@ -749,10 +749,10 @@ use core.mem
 
 fn main() {
     region scratch {
-        a :: mem.Arena.new()
-        b :: mem.Bump.new()
-        first :: a.alloc(1)
-        second :: b.alloc(2)
+        a @= mem.Arena.new()
+        b @= mem.Bump.new()
+        first @= a.alloc(1)
+        second @= b.alloc(2)
         print(first)
         print(second)
     }                                    // both arenas freed here
@@ -801,11 +801,11 @@ error (**E1003**).
 
 ```jet
 fn main() {
-    b: U8 :: 255
+    b: U8 @= 255
     print(b.to_int())                       // 255 as Int
-    n :: 42.to_u8() ?? return              // checked conversion
-    bytes :: "hi".bytes()                  // [U8]
-    text :: String.from_bytes(bytes) ?? return
+    n @= 42.to_u8() ?? return              // checked conversion
+    bytes @= "hi".bytes()                  // [U8]
+    text @= String.from_bytes(bytes) ?? return
     print(text)
 }
 ```
@@ -829,8 +829,8 @@ silently wrapping. Opt a single op out at the use site:
 
 ```jet
 fn main() {
-    hi: U8 :: 200
-    lo: U8 :: 100
+    hi: U8 @= 200
+    lo: U8 @= 100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
     print(saturating(hi + lo))          // 255  — clamps to the type's range
     print(checked(hi + lo) ?? 0)        // 0    — checked(…) -> T?, null on overflow
@@ -884,7 +884,7 @@ shift count past the type's width traps (no leaked Rust panic).
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
 | `import core.fs` | `use core.fs` (teaching error E0015) |
-| `val x = …` / `var x = …` | `x :: …` (immutable) / `x := …` (mutable) |
+| `val x = …` / `var x = …` | `x @= …` (immutable) / `x := …` (mutable) |
 
 ---
 

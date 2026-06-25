@@ -15,8 +15,8 @@ without sequencing the prerequisites first.
   first-class **`tag`** keyword; declaring a method on a `tag` is **E0732**; using a
   tag where dispatch is expected is **E0731**. Codegen unchanged (tags erase).
 - **D-LIN1 = A** — `syntax-decisions.md:1824`: `#SingleUse` values must be consumed
-  exactly once on every reachable path (`take` param / returned / `drop(x)` with an
-  `#Audit`). `#SingleUse` implies `#no_copy`. Checker tracks consumption through
+  exactly once on every reachable path (`^` consumer param / returned / `drop(x)` with an
+  `#Unsafe("reason")`). `#SingleUse` implies `#NoCopy`. Checker tracks consumption through
   branches: **E0140** (unconsumed at scope end), **E0141** (unconsumed on one branch).
 
 ## 2. Prerequisite reality check (grep findings — IMPORTANT)
@@ -60,7 +60,7 @@ bottom-up:
 
 ## 4. Pipeline work, in order
 
-Anchors: tag/marker parsing belongs with `#Unsafe`/`#Audit` handling in
+Anchors: tag/marker parsing belongs with `#Unsafe("reason")` handling in
 `Source/Parser/Items.rs` + `Source/Parser/Statements.rs`; the consume/move dataflow
 belongs in `Source/Sema/CheckerOwnership.rs` (already does move/borrow tracking — the
 natural home for linear consumption); type registration in
@@ -108,7 +108,7 @@ state tag can be attached to a value's type. Spans on all (R4).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| **E0140** | "`<x>` is a single-use value but it's never used" | a `#SingleUse` value must be consumed on every path. | "pass it to a `take` consumer, return it, or `drop(x)` with an `#Audit`" |
+| **E0140** | "`<x>` is a single-use value but it's never used" | a `#SingleUse` value must be consumed on every path. | "pass it to a `^` consumer, return it, or `drop(x)` with an `#Unsafe("reason")`" |
 | **E0141** | "`<x>` is used on one path but not the other" | single-use must be consumed on *every* reachable path. | "consume it in the other branch too, or hoist the consume after the `if`" |
 | **E0150** | "this needs `<X>` in state `<S>`, but it's in state `<S''>`" | typestate: a method is only valid in a given state. | "transition it first: call `<the transition fn>` to reach `<S>`" |
 | **E0731** | "`<Tag>` is a tag, not a trait — it can't be dispatched" | tags have no methods and erase. | "declare `trait <Name>` if you need methods/dispatch" |

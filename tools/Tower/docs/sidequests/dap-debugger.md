@@ -68,7 +68,7 @@ or codegen beyond the line table.
 $ jet debug examples/features/05_loops.jet
 # editor sets a breakpoint on loops.jet:7
 breakpoint hit  loops.jet:7  in main()
-   6 |   var total = 0
+   6 |   total := 0
    7 |   loop i in 1..n {        <- here
    8 |     total += i
 locals:  n = 5   total = 0   i = 1

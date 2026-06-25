@@ -33,7 +33,7 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   E0001. Unary minus is an operator, not part of the literal.
 - `true` and `false` are `Bool` literals.
 - Statements end with `;` (S6 — required, including before `}`). Blocks
-  (`}` of `if`/`loop`/`fn`) don't take one; `when` arms do.
+  (`}` of `if`/`loop`/`fn`) don't take one; `if subject { … }` arms do.
 - The lexer recovers from bad characters and keeps going; one run reports
   every lexical error it can.
 
@@ -166,23 +166,25 @@ Borrow-checker mechanics live in the transpiler; tier-1 users never write
 | You write              | It means                          | Compiles to Rust |
 |------------------------|-----------------------------------|------------------|
 | `fn f(x: T)`           | shared read (default)             | `x: &T`          |
-| `fn f(mut x: T)`       | mutable borrow                    | `x: &mut T`      |
-| `fn f(take x: T)`      | move; caller must write `take`    | `x: T`           |
-| `fn f() -> view T`     | borrow return (elided lifetime)   | `-> &T`          |
+| `fn f(x: ~T)`          | mutable borrow                    | `x: &mut T`      |
+| `fn f(x: ^T)`          | move; caller must write `^`        | `x: T`           |
+| `fn f() -> &T`         | borrow return (elided lifetime)   | `-> &T`          |
 | `ref field: T` (tier 2)| stored reference in a struct      | `field: &'a T`   |
 
-Call-site rules: `mut` and `take` must match the parameter; omitting `take`
-on a clonable type inserts `.clone()` with lint **L0201** (fired only when
-the cloned value is dead after the call — D-L0201); on a non-clonable type → **E0201**. Omitting `mut` on a mutable parameter →
-**E0202**. Using the same name twice in one call while `mut` is active →
-**E0204**. `*` outside `unsafe` → **E0208**.
+The capability is a prefix sigil on the **type** (D-CAP7) — see "Access
+capability sigils" below for the full set. Call-site rules: the call-site sigil
+must match the parameter; omitting `^` on a clonable type inserts `.clone()`
+with lint **L0201** (fired only when the cloned value is dead after the call —
+D-L0201); on a non-clonable type → **E0201**. Omitting `~` on a mutable
+parameter → **E0202**. Using the same name twice in one call while `~` is active
+→ **E0204**. `*` outside `#Unsafe` → **E0208**.
 
 `const NAME = value` always looks the same; the transpiler emits Rust
 `const` or `static` when the address is taken or the type needs it.
 
 Aliasing rule, stated for humans: *while something is being changed,
 nobody else may be looking at it.* Foreign `read`/`write` spellings get
-teaching errors **E0017**/**E0018** (S14). A `view` return may only hand
+teaching errors **E0017**/**E0018** (S14). A `&T` return may only hand
 back a parameter, a scalar local, or a const — not fresh text (**E0206**).
 
 ## Access capability sigils (D-CAP7/D-CAP8)
@@ -304,8 +306,8 @@ error[E0029]: two capability markers on one parameter
 
 ### Migration: `mut` / `take` / `view` → sigils
 
-The old ownership keywords parse today but are planned to become teaching errors
-(D-CAP7 mandate, not yet enforced):
+The old ownership keywords are retired (D-CAP7) — they lex only to fire teaching
+errors **E0056**/**E0057**/**E0058** pointing at the sigils:
 
 | Old spelling | New spelling | Notes |
 |---|---|---|
@@ -347,14 +349,14 @@ impl Circle {
 }
 ```
 
-- **`self`** is the receiver; prefix with `mut` or `take` like any parameter.
-- **Self-mutation (D-MUTSELF1):** inside a **`mut self`** method the receiver may be
+- **`self`** is the receiver; prefix the type sigil (`~self`, `^self`, `&self`) like any parameter (D-CAP7).
+- **Self-mutation (D-MUTSELF1):** inside a **`~self`** method the receiver may be
   changed in place — assign a field (`self.field = v`), update one (`self.field += v`,
-  S17), or reassign the whole receiver (`self = New{…}`). No new syntax (a `mut`
-  parameter is already a valid assignment LHS). The same write in a non-`mut self`
+  S17), or reassign the whole receiver (`self = New{…}`). No new syntax (a `~`
+  parameter is already a valid assignment LHS). The same write in a non-`~self`
   method (a shared-read receiver) is **E0205**, pointed at the assignment with a "write
-  the receiver as `mut self`" fix. Calling a `mut self` method needs a changeable
-  receiver binding (`:=`/`mut`), enforced at the call site by E0202.
+  the receiver as `~self`" fix. Calling a `~self` method needs a changeable
+  receiver binding (`:=`/`~`), enforced at the call site by E0202.
 - Invoke with **`c.area()`** (not `area(c)`).
 - Methods may live **inside** the type **or** in **`impl Type { }`** — same rules either way.
 - Static methods omit `self` (e.g. `Circle.unit()`).
@@ -362,7 +364,7 @@ impl Circle {
   distinctly-named no-`self` statics returning the type (`Point.cartesian`,
   `Point.polar`). Overloading is rejected; a duplicate name is E0105 with
   a teaching message pointing at constructor naming.
-- Enum `when` arms must be exhaustive; missing cases are a compile error.
+- Enum `if subject { … }` arms must be exhaustive; missing cases are a compile error.
 - **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as
   `impl Type: Trait { … }` (qualify foreign types: `impl other.Point: Shape`).
@@ -469,10 +471,10 @@ Cross-type **`?`** conversion supports two forms:
   **`??`** (S71, D-SG6).
 - **`panic("msg")`** and **`require(cond)`** / **`require(cond, "msg")`**
   (S36) stop the program with a friendly report on stderr and exit code 70.
-- In **`when <fallible-expr> { … }`**, when the subject is not a plain
+- In **`if <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == ok(n)`**.
 - **`main`** may not return a fallible type; handle errors with **`??`**, a
-  full **`when`**, or **`panic`**.
+  full **`if subject { … }`**, or **`panic`**.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
 bad propagation (**E0403**), `ok`/`err` outside a result context (**E0404**),
@@ -553,7 +555,7 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 **`extern rust "crate@version" { … }`** (S50) declares foreign functions. Each
 entry is a normal Jet signature plus **`= "rust::path"`** naming the target
 item. This source-level declaration is sufficient even inside a project with
-`pack.jet`; users do not need the package manager just to call a foreign
+`pkg.jet`; users do not need the package manager just to call a foreign
 function. **`extern rust "std" { … }`** works for standard-library items with
 no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
@@ -782,15 +784,15 @@ invokes rustc, so the cargo debug binary is sufficient.
 
 **Lambdas (S46):** `(params) => expr` or `(params) => { … }`. Parameter types
 may be omitted when the expected function type is known (**E0801** when not).
-The lambda arrow is **`=>`**; **`->`** stays for return types and `when` arms.
+The lambda arrow is **`=>`**; **`->`** stays for return types and `if subject { … }` arms.
 
 **Function types (S47):** `fn(T1, T2) -> R` (no parameter names; `-> R` may be
 omitted for no-return callbacks). Named `fn`s coerce to function values when
 referenced without a call.
 
 **Capture rules (S47):** shared read for names only read; mutable borrow for
-names written (`var` required, else **E0111**). Escaping lambdas (stored in a
-binding, returned, in a struct field, or passed to a `take` parameter) must own
+names written (a `:=` binding required, else **E0111**). Escaping lambdas (stored in a
+binding, returned, in a struct field, or passed to a `^T` parameter) must own
 captures: clonable values are copied (**L0801**); non-clonable values need an
 explicit prefix **`take(name)`** on the lambda (**E0802**). Self-recursion through
 the binding is rejected (**E0804**). Calling a non-function → **E0803**.
@@ -1159,7 +1161,7 @@ fan_out = expr ".[" [ expr { "," expr } [ "," ] ] "]" ;
 ```jet
 fn double(n: Int) -> Int { return n * 2; }
 
-val doubled = double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
+doubled @= double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
 ```
 
 Errors: **E0961** if the callee is not a one-argument function; **E0962** if an
@@ -1176,8 +1178,8 @@ type_fixed_list = "[" type "#" int_literal "]" ;
 ```
 
 ```jet
-val result: [Int#3] = double.[1, 2, 3];
-val [a, b, c] = result;   // OK — 3 names for 3 elements
+result: [Int#3] @= double.[1, 2, 3];
+[a, b, c] @= result;   // OK — 3 names for 3 elements
 ```
 
 - Destructuring a `[T#N]` with the wrong number of names is **E0963**.
@@ -1263,7 +1265,7 @@ caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 ```jet
 fn main() {
     #Caps(Fs, Io) {
-        val text = core.fs.read("x") ?? "";   // Fs — allowed
+        text @= core.fs.read("x") ?? "";   // Fs — allowed
         print(text);                            // Io — allowed
     }
 }

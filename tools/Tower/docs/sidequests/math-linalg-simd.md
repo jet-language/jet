@@ -14,7 +14,7 @@ vectorized kernels without dropping to Rust FFI).
 `core.math` covers basic `Float` ops only (verified persona note + no matrix/SIMD
 code in `Source/`). Marcus must implement linear algebra from scratch or via Rust
 FFI, and there are no SIMD intrinsics — the expert tier gives raw memory
-(`#Audit`/`#Unsafe`/`Ptr<T>`, verified `48_lowlevel.jet`) but no vectorized math.
+(`#Unsafe("reason")`/`Ptr<T>`, verified `48_lowlevel.jet`) but no vectorized math.
 Two distinct gaps:
 
 - **A library**: vectors, matrices, decompositions, FFT — a numerics package.
@@ -37,7 +37,7 @@ Two distinct gaps:
 
 - **I6** any bootstrap numerics crate needs owner approval + a native plan.
 - **I1** SIMD must stay memory-safe by default; intrinsics that can violate
-  bounds/alignment belong behind `#Unsafe`/`#Audit`. Portable safe SIMD
+  bounds/alignment belong behind `#Unsafe("reason")`. Portable safe SIMD
   (`std::simd`) is the safe-by-default path.
 - **I8** simplicity ratchet — these are large; each needs a roadmap slot / owner
   sign-off. Surfaced now so the next persona run isn't a surprise.

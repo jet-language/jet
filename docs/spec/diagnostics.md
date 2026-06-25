@@ -70,21 +70,21 @@ before continuing.
 | E0006 | parse | *retired in M4* (was: `?` staged)         |
 | E0007 | jet   | integer too large for 64 bits             |
 | E0008 | parse | teaching: `def`/`func` → `fn` (S14)       |
-| E0009 | parse | teaching: `let`/`let mut` → `val`/`var`   |
-| E0010 | parse | teaching: `set` → `val`                   |
+| E0009 | parse | teaching: `let`/`let mut` → `name @=`/`name :=` |
+| E0010 | parse | teaching: `set` → `name @=`               |
 | E0011 | sema  | *retired in M10* (was: `println` → `print`) |
 | E0012 | parse | teaching: `and`/`not` → `&&`/`!` |
 | E0013 | parse | teaching: `Text` → `String`               |
 | E0014 | parse | teaching: `try` → `?` (M4 — real feature)   |
 | E0015 | parse | teaching: `import` → `use` (S16, D-S16-USE) |
-| E0016 | parse | teaching: `match` → `when` (S24)          |
+| E0016 | parse | teaching: `match` → `if subject { … }` (D-IF1) |
 | E0017 | parse | teaching: `read` → default parameter access (S10) |
 | E0018 | parse | teaching: `write` → `~` sigil (S10, D-CAP7) |
 | E0019 | parse | *retired in M6* (was: `import` staged; S16 shipped) |
 | E0020 | parse | teaching: `None`/`Some`/… → `null`/`value` (S32) |
 | E0021 | parse | teaching: `class` → `struct` (S29)              |
 | E0022 | parse | teaching: `trait`/`interface` staged → M9 (S28) |
-| E0023 | parse | teaching: `case`/`default` → `when` arm syntax (S24) |
+| E0023 | parse | teaching: `case`/`default` → `if subject { … }` arm syntax (D-IF1) |
 | E0024 | parse | teaching: `catch`/`except` → `or` / `== err` (M4) |
 | E0025 | parse | teaching: `unwrap`/`expect` → `or panic(…)` (M4) |
 | E0026 | parse | teaching: `throw`/`raise` → `err(…)` (M4) |
@@ -104,7 +104,7 @@ before continuing.
 | E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
 | E0041 | sema  | teaching: `Mutex`/`lock` → channels |
 | E0043 | jet   | teaching: `jet install` → `jet fetch` |
-| E0044 | parse | teaching: `switch` → `when` (S24, D-SG1)  |
+| E0044 | parse | teaching: `switch` → `if subject { … }` (D-IF1) |
 | E0045 | parse | teaching: `or` fallback → `??` (S71, D-SG6) |
 | E0046 | parse | `?.` optional chaining reaches fields, not methods (S71) |
 | E0047 | type | `?.` left side must be optional `T?` (S71, D-SG6) |
@@ -136,7 +136,7 @@ before continuing.
 | E0108 | sema  | binding type doesn't match its value      |
 | E0109 | sema  | operator type mismatch (incl. Int/Float mixing, `+` on text) |
 | E0110 | sema  | condition isn't `Bool` (`if`/`while`/arm/logic operand) |
-| E0111 | sema  | changing a `val`, const, or read-only parameter |
+| E0111 | sema  | changing an `@=`, const, or read-only parameter |
 | E0112 | sema  | value doesn't fit where it's used (argument/print/interpolation) |
 | E0113 | sema  | `return` value mismatch (wrong/missing/unexpected) |
 | E0114 | sema  | a path reaches the end without `return`   |
@@ -538,7 +538,7 @@ block reserved for M6.
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type: Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType: Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
 | E2402 | `?` can't convert `{err}` into `Error` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Error` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Error`. | Add `impl {err}: Fallible { fn to_error(self) -> Error { Error(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
-| E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `val name = …;` before the struct literal, or write the long form `Type { field_name: value }`. |
+| E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name @= …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source -> Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} -> {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} -> {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … -> …` blocks. |
 | E2406 | Can't declare `impl {Source} -> {Target}` — neither type is defined in this program. | Error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined, so conversions between two foreign types can't be added silently. | Define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type. |
@@ -634,16 +634,16 @@ span is embedded in the message (Jet file + line + function name).
 ## Low-level tier diagnostics (E2-M13, S58)
 
 The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an
-`#Audit("…")` + `#Unsafe { … }` region (or an `#Unsafe fn` contract) opens the
+`#Unsafe("…") { … }` region (or an `#Unsafe fn` contract) opens the
 operations that can violate memory safety. Ordinary Jet never reaches these.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E3101 | `{op}` can only run inside an `#Unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `#Unsafe("why this is safe") { … }`. |
 | E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
-| E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Audit("…") #Unsafe { … }`. |
+| E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Unsafe("…") { … }`. |
 | E3104 | `{arena}` was already {reset/freed}; this value lives in `{arena}` which is gone. | Calling `arena.reset()` or `arena.free()` invalidates all values allocated in it. | Move the `alloc` call before the `reset`/`free`, or create a new allocator. |
-| L3101 | This `#Unsafe` block has no `#Audit` reason. | Every gated region records, in one line, why it can't break memory safety. | Add `#Audit("why this is safe")` on the line above. |
+| L3101 | This `#Unsafe` block has no reason. | Every gated region records, in one line, why it can't break memory safety. | Add the reason: `#Unsafe("why this is safe") { … }`. |
 
 ## Arena region diagnostics (D-ALLOC2 / D-REGION1)
 

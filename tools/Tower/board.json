@@ -1349,16 +1349,20 @@
       "type": "task",
       "title": "Doc & path consistency sweep (#Audit→#Unsafe drift, R1–R7→R1–R10, dead links, src/→Source)",
       "body": "Mechanical doc cleanup, no decision — code is correct, docs lag. (1) D-UNSAFE2 (2026-06-22) retired the separate #Audit(\"…\") marker (E0055) and folded the reason into #Unsafe(\"reason\"), but 8 doc sites still teach the retired two-marker (or older @unsafe/@audit) form: README.md:41/69, diagnostics.md:599/604/606/608 (self-contradicts E0055 at :118), architecture.md:63-64, roadmap.md:63/128, and CLAUDE.md I1 (~51/53/55). (2) CLAUDE.md:14 & docs/README.md:23 say architecture.md is 'rules R1–R7'; it defines R1–R10. (3) Dead links: docs/reference/errors/*.md (13 files) footer -> ../admin/04-diagnostics.md (should be ../../spec/diagnostics.md); roadmap.md:24 & syntax-decisions.md:888 link decision-ballots.md at wrong path. (4) Stale src/->Source/ path comments: CLI.rs:9, Prelude/CoreLib.rs:1446, CBind.rs:11, Comptime/Methods.rs:67, Comptime/mod.rs:85, Manifest.rs:3. (5) Example comments teaching retired :: / when (CODE is clean): 03_values.jet:2, 69_distinct_types.jet:2, 75_arena_regions.jet:40 (:: -> @=), 11_enums.jet:1 ('exhaustive when'). CLAUDE.md and docs/README.md are owner-owned — surface those fixes, don't edit unilaterally. Plan: tools/Tower/docs/sidequests/doc-consistency-sweep.md.",
-      "stage": "ready",
-      "plan": "doc-consistency-sweep",
+      "stage": "done",
+      "plan": null,
       "notes": [
         {
           "t": "Filed from codebase audit 2026-06-24. Folds in the minor example-comment :: / when stragglers (example CODE is fully modern; only header comments lag).",
           "at": "2026-06-24T22:45:02.236Z"
+        },
+        {
+          "t": "[sweep] Doc consistency sweep done: fixed stale ::/val/var->@=/:=, mut/take/view->~/^/& sigils, #Audit->#Unsafe, pack.jet/payload.jet->pkg.jet, when->if subject{} across docs/reference, spec.md, diagnostics.md index, README, plans/sidequests. Left syntax-decisions.md historical ledger untouched. Flagged for owner: E0964 live diagnostic still says var [T] (compiler-output fix + rebless, not docs); syntax-decisions internal #no_copy/#NoCopy + D-LIN1 drop-reason drift.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-24T22:45:02.236Z",
-      "updated": "2026-06-24T22:45:02.236Z",
+      "updated": "2026-06-25",
       "priority": "P2",
       "workOrder": 0
     },

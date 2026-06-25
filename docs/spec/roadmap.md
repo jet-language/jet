@@ -60,7 +60,7 @@ interpreter (I2/I3); JIT deferred to Epoch 3 (D-DEV2). Std-only file watching
 (I6).
 
 **E2-M13 — Expert low-level tier (S58)** verified 2026-06-17. `use
-core.mem` discovery gate, `#Audit("…")` + `#Unsafe { … }` / `#Unsafe fn` audit
+core.mem` discovery gate, `#Unsafe("reason") { … }` / `#Unsafe fn` audit
 gate, `Ptr<T>` (→ `*mut`), `mem.volatile_read`/`address_of`/`from_addr`;
 diagnostics E3101/E3102/E3103 + lint L3101; the I1 amendment (D-LL1) recorded in
 `architecture.md` (generated `unsafe` only inside user gates; safe Jet emits
@@ -133,7 +133,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`jet.http`, plain HTTP). TLS is delivered as the `jet.tls` package (separate from the core binary, I6).
 - **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
 - **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.
-- **E2-M13** — expert low-level tier: `use core.mem`, `#Audit`/`#Unsafe` gates, `Ptr<T>`, volatile; I1 amendment (D-LL1).
+- **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `Ptr<T>`, volatile; I1 amendment (D-LL1).
 - **E2-M14** — C FFI: `@bindgen`/`@extern module`, `use c.<lib>`, link discovery.
 - **E2-M15** — cross-compilation + freestanding: `jet build --target`, `--freestanding`, QEMU smoke.
 - **E2-M16** — pure evaluation + layer 3: `#Pure fn`, `jet eval --pure`, package recipes, sandboxed builds.

@@ -60,8 +60,8 @@ and emit directly; only executable bodies go through the TIR.)
   **I1 amendment (D-LL1, ratified 2026-06-16, E2-M13).** I1 originally read
   *"no `unsafe` in the language or generated code, ever (v1)."* The expert
   low-level tier (S58) amends it: generated `unsafe` appears **only** inside
-  user-written gated regions — an `#Unsafe { … }` block (which requires an
-  `#Audit("…")` reason, lint L3101) or an `#Unsafe fn` contract, both
+  user-written gated regions — an `#Unsafe("reason") { … }` block (the reason is
+  required; lint L3101 if missing) or an `#Unsafe fn` contract, both
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
   sema (E3101/E3102/E3103) and tested in `tests/golden.rs` (every example but
