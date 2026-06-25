@@ -6,11 +6,20 @@
 //!   * an explicit `region r { … }` may span two allocators.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Unique temp dir per call. Keying only on PID let parallel tests clobber a
+/// shared `fixture.jet`, so a test compiled another's source — flaky races.
+static SEQ: AtomicU64 = AtomicU64::new(0);
+fn unique_tmp() -> std::path::PathBuf {
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("jet_arena_{}_{}", std::process::id(), n))
+}
 
 /// Write the fixture to a real temp file so `use core.mem` resolves like a
 /// normal build, then return the diagnostic codes (empty = clean).
 fn error_codes(src: &str) -> Vec<String> {
-    let dir = std::env::temp_dir().join(format!("jet_arena_{}", std::process::id()));
+    let dir = unique_tmp();
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("fixture.jet");
     std::fs::write(&path, src).unwrap();
@@ -25,7 +34,7 @@ fn error_codes(src: &str) -> Vec<String> {
 /// This is the I2 backstop: the runtime `&mut self`/`self` signatures must also
 /// accept what Jet accepted.
 fn build_and_run(name: &str, src: &str) -> Option<String> {
-    let dir0 = std::env::temp_dir().join(format!("jet_arena_{}", std::process::id()));
+    let dir0 = unique_tmp();
     std::fs::create_dir_all(&dir0).unwrap();
     let fpath = dir0.join("fixture.jet");
     std::fs::write(&fpath, src).unwrap();

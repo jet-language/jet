@@ -316,10 +316,14 @@ impl<'a> Resolver<'a> {
                 let dep_manifest = self.load_dep_manifest(&clone_dir, dep_name)?;
                 let dep_version = dep_manifest.package.version.clone();
 
-                // Get the git tree hash.
-                let git_tree_hash = git_tree_hash(&clone_dir, &rev_to_fetch).unwrap_or_else(|_| {
-                    format!("sha256-{}", &rev_to_fetch[..8.min(rev_to_fetch.len())])
-                });
+                // Content hash of the checked-out source tree. This MUST use the
+                // same algorithm as path deps (`SHA256::tree_hash`), because the
+                // integrity floor (c122) re-hashes the *store* entry with that same
+                // function and compares — git's own `HEAD^{tree}` object id is a
+                // different hash space and would never match, falsely tripping
+                // E1204 on every git dep. Git identity is already recorded by the
+                // locked `rev`; this field is the content fingerprint.
+                let git_tree_hash = tree_hash(&clone_dir);
 
                 // Check for version conflicts.
                 let dep_name_in_manifest = dep_manifest.package.name.clone();
@@ -633,23 +637,6 @@ fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
     })?;
 
     Ok(())
-}
-
-fn git_tree_hash(repo_dir: &Path, _rev: &str) -> Result<String, String> {
-    let out = Command::new("git")
-        .args([
-            "-C",
-            repo_dir.to_str().unwrap_or("."),
-            "rev-parse",
-            "HEAD^{tree}",
-        ])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err("git rev-parse failed".to_string());
-    }
-    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    Ok(format!("sha256-{}", hash))
 }
 
 fn normalize_path(p: &Path) -> PathBuf {

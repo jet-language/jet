@@ -75,10 +75,10 @@ fn main() {
 #[test]
 fn take_prefix_moves_non_clone_capture() {
     let src = r#"
-struct NoClone { tag: Int }
+struct NoClone { label: Int }
 fn main() {
-    item @= NoClone { tag: 7 }
-    f @= take(item) (n: Int) => n + item.tag
+    item @= NoClone { label: 7 }
+    f @= take(item) (n: Int) => n + item.label
     print(f(1))
 }
 "#;

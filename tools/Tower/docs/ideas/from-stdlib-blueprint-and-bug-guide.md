@@ -22,17 +22,6 @@ Legend: `NEW` · `ALREADY RATIFIED (id)` · `ALREADY IN BALLOT (id)` ·
 
 # A. From the standard-library blueprint
 
-## A1 — Two-tier library: tiny frozen Core + curated, separately-versioned ring
-**What it is:** Keep a small unchanging Core that ships with the compiler, and
-put the "batteries" (http, json, crypto, …) in an official set that can
-evolve, deprecate, and version on its own schedule — so dead modules never rot
-inside the language's stability promise.
-**Source:** blueprint, Commandment 7 / Principle 7 / Part 4.
-**Status:** ALREADY IMPLEMENTED — Core is the frozen 8 modules in
-`core-library.md`; the `jet.*` first-party ring (http/regex/csv/toml/log/time/
-crypto/archive/db) ships versioned separately. Editions/epochs ratified (E2-M2).
-**CEO note:** Skip — this is exactly the architecture Jet already runs.
-
 ## A2 — Tiny composable interfaces (Reader/Writer/Iterator) underpin everything
 **What it is:** Define a handful of small protocols (read bytes, write bytes,
 iterate, close) once; every file, socket, compressor, and encoder implements

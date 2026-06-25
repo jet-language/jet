@@ -20,15 +20,6 @@ covered — flagged as "PARTIAL" with the gap called out.
 This file is about **where you write a type's methods** and **how modules/namespaces
 work** — ergonomics, not new runtime power. Much of it is already settled.
 
-### A1. Write methods inside the type body (inline methods)
-**What it is.** Let people write a type's methods in the same block as its fields,
-instead of in a separate `impl` block; the compiler splits them apart for Rust
-behind the scenes. Beginners never learn the word "impl."
-**Source.** Layer 0, "Inline methods (the foundation)" + the M-LANG roadmap slot.
-**Status.** ALREADY RATIFIED (S27). S27 already allows methods *inside the
-`struct`/`enum` body* or in a separate `impl` block, both equivalent.
-**CEO note.** Done — this is the headline of the file and Jet already does it.
-
 ### A2. `extend` blocks — add methods to a type from another file
 **What it is.** A keyword to bolt extra methods onto an existing type elsewhere
 (another file/module), for cases that can't live in the home definition.
@@ -64,19 +55,6 @@ tooling (S49 doc comments, M13). None of T2–T7 exists as a card; they're all
 *library/tooling on top of A3*, not language changes.
 **CEO note.** All deferrable tooling; the doc gen (T6) and breadcrumbs/outline (T5/T2)
 are the cheap wins. Nothing here needs an owner syntax call — only A3 does.
-
-### A5. File = module, folder = package (zero-boilerplate modules)
-**What it is.** The file's location on disk *is* its module path — no `mod foo;`
-declarations (unlike Rust). Folders become packages automatically.
-**Source.** Part B, "The recommended default model."
-**Status.** ALREADY RATIFIED / IMPLEMENTED (S16 `use`, D-MOD1–4, roadmap M6/M12).
-S16 resolves modules by file/dir with no `mod` boilerplate.
-**CEO note.** Done.
-
-### A6. Private by default, `pub` to export
-**Source.** Part B toolbox + visibility tiers.
-**Status.** ALREADY RATIFIED (S18 — private by default; prefix `pub`).
-**CEO note.** Done.
 
 ### A7. `pub(package)` middle visibility tier
 **What it is.** A visibility level between private and fully public: visible

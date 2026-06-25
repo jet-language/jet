@@ -337,13 +337,13 @@ struct Inner {
 }
 struct Outer {
     inner: Inner
-    tag: Int
+    label: Int
 }
 fn deep(o: Outer) -> Int {
-    return (o.inner.v + o.tag)
+    return (o.inner.v + o.label)
 }
 fn main() {
-    o @= Outer { inner: Inner { v: 10 }, tag: 5 }
+    o @= Outer { inner: Inner { v: 10 }, label: 5 }
     print(deep(o))
     print(o.inner.v)
 }
@@ -638,10 +638,10 @@ fn user_method_with_string_arg_implicit_clone() {
     }
     let src = "\
 struct Crate {
-    tag: String
+    label: String
 
     fn combine(self, other: String) -> String {
-        return \"{self.tag}-{other}\"
+        return \"{self.label}-{other}\"
     }
 }
 fn run(b: Crate) -> String {
@@ -649,7 +649,7 @@ fn run(b: Crate) -> String {
     return b.combine(name)
 }
 fn main() {
-    b @= Crate { tag: \"t\" }
+    b @= Crate { label: \"t\" }
     print(run(b))
 }
 ";
@@ -1785,7 +1785,7 @@ fn file_module_qualified_call() {
 module math
 fn main() {
     print(math.clamp(15, 0, 10))
-    print(math.tag(\"x\", 5))
+    print(math.label(\"x\", 5))
 }
 ";
     let math_src = "\
@@ -1798,7 +1798,7 @@ pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
     }
     return x
 }
-pub fn tag(prefix: String, n: Int) -> String {
+pub fn label(prefix: String, n: Int) -> String {
     return \"{prefix}:{n}\"
 }
 ";
