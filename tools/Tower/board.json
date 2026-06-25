@@ -164,7 +164,7 @@
       "type": "idea",
       "title": "Scoped transactions (#transact rollback semantics)",
       "body": "#transact {} surface is ratified (S82); decide rollback semantics: per-type opt-in Rollback trait, reverse-chain on ?-failure, commit on success. After D-EFF1.",
-      "stage": "deciding",
+      "stage": "building",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-TXN1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -196,6 +196,10 @@
         },
         {
           "t": "[handoff 2026-06-25] STATUS — layers 1+3 SHIPPED (example 110, suite green). Layer 2 (Rollback trait) NOT built: blocked on c149 (complete associated-type resolution), which is itself gated on decision D-ASSOC-NOW (sequence assoc-types vs D-PARSE-1; recommend B). NEXT ACTION once D-ASSOC-NOW resolves A/C: build c149, then layer 2 = trait recognition (assoc `type Snapshot` + snapshot/restore) + #Transact dispatch to custom snapshot/restore instead of deep clone + `derive Rollback` (Snapshot=Self) + example + snapshot tests; keep all unsafe in the jet_txn prelude (I1), rustc never speaks (I2). Stage moved done→deciding to reflect the unbuilt layer.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[unblocked 2026-06-25] D-ASSOC-NOW=C decided + c149 (associated types) SHIPPED → layer 2 prerequisite cleared. Stage deciding→building; layer 2 is now ready to implement. PLAN: (1) make `Rollback` a recognized trait the user impls (`impl T: Rollback { type Snapshot = …  fn snapshot(self) -> Snapshot  fn restore(~self, ^Snapshot) }`) — assoc types now work; (2) `#Transact` codegen: for each auto-snapshot root whose type implements Rollback, call its snapshot()/restore() instead of the generic deep clone (the raw-pointer registration stays in the jet_txn prelude, I1); (3) `derive Rollback` → field-wise full-clone impl (Snapshot=Self); (4) example + snapshot tests. NOTE: restore takes `^Snapshot` (owned) to sidestep c150 (borrowed-param-to-field move bug); that's semantically correct (restore consumes the snapshot).",
           "at": "2026-06-25"
         }
       ],
@@ -609,7 +613,7 @@
       "type": "idea",
       "title": "Complete associated-type resolution (D-LIB2 generics v1)",
       "body": "D-LIB2 (generics v1: associated types + default method bodies, ratified 2026-06-17) was built PARSE-ONLY: `assoc_types` on TraitDef and `assoc_type_impls` on ImplDef are parsed and formatted but never resolved in sema or codegen — only the Formatter reads them. A trait method whose return/param uses an associated type fails E0907 ('doesn't match the trait signature') because sema compares the trait's abstract type (e.g. `Item`) against the impl's concrete type literally. SCOPE: sema must substitute the impl's `type X = Concrete` during signature matching, method resolution, and return/param typing; codegen must emit the Rust associated-type binding and `Self::X` in bounds/returns. Hard prerequisite for c72 layer 2 (the Rollback trait's `type Snapshot`). Sequenced against D-PARSE-1 by decision D-ASSOC-NOW.",
-      "stage": "building",
+      "stage": "done",
       "plan": null,
       "notes": [
         {
@@ -619,6 +623,10 @@
         {
           "t": "[build 2026-06-25] D-ASSOC-NOW=C — both streams greenlit; assoc-types now BUILDING. Plan: (1) sema substitution — when matching an impl method against a trait sig, resolve the trait's associated type to the impl's `type X = Concrete` before comparing (kills the spurious E0907); (2) thread the resolved type through return/param typing + method resolution; (3) codegen emit. Verify with the Container/Bag repro + a snapshot test, then unblock c72 layer 2.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[DONE 2026-06-25] Shipped (commit 7ddd382). Sema: TraitInfo records the trait's assoc-type names; validate_trait_impl builds a subst from the impl's `type X = Concrete` and substitutes the trait sig before sig_matches_trait; missing binding = E0913 (new), which suppresses the would-be E0907. Codegen: emit_trait_def declares `type X;` + renders assoc uses as `Self::X` (rust_type_name_assoc); both impl emitters write `type X = <concrete>;`. example 113 + golden, E0913 ui snapshot + diagnostics.md. Suite 1081 passed / 0 failed. Discovered an UNRELATED pre-existing codegen bug (a Read-convention non-Copy param assigned to a field isn't cloned → rustc E0507 / I2) → filed c150; NOT a blocker for layer 2 (restore can take `^Snapshot`). c72 layer 2 now unblocked.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-25",
@@ -626,6 +634,25 @@
       "decisions": [
         "D-ASSOC-NOW"
       ],
+      "priority": "P2",
+      "workOrder": null
+    },
+    {
+      "id": "c150",
+      "type": "idea",
+      "title": "Borrowed non-Copy param assigned to a field isn't cloned (I2/E0507)",
+      "body": "Pre-existing codegen bug (surfaced while building c149). A method that assigns a Read-convention (borrowed) non-Copy param straight into a field emits a move out of a shared reference, which rustc rejects (E0507) — an I2 violation. REPRO: `struct Ledger { rows: [Int] }  impl Ledger { fn put_back(~self, s: [Int]) { self.rows = s } }` → generated `(*self).user_rows = (*user_s);` fails E0507 'cannot move out of `*user_s` behind a shared reference'. The codegen should clone on assignment-from-borrow (`= user_s.clone()`) for non-Copy types, mirroring how other borrowed-value stores are handled. WORKAROUND: take the param by `^` (owned/move) — then the store is a real move and compiles. Not a hard blocker for c72 layer 2 (Rollback `restore` can take `^Snapshot`), but the Read-convention path is a real correctness hole worth closing.",
+      "stage": "planning",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[file 2026-06-25] Found during c149 verification; isolated to a plain inherent method (no trait, no associated types), so it is independent of c149. Verified `^` (owned) param avoids it. FILES: the field-assignment lowering in Source/Codegen/TIR (the store of a param place into a field place) — clone non-Copy RHS when it is a borrowed param.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "decisions": [],
       "priority": "P2",
       "workOrder": null
     }
