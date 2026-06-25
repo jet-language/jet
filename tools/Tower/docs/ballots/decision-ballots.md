@@ -847,6 +847,49 @@ Vale/Austral (linear langs) — an explicit `destroy`/`drop` is the only way to 
 
 ---
 
+### D-TXN-ROLLBACK — how a value opts into `#Transact` rollback (rec A)
+
+**Gist:** When a `#Transact` block fails on `?`, how does a mutated value get its `rollback` run — does the block track every mutation automatically, or does the author register each undo explicitly?
+
+**Story.** Walter is moving money between two in-memory accounts inside a `#Transact(tx) { … }`. He debits `from`, then the credit to `to` hits a `?`-failure (the account is frozen). D-TXN1 promises the debit is undone "in reverse order on the values mutated so far." Walter needs to know *what he has to write* for that promise to hold: nothing (the block watches `from`)? a trait on `Account`? an explicit `tx.on_rollback(() => { from.credit(amt) })` next to the debit?
+
+**In the wild:**
+```jet
+struct Account { balance: Int }
+
+fn transfer(from: ~Account, to: ~Account, amt: Int) -> Bool ? Fail {
+    #Transact(tx) {
+        from.balance = from.balance - amt          // mutation #1
+
+        // ── the open question: what makes mutation #1 reversible? ──
+        // Option A (explicit hook):   tx.on_rollback(() => { from.balance = from.balance + amt })
+        // Option B (Rollback trait):  (nothing here; `Account` derives `Rollback`, the block snapshots it)
+        // Option C (auto-snapshot):   (nothing here; the block deep-copies every value it sees mutated)
+
+        ok_or_freeze(to, amt)?                       // `?`-failure here → rollback mutation #1
+        to.balance = to.balance + amt               // never reached
+    }
+    return ok(true)
+}
+```
+On the `?`-failure, the debit to `from` must be undone. The three options differ entirely in what Walter writes and what the compiler must prove.
+
+**Other languages:** Software-transactional-memory (Haskell STM, Clojure refs) auto-snapshots every ref touched in a transaction and retries — zero author annotation, but every participant must be a special `TVar`/`ref` cell, not a plain value. Rust has no language transactions; libraries (e.g. `scopeguard`'s `guard(val, |v| …)`) make you write the undo closure explicitly. Database `BEGIN/ROLLBACK` snapshots at the storage engine, invisible to the app. D-TXN3's already-ratified `on_commit` is the *forward* (commit) half and is explicit per-hook — option A is its mirror image (an explicit `on_rollback`), which is the most consistent with what already shipped.
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | What the author writes | What the compiler must prove | Works on plain values? | Consistency with shipped `on_commit` |
+|---|---|---|---|---|
+| **A — explicit `tx.on_rollback(() => {…})` (recommended)** | one undo lambda per reversible mutation, beside the mutation | nothing new — it's the `on_commit` machinery run on the *failure* path instead of commit | yes (any value, captured by the closure) | exact mirror of `on_commit`; same Drop-backed model, same LIFO order |
+| **B — `Rollback` trait the type derives** | `#[Rollback]` on the struct; nothing at the mutation site | the block must snapshot each `Rollback` value on entry and prove a non-`Rollback` value isn't mutated (a new E-code + a "mutated value isn't `Rollback`" diagnostic) | only on types that derive it | new concept (a trait + snapshot pass); `on_commit` stays a closure, so two different mental models |
+| **C — auto-snapshot every mutated value** | nothing | the block must detect *every* mutation in its dynamic extent and deep-copy the pre-state — expensive and hard to bound for heap/collection types; aliasing makes "restore" ambiguous | yes, but with hidden cost | invisible magic vs. explicit `on_commit` — least consistent |
+
+**Recommendation:** **A** — an explicit `tx.on_rollback(() => { … })` is the precise mirror of the already-shipped, already-ratified `tx.on_commit(() => { … })`: same handle, same Drop-backed mechanism, same LIFO order, just fired on the failure path instead of the commit path. It needs no new trait, no snapshot pass, and no "is this value reversible" proof; it works on plain values; and it keeps one mental model for the whole transaction surface ("register what to do on commit; register what to undo on rollback"). The D-TXN1 ratified phrase "calls `rollback(mut self)` (the `Rollback` trait)" reads toward B, so this fork genuinely needs the owner: keep the `Rollback`-trait spelling (B), or supersede it with the closure-symmetric `on_rollback` (A)?
+
+**Owner Q (D-TXN-ROLLBACK):** D-TXN1 as ratified names a `Rollback` trait and "values mutated so far." After building `on_commit` (D-TXN3/4) as an explicit Drop-backed closure, the symmetric move is an explicit `tx.on_rollback(() => {…})` (A) rather than a trait + auto-snapshot (B). Do you want to (A) supersede the `Rollback`-trait wording with the closure-symmetric `on_rollback`, or (B) keep the trait and have the block auto-snapshot `Rollback`-deriving values? (The `#Transact` block, `on_commit`, and the D-TXN2 irreversible-effect rejection are already built and shipped; only this registration mechanism is held.)
+
+---
+
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
   `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor
