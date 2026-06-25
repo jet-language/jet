@@ -390,3 +390,78 @@ fn repl_reset_clears_imports() {
         out
     );
 }
+
+// ── D-CTCORE1: inline pure Core execution in the REPL ────────────────────
+
+#[test]
+fn repl_core_math_sqrt_inline() {
+    // c133/D-CTCORE1: after importing core.math, math.sqrt() must execute
+    // inline in the interpreter (not raise E0956).
+    let inputs = &["use core.math as math", "math.sqrt(16.0)"];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("ok") && out.contains("4") && !out.contains("E0956"),
+        "math.sqrt(16.0) should produce 4 inline, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_core_math_multiple_calls() {
+    // Confirm several whitelisted math calls work sequentially in one session.
+    let inputs = &[
+        "use core.math as math",
+        "math.floor(3.7)",
+        "math.ceil(2.1)",
+        "math.abs(-5)",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(out.contains("3"), "floor(3.7) should be 3, got: {:?}", out);
+    assert!(out.contains("3"), "ceil(2.1) should be 3, got: {:?}", out);
+    assert!(out.contains("5"), "abs(-5) should be 5, got: {:?}", out);
+    assert!(!out.contains("E0956"), "no E0956 for whitelisted calls, got: {:?}", out);
+}
+
+#[test]
+fn repl_core_math_pow_inline() {
+    // Another whitelisted math function: math.pow(2.0, 10.0) = 1024.
+    let inputs = &["use core.math as math", "math.pow(2.0, 10.0)"];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("1024") && !out.contains("E0956"),
+        "math.pow(2.0, 10.0) should produce 1024 inline, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_core_result_stored_in_binding() {
+    // The result of a whitelisted core call can be stored and used.
+    let inputs = &[
+        "use core.math as math",
+        "r @= math.sqrt(9.0)",
+        "r",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("3") && !out.contains("E0956"),
+        "binding from math.sqrt should work, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_non_whitelisted_core_io_still_rejects() {
+    // core.io I/O calls must NOT silently execute at comptime (E0958).
+    // core.io is not in the hard-reject list (only core.fs/tasks/mem are).
+    // After importing, calling io.read() must produce an error, not succeed.
+    let inputs = &["use core.io as io", "io.read()"];
+    let out = run_transcript(inputs, None);
+    // Either sema rejects it (type error) or the comptime interpreter rejects
+    // it (E0958 — I/O not allowed at comptime). Either way: no silent success.
+    assert!(
+        out.contains("error") || out.contains("E095"),
+        "io.read() must not silently succeed, got: {:?}",
+        out
+    );
+}

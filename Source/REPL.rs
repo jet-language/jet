@@ -141,6 +141,11 @@ pub struct Session {
     /// Accumulated raw statement source text for each successfully executed
     /// statement input. Used by `:run` to materialize a `main()` body.
     pub stmt_srcs: Vec<String>,
+    /// D-CTCORE1: alias → Core module path (e.g. `"math"` → `"core.math"`),
+    /// derived from successfully accepted `use` declarations. Passed to
+    /// `run_repl_step` so the comptime interpreter can execute whitelisted
+    /// pure Core calls (e.g. `math.sqrt(16.0)`) inline instead of E0956.
+    pub core_imports: HashMap<String, String>,
 }
 
 impl Default for Session {
@@ -161,6 +166,7 @@ impl Session {
             step: 0,
             moved_names: HashSet::new(),
             stmt_srcs: Vec::new(),
+            core_imports: HashMap::new(),
         }
     }
 
@@ -173,6 +179,7 @@ impl Session {
         self.step = 0;
         self.moved_names.clear();
         self.stmt_srcs.clear();
+        self.core_imports.clear();
         // Keep shown_preload_note — no need to repeat the teaching note.
     }
 
@@ -609,6 +616,21 @@ fn looks_like_item(text: &str) -> bool {
         || t.starts_with("impl ")
         || t.starts_with("const ")
         || t.starts_with("module ")
+}
+
+/// D-CTCORE1: parse one `use …;` source line and add any core module alias →
+/// path entries to `map`. Called after a `use` import is accepted into the
+/// session so `run_repl_step` can resolve whitelisted pure Core calls inline.
+fn update_core_imports(import_src: &str, map: &mut HashMap<String, String>) {
+    let (toks, _) = crate::Lexer::lex(import_src);
+    if let Ok(prog) = crate::Parser::parse(&toks) {
+        for imp in &prog.imports {
+            if let Some(module) = crate::Loader::core_module_path(imp) {
+                let alias = crate::Loader::import_alias(imp);
+                map.insert(alias, module);
+            }
+        }
+    }
 }
 
 /// Detect whether the text is a `use …` import line (S16). `pub use` re-exports
@@ -1158,13 +1180,16 @@ pub fn run(project_dir: Option<&str>) -> i32 {
             InputKind::Import(src) => {
                 // Try it against the accumulated session so a bad import
                 // (unknown core module, etc.) reports before being kept.
-                session.import_srcs.push(src);
+                session.import_srcs.push(src.clone());
                 let errors = type_check_item(&session, "");
                 if !errors.is_empty() {
                     session.import_srcs.pop();
                     render_diags(&step_src, trimmed, &errors, color);
                     continue;
                 }
+                // D-CTCORE1: register any core alias → module path so the
+                // comptime interpreter can execute whitelisted pure Core calls.
+                update_core_imports(&src, &mut session.core_imports);
                 println!("{}", green("ok", color));
             }
 
@@ -1197,6 +1222,7 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                     &mut session.scope,
                     REPL_FUEL_BUDGET,
                     suppress,
+                    &session.core_imports,
                 ) {
                     Ok(echo_val) => {
                         // Track moves: bindings consumed in this input are gone.
@@ -1442,7 +1468,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
             }
 
             InputKind::Import(src) => {
-                session.import_srcs.push(src);
+                session.import_srcs.push(src.clone());
                 let errors = type_check_item(&session, "");
                 if !errors.is_empty() {
                     session.import_srcs.pop();
@@ -1451,6 +1477,9 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     }
                     continue;
                 }
+                // D-CTCORE1: register any core alias → module path so the
+                // comptime interpreter can execute whitelisted pure Core calls.
+                update_core_imports(&src, &mut session.core_imports);
                 out.push_str("ok\n");
             }
 
@@ -1484,6 +1513,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     &mut session.scope,
                     REPL_FUEL_BUDGET,
                     suppress,
+                    &session.core_imports,
                 ) {
                     Ok(echo_val) => {
                         // Track moves for cross-input detection (D-REPL8=A).

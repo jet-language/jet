@@ -204,6 +204,11 @@ pub fn run_main_with_fuel(
 /// The `suppress` flag implements `;` at end of input — the caller strips the
 /// trailing `;` to detect a bare expression and passes `suppress = false`; a
 /// statement ending in `;` passes `suppress = true`.
+///
+/// D-CTCORE1: `core_imports` maps alias → Core module path (e.g. `"math"` →
+/// `"core.math"`) from the session's accumulated `use` declarations, so
+/// whitelisted pure Core calls (e.g. `math.sqrt(16.0)`) execute inline instead
+/// of raising E0956. Pass `&HashMap::new()` when no imports are active.
 pub fn run_repl_step(
     stmts: &[crate::AST::Stmt],
     funcs: &HashMap<String, &Func>,
@@ -212,13 +217,14 @@ pub fn run_repl_step(
     scope: &mut HashMap<String, CtValue>,
     fuel: u64,
     suppress: bool,
+    core_imports: &HashMap<String, String>,
 ) -> Result<Option<CtValue>, Diagnostic> {
     let mut interp = Interp {
         funcs,
         base_dir,
         fuel,
         sink: Some(sink),
-        core_imports: empty_imports(),
+        core_imports,
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
