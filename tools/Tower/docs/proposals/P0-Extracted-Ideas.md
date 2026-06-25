@@ -25,6 +25,18 @@
 - Jet fmt should not drop parenthesis used for visual/functional grouping
 - Use Jai . operator for Enum "expansion" and maybe for implied constructors?
 - Broad gated build-time I/O: allow comptime code to read env vars, hit the network, run a subprocess, or codegen at build time (Jai's #run / Zig @embedFile-plus territory), behind a sandbox + an auditable .jet/build-io.lock of every accessed path + cache-invalidation on change. Powerful (full build scripting without a separate build step), but it adds a supply-chain attack surface that the S26 "no ambient I/O at comptime" law was written to refuse — the Nim/Jai evidence shows un-auditable spread once it ships.
+- Following constructor syntax: fmt: Fmt = .{
+        .gpa = gpa,
+        .arena = arena,
+        .io = io,
+        .seen = .init(gpa),
+        .any_error = false,
+        .check_ast = check_ast_flag,
+        .force_zon = force_zon,
+        .color = color,
+        .out_buffer = .init(gpa),
+        .stdout_writer = &stdout_writer,
+    };
 
 # A. From `jet-code-organization.md`
 

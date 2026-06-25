@@ -358,6 +358,83 @@ fn main() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+// D-PARSE-1: the user-facing JSON parser is full RFC 8259 — exponents,
+// `\uXXXX` (with surrogate pairs), every escape — and rejects invalid input
+// (bad escapes, raw control chars) with a clear line/message.
+#[test]
+fn json_parser_is_rfc8259_complete() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping json_parser_is_rfc8259_complete (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_json_full_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    // Probe (a): exponent number, BMP `\u` escape, a surrogate pair, and a `\t`
+    // escape — all parsed, then re-serialized (keys sort, `\t` re-escaped).
+    let (code_a, stdout_a, stderr_a) = build_and_run(
+        &dir,
+        "json_full_a",
+        r#"
+use core.encoding.json as json
+fn main() {
+    raw @= "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
+    data @= json.parse(raw) ?? panic("bad json")
+    print(json.to_string(data))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code_a, 0, "probe (a) failed: {stderr_a}");
+    assert_eq!(
+        stdout_a, "{\"acc\":\"café\",\"big\":1500.0,\"grin\":\"😀\",\"tab\":\"a\\tb\"}\n",
+        "probe (a): full parse + re-serialize"
+    );
+
+    // Probe (b): an invalid escape is rejected with a clear message.
+    let (code_b, stdout_b, stderr_b) = build_and_run(
+        &dir,
+        "json_full_b",
+        r#"
+use core.encoding.json as json
+fn main() {
+    if json.parse("{{\"x\":\"a\\qb\"}}") == {
+        ok(_) -> { print("OK") }
+        err(e) -> { print("ERR: {e.message}") }
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code_b, 0, "probe (b) failed: {stderr_b}");
+    assert_eq!(stdout_b, "ERR: invalid escape in string\n", "probe (b): bad escape rejected");
+
+    // Probe (c): a raw control character (literal tab) inside a string is rejected.
+    let (code_c, stdout_c, stderr_c) = build_and_run(
+        &dir,
+        "json_full_c",
+        "
+use core.encoding.json as json
+fn main() {
+    if json.parse(\"{{\\\"x\\\":\\\"a\tb\\\"}}\") == {
+        ok(_) -> { print(\"OK\") }
+        err(e) -> { print(\"ERR: {e.message}\") }
+    }
+}
+",
+        &[],
+        None,
+    );
+    assert_eq!(code_c, 0, "probe (c) failed: {stderr_c}");
+    assert_eq!(stdout_c, "ERR: control character in string\n", "probe (c): raw control char rejected");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 #[ignore]
 fn channel_stress_1000_messages() {

@@ -163,21 +163,44 @@ impl Parser {
                     Some('r') => out.push('\r'),
                     Some('b') => out.push('\u{08}'),
                     Some('f') => out.push('\u{0C}'),
-                    Some('u') => {
-                        let mut code = 0u32;
-                        for _ in 0..4 {
-                            let c = self.bump().ok_or("truncated \\u escape")?;
-                            let d = c.to_digit(16).ok_or("invalid \\u escape")?;
-                            code = code * 16 + d;
-                        }
-                        out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
-                    }
+                    Some('u') => out.push(self.unicode_escape()?),
                     _ => return Err("invalid escape in string".into()),
                 },
                 Some(c) => out.push(c),
                 None => return Err("unterminated string".into()),
             }
         }
+    }
+
+    /// A `\uXXXX` escape, already past the `u`, combining a high+low surrogate
+    /// pair into one code point and rejecting a lone or malformed surrogate.
+    fn unicode_escape(&mut self) -> Result<char, String> {
+        let cp = self.hex4()?;
+        if (0xD800..=0xDBFF).contains(&cp) {
+            if self.bump() != Some('\\') || self.bump() != Some('u') {
+                return Err("unpaired surrogate in string".into());
+            }
+            let lo = self.hex4()?;
+            if !(0xDC00..=0xDFFF).contains(&lo) {
+                return Err("unpaired surrogate in string".into());
+            }
+            let combined = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+            char::from_u32(combined).ok_or_else(|| "invalid \\u escape".into())
+        } else if (0xDC00..=0xDFFF).contains(&cp) {
+            Err("unpaired surrogate in string".into())
+        } else {
+            char::from_u32(cp).ok_or_else(|| "invalid \\u escape".into())
+        }
+    }
+
+    fn hex4(&mut self) -> Result<u32, String> {
+        let mut code = 0u32;
+        for _ in 0..4 {
+            let c = self.bump().ok_or("truncated \\u escape")?;
+            let d = c.to_digit(16).ok_or("invalid \\u escape")?;
+            code = code * 16 + d;
+        }
+        Ok(code)
     }
 
     fn number(&mut self) -> Result<Json, String> {

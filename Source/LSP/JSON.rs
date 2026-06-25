@@ -173,14 +173,7 @@ impl<'a> JsonParser<'a> {
                     'n' => '\n',
                     'r' => '\r',
                     't' => '\t',
-                    'u' => {
-                        let hex: String = self.s[self.i..].chars().take(4).collect();
-                        if hex.len() != 4 {
-                            return Err(());
-                        }
-                        self.i += 4;
-                        char::from_u32(u32::from_str_radix(&hex, 16).map_err(|_| ())?).ok_or(())?
-                    }
+                    'u' => self.unicode_escape()?,
                     _ => return Err(()),
                 });
             } else {
@@ -189,6 +182,36 @@ impl<'a> JsonParser<'a> {
             }
         }
         Err(())
+    }
+
+    /// A `\uXXXX` escape, already past the `u`, combining a high+low surrogate
+    /// pair into one code point and rejecting a lone or malformed surrogate.
+    fn unicode_escape(&mut self) -> Result<char, ()> {
+        let cp = self.hex4()?;
+        if (0xD800..=0xDBFF).contains(&cp) {
+            if self.bump() != Some('\\') || self.bump() != Some('u') {
+                return Err(());
+            }
+            let lo = self.hex4()?;
+            if !(0xDC00..=0xDFFF).contains(&lo) {
+                return Err(());
+            }
+            let combined = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+            char::from_u32(combined).ok_or(())
+        } else if (0xDC00..=0xDFFF).contains(&cp) {
+            Err(())
+        } else {
+            char::from_u32(cp).ok_or(())
+        }
+    }
+
+    fn hex4(&mut self) -> Result<u32, ()> {
+        let hex: String = self.s[self.i..].chars().take(4).collect();
+        if hex.len() != 4 {
+            return Err(());
+        }
+        self.i += 4;
+        u32::from_str_radix(&hex, 16).map_err(|_| ())
     }
 }
 

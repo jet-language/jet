@@ -556,8 +556,12 @@ mod jet_std {
             match c {
                 '"' => out.push_str("\\\""),
                 '\\' => out.push_str("\\\\"),
+                '\u{0008}' => out.push_str("\\b"),
+                '\u{000c}' => out.push_str("\\f"),
                 '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
                 '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
                 _ => out.push(c),
             }
         }
@@ -723,15 +727,65 @@ mod jet_std {
                         match e {
                             '"' => out.push('"'),
                             '\\' => out.push('\\'),
+                            '/' => out.push('/'),
+                            'b' => out.push('\u{0008}'),
+                            'f' => out.push('\u{000c}'),
                             'n' => out.push('\n'),
+                            'r' => out.push('\r'),
                             't' => out.push('\t'),
-                            other => out.push(other),
+                            'u' => self.unicode_escape(&mut out)?,
+                            _ => return Err(self.err("invalid escape in string")),
                         }
                     }
+                    c if (c as u32) < 0x20 => return Err(self.err("control character in string")),
                     other => out.push(other),
                 }
             }
             Err(self.err("missing closing quote"))
+        }
+
+        // A `\uXXXX` escape, already past the `u`. Combines a high+low surrogate
+        // pair into one code point; rejects a lone or malformed surrogate.
+        fn unicode_escape(&mut self, out: &mut String) -> Result<(), JsonError> {
+            let cp = self.hex4()?;
+            if (0xD800..=0xDBFF).contains(&cp) {
+                if self.peek() != Some('\\') {
+                    return Err(self.err("unpaired surrogate in string"));
+                }
+                self.pos += 1;
+                if self.peek() != Some('u') {
+                    return Err(self.err("unpaired surrogate in string"));
+                }
+                self.pos += 1;
+                let lo = self.hex4()?;
+                if !(0xDC00..=0xDFFF).contains(&lo) {
+                    return Err(self.err("unpaired surrogate in string"));
+                }
+                let combined = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                match char::from_u32(combined) {
+                    Some(ch) => out.push(ch),
+                    None => return Err(self.err("invalid unicode escape")),
+                }
+            } else if (0xDC00..=0xDFFF).contains(&cp) {
+                return Err(self.err("unpaired surrogate in string"));
+            } else {
+                match char::from_u32(cp) {
+                    Some(ch) => out.push(ch),
+                    None => return Err(self.err("invalid unicode escape")),
+                }
+            }
+            Ok(())
+        }
+
+        fn hex4(&mut self) -> Result<u32, JsonError> {
+            let mut v = 0u32;
+            for _ in 0..4 {
+                let Some(c) = self.peek() else { return Err(self.err("truncated unicode escape")); };
+                let d = c.to_digit(16).ok_or_else(|| self.err("invalid unicode escape"))?;
+                v = v * 16 + d;
+                self.pos += 1;
+            }
+            Ok(v)
         }
 
         fn number(&mut self) -> Result<Json, JsonError> {
@@ -739,11 +793,36 @@ mod jet_std {
             if self.peek() == Some('-') {
                 self.pos += 1;
             }
-            while matches!(self.peek(), Some('0'..='9')) {
-                self.pos += 1;
+            // Integer part: `0` alone, or a non-zero digit then more digits.
+            match self.peek() {
+                Some('0') => self.pos += 1,
+                Some('1'..='9') => {
+                    self.pos += 1;
+                    while matches!(self.peek(), Some('0'..='9')) {
+                        self.pos += 1;
+                    }
+                }
+                _ => return Err(self.err("bad number")),
             }
+            // Fraction: a `.` must be followed by at least one digit.
             if self.peek() == Some('.') {
                 self.pos += 1;
+                if !matches!(self.peek(), Some('0'..='9')) {
+                    return Err(self.err("bad number"));
+                }
+                while matches!(self.peek(), Some('0'..='9')) {
+                    self.pos += 1;
+                }
+            }
+            // Exponent: `e`/`E`, optional sign, at least one digit.
+            if matches!(self.peek(), Some('e') | Some('E')) {
+                self.pos += 1;
+                if matches!(self.peek(), Some('+') | Some('-')) {
+                    self.pos += 1;
+                }
+                if !matches!(self.peek(), Some('0'..='9')) {
+                    return Err(self.err("bad number"));
+                }
                 while matches!(self.peek(), Some('0'..='9')) {
                     self.pos += 1;
                 }
