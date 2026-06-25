@@ -56,6 +56,10 @@ pub fn fetch(
         ) {
             return Err(vec![d]);
         }
+        // D-SUPPLY1 Step 2: every manifest dep must resolve to a pinned version.
+        if let Err(d) = Lock::verify_all_manifest_deps_locked(manifest, lock) {
+            return Err(vec![d]);
+        }
         let dep_dirs = build_dep_dirs_from_lock(lock, project_root, manifest)?;
         return Ok((lock.clone(), dep_dirs));
     }

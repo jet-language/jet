@@ -83,10 +83,70 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
     for item in &current_api {
         println!("    {} {}", item.kind, item.name);
     }
-    println!(
-        "  note: SemVer diff (E2601) requires the previous version from the registry.\n  \
-         In v1, this is checked by the registry on receipt. The local gate ensures build+tests pass."
-    );
+
+    // D-SUPPLY1 Step 3: local SemVer gate (E1218). If a frozen public-API
+    // snapshot from a previous release exists (`.jet/cache/api/<name>.api`),
+    // diff the current surface against it. A breaking change under a non-major
+    // bump is refused unless `--force`.
+    if let Some(prev) = jet::Publish::ApiFreeze::load_snapshot(&root, name) {
+        let old_api: Vec<jet::Publish::ApiItem> = prev
+            .funcs
+            .iter()
+            .map(|f| jet::Publish::ApiItem {
+                kind: "fn".to_string(),
+                name: f.name.clone(),
+                signature: f.signature.clone(),
+            })
+            .collect();
+        let current_fns: Vec<jet::Publish::ApiItem> =
+            current_api.iter().filter(|i| i.kind == "fn").cloned().collect();
+        let breaking = jet::Publish::diff_public_api(&old_api, &current_fns);
+
+        let bump = match (
+            jet::Publish::SemVer::SemVer::parse(&prev.published_version),
+            jet::Publish::SemVer::SemVer::parse(version),
+        ) {
+            (Some(old), Some(new)) => jet::Publish::classify_bump(&old, &new),
+            _ => jet::Publish::BumpKind::Same,
+        };
+
+        if !breaking.is_empty() && !matches!(bump, jet::Publish::BumpKind::Major) {
+            let next_major = jet::Publish::SemVer::SemVer::parse(&prev.published_version)
+                .map(|v| v.major + 1)
+                .unwrap_or(1);
+            let diags: Vec<_> = breaking
+                .iter()
+                .map(|c| {
+                    jet::Publish::e1218(&prev.published_version, version, bump, c, next_major)
+                })
+                .collect();
+            if force {
+                eprintln!(
+                    "warning [--force]: {} breaking API change(s) under a non-major bump — publishing anyway.",
+                    diags.len()
+                );
+            } else {
+                let raw = String::new();
+                eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags));
+                eprintln!(
+                    "\nerror: breaking public API change since {} requires a major version bump.",
+                    prev.published_version
+                );
+                eprintln!(" use `jet publish --force` to override with a warning banner");
+                exit(ExitCodes::USER_ERROR);
+            }
+        } else {
+            println!(
+                "  semver: ok — public API compatible with the {} snapshot",
+                prev.published_version
+            );
+        }
+    } else {
+        println!(
+            "  note: no previous API snapshot — SemVer diff (E1218) starts on the next publish.\n  \
+             The registry re-checks against the live previous version (E2601) on receipt."
+        );
+    }
 
     // D-MIGRATE1: snapshot `#PublishedSchema` structs at release time.
     let snap_count = jet::Publish::write_schema_snapshots_for_entry(&root, &entry_str, version);
@@ -136,8 +196,11 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
     );
 }
 
-/// `jet vendor` — copy all resolved dependencies into `vendor/`.
-pub(crate) fn run_vendor() {
+/// `jet vendor [--vendor-dir <path>]` — copy all resolved dependencies into a
+/// local vendor tree for offline builds (D-SUPPLY1). The default location is
+/// `<project>/vendor`; `--vendor-dir` relocates it (relative paths resolve
+/// against the project root).
+pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
         eprintln!("error: no `pkg.jet` found — run `jet vendor` inside a project");
@@ -163,16 +226,31 @@ pub(crate) fn run_vendor() {
             exit(ExitCodes::USER_ERROR);
         });
 
-    match jet::Publish::vendor(&root, &lock, &dep_dirs) {
+    // Resolve the vendor directory: default `<project>/vendor`, or the
+    // `--vendor-dir` path (relative paths anchor at the project root).
+    let target_dir = match vendor_dir {
+        Some(p) => {
+            let p = PathBuf::from(p);
+            if p.is_absolute() { p } else { root.join(p) }
+        }
+        None => root.join("vendor"),
+    };
+
+    match jet::Publish::vendor(&root, &lock, &dep_dirs, &target_dir) {
         Ok(copied) => {
+            let shown = target_dir
+                .strip_prefix(&root)
+                .unwrap_or(&target_dir)
+                .display()
+                .to_string();
             if copied.is_empty() {
                 println!("vendor: no dependencies to copy");
             } else {
                 for name in &copied {
                     println!("vendored: {}", name);
                 }
-                println!("ok: {} dependencies copied to vendor/", copied.len());
-                println!("tip: commit vendor/ and use `jet fetch --locked` for reproducible offline builds.");
+                println!("ok: {} dependencies copied to {}/", copied.len(), shown);
+                println!("tip: commit {}/ and use `jet fetch --locked` for reproducible offline builds.", shown);
             }
         }
         Err(d) => {
@@ -223,18 +301,40 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         exit(ExitCodes::OK);
     }
 
-    let diags = jet::Publish::audit_lockfile(&lock, &advisories);
-    if diags.is_empty() {
+    let matches = jet::Publish::audit_lockfile(&lock, &advisories);
+    if matches.is_empty() {
         println!(
             "audit: {} dependencies checked, no advisories found.",
             lock.packages.len()
         );
-    } else {
-        let raw = String::new();
-        eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags));
-        eprintln!("\n{} advisory match(es) found", diags.len());
+        return;
+    }
+
+    // D-SUPPLY1: report every match, but only a CRITICAL advisory makes the
+    // command exit nonzero (advisory scan). Lower severities inform and exit 0.
+    let raw = String::new();
+    let diags: Vec<_> = matches.iter().map(|m| m.diagnostic.clone()).collect();
+    eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags));
+
+    let critical = matches
+        .iter()
+        .filter(|m| m.severity == jet::Publish::Severity::Critical)
+        .count();
+    eprintln!(
+        "\n{} advisory match(es) found ({} critical)",
+        matches.len(),
+        critical
+    );
+    if critical > 0 {
+        eprintln!(
+            "audit: {} critical advisor{} — failing. Upgrade the affected dependenc{}.",
+            critical,
+            if critical == 1 { "y" } else { "ies" },
+            if critical == 1 { "y" } else { "ies" },
+        );
         exit(ExitCodes::USER_ERROR);
     }
+    // Non-critical matches are advisory only: exit 0 so a scan doesn't break CI.
 }
 
 /// `jet sbom [--cyclonedx]` — emit a software bill of materials from the lockfile.

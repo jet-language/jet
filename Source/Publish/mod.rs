@@ -188,9 +188,22 @@ mod tests {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
         let db = "ADV-001|mylib|^1.0|1.0.5|XSS in template engine\n";
         let advisories = parse_advisory_db(db);
-        let diags = audit_lockfile(&lock, &advisories);
-        assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, "E2603");
+        let matches = audit_lockfile(&lock, &advisories);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].diagnostic.code, "E2603");
+        // No explicit severity field → defaults to Medium (advisory, exit 0).
+        assert_eq!(matches[0].severity, Severity::Medium);
+    }
+
+    #[test]
+    fn audit_severity_parsed_from_db() {
+        let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
+        let db = "ADV-002|mylib|^1.0||Heap overflow|critical\n";
+        let advisories = parse_advisory_db(db);
+        assert_eq!(advisories[0].severity, Severity::Critical);
+        let matches = audit_lockfile(&lock, &advisories);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].severity, Severity::Critical);
     }
 
     #[test]

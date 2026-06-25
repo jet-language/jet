@@ -1,13 +1,9 @@
 # Owner ballot results
 
-_submitted 2026-06-24 19:03 · **ratified + cards stripped 2026-06-24 (batch 4)**_
+_submitted 2026-06-25 10:07_
 
-Decisions captured from Tower. **Processed:** the 11 open full cards (D-SIMD2,
-D-SERDE2–8, D-NOSTD1, D-IF3, D-FMT1) + the C-CASING/C-MANIFEST corrections are
-recorded in `docs/spec/syntax-decisions.md` and stripped from `decision-ballots.md`
-(see the batch-4 drain note there). The remaining IDs below were already ratified in
-the 2026-06-22/23/24 batches. Owner follow-on requests (D-EFF1 subquestions, D-SOA1
-name + open questions) are queued as **Pending follow-on cards** in `decision-ballots.md`.
+Decisions captured from Tower. Tell Claude **"go"** to ratify these
+into syntax-decisions.md, strip the cards, and implement the plans.
 
 ## Decisions
 
@@ -176,3 +172,53 @@ Comment: Ship the chooser now, not post v1. How does this collide with the field
 
 **D-SERDE8** — unknown-field policy
 Decision: **A**
+
+**D-PUBLISH1A** — `jet publish` command shape + pre-flight refusals
+Decision: **A**
+
+**D-VERSION1** — version immutability / re-publish policy
+Decision: **A**
+
+**D-RESOLVE1** — dependency resolver default
+Decision: **A**
+
+**D-LOCK1** — is `.jet/lock` committed to version control by default?
+Decision: **A**
+
+**D-SERDE9** — generic serde bound propagation
+Decision: **A**
+
+**D-SERDE10** — phantom / non-serialized type params
+Decision: **A**
+
+**D-SERDE11** — manual bound override
+Decision: **A**
+Comment: Add a card to tower so that the shipping bound idea doesnt get lost
+
+**D-SERDE12** — lift the E2413 gate
+Decision: **A**
+
+**D-DEP-ARCHIVE1** — which crate(s) `jet.archive` wraps
+Decision: **A**
+
+**D-DEP-DB1** — which sqlite crate `jet.db` wraps
+Decision: **A**
+
+**D-BFS1** — where a wrapped crate's source lives for an offline build
+Decision: **A**
+
+**D-LIN1-DROP** — how to deliberately discard a `#SingleUse` value
+Decision: **A**
+
+**D-TXN-ROLLBACK** — how a value opts into `#Transact` rollback
+Decision: **C**
+Comment: Auto snapshot by default -> but allow experts to define rollback trait for customizability AND to explicitly define on rollback. This gives magic out of the box at the potential cost of some performance, but experts will be able to work around performance hit using manual method if desired
+
+**D-TAINT-SAN** — sanitizer-function spelling: bare `sanitizer fn` vs `#Sanitizer fn`
+Decision: **B**
+
+**D-DET-CAPAPI** — the method API for the deterministic `Clock` / `Rng` capabilities
+Decision: **B**
+
+**D-PARSE-1** — correctness-sensitive formats: keep hand-rolled subsets, or let I6 bend?
+Decision: **C**

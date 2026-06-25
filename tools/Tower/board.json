@@ -1011,10 +1011,10 @@
       "type": "task",
       "title": "Strengthen package and ecosystem trust",
       "body": "Make Jetpack/package workflows launch-grade: lockfile stability, registry semantics, semver compatibility tests, package signing/provenance, offline builds, vendoring, SBOM, docs generation, and package build-from-source.",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P1",
       "workOrder": 9,
-      "plan": "package-ecosystem-trust",
+      "plan": null,
       "notes": [
         {
           "t": "Recommended after core invariants because ecosystem trust multiplies every future stdlib and domain story.",
@@ -1027,10 +1027,14 @@
         {
           "t": "Step 1 (checksum floor) shipped. Remaining: signing, vendoring, SBOM, jet audit.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] c122 registry-independent surface shipped (D-SUPPLY1 + D-PKGSIGN1 tier B): jet build --sbom (writes SPDX next to the binary), jet vendor --vendor-dir (vendor/manifest.json for offline builds), jet audit severity model (advisory; nonzero exit only on CRITICAL), E1217 (lockfile completeness, enforced --locked), E1218 (local SemVer breaking-change gate at publish). SHA-256 verify floor (E1204) confirmed always-on. Ed25519 author signing (tier A) gated on c96 (registry key distribution) → follow-on card. 6 pkg tests, cli reblessed narrowly.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-24"
+      "updated": "2026-06-25"
     },
     {
       "id": "c123",
@@ -1374,7 +1378,7 @@
       "created": "2026-06-24T22:45:02.236Z",
       "updated": "2026-06-25",
       "priority": "P1",
-      "workOrder": 0
+      "workOrder": null
     },
     {
       "id": "c138",
@@ -1396,7 +1400,7 @@
       "created": "2026-06-24T22:45:02.236Z",
       "updated": "2026-06-25",
       "priority": "P2",
-      "workOrder": 0
+      "workOrder": null
     },
     {
       "id": "c139",
@@ -1458,7 +1462,7 @@
       "created": "2026-06-24",
       "updated": "2026-06-24",
       "decisions": [],
-      "priority": "P4",
+      "priority": "P2",
       "workOrder": null
     },
     {
@@ -1548,6 +1552,28 @@
       "decisions": [],
       "priority": "P2",
       "workOrder": null
+    },
+    {
+      "id": "c146",
+      "type": "feature",
+      "title": "Package signing tier A (Ed25519) — gated on c96 registry",
+      "body": "D-PKGSIGN1 tier A (opt-in Ed25519 author signing): native Ed25519/SHA-512 ring primitives (I6, only SHA-256 today), Sign.rs, LockedPackage.signature, jet keygen + jet key backup, publish auto-keygen on first publish, fetch-time signature verify, require_signed enforcement (per-registry, OFF by default). Every surface needs the registry-publish key-distribution handshake (TOFU pinning via the index) that c96 owns — build once c96 (publish/registry) lands. The checksum floor (tier B, E1204) + vendor/audit/SBOM already shipped in c122.",
+      "stage": "backlog",
+      "plan": "package-ecosystem-trust",
+      "notes": [
+        {
+          "t": "[sweep] Split from c122 — buildable trust surface done; signing tier blocks on the c96 registry build (not a decision; D-PKGSIGN1 is ratified).",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "decisions": [],
+      "priority": "P2",
+      "workOrder": null,
+      "blockedBy": [
+        "c96"
+      ]
     }
   ],
   "questions": [
@@ -1782,6 +1808,14 @@
       "status": "open",
       "answer": "",
       "created": "2026-06-24T16:29:34.608Z"
+    },
+    {
+      "id": "cmqtbzlic586",
+      "decisionId": "D-STATE-DECL",
+      "text": "What is the fundamental difference between being able to just use an enum for this??? Could we enhance enums rather than messing around with a similar but entirely new additional tag system?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-25T10:00:06.564Z"
     }
   ],
   "ingest": []

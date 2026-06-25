@@ -144,7 +144,9 @@ package management (M12.1):
 supply chain (E2-M8):
   {bin} publish                     publish the current package to the registry
   {bin} publish --force             publish even if the pre-publish gate warns
-  {bin} vendor                      copy all dependencies into vendor/
+  {bin} vendor                      copy all dependencies into vendor/ (offline builds)
+  {bin} vendor --vendor-dir <path>  copy them into a chosen directory instead
+  {bin} build  --sbom <file>        also write an SPDX SBOM next to the binary
   {bin} audit                       check dependencies against the advisory database
   {bin} audit --advisory-db <path>  use a custom advisory database
   {bin} sbom                        emit an SPDX SBOM from the lockfile
@@ -153,6 +155,8 @@ supply chain (E2-M8):
 flags:
   --emit-rust                  also print the generated Rust code
   --check                      with fmt: exit 1 if file would change (CI)
+  --sbom                       with build: write an SPDX SBOM beside the binary
+  --vendor-dir <path>          with vendor: directory to copy dependencies into
   --small                      with build/run: smallest binary (S15)
   --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
   --target=<triple>            with build: cross-compile for a rustc target triple (E2-M15)
@@ -304,6 +308,8 @@ fn main() {
     let verbose = jet_argv.iter().any(|a| a == "--verbose" || a == "-v");
     // D-TOOL5 (E2-M11): capability summary flags.
     let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
+    // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
+    let sbom = jet_argv.iter().any(|a| a == "--sbom");
     // E2-M15: cross-compilation target triple (`--target=<triple>`).
     let cross_target: Option<String> = jet_argv
         .iter()
@@ -440,7 +446,8 @@ fn main() {
             return;
         }
         "vendor" => {
-            run_vendor();
+            let vendor_dir = flag_value(&raw, "--vendor-dir");
+            run_vendor(vendor_dir);
             return;
         }
         "schema" => {
@@ -636,6 +643,7 @@ fn main() {
                                     cross_target.as_deref(),
                                     verbose,
                                     capabilities_json,
+                                    sbom,
                                     &program_args,
                                     mode,
                                 );
@@ -713,7 +721,7 @@ fn main() {
             } else {
                 target.to_string()
             };
-            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, cross_target.as_deref(), verbose, capabilities_json, &program_args, mode);
+            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, cross_target.as_deref(), verbose, capabilities_json, sbom, &program_args, mode);
         }
     }
 }

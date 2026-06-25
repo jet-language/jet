@@ -178,3 +178,39 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 **D-PKGSIGN1 ratified 2026-06-24 = B + A opt-in** (checksum integrity floor always on;
 Ed25519 author signing opt-in and non-blocking, `require_signed` off by default). **Every
 step (1–7) is now unblocked — this plan is implement-ready for the burn-down.**
+
+## Implementation status (2026-06-25, c122)
+
+Done — the buildable, registry-independent surface:
+
+- **Step 1 / Tier B (E1204)** — already wired: `Store::verify_entry` runs before
+  `link_into_project` at both fetch sites (`Source/Fetch.rs:273`/`365`). Mandatory SHA-256
+  integrity floor on every install; no key ceremony.
+- **Step 2 (E1217)** — `Lock::verify_all_manifest_deps_locked` (bidirectional completeness),
+  enforced in the `--locked` fetch path (`Source/Fetch.rs`). Every manifest dep must resolve
+  to a pinned version.
+- **Step 3 (E1218)** — local SemVer gate in `run_publish`: diffs the current public API against
+  the frozen API snapshot (`ApiFreeze::load_snapshot`); a breaking change under a non-major bump
+  is E1218 (`--force` overrides). Distinct from the registry-side E2601.
+- **Step 5 — `jet vendor [--vendor-dir <path>]`** — copies deps into a vendor tree (default
+  `vendor/`, relocatable) + writes `vendor/manifest.json` (name/version/fingerprint per dep).
+- **Step 6 — `jet build --sbom`** — writes `<bin>.spdx` (SPDX 2.3) next to the binary.
+  Dep `PackageChecksum` already carries the real `SHA256: <tree_hash>`.
+- **Step 7 — `jet audit`** — advisory scan with a per-advisory `Severity` (low|medium|high|
+  critical); exits nonzero **only on CRITICAL**, advisory otherwise. E2603 is now severity-
+  prefixed. Advisory-DB line format gained an optional 6th `severity` field.
+
+Diagnostics added (I4): E1217, E1218 in `docs/spec/diagnostics.md` + covered by
+`tests/pkg.rs`. CLI flags `--vendor-dir`/`--sbom` registered in `Source/CLI.rs`.
+
+**Gated on c96 (registry, open ballot) — NOT built:**
+
+- **Step 4 / Tier A** — Ed25519 author signing in full: `Source/Publish/Sign.rs`, native
+  Ed25519/SHA-512 ring primitives, `LockedPackage::signature` + pinned-key fingerprint,
+  `jet keygen`/`jet key backup`, `jet publish` auto-keygen-on-first-publish, signature verify
+  in `jet fetch`, and `require_signed` enforcement. Every one of these needs the
+  registry-publish handshake (key distribution via the registry index, TOFU pinning) that
+  c96's open publish/registry ballot owns. `require_signed` already exists on `RegistryConfig`
+  (OFF by default) and stays inert until then.
+- **`jet publish` registry upload** + the "publish always emits an SBOM to the registry index"
+  half of D-SUPPLY1 — both need the live registry (c96).

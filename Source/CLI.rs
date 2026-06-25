@@ -86,6 +86,8 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--spdx", help: "with sbom: emit SPDX tag-value format (default)" },
     FlagSpec { long: "--cyclonedx", help: "with sbom: emit CycloneDX JSON format" },
     FlagSpec { long: "--advisory-db", help: "with audit: path to advisory database file" },
+    FlagSpec { long: "--vendor-dir", help: "with vendor: directory to copy dependencies into (default vendor/)" },
+    FlagSpec { long: "--sbom", help: "with build: also write an SPDX SBOM next to the binary" },
     FlagSpec { long: "--verbose", help: "with build: print the bridge steps" },
     FlagSpec { long: "--online", help: "with doctor: allow network checks" },
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },

@@ -323,6 +323,40 @@ pub fn verify_lock_matches_manifest(
     Ok(())
 }
 
+/// Stronger, bidirectional completeness check (D-SUPPLY1, Step 2): every dep
+/// named in the manifest must appear in the lock *and* resolve to a recorded
+/// version. Where `verify_lock_matches_manifest` only checks membership, this
+/// also rejects a lock entry that exists but carries no resolved version —
+/// the case a half-written or hand-edited lock can produce. Fires in
+/// `--locked` CI mode and at publish time. Returns E1217 on the first gap.
+pub fn verify_all_manifest_deps_locked(
+    manifest: &Manifest,
+    lock: &LockFile,
+) -> Result<(), Diagnostic> {
+    for (dep_name, _spec) in &manifest.dependencies {
+        match lock.packages.iter().find(|p| &p.name == dep_name) {
+            None => return Err(e1217(dep_name)),
+            Some(pkg) if pkg.version.trim().is_empty() => return Err(e1217(dep_name)),
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
+/// E1217 — a dependency in the manifest has no locked, resolved revision.
+pub fn e1217(dep_name: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1217",
+        format!("`{}` is in {} but has no locked revision", dep_name, Syntax::PAYLOAD_FILE),
+        format!(
+            "a `--locked` build (and `jet publish`) requires every dependency to be pinned in {} to a resolved version, so the build is reproducible. `{}` is declared but not pinned.",
+            Syntax::UNIFIED_LOCK_FILE, dep_name
+        ),
+        format!("run `jet fetch` to resolve and pin `{}`, then commit {}.", dep_name, Syntax::UNIFIED_LOCK_FILE),
+        None,
+    )
+}
+
 // ──────────────────────────────────────────────
 // Fingerprint computation
 // ──────────────────────────────────────────────

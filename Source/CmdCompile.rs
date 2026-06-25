@@ -18,6 +18,7 @@ pub(crate) fn run_compile_cmd(
     cross_target: Option<&str>,
     verbose: bool,
     capabilities_json: bool,
+    sbom: bool,
     program_args: &[&String],
     mode: OutputMode,
 ) {
@@ -114,6 +115,10 @@ pub(crate) fn run_compile_cmd(
             if let Some(triple) = cross_target {
                 println!("target: {}", triple);
             }
+            // D-SUPPLY1: `--sbom` writes an SPDX SBOM next to the binary.
+            if sbom {
+                write_sbom_for_build(file, &bin_path(file));
+            }
             // D-TOOL5 (E2-M11): print capability summary after a successful build.
             if capabilities_json {
                 println!("{}", capabilities.to_json());
@@ -147,6 +152,46 @@ pub(crate) fn run_compile_cmd(
             eprint!("{}", usage());
             exit(ExitCodes::USAGE);
         }
+    }
+}
+
+/// D-SUPPLY1 — write an SPDX SBOM next to the freshly built binary.
+///
+/// Best-effort: an SBOM describes the *dependency* graph, so a single-file
+/// program with no project is emitted with just the root component. When a
+/// `pkg.jet` and lockfile exist, the SBOM lists every locked dependency with
+/// its tree-hash checksum.
+fn write_sbom_for_build(file: &str, bin: &Path) {
+    let file_path = Path::new(file);
+    let search_from = file_path.parent().unwrap_or(Path::new("."));
+
+    // Resolve a name/version + lockfile from the enclosing project, if any.
+    let (name, version, lock) = match jet::Loader::find_manifest_root(search_from) {
+        Some(root) => {
+            let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+            let (n, v) = match fs::read_to_string(&pack_path)
+                .ok()
+                .and_then(|raw| jet::Manifest::parse(&pack_path, &raw).ok())
+            {
+                Some(mf) => (mf.package.name, mf.package.version),
+                None => (stem(file), "0.0.0".to_string()),
+            };
+            (n, v, jet::Lock::load(&root))
+        }
+        None => (stem(file), "0.0.0".to_string(), None),
+    };
+
+    let lock = lock.unwrap_or_else(|| jet::Lock::LockFile {
+        version: 1,
+        packages: Vec::new(),
+        root_dependencies: Vec::new(),
+    });
+
+    let sbom = jet::Publish::emit_spdx(&lock, &name, &version);
+    let out = bin.with_extension("spdx");
+    match fs::write(&out, sbom) {
+        Ok(()) => println!("sbom: {}", out.display()),
+        Err(e) => eprintln!("warning: couldn't write SBOM to {}: {}", out.display(), e),
     }
 }
 

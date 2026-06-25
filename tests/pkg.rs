@@ -999,6 +999,68 @@ fn cli_jet_new_creates_project_structure() {
 }
 
 #[test]
+fn cli_build_sbom_writes_spdx() {
+    // D-SUPPLY1: `jet build --sbom` writes an SPDX file next to the binary.
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_build_sbom (run `cargo build` first)");
+        return;
+    }
+    let tmp = tmp_dir("cli_build_sbom");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(&tmp, "hello.jet", "fn main() { print(\"hi\"); }\n");
+
+    let out = jet_cmd(&["build", "--sbom", "hello.jet"], &tmp, &store);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "jet build --sbom failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("sbom:"), "build output must announce the SBOM path");
+
+    // The SBOM lands beside the produced binary as <bin>.spdx.
+    let spdx = tmp.join("build/hello.spdx");
+    assert!(spdx.is_file(), "expected SBOM at {}", spdx.display());
+    let body = fs::read_to_string(&spdx).unwrap();
+    assert!(body.starts_with("SPDXVersion: SPDX-2.3\n"), "SBOM must be SPDX 2.3");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_vendor_dir_flag_relocates() {
+    // D-SUPPLY1: `--vendor-dir` writes the vendor tree to a chosen location.
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!("note: skipping cli_vendor_dir (need built binary)");
+        return;
+    }
+    let tmp = tmp_dir("cli_vendor_dir");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(&tmp, "greeter/pkg.jet", &min_manifest("greeter", "0.1.0"));
+    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\"; }\n");
+    write(
+        &tmp,
+        "pkg.jet",
+        &manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,"),
+    );
+
+    let out = jet_cmd(&["vendor", "--vendor-dir", "third_party"], &tmp, &store);
+    assert!(
+        out.status.success(),
+        "jet vendor --vendor-dir failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(tmp.join("third_party/greeter").is_dir(), "dep must land in the chosen dir");
+    assert!(tmp.join("third_party/manifest.json").is_file(), "vendor manifest must be written");
+    assert!(!tmp.join("vendor").exists(), "default vendor/ must not be created");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn cli_jet_new_annotated_has_dep_comments() {
     if !jet_bin().is_file() {
         eprintln!("note: skipping cli_jet_new_annotated (run `cargo build` first)");
@@ -1198,11 +1260,16 @@ fn vendored_offline_locked_build() {
     let (lock, dep_dirs) = result.unwrap();
 
     // Vendor the dependency.
-    let vendor_result = jet::Publish::vendor(&tmp, &lock, &dep_dirs);
+    let vendor_dir = tmp.join("vendor");
+    let vendor_result = jet::Publish::vendor(&tmp, &lock, &dep_dirs, &vendor_dir);
     assert!(vendor_result.is_ok(), "vendor must succeed");
     let copied = vendor_result.unwrap();
     assert!(copied.contains(&"greeter".to_string()), "greeter must be vendored");
     assert!(tmp.join("vendor/greeter").is_dir(), "vendor/greeter must exist");
+    // D-SUPPLY1: a vendor manifest records each dep's name/version/fingerprint.
+    let manifest = fs::read_to_string(tmp.join("vendor/manifest.json")).unwrap();
+    assert!(manifest.contains("\"name\": \"greeter\""), "manifest must list greeter");
+    assert!(manifest.contains("\"fingerprint\""), "manifest must record fingerprints");
 
     // With the lock present, --locked fetch succeeds (no network needed).
     let lock_text = fs::read_to_string(tmp.join(".jet/lock")).unwrap_or_default();
@@ -1278,15 +1345,82 @@ fn audit_e2603_on_vulnerable_dep() {
 
     let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
     // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
-    let db = "JET-2026-SEC-001|crypto-lib|^0|0.9.5|Timing side-channel in AES-GCM\n";
+    let db = "JET-2026-SEC-001|crypto-lib|^0|0.9.5|Timing side-channel in AES-GCM|critical\n";
     let advisories = parse_advisory_db(db);
-    let diags = audit_lockfile(&lock, &advisories);
+    let matches = audit_lockfile(&lock, &advisories);
 
-    assert_eq!(diags.len(), 1, "one advisory match expected");
-    assert_eq!(diags[0].code, "E2603");
-    assert!(diags[0].what.contains("JET-2026-SEC-001"));
-    assert!(diags[0].what.contains("crypto-lib"));
-    assert!(diags[0].what.contains("Timing side-channel"));
+    assert_eq!(matches.len(), 1, "one advisory match expected");
+    let d = &matches[0].diagnostic;
+    assert_eq!(d.code, "E2603");
+    assert!(d.what.contains("JET-2026-SEC-001"));
+    assert!(d.what.contains("crypto-lib"));
+    assert!(d.what.contains("Timing side-channel"));
+    assert!(d.what.contains("[critical]"), "severity must prefix the message");
+    assert_eq!(matches[0].severity, jet::Publish::Severity::Critical);
+}
+
+#[test]
+fn audit_non_critical_is_advisory() {
+    // D-SUPPLY1: a non-critical advisory still matches but is advisory-only —
+    // the severity carried back is below Critical, so `jet audit` exits 0.
+    use jet::Publish::{parse_advisory_db, audit_lockfile, Severity};
+
+    let lock = make_test_lock("util-lib", "1.0.0", "sha256-ccdd");
+    let db = "JET-2026-INFO-1|util-lib|^1|1.0.2|Minor info leak in debug logs|low\n";
+    let advisories = parse_advisory_db(db);
+    let matches = audit_lockfile(&lock, &advisories);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].severity, Severity::Low);
+    assert!(matches.iter().all(|m| m.severity != Severity::Critical));
+}
+
+#[test]
+fn e1217_missing_locked_revision() {
+    // D-SUPPLY1 Step 2: a dep declared in the manifest with no lock entry fails
+    // the bidirectional completeness check.
+    use jet::Lock::{verify_all_manifest_deps_locked, LockFile};
+
+    let raw = manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,");
+    let tmp = tmp_dir("e1217");
+    write(&tmp, "pkg.jet", &raw);
+    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+
+    // Empty lock — greeter is declared but not pinned.
+    let empty_lock = LockFile { version: 1, packages: vec![], root_dependencies: vec![] };
+    let err = verify_all_manifest_deps_locked(&mf, &empty_lock)
+        .expect_err("missing locked revision must fail");
+    assert_eq!(err.code, "E1217");
+    assert!(err.what.contains("greeter"));
+
+    // A lock that pins greeter passes.
+    let good_lock = make_test_lock("greeter", "0.1.0", "sha256-aabb");
+    assert!(verify_all_manifest_deps_locked(&mf, &good_lock).is_ok());
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn e1218_breaking_change_under_minor_bump() {
+    // D-SUPPLY1 Step 3: a removed public fn under a minor bump is E1218.
+    use jet::Publish::{diff_public_api, e1218, classify_bump, BumpKind, ApiItem};
+    use jet::Publish::SemVer::SemVer;
+
+    let old = vec![ApiItem {
+        kind: "fn".into(),
+        name: "parse".into(),
+        signature: "fn parse(raw: String) -> Int".into(),
+    }];
+    let new: Vec<ApiItem> = vec![]; // parse removed
+    let breaking = diff_public_api(&old, &new);
+    assert!(!breaking.is_empty());
+
+    let bump = classify_bump(&SemVer::parse("1.0.0").unwrap(), &SemVer::parse("1.1.0").unwrap());
+    assert_eq!(bump, BumpKind::Minor);
+
+    let d = e1218("1.0.0", "1.1.0", bump, &breaking[0], 2);
+    assert_eq!(d.code, "E1218");
+    assert!(d.what.contains("1.1.0"));
+    assert!(d.fix.contains("2.0.0"), "fix must suggest a major bump");
 }
 
 #[test]

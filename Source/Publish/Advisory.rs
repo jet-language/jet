@@ -8,6 +8,38 @@ use super::SemVer::{SemVer, VersionReq};
 // Advisory database
 // ──────────────────────────────────────────────
 
+/// Advisory severity (D-SUPPLY1). `jet audit` exits nonzero only when a
+/// `Critical` advisory matches; lower severities are advisory and exit 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl Severity {
+    /// Parse a severity word (case-insensitive). Unknown / empty → `Medium`,
+    /// so a database that omits the field is treated as advisory, not fatal.
+    pub fn parse(s: &str) -> Severity {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "low" => Severity::Low,
+            "high" => Severity::High,
+            "critical" | "crit" => Severity::Critical,
+            _ => Severity::Medium,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Severity::Low => "low",
+            Severity::Medium => "medium",
+            Severity::High => "high",
+            Severity::Critical => "critical",
+        }
+    }
+}
+
 /// One advisory entry. In v1 the database is a list of these structs, loaded
 /// from a plain text format (one JSON-like record per advisory).
 #[derive(Debug, Clone)]
@@ -20,6 +52,8 @@ pub struct Advisory {
     /// First version where the fix is available, if known.
     pub fixed: Option<SemVer>,
     pub title: String,
+    /// Advisory severity — only `Critical` makes `jet audit` exit nonzero.
+    pub severity: Severity,
 }
 
 impl Advisory {
@@ -31,12 +65,14 @@ impl Advisory {
 }
 
 /// Parse advisories from the line-based format:
-/// `id|package|affected_req|fixed_version_or_empty|title`
+/// `id|package|affected_req|fixed_version_or_empty|title[|severity]`
+/// The trailing `severity` field (low|medium|high|critical) is optional; a
+/// missing or unknown severity is treated as `medium` (advisory, not fatal).
 pub fn parse_advisory_db(text: &str) -> Vec<Advisory> {
     text.lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
         .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(5, '|').collect();
+            let parts: Vec<&str> = line.splitn(6, '|').collect();
             if parts.len() < 5 {
                 return None;
             }
@@ -49,18 +85,29 @@ pub fn parse_advisory_db(text: &str) -> Vec<Advisory> {
                 SemVer::parse(parts[3].trim())
             };
             let title = parts[4].trim().to_string();
-            Some(Advisory { id, package, affected, fixed, title })
+            let severity = parts
+                .get(5)
+                .map(|s| Severity::parse(s))
+                .unwrap_or(Severity::Medium);
+            Some(Advisory { id, package, affected, fixed, title, severity })
         })
         .collect()
 }
 
+/// One advisory that matched a locked package, paired with its severity so the
+/// caller can decide the exit code (`jet audit` exits nonzero on CRITICAL).
+pub struct AuditMatch {
+    pub severity: Severity,
+    pub diagnostic: Diagnostic,
+}
+
 /// Check a set of locked packages against the advisory database.
-/// Returns one E2603 per match.
+/// Returns one match (severity + E2603) per advisory that applies.
 pub fn audit_lockfile(
     lock: &LockFile,
     advisories: &[Advisory],
-) -> Vec<Diagnostic> {
-    let mut diags = Vec::new();
+) -> Vec<AuditMatch> {
+    let mut matches = Vec::new();
     for pkg in &lock.packages {
         let ver = match SemVer::parse(&pkg.version) {
             Some(v) => v,
@@ -68,22 +115,39 @@ pub fn audit_lockfile(
         };
         for adv in advisories {
             if adv.package == pkg.name && adv.affects(&ver) {
-                diags.push(e2603(&adv.id, &pkg.name, &pkg.version, &adv.title, adv.fixed.as_ref()));
+                matches.push(AuditMatch {
+                    severity: adv.severity,
+                    diagnostic: e2603(
+                        &adv.id,
+                        &pkg.name,
+                        &pkg.version,
+                        &adv.title,
+                        adv.severity,
+                        adv.fixed.as_ref(),
+                    ),
+                });
             }
         }
     }
-    diags
+    matches
 }
 
 /// E2603 — advisory match.
-pub fn e2603(id: &str, package: &str, version: &str, title: &str, fixed: Option<&SemVer>) -> Diagnostic {
+pub fn e2603(
+    id: &str,
+    package: &str,
+    version: &str,
+    title: &str,
+    severity: Severity,
+    fixed: Option<&SemVer>,
+) -> Diagnostic {
     let fix_msg = match fixed {
         Some(v) => format!("upgrade `{}` to >= {}. Run `jet audit --explain {}` for details.", package, v, id),
         None => format!("no fixed version is known; monitor `{}` for a patch. Run `jet audit --explain {}` for details.", package, id),
     };
     Diagnostic::error(
         "E2603",
-        format!("advisory {} matches `{}` {}: {}", id, package, version, title),
+        format!("[{}] advisory {} matches `{}` {}: {}", severity.label(), id, package, version, title),
         format!(
             "the advisory database flags `{}` {} as having a known vulnerability, exposed interface, or supply-chain risk.",
             package, version
