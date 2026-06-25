@@ -961,7 +961,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         let callee_ty = self.infer(callee)?;
-        let Type::Fn { params, ret } = callee_ty.clone() else {
+        let Type::Fn { params, ret, .. } = callee_ty.clone() else {
             self.diags.push(Diagnostic::error(
                 "E0803",
                 format!("this is {}, not a function", callee_ty.show()),
@@ -1019,7 +1019,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_lambda(&mut self, lam: &mut Lambda, expected: Option<&Type>) -> Option<Type> {
         let (exp_params, exp_ret) = match expected {
-            Some(Type::Fn { params, ret }) => (Some(params.as_slice()), ret.as_ref()),
+            Some(Type::Fn { params, ret, .. }) => (Some(params.as_slice()), ret.as_ref()),
             _ => (None, None),
         };
 
@@ -1344,6 +1344,10 @@ impl<'a> Checker<'a> {
         Some(Type::Fn {
             params: param_types,
             ret: ret_ty.map(Box::new),
+            // A lambda value is a concrete callback, not a demand for one — it
+            // carries no effect bound (D-EFF2 bounds ride callback *parameter*
+            // types, checked against this value at the call site).
+            effect_bound: None,
         })
     }
 
@@ -1690,7 +1694,7 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
-            Some(Type::Fn { ref params, ref ret }) if params.len() == 1 => {
+            Some(Type::Fn { ref params, ref ret, .. }) if params.len() == 1 => {
                 (params[0].clone(), ret.as_ref().map(|r| *r.clone()))
             }
             Some(ref other) => {
@@ -3534,6 +3538,21 @@ impl<'a> Checker<'a> {
                     self.expected_type = Some(param_ty.clone());
                 }
             }
+            // D-EFF2 (callback param bound): snapshot the effect accumulator
+            // before walking a function-typed argument so the callback's own
+            // effect contribution (the delta) can be checked against the
+            // parameter's declared bound after the walk.
+            let cb_bound: Option<Vec<(String, Span)>> = match effective_params.get(i) {
+                Some((_, Type::Fn { effect_bound: Some(b), .. })) => Some(b.clone()),
+                _ => None,
+            };
+            let cb_snapshot = cb_bound.as_ref().map(|_| {
+                (
+                    self.fx_direct.clone(),
+                    self.fx_edges.clone(),
+                    self.fx_maximal,
+                )
+            });
             let arg_ty = if args_pre_inferred {
                 pre_inferred.get(i).and_then(|t| t.clone())
             } else {
@@ -3548,6 +3567,12 @@ impl<'a> Checker<'a> {
             // its effects through to this caller (transparent flow-through).
             if matches!(param_ty, Type::Fn { .. }) {
                 self.attribute_fn_arg(&arg.expr);
+            }
+            // D-EFF2 (callback param bound): record the obligation now that the
+            // callback's effects are in the accumulator (including the edge added
+            // by `attribute_fn_arg` for a named-fn callback). Checked post-solve.
+            if let (Some(bound), Some((bd, be, bm))) = (&cb_bound, &cb_snapshot) {
+                self.record_callback_obligation(bound, bd, be, *bm, arg.expr.span());
             }
             if arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _))
             {

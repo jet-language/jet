@@ -590,6 +590,10 @@ pub const KW_TODO: &str = "Todo";
 /// builtins; impure calls are a compile error (E3401) with the call-trace path.
 /// Bare lowercase `pure` (FOREIGN_PURE) is the retired spelling → E0053 teaching
 /// error pointing at `#Pure`.
+///
+/// D-EFF2 (ratified 2026-06-22): `#Pure` also rides the front of a callback
+/// parameter type — `f: #Pure fn(T) -> U` demands a pure callback; passing one
+/// with any effect is E0747. Sibling of the `#(E, …) fn(…)` bounded form.
 pub const KW_PURE: &str = "Pure";
 
 /// D-TAINT1 (ratified 2026-06-21, option A; gated on D-EFF1): the value-fact tag
@@ -1085,7 +1089,12 @@ pub const KW_CHANGE: &str = "change"; // D-MIGRATE2
 
 /// D-MIGRATE2E (ratified): the `via { expr }` clause that supplies the inline
 /// converter for a `change` op (`change price: Int -> Usd via { (c) => Usd(c) }`).
-pub const KW_VIA: &str = "via"; // D-MIGRATE2
+///
+/// D-EFF2 (ratified 2026-06-22): also the pass-through marker in a `#(via f)`
+/// signature annotation — a function whose published effect set IS whatever the
+/// callback parameter `f` carries (a tight pass-through that holds when the value
+/// escapes, vs. the conservative flow-through default). Erased in codegen (I3).
+pub const KW_VIA: &str = "via"; // D-MIGRATE2 / D-EFF2
 
 /// D-MIGRATE2F (ratified): the rejected `reorder` verb — field reordering is not
 /// a tracked breaking change and needs no migration. Kept only to teach.

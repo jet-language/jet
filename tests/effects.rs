@@ -537,3 +537,136 @@ fn main() {
 "#;
     assert!(codes(src).is_empty(), "bare #Transact should compile: {:?}", codes(src));
 }
+
+// ---------------------------------------------------------------------------
+// D-EFF2 expert levers: callback param effect bounds + `#(via f)` pass-through.
+// ---------------------------------------------------------------------------
+
+/// Lever 1: a `#Pure fn(…)` parameter handed a pure callback compiles clean.
+#[test]
+fn callback_pure_bound_pure_arg_ok() {
+    let src = r#"
+fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
+    return items.map((x) => f(x));
+}
+#Pure fn inc(n: Int) -> Int { return n + 1; }
+fn main() { print("{transform([1, 2], inc)}"); }
+"#;
+    assert!(codes(src).is_empty(), "pure callback to a #Pure bound is clean: {:?}", codes(src));
+}
+
+/// Lever 1: a `#Pure fn(…)` parameter handed an impure callback is E0747.
+#[test]
+fn callback_pure_bound_impure_arg_is_e0747() {
+    let src = r#"
+fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
+    return items.map((x) => f(x));
+}
+fn noisy(n: Int) -> Int { print("{n}"); return n; }
+fn main() { print("{transform([1, 2], noisy)}"); }
+"#;
+    assert_eq!(codes(src), vec!["E0747"], "impure callback to a #Pure bound is E0747");
+}
+
+/// Lever 1: a `#(E) fn(…)` parameter handed a callback within `E` compiles clean.
+#[test]
+fn callback_set_bound_within_ok() {
+    let src = r#"
+fn run(n: Int, act: #(Io) fn(Int)) {
+    act(n);
+}
+fn show(n: Int) { print("{n}"); }
+fn main() { run(5, show); }
+"#;
+    assert!(codes(src).is_empty(), "Io callback within an #(Io) bound is clean: {:?}", codes(src));
+}
+
+/// Lever 1: a `#(E) fn(…)` parameter handed a callback that reaches an effect
+/// outside `E` is E0747.
+#[test]
+fn callback_set_bound_exceeded_is_e0747() {
+    let src = r#"
+use core.fs as fs
+fn run(p: String, act: #(Io) fn(String)) {
+    act(p);
+}
+fn read_it(p: String) { x @= fs.read(p) ?? ""; print("{x}"); }
+fn main() { run("f.txt", read_it); }
+"#;
+    assert_eq!(codes(src), vec!["E0747"], "Fs callback to an #(Io) bound is E0747");
+}
+
+/// Lever 1: an unknown effect name in a callback bound is E0119.
+#[test]
+fn callback_bound_unknown_effect_is_e0119() {
+    let src = r#"
+fn run(n: Int, act: #(Nope) fn(Int)) { act(n); }
+fn show(n: Int) { print("{n}"); }
+fn main() { run(5, show); }
+"#;
+    assert_eq!(codes(src), vec!["E0119"], "unknown effect in a callback bound is E0119");
+}
+
+/// Lever 2: `#(via f)` publishes the callback's effects — a `#Pure fn` calling a
+/// via-fn whose callback carries `Io` is rejected (E3401), proving the
+/// pass-through surfaced the effect even though the body only calls a fn-value.
+#[test]
+fn effect_via_publishes_callback_effect() {
+    let src = r#"
+fn run(n: Int, act: #(Io) fn(Int)) #(via act) {
+    act(n);
+}
+fn show(n: Int) { print("{n}"); }
+#Pure fn caller() -> Int { run(5, show); return 0; }
+fn main() { print("{caller()}"); }
+"#;
+    assert_eq!(codes(src), vec!["E3401"], "#(via act) must publish the Io effect to callers");
+}
+
+/// Lever 2: `#(via f)` naming a non-existent parameter is E0748.
+#[test]
+fn effect_via_unknown_param_is_e0748() {
+    let src = r#"
+fn run(n: Int, act: #(Io) fn(Int)) #(via missing) { act(n); }
+fn show(n: Int) { print("{n}"); }
+fn main() { run(5, show); }
+"#;
+    assert_eq!(codes(src), vec!["E0748"], "#(via missing) is E0748");
+}
+
+/// Lever 2: `#(via f)` naming a non-callback parameter is E0748.
+#[test]
+fn effect_via_non_callback_param_is_e0748() {
+    let src = r#"
+fn run(n: Int) #(via n) { print("{n}"); }
+fn main() { run(5); }
+"#;
+    assert_eq!(codes(src), vec!["E0748"], "#(via n) on a non-fn param is E0748");
+}
+
+/// I3: the D-EFF2 levers are erased — a program using `#Pure fn(…)` callback
+/// bounds and `#(via f)` generates the same Rust as its annotation-stripped twin.
+#[test]
+fn eff2_levers_are_erased() {
+    let annotated = r#"
+fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
+    return items.map((x) => f(x));
+}
+fn run(n: Int, act: #(Io) fn(Int)) #(via act) { act(n); }
+#Pure fn inc(n: Int) -> Int { return n + 1; }
+fn show(n: Int) { print("{n}"); }
+fn main() { print("{transform([1], inc)}"); run(5, show); }
+"#;
+    let plain = r#"
+fn transform(items: [Int], f: fn(Int) -> Int) -> [Int] {
+    return items.map((x) => f(x));
+}
+fn run(n: Int, act: fn(Int)) { act(n); }
+fn inc(n: Int) -> Int { return n + 1; }
+fn show(n: Int) { print("{n}"); }
+fn main() { print("{transform([1], inc)}"); run(5, show); }
+"#;
+    let a = jet::compile(annotated).expect("annotated compiles").rust;
+    let b = jet::compile(plain).expect("plain compiles").rust;
+    assert_eq!(a, b, "D-EFF2 levers must leave no trace in generated Rust (I3)");
+}

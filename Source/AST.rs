@@ -30,7 +30,7 @@ pub enum AccessConvention {
     Raw,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Type {
     Int,
     Float,
@@ -53,9 +53,21 @@ pub enum Type {
         err: Box<Type>,
     },
     /// S47 (M8): function type `fn(T1, T2) -> R` (`ret` omitted = no return value).
+    ///
+    /// D-EFF2 (callback param effect bound): an optional effect annotation may
+    /// ride the *front* of a function type — `#Pure fn(T) -> U` (the callback
+    /// must be pure) or `#(Net) fn(T) -> U` (the callback may use at most the
+    /// listed effects). `effect_bound` is `None` when unannotated, `Some(empty)`
+    /// for `#Pure`, and `Some([(name, span), …])` for `#(…)`. Names are validated
+    /// against the effect vocabulary in sema, not the parser. The bound is a
+    /// call-site obligation on whatever callback is passed (E0747) — it is **not**
+    /// part of structural type identity (see the manual `PartialEq for Type`,
+    /// which ignores it in the `Fn` arm), so `#Pure fn(Int)` and `fn(Int)` are the
+    /// same type for assignability; the bound is an *extra* check, not a subtype.
     Fn {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
+        effect_bound: Option<Vec<(String, Span)>>,
     },
     /// User-defined monomorphic type name.
     Named(String),
@@ -83,6 +95,45 @@ pub enum Type {
     /// (and `F64`) and lives in `Type::Float`; only `F32` is a `Float32`.
     Float32,
 }
+
+/// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
+/// except the `Fn` arm ignores `effect_bound`: a callback effect bound is a
+/// call-site obligation, not part of a function type's identity, so a
+/// `#Pure fn(Int)` value is assignable wherever a `fn(Int)` is expected. The
+/// bound is enforced separately at the call site (E0747).
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        use Type::*;
+        match (self, other) {
+            (Int, Int)
+            | (Float, Float)
+            | (Bool, Bool)
+            | (String, String)
+            | (Char, Char)
+            | (Float32, Float32) => true,
+            (List(a), List(b)) => a == b,
+            (Map { key: k1, value: v1 }, Map { key: k2, value: v2 }) => k1 == k2 && v1 == v2,
+            (Shared(a), Shared(b)) => a == b,
+            (Option(a), Option(b)) => a == b,
+            (Result { ok: o1, err: e1 }, Result { ok: o2, err: e2 }) => o1 == o2 && e1 == e2,
+            // D-EFF2: effect_bound deliberately excluded from the comparison.
+            (Fn { params: p1, ret: r1, .. }, Fn { params: p2, ret: r2, .. }) => {
+                p1 == p2 && r1 == r2
+            }
+            (Named(a), Named(b)) => a == b,
+            (Apply { name: n1, args: a1 }, Apply { name: n2, args: a2 }) => n1 == n2 && a1 == a2,
+            (TraitObject(a), TraitObject(b)) => a == b,
+            (Tuple(a), Tuple(b)) => a == b,
+            (FixedList { elem: e1, len: l1 }, FixedList { elem: e2, len: l2 }) => {
+                e1 == e2 && l1 == l2
+            }
+            (IntN { signed: s1, bits: b1 }, IntN { signed: s2, bits: b2 }) => s1 == s2 && b1 == b2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Type {}
 
 /// D-SG9: the spelling of a fixed-width integer (`U8`, `I32`, …).
 pub fn int_spelling(signed: bool, bits: u8) -> String {
@@ -143,7 +194,7 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret } => {
+            Type::Fn { params, ret, .. } => {
                 let ps = params
                     .iter()
                     .map(|p| p.name())
@@ -202,7 +253,7 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret } => {
+            Type::Fn { params, ret, .. } => {
                 let ps = params
                     .iter()
                     .map(|p| p.name())
@@ -820,6 +871,13 @@ pub struct Func {
     /// a subset (E0740). Names are validated in sema, not the parser. Erased in
     /// codegen (I3).
     pub declared_effects: Option<Vec<(String, Span)>>,
+    /// D-EFF2 (`#(via f)` pass-through): when set, this function publishes a tight
+    /// pass-through — its effect set IS whatever the callback parameter named `f`
+    /// carries, rather than the conservative flow-through default. Holds the param
+    /// name and the span of the `via` clause. Mutually exclusive with
+    /// `declared_effects` (a `#(via f)` annotation occupies the same `#(…)` slot).
+    /// Erased in codegen (I3).
+    pub effect_via: Option<(String, Span)>,
     pub body: Vec<Stmt>,
 }
 

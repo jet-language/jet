@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
                 self.check_declared_type(ok, span);
                 self.check_declared_type(err, span);
             }
-            Type::Fn { params, ret } => {
+            Type::Fn { params, ret, .. } => {
                 for p in params {
                     self.check_declared_type(p, span);
                 }

@@ -121,6 +121,45 @@ impl<'a> super::Checker<'a> {
     ///   onward, a returned/stored callback — has an origin that isn't statically
     ///   known here, so it defaults to the maximal effect set (D-EFF2, sound).
     ///   The expert levers `#(E) fn(…)` param types and `#(via f)` tighten this.
+    /// D-EFF2 (callback param bound): record an obligation that the callback just
+    /// walked (whose effect contribution is the delta of `fx_direct`/`fx_edges`/
+    /// `fx_maximal` between `before` and now) satisfies the parameter's declared
+    /// bound. `bound_names` is the raw `#Pure`/`#(…)` list off the parameter type
+    /// (empty = `#Pure`); names are validated here (E0119) and the obligation is
+    /// checked against the resolved callback effects in the post-pass (E0747).
+    pub(crate) fn record_callback_obligation(
+        &mut self,
+        bound_names: &[(String, Span)],
+        before_direct: &EffectSet,
+        before_edges: &BTreeSet<String>,
+        before_maximal: bool,
+        span: Span,
+    ) {
+        let mut bound: EffectSet = EffectSet::new();
+        for (name, nspan) in bound_names {
+            match Effect::parse(name) {
+                Some(e) => {
+                    bound.insert(e);
+                }
+                None => {
+                    self.diags.push(unknown_effect(name, *nspan));
+                    return; // a bad name leaves the bound incomplete; skip the check
+                }
+            }
+        }
+        let direct: EffectSet = self.fx_direct.difference(before_direct).copied().collect();
+        let edges: BTreeSet<String> =
+            self.fx_edges.difference(before_edges).cloned().collect();
+        let maximal = self.fx_maximal && !before_maximal;
+        self.fx_callback_obligations.push(CallbackObligation {
+            bound,
+            direct,
+            edges,
+            maximal,
+            span,
+        });
+    }
+
     pub(crate) fn attribute_fn_arg(&mut self, arg: &crate::AST::Expr) {
         use crate::AST::Expr;
         match arg {
@@ -222,6 +261,32 @@ pub struct EffectSummary {
     /// D-EFF1: `#Caps(…)` restriction regions found in this body (checked against
     /// their transitive inferred set in the post-pass — E0741).
     pub regions: Vec<RegionSummary>,
+    /// D-EFF2 (callback param bound): obligations recorded at each call to a
+    /// higher-order fn whose function-typed parameter carries an effect bound
+    /// (`#Pure fn(…)` / `#(E) fn(…)`). Checked against the actual callback's
+    /// resolved effects in the post-pass — E0747.
+    pub callback_obligations: Vec<CallbackObligation>,
+}
+
+/// D-EFF2 (callback param bound): one obligation that a callback argument passed
+/// to a `#Pure fn(…)` / `#(E) fn(…)` parameter satisfies the declared bound. The
+/// callback's own effect contribution is captured as the delta of the function's
+/// effect accumulator across the argument walk (its direct effects, its
+/// call-graph edges, and whether it forced the maximal set). Edges are resolved
+/// against the whole-program `solved` map in the post-pass.
+#[derive(Debug, Clone)]
+pub struct CallbackObligation {
+    /// The declared bound — the most effects the callback may carry.
+    pub bound: EffectSet,
+    /// Effects the callback reaches directly (delta of `fx_direct`).
+    pub direct: EffectSet,
+    /// Call-graph edges the callback introduces (delta of `fx_edges`).
+    pub edges: BTreeSet<String>,
+    /// The callback forced the maximal set (delta of `fx_maximal`) — an unknown /
+    /// escaping callback value (D-EFF2 sound default).
+    pub maximal: bool,
+    /// Span of the callback argument, for the diagnostic.
+    pub span: Span,
 }
 
 /// D-EFF1: an open `#Caps(…)` region's running accumulator while the checker
@@ -293,6 +358,175 @@ pub fn solve(summaries: &HashMap<String, EffectSummary>) -> HashMap<String, Effe
         }
     }
     sets
+}
+
+/// D-EFF2 (`#(via f)` pass-through): seed each via-fn's effect summary with the
+/// declared bound of its callback parameter `f`, so its published effect set is a
+/// tight pass-through of `f` (the set that holds even when the callback value
+/// escapes — the conservative flow-through can't see a callback the body stores
+/// or returns). Runs over the assembled summaries **before** the fixpoint solve.
+///
+/// - `f` must be a parameter of this function whose type is a function type
+///   (`Type::Fn`), else E0748.
+/// - `f`'s declared bound (`#Pure` → empty, `#(E)` → that set) is the pass-through
+///   set. An **unbounded** callback param (`f: fn(T)`) publishes the maximal set
+///   (sound: an unconstrained callback may do anything).
+/// - `#(via f)` and a `#(…)` effect list are mutually exclusive at parse time, so
+///   there is no interaction with E0740 here.
+pub fn apply_effect_via(
+    items: &[crate::AST::Item],
+    summaries: &mut HashMap<String, EffectSummary>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    use crate::AST::{Item, Type};
+    fn one(
+        f: &crate::AST::Func,
+        owner: Option<&str>,
+        summaries: &mut HashMap<String, EffectSummary>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Some((param, via_span)) = &f.effect_via else {
+            return;
+        };
+        let Some(p) = f.params.iter().find(|p| &p.name == param) else {
+            diags.push(e0748_unknown_param(&f.name, param, *via_span));
+            return;
+        };
+        let Type::Fn { effect_bound, .. } = &p.ty else {
+            diags.push(e0748_not_callback(&f.name, param, p.ty.name(), *via_span));
+            return;
+        };
+        // The pass-through set: the param's declared bound, or maximal if unbounded.
+        let mut via_set = EffectSet::new();
+        let mut maximal = false;
+        match effect_bound {
+            Some(names) => {
+                for (n, ns) in names {
+                    match Effect::parse(n) {
+                        Some(e) => {
+                            via_set.insert(e);
+                        }
+                        None => diags.push(unknown_effect(n, *ns)),
+                    }
+                }
+            }
+            None => maximal = true,
+        }
+        let key = super::effect_key(owner, &f.name);
+        let entry = summaries.entry(key).or_default();
+        entry.direct.extend(via_set);
+        entry.maximal |= maximal;
+    }
+    for item in items {
+        match item {
+            Item::Func(f) => one(f, None, summaries, diags),
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    one(m, Some(&i.type_name), summaries, diags);
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    one(m, Some(&s.name), summaries, diags);
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        one(m, Some(&s.name), summaries, diags);
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    one(m, Some(&e.name), summaries, diags);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// E0748 (D-EFF2): `#(via f)` names `f`, which is not a parameter of this function.
+pub fn e0748_unknown_param(fn_name: &str, param: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0748",
+        format!("`#(via {})` on `{}` names no such parameter", param, fn_name),
+        format!(
+            "`#(via f)` publishes the effects of a callback parameter `f`; `{}` has no parameter called `{}`",
+            fn_name, param
+        ),
+        format!("name one of `{}`'s callback parameters after `via`", fn_name),
+        Some(span),
+    )
+}
+
+/// E0748 (D-EFF2): `#(via f)` names a parameter that is not a function type.
+pub fn e0748_not_callback(fn_name: &str, param: &str, ty: String, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0748",
+        format!("`#(via {})` on `{}` names a parameter that isn't a callback", param, fn_name),
+        format!(
+            "`#(via f)` publishes the effects of a *function* parameter; `{}` is `{}`, not a `fn(…)` type",
+            param, ty
+        ),
+        format!("point `via` at a parameter whose type is a function, or drop the `#(via {})` annotation", param),
+        Some(span),
+    )
+}
+
+/// D-EFF2: check every callback-bound obligation across the program. For each
+/// obligation, resolve the callback's effects (its direct effects, plus the
+/// maximal set if it escaped, plus the transitive effects of every edge from
+/// `solved`) and verify the result is a subset of the declared bound. Any effect
+/// beyond the bound is E0747.
+pub fn check_callback_bounds(
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for summary in summaries.values() {
+        for ob in &summary.callback_obligations {
+            let mut cb = ob.direct.clone();
+            if ob.maximal {
+                cb.extend(Effect::all());
+            }
+            for callee in &ob.edges {
+                if let Some(cs) = solved.get(callee) {
+                    cb.extend(cs.iter().copied());
+                }
+            }
+            let over: EffectSet = cb.difference(&ob.bound).copied().collect();
+            if !over.is_empty() {
+                diags.push(e0747(&over, &ob.bound, ob.span));
+            }
+        }
+    }
+}
+
+/// E0747 (D-EFF2): a callback argument carries an effect the parameter's bound
+/// doesn't allow — a `#Pure fn(…)` parameter handed an impure callback, or a
+/// `#(E) fn(…)` parameter handed one that reaches an effect outside `E`.
+pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
+    let over_list = show_set(over);
+    let bound_desc = if bound.is_empty() {
+        format!("the parameter is `#{} fn(…)`, so the callback must be pure", crate::Syntax::KW_PURE)
+    } else {
+        format!(
+            "the parameter is `#({}) fn(…)`, so the callback may use only those effects",
+            show_set(bound)
+        )
+    };
+    let fix = if bound.is_empty() {
+        format!("pass a `#{} fn` (or a lambda that uses no effects), or widen the parameter's bound", crate::Syntax::KW_PURE)
+    } else {
+        format!("pass a callback within `#({})`, or add `{}` to the parameter's bound", show_set(bound), over_list)
+    };
+    Diagnostic::error(
+        "E0747",
+        format!("this callback uses the effect `{}`, which the parameter doesn't allow", over_list),
+        format!("{}; `{}` is outside that bound", bound_desc, over_list),
+        fix,
+        Some(span),
+    )
 }
 
 /// E0740: a function's inferred effects exceed its declared `#(…)` bound.

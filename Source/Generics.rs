@@ -62,9 +62,12 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             ok: Box::new(substitute_type(ok, subst)),
             err: Box::new(substitute_type(err, subst)),
         },
-        Type::Fn { params, ret } => Type::Fn {
+        Type::Fn { params, ret, effect_bound } => Type::Fn {
             params: params.iter().map(|p| substitute_type(p, subst)).collect(),
             ret: ret.as_ref().map(|r| Box::new(substitute_type(r, subst))),
+            // D-EFF2: the callback effect bound is a plain annotation, not a
+            // generic-substitutable type — carry it through unchanged.
+            effect_bound: effect_bound.clone(),
         },
         Type::Tuple(fields) => Type::Tuple(
             fields
@@ -139,7 +142,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
             collect_free(ok, out);
             collect_free(err, out);
         }
-        Type::Fn { params, ret } => {
+        Type::Fn { params, ret, .. } => {
             params.iter().for_each(|p| collect_free(p, out));
             if let Some(r) = ret {
                 collect_free(r, out);
@@ -401,7 +404,7 @@ pub fn generic_depth_exceeded(ty: &Type) -> Option<String> {
                 stack.push((ok, chain.clone()));
                 stack.push((err, chain));
             }
-            Type::Fn { params, ret } => {
+            Type::Fn { params, ret, .. } => {
                 for p in params {
                     stack.push((p, chain.clone()));
                 }

@@ -238,6 +238,8 @@ before continuing.
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
 | E0745 | sema  | a `#Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
 | E0746 | sema  | an irreversible effect (Net/Fs/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
+| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`#Pure fn(…)` / `#(E) fn(…)`) (D-EFF2) |
+| E0748 | sema  | `#(via f)` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
 | E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |
@@ -655,6 +657,8 @@ reported as **E0119** (unknown name).
 | E0721 | Untrusted (`#Tainted`) data reaches `{api}` without being sanitized. | A `#Tainted` value is untrusted input; it spreads to anything derived from it. `{api}` is a sink effect (`Db`/`Exec`/`Net` — a database query, subprocess command, or network request), and an untrusted value used there unchecked is the classic injection bug (D-TAINT1). | Pass the value through a `#Sanitizer fn` first — its return value is trusted by contract, so it may reach the sink. |
 | E0745 | `{fn}` is `#Pure` but also declares effects. | `#Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `#Pure` to allow the listed effects. |
 | E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`Fs`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
+| E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `#Pure fn(…)` parameter demands a pure callback, and a `#(E) fn(…)` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `#Pure fn` for a pure parameter), or widen the parameter's effect bound. |
+| E0748 | `#(via {param})` on `{fn}` names no such parameter / a parameter that isn't a callback. | `#(via f)` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `#(via …)` annotation. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
 

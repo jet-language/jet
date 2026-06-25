@@ -90,7 +90,25 @@ impl<'a> Fmt<'a> {
                 self.write(" ? ");
                 self.fmt_type(err);
             }
-            Type::Fn { params, ret } => {
+            Type::Fn { params, ret, effect_bound } => {
+                // D-EFF2: render the callback effect bound prefix — `#Pure ` for an
+                // empty bound, `#(E1, E2) ` for a listed one.
+                if let Some(bound) = effect_bound {
+                    if bound.is_empty() {
+                        self.write("#");
+                        self.write(crate::Syntax::KW_PURE);
+                        self.write(" ");
+                    } else {
+                        self.write("#(");
+                        for (i, (name, _)) in bound.iter().enumerate() {
+                            if i > 0 {
+                                self.write(", ");
+                            }
+                            self.write(name);
+                        }
+                        self.write(") ");
+                    }
+                }
                 self.write("fn(");
                 for (i, p) in params.iter().enumerate() {
                     if i > 0 {

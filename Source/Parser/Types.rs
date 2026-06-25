@@ -36,6 +36,10 @@ impl<'a> Parser<'a> {
             self.peek().kind,
             TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
         )
+        // D-EFF2: `#Pure fn(…)` / `#(E) fn(…)` — an effect-bounded function type.
+        || (matches!(self.peek().kind, TokKind::Hash)
+            && (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
+                || matches!(self.peek2().kind, TokKind::LParen)))
     }
 
     pub(super) fn return_type(&mut self) -> Result<(Type, Span), Diagnostic> {
@@ -328,29 +332,18 @@ impl<'a> Parser<'a> {
                     args: vec![elem],
                 }
             }
-            TokKind::KwFn => {
-                self.bump();
-                self.expect(TokKind::LParen, "after `fn` in a function type")?;
-                let mut params = Vec::new();
-                if !matches!(self.peek().kind, TokKind::RParen) {
-                    loop {
-                        let (pty, _) = self.type_()?;
-                        params.push(pty);
-                        if matches!(self.peek().kind, TokKind::RParen) {
-                            break;
-                        }
-                        self.expect(TokKind::Comma, "between parameter types in `fn(...)`")?;
-                    }
-                }
-                self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
-                let ret = if matches!(self.peek().kind, TokKind::Arrow) {
-                    self.bump();
-                    let (r, _) = self.type_()?;
-                    Some(Box::new(r))
-                } else {
-                    None
-                };
-                Type::Fn { params, ret }
+            TokKind::KwFn => self.fn_type(None)?,
+            // D-EFF2: a callback effect bound rides the front of a function type —
+            // `#Pure fn(T) -> U` (the callback must be pure) or `#(Net) fn(T) -> U`
+            // (at most the listed effects). The `#` must be followed by either the
+            // `Pure` marker + `fn`, or `(` … `)` + `fn`; anything else is not a
+            // type and falls through to the normal "expected a type" error.
+            TokKind::Hash
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
+                    || matches!(self.peek2().kind, TokKind::LParen) =>
+            {
+                let bound = self.parse_fn_type_effect_bound()?;
+                self.fn_type(Some(bound))?
             }
             TokKind::LBracket => {
                 self.bump();
@@ -640,6 +633,60 @@ impl<'a> Parser<'a> {
             return Ok((Type::Option(Box::new(base)), start));
         }
         Ok((base, start))
+    }
+
+    /// Parse a function type `fn(T1, …) -> R`, the cursor at `fn`. `effect_bound`
+    /// is the D-EFF2 callback bound parsed off the front (`#Pure` → `Some([])`,
+    /// `#(E,…)` → `Some([(name, span), …])`), or `None` for an unbounded type.
+    fn fn_type(&mut self, effect_bound: Option<Vec<(String, Span)>>) -> Result<Type, Diagnostic> {
+        self.expect(TokKind::KwFn, "to start a function type")?;
+        self.expect(TokKind::LParen, "after `fn` in a function type")?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (pty, _) = self.type_()?;
+                params.push(pty);
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between parameter types in `fn(...)`")?;
+            }
+        }
+        self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
+        let ret = if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            let (r, _) = self.type_()?;
+            Some(Box::new(r))
+        } else {
+            None
+        };
+        Ok(Type::Fn { params, ret, effect_bound })
+    }
+
+    /// D-EFF2: parse the effect bound on the front of a function type, the cursor
+    /// at `#`. `#Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
+    /// listed names (validated against the effect vocabulary in sema, not here).
+    /// The caller has confirmed via lookahead that a `fn` follows.
+    fn parse_fn_type_effect_bound(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
+        self.expect(TokKind::Hash, "to start a callback effect bound")?;
+        if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) {
+            self.bump(); // `Pure`
+            return Ok(Vec::new());
+        }
+        self.expect(TokKind::LParen, "after `#` to start a callback effect list")?;
+        let mut effects = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, span) = self.expect_ident("for an effect name")?;
+                effects.push((name, span));
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between effects in the list")?;
+            }
+        }
+        self.expect(TokKind::RParen, "to close the callback effect list")?;
+        Ok(effects)
     }
 
 }

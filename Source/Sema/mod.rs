@@ -485,6 +485,10 @@ pub(crate) struct Checker<'a> {
     /// D-EFF1: completed `#Caps(…)` regions in this body, rolled into the
     /// `EffectSummary` for the post-pass E0741 check.
     fx_regions: Vec<RegionSummary>,
+    /// D-EFF2: callback-bound obligations recorded at higher-order call sites
+    /// where the function-typed parameter carries a `#Pure`/`#(…)` bound. Rolled
+    /// into the `EffectSummary` for the post-pass E0747 check.
+    fx_callback_obligations: Vec<CallbackObligation>,
     /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
     /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
     /// irreversible Core effect (Net/Fs/Exec) reached directly in the block is

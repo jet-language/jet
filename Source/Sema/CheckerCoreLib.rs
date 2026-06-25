@@ -731,7 +731,7 @@ impl<'a> Checker<'a> {
                 self.is_task_spawn = saved_task;
                 // Extract the return type from the closure's function type.
                 let t = match lam_ty {
-                    Some(Type::Fn { params, ret }) => {
+                    Some(Type::Fn { params, ret, .. }) => {
                         if !params.is_empty() {
                             self.diags.push(Diagnostic::error(
                                 "E0104",

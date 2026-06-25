@@ -1757,7 +1757,7 @@ fn foreign_struct_lit_in_subset(
 /// admitted recursively.
 fn is_covered_fn_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
-        Type::Fn { params, ret } => {
+        Type::Fn { params, ret, .. } => {
             params.iter().all(|p| is_subset_param_ty(p, cx))
                 && ret.as_ref().map(|r| is_subset_param_ty(r, cx)).unwrap_or(true)
         }
@@ -5280,7 +5280,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     .ty
                     .as_ref()
                     .map(|t| {
-                        if let Type::Fn { params, ret } = t {
+                        if let Type::Fn { params, ret, .. } = t {
                             format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), false))
                         } else {
                             format!(": {}", cx.rust_type(t))
@@ -5316,7 +5316,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
             );
             if mut_fn {
-                if let Some(Type::Fn { params, ret }) = &b.ty {
+                if let Some(Type::Fn { params, ret, .. }) = &b.ty {
                     let coerced = format!(
                         "{} as {}",
                         emit_tir_expr(&init, cx),
@@ -5354,7 +5354,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 .ty
                 .as_ref()
                 .map(|t| {
-                    if let Type::Fn { params, ret } = t {
+                    if let Type::Fn { params, ret, .. } = t {
                         format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), mut_fn))
                     } else {
                         format!(": {}", cx.rust_type(t))
@@ -7409,6 +7409,7 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: Type::Fn {
                     params: Vec::new(),
                     ret: None,
+                    effect_bound: None,
                 },
                 kind: TExprKind::Lambda(Box::new(tl)),
             }
@@ -11849,6 +11850,7 @@ fn greet() -> String { return input() }
         let fn_ty = Type::Fn {
             params: vec![Type::Int],
             ret: Some(Box::new(Type::Int)),
+            effect_bound: None,
         };
         assert!(field_ty_covered(&fn_ty, &cx, &mut HashSet::new()));
     }

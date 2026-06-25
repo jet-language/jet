@@ -279,7 +279,7 @@ fn type_key(ty: &Type) -> String {
         Type::Shared(inner) => format!("Shared<{}>", type_key(inner)),
         Type::Option(inner) => format!("{}?", type_key(inner)),
         Type::Result { ok, err } => format!("Result<{},{}>", type_key(ok), type_key(err)),
-        Type::Fn { params, ret } => {
+        Type::Fn { params, ret, .. } => {
             let ps = params.iter().map(type_key).collect::<Vec<_>>().join(",");
             let r = ret.as_ref().map(|t| type_key(t)).unwrap_or_default();
             format!("fn({ps})->{r}")

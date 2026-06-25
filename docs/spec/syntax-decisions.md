@@ -2172,7 +2172,14 @@ call, the effects of statically-known function arguments (zero syntax; Marcus's
 maximal effect set (sound). Two optional expert levers: `#Pure fn(…)` / `#(net) fn(…)`
 **param types** to demand/bound a callback, and `#(via f)` on the **signature** to publish
 a tight pass-through that holds when the value escapes. Effect rows are static + erased
-(I3). (c66)
+(I3). (c66) **IMPLEMENTED** (2026-06-24): the flow-through default already shipped; both
+expert levers now build end-to-end. Lever 1 rides the front of a function *type* —
+`#Pure fn(T) -> U` / `#(E) fn(T) -> U` parsed onto `Type::Fn.effect_bound` (ignored in
+structural type equality — it's a call-site obligation, not a subtype), checked at each
+call site against the actual callback's inferred effects (E0747). Lever 2 `#(via f)` parses
+into `Func.effect_via` and seeds the function's published effect set with callback param
+`f`'s declared bound (maximal if `f` is unbounded) before the fixpoint; a `via` naming a
+non-parameter or non-callback is E0748. Example: `examples/features/effect_levers.jet`.
 
 **D-EFF3 — effects on trait methods (dispatch contract)** *(ratified 2026-06-22, option
 C)*: a trait method may declare an effect upper bound (`#Pure fn hash(self)`, `fn

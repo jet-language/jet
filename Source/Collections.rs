@@ -379,27 +379,32 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Int)), // sema refines via expected_type
+                effect_bound: None,
             }]),
             "filter" | "find" | "any" | "all"
             // D-ITER1: closure bool predicates.
             | "take_while" | "skip_while" | "position" | "partition" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Bool)),
+                effect_bound: None,
             }]),
             "each" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None,
+                effect_bound: None,
             }]),
             // D-ITER1: key-extracting closure methods.
             "sort_by" | "min_by" | "max_by" | "group_by" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Int)), // sema refines key type
+                effect_bound: None,
             }]),
             "reduce" | "fold" => Some(vec![
                 Type::Int, // init — sema refines
                 Type::Fn {
                     params: vec![Type::Int, (**inner).clone()],
                     ret: Some(Box::new(Type::Int)),
+                    effect_bound: None,
                 },
             ]),
             "scan" => Some(vec![
@@ -407,11 +412,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 Type::Fn {
                     params: vec![Type::Int, (**inner).clone()],
                     ret: Some(Box::new(Type::Int)), // sema refines
+                    effect_bound: None,
                 },
             ]),
             "flat_map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::List(Box::new(Type::Int)))), // sema refines
+                effect_bound: None,
             }]),
             // D-ITER1: non-closure adapters.
             "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
@@ -425,6 +432,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "each" => Some(vec![Type::Fn {
                 params: vec![(**key).clone(), (**value).clone()],
                 ret: None,
+                effect_bound: None,
             }]),
             _ => Some(vec![]),
         },

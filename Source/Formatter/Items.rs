@@ -261,6 +261,14 @@ impl<'a> Fmt<'a> {
             }
             self.write(")");
         }
+        // D-EFF2: the `#(via f)` pass-through annotation occupies the same slot.
+        if let Some((param, _)) = &f.effect_via {
+            self.write(" #(");
+            self.write(Syntax::KW_VIA);
+            self.write(" ");
+            self.write(param);
+            self.write(")");
+        }
         if let Some(ret) = &f.return_type {
             self.write(" -> ");
             if f.is_view_return {

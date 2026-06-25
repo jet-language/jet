@@ -172,7 +172,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
 
 pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
     let rust_name = mangle(name);
-    let Type::Fn { params, ret } = ft else {
+    let Type::Fn { params, ret, .. } = ft else {
         return rust_name;
     };
     let arg_decls: Vec<String> = params

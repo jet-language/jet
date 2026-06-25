@@ -1087,8 +1087,9 @@ impl<'a> Parser<'a> {
 
         // D-EFF1 / D-QUAL1: an optional `#(Net, Db)` effect bound, between the
         // parameter list and the return arrow. Effect names are validated in
-        // sema, not here.
-        let declared_effects = self.parse_opt_effect_annotation()?;
+        // sema, not here. D-EFF2: the same slot also admits a `#(via f)` tight
+        // pass-through.
+        let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
 
         let mut return_type = None;
         let mut is_view_return = false;
@@ -1121,6 +1122,7 @@ impl<'a> Parser<'a> {
                 is_pure,
                 is_sanitizer,
                 declared_effects,
+                effect_via,
                 body,
             });
         }
@@ -1138,6 +1140,7 @@ impl<'a> Parser<'a> {
             is_pure,
             is_sanitizer,
             declared_effects,
+            effect_via,
             body,
         })
     }
@@ -1148,13 +1151,34 @@ impl<'a> Parser<'a> {
     fn parse_opt_effect_annotation(
         &mut self,
     ) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
+        // Trait methods (and any caller that can't host a `#(via f)` pass-through)
+        // route through here: a `via` clause is parsed and discarded as a list,
+        // so it surfaces as an unknown-effect E0119 in sema rather than silently
+        // working. The two `Func` sites use `parse_opt_func_effects` instead.
+        Ok(self.parse_opt_func_effects()?.0)
+    }
+
+    /// D-EFF1 / D-EFF2: parse the `#(…)` signature annotation, which is either a
+    /// declared effect bound (`#(Net, Db)`) or a `#(via f)` pass-through. Returns
+    /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
+    /// the cursor is not at `#(`.
+    pub(super) fn parse_opt_func_effects(
+        &mut self,
+    ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
         if !(matches!(self.peek().kind, TokKind::Hash)
             && matches!(self.peek2().kind, TokKind::LParen))
         {
-            return Ok(None);
+            return Ok((None, None));
         }
         self.bump(); // `#`
         self.expect(TokKind::LParen, "after `#` to start an effect list")?;
+        // D-EFF2 `#(via f)`: a tight pass-through publishing param `f`'s effects.
+        if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
+            self.bump(); // `via`
+            let (param, span) = self.expect_ident("for the callback parameter name after `via`")?;
+            self.expect(TokKind::RParen, "to close the `#(via …)` annotation")?;
+            return Ok((None, Some((param, span))));
+        }
         let mut effects = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
@@ -1167,7 +1191,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "to close the effect list")?;
-        Ok(Some(effects))
+        Ok((Some(effects), None))
     }
 
     /// D-CAP7: the view-return marker after `->`. `&T` is the sigil spelling

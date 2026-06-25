@@ -521,6 +521,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     is_pure: false,
                     is_sanitizer: false,
                     declared_effects: None,
+        effect_via: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body(
@@ -568,11 +569,16 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         }
     }
 
+    // D-EFF2 (`#(via f)`): seed each via-fn's summary with its callback's bound
+    // before the fixpoint, so its published effect set is a tight pass-through.
+    apply_effect_via(&prog.items, &mut effect_summaries, &mut diags);
     // D-EFF1: whole-program effect fixpoint, then enforce every `#(…)` bound and
     // every `#Caps(…)` region restriction.
     let solved = solve(&effect_summaries);
     check_effect_boundaries(&prog.items, &solved, &mut diags);
     check_region_caps(&effect_summaries, &solved, &mut diags);
+    // D-EFF2: callback param effect bounds (E0747).
+    check_callback_bounds(&effect_summaries, &solved, &mut diags);
 
     // D-TAINT1: taint tracking — `#Tainted` value-facts propagate, a `#Sanitizer
     // fn` clears taint, and a tainted value reaching a sink effect (Db/Exec/Net)
@@ -1312,6 +1318,7 @@ pub(crate) fn check_func_body(
         fx_maximal: false,
         region_stack: Vec::new(),
         fx_regions: Vec::new(),
+        fx_callback_obligations: Vec::new(),
         txn_depth: 0,
         det_suppress: 0,
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
@@ -1362,6 +1369,7 @@ pub(crate) fn check_func_body(
             edges: std::mem::take(&mut ck.fx_edges),
             maximal: ck.fx_maximal,
             regions: std::mem::take(&mut ck.fx_regions),
+            callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
         },
     );
     ck.diags
@@ -1412,6 +1420,7 @@ pub(crate) fn check_error_conv_body(
         is_pure: false,
         is_sanitizer: false,
         declared_effects: None,
+        effect_via: None,
         body: std::mem::take(&mut ec.body),
     };
     let d = check_func_body(
@@ -1698,6 +1707,7 @@ pub(crate) fn synthesize_delegation_method(
         is_pure: false,
         is_sanitizer: false,
         declared_effects: None,
+        effect_via: None,
         body: vec![body_stmt],
     }
 }
@@ -1734,6 +1744,7 @@ pub(crate) fn synthesize_default_method(
         is_pure: false,
         is_sanitizer: false,
         declared_effects: None,
+        effect_via: None,
         body: body.to_vec(),
     }
 }

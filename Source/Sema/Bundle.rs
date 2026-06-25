@@ -873,11 +873,18 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             &mut effect_summaries,
         ));
     }
+    // D-EFF2 (`#(via f)`): seed each via-fn's summary with its callback's bound
+    // before the fixpoint, so its published effect set is a tight pass-through.
+    for module in &bundle.modules {
+        apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
+    }
     let solved = solve(&effect_summaries);
     for module in &bundle.modules {
         check_effect_boundaries(&module.items, &solved, &mut diags);
     }
     check_region_caps(&effect_summaries, &solved, &mut diags);
+    // D-EFF2: callback param effect bounds (E0747).
+    check_callback_bounds(&effect_summaries, &solved, &mut diags);
 
     // D-TAINT1: taint tracking across every module. `#Sanitizer fn`s are
     // collected program-wide (a sanitizer in one module clears taint at a call in
@@ -1396,6 +1403,7 @@ pub(crate) fn check_module_bodies(
                     is_pure: false,
                     is_sanitizer: false,
                     declared_effects: None,
+        effect_via: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1428,6 +1436,7 @@ pub(crate) fn check_module_bodies(
                     is_pure: false,
                     is_sanitizer: false,
                     declared_effects: None,
+        effect_via: None,
                     body: std::mem::take(&mut b.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1526,6 +1535,7 @@ pub(crate) fn check_func_body_bundle(
         fx_maximal: false,
         region_stack: Vec::new(),
         fx_regions: Vec::new(),
+        fx_callback_obligations: Vec::new(),
         txn_depth: 0,
         det_suppress: 0,
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
@@ -1578,6 +1588,7 @@ pub(crate) fn check_func_body_bundle(
             edges: std::mem::take(&mut ck.fx_edges),
             maximal: ck.fx_maximal,
             regions: std::mem::take(&mut ck.fx_regions),
+            callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
         },
     );
     ck.diags
@@ -1587,6 +1598,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
     Type::Fn {
         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
         ret: sig.return_type.clone().map(Box::new),
+        effect_bound: None,
     }
 }
 
@@ -1595,10 +1607,12 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
         Type::Fn {
             params: wp,
             ret: wr,
+            ..
         },
         Type::Fn {
             params: gp,
             ret: gr,
+            ..
         },
     ) = (want, got)
     else {

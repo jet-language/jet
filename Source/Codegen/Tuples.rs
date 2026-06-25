@@ -42,7 +42,7 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(Str
             collect_tuple_shapes_from_type(ok, out);
             collect_tuple_shapes_from_type(err, out);
         }
-        Type::Fn { params, ret } => {
+        Type::Fn { params, ret, .. } => {
             for p in params {
                 collect_tuple_shapes_from_type(p, out);
             }

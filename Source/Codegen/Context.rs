@@ -298,7 +298,7 @@ impl Cx {
                 }
             }
             Type::TraitObject(t) => format!("Box<dyn {}>", Generics::user_trait_rust(t)),
-            Type::Fn { params, ret } => self.rust_fn_trait(params, ret.as_deref(), false),
+            Type::Fn { params, ret, .. } => self.rust_fn_trait(params, ret.as_deref(), false),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
             // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].
             // All size/bounds checks live in sema (I3). The Rust type is [E; N].
@@ -471,6 +471,7 @@ pub(crate) fn build_cx_items(
                     Type::Fn {
                         params: f.params.iter().map(|p| p.ty.clone()).collect(),
                         ret: f.return_type.clone().map(Box::new),
+                        effect_bound: None,
                     },
                 );
             }
@@ -563,6 +564,7 @@ pub(crate) fn build_cx_items(
                                 Type::Fn {
                                     params: f.params.iter().map(|p| p.ty.clone()).collect(),
                                     ret: f.return_type.clone().map(Box::new),
+                                    effect_bound: None,
                                 },
                             );
                         }
