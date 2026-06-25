@@ -1,29 +1,28 @@
-// Typestate (D-STATE1, option A): order-of-events safety, checked at compile time.
+// Typestate (D-STATE1 / D-STATE-DECL): order-of-events safety, checked at compile time.
 //
-// A value moves through named *states* (each an ordinary `tag`). An operation
-// declares the state it needs and the state it leaves the value in:
+// States are declared in a dedicated block (D-STATE-DECL, option B). An operation
+// declares the state it needs and the state it advances the value into:
 //
-//   #Transition(_ -> Pending)  fn book(...)      -- an *entry* transition: makes a
-//                                                   value in the initial state
+//   state Reservation { Pending, Confirmed, CheckedIn }
+//
+//   #Transition(_ -> Pending)  fn book(...)      -- entry: value starts in `Pending`
 //   #Transition(Pending -> Confirmed) fn pay(self) -> R   -- advances the state
 //   #State(Confirmed) fn check_in(self)          -- valid only in `Confirmed`
 //
 // Calling an operation in the wrong state is the compile error E0150 (see the ui
 // snapshot `typestate_wrong_state` for the rejected case: `check_in` on a still
-// `#Pending` reservation). The states are compile-time facts, threaded through the
+// `Pending` reservation). The states are compile-time facts, threaded through the
 // function by the checker and **erased in codegen** — a typestate program generates
 // the exact same Rust as the untagged version, at zero runtime cost.
 
-tag Pending {}
-tag Confirmed {}
-tag CheckedIn {}
+state Reservation { Pending, Confirmed, CheckedIn }
 
 struct Reservation {
     guest: String,
 }
 
 impl Reservation {
-    // Entry transition: a fresh booking starts life `#Pending`.
+    // Entry transition: a fresh booking starts life in `Pending`.
     #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
         return Reservation { guest: guest }
     }

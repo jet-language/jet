@@ -646,7 +646,8 @@ pub(crate) fn build_cx_items(
             // D-QUAL2: a tag erases — it contributes no codegen names.
             Item::Tag(_) => {}
             Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
-            | Item::Migration(_) => {} // D-MIGRATE1
+            | Item::Migration(_) // D-MIGRATE1
+            | Item::StateDecl(_) => {} // D-STATE-DECL: erases
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());
                 cx.distinct_types

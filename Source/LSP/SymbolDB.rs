@@ -436,6 +436,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::ErrorConv(_) => {}
         // D-MIGRATE1: migration blocks aren't yet indexed for symbols/hover.
         Item::Migration(_) => {}
+        // D-STATE-DECL: state-set declarations aren't yet indexed for symbols/hover.
+        Item::StateDecl(_) => {}
     }
 }
 

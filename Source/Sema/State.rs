@@ -1,8 +1,7 @@
-//! Typestate (D-STATE1, option A).
+//! Typestate (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS).
 //!
-//! A value moves through an ordered set of *states*, each an ordinary `tag`
-//! (D-QUAL2). Operations declare the state they need and the state they leave the
-//! value in, via two fn markers:
+//! A value moves through a named set of *states*. Operations declare the state they
+//! need and the state they leave the value in, via two fn markers:
 //!
 //!   - `#State(S) fn m(self, …)` — a **require-state** guard: `m` is valid only
 //!     when its receiver is currently in state `S`. Calling it in any other state
@@ -13,24 +12,25 @@
 //!     from-state may be `_` (an *entry* transition: a constructor that produces the
 //!     initial state from nothing — e.g. `#Transition(_ -> Pending) fn new() -> R`).
 //!
-//! This is the ratified mechanism verbatim: "a fn takes the old state tag and
-//! returns the next; wrong-state call = E0150; tags erase." The current state of a
-//! value is a **compile-time fact** threaded by intraprocedural forward dataflow
-//! over locals (same shape as `Taint.rs`), keyed on a binding being a plain local.
-//! Nothing about the state reaches codegen — the markers erase (I3, zero runtime
-//! cost). When a value's state cannot be tracked precisely (it escapes into a field,
-//! a non-local receiver, a loop-carried position), the checker is **silent** rather
-//! than guessing: a missed guard is a soundness gap deferred to the fuller analysis,
-//! never a false E0150 on correct code (P1 — beginners never see a spurious error).
+//! D-STATE-DECL (ratified 2026-06-25, option B): states are declared in a dedicated
+//! block `state TypeName { Pending, Confirmed, CheckedIn }`. When present:
+//!   - `#State(X)` / `#Transition(A -> B)` on `TypeName::*` must reference declared
+//!     state names; an unknown name is **E0151** (typo against the set).
+//!   - A declared state with no outgoing `#Transition(S -> …)` is a dead-end warning
+//!     **L0151** (a half-built machine still compiles).
+//!   - The set erases (compile-time only, no runtime discriminant).
 //!
-//! The state-machine **set** is derived from the markers themselves (D-STATE-DECL
-//! option A): there is no separate `states { … }` declaration in v1.
+//! The current state of a value is a **compile-time fact** threaded by intraprocedural
+//! forward dataflow over locals. Nothing about the state reaches codegen (I3, zero
+//! runtime cost). When a value's state cannot be tracked precisely (it escapes into a
+//! field, a non-local receiver, a loop-carried position), the checker is **silent**
+//! rather than guessing (P1 — beginners never see a spurious error).
 
 use crate::AST::{
     Call, ElseBranch, Expr, Func, IfStmt, Item, LValue, Stmt,
 };
 use crate::Diagnostics::{Diagnostic, Span};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Program-wide typestate metadata, collected once before any body is walked.
 #[derive(Default)]
@@ -49,6 +49,10 @@ pub struct StateTable {
     /// method name (`Type::method` → to-state). Lets a binding `r := Type.ctor()`
     /// seed `r`'s initial state.
     entry_ctors: HashMap<String, String>,
+    /// D-STATE-DECL: type name → declared state labels with their spans. When a type
+    /// has a `state TypeName { … }` block, every `#State(X)` / `#Transition(A -> B)`
+    /// marker on its methods must reference a name from this set (else E0151).
+    declared: HashMap<String, Vec<(String, Span)>>,
 }
 
 impl StateTable {
@@ -62,6 +66,8 @@ impl StateTable {
     /// Register every typestate marker in `items` into this table. Methods key as
     /// `Type::method`; entry transitions (`_ -> To`) also register under
     /// `entry_ctors` so a constructor call can seed a local's initial state.
+    /// D-STATE-DECL: `state TypeName { … }` blocks are also registered here so
+    /// `validate_declarations` can check markers against declared sets.
     /// Idempotent across modules — call once per module for a bundle.
     pub fn add_items(&mut self, items: &[Item]) {
         for item in items {
@@ -87,7 +93,74 @@ impl StateTable {
                         self.add_method(&e.name, m);
                     }
                 }
+                // D-STATE-DECL: register the bounded state-set for this type.
+                Item::StateDecl(sd) => {
+                    self.declared.insert(sd.type_name.clone(), sd.states.clone());
+                }
                 _ => {}
+            }
+        }
+    }
+
+    /// D-STATE-DECL: validate that every `#State(X)` / `#Transition(A -> B)` marker
+    /// on methods of a type that has a `state TypeName { … }` declaration references
+    /// a state in the declared set. Unknown state → E0151. Also warns (L0151) about
+    /// declared states with no outgoing `#Transition(S -> …)` (dead-end states).
+    pub fn validate_declarations(&self, items: &[Item], diags: &mut Vec<Diagnostic>) {
+        for (type_name, decl_states) in &self.declared {
+            let state_names: HashSet<&str> =
+                decl_states.iter().map(|(n, _)| n.as_str()).collect();
+
+            // Collect all method markers for this type.
+            let mut outgoing: HashSet<String> = HashSet::new();
+
+            // Helper to check a single state name against the declared set.
+            let check_state = |state: &str, span: Span, diags: &mut Vec<Diagnostic>| {
+                if !state_names.contains(state) {
+                    let candidates: Vec<&str> = state_names
+                        .iter()
+                        .filter(|&&s| edit_distance(state, s) <= 2)
+                        .copied()
+                        .collect();
+                    diags.push(e0151(state, type_name, &candidates, span));
+                }
+            };
+
+            // Walk all method markers on this type.
+            for item in items {
+                let methods: Vec<&Func> = match item {
+                    Item::Impl(i) if i.type_name == *type_name => {
+                        i.methods.iter().collect()
+                    }
+                    Item::Struct(s) if s.name == *type_name => {
+                        let mut ms: Vec<&Func> = s.methods.iter().collect();
+                        for block in &s.trait_impls {
+                            ms.extend(block.methods.iter());
+                        }
+                        ms
+                    }
+                    Item::Enum(e) if e.name == *type_name => e.methods.iter().collect(),
+                    _ => continue,
+                };
+                for m in methods {
+                    if let Some((state, span)) = &m.state_requires {
+                        check_state(state, *span, diags);
+                    }
+                    if let Some(tr) = &m.state_transition {
+                        if let Some(from) = &tr.from {
+                            check_state(from, tr.span, diags);
+                            outgoing.insert(from.clone());
+                        }
+                        check_state(&tr.to, tr.span, diags);
+                    }
+                }
+            }
+
+            // L0151: dead-end state — declared but no outgoing transition.
+            for (state, span) in decl_states {
+                if !outgoing.contains(state.as_str()) {
+                    diags.push(l0151(state, type_name, *span));
+                }
             }
         }
     }
@@ -118,12 +191,13 @@ impl StateTable {
     }
 
     /// True when the program declares no typestate at all — lets the caller skip
-    /// the per-body walk entirely.
+    /// the per-body walk and declaration validation entirely.
     pub fn is_empty(&self) -> bool {
         self.requires.is_empty()
             && self.transitions.is_empty()
             && self.fn_requires.is_empty()
             && self.fn_transitions.is_empty()
+            && self.declared.is_empty()
     }
 }
 
@@ -566,6 +640,68 @@ pub fn check_items_state(items: &[Item], tbl: &StateTable, diags: &mut Vec<Diagn
             _ => {}
         }
     }
+}
+
+/// E0151 (D-STATE-DECL): a `#State(X)` or `#Transition(A -> B)` marker references a
+/// state name that is not in the `state TypeName { … }` declaration for that type.
+/// Includes a typo suggestion when the edit distance is ≤ 2.
+pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> Diagnostic {
+    let fix = if let Some(c) = candidates.first() {
+        format!("did you mean `{c}`?  Check the `state {type_name} {{ … }}` block for valid names")
+    } else {
+        format!("add `{state}` to the `state {type_name} {{ … }}` declaration, or correct the spelling")
+    };
+    Diagnostic::error(
+        "E0151",
+        format!("`{state}` is not a declared state of `{type_name}`"),
+        format!(
+            "typestate (D-STATE-DECL): `state {type_name} {{ … }}` defines the valid state labels; \
+             `{state}` is not among them — a typo here would silently create a phantom state that no \
+             transition reaches"
+        ),
+        fix,
+        Some(span),
+    )
+}
+
+/// L0151 (D-STATE-DECL): a declared state has no outgoing `#Transition(S -> …)`,
+/// making it a dead end — a value in this state can never advance further.
+/// This is a warning (not an error) so a half-built machine still compiles.
+pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::lint(
+        "L0151",
+        format!("`{state}` (in `state {type_name}`) has no outgoing transition"),
+        format!(
+            "typestate (D-STATE-DECL): a state with no `#Transition({state} -> …)` is a dead end — \
+             a value that reaches `{state}` can never advance to another state"
+        ),
+        format!(
+            "add `#Transition({state} -> NextState) fn …` on `{type_name}`, or remove `{state}` from the declaration"
+        ),
+        Some(span),
+    )
+}
+
+/// Simple Levenshtein distance (capped at 3) for state-name suggestions in E0151.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (m, n) = (a.len(), b.len());
+    if m == 0 { return n.min(3); }
+    if n == 0 { return m.min(3); }
+    let mut row: Vec<usize> = (0..=n).collect();
+    for i in 1..=m {
+        let mut prev = row[0];
+        row[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            let next = (row[j] + 1).min(row[j - 1] + 1).min(prev + cost);
+            prev = row[j];
+            row[j] = next;
+            if next >= 3 { break; }
+        }
+    }
+    row[n]
 }
 
 /// E0150 (D-STATE1): a typestate operation is called on a value in the wrong state.

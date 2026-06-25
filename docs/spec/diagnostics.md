@@ -164,6 +164,8 @@ before continuing.
 | E0142 | sema  | `#SingleUse` value lent/shared instead of moved (D-LIN1) |
 | E0143 | sema  | `drop` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
+| E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
+| L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S -> …)` — a dead-end state (D-STATE-DECL, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`~`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |
@@ -729,21 +731,32 @@ Error [E0731]: `Reviewed` is a tag, but `derive` needs a trait
  Fix: declare `Reviewed` as a `trait` with the method(s) it should provide
 ```
 
-## Typestate diagnostics (D-STATE1)
+## Typestate diagnostics (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS)
 
-A value moves through named **states** (each an ordinary `tag`). An operation
-declares the state it needs with `#State(S)` and the state it leaves the value in
-with `#Transition(From -> To)` — the ratified mechanism: *a fn takes the old state
-tag and returns the next.* Calling an operation on a value in the wrong state is
-**E0150**, caught at compile time. States are compile-time facts threaded through
-each function; they **erase in codegen** (zero runtime cost). When the checker
-cannot follow a value's state precisely (it escapes into a field, a non-local
-receiver, a state-divergent branch join) it stays silent rather than risk a false
-error on correct code.
+A value moves through named **states**. Operations declare the state they need with
+`#State(S)` and the state they advance the value to with `#Transition(From -> To)`.
+Calling an operation on a value in the wrong state is **E0150**, caught at compile
+time. States are compile-time facts threaded through each function; they **erase in
+codegen** (zero runtime cost). When the checker cannot follow a value's state
+precisely (it escapes into a field, a non-local receiver, a state-divergent branch
+join) it stays silent rather than risk a false error on correct code.
+
+States are declared in a dedicated block (D-STATE-DECL, option B):
+
+```jet
+state Reservation { Pending, Confirmed, CheckedIn }
+```
+
+When a `state TypeName { … }` block is present, every `#State(X)` / `#Transition(A
+-> B)` marker on `TypeName` methods must reference a name from the declared set
+(unknown name = **E0151**). A declared state with no outgoing `#Transition(S -> …)`
+is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
+| E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
+| L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state} -> …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state} -> NextState) fn …`, or remove `{state}` from the declaration. |
 
 `check_in` requires a `Confirmed` reservation, but the value is still `Pending`:
 

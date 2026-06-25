@@ -253,6 +253,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::ErrorConv(_) => {}
             // D-MIGRATE1: migration decls are handled by the schema diff pass.
             Item::Migration(_) => {}
+            // D-STATE-DECL: state-set declarations are sema-only (I3); no type to register.
+            Item::StateDecl(_) => {}
         }
     }
 
@@ -582,7 +584,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::Distinct(_)
             | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types at registration
             | Item::Bench(_)
-            | Item::Migration(_) => {} // D-MIGRATE1
+            | Item::Migration(_) // D-MIGRATE1
+            | Item::StateDecl(_) => {} // D-STATE-DECL: state-set decls are sema-only (I3)
         }
     }
 
@@ -604,11 +607,11 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     collect_sanitizers(&prog.items, &mut sanitizers);
     check_program_taint(&prog.items, &sanitizers, &single_core_imports, &mut diags);
 
-    // D-STATE1: typestate — a value's state is threaded through each body; calling
-    // a `#State(S)`/`#Transition(From -> _)` operation in the wrong state is E0150.
-    // Static, erased in codegen (I3).
+    // D-STATE1 / D-STATE-DECL: typestate — state-set declarations validated (E0151,
+    // L0151); per-body forward dataflow checks wrong-state calls (E0150). Erased (I3).
     let state_tbl = crate::Sema::StateTable::build(&prog.items);
     if !state_tbl.is_empty() {
+        state_tbl.validate_declarations(&prog.items, &mut diags);
         crate::Sema::check_items_state(&prog.items, &state_tbl, &mut diags);
     }
 
@@ -990,7 +993,8 @@ pub(crate) fn comptime_context_from_items(
             | Item::Distinct(_)
             | Item::UnitFamily(_) // D-QUAL3: contributes no comptime context
             | Item::ErrorConv(_)
-            | Item::Migration(_) => {} // D-MIGRATE1
+            | Item::Migration(_) // D-MIGRATE1
+            | Item::StateDecl(_) => {} // D-STATE-DECL
         }
     }
     (funcs, externs, globals)

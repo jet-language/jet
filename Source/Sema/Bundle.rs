@@ -410,6 +410,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 Item::ErrorConv(_) => {}
                 // D-MIGRATE1: migration decls are handled by the schema diff pass; no registration needed.
                 Item::Migration(_) => {}
+                // D-STATE-DECL: state-set decls are sema-only (I3); no type to register.
+                Item::StateDecl(_) => {}
             }
         }
         // S62 + D-LIB2: synthesis must happen before register_impl_methods
@@ -787,7 +789,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
             | Item::CModule(_) | Item::CodeModule(_)
             | Item::ErrorConv(_)
-            | Item::Migration(_) => {} // D-MIGRATE1
+            | Item::Migration(_) // D-MIGRATE1
+            | Item::StateDecl(_) => {} // D-STATE-DECL: erases
             }
         }
         for item in &mut module.items {
@@ -918,15 +921,16 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         }
     }
 
-    // D-STATE1: typestate across the whole bundle. The transition/require table is
-    // built program-wide (a transition declared in one module gates a call in
-    // another), then each module's bodies are checked. Erased in codegen (I3).
+    // D-STATE1 / D-STATE-DECL: typestate across the whole bundle. State-set
+    // declarations are collected program-wide, then declarations validated (E0151,
+    // L0151) and per-body forward dataflow checked (E0150). Erased in codegen (I3).
     let mut state_tbl = crate::Sema::StateTable::default();
     for module in &bundle.modules {
         state_tbl.add_items(&module.items);
     }
     if !state_tbl.is_empty() {
         for module in &bundle.modules {
+            state_tbl.validate_declarations(&module.items, &mut diags);
             crate::Sema::check_items_state(&module.items, &state_tbl, &mut diags);
         }
     }
@@ -1059,7 +1063,8 @@ pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) 
                 | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
                 | Item::CModule(_) | Item::CodeModule(_)
                 | Item::ErrorConv(_)
-                | Item::Migration(_) => {} // D-MIGRATE1
+                | Item::Migration(_) // D-MIGRATE1
+                | Item::StateDecl(_) => {} // D-STATE-DECL: uses no core imports
             }
         }
     }

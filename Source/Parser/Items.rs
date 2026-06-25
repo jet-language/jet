@@ -344,6 +344,11 @@ impl<'a> Parser<'a> {
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                     TokKind::KwTag => self.tag_def(false).map(Item::Tag),
+                    // D-STATE-DECL: `pub state TypeName { A, B, C }`
+                    TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
+                        self.bump(); // consume `pub`
+                        self.state_decl(true).map(Item::StateDecl)
+                    }
                     TokKind::KwModule if self.is_code_module_at(2) => {
                         self.code_module(true).map(Item::CodeModule)
                     }
@@ -408,6 +413,10 @@ impl<'a> Parser<'a> {
                 // D-MIGRATE1: `migration TypeName { rename a -> b }`
                 TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
                     self.migration_decl().map(Item::Migration)
+                }
+                // D-STATE-DECL: `state TypeName { A, B, C }`
+                TokKind::Ident(n) if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
+                    self.state_decl(false).map(Item::StateDecl)
                 }
                 TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
                 TokKind::At => {
@@ -2768,5 +2777,40 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span;
         let span = Span::new(start.start, end.end);
         Ok(crate::AST::MigrationDecl { type_name, type_span, ops, span })
+    }
+
+    /// D-STATE-DECL: true when `state <TypeName> {` is at the cursor (contextual).
+    fn at_state_block(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL)
+            && matches!(&self.peek2().kind, TokKind::Ident(_))
+            && matches!(&self.peek3().kind, TokKind::LBrace)
+    }
+
+    /// D-STATE-DECL (ratified 2026-06-25, option B): parse
+    /// `[pub] state TypeName { A, B, C }`.
+    ///
+    /// The state names are comma-separated PascalCase identifiers. The block may have
+    /// a trailing comma; semicolons between names are allowed for formatting flexibility.
+    fn state_decl(&mut self, is_pub: bool) -> Result<crate::AST::StateDecl, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // consume `state`
+        let (type_name, type_name_span) = self.expect_ident("the type name in `state TypeName { … }`")?;
+        self.expect(TokKind::LBrace, "to open the state declaration block")?;
+        let mut states = Vec::new();
+        while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(&self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let (name, name_span) = self.expect_ident("a state name inside `state { … }`")?;
+            states.push((name, name_span));
+            // Consume optional trailing comma between state names.
+            if matches!(&self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the state declaration block")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::StateDecl { is_pub, type_name, type_name_span, states, span: Span::new(start.start, end) })
     }
 }

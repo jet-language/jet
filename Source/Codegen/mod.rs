@@ -429,7 +429,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
-            | Item::Migration(_) => {} // D-MIGRATE1: migration is sema-only (I3)
+            | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
+            | Item::StateDecl(_) => {} // D-STATE-DECL: state-set decls erase (I3)
         }
     }
 
@@ -524,7 +525,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
-            | Item::Migration(_) => {} // D-MIGRATE1: migration is sema-only (I3)
+            | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
+            | Item::StateDecl(_) => {} // D-STATE-DECL: state-set decls erase (I3)
         }
     }
 

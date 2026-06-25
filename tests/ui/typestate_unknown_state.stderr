@@ -1,0 +1,15 @@
+Error [E0151]: `Stuffed` is not a declared state of `Crate`
+  --> tests/ui/typestate_unknown_state.jet:13:5
+    |
+ 13 |     #State(Stuffed) fn get(self) -> Int {
+    |     ^^^^^^^^^^^^^^^
+ Why: typestate (D-STATE-DECL): `state Crate { … }` defines the valid state labels; `Stuffed` is not among them — a typo here would silently create a phantom state that no transition reaches
+ Fix: add `Stuffed` to the `state Crate { … }` declaration, or correct the spelling
+
+Error [E0150]: `get` needs `Crate` in state `Stuffed`, but `b` is in state `Full`
+  --> tests/ui/typestate_unknown_state.jet:20:13
+    |
+ 20 |     print(b.get())
+    |             ^^^
+ Why: typestate (D-STATE1): `get` is only valid in state `Stuffed`; calling it in `Full` is the out-of-order-events bug it prevents
+ Fix: transition `b` into state `Stuffed` before calling `get`

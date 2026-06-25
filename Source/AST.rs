@@ -539,6 +539,14 @@ pub enum Item {
     /// D-MIGRATE1 (ratified 2026-06-22): `migration TypeName { rename a -> b }`
     /// block — declares field renames on a `#PublishedSchema` struct.
     Migration(MigrationDecl),
+    /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
+    /// declares the bounded set of states for a typestate machine. The set erases at
+    /// runtime (pure compile-time, no discriminant). Each name in the body is a state
+    /// label; `#State(S)` / `#Transition(From -> To)` markers on `TypeName::*` methods
+    /// must reference names from this set (unknown state = E0151). A declared state with
+    /// no outgoing `#Transition` is a dead-end warning (L0151). Declaration family sibling
+    /// of `tag`/`struct`/`enum`.
+    StateDecl(StateDecl),
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
@@ -790,6 +798,20 @@ pub struct TagDef {
     /// Methods erroneously written in a tag body. Always empty for a well-formed
     /// tag; each entry triggers E0732 in sema.
     pub methods: Vec<TraitMethodSig>,
+    pub span: Span,
+}
+
+/// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
+/// a bounded compile-time state-set declaration. Each string in `states` is a valid
+/// state label; `#State(X)` / `#Transition(A -> B)` markers on `TypeName::*` methods
+/// must reference labels from this set. Erases in codegen (I3, no runtime discriminant).
+#[derive(Debug)]
+pub struct StateDecl {
+    pub is_pub: bool,
+    pub type_name: String,
+    pub type_name_span: Span,
+    /// Declared state labels in declaration order, with their name spans for diagnostics.
+    pub states: Vec<(String, Span)>,
     pub span: Span,
 }
 

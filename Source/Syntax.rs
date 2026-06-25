@@ -709,6 +709,16 @@ pub const KW_STATE: &str = "State";
 /// for owner confirmation as D-STATE-TRANS.
 pub const KW_TRANSITION: &str = "Transition";
 
+/// D-STATE-DECL (ratified 2026-06-25, option B): the typestate **state-set
+/// declaration** contextual keyword — `state TypeName { Pending, Confirmed, CheckedIn }`.
+/// Declares the bounded set of states for a type, tied to the type by name. The set
+/// erases at runtime (pure compile-time, no discriminant). A dead-end state (no
+/// outgoing `#Transition`) is a warning (L0151). A state referenced in `#State(X)` or
+/// `#Transition(A -> B)` that is not in the declared set is E0151. Contextual: the
+/// word `state` stays usable as an ordinary identifier outside a top-level declaration
+/// position (like `migration`). Declaration family sibling of `tag`/`struct`/`enum`.
+pub const KW_STATE_DECL: &str = "state"; // D-STATE-DECL
+
 /// D-STATE1: the entry-transition placeholder — `#Transition(_ -> Pending)` means
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 pub const STATE_ENTRY: &str = "_";
@@ -1396,8 +1406,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TEST, KW_BENCH, KW_PURE, KW_TODO,
     // Taint tracking (D-TAINT1): value-fact tag + sanitizer modifier
     KW_TAINTED, KW_SANITIZER,
-    // Typestate (D-STATE1): require-state + transition fn modifiers
-    KW_STATE, KW_TRANSITION,
+    // Typestate (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS)
+    KW_STATE, KW_TRANSITION, KW_STATE_DECL,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
     LIT_TRUE, LIT_FALSE, LIT_NULL, LIT_OK, LIT_ERR, KW_IT,
     // Binding sigils (SIGIL_BIND_IMMUT / SIGIL_BIND_MUT) are not words; omitted.

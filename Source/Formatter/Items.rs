@@ -69,6 +69,12 @@ impl<'a> Fmt<'a> {
                 self.write(&text);
                 self.newline();
             }
+            // D-STATE-DECL: state-set declarations are emitted verbatim (non-destructive).
+            Item::StateDecl(s) => {
+                let text = self.src[s.span.start..s.span.end].to_string();
+                self.write(&text);
+                self.newline();
+            }
         }
     }
 
