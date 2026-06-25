@@ -1,6 +1,12 @@
 # Plan: Visible uninitialization (D-UNINIT1)
 
-**Status: implementation — D-UNINIT1 ratified 2026-06-21, option C (`#Uninit` marker).**
+**Status: READY to implement — no open owner decision. D-UNINIT1 ratified 2026-06-21 (opt C, `#Uninit` marker); the prior codegen blocker (D-FIXARR1) is ratified AND implemented (verified 2026-06-25). Remaining work is pure implementation: MaybeUninit codegen + wire the parser dispatch + snapshots/example.**
+
+**Verification (2026-06-25):**
+- D-FIXARR1 stack-array lowering is **implemented**: `Type::FixedList { elem, len }` lowers to a real Rust array `[E; N]` in codegen (`Source/Codegen/Context.rs:378-380`), in FFI (`Source/FFI.rs:431-432`), and array literals/fan-out emit `[…]` (`Source/Codegen/TIR/emit.rs:1142-1149,1323`). `Vec<…>` now lowers only plain `Type::List` (`Context.rs:249`), not `[T#N]` — so the old "[T#N]→Vec" claim below is **stale**; the prerequisite is satisfied. `MaybeUninit<[T; N]>` is now sound.
+- Sema write-before-read proof is **done and wired**: `check_uninit_binding` (`Source/Sema/CheckerCore.rs:2018`) is called from `check_binding` (`CheckerCore.rs:2101`); gate E0424 + POD E0423 there; read-hook E0420 (`Source/Sema/CheckerInfer/expr.rs:239-254`); compound-assign E0420 (`CheckerCore.rs:481-494`); `mut`-arg clears (`expr.rs:296,470`); if-merge intersection (`CheckerCore.rs:1495-1594`); loop restore (`CheckerCore.rs:1037,1059,1206,1257`). Flow-state field `uninit` (`Source/Sema/mod.rs:540`).
+- Parser `uninit_binding` written with E0421/E0422 (`Source/Parser/Statements.rs:360-405`) but **still UNWIRED** in the `TokKind::Hash` dispatch (`Statements.rs:761-764`).
+- Codegen for `b.uninit` is **not yet emitted** — only the comptime subset excludes it (`Source/Codegen/TIR/subset.rs:983-1036`). No `MaybeUninit` line is generated.
 
 **Landed (green, all 42 test binaries pass):**
 - AST `Binding.uninit` field (placeholder `Expr::Int(0,…)` init, so the 46 `b.init` walkers need no edits).
@@ -18,29 +24,25 @@ path; no-`else` keeps fall-through) and `check_branches` (conservative — switc
 initialize); loops restore the pre-loop set (0-iteration path). Parser `uninit_binding`
 (E0421/E0422) written, still UNWIRED.
 
-## ⛔ BLOCKER discovered during codegen — needs a prerequisite decision
+## Prior blocker — RESOLVED (D-FIXARR1 implemented)
 
 `MaybeUninit::uninit().assume_init()` (the ratified lowering) requires the binding to be
-a **stack value** of a fixed size. But this codebase lowers `[T#N]` fixed-size lists to
-**`Vec<T>`** (`Source/Codegen/Context.rs:252`), a heap value. An uninitialized `Vec`
-(garbage ptr/len/cap) is **undefined behavior** on use/drop — so MaybeUninit is unsafe
-here — and the only *safe* `Vec` lowering, `vec![0u8; N]`, **zero-fills**, defeating the
-entire purpose of `#Uninit` (the buffer case `[U8#4096]` is exactly a fixed-size list).
+a **stack value** of a fixed size. This was originally blocked because `[T#N]` lowered to
+a heap `Vec<T>` (an uninitialized `Vec` is UB; the safe `vec![0u8; N]` zero-fills, defeating
+`#Uninit`). **That blocker is gone:** D-FIXARR1=B is ratified (2026-06-22, card c82) AND
+implemented — `[T#N]` now lowers to a real stack array `[E; N]` (`Source/Codegen/Context.rs:380`),
+so `MaybeUninit<[T; N]>` is sound and skips the fill. No prerequisite remains; this is now
+straight implementation.
 
-**Therefore D-UNINIT1's codegen + parser-wiring are gated on a build prerequisite:** `[T#N]`
-fixed-size lists must lower to a real stack array (so `MaybeUninit<[T; N]>` is sound
-and skips the fill). **D-FIXARR1 = B is ratified (2026-06-22, board card c82): `[T#N]`
-lowers to a real fixed-size stack array** — no owner decision open. This is now an
-implementation-sequencing gate (build D-FIXARR1's codegen first), not a decision gate.
-Until that codegen lands, `#Uninit` stays parser-unwired and codegen-less — the sema proof
-is ready to switch on the moment the representation supports it.
+Scalars (`Int`/`U8`/…) work with MaybeUninit too, but a single uninitialized scalar has no
+perf benefit — the feature exists for buffers — so a scalars-only `#Uninit` would be a
+misleading partial. The buffer case `[U8#4096]` is exactly the `[T#N]` array that now works.
 
-Scalars (`Int`/`U8`/…) *would* work with MaybeUninit today, but a single uninitialized
-scalar has no perf benefit — the feature exists for buffers — so shipping a scalars-only
-`#Uninit` would be a misleading partial. Hold for the array representation.
-
-**Remaining once D-FIXARR1 lands:** MaybeUninit codegen (stack array), wire the parser
-dispatch, diagnostics.md (E0420–E0424) + ui snapshots + golden buffer example + unit tests.
+**Remaining work (no gate):** (1) MaybeUninit codegen in the `Stmt::Val` arm for `b.uninit`
+(emit `let mut <name>: <T> = unsafe { core::mem::MaybeUninit::uninit().assume_init() };`),
+(2) wire the parser dispatch (`Statements.rs:761-764` → call `uninit_binding`),
+(3) diagnostics.md rows E0420–E0424 + ui snapshots, (4) golden buffer example + dataflow unit
+tests. Sema is already complete and inert until the parser is wired.
 
 ## Ratified surface (option C — NOT the old `:= uninit` form)
 

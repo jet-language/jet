@@ -1,8 +1,21 @@
 # DAP step-through debugger + adoption docs
 
 **Status:** Step 1 SHIPPED (2026-06-25) — interpreter-backed source-level
-debugger; step 2 (native DAP/lldb backend) remains.
+debugger; step 2 (native DAP/lldb backend) remains. **READY to start** —
+command vocabulary + entry point ratified (D-DBG1=A, D-DBG2, D-DBG3); no new
+syntax. One confirm-only product item in `## Open Owner-Q` below (lldb runtime
+dependency + platform matrix) — a posture confirmation, not a blocking gate.
 **Card:** c52
+
+**Verification (2026-06-25):** Step 1 is real and committed (b364176 "c52: jet
+debug interactive source-level stepper"). Driver `Source/Debug.rs` (21 KB) runs
+the `(jet)` prompt with the ratified vocabulary — `backtrace`/`bt` (`Debug.rs:257,312`,
+help `Debug.rs:336`), plus step/next/continue/finish/break/print/locals/list/quit.
+The interpreter declines native-only features with **E2203** (emitted at
+`Source/Interpreter.rs:111-117`, named for `jet debug`) and a mid-run `quit` surfaces
+**E2204** (`Debug.rs:379`; `Syntax.rs:1272`). Example `examples/features/118_debug.jet`
+and `tests/debug.rs` both present. The step-2 delta (native backend, `--raw-frames`,
+editor DAP wiring) is unchanged and accurate.
 
 ## Step 1 — SHIPPED (2026-06-25): interpreter-backed source-level debugger
 
@@ -131,7 +144,25 @@ the Rust intermediate are never surfaced.
   Linux/macOS; gdb and Windows are follow-ups. Note this in the doc, don't
   pretend cross-platform on day one.
 
-## Open decisions
+## Open Owner-Q
+
+No **language** decision blocks step 2 — the command vocabulary, `jet debug` entry
+point, and `--raw-frames` are all ratified (D-DBG1/2/3); there is no new syntax and
+nothing touches `Source/Syntax.rs`. The DAP transport is hand-rolled std JSON over
+stdio (no crate → I6 holds; lldb is driven via process pipes, not a linked crate).
+
+The one borderline product call worth an owner confirm (not a code-blocking gate):
+
+- **Native-backend tool dependency + platform matrix.** The native backend requires
+  an external system debugger (lldb on Linux/macOS for phase 1; gdb + Windows are
+  follow-ups). This is a runtime *tool* dependency on the user's machine — the same
+  posture the owner already accepted for native/system deps via nixpkgs "if the user
+  has it." Confirm: (a) lldb-required-for-native-debug is the accepted stance (with a
+  clear message + the interpreter-backed step-1 debugger as the no-lldb fallback), and
+  (b) phase-1 = lldb/Linux+macOS only is the right initial scope. Tests gate on lldb
+  presence (skip when absent), like `tests/observe.rs` gates on `rustc`.
+
+## Open decisions (history)
 
 No new user-facing **syntax** — DAP is a tooling/protocol surface, and the line
 table is an internal codegen artifact. Nothing here touches `Source/Syntax.rs` or

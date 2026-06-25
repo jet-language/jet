@@ -25,10 +25,412 @@ it's time to decide it.
 
 ## Open decisions
 
-_No cards open. **D-ENC-DYN1** (A+ — one shared `Data` value with per-format
-aliases) and **D-ENC-YAML1** (A — YAML core + anchors; full 1.2 → frozen c153)
-were ratified 2026-06-25 and recorded in [`syntax-decisions.md`](syntax-decisions.md);
-build = c152. The earlier batch is recorded there too._
+_Five decisions are open for owner pick (sweep 2026-06-25). Each is a full Focus-Mode card below; every other non-frozen board card now has a vetted plan and is ready to implement on your "go"._
+
+## Plugin target — board card c81
+
+### D-PLUGIN1 — Plugin target model & ABI substrate (rec B)
+
+**Gist:** Decide what a package that declares the `plugin` target actually builds, and how a running Jet program loads and calls it safely.
+
+**Story.** Doris ships a desktop note-taking app in Jet. Power users keep asking to write their own little add-ons — a word-counter, a spell-checker, an export-to-PDF button — and drop them in a `plugins/` folder without rebuilding her whole app. She wants to declare those add-ons as Jet packages with `target: plugin`, hand them to her app at runtime, and call them. The reserved `plugin` keyword promises exactly this, but today it is rejected with E1210. The question this card settles: when Doris's app loads a stranger's plugin, is that load sandboxed and safe by default, or does it run as raw native code in her process?
+
+**In the wild:**
+```jet
+// --- host app: note_app/pack.jet ---
+package {
+    name: "note_app"
+    target: app
+}
+
+// --- host app: src/main.jet ---
+fn main() {
+    let bar = PluginHost.discover("./plugins")   // load every plugin in the folder
+    for p in bar.plugins {
+        print("loaded: {p.name}")
+        p.on_export(current_note())              // call across the ABI boundary
+    }
+}
+
+// --- a third-party plugin: pdf_export/pack.jet ---
+package {
+    name: "pdf_export"
+    target: plugin          // <-- E1210 today; this card unblocks it
+    entry: "src/plugin.jet"
+}
+
+// --- pdf_export/src/plugin.jet ---
+pub fn name() -> Text { "Export to PDF" }
+pub fn on_export(note: Note) { write_pdf(note) }
+```
+
+**Other languages:**
+```rust
+// Rust: native cdylib + dlopen. No language-level safety — the whole
+// boundary is `unsafe`, and an ABI mismatch is undefined behavior.
+let lib = unsafe { libloading::Library::new("plugins/pdf_export.so")? };
+let on_export: libloading::Symbol<unsafe extern "C" fn(*const Note)> =
+    unsafe { lib.get(b"on_export")? };
+unsafe { on_export(&note) };   // trusting a stranger's .so inside your process
+```
+```wat
+;; WASM component model: the plugin is a sandboxed module with a typed
+;; interface. The host grants capabilities explicitly; a misbehaving
+;; plugin can't touch host memory, the filesystem, or the network.
+(component
+  (import "host:note/types" (instance ...))
+  (export "on-export" (func (param "note" $note))))
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Safety (I1) | New dep (I6) | Perf | Use-case fit |
+|---|---|---|---|---|
+| A — Native cdylib + `@unsafe` gate | Every load is expert-gated unsafe; footgun if anyone forgets | None (new rustc `--crate-type` path only) | Fastest; direct call | Trusted first-party plugins only; hostile-plugin story is "don't" |
+| B — WASM sandbox (recommended) | Safe by construction; no gate needed; capability-scoped | New WASM runtime in stdlib — owner-approval gate | Marshaling cost per call; fine for coarse calls | General app plugins from untrusted authors; the beginner default |
+| C — Out-of-process RPC | Process isolation; safe | New RPC/IPC layer | Highest latency; serialize every call | Heavyweight isolation; no shared typed state |
+
+- **Option A — Native cdylib + `@unsafe` gate.** The `plugin` target compiles to a native shared library (`cdylib` via rustc, the first non-`bin` crate type in the codebase) with a C ABI. The host loads it with `dlopen`-style machinery. Crossing that boundary is inherently unsafe — a wrong signature or a stale ABI is undefined behavior — so under I1 the load site must sit behind a user-written `@unsafe`/`@audit` gate. This makes loading *any* plugin an expert-tier act: Doris cannot offer a safe plugin folder to ordinary users without auditing every load. No new dependency, fastest calls, but the default footgun is exactly what I1 forbids.
+```jet
+fn main() {
+    @unsafe {
+        @audit("native plugin load: trusting .so authors with full process access")
+        let bar = PluginHost.discover("./plugins")   // native dlopen, no sandbox
+        bar.plugins[0].on_export(current_note())
+    }
+}
+// Without the @unsafe gate:
+//   error[E12xx]: loading a native plugin is an unsafe operation
+//     this crosses a native ABI boundary; a mismatched plugin is undefined behavior
+//     fix: wrap the load in `@unsafe { @audit("…") … }` (expert tier)
+```
+- **Option B — WASM sandbox (recommended).** The `plugin` target compiles to a sandboxed WASM module. The host loads and calls it through a typed interface; the plugin runs in an isolated sandbox and can only touch what the host explicitly grants. This is I1-clean by construction — no `@unsafe`, no audit, no footgun — so Doris's plugin folder is safe for strangers' code out of the box, which is the whole beginner promise. The honest cost (I6): this introduces a WASM runtime as a new stdlib external dependency, which requires owner approval and, per the Epoch-3 dependency rule, must eventually be a native Jet/Rust implementation. Call-boundary marshaling adds latency versus a raw native call.
+```jet
+// pdf_export/pack.jet
+package {
+    name: "pdf_export"
+    target: plugin          // compiles to a sandboxed wasm32 module
+    entry: "src/plugin.jet"
+}
+
+// host — no @unsafe needed; the sandbox is the safety boundary
+fn main() {
+    let bar = PluginHost.discover("./plugins")   // safe by default
+    for p in bar.plugins {
+        p.on_export(current_note())              // marshaled across the sandbox
+    }
+}
+```
+- **Option C — Out-of-process RPC.** The `plugin` target builds a standalone executable the host launches as a child process and talks to over a JSON-RPC-style protocol (LSP-shaped). Strongest isolation — a crashing or hostile plugin cannot corrupt the host — and language-agnostic. But every call is serialized across a process boundary (highest latency), it carries process-management complexity, and there is no shared typed state, which rules it out for any future compiler-hook plugin that needs the typed AST.
+```jet
+fn main() {
+    let bar = PluginHost.spawn("./plugins")      // each plugin = a child process
+    for p in bar.plugins {
+        p.on_export(current_note())              // RPC round-trip per call
+    }
+}
+```
+
+**Recommendation:** B — a sandboxed WASM substrate is the only option where loading an untrusted plugin is safe by default with no `@unsafe` gate, which is precisely what I1 and the beginner experience demand; it is one clear path for all app plugins, and the sandbox stays correct as the surface grows. The new WASM runtime dependency (I6) is a real, owner-gated cost named here honestly, not a ranking factor. Native cdylib (A) is the natural *future expert opt-in* layered on top of B — deferred to its own card, not committed now — so the safe default ships first and the expert reach comes later without making the footgun the default.
+
+**Owner Q1 — deferred sub-decisions.** Versioning / ABI handshake (reuse the D-CAP4 `api: stable` freeze?) and export-surface spelling (`#Plugin` marker vs manifest `entry:` + `pub` contract) are decided in follow-up cards once this substrate choice lands.
+
+## User derives & reflection — board card c155
+
+### D-METAREFLECT1 — Reflection read-API surface (rec B)
+
+**Gist:** How build-time code asks a type for its fields, their types, and their markers.
+
+**Story.** Doris maintains a small in-house table-store library. Every team that uses it writes a `struct` for a row, then by hand types out the column names, the column types, and which fields to skip — and the hand-list drifts out of sync with the struct the moment someone adds a field. She wants the library to read the struct's shape itself at build time and generate the column list, so the struct stays the single source of truth. To do that, her derive body needs a way to walk a type: ordered fields, each field's type, and the `@skip`-style markers on each one.
+
+**In the wild:**
+```jet
+// table-store: build the column list from the row struct itself, at build time.
+@Row
+struct Account {
+    id: Int
+    email: Text
+    @skip cached_token: Text   // not a real column
+}
+
+// inside the library's derive body — read Account's shape:
+comptime {
+    let cols = T.reflect().fields
+        .where(|f| !f.has_marker("skip"))
+        .map(|f| (f.name, sql_type(f.ty)))
+    // cols == [("id","INTEGER"), ("email","TEXT")]
+}
+```
+
+**Other languages:**
+```swift
+// Swift: Mirror is a reflected handle over a value/type — one entry point, walk children.
+let m = Mirror(reflecting: account)
+for child in m.children { print(child.label, type(of: child.value)) }
+```
+```zig
+// Zig: @typeInfo returns a comptime value you index into.
+inline for (@typeInfo(Account).Struct.fields) |f| {
+    @compileLog(f.name, f.type);
+}
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Entry points | LSP-discoverable | One-path (I8) fit | Iteration ergonomics | New surface |
+|---|---|---|---|---|---|
+| A free functions | many builtins | poor (loose bag) | weak (scattered) | manual | low |
+| B reflected handle | one (`T.reflect()`) | strong | strong | good (`.fields` is a list) | one `Type` value |
+| C `comptime for` | one keyword form | medium | medium | best for walk-only | a 2nd comptime control form |
+
+- **Option A — free functions.** A set of comptime builtins: `fields_of(T)`, `type_name(T)`, `attrs_of(T, field)`. Familiar and cheap; composes with ordinary comptime bindings. But it grows into a loose bag of globals with no single place to discover what reflection can do, and each new query is another top-level name.
+```jet
+comptime {
+    let names = fields_of(T)                       // ["id","email","cached_token"]
+    for f in names {
+        let t = field_type(T, f)                   // Int / Text / Text
+        let skip = attrs_of(T, f).contains("skip")
+        if !skip { emit_column(f, sql_type(t)) }
+    }
+}
+```
+- **Option B — reflected `Type` handle (recommended).** `T.reflect()` returns one reflected value; everything hangs off it (`.name`, `.fields`, each field's `.name`/`.ty`/`.markers`). One discoverable, LSP-completable entry point — fits the Blueprint north-star — and keeps reflection from scattering into globals. Costs one first-class comptime `Type` value. Matches Swift's `Mirror` and Zig's `@typeInfo`-as-value.
+```jet
+comptime {
+    let info = T.reflect()
+    for f in info.fields {                         // ordered, typed
+        if f.has_marker("skip") { continue }
+        emit_column(f.name, sql_type(f.ty))        // f.ty is a reflected type
+    }
+}
+```
+- **Option C — `comptime for field in T`.** A dedicated iteration construct that binds each field's shape per iteration. Reads most naturally for the dominant case (walk fields to build an impl). But it is a second comptime control form, and it is narrower than a general read-API — you still need some handle for "the type's name" or "this field's markers", so it tends to need B underneath anyway.
+```jet
+comptime for field in T {                          // field: name, ty, markers
+    if field.has_marker("skip") { continue }
+    emit_column(field.name, sql_type(field.ty))
+}
+```
+
+**Recommendation:** B — one discoverable, LSP-completable handle keeps reflection coherent (Blueprint/I8) and mirrors Swift `Mirror` / Zig `@typeInfo`; adopt C later as pure sugar over B if field-walking dominates real derive bodies.
+
+### D-METADERIVE1 — User derive authoring + output mechanism (rec A)
+
+**Gist:** How a library author writes a `derive`, and whether its output is Jet text the compiler re-reads or a tree it hands the compiler directly.
+
+**Story.** Hank ships a small networking library. He wants users to tag a `struct` with `@Wire` and get a hand-free binary encoder, the same way the built-in `#[Codable]` works — but `Wire` is his trait, not the compiler's, so he has to *author* the derive. The hard question isn't the keyword; it's the output mechanism. When a user puts `@Wire` on a struct with a field his encoder can't handle, the error has to land on that user's `@Wire` line in plain Jet — not as a wall of rustc output about generated code. That only holds if the derive's output goes back through the front end the same way hand-written code does (D-CTCODEGEN1=A: never inject pre-parsed AST; errors pin at the trigger).
+
+**In the wild:**
+```jet
+// library author defines the derive once:
+derive Wire for T {                                  // T = the triggering type's reflected handle
+    let puts = T.reflect().fields
+        .map(|f| `    self.$f.name.write_wire(buf)`)  // one line per field; $-splice computed names
+    emit `
+        impl Wire for $T.name {
+            fn write_wire(self, buf: Buffer) { $puts }
+        }
+    `                                                  // emitted Jet TEXT → lexer→parser→sema
+}
+
+// a consumer, in another file, just tags the type:
+@Wire
+struct Packet { seq: Int, payload: Bytes }
+
+let buf = Buffer.new()
+Packet{seq: 1, payload: b"hi"}.write_wire(buf)        // works: both fields are Wire
+```
+
+**Other languages:**
+```rust
+// Rust: a derive macro returns a TokenStream — source-level tokens the compiler
+// then PARSES and type-checks. Errors point into the generated code, at the call site.
+#[proc_macro_derive(Wire)]
+fn derive_wire(input: TokenStream) -> TokenStream { /* quote!{ impl Wire … } */ }
+// Swift macros are the same shape: emit SwiftSyntax source, recompiled & rechecked.
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Declaration | Output mechanism | Errors pin at `@Marker` site | Honors D-CTCODEGEN1=A | Trigger / coherence |
+|---|---|---|---|---|---|
+| A `derive T for …` | impl-like block | Jet **source fragment** re-enters lexer→parser→sema | yes (parsed like hand code) | yes | `@Marker` router · local-only |
+| B `derive fn(T: Type)` | comptime fn | returns **typed AST** sema re-validates | only with hand-threaded spans | **no — reopens it** | `@Marker` router · local-only |
+| C `@derive(T) impl …` | attribute + skeleton | Jet source fragment (same as A) | yes | yes | attribute · local-only |
+
+- **Option A — `derive Trait for T { … }`, source-fragment re-entry (recommended).** Reads like an impl block; the body uses reflection (D-METAREFLECT1) and `$name` splices (D-CTMARKER1=C) to build Jet **text**, which re-enters the front end exactly like hand-written code. Triggered by the existing `@Marker` router (`split_type_markers` already routes unknown names to derives — zero new trigger syntax), local-only coherence (derive only where the trait or the type is defined). Errors pin at the trigger for free, because sema sees ordinary parsed code carrying the trigger span. Matches Rust/Swift macros.
+```jet
+derive Wire for T {
+    let puts = T.reflect().fields.map(|f| `    self.$f.name.write_wire(buf)`)
+    emit `impl Wire for $T.name { fn write_wire(self, buf: Buffer) { $puts } }`
+}
+
+@Wire
+struct Frame { seq: Int, when: Instant }    // Instant is not Wire
+
+// error pins at the user's trigger, in plain Jet (rustc never speaks — I2):
+//   error[E-DERIVE-FRAGMENT]: derived `Wire` impl does not type-check
+//     --> frame.jet:1:1
+//      |
+//    1 | @Wire
+//      | ^^^^^ this derive generated code that failed sema
+//      = field `when: Instant` has no `write_wire` — `Wire` needs every field to be Wire
+```
+- **Option B — `derive fn Trait(T: Type) { … }`, typed-AST return.** Declares the derive as an explicit comptime function that builds and returns AST nodes; sema then re-validates the tree. Reads clearly as "a function the compiler calls." But the compiler receives **pre-built AST**, so spans don't map to any user text — pinning an error at the trigger means threading synthetic spans by hand, and D-CTCODEGEN1=A already ratified "never inject pre-parsed AST past the sema gatekeeper." Picking B reopens that decision.
+```jet
+derive fn Wire(T: Type) -> Impl {
+    let body = T.reflect().fields
+        .map(|f| Stmt.call(field(self_(), f.name), "write_wire", [ident("buf")]))
+    Impl.new(trait: "Wire", ty: T, method: Method("write_wire", body))
+}   // returns a tree, not text → conflicts with the ratified re-entry rule
+```
+- **Option C — `@derive(Trait) impl … { … }`, attribute + source fragment.** Closest to today's `#[…]` marker world: an attribute on an `impl` skeleton whose body emits a Jet source fragment (same sound mechanism as A). Familiar to anyone coming from attribute systems, but it splits the declaration across an attribute and a half-written `impl`, and the `impl … for T` header duplicates what the attribute already says — more ceremony than A for the same result.
+```jet
+@derive(Wire)
+impl Wire for T {
+    fn write_wire(self, buf: Buffer) {
+        emit T.reflect().fields.map(|f| `self.$f.name.write_wire(buf)`)
+    }
+}
+```
+
+**Recommendation:** A — declaration `derive Trait for T` reads as an impl, output is a Jet **source fragment** re-entering lexer→parser→sema (the literal D-CTCODEGEN1=A path, so errors pin at the `@Marker` trigger and rustc never speaks); reuse the existing `@Marker` router and a Rust-style local-only orphan rule.
+
+## Monorepo workspace — board card c156
+
+### D-WORKSPACE2 — Workspace surface keyword + filename (rec B)
+
+**Gist:** Pick the keyword and filename for the Jet-grammar file that indexes every package in a multi-package repo.
+
+**Story.** Earl runs a 40-package repo: a ranker service, a logging crate, shared protobufs, a half-dozen CLIs. He deletes the old `jetpack.toml` index and writes one Jet file at the repo root that lists the members. He wants its first line to read like what it is — "this is the set of packages in this repo" — and to sit next to `env.jet`/`config.jet` without a beat of confusion about which file does what.
+
+**In the wild:**
+```jet
+// fleet.jet
+module fleet {
+    members: find("./packages")
+}
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Reads as | Collision risk | Theme fit |
+|---|---|---|---|
+| A `workspace` | industry-standard, generic, long | none | off-theme |
+| B `fleet` | "all the packages we operate" | none | strong |
+| C `roster` | "the enrolled list of members" | none | mild (crew) |
+| D `wing` | "a formation of packages" | none | strong |
+| E `squadron` | "a unit of grouped packages" | none | strong, long |
+| F `hangar` | "where the packages are kept" | **store name** | strong |
+| G `manifest` | "the cargo list" | **overloaded vs pkg.jet** | mild |
+
+- **Option A — `module workspace` / `workspace.jet`.** Familiar from Cargo/npm workspaces, so a transplant guesses it instantly. But it's the longest, most generic spelling, off the jet/jetpack/jetos aviation canon, and carries baggage from other ecosystems' workspace semantics that Jet's surface doesn't share.
+```jet
+// workspace.jet
+module workspace { members: find("./packages") }
+```
+- **Option B — `module fleet` / `fleet.jet` (recommended).** A fleet is the set of aircraft an operator runs — so "the fleet" reads cleanly as "all the packages in this repo." Short, on-canon with jet/jetpack/jetos, no collision with `pkg.jet`/`env.jet`/`config.jet`, and a beginner needs no prior workspace vocabulary to get it.
+```jet
+// fleet.jet
+module fleet { members: find("./packages") }
+```
+- **Option C — `module roster` / `roster.jet`.** A roster is literally an enrolled list of members, which is exactly the field's job — the keyword and the `members:` field reinforce each other. Slightly more crew/personnel than aircraft, but no collision and very legible.
+```jet
+// roster.jet
+module roster { members: find("./packages") }
+```
+- **Option D — `module wing` / `wing.jet`.** A wing is a formation of aircraft flying together — distinctive, short, on-theme. Reads a touch more poetic than literal ("the wing" is less obviously "the package list" than "the fleet"), and "wing" has an unrelated everyday meaning that may briefly mislead.
+```jet
+// wing.jet
+module wing { members: find("./packages") }
+```
+- **Option E — `module squadron` / `squadron.jet`.** A squadron is a named operational unit of aircraft — strongly on-theme and unambiguous as "a managed group." Longer to type than `fleet`/`wing` and a less common English word for a beginner.
+```jet
+// squadron.jet
+module squadron { members: find("./packages") }
+```
+- **Option F — `module hangar` / `hangar.jet`.** Evocative and on-theme, but **collides**: "hangar" already names the Jetpack package store (`Source/Jetpack/Store.rs`). Two unrelated meanings of one word in the same package system is exactly the footgun to avoid — reject.
+```jet
+// hangar.jet
+module hangar { members: find("./packages") }
+```
+- **Option G — `module manifest` / `manifest.jet`.** "Manifest" = the cargo list, which fits, but it's **overloaded** against the per-package manifest concept (`pkg.jet`), so "the manifest" becomes ambiguous about which level it means. Avoid.
+```jet
+// manifest.jet
+module manifest { members: find("./packages") }
+```
+
+**Recommendation:** B — `fleet` is short, on-canon, collision-free, and reads as "all the packages in this repo" with zero prior vocabulary; falls back cleanly to the generic A if the owner prefers the industry term.
+
+## Dot-inferred construction — board card c158
+
+### D-DOTCTOR2 — Does `T.{ }` retire the dotless `T { }` struct literal? (rec A)
+
+**Gist:** Now that named construction is `T.{ … }`, decide whether the old dotless `T { … }` goes away or lives on beside it.
+
+**Story.** Floyd is writing the config types for a small service. He names a struct two ways in the same file — once the way the tutorial showed him last year (`Config { … }`) and once the way the new docs show (`Config.{ … }`) — and both compile. He stalls: which is "right," and will a reviewer flag the other? Two spellings for the exact same act of building a struct is the thing the language is supposed to spare him.
+
+**In the wild:**
+```jet
+let server = Server.{
+  host: "0.0.0.0",
+  port: 8080,
+  tls: .Enabled(Cert.{ path: "/etc/ssl/site.pem" }),
+  log: .Json,
+}
+```
+
+**Other languages:**
+```rust
+// Rust: one struct-literal spelling, always dotless, no enum-dot pressure
+let server = Server { host: "0.0.0.0".into(), port: 8080 };
+```
+```swift
+// Swift: construction is a call, T(...); enum cases use a leading dot (.json)
+// but struct init never does — so Swift feels no symmetry pull on structs
+let server = Server(host: "0.0.0.0", port: 8080)
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | One spelling (I8) | Enum-dot symmetry | Migration surface |
+|---|---|---|---|
+| A retire S29 | Yes — only `T.{ }` | Full — matches `.Variant` | Wide (all struct literals + S74 patterns) |
+| B coexist | No — two spellings | Partial — dot optional | None |
+| C inference-only dot | Yes for named (`T { }` only) | Broken — named struct dotless, named enum dotted | None |
+
+- **Option A — Retire S29 fully (recommended).** `T.{ … }` becomes the one named-construction spelling; the dotless `T { … }` is removed and typing it teaches the fix-it. One spelling per job (I8), and named struct construction reads exactly like named enum construction — `T.{ … }` next to `T.Variant`, `.{ … }` next to `.Variant`. A beginner learns a single rule: a leading dot means "construct," named or inferred, struct or enum.
+```jet
+let server = Server.{ host: "0.0.0.0", port: 8080 }
+
+// typing the old dotless form:
+let server = Server { host: "0.0.0.0", port: 8080 }
+//                  ^ E0320: named construction uses a dot: `Server.{ … }`
+//                    fix: insert `.` before `{`  →  Server.{ host: …, port: … }
+```
+- **Option B — Coexist.** Keep dotless `T { … }` for named construction and also accept `T.{ … }`. Nothing migrates, but the shipped language then has two spellings for one job — a direct I8 violation. Floyd's two-spellings-in-one-file confusion is the permanent state, and every style guide has to legislate which to use. The card asked for symmetry with the enum dot; coexistence only makes the dot optional, so the symmetry is a suggestion rather than a rule.
+```jet
+let a = Server { host: "0.0.0.0", port: 8080 }   // legal
+let b = Server.{ host: "0.0.0.0", port: 8080 }   // also legal — same thing, I8 tension
+```
+- **Option C — Inference-only dot.** The dot exists only for context-inferred construction (`.{ … }`, `.Variant`); named construction stays dotless `T { … }` and `T.{ … }` is never offered for structs. One spelling per job is preserved, but it breaks symmetry the other way: a named enum is `T.Variant` (dotted) while a named struct is `T { … }` (dotless), and an inferred struct is `.{ … }` (dotted) while its own named form drops the dot. The leading dot would mean "construct" for enums and "inferred only" for structs — two rules, not one.
+```jet
+let server = Server { host: "0.0.0.0", port: 8080 }   // named struct: no dot
+let mode   = .Json                                     // inferred enum: dot
+let cert: Cert = .{ path: "/etc/ssl/site.pem" }        // inferred struct: dot
+// named enum is Server.Variant (dot) but named struct is Server { } (no dot) — asymmetric
+```
+
+**Recommendation:** A — one spelling per construction job (I8), and a leading dot uniformly means "construct," so named/inferred and struct/enum all read the same.
+
+## Recently ratified — context (no action)
+
+_Most recent batch (ratified 2026-06-25): **D-CTMARKER1** (C — `$` for the comptime
+splice site only + a `comptime { … }` execution block) · **D-WORKSPACE1** (B — fully
+computable `workspace.jet` index) · **D-METADEPTH1** (A — reflection/derives only;
+full Jai → frozen c154) · **D-CTEFFECT1**, **D-DOTCTOR1**, **D-MONOREF1**,
+**D-BUILDPROFILE1**, **D-CTCODEGEN1**, **D-COMPILERLIB1** · plus **D-ENC-DYN1** (A+)
+and **D-ENC-YAML1** (A) — build c152, shipped. Tracking cards: c154–c161._
 
 
 _Background: **D-ASSOC-NOW** was decided **C** (fund both streams: complete

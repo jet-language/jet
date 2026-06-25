@@ -1,166 +1,152 @@
-# c119 — Split largest compiler modules by responsibility
-**Decision:** none required — pure refactor, no behavior change, no new user-facing surface.
-**Gate:** none.
+# c160 — Compiler internal seams refactor (D-COMPILERLIB1=A)
+
+**Decision:** D-COMPILERLIB1=A **ratified 2026-06-25** (Epoch 3). Factor `Source/`
+into internal Rust library seams — `lexer` / `parser` / `sema` / `tir` / `codegen` /
+`comptime` + a `driver` that composes them — each owning its types behind a small
+documented API, with today's coarse `lib.rs` (`check_*` / `compile_*` / `render_*`)
+kept as a **thin façade** built on the seams.
+**Gate:** none. I6-safe — these are the compiler's OWN internal crates/modules, no
+external deps, no carve-out. Owner-Q3 (exact seam boundaries) left *confirmable*; the
+ratified decision already names the seams, so they are baked below (§2), not blocked.
+**Scope:** Epoch 3 refactor. No user-facing syntax, no behavior change → no ballot.
 
 ---
 
 ## Why
 
-The largest modules are maintenance bottlenecks. Any new sema pass or codegen feature has to
-navigate files that mix unrelated responsibilities. The split is by stable responsibility
-boundaries so future features touch fewer files and conflicts narrow.
+Two costs the seams remove:
+
+1. **Forked pipeline.** The LSP re-derives the compile pipeline instead of calling each
+   stage as a library. A documented per-seam API lets the build driver *and* the LSP
+   drive lex → parse → sema → tir → codegen as composed library calls, and inspect the
+   typed IR between sema and codegen, off one path.
+2. **Self-host boundaries.** Crisp crate-by-crate seams give the future self-host port a
+   clean unit of work each (rustc / Roslyn precedent), instead of one monolith to port
+   big-bang.
+
+This is the *merits* framing the owner ratified — LSP/driver unification + self-host
+boundaries + I6-machine-safety. It is **not** a "reduce big files" refactor; line-count
+reduction is incidental.
 
 ---
 
-## Measured sizes (verified 2026-06-24 via `wc -l Source/**/*.rs | sort -n | tail`)
+## 1. Current reality (verified 2026-06-25, file:line)
 
-| File | Lines |
-|------|-------|
-| `Source/Codegen/TIR.rs` | 12,124 |
-| `Source/Sema/CheckerInfer.rs` | 3,639 |
-| `Source/Sema/CheckerCore.rs` | 2,420 |
-| `Source/Sema/CheckerCoreLib.rs` | 2,079 |
-| `Source/Parser/Items.rs` | 2,044 |
-| `Source/Parser/Statements.rs` | 1,806 |
-| `Source/Parser/Expressions.rs` | 1,713 |
-| `Source/Sema/Registration.rs` | 1,682 |
-| `Source/AST.rs` | 1,575 |
-| `Source/REPL.rs` | 1,530 |
-| `Source/Sema/Bundle.rs` | 1,495 |
-| `Source/Sema/CheckerItems.rs` | 1,439 |
-| `Source/Loader.rs` | 1,127 |
+The coarse-grained module split that an earlier draft of this card proposed is **already
+done** — it is the foundation this seam work builds on, not pending work:
 
-Priority order: TIR.rs first (12K lines, 10× the second); then CheckerInfer.rs; then Parser
-cluster; then Registration.rs.
+- `Source/Codegen/TIR.rs` is now the directory `Source/Codegen/TIR/`:
+  `mod.rs` (3,180 — TIR node types + totality contract), `lower.rs` (4,714 — AST→TIR
+  lowering), `emit.rs` (2,032 — `emit_tir_func` at `emit.rs:12`, TIR→Rust), `subset.rs`
+  (3,460 — the coverage predicate family: `tir_covers` at `subset.rs:22`,
+  `tir_covers_test_body:82`, `tir_covers_error_conv_body:91`, `tir_covers_method:111`,
+  `tir_covers_trait_method:178`). (An earlier draft claimed `tir_covers` did not exist —
+  that is now wrong; it does.)
+- `Source/Sema/CheckerInfer.rs` is now the directory `Source/Sema/CheckerInfer/`:
+  `expr.rs` (1,282), `calls.rs` (2,334), `mod.rs`.
 
----
+So the seam boundaries below are mostly a matter of **publishing a documented API per
+existing module + extracting a `driver`**, not carving up monoliths from scratch.
 
-## Split plan
+The today's-façade entry points (`Source/lib.rs`) the ratified text calls out as the
+thin layer to keep:
 
-### 1. `Source/Codegen/TIR.rs` → 6 modules
+- `check_*`: `check_with_path` (`lib.rs:188`), `check_for_eval` (`lib.rs:203`),
+  `check_document` (`lib.rs:543`), re-export `check_pure_program_root` (`lib.rs:534`).
+- `compile_*`: `compile` (`:177`), `compile_with_path` (`:181`), `compile_freestanding`
+  (`:249`), `compile_tests_with_path[_cov]` (`:328`/`:338`), `compile_benches_with_path`
+  (`:365`), `compile_with_mode` (`:464`), `compile_rust` (`:528`); private composers
+  `compile_bundle_path[_opts]` (`:240`/`:253`).
+- `render_*`: `render_diagnostics` / `render_all_colored` / `render_all_json` /
+  `render_all_linked` re-exports (`lib.rs:532`).
 
-Current responsibilities mixed in TIR.rs (verified names):
-- TIR node definitions: `TFunc` (`:53`), `TStmt` (`:164`), `TExpr` (`:427`), `TExprKind`
-  (`:432`) — these exist as stated.
-- The subset-coverage predicate is the module-level **`pub(crate) fn n(body, cx) -> bool`**
-  (called from `Codegen/mod.rs`). **There is no `tir_covers` / `tir_covers_test_body` /
-  `tir_covers_error_conv`** — the writer invented those names; the predicate is `n` (plus its
-  helpers).
-- Expression lowering: `lower_expr` (`:6301`), all `TExprKind` arms.
-- Statement lowering: `lower_stmts` (`:5034`), `lower_stmt` (`:5038`), `lower_forin_collection`
-  (`:5496`), `lower_enum_match` (`:5865`)/`lower_enum_arg` (`:6070`). (No `lower_for`/
-  `lower_match` by those names.)
-- Item lowering and emit (16 `emit_*` fns) — currently interleaved with lowering.
-
-Proposed split (`Source/Codegen/TIR/` subdirectory, new `mod.rs` re-exports):
-
-| New file | Responsibility |
-|----------|---------------|
-| `TIR/Nodes.rs` | TIR node type definitions (`TFunc`, `TStmt`, `TExpr`, `TExprKind`, etc.) |
-| `TIR/Coverage.rs` | the `n` coverage predicate and its helpers |
-| `TIR/LowerExpr.rs` | Expression lowering (`lower_expr`, all `TExprKind` arms) |
-| `TIR/LowerStmt.rs` | Statement lowering (`lower_stmts`, `lower_stmt`, `lower_forin_collection`, `lower_enum_match`) |
-| `TIR/LowerItems.rs` | Item lowering (fn/struct/enum/trait-impl lowering) |
-| `TIR/Emit.rs` | Rust string emission (all `emit_*` fns) |
-
-The existing `Source/Codegen/TIR.rs` becomes `Source/Codegen/TIR/mod.rs` re-exporting all
-pub items. `Source/Codegen/mod.rs`'s `use crate::Codegen::TIR::*` import is unchanged —
-callers see no difference.
-
-**Safety:** zero behavior change. Move code exactly; no renaming of pub items. Run
-`nix develop -c cargo test` after each file move to confirm green.
-
-### 2. `Source/Sema/CheckerInfer.rs` → 3 modules
-
-Current responsibilities:
-- Type inference core (`infer`, `infer_inner`, all Expr arms)
-- Method-call resolution (`infer_method_call`, `finish_builtin_method`)
-- Numeric / binary op inference (`infer_binary`, `infer_numeric_op`)
-- Collection inference (`infer_list_lit`, `infer_map_lit`, `infer_index`, `infer_slice`)
-- Fallibility / `?` / `??` handling (`infer_try`, `infer_or_fallback`, `infer_fallible_stmt`)
-
-Proposed split:
-
-| New file | Responsibility |
-|----------|---------------|
-| `Sema/Infer/Core.rs` | `infer`, `infer_inner`, `infer_name_or`, scalar/bool/string arms |
-| `Sema/Infer/Methods.rs` | `infer_method_call`, `finish_builtin_method`, `field_type` |
-| `Sema/Infer/Fallible.rs` | `infer_try`, `infer_or_fallback`, `infer_fallible_stmt`, `??` |
-| `Sema/Infer/Collections.rs` | `infer_list_lit`, `infer_map_lit`, `infer_index`, `infer_slice`, `infer_tuple_lit`, `infer_fan_out` |
-| `Sema/Infer/BinaryOps.rs` | `infer_binary` (`:2554`) + numeric coercion helpers |
-
-`Source/Sema/CheckerInfer.rs` becomes `Source/Sema/Infer/mod.rs`.
-
-### 3. `Source/Parser/` cluster — Items.rs, Statements.rs, Expressions.rs
-
-These are already modular enough; each is one responsibility. The only split worth doing:
-
-`Source/Parser/Items.rs` (2,044 lines): split struct/enum/trait/impl parsing from
-fn/module/test parsing.
-
-| New file | Responsibility |
-|----------|---------------|
-| `Parser/ItemsTypes.rs` | struct, enum, trait, impl blocks |
-| `Parser/ItemsFns.rs` | fn, test_def, module declarations |
-
-`Items.rs` becomes `ItemsTypes.rs` + `ItemsFns.rs`; `Parser/mod.rs` re-exports both.
-
-### 4. `Source/Sema/Registration.rs` → 2 modules
-
-**Correction:** Registration.rs does **not** contain `compile_bundle`/`check_bundle` — that
-pipeline driver lives in `Source/Sema/Bundle.rs` (the `check`/`check_freestanding` entry over
-`ProgramBundle`/`CompileMode`). Registration.rs's actual contents are the top-level entry
-`check`/`check_with_mode` (`:82`/`:86`) plus a large family of `register_*` and `check_*`
-helpers (`register_distinct`, `register_const`, `register_struct`, `register_enum`,
-`register_type_methods`, `register_impl_methods`, `check_func_body`, `check_effect_boundaries`,
-`eval_comptime_items`, …). The natural split is registration vs in-place body/effect checks,
-not registration vs pipeline:
-
-| New file | Responsibility |
-|----------|---------------|
-| `Sema/Register.rs` | `register_*` (struct/enum/const/distinct/methods into the registry) |
-| `Sema/CheckBodies.rs` | `check`/`check_with_mode` entry, `check_func_body`, `check_effect_boundaries`, `eval_comptime_items` |
-
-`Registration.rs` → `Register.rs` + `CheckBodies.rs`; `Sema/mod.rs` re-exports both. (The
-pipeline already lives separately in `Bundle.rs`, so no `Pipeline.rs` is needed.)
-
-### 5. `Source/AST.rs` — leave as-is for now
-
-AST.rs (1,575 lines) is all type definitions — coherent, flat. It will need splitting as
-node count grows, but the current size is manageable and it has no logic to separate. Defer.
+The pipeline these façade fns compose today is spread across `Loader::load_entry_*`
+(lex+parse+module resolution), `CFFI::assemble`, `Sema::check_bundle` /
+`check_bundle_freestanding`, `FFI::prepare`, and `Codegen::emit_bundle*`
+(`lib.rs:253–313`, `:464–525`). **That composition is exactly the `driver` seam.**
 
 ---
 
-## Execution order
+## 2. The seven seams (Owner-Q3 baked — confirmable)
 
-1. TIR.rs split (highest leverage; move in 6 PRs, one per file, test after each).
-2. CheckerInfer.rs split.
-3. Parser/Items.rs split.
-4. Registration.rs split.
+The ratified decision names them; the mapping onto the current tree:
 
-Each step:
-- Create new file(s).
-- Move code exactly (no renames, no logic changes).
-- Update `mod.rs` / re-exports.
-- `nix develop -c cargo build && nix develop -c cargo test` — must be green.
-- Commit with message `refactor: split <OldFile> into <NewFiles> (c119)`.
+| Seam | Owns | Today | API to publish |
+|------|------|-------|----------------|
+| `lexer` | source → tokens | `Source/Lexer/` | `lex(src) -> (Vec<Token>, Vec<Diagnostic>)` |
+| `parser` | tokens → AST | `Source/Parser/` | `parse(&[Token]) -> Result<Program, Vec<Diagnostic>>` + module parse |
+| `sema` | AST → checked AST + facts | `Source/Sema/` | `check_bundle(&mut ProgramBundle, CompileMode) -> Vec<Diagnostic>` (+ the typed-facts accessors the LSP needs) |
+| `tir` | checked AST → typed/total IR | `Source/Codegen/TIR/{mod,lower,subset}.rs` | lower entry + the `Type`/`TFunc`/`TExpr` accessors (today `pub(crate)`) |
+| `codegen` | TIR → Rust source | `Source/Codegen/` (`emit.rs`, `Items.rs`, `Context.rs`, `mod.rs`) | `emit_bundle(&bundle, mode, ffi) -> String` |
+| `comptime` | pure-Core evaluation | `Source/Comptime/` | `run_main* ` / `DevSink` (already close to an API) |
+| `driver` | composes all of the above | **new** `Source/Driver/` (extracted from `lib.rs` + `Loader`) | the `load → cffi → sema → ffi → codegen` sequence, returning `CompileOutput` |
 
----
+`lib.rs` keeps only the `check_*`/`compile_*`/`render_*` thin wrappers, each now a 1–3
+line call into `Driver`. The LSP's forked pipeline collapses onto the same `Driver`
+calls (and gains the between-sema-and-codegen IR inspection point the decision promises).
 
-## Files touched
-
-All moves are within `Source/`. No `docs/`, `tests/`, or `examples/` changes except that
-tests must stay green throughout.
-
-| Before | After |
-|--------|-------|
-| `Source/Codegen/TIR.rs` | `Source/Codegen/TIR/{mod,Nodes,Coverage,LowerExpr,LowerStmt,LowerItems,Emit}.rs` |
-| `Source/Sema/CheckerInfer.rs` | `Source/Sema/Infer/{mod,Core,Methods,Fallible,Collections,BinaryOps}.rs` |
-| `Source/Parser/Items.rs` | `Source/Parser/ItemsTypes.rs` + `Source/Parser/ItemsFns.rs` |
-| `Source/Sema/Registration.rs` | `Source/Sema/Register.rs` + `Source/Sema/CheckBodies.rs` |
+**Owner-Q3 status:** *confirmable, not blocking.* The seam list is fixed by the ratified
+text; the only open nuance is whether `tir` and `codegen` are one seam or two (they share
+`Source/Codegen/`). Recommendation baked above: **two** — `tir` is the typed-IR product
+the LSP wants to inspect, `codegen` is the dumb Rust emitter (I3); keeping them distinct
+makes the inspection point a real API boundary. If the owner prefers a single `codegen`
+seam, only the table's two rows merge; nothing else changes.
 
 ---
 
-## Decision verdict
+## 3. Module-seam vs. workspace-crate
 
-No decision needed — pure refactor, no user-facing syntax or behavior change.
+D-COMPILERLIB1=A says "internal Rust library seams … the compiler's OWN internal crates."
+Two faithful readings, both I6-safe:
+
+- **3a — module seams in one crate (recommended first step).** Each seam is a module tree
+  with a documented `pub` API and a `#![deny]` on cross-seam reach into private items;
+  `Driver` is a new module. Zero workspace churn, the API discipline is real, and it is
+  the prerequisite for 3b regardless.
+- **3b — workspace members.** Promote each seam to a workspace-member crate once the
+  module APIs are stable. This is what gives the self-host port crate-by-crate units and
+  is the same workspace conversion D-JIT2=A already mandates for `jet-jit/` (c139) — so
+  the workspace skeleton will exist anyway. Do 3b *after* 3a proves the API surface.
+
+Sequencing: 3a first (publish + document each seam API, extract `Driver`, retarget
+`lib.rs` and the LSP onto it), then 3b (lift the documented seams into member crates) as
+a mechanical follow-on. No decision separates them; 3b is the natural completion.
+
+---
+
+## 4. Execution order
+
+1. **`Driver` extraction.** Move the `load → cffi → sema → ffi → codegen` composition out
+   of `lib.rs`/`Loader` into `Source/Driver/`; make `lib.rs`'s `compile_*`/`check_*` thin
+   callers. Retarget the LSP's pipeline onto `Driver`. *Exit:* full suite green; LSP and
+   build path share one composition.
+2. **Publish per-seam APIs.** For each of lexer/parser/sema/tir/codegen/comptime, surface
+   a documented `pub` entry + the accessors the driver and LSP need (notably promoting the
+   `tir` `Type`/`TFunc`/`TExpr` surface from `pub(crate)` to a documented `pub` view —
+   the same surfacing c139's `jet-jit/` needs). *Exit:* each seam callable as a library;
+   no caller reaches a seam's private internals.
+3. **(3b) workspace members.** Lift each seam into a member crate; `jet`/`jetpack` bins +
+   `lib.rs` façade depend on them. *Exit:* `cargo tree` shows the seam graph; I6 stays
+   machine-checkable (no external deps in any compiler seam crate).
+
+Each step: pure refactor, no behavior change. `nix develop -c cargo build && cargo test`
+green after each. Commit per step.
+
+---
+
+## 5. Verification
+
+- **No behavior change.** The golden battery, `tests/decisions.rs`, and every ui snapshot
+  must pass *unchanged* throughout — that is the proof the refactor is semantics-neutral.
+- **Façade stability.** `lib.rs`'s public `check_*`/`compile_*`/`render_*` signatures are
+  unchanged (external callers — bins, tests, LSP — keep compiling untouched).
+- **I6 machine-check.** After 3b, a lockfile/`cargo tree` check over each compiler seam
+  crate shows zero external crates (the same check D-JIT2=A relies on for `jet`).
+
+---
+
+## Status
+
+**READY** (Epoch 3, pure refactor, no behavior change). D-COMPILERLIB1=A ratified; seam
+boundaries baked (§2); Owner-Q3 confirmable, not blocking. No ballot — no user-facing
+syntax. No open gate.

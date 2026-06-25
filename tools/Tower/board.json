@@ -6,7 +6,7 @@
       "type": "idea",
       "title": "Arena allocator compiler inference (far horizon)",
       "body": "Compiler infers arena placement.",
-      "stage": "planning",
+      "stage": "ready",
       "plan": "arena-allocator-inference",
       "notes": [
         {
@@ -16,10 +16,14 @@
         {
           "t": "Far-horizon (arena allocator inference) — parked per overnight summary.",
           "at": "2026-06-24 (align with overnight summary)"
+        },
+        {
+          "t": "[sweep 2026-06-25] far-horizon impl plan; verified current. No open owner decision → ready (low priority).",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-25T11:32:51.404Z",
+      "updated": "2026-06-25",
       "priority": "P2",
       "workOrder": null
     },
@@ -46,8 +50,8 @@
       "type": "task",
       "title": "Package build-from-source + M9 wave-2 (regex/archive/db)",
       "body": "E2 loose end → E3. jetpack step to compile a dependency from its Jet source (provider.rs realize()); wave-2 rings ship on top. Plan: tools/Tower/docs/plans/epoch-3/package-build-from-source.md.",
-      "stage": "backlog",
-      "plan": "package-build-from-source",
+      "stage": "ready",
+      "plan": "c50-build-from-source",
       "notes": [
         {
           "t": "Epoch 2 wrap → Epoch 3",
@@ -72,10 +76,14 @@
         {
           "t": "[sweep] D-DEP-ARCHIVE1/DB1/BFS1 ratified A: jet.archive=zip+tar+flate2, jet.db=rusqlite bundled, vendored source in-package hash-pinned. Unblocked → building.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan refreshed to ratified deps (D-DEP-ARCHIVE1/DB1/BFS1=A); realize() compile step is the core gap. No open decision → ready.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-25T16:21:03.080Z",
+      "updated": "2026-06-25",
       "priority": "P2",
       "workOrder": null,
       "decisions": []
@@ -125,100 +133,11 @@
       "workOrder": null
     },
     {
-      "id": "c71",
-      "type": "idea",
-      "title": "Typestate (order-of-events tags)",
-      "body": "Tags that change as a value moves through its lifecycle (unpaid->paid); methods consume one tag-state, return the next. Reuses the tag concept; gated on D-QUAL2.",
-      "stage": "done",
-      "notes": [
-        {
-          "t": "[sweep] EVALUATE-tier ballot D-STATE1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
-          "at": "2026-06-20"
-        },
-        {
-          "t": "D-STATE1=A ratified 2026-06-22; D-QUAL2 (tag kind) ratified so UNBLOCKED. Sequence after #SingleUse (D-LIN1) machinery.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "D-STATE1 ratified, not built. Build after c69.",
-          "at": "2026-06-24"
-        },
-        {
-          "t": "[sweep] D-STATE1 typestate shipped: #State(S) fn (require-state guard) + #Transition(From -> To) fn (transition; _ from-state = entry ctor); states are tags, current state is a compile-time fact threaded per-value (forward dataflow, branch-join), wrong-state op = E0150. Erases in codegen. example 113_typestate, 5 tests, fmt round-trips. Marker SPELLINGS (#State/#Transition/states{}) deferred to D-STATE-REQ/TRANS/DECL (defaults shipped; mechanism fully pinned).",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[sweep] D-STATE-REQ/D-STATE-TRANS ratified A (match shipped #State(S)/#Transition(From->To)). D-STATE-DECL still OPEN (enum-as-state-set reframe, rec B, pending owner confirm).",
-          "at": "2026-06-25"
-        }
-      ],
-      "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-25",
-      "decisions": [],
-      "priority": "P2",
-      "workOrder": null,
-      "plan": null
-    },
-    {
-      "id": "c72",
-      "type": "idea",
-      "title": "Scoped transactions (#transact rollback semantics)",
-      "body": "#transact {} surface is ratified (S82); decide rollback semantics: per-type opt-in Rollback trait, reverse-chain on ?-failure, commit on success. After D-EFF1.",
-      "stage": "done",
-      "notes": [
-        {
-          "t": "[sweep] EVALUATE-tier ballot D-TXN1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
-          "at": "2026-06-20"
-        },
-        {
-          "t": "[sweep] D-TXN1 ratified = A (`#transact {}` over the `Rollback` trait; reverse-order rollback on `?`-failure; non-Rollback type = compile error). D-TXN2 already ratified. Semantic contract decided; the effect-region wiring is gated on D-EFF1 (c66) implementation.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "Reconciled 2026-06-22: plan exists, but implementation is parked until c66's D-EFF2/D-EFF3 unblock D-EFF1. Do not start as ready work yet.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "[sweep] D-TXN3/4 shipped: #Transact(name){} block + name.on_commit(()=>{}) Drop-backed post-commit hooks (LIFO on commit, dropped on ?-failure). D-TXN1 rollback-REGISTRATION mechanism deferred to ballot D-TXN-ROLLBACK (ratified text named a Rollback trait but the symmetric design vs on_rollback is an owner fork). Block+hooks+rejection all shipped.",
-          "at": "2026-06-24"
-        },
-        {
-          "t": "[sweep] D-TXN-ROLLBACK ratified C-layered: auto-snapshot default + Rollback trait (expert) + explicit tx.on_rollback (expert). Unblocked → building.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[sweep] D-TXN-ROLLBACK=C(layered) shipped: layer 1 auto-snapshot (clones every root local/param the #Transact block ASSIGNS, restores LIFO on ?-failure — magic by default) + layer 3 explicit tx.on_rollback(()=>{}) (Drop-backed mirror of on_commit, runs on failure path). The one raw-pointer snapshot-restore is confined to the vetted jet_txn prelude module (stripped from golden like jet_mem), never user code. Layer 2 (Rollback trait method shape) deferred → ballot D-ROLLBACK-TRAIT (trait name reserved). Deferred corners: ~self-method-only mutation + deep-alias not auto-snapshotted; on_rollback composes with (not suppresses) layer-1 snapshots. example 110 (6 paths), effects 47/47.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[recovery 2026-06-25] D-ROLLBACK-TRAIT ratified=A (paired snapshot/restore + associated `type Snapshot`), recorded in syntax-decisions.md, open ballot card stripped. BUILD GATE FOUND for layer 2: option A's `type Snapshot` associated type is non-functional today — `assoc_type_impls` is parsed and formatted but never resolved in sema/codegen (only the Formatter reads it; a trait method returning an associated type fails E0907 'doesn't match the trait signature'). D-LIB2 (generics v1: associated types, ratified 2026-06-17) was built parse-only. So shipping layer 2 requires FIRST completing associated-type resolution: sema signature substitution (`Item`→concrete) + codegen of `type X = Y` and `Self::X` in bounds/returns. Recommend a dedicated assoc-types build card sequenced ahead of layer 2. Layers 1+3 remain shipped. D-PARSE-1 is the other unblocked stream (no prerequisite gate).",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[handoff 2026-06-25] STATUS — layers 1+3 SHIPPED (example 110, suite green). Layer 2 (Rollback trait) NOT built: blocked on c149 (complete associated-type resolution), which is itself gated on decision D-ASSOC-NOW (sequence assoc-types vs D-PARSE-1; recommend B). NEXT ACTION once D-ASSOC-NOW resolves A/C: build c149, then layer 2 = trait recognition (assoc `type Snapshot` + snapshot/restore) + #Transact dispatch to custom snapshot/restore instead of deep clone + `derive Rollback` (Snapshot=Self) + example + snapshot tests; keep all unsafe in the jet_txn prelude (I1), rustc never speaks (I2). Stage moved done→deciding to reflect the unbuilt layer.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[unblocked 2026-06-25] D-ASSOC-NOW=C decided + c149 (associated types) SHIPPED → layer 2 prerequisite cleared. Stage deciding→building; layer 2 is now ready to implement. PLAN: (1) make `Rollback` a recognized trait the user impls (`impl T: Rollback { type Snapshot = …  fn snapshot(self) -> Snapshot  fn restore(~self, ^Snapshot) }`) — assoc types now work; (2) `#Transact` codegen: for each auto-snapshot root whose type implements Rollback, call its snapshot()/restore() instead of the generic deep clone (the raw-pointer registration stays in the jet_txn prelude, I1); (3) `derive Rollback` → field-wise full-clone impl (Snapshot=Self); (4) example + snapshot tests. NOTE: restore takes `^Snapshot` (owned) to sidestep c150 (borrowed-param-to-field move bug); that's semantically correct (restore consumes the snapshot).",
-          "at": "2026-06-25"
-        }
-      ],
-      "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-25T16:37:09.228Z",
-      "decisions": [
-        "D-ROLLBACK-TRAIT",
-        "D-ASSOC-NOW"
-      ],
-      "plan": null,
-      "priority": "P2",
-      "workOrder": null
-    },
-    {
       "id": "c76",
       "type": "idea",
       "title": "Visible uninitialization (uninit / ---)",
       "body": "Jai-borrowed: expert opt-out of safe auto-fill for raw speed; read-before-write stays a compile error (the Jet-vs-Jai safety line). Lowers to Rust MaybeUninit. Gated behind use core.mem (S58).",
-      "stage": "planning",
+      "stage": "ready",
       "decisions": [
         "D-UNINIT1"
       ],
@@ -246,10 +165,14 @@
         {
           "t": "Reconciled 2026-06-22: D-UNINIT1 is already ratified; parked until D-FIXARR1 decides the `[T#N]` stack-array lowering. Do not draft a duplicate D-UNINIT1 ballot.",
           "at": "2026-06-22"
+        },
+        {
+          "t": "[sweep 2026-06-25] gate lifted — D-FIXARR1 stack-array lowering verified IMPLEMENTED (Context.rs:380). Remaining = MaybeUninit codegen + wire parser. No open decision → ready.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-25T11:33:27.742Z",
+      "updated": "2026-06-25",
       "plan": "visible-uninit",
       "priority": "P2",
       "workOrder": null
@@ -259,16 +182,20 @@
       "type": "task",
       "title": "`benchmark` target support",
       "body": "Build the benchmark target backend (reserved by D-TGT2). Until then `benchmark` is a reserved manifest keyword that errors with no-backend.",
-      "stage": "planning",
-      "plan": null,
+      "stage": "ready",
+      "plan": "benchmark-target",
       "notes": [
         {
           "t": "created 2026-06-21 per D-TGT2 owner note: benchmark/plugin reserved now, denoted for future addressing",
           "at": "2026-06-21"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan written+vetted; benchmark TARGET points the shipped #Bench/jet bench engine (c121) at a package entry — no new mechanism (I8). No open decision → ready.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-25T11:35:16.906Z",
+      "updated": "2026-06-25",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -278,17 +205,23 @@
       "type": "task",
       "title": "`plugin` target support",
       "body": "Build the plugin target backend + loader (reserved by D-TGT2). Until then `plugin` is a reserved manifest keyword that errors with no-backend.",
-      "stage": "planning",
-      "plan": null,
+      "stage": "deciding",
+      "plan": "plugin-target",
       "notes": [
         {
           "t": "created 2026-06-21 per D-TGT2 owner note: benchmark/plugin reserved now, denoted for future addressing",
           "at": "2026-06-21"
+        },
+        {
+          "t": "[sweep 2026-06-25] Plan written+vetted; zero dynamic-loading machinery today. Foundational substrate is an owner decision → ballot D-PLUGIN1 (native cdylib / WASM sandbox / RPC; rec B). Versioning + export-surface deferred until it lands.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-25T11:35:14.161Z",
-      "decisions": [],
+      "updated": "2026-06-25",
+      "decisions": [
+        "D-PLUGIN1"
+      ],
       "priority": "P2",
       "workOrder": null
     },
@@ -297,7 +230,7 @@
       "type": "task",
       "title": "M12.2 registry + jet publish UX",
       "body": "jet publish command shape + semver/version-immutability + resolver default. Rides c50/c56 infra. Saoirse, Amara.",
-      "stage": "backlog",
+      "stage": "ready",
       "plan": "publish-registry-ux",
       "notes": [
         {
@@ -307,72 +240,17 @@
         {
           "t": "[sweep] D-PUBLISH1A/VERSION1/RESOLVE1/LOCK1 all ratified A (2026-06-25): jet publish (version from pkg.jet, refuses dirty tree/failing tests), immutable versions + jet yank, highest-compatible resolver frozen in .jet/lock, .jet/lock committed for executables. Unblocked → building.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan rewritten from DEFERRED to active — D-PUBLISH1A/VERSION1/RESOLVE1/LOCK1 all ratified. Rides c50 realize() for downstream lib builds. No open decision → ready.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-25T16:20:58.213Z",
+      "updated": "2026-06-25",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
-    },
-    {
-      "id": "c111",
-      "type": "task",
-      "title": "Replace hand-rolled parsers where correctness matters",
-      "body": "Audit finding: the zero-dependency rule has pushed correctness-sensitive protocol/config/version parsing into hand-written subsets. Decide where I6 should bend, or explicitly narrow the feature contracts. Evidence: Source/LSP/JSON.rs minimal JSON; Source/Jetpack/ManifestTOML.rs TOML subset; Source/Publish/SemVer.rs partial SemVer/ranges; Source/CBind.rs focused C prototype parser; Cargo.toml enforces std-only compiler deps.",
-      "stage": "done",
-      "plan": "c111-parser-consolidation",
-      "notes": [
-        {
-          "t": "Filed from serious-language credibility audit. Needs a dependency-policy decision, not just implementation cleanup.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "Plan added 2026-06-22: parser-correctness-policy. No open owner decision blocks the plan; next step is implementation on go.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "[sweep] Audited all ad-hoc parsers (3 JSON readers, 4 JSON escapers, 2 unquote, SemVer/Lock/RefSpec, CBind, pack.jet/jetpack.toml/env.jet). NONE safely auto-replaceable — each has a distinct accepted-input/error/output contract; a forced merge would change behavior (I8). No code changed. The real question is owner-facing → ballot D-PARSE-1: subset parsers silently mis-parse (SemVer drops +build, TOML subset ignores unknown tables, JSON accepts lone surrogates) — refuse out-of-subset input loudly? Plan: c111-parser-consolidation.md.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[sweep] D-PARSE-1 ratified C: build FULL native std-only JSON/TOML/SemVer parsers (incl +build metadata) replacing lossy subsets; I6 stays hard. Unblocked → building.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[handoff 2026-06-25] STATUS — NOT started; ready to build (D-PARSE-1=C ratified, no gate). Plan: tools/Tower/docs/sidequests/c111-parser-consolidation.md. Independent of c149/c72; sequenced against them by decision D-ASSOC-NOW (recommend B = this card first). Build full std-only parsers one format at a time, each shipped complete with snapshot tests: SemVer (Source/Publish/SemVer.rs — add +build metadata + range ops) → JSON (collapse the 3 value models onto one shared jet_std::Json across LSP/Jetpack/diagnostics) → TOML (Source/Jetpack/ManifestTOML.rs — full tables/arrays, replace the 3-table subset). Behavior-changing: snapshot-pin the new accept/reject contracts.",
-          "at": "2026-06-25"
-        }
-      ],
-      "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-25T16:21:24.606Z",
-      "priority": "P2",
-      "workOrder": null,
-      "decisions": [
-        "D-ASSOC-NOW"
-      ]
-    },
-    {
-      "id": "c152",
-      "type": "task",
-      "title": "Complete core.encoding: full TOML & YAML adapters (serde parity)",
-      "body": "TOML and YAML are the last lossy adapters in core.encoding — flat Map<String,String> subsets that ignore [table] headers / nesting, while json+csv are full serde-equivalents. Make them serde-complete: rich DataTree parse / decode<T> / encode. Reuse Source/Jetpack/TOML.rs (full TOML 1.0 parser, written for D-PARSE-1) for TOML; write a full std-only YAML parser (I6). The derive engine + DataTree decode path are already full (JSON proves nested typed decode) — only these two adapters feed a flat tree. Plan: sidequests/serde-model.md (COMPLETION section) — files, build order, done criteria all there.",
-      "stage": "building",
-      "plan": "serde-model",
-      "notes": [
-        {
-          "t": "[handoff 2026-06-25] Created on owner permission. The encoding library is the serde equivalent; json+csv are full, toml+yaml are flat Map<String,String> subsets (Source/Prelude/CoreLib.rs jet_ring_toml_parse / jet_ring_yaml_parse). Cold-handoff plan: sidequests/serde-model.md COMPLETION section. NO GATES REMAIN: both decisions RATIFIED 2026-06-25 — D-ENC-DYN1=A+ (one underlying `Data` value; Json/Toml/Yaml/Csv are type aliases over it; migrate the shipped JSON enum to Data as a clean break) and D-ENC-YAML1=A (YAML core + anchors/aliases + documents; explicit tags deferred to frozen c153). The card is now 100% buildable end-to-end with no further decisions. Reuse Source/Jetpack/TOML.rs for the TOML engine; write the std-only YAML parser.",
-          "at": "2026-06-25"
-        }
-      ],
-      "created": "2026-06-25T00:00:00Z",
-      "updated": "2026-06-25",
-      "priority": "P2",
-      "workOrder": null,
-      "decisions": [
-        "D-ENC-DYN1",
-        "D-ENC-YAML1"
-      ]
     },
     {
       "id": "c153",
@@ -464,47 +342,21 @@
       "type": "task",
       "title": "Inline CoreLib execution in the REPL interpreter",
       "body": "REPL v2 (c55) shipped; this is its one deferred fork. The comptime tree-walker resolves core calls (math.sqrt) across REPL inputs but cant execute them inline (E0956) — only :run/native does. Teach Source/Comptime/ to run the curated-pure CoreLib surface inline, reusing the D-CTCORE1 whitelist so inline-executable == comptime-legal. Large (interpreter, every core module). Plan: repl-inline-core-exec.md.",
-      "stage": "planning",
+      "stage": "ready",
       "plan": "repl-inline-core-exec",
       "notes": [
         {
           "t": "REPL v2 shipped; only inline CoreLib execution in the interpreter remains. Works via :run; parked.",
           "at": "2026-06-24"
-        }
-      ],
-      "created": "2026-06-24T00:00:00Z",
-      "updated": "2026-06-25T11:35:07.328Z",
-      "priority": "P2",
-      "workOrder": null
-    },
-    {
-      "id": "c137",
-      "type": "task",
-      "title": "Zed/tree-sitter grammar is a stale dialect — fix broken highlighting",
-      "body": "The Zed extension highlights an OLD dialect, so keywords light up inside identifiers (format->for, inner->in, asset->as, reference->ref, mutable->mut, usage->use, tests->test). Two multiplicative root causes. (1) grammar.js has NO `word: $ => $.identifier` token, so tree-sitter does no keyword extraction and keyword tokens match as PREFIXES of identifiers, worst in the ERROR/partial states that dominate live editing. (2) the grammar still defines retired constructs (val/var bindings, switch_stmt) and CANNOT parse modern ratified syntax real examples use (@=/:= sigil bindings, multi-arm `if subj == { pat -> {} }`, enum/or/range/wildcard patterns, ~^&* capability sigils, fan-out f.[…]/s.{…}, ??, dotted `use core.x.y`, map literals, self/~self, #Unsafe/#Uninit/#-attributes, block comments /* */) and REQUIRES `;` terminators modern Jet omits — so nearly every file is full of ERROR nodes, compounding (1). highlights/outline/indents.scm still tag retired switch/val/var. No new user-facing syntax — the grammar just needs to track already-ratified syntax, so NO ballot. Authoritative source: editors/tree-sitter/grammar.js; ship via FORCE=1 editors/zed/install.sh (regen parser.c + wasm + re-pin extension.toml), update the four .scm/config.toml query files in lockstep (a dangling node ref is a hard Zed load failure). Plan: tools/Tower/docs/sidequests/zed-grammar-modernization.md.",
-      "stage": "done",
-      "plan": null,
-      "notes": [
-        {
-          "t": "Filed from codebase audit 2026-06-24. No existing editor/grammar card — genuine gap. User-reported pain point.",
-          "at": "2026-06-24T22:45:02.236Z"
         },
         {
-          "t": "Coordinate with c124/c127/c131 (D-CAP7/D-CAP9): the grammar must land on the FINAL ~^&* sigil vocabulary, not the transitional mut/take/view keywords (c124 Phase 6 retires those). Track ratified syntax only.",
-          "at": "2026-06-24T22:45:02.236Z"
-        },
-        {
-          "t": "An implementing agent is already active in the repo — this card is for tracking/coordination; verify the live multi-arm-if spelling against Source/Syntax.rs (D-IF1/D-IF3, c134) before encoding it.",
-          "at": "2026-06-24T22:45:02.236Z"
-        },
-        {
-          "t": "[sweep] Zed/tree-sitter grammar refreshed to modern Jet: @=/:= bindings, ~/^/&/* capability sigils + p.* deref, == dispatch, all #-markers (serde/#Transact/#grant/#SingleUse/#Tainted/#Caps/#(effects)/#(via f)/assume_deterministic), turbofish, fan-out, etc. grammar.js + regenerated src/ + jet.wasm + highlights/indents/outline. 185/187 examples parse (2 are jetos config dialect). install.sh re-pin not run (does git) — grammar files in place + synced.",
+          "t": "[sweep 2026-06-25] verified — inline pure-core executor already shipped (c98); remaining gap is plumbing the live core_imports map into the comptime path. No open decision → ready.",
           "at": "2026-06-25"
         }
       ],
-      "created": "2026-06-24T22:45:02.236Z",
+      "created": "2026-06-24T00:00:00Z",
       "updated": "2026-06-25",
-      "priority": "P1",
+      "priority": "P2",
       "workOrder": null
     },
     {
@@ -512,7 +364,7 @@
       "type": "idea",
       "title": "JIT tier-1: Cranelift backend over the JitBackend seam",
       "body": "D-JITDEP1 = approve. Implement a CraneliftBackend satisfying the JitBackend seam (shipped c77) as JIT tier-1 for fast hot-swap / live-state in jet serve. Cranelift is runtime-side ONLY (never compiler Source/) so I6 holds; scoped + owner-signed like D-REGEX1. Production stays AOT (compile-to-Rust); this is the resident dev-loop speedup. Needs a sidequest plan (integration + executable-memory/W^X + tier-0/tier-1 switch).",
-      "stage": "deciding",
+      "stage": "ready",
       "plan": "jit-cranelift",
       "notes": [
         {
@@ -521,6 +373,10 @@
         },
         {
           "t": "[sweep] Plan written + independently vetted (jit-cranelift.md): Cranelift JIT tier-1 over the JitBackend seam (c77), TIR->CLIF dumb backend (I3), resident hot-swap for jet serve/dev, AOT path unchanged. Milestones M0-M3 with byte-differential exit criteria. One open gate → ballot D-JIT2: WHERE the Cranelift dep lives (A workspace member jet-jit/ = I6 machine-checkable; B in-crate cfg-gated + I6 carve-out; C out-of-tree). Vet confirmed single-crate w/ jet+jetpack bins, TIR types pub(crate) today, seam construct-point in CmdDevTools run_resident_*.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] D-JIT2 ratified A (2026-06-25): Cranelift in workspace member jet-jit/, JIT on by default + opt-out flag. JitBackend seam shipped (c77). No open decision → ready (was stale \"deciding\").",
           "at": "2026-06-25"
         }
       ],
@@ -575,16 +431,20 @@
       "type": "feature",
       "title": "Debugger step 2: native DAP/lldb backend (full-feature stepping + editor wiring)",
       "body": "D-DBG3 step 2 (the in-session command surface shipped in c52 over the interpreter). Remaining: a native backend that steps the FULL feature set the interpreter declines (E2203: FFI, tasks, #Unsafe, native std), the D-DBG2 --raw-frames expert view, and editor DAP wiring (VS Code/Zed). The ratified command vocabulary (step/next/continue/finish/break/print/locals/backtrace) is fixed and reused; only the native backend + protocol transport remain.",
-      "stage": "planning",
+      "stage": "ready",
       "plan": "dap-debugger",
       "notes": [
         {
           "t": "[sweep] Split from c52 — ratified UX done, native backend is the larger remaining piece.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] step-1 interpreter debugger shipped; native DAP/lldb backend plan current. lldb is a runtime tool dep (not I6 compiler crate), interpreter is the no-lldb fallback — baked, not balloted. No open decision → ready.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-25T11:36:54.318Z",
+      "updated": "2026-06-25",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -635,46 +495,21 @@
       "type": "idea",
       "title": "Multi-character type-param names mangle wrong in codegen/TIR",
       "body": "Pre-existing (surfaced by c136): Generics::is_type_var_name only recognizes a SINGLE uppercase letter as a type variable, so a multi-char param like `Kind` in a field type mangles to user_Kind (treated as a concrete type) instead of the generic param. Single-letter params (T, K) work fully. Fix is_type_var_name + the TIR/codegen paths to recognize the declared type-param set rather than the single-letter heuristic.",
-      "stage": "planning",
-      "plan": null,
+      "stage": "ready",
+      "plan": "type-param-mangling",
       "notes": [
         {
           "t": "[sweep] From c136 generic-serde agent. P2 codegen correctness; niche (most code uses single-letter params).",
           "at": "2026-06-25"
-        }
-      ],
-      "created": "2026-06-25",
-      "updated": "2026-06-25T11:37:34.610Z",
-      "decisions": [],
-      "priority": "P2",
-      "workOrder": null
-    },
-    {
-      "id": "c149",
-      "type": "idea",
-      "title": "Complete associated-type resolution (D-LIB2 generics v1)",
-      "body": "D-LIB2 (generics v1: associated types + default method bodies, ratified 2026-06-17) was built PARSE-ONLY: `assoc_types` on TraitDef and `assoc_type_impls` on ImplDef are parsed and formatted but never resolved in sema or codegen — only the Formatter reads them. A trait method whose return/param uses an associated type fails E0907 ('doesn't match the trait signature') because sema compares the trait's abstract type (e.g. `Item`) against the impl's concrete type literally. SCOPE: sema must substitute the impl's `type X = Concrete` during signature matching, method resolution, and return/param typing; codegen must emit the Rust associated-type binding and `Self::X` in bounds/returns. Hard prerequisite for c72 layer 2 (the Rollback trait's `type Snapshot`). Sequenced against D-PARSE-1 by decision D-ASSOC-NOW.",
-      "stage": "done",
-      "plan": null,
-      "notes": [
-        {
-          "t": "[handoff 2026-06-25] Discovered while building c72 layer 2. Gated on decision D-ASSOC-NOW (priority: assoc-types vs D-PARSE-1). REPRO today: trait `Container { type Item  fn first(self) -> Item }` + `impl Bag: Container { type Item = Int  fn first(self) -> Int { ... } }` fails E0907. FILES: Source/Parser/Items.rs (parse — done), Source/AST.rs (TraitDef.assoc_types ~L777, ImplDef.assoc_type_impls ~L1142), Source/Sema (signature-match needs assoc-type substitution), Source/Codegen (emit assoc binding + Self::X). BLOCKS c72 layer 2.",
-          "at": "2026-06-25"
         },
         {
-          "t": "[build 2026-06-25] D-ASSOC-NOW=C — both streams greenlit; assoc-types now BUILDING. Plan: (1) sema substitution — when matching an impl method against a trait sig, resolve the trait's associated type to the impl's `type X = Concrete` before comparing (kills the spurious E0907); (2) thread the resolved type through return/param typing + method resolution; (3) codegen emit. Verify with the Container/Bag repro + a snapshot test, then unblock c72 layer 2.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[DONE 2026-06-25] Shipped (commit 7ddd382). Sema: TraitInfo records the trait's assoc-type names; validate_trait_impl builds a subst from the impl's `type X = Concrete` and substitutes the trait sig before sig_matches_trait; missing binding = E0913 (new), which suppresses the would-be E0907. Codegen: emit_trait_def declares `type X;` + renders assoc uses as `Self::X` (rust_type_name_assoc); both impl emitters write `type X = <concrete>;`. example 113 + golden, E0913 ui snapshot + diagnostics.md. Suite 1081 passed / 0 failed. Discovered an UNRELATED pre-existing codegen bug (a Read-convention non-Copy param assigned to a field isn't cloned → rustc E0507 / I2) → filed c150; NOT a blocker for layer 2 (restore can take `^Snapshot`). c72 layer 2 now unblocked.",
+          "t": "[sweep 2026-06-25] plan written+vetted; root cause Generics.rs:117 is_type_var_name single-letter heuristic; declared param set is in hand at all sites. Clean no-decision fix → ready.",
           "at": "2026-06-25"
         }
       ],
       "created": "2026-06-25",
       "updated": "2026-06-25",
-      "decisions": [
-        "D-ASSOC-NOW"
-      ],
+      "decisions": [],
       "priority": "P2",
       "workOrder": null
     },
@@ -683,11 +518,15 @@
       "type": "idea",
       "title": "Borrowed non-Copy param assigned to a field isn't cloned (I2/E0507)",
       "body": "Pre-existing codegen bug (surfaced while building c149). A method that assigns a Read-convention (borrowed) non-Copy param straight into a field emits a move out of a shared reference, which rustc rejects (E0507) — an I2 violation. REPRO: `struct Ledger { rows: [Int] }  impl Ledger { fn put_back(~self, s: [Int]) { self.rows = s } }` → generated `(*self).user_rows = (*user_s);` fails E0507 'cannot move out of `*user_s` behind a shared reference'. The codegen should clone on assignment-from-borrow (`= user_s.clone()`) for non-Copy types, mirroring how other borrowed-value stores are handled. WORKAROUND: take the param by `^` (owned/move) — then the store is a real move and compiles. Not a hard blocker for c72 layer 2 (Rollback `restore` can take `^Snapshot`), but the Read-convention path is a real correctness hole worth closing.",
-      "stage": "planning",
-      "plan": null,
+      "stage": "ready",
+      "plan": "borrow-field-clone",
       "notes": [
         {
           "t": "[file 2026-06-25] Found during c149 verification; isolated to a plain inherent method (no trait, no associated types), so it is independent of c149. Verified `^` (owned) param avoids it. FILES: the field-assignment lowering in Source/Codegen/TIR (the store of a param place into a field place) — clone non-Copy RHS when it is a borrowed param.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan written+vetted; root cause lower.rs:862-870 field-store arm; mirror lower_enum_arg clone predicate. Clean no-decision fix (I2/E0507) → ready.",
           "at": "2026-06-25"
         }
       ],
@@ -696,6 +535,252 @@
       "decisions": [],
       "priority": "P2",
       "workOrder": null
+    },
+    {
+      "id": "c154",
+      "type": "idea",
+      "title": "Full Jai metaprogramming (message loop / user macros) — post-self-host",
+      "body": "Deferred top rung of the D-METADEPTH1 ladder (owner answered A = reflection/derives only for v1; full Jai parked here per owner: 'Ensure full jai is tracked as a frozen card for later consideration'). Option C: user/build code receives every decl after typecheck and may inspect, rewrite, and inject AST + define macros. Requires reversing the no-macros non-goal and bending I3/I8, so it is explicitly post-self-host and off the v1 table. Devil's-advocate analysis (full-jai vs A across beginner/student/power-user/enterprise) lives on the D-METADEPTH1 ballot card Owner Q5 and in syntax-decisions.md.",
+      "stage": "frozen",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] Created per owner comment on D-METADEPTH1=A ('Ensure full jai is tracked as a frozen card for later consideration'). The A-rung (reflection/derives) is c155; B-rung (rejection-lint) is a future vote. Frozen — post-self-host.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P3",
+      "workOrder": null,
+      "decisions": []
+    },
+    {
+      "id": "c155",
+      "type": "task",
+      "title": "User-authored derives + reflection (S56) — the D-METADEPTH1=A v1 ceiling",
+      "body": "D-METADEPTH1=A (ratified 2026-06-25) sets the v1 user-metaprogramming ceiling at reflection/derives only. Build the S56 surface: user code READS type info via reflection and authors derives (derive Encode for T) on top of the compiler-provided built-ins (S55, e.g. #[Codable]); no rewrite/inject/macros. Pairs with D-CTCODEGEN1=A (generated code re-enters lexer->parser->sema) so a user derive's output is sema-checked with diagnostics pinned at the user trigger site. B (read-only rejection lint) and C (full Jai, c154) stay off v1.",
+      "stage": "deciding",
+      "plan": "user-derives-reflection",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-METADEPTH1=A. Built-in derives already ship (#[Codable] etc.); this card is the USER-authored derive + reflection surface (S56). Needs a build plan.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] Plan written+vetted (folds the E3 milestone doc). Two new user-facing surfaces need owner picks → ballots D-METAREFLECT1 (reflection API; rec B handle) + D-METADERIVE1 (derive authoring + output mechanism; rec A source-fragment). $name splice impl rides c162.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-METADEPTH1",
+        "D-METAREFLECT1",
+        "D-METADERIVE1"
+      ]
+    },
+    {
+      "id": "c156",
+      "type": "task",
+      "title": "Monorepo: workspace.jet index (D-WORKSPACE1=B) + package addressing (D-MONOREF1=A)",
+      "body": "Two ratified monorepo decisions, built together. D-WORKSPACE1=B (owner chose full power over rec A): retire the root jetpack.toml monorepo index for a fully-computable 'module workspace' in workspace.jet (parallel to env.jet/system.jet) whose members: field may run arbitrary comptime — one grammar (Jet), ends the sources: double-home; external tools must evaluate Jet (mitigate with a generated lock for the common case). D-MONOREF1=A: address one package as source.package (dot form, e.g. mono.ranker) with path-style infra/logging for in-repo siblings (bare name as sugar when unambiguous), resolved index-first then sparse fetch of the named subtree + transitive in-repo deps. Confirm keyword 'module workspace' + filename workspace.jet (D-WORKSPACE1 Owner Q4) before code.",
+      "stage": "deciding",
+      "plan": "monorepo-workspace",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-WORKSPACE1=B + D-MONOREF1=A. Consolidated — both touch the jetpack monorepo index. Aligns with the owner's computed-modules/pure-eval direction. Needs a build plan + the workspace keyword/filename confirmation.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] Plan written+vetted. Owner asked to confirm keyword+filename before code → ballot D-WORKSPACE2 (aviation-themed menu; rec B `module fleet`/`fleet.jet`). Arbitrary-comptime members impl-gated on c162+c157.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-WORKSPACE1",
+        "D-MONOREF1",
+        "D-WORKSPACE2"
+      ]
+    },
+    {
+      "id": "c157",
+      "type": "task",
+      "title": "Compile-time effect boundary (D-CTEFFECT1=A): tiers + #Impure gate",
+      "body": "D-CTEFFECT1=A (ratified 2026-06-25). Three tiers for build-time/comptime code: Tier 0 pure (always on), Tier 1 hashed-reproducible effects (@embed, find, fetch(url, sha256:)) recorded in .jet/lock, Tier 2 ambient/non-deterministic effects gated behind #Impure(reason) AND --allow-impure so CI is hermetic by default. Reuses the #Unsafe audited-gate + #(fs,net,exec) effect-tag machinery. Owner: a project build file may alias/relax the impure gate (a config knob to drop the --allow-impure requirement per-project). Gate name #Impure (alternatives offered). Gates D-BUILDPROFILE1's hermeticity (c159).",
+      "stage": "ready",
+      "plan": "qualifier-system-implementation",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-CTEFFECT1=A. Plan tentatively linked to qualifier-system-implementation (the effect-tag system); confirm scope. The $-as-comptime-marker idea split to open ballot D-CTMARKER1.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan rewritten for D-CTEFFECT1=A three tiers + #Impure gate (old plan predated it). Effects engine D-EFF1/2/3 already built; gaps = fetch()/embed-hash/.jet/lock effect-inputs/--allow-impure. No open decision → ready.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-CTEFFECT1"
+      ]
+    },
+    {
+      "id": "c158",
+      "type": "task",
+      "title": "Dot-inferred construction .{ } / T.{ } (D-DOTCTOR1=A)",
+      "body": "D-DOTCTOR1=A (ratified 2026-06-25): replace U18 with one leading-dot rule for every inferred construction, structs and enums alike — .{ name: ..., grade: .A } when the type is known from context, T.{ ... } when it must be named, matching the shipped enum-variant dot. Parser + sema + codegen + formatter + examples + re-bless snapshots. Owner-Q defaults (confirmable): .{} is the empty/unit construct; .{ } works in return position when -> T supplies the type; positional T.(a,b) deferred (named-fields only for v1).",
+      "stage": "deciding",
+      "plan": "dot-construction",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-DOTCTOR1=A. Clean break from U18 — formatter round-trip + example/snapshot re-bless required (see formatter-roundtrip-required-for-new-syntax). Needs a build plan.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] Plan written+vetted. D-DOTCTOR1=A settled the dot rule; the consequence for S29's dotless `T { }` is open → ballot D-DOTCTOR2 (retire S29 / coexist / inference-only; rec A retire). Formatter round-trip + fmt-stability test required.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-DOTCTOR1",
+        "D-DOTCTOR2"
+      ]
+    },
+    {
+      "id": "c159",
+      "type": "task",
+      "title": "Build profiles: named + flag-selected (D-BUILDPROFILE1=A)",
+      "body": "D-BUILDPROFILE1=A (ratified 2026-06-25): a package's build { } surface defines named profiles (release/debug/ci as Build.{ optimize: ..., targets: [...] }); the active profile is chosen by an explicit flag (--release sugar for --profile=release, general --profile=<name>), never by ambient environment — same commit + flag yields byte-identical binaries. Blessed names release/debug carry built-in defaults; others user-defined. Aligns with D-CTEFFECT1 (no ungated ambient read on the default build) — so gated on c157's effect model.",
+      "stage": "ready",
+      "plan": "build-profiles",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-BUILDPROFILE1=A. Part of the build-driver work; the build { } surface uses the dot-construct (c158) and the Build.{ } shape. Needs a build plan.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan written+vetted (D-BUILDPROFILE1=A). Impl-gated on c157 (no-ambient-read) + c158 (Build.{} literal); build{} placement baked to pack.jet. No open owner decision → ready.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-BUILDPROFILE1"
+      ]
+    },
+    {
+      "id": "c160",
+      "type": "task",
+      "title": "Compiler internal seams refactor (D-COMPILERLIB1=A) — Epoch 3",
+      "body": "D-COMPILERLIB1=A (ratified 2026-06-25): factor Source/ into internal Rust library seams (lexer / parser / sema / tir / codegen / comptime + a driver that composes them), each owning its types behind a small documented API, with today's coarse lib.rs (check_*/compile_*/render_*) kept as a thin facade. Lets the build driver + LSP drive each stage as a library call (and inspect the typed IR between sema and codegen) instead of re-deriving the pipeline, and gives the self-host port crisp crate-by-crate boundaries. I6-safe (compiler's OWN internal crates, no external deps, no carve-out). Scheduled for Epoch 3.",
+      "stage": "ready",
+      "plan": "split-compiler-modules",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-COMPILERLIB1=A. Plan exists (split-compiler-modules). Owner flagged the prior ballot recommendation framing — the ratified text states the choice on merits (LSP/build-driver unification + self-host boundaries + I6-safety), not refactor effort. Epoch 3.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan rewritten for D-COMPILERLIB1=A internal seams (old \"c119 file-size split\" was stale; several splits already done). Epoch 3, pure refactor, seam list ratified. No open decision → ready.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P3",
+      "workOrder": null,
+      "decisions": [
+        "D-COMPILERLIB1"
+      ]
+    },
+    {
+      "id": "c161",
+      "type": "task",
+      "title": "Encode D-CTCODEGEN1=A as a standing architecture rule",
+      "body": "D-CTCODEGEN1=A (ratified 2026-06-25) is a standing rule, not a feature: every build-time code generation step (derives, comptime) emits a typed SOURCE fragment that re-enters lexer->parser->sema like hand-written code — no generation path may inject pre-parsed AST past the sema gatekeeper. Keeps I3 (codegen dumb), R2 (sema gatekeeper), I2 (rustc never speaks); errors in generated code surface as real sema diagnostics pinned to the user trigger site. The existing #[Codable] derive already follows this. Task: encode the rule explicitly in docs/spec/architecture.md so future derives/build steps can't quietly reintroduce AST-injection.",
+      "stage": "ready",
+      "plan": "ctcodegen-architecture-rule",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-CTCODEGEN1=A. Small doc task (architecture.md rule) + a guard for future derives; the current derive already conforms.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan written; proposed R11 in guarantee-form (matches #[Codable] reality + owner intent; superset of strict re-parse). The derive output-mechanism fork lives in c155/D-METADERIVE1. No open decision → ready.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P3",
+      "workOrder": null,
+      "decisions": [
+        "D-CTCODEGEN1"
+      ]
+    },
+    {
+      "id": "c162",
+      "type": "task",
+      "title": "Comptime: `$` splice marker + `comptime { }` execution block (D-CTMARKER1=C)",
+      "body": "D-CTMARKER1=C (ratified 2026-06-25). Two pieces: (1) `$name` marks a compile-time value being woven into runtime/generated code — the metaprogramming SPLICE site only (NOT a `$if`/`$loop` C3-style duplicate of the `comptime` keyword, so I8 holds); pairs with the S56 reflection/derive surface (c155). (2) Owner: 'Ensure we add a comptime execution block' — add a keyword-spelled `comptime { … }` statement block (Jet's gated equivalent of Jai's free-standing #run { … }, consistent with comptime if), filling the gap where Jet today has comptime bindings + comptime if but no comptime block. Both run inside the D-CTCORE1 pure-Core whitelist + D-CTEFFECT1 reproducible/#Impure tiers. `$` is currently unused in the lexer — verify before code. Parser + sema + (erasure) codegen + formatter + example + diagnostics.",
+      "stage": "ready",
+      "plan": "comptime-marker-block",
+      "notes": [
+        {
+          "t": "[ratified 2026-06-25] D-CTMARKER1=C + owner 'add a comptime execution block' (confirms Owner Q4). Downstream of c155 (the S56 reflection/derive surface `$` marks). Needs a build plan.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep 2026-06-25] plan written+vetted (D-CTMARKER1=C). $ confirmed FREE in lexer. comptime{} block stands alone; $name splice impl-gated on c155. No open owner decision → ready.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-CTMARKER1"
+      ]
+    },
+    {
+      "id": "c163",
+      "type": "feature",
+      "title": "Typestate `state { }` declaration + `#Transition` marker (D-STATE-DECL=B + D-STATE-TRANS=A)",
+      "body": "Both ratified 2026-06-25, unimplemented. D-STATE-DECL=B: states declared in a dedicated `state TypeName { Pending, Confirmed, CheckedIn }` block (bare keyword in the tag/struct/enum family; bounded + typo-checked; erases, zero runtime; dead-end state = warning). D-STATE-TRANS=A: `#Transition(From -> To) fn` advances state via the `->` glyph, `_` from-state marks an entry constructor. Builds on the SHIPPED typestate core (D-STATE1=A loose-tags, example 113, E0150). `#Transition(A -> B)` already parses; the `state {}` block (new Item::StateDecl + KwState token) is the real work. Plan: sidequests/typestate-state-block.md.",
+      "stage": "ready",
+      "plan": "typestate-state-block",
+      "notes": [
+        {
+          "t": "[sweep 2026-06-25] Created — D-STATE-DECL=B + D-STATE-TRANS=A ratified with no tracking card. Plan written+vetted: `state` confirmed FREE keyword; core typestate ships; migrate example 113 + wrong-state fixture to the block. No open owner decision → ready.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-STATE-DECL",
+        "D-STATE-TRANS"
+      ]
     }
   ],
   "questions": [
@@ -887,64 +972,64 @@
       "id": "cmqs8xldn5mu",
       "decisionId": "D-SERDE2",
       "text": "I want this to be easily translatable -> one core lib to support csv, json, toml, yaml, etc. Is that what serde is? I don't want the \"SerdeError\" - because that engrains a rust package name into our new language. Show me how this is handled in rust & how other languages that are lauded for their handling of this are done",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified A (2026-06-24, batch 4): Swift-plain hand-impl — encode/decode, DataTree, EncodeError/DecodeError (no 'SerdeError'). In syntax-decisions.md.",
       "created": "2026-06-24T15:46:48.059Z"
     },
     {
       "id": "cmqs8zavw1iz",
       "decisionId": "D-SERDE3",
       "text": "Please analyze community sentiment on different cases. I STRONGLY prefer PascalCase for everything in general, but want to know what most people think",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified C (2026-06-24): typed RenameAll menu (camel/snake/pascal/kebab/screaming). Wire-axis only; Jet identifiers stay #PascalCase (D-CASING1).",
       "created": "2026-06-24T15:48:07.772Z"
     },
     {
       "id": "cmqs91z03bz",
       "decisionId": "D-NOSTD1",
       "text": "I'm not entirely clear on what you are saying. I want to support embedded ssystems. I may have intended to defer this until later or not understood the context... If someone wants to opt out, then I'm fine with that, but we need to match syntax for jet not presume outdated syntax",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified A (2026-06-24): platform-implied std opt-out (target: bare.* ⇒ no std); no borrowed no_std boolean.",
       "created": "2026-06-24T15:50:12.339Z"
     },
     {
       "id": "cmqs97t5s3jg",
       "decisionId": "D-JSONVERB1",
       "text": "Please update the options to use other options with string in the name. I want it to be clear on its face that it is a to string conversion, but I want to keep the pretty printing as an option. Give multiple examples - maybe even based on other langs that have popular, lauded versions, just translate to jet syntax",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified A (2026-06-24, batch 3): json.to_string(v) + json.to_string_pretty(v) (2-space); retires json.render; matches the to_ conversion idiom (S42).",
       "created": "2026-06-24T15:54:44.704Z"
     },
     {
       "id": "cmqs9e9e4kl",
       "decisionId": "D-SIMD2",
       "text": "What language handles this the best per community sentiment? Show me what that looks like. I want the best version for everything in jet -> if there's already a \"perfect\" system, lets not reinvent the wheel, just ensure the syntax lets us put it on our axel",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified A (2026-06-24, batch 4): method-reduce SIMD surface (Zig @Vector / Swift SIMD4 model); operator overloading on built-in lane types only.",
       "created": "2026-06-24T15:59:45.676Z"
     },
     {
       "id": "cmqsaglqo3dl",
       "decisionId": "D-JSONVERB1",
       "text": "Why not just \"JSON.string(...)\" or JSON.string_pretty(...)\"? Is the \"to_",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified A (2026-06-24, batch 3): json.to_string(v) + json.to_string_pretty(v) (2-space); retires json.render; matches the to_ conversion idiom (S42).",
       "created": "2026-06-24T16:29:34.608Z"
     },
     {
       "id": "cmqtbzlic586",
       "decisionId": "D-STATE-DECL",
       "text": "What is the fundamental difference between being able to just use an enum for this??? Could we enhance enums rather than messing around with a similar but entirely new additional tag system?",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified B (2026-06-25): `state TypeName { … }` declaration block. Tracked for implementation as board card c163 (with D-STATE-TRANS=A).",
       "created": "2026-06-25T10:00:06.564Z"
     },
     {
       "id": "cmqtcdd7b3bx",
       "decisionId": "D-JIT2",
       "text": "This question formatting is broken, cant actually chose & it looks very confusing",
-      "status": "open",
-      "answer": "",
+      "status": "answered",
+      "answer": "Ratified A (2026-06-25): Cranelift dep in workspace member jet-jit/ (Source/ stays std-only, I6 machine-checkable); JIT on by default + opt-out flag (name chosen at build). Card c139 now ready.",
       "created": "2026-06-25T10:10:48.983Z"
     },
     {
@@ -954,6 +1039,22 @@
       "status": "answered",
       "answer": "Yes — and it's the recommended path. The D-ENC-DYN1 card now has Option A+ (one shared `Data` value for ALL four formats: json, toml, yaml, csv) as the recommendation. The internal `DataTree` is already the one universal model every format encodes/decodes through (that IS the serde architecture), so A+ just exposes it as the single dynamic value every `parse` returns. One vocabulary, one walker, no lossy surface. The only real cost: `json.parse` today returns the shipped `JSON` enum — A+ replaces it with `Data` as a clean break (no alias), migrating ~4 examples + the enum rename; cheapest done now, pre-1.0 (same spirit as core.json→core.encoding). Pick A+ on the ballot to lock it; there's a follow-up naming Owner Q (`Data` vs `Value`/`Doc`/`Node`, rec `Data`).",
       "created": "2026-06-25T16:42:32.523Z"
+    },
+    {
+      "id": "cmqtucbwi789",
+      "decisionId": "D-METADEPTH1",
+      "text": "What is really the issue with full jai? Build systems allow arbitrary code execution, but this just keeps it within the language. Play devil's advocate & tell me what we would lose out on by going with option a vs full jai. Consider every level of use case (beginner/college student/enterprise/etc.)",
+      "status": "answered",
+      "answer": "Full writeup is on the D-METADEPTH1 ballot card as Owner Q5. Steel-manning C: one language/debugger/syntax (no second toolchain) and a genuinely higher ceiling — rewrite decls, schema-driven codegen, DSLs — that A (read + derive) gives up. BUT 'inside the language' only removes a TOOLCHAIN seam, not Jai's two real costs: (1) local reasoning dies — if any macro can rewrite any decl you can't read code and know what it does; grep/go-to-def/'what did it expand to' all degrade (the proc-macro tax), bending I3/I8 and D-CTCODEGEN1=A (generated code re-enters sema, never injected). (2) It's still arbitrary build-time code execution + non-reproducibility — identical whether in-language or in build.rs; keeping it in-language removes the very seam you'd sandbox/audit it through, so it makes supply-chain RISK worse, not better. By use case: BEGINNER loses ~nothing (and C only adds footguns — a struct no longer trustworthy at face value); LEARNER trades metaprogramming exercises for the guarantee that reading code = understanding it (A wins for learning the language, C only for learning metaprogramming); POWER USER loses custom rules/DSLs/schema-codegen — the genuine cost, mitigated by S56 derives + blessed first-class rules (#(net) effects enforce 'no panic in net', typestate enforces state rules) + the B rung (rejection-lint); ENTERPRISE flips entirely — frictionless idiomatic compile-time exec is exactly the xz/SolarWinds/npm-postinstall attack surface, so a Jai-style Jet gets banned or heavily sandboxed and reproducibility (D-CTEFFECT1) dies. Decisive point: A⊂B⊂C is a LADDER. A is the floor, not the ceiling — we can vote UP later (B for rejection rules, C only post-self-host) with no redesign, because nothing in A forecloses them; the reverse is impossible (you can't un-ship macros — the ecosystem locks you in, see Rust). So A is the only rung that is safe-by-default for beginners, auditable-by-default for enterprise, AND forward-compatible. Recommendation stays A; the live decision is how far up the ladder v1 goes (Owner Q1/Q2: ship B's rejection-lint now or defer).",
+      "created": "2026-06-25T18:33:53.730Z"
+    },
+    {
+      "id": "cmqtvgmtp4rv",
+      "decisionId": "D-CTMARKER1",
+      "text": "How does jai handle this? Show me a detailed comparison between jet & c3 so I can see what this looks like in practice. What about jai's \"#run\" directive? How do we do that in jet? How can we scope to a code block?",
+      "status": "answered",
+      "answer": "Full writeup on the D-CTMARKER1 ballot card as Owner Q3 (with a Jet↔C3 table and the Jai #run breakdown). Jai's #run does two jobs: (a) bake a compile-time value into the binary (X :: #run f();), and (b) a free-standing #run { … } block of arbitrary build-time statements that can even generate source via add_build_string — and it is UNGATED (any I/O, no reproducibility wall). Jet already has (a): a `comptime` binding IS #run-for-a-value (`comptime ICONS = pack(@embed(\"icons/\"))`), but GATED — comptime runs only the curated pure-Core whitelist (D-CTCORE1), and world-touching effects are hashed-reproducible (Tier 1 @embed/find/fetch(…,sha256:)) or behind #Impure (Tier 2) per D-CTEFFECT1. Jai's source-generating add_build_string is exactly what D-CTCODEGEN1=A (generated code re-enters lexer→parser→sema, never injected) and D-METADEPTH1=A (reflection/derives only, no user macros) deliberately fence off — so Jet gives you #run's POWER (compute at build time, derive code) without #run's FOOTGUNS (ungated RCE + post-sema injection). C3 vs Jet in practice = the same program with C3's `$` sigil vs Jet's `comptime` keyword: $crc/comptime crc, $if/comptime if, $foreach/comptime loop — identical for everything EXCEPT a build-time statement BLOCK, which Jet does NOT have today (only comptime bindings + comptime if; 'no comptime blocks'). That is the genuine gap and the real thing to add. Sharpened recommendation: add a keyword-spelled `comptime { … }` block (Jet's gated equivalent of Jai's free-standing #run {}, consistent with comptime if) and reserve `$` for the metaprogramming SPLICE site only (rec C: $name = a comptime value woven into runtime/generated code) — Jai's full reach behind Jet's reproducible-by-default wall, no $if/comptime-if I8 fork. Added Owner Q4 to the card to pick the block form. Decision stays open.",
+      "created": "2026-06-25T19:05:14.125Z"
     }
   ],
   "ingest": []

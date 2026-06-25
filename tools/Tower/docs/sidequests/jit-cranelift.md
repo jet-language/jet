@@ -1,15 +1,22 @@
 # c139 — JIT tier-1: Cranelift backend over the JitBackend seam
 
-**Status:** plan (needs a second-agent vet before it reaches the owner).
+**Status:** READY to build — plan written + independently vetted; both gates now closed.
 **Decision:** D-JITDEP1 ratified 2026-06-24 — Cranelift approved as a runtime-side dep
 (never in compiler `Source/`; I6 holds; scoped + owner-signed like D-REGEX1). Production
 stays AOT (compile-to-Rust); the JIT is the resident dev-loop tier only.
+**Decision (was the open gate):** **D-JIT2 = A, owner-modified — RATIFIED 2026-06-25**
+(`docs/spec/syntax-decisions.md:2935`). The Cranelift dep lives in a **new workspace-member
+crate `jet-jit/`**; the `jet` compiler crate (`Source/`) stays std-only so I6 is
+**machine-checkable** (a lockfile grep of crate `jet` shows zero external crates). Owner
+mod: the JIT ships **on by default** in the `jet` binary (not behind `--features jit`),
+with an opt-**out** flag to build/run without it — exact flag name (`--interpret` /
+`--aot-only` / `--no-jit`, "named better than `--no-jit`") chosen **during this build**,
+not a separate ballot. Options B (cfg-gated single-crate carve-out) and C (out-of-tree
+component) were **rejected**.
 **Frozen successors:** c140 (own bytecode VM, zero-dep) → c141 (own native JIT). This
 plan must not paint either into a corner.
-**Open gate this plan surfaces:** **D-JIT2** — where the Cranelift dep physically lives
-(workspace member vs. cfg-gated in-crate vs. out-of-tree component). See
-`tools/Tower/docs/ballots/decision-ballots.md`. **Stop on the seam-location work until
-D-JIT2 is ratified;** everything else below is decidable now.
+**No open gate remains.** D-JIT2 was the sole blocker and is decided; everything below is
+buildable now. §1/§2 below preserve the option analysis for context but A is final.
 
 ---
 
@@ -35,9 +42,10 @@ not *where the crate physically sits*. Two facts make that a real, unanswered qu
    satisfying `JitBackend`; it is not a shipped Core package, so it has no Core
    sub-library to live in.
 
-The options (full consequences in the **D-JIT2** ballot card):
+The options below were laid out for the **D-JIT2** ballot; the owner **picked A**
+(modified: JIT on by default, opt-out flag). They are retained for build context.
 
-- **A — new workspace member `jet-jit/`.** Convert to a Cargo workspace; `Source/`
+- **A — new workspace member `jet-jit/`. ✅ RATIFIED (D-JIT2=A).** Convert to a Cargo workspace; `Source/`
   stays the dep-free `jet` crate (both `jet` and `jetpack` bins + the lib stay inside
   it, undisturbed); a sibling crate owns the Cranelift dep and `impl JitBackend for
   CraneliftBackend`. The `jet` binary depends on it only behind `--features jit`. I6
@@ -56,11 +64,13 @@ The options (full consequences in the **D-JIT2** ballot card):
   undercuts the "fast `jet serve`, just works" value because the headline feature is no
   longer default.
 
-**Recommendation: lay out, do not pick** (owner-facing per the syntax/dep protocol).
-Engineering lean is A — it is the only option that keeps I6 enforced and is the cleanest
-host for the frozen c140/c141 successors (each becomes another member behind the same
-trait). The rest of this plan is written so it holds under whichever the owner picks; the
-only thing that changes is the crate boundary and how TIR is surfaced.
+**Outcome: the owner picked A** (the engineering lean — the only option that keeps I6
+machine-enforced and is the cleanest host for the frozen c140/c141 successors, each a
+sibling member behind the same trait). Owner modification: the JIT is **on by default**
+in `jet` (no `--features jit`), with an opt-out flag instead. So the build does the
+one-time workspace conversion, puts `impl JitBackend for CraneliftBackend` in `jet-jit/`,
+and surfaces the `pub(crate)` TIR types as a documented `pub` view for that sibling crate
+(the same surfacing c160/D-COMPILERLIB1 needs for the `tir` seam — coordinate the two).
 
 ---
 
@@ -91,13 +101,14 @@ only approximate) and near-native dev-loop speed without a `rustc` compile.
   today (`CmdDevTools.rs:194,212`) — there is no long-lived `&mut dyn JitBackend` held
   across the watch loop yet, so tier-1 also makes that *construction* the selection seam.
   Tier-1 makes that construction **tier-selecting**:
-  if the JIT is available (feature/component present per D-JIT2) and the program is in
-  the JIT-covered subset, build a `CraneliftBackend`; else fall back to
-  `InterpreterBackend` (tier-0 stays permanent — D-JIT1).
-- Expose an explicit override so the choice is testable and debuggable:
-  `jet serve --engine=jit|interp` (and the same on `jet dev`). Default = auto-select.
-  This flag is a CLI affordance, not new language syntax (no ballot needed), but confirm
-  with the owner before shipping the user-visible name.
+  the JIT is **on by default** (D-JIT2=A owner-mod — `jet-jit/` is always linked into the
+  `jet` binary). If the program is in the JIT-covered subset, build a `CraneliftBackend`;
+  else fall back to `InterpreterBackend` (tier-0 stays permanent — D-JIT1).
+- Per D-JIT2=A, expose the **opt-out flag** that builds/runs without the JIT (forcing
+  tier-0): one of `--interpret` / `--aot-only` / `--no-jit`, "named better than
+  `--no-jit`" — **pick the spelling during this build** (D-JIT2 explicitly defers the
+  exact name to the build, no separate ballot). This doubles as the testable/debuggable
+  engine override; default is JIT-on with auto-fallback.
 - `jet run`/`jet build` are untouched — they stay AOT (I2/I3; the JIT never enters the
   release path).
 
@@ -152,11 +163,13 @@ already carries.
 
 ## 4. Staged milestones (each with an exit criterion)
 
-- **M0 — seam wiring (blocked on D-JIT2).** Establish the crate boundary the owner
-  picks; surface a stable TIR view to the backend; stub `CraneliftBackend` that
-  delegates everything to the interpreter. *Exit:* `jet serve --engine=jit` builds and
-  runs every example with output identical to `--engine=interp` (because it still
-  delegates). Proves the wiring without a single CLIF instruction.
+- **M0 — seam wiring (unblocked; D-JIT2=A decided).** Do the one-time Cargo workspace
+  conversion; create the `jet-jit/` member crate owning the Cranelift dep; surface a
+  stable `pub` TIR view to it (today `pub(crate)`); stub `CraneliftBackend` that delegates
+  everything to the interpreter. *Exit:* the default `jet serve` (JIT on) builds and runs
+  every example with output identical to the opt-out/`--interpret` run (because it still
+  delegates) AND a lockfile/`cargo tree` check shows crate `jet` has zero external crates
+  (I6 machine-check). Proves the wiring without a single CLIF instruction.
 - **M1 — first JIT execution (the vertical slice).** Implement `jit_covers` v1 +
   `lower_tir_clif` for that subset; JIT-execute `01_hello.jet`, arithmetic, and
   multi-function programs natively; others fall back to tier-0. *Exit:* the slice's
@@ -239,12 +252,14 @@ does the same at comptime. Both skip cleanly when `rustc` is absent.
 
 ---
 
-## Open decisions this plan surfaces
+## Decisions — both closed
 
-- **D-JIT2 (new, queued):** where the Cranelift dep physically lives — workspace member
-  / cfg-gated in-crate / out-of-tree component. **Blocks M0.** Owner-facing.
-- **`jet serve --engine=` flag name** (minor, CLI-only, not language syntax): confirm
-  the user-visible spelling with the owner before shipping; no ballot required.
+- **D-JIT2 — RATIFIED 2026-06-25 = A (owner-modified).** Cranelift lives in a new
+  workspace-member crate `jet-jit/`; `Source/` stays std-only (I6 machine-checkable);
+  JIT on by default with an opt-out flag whose exact spelling is chosen during this
+  build. (`docs/spec/syntax-decisions.md:2935`.) **No longer blocks M0.**
+- **D-JITDEP1 — RATIFIED 2026-06-24.** Cranelift approved runtime-side; I6 holds.
 
-Everything else (lowering via TIR, `jit_covers` discipline, the three-way differential
-battery, milestone exits) is decidable now and needs no further ratification.
+No open gate remains. Everything (crate layout via D-JIT2=A, lowering via TIR,
+`jit_covers` discipline, the three-way differential battery, milestone exits, the opt-out
+flag name) is decidable/buildable now and needs no further ratification.
