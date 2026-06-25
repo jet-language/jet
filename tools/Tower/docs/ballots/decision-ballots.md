@@ -1177,50 +1177,64 @@ fn main() {
 
 **Recommendation:** A — `->` is already the "produces" arrow the dev knows from every fn signature; reusing it for "produces a value in the next state" reads naturally and keeps one transition marker rather than C's two.
 
-### D-STATE-DECL — do states need an explicit grouping declaration? (rec A)
+### D-STATE-DECL — what is the state vocabulary: loose tags, or an enum? (rec B — REFRAMED per owner Q 2026-06-25)
 
-**Gist:** Decide whether a typestate type lists its states in a dedicated `states { … }` block, or whether the states are just the ordinary `tag`s the transition markers happen to name.
+**Owner answer (your question: "why not just use an enum? could we enhance enums instead of a new tag system?").** Two things first, because they reframe this card:
 
-**Story.** Earl models a reservation's lifecycle and wonders whether he must declare the set `{ Pending, Confirmed, CheckedIn }` somewhere, or whether writing `#Transition(Pending -> Confirmed)` is enough for the compiler to know the states. He'd like a typo — `#Transition(Pending -> Confrimed)` — caught, but he doesn't want to maintain a separate state list that can drift from the transitions. The mechanism ships with no grouping (states are plain `tag`s); this confirms that or adds the block.
+1. **Typestate is not a new tag system.** The shipped feature (c71) does *not* introduce a parallel concept — a "state" is just an ordinary `tag` (the ratified D-QUAL2 `tag` keyword). `#State`/`#Transition` are markers that *point at* existing tags. So there's nothing new to learn beyond the two markers; the vocabulary is tags you already have.
+
+2. **An enum and typestate answer different questions — but you're right that the enum should be the vocabulary.** The fundamental difference:
+   - A plain **enum is a runtime value**. `enum Status { Pending, Confirmed, CheckedIn }` lives in memory as a discriminant; you read it and branch with `if`/match *at runtime*. It answers "what state is this **right now**?"
+   - **Typestate is a compile-time fact that erases to nothing.** It answers "**prove** this operation can't be called in the wrong state." With a plain enum, `r.room_key()` on a `Pending` reservation **compiles** — you only catch it if you remember to write a runtime `if status == CheckedIn { … } else { return err }` in every method. With typestate, the wrong-state call is a **compile error (E0150)** and the check costs zero bytes at runtime.
+
+   So they are not competitors: if you want a queryable/serializable runtime value, use a plain enum (already supported, no typestate needed); if you want the compiler to *prove* a misuse can't happen, that's typestate. (Rust agrees: its type-state pattern uses phantom *type* parameters, not a runtime enum — closer to Jet's erasing tags than to a stored discriminant.)
+
+   **But your instinct lands exactly on this card's real question.** The mechanism needs a *vocabulary of state names*; it does not care whether those names are loose `tag`s or the *variants of an `enum`*. Using an enum as the vocabulary is the better answer — it gives one named, grouped state set (the enum *is* the grouping the original card wanted) and exhaustiveness/typo-catching **for free, with no new `states { }` keyword**. So I've dropped the bespoke `states { }` block (old Option B) and replaced it with "the enum is the state set."
+
+**Gist:** Decide whether a typestate's states are loose `tag`s (shipped) or the variants of a dedicated `enum` that the markers reference (your enhance-the-enum direction).
+
+**Story.** Earl models a reservation lifecycle. He wants the state set named in one place — `{ Pending, Confirmed, CheckedIn }` — so a typo (`#Transition(Pending -> Confrimed)`) is caught and so "is there a dead-end state?" can be asked, but he does not want to maintain a separate list that drifts from the transitions. An `enum Reservation_State { … }` he already knows how to write *is* that one place.
 
 **In the wild:**
 ```jet
-// Option A (shipped): no grouping — each state is just a `tag`, the markers name them
-tag Pending {}
-tag Confirmed {}
-tag CheckedIn {}
+// Option B (reframed, recommended): the enum is the state vocabulary
+enum ReservationState { Pending, Confirmed, CheckedIn }
 
 impl Reservation {
-    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation { return self }
-    // a typo here — `Confrimed` — is an undefined-tag error from the normal tag resolver,
-    // not a typestate-specific one. No separate state list to keep in sync.
+    #Transition(ReservationState.Pending -> ReservationState.Confirmed)
+    fn pay(self: ^Reservation) -> Reservation { return self }
+
+    #State(ReservationState.CheckedIn) fn room_key(self) -> String { return "key for {self.guest}" }
+    // a typo `Confrimed` is a normal unknown-variant error; the enum bounds the set,
+    // so the checker can also warn on a variant with no outgoing transition.
 }
 ```
 
-**Other languages:** Rust's type-state pattern has no state declaration — each state is a marker type, and the set is implicit in which `Reservation<S>` impls exist. Statechart libraries (XState in TS, Stateless in C#) *do* declare the full machine up front (states + transitions in one table) precisely to get exhaustiveness and diagrams. The split is "implicit from the code" vs "explicit machine table."
+**Other languages:** Rust's type-state pattern has no declaration (each state is a marker type; the set is implicit in which `Reservation<S>` impls exist). Statechart libraries (XState/TS, Stateless/C#) declare the whole machine up front for exhaustiveness + diagrams. An enum-as-state-set sits between: one named set, no separate machine table, and it's a construct the user already has.
 
 **Tradeoffs:** (subagent-reviewed)
 
-| Option | New construct | Exhaustiveness check (typo / dead-end states) | Weight |
-|---|---|---|---|
-| A no grouping — states are plain `tag`s (recommended) | none | none beyond the normal undefined-tag error | matches "tags erase, zero declaration weight" |
-| B explicit `states Reservation { Pending, Confirmed, CheckedIn }` block | a new keyword + construct | yes — can flag a typo'd or unreachable state, "no transition out of CheckedIn" | a brand-new owner-facing declaration form |
+| Option | State vocabulary | New construct | Exhaustiveness (typo / dead-end) | Runtime cost |
+|---|---|---|---|---|
+| A loose `tag`s (shipped) | each state a standalone `tag` | none | only the normal undefined-tag error | none (tags erase) |
+| B enum variants (recommended) | one `enum` names the set | none new — reuses `enum` | yes — set is bounded; can flag typo'd/unreachable state | none for the gate (state fact still erases); the enum type exists only if you also store it |
 
-- **Option A — no grouping; the markers define the state set. (recommended)**
+- **Option A — loose `tag`s define the set (shipped today).**
 ```jet
-tag Pending {}                       // the states are simply these three tags
+tag Pending {}                       // three independent tags; the set is whatever the markers mention
 tag Confirmed {}
 tag CheckedIn {}
-// the checker derives the state set from the transition/require markers it sees
 ```
 
-- **Option B — explicit `states { … }` grouping block.**
+- **Option B — an `enum` is the state set. (recommended — your enhance-the-enum direction)**
 ```jet
-states Reservation { Pending, Confirmed, CheckedIn }   // brand-new construct
-// enables exhaustiveness: a typo state or a state with no outgoing transition can be flagged
+enum ReservationState { Pending, Confirmed, CheckedIn }   // one named, grouped, typo-checked set
+// markers reference ReservationState.Pending etc.; no new `states { }` keyword
 ```
 
-**Recommendation:** A for v1 — it matches the ratified "tags erase, no new runtime or declaration weight" stance and adds zero new owner-facing syntax. B is a natural follow-on if exhaustive state-machine checking is later wanted (it would pair with the deferred D-ROLE1 time-varying-roles card).
+**Recommendation:** **B** — use an enum as the state vocabulary. It directly answers your question (enhance the construct we have rather than lean on loose tags), gives the grouping/exhaustiveness the original card wanted with **zero new syntax**, and keeps the compile-time gate free (the state fact still erases; the enum type only materializes if you also choose to store/serialize the state as a value). The shipped feature uses loose tags (A); moving to enum-variants is a contained change to how the `#State`/`#Transition` markers resolve their arguments (the E0150 mechanism, dataflow, and erasure are unchanged). Confirm B and I'll re-point the marker resolver at enum variants and migrate the example/tests.
+
+**Owner Q (D-STATE-DECL):** B reuses `enum` as the state set (recommended). Do you also want the state to be optionally *storable* as a real `ReservationState` field (runtime value you can match/serialize) in addition to the compile-time gate — i.e. one enum serving both the "what now?" runtime question and the "prove it" compile-time gate — or keep the gate purely compile-time-erased for v1?
 
 ---
 
@@ -1301,9 +1315,9 @@ change rather than a risky "behavior-preserving" merge.
 
 ---
 
-### D-JIT2 — where the Cranelift dependency physically lives
+### D-JIT2 — where the Cranelift dependency physically lives (rec A — board card c139)
 
-**Status:** open · **Card:** c139 (JIT tier-1) · **Rides:** D-JITDEP1 (Cranelift approved, runtime-side, I6 holds), D-REGEX1 (dep-scoping precedent)
+_Rides D-JITDEP1 (Cranelift already approved, runtime-side; I6 holds). This decides ONLY where the crate physically sits so I6 ("zero external crates in the compiler") stays machine-checkable, not the runtime design (settled: production is AOT, the JIT is the resident dev-loop tier)._
 
 **Gist:** D-JITDEP1 approved the Cranelift JIT dep "never in compiler `Source/`," but the repo is one crate — so decide whether the wall is a new `jet-jit` workspace crate (A), a cfg-gated I6 carve-out in the one crate (B), or an out-of-tree optional component (C).
 
@@ -1348,7 +1362,7 @@ sits* so that I6 ("zero external crates in the compiler") stays true and enforce
 
 ---
 
-**Option A — new workspace member `jet-jit/` (own crate, owns the Cranelift dep).**
+- **Option A — new workspace member `jet-jit/` (own crate, owns the Cranelift dep). (recommended)**
 Convert the repo to a Cargo workspace. `Source/` becomes the `jet` crate and stays
 dep-free. A new sibling crate (e.g. `jit/`, crate name `jet-jit`) depends on Cranelift
 and on `jet` (for the `JitBackend` trait + a TIR view), and implements `CraneliftBackend`.
@@ -1377,7 +1391,7 @@ jit/
 - Consequence to weigh: this is the only option that keeps I6 an *enforced* invariant
   rather than a documented promise.
 
-**Option B — explicit, scoped I6 carve-out; Cranelift dep in the one crate behind a feature.**
+- **Option B — explicit, scoped I6 carve-out; Cranelift dep in the one crate behind a feature.**
 Keep the single crate. Add `cranelift-*` to `Cargo.toml` under an off-by-default
 `jit` feature; `CraneliftBackend` lives in `Source/` (e.g. `Source/Jit/Cranelift.rs`)
 gated `#[cfg(feature = "jit")]`. Amend I6's text to name a standing, owner-signed
@@ -1397,7 +1411,7 @@ $ cargo tree -p jet | grep cranelift   # now prints cranelift — I6 true only b
   precedent that says yes-with-a-flag. This is the carve-out the prompt names as
   option (b), and it is a real softening of I6.
 
-**Option C — `jet-jit` as an out-of-tree optional toolchain component (plugin).**
+- **Option C — `jet-jit` as an out-of-tree optional toolchain component (plugin).**
 `jet-jit` is its own crate (as in A) but NOT a workspace member built by default — it is
 an optional component the user installs (`jetpack add-component jit` / a separate build)
 and the `jet` binary loads/links only when present. I6 is untouched; the compiler never
@@ -1420,16 +1434,9 @@ $ jet serve                            # now Cranelift-backed
 
 ---
 
-**Recommendation:** lay out, do not decide. **A** keeps I6 enforceable and matches R7 and
-the seam's stated design, at the cost of a one-time workspace conversion; it is the
-cleanest fit for the frozen c140/c141 progression. **B** is the lightest touch but
-converts I6 from an enforced wall into a documented exception. **C** maximizes isolation
-but undercuts the "fast serve, just works" value proposition. The owner's call hinges on
-how literal I6 must stay vs. how much workspace surgery is acceptable.
+**Recommendation:** **A** — a `jet-jit/` workspace member is the only option that keeps I6 *machine-checkable* (a CI grep of the `jet` crate's lockfile proves zero external crates), matches R7 (swappable backend behind a stable seam) and the existing `JitBackend` design, and lets the frozen successors (c140 bytecode VM, c141 native JIT) slot in as more members behind the same trait with zero `Source/` churn. Its one cost is a one-time workspace conversion — vetted as low-disruption: the `jet` and `jetpack` bins stay in-crate, the `editors/zed/wasm-src` crate is standalone and untouched, and only a small stable TIR accessor (TIR types are `pub(crate)` today) is new work. **B** is the lightest diff but converts I6 from an enforced wall to a documented promise (every future "can this dep go in the compiler?" then cites it). **C** maximizes isolation but makes the JIT a non-default component, undercutting D-JITDEP1's whole point (fast `jet serve` that just works).
 
-*(Reviewer note: this card needs a second-agent vet before it reaches the owner — confirm
-the single-crate fact and that `jetpack`/zed-wasm builds survive a workspace conversion
-under Option A.)*
+**Owner Q (D-JIT2):** confirm **A** (workspace member — I6 stays provable), or pick **B** if you'd rather keep one crate and accept I6 as a documented, feature-gated exception.
 
 ---
 
