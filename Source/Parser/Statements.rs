@@ -182,6 +182,37 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement
+    /// position. Cursor is on the `#` token. `name` binds a user-chosen
+    /// transaction handle (any ident, mirroring `region r { … }`).
+    fn at_transact_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // `#`
+        self.bump(); // `Transact`
+        // D-TXN4: `#Transact(name) { … }` binds a handle; a bare `#Transact { … }`
+        // (no handle, hence no `on_commit` hooks) stays legal.
+        let (name, name_span) = if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // `(`
+            let (n, ns) = self.expect_ident("for the transaction handle name")?;
+            self.expect(
+                TokKind::RParen,
+                &format!("to close `#{}(name`", Syntax::KW_TRANSACT),
+            )?;
+            (Some(n), Some(ns))
+        } else {
+            (None, None)
+        };
+        self.expect(TokKind::LBrace, &format!("after `#{}`", Syntax::KW_TRANSACT))?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Transact {
+            name,
+            name_span,
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// S19 + D-LABEL1: parse a `loop` statement (all three header forms), with an
     /// optional `@name` label already parsed by the caller. The cursor is on the
     /// `loop` keyword.
@@ -692,6 +723,10 @@ impl<'a> Parser<'a> {
                 // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
+                }
+                // D-TXN1–D-TXN4: `#Transact(name) { … }` transaction block.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSACT) {
+                    return self.at_transact_stmt();
                 }
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()

@@ -295,6 +295,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::ContextBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         // D-TERM1 (ratified 2026-06-22): `live { … }` — use span end.
         Stmt::Live { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        // D-TXN1–D-TXN4: `#Transact(name) { … }` — use body/span end.
+        Stmt::Transact { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
     }
 }
 
@@ -605,6 +607,8 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::ContextBlock { span, .. } => span.start,
         // D-TERM1 (ratified 2026-06-22): `live { … }` — use span start.
         Stmt::Live { span, .. } => span.start,
+        // D-TXN1–D-TXN4: `#Transact(name) { … }` — use span start.
+        Stmt::Transact { span, .. } => span.start,
     }
 }
 

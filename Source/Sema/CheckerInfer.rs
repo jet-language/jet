@@ -1250,6 +1250,14 @@ impl<'a> Checker<'a> {
             );
         }
 
+        // D-TXN2: a lambda body is a deferred execution context (it runs later —
+        // e.g. an `on_commit` hook fires only post-commit). Effects inside it are
+        // NOT rejected by the enclosing `#Transact` block, so zero the depth here
+        // and restore it after the body. This is exactly why `name.on_commit(() =>
+        // { fs.write(…) })` is the D-TXN2 fix-it: the irreversible work moves into
+        // a lambda, off the block's direct path.
+        let saved_txn_depth = self.txn_depth;
+        self.txn_depth = 0;
         let body_ret = match &mut lam.body {
             LambdaBody::Expr(e) => {
                 if self.is_task_spawn {
@@ -1276,6 +1284,7 @@ impl<'a> Checker<'a> {
                 last_ret
             }
         };
+        self.txn_depth = saved_txn_depth;
 
         self.pop_scope();
 
@@ -2304,6 +2313,63 @@ impl<'a> Checker<'a> {
                     self.infer(&mut a.expr);
                 }
                 return None;
+            }
+        }
+        // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact`
+        // transaction handle. Same shape as `scope.guard`: a zero-parameter
+        // lambda, Drop-backed, run LIFO on a clean commit and dropped on a
+        // `?`-failure/rollback. Returns a guard handle (`TransactionGuard`),
+        // bound or discarded like a `scope.guard`. Sets `recv_type` so codegen
+        // routes the node to the commit-guard lowering (I3).
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == crate::Syntax::TXN_HANDLE_TYPE && method == crate::Syntax::TXN_ON_COMMIT {
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!(
+                            "`{}` takes one lambda, got {}",
+                            crate::Syntax::TXN_ON_COMMIT,
+                            args.len()
+                        ),
+                        "a post-commit hook registers a single cleanup lambda".to_string(),
+                        format!("write `{}.{}(() => {{ … }})`", "<handle>", crate::Syntax::TXN_ON_COMMIT),
+                        Some(span),
+                    ));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return Some(Type::Named("TransactionGuard".to_string()));
+                }
+                let lam_ty = self.infer(&mut args[0].expr);
+                match &lam_ty {
+                    Some(Type::Fn { params, .. }) => {
+                        if !params.is_empty() {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!(
+                                    "`{}` needs a zero-parameter lambda, got {} parameter{}",
+                                    crate::Syntax::TXN_ON_COMMIT,
+                                    params.len(),
+                                    if params.len() == 1 { "" } else { "s" }
+                                ),
+                                "the hook body takes no arguments — it captures what it needs via closure".to_string(),
+                                format!("write `<handle>.{}(() => {{ … }})` with no parameters", crate::Syntax::TXN_ON_COMMIT),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{}` needs a lambda, not {}", crate::Syntax::TXN_ON_COMMIT, other.show()),
+                            "a post-commit hook runs a lambda only after the transaction commits".to_string(),
+                            format!("write `<handle>.{}(() => {{ … }})`", crate::Syntax::TXN_ON_COMMIT),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
+                    None => {}
+                }
+                *recv_type_out = Some(handle_ty.clone());
+                return Some(Type::Named("TransactionGuard".to_string()));
             }
         }
         // E2-M7: method calls on streaming file handles (D-IO2).

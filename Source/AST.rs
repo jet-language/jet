@@ -1259,6 +1259,24 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a
+    /// transaction block. `name` binds a user-chosen transaction handle (any
+    /// lowercase ident, mirroring `region r { … }`) typed `Transaction`.
+    /// Inside the block an irreversible effect (Net/Fs/Exec) that can't be rolled
+    /// back is a compile error (E0746, D-TXN2) — the fix is to move it after the
+    /// block or register it via `name.on_commit(() => { … })` (D-TXN3) so it runs
+    /// only on a clean commit. `on_commit` lambdas are Drop-backed and run LIFO on
+    /// commit, dropped on a `?`-failure/rollback. A lexical scope emitted as a
+    /// plain Rust block; effects/transaction state erase (I3).
+    Transact {
+        /// The user-chosen handle name, or `None` for a bare `#Transact { … }` with
+        /// no hooks (D-TXN4: a transaction without a handle stays legal). A name is
+        /// required only to call `name.on_commit(…)`.
+        name: Option<String>,
+        name_span: Option<Span>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 /// Assignment target: local name or indexed collection slot (M5).

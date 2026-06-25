@@ -409,6 +409,21 @@ pub(crate) enum TStmt {
     Live {
         body: Vec<TStmt>,
     },
+    /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a transaction
+    /// block. Lowers to:
+    ///   `{ let mut <handle> = jet_transaction(); <body>; <handle>.commit(); }`
+    /// `<handle>.on_commit(() => { … })` inside the body lowers to
+    /// `<handle>.on_commit(Box::new(move || { … }))`. The registered hooks run LIFO
+    /// in `JetTransaction::drop` — but only if `commit()` ran. A `?`-failure or any
+    /// early return skips `commit()`, so the hooks drop un-run (D-TXN3). The
+    /// irreversible-effect rejection (E0746, D-TXN2) and rollback are sema's job;
+    /// codegen is dumb (I3): effects/transaction state are a compile-time fact.
+    Transact {
+        /// The mangled Rust name of the transaction handle (`user_<name>`), or `None`
+        /// for a bare `#Transact { … }` with no handle (no `on_commit` hooks).
+        handle: Option<String>,
+        body: Vec<TStmt>,
+    },
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
@@ -877,6 +892,8 @@ pub(crate) enum TCoreClosureKind {
     Serve { addr: Box<TExpr>, closure: String },
     /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.
     Guard { closure: String },
+    /// D-TXN3: `<handle>.on_commit(<lambda>)` → `<handle>.on_commit(Box::new(<closure>))`.
+    OnCommit { handle: String, closure: String },
 }
 
 /// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
@@ -2445,6 +2462,17 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
         // The body leaks into the outer scope like a region; check it on the SAME `locals`.
         Stmt::Live { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` lowers to a
+        // transaction-guarded Rust block. The handle `name` is a covered local
+        // inside the body (so `name.on_commit(…)` resolves); check the body with it
+        // in scope.
+        Stmt::Transact { name, body, .. } => {
+            let mut inner = locals.clone();
+            if let Some(name) = name {
+                inner.insert(name.clone());
+            }
+            body.iter().all(|s| stmt_in_subset(s, cx, &mut inner))
+        }
         // Forward-safety default: a future Stmt variant defaults to the safe AST path
         // (I2 — a false negative keeps a fn off the TIR; a false positive would be unsafe).
         // Currently unreachable because every variant above is matched.
@@ -3538,6 +3566,18 @@ fn method_call_in_subset(
     // since sema's `.raw()` arm returns the base type without the recv_type writeback).
     if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
+    }
+    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
+    // Sema types the handle `Transaction` (`recv_type == Some("Transaction")`).
+    // It lowers to a Drop-backed commit guard (a `scope.guard` cousin), so the
+    // single arg must be an in-subset literal zero-param lambda.
+    if method == Syntax::TXN_ON_COMMIT
+        && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE)
+    {
+        return args.len() == 1
+            && args[0].label.is_none()
+            && matches!(&args[0].expr, Expr::Lambda(_))
+            && expr_in_subset(&args[0].expr, cx, locals);
     }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
     // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.
@@ -5515,6 +5555,26 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Live { body, .. } => TStmt::Live {
             body: lower_stmts(body, cx, env),
         },
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
+        // handle (typed `Transaction`) in `env` so `name.on_commit(…)` lowers against
+        // it, then lower the body on the SAME `env` (it leaks like a region). The
+        // `let mut <handle> = jet_transaction(); … <handle>.commit();` framing is
+        // emitted in `emit_tir_stmt`; codegen is dumb (I3).
+        Stmt::Transact { name, body, .. } => {
+            let handle = name.as_ref().map(|name| {
+                let h = mangle(name);
+                env.bind(
+                    name,
+                    h.clone(),
+                    Some(Type::Named(Syntax::TXN_HANDLE_TYPE.to_string())),
+                );
+                h
+            });
+            TStmt::Transact {
+                handle,
+                body: lower_stmts(body, cx, env),
+            }
+        }
         // Forward-safety default: a Stmt variant not in the subset never reaches
         // lowering (`stmt_in_subset` returns false for it). Kept as a guard against a
         // future variant; currently unreachable because every covered variant is matched.
@@ -7500,6 +7560,42 @@ fn lower_method_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
+    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
+    // The gate proved `recv_type == Some("Transaction")` and a single literal
+    // zero-param lambda arg. Lower to `<handle>.on_commit(Box::new(move || { … }))`;
+    // the Drop-backed LIFO-on-commit semantics live in the `JetTransaction` prelude
+    // type. The receiver is the bound handle ident → its mangled Rust place.
+    if method == Syntax::TXN_ON_COMMIT
+        && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE)
+    {
+        // The handle is always a bound ident (sema typed it `Transaction` from a
+        // `#Transact(name)` binding); its mangled place is `user_<name>`.
+        let handle = match receiver {
+            Expr::Ident(name, _) => mangle(name),
+            // Defensive: a non-ident receiver can't be a transaction handle, but
+            // lowering it keeps the place well-formed if one ever appears.
+            other => emit_tir_expr(&lower_expr(other, cx, env), cx),
+        };
+        if let Some(crate::AST::Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
+            // Build the closure directly (not via `render_lambda_str`, which may add
+            // its own `Box::new(…)` wrapper). The hook is stored in the transaction's
+            // `Vec<Box<dyn FnOnce()>>`, so it must be a `move` closure boxed exactly
+            // once by the `TCoreClosureKind::OnCommit` emit (no double-box).
+            let tl = lower_lambda(lam, cx, env);
+            let inner = format!("move |{}| {}", tl.params.join(", "), tl.body);
+            let closure = if tl.prep.is_empty() {
+                inner
+            } else {
+                format!("{{ {} {} }}", tl.prep, inner)
+            };
+            return TExpr {
+                ty: Type::Named("TransactionGuard".to_string()),
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::OnCommit { handle, closure },
+                },
+            };
+        }
+    }
     // The sema-inserted `.clone()`: emit `(recv).clone()`, result is the receiver's
     // type (a clone preserves it). Mirrors `emit_method_call`'s `clone` early return.
     if method == "clone" {
@@ -9299,6 +9395,31 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             emit_tir_stmts(body, cx, out, indent + 1);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block — open a
+        // transaction guard, emit the body, then `commit()` on the clean fall-through
+        // path. An early `?`/`return` skips `commit()`, so registered `on_commit` hooks
+        // drop un-run (D-TXN3). Codegen is dumb (I3): no effect/rollback machinery here.
+        TStmt::Transact { handle, body } => {
+            let inner = indent + 1;
+            let inner_pad = "    ".repeat(inner);
+            out.push_str(&format!("{}{{\n", pad));
+            match handle {
+                // A named transaction: open the guard, emit the body, commit on the
+                // clean fall-through path (an early `?`/`return` skips it).
+                Some(handle) => {
+                    out.push_str(&format!(
+                        "{}let mut {} = {}jet_transaction();\n",
+                        inner_pad, handle, cx.root_prefix
+                    ));
+                    emit_tir_stmts(body, cx, out, inner);
+                    out.push_str(&format!("{}{}.commit();\n", inner_pad, handle));
+                }
+                // A bare `#Transact { … }` with no handle has no `on_commit` hooks, so
+                // it erases to a plain block (its only job was the D-TXN2 ceiling).
+                None => emit_tir_stmts(body, cx, out, inner),
+            }
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // c109 Phase 19: a `#Context(field: value) { … }` block — a plain block with one
         // RAII guard per field (declaration order) BEFORE the body, byte-for-byte
         // `emit_stmts`'s `Stmt::ContextBlock` arm.
@@ -10089,6 +10210,12 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             ),
             TCoreClosureKind::Guard { closure } => {
                 format!("{}jet_scope_guard({})", cx.root_prefix, closure)
+            }
+            // D-TXN3: register a post-commit hook on the transaction handle. Boxed so
+            // hooks of differing closure types share one queue; run LIFO in Drop, but
+            // only after `commit()` (the `JetTransaction` prelude type).
+            TCoreClosureKind::OnCommit { handle, closure } => {
+                format!("{}.on_commit(Box::new({}))", handle, closure)
             }
         },
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the

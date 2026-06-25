@@ -479,6 +479,13 @@ pub(crate) struct Checker<'a> {
     /// D-EFF1: completed `#Caps(…)` regions in this body, rolled into the
     /// `EffectSummary` for the post-pass E0741 check.
     fx_regions: Vec<RegionSummary>,
+    /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
+    /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
+    /// irreversible Core effect (Net/Fs/Exec) reached directly in the block is
+    /// E0746 at the call site — the fix is to move it after the block or register
+    /// it via `name.on_commit(…)`. Zeroed and restored around every lambda body
+    /// (effects inside an `on_commit`/other lambda are deferred, not rejected).
+    txn_depth: usize,
     in_unsafe: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.

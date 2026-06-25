@@ -1294,6 +1294,26 @@ impl<'a> Checker<'a> {
                 }
                 self.check_block(body, true);
             }
+            // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }`.
+            // Bind the user-chosen handle `name` (typed `Transaction`) so
+            // `name.on_commit(() => { … })` resolves inside the block, then check
+            // the body with the transaction depth raised: an irreversible Core
+            // effect (Net/Fs/Exec) reached directly in the block is E0746
+            // (D-TXN2) at its call site. A lexical scope; erased in codegen (I3).
+            Stmt::Transact { name, name_span, body, .. } => {
+                self.push_scope();
+                if let (Some(name), Some(name_span)) = (name, name_span) {
+                    self.declare_loop_var(
+                        name.clone(),
+                        *name_span,
+                        &Type::Named(crate::Syntax::TXN_HANDLE_TYPE.to_string()),
+                    );
+                }
+                self.txn_depth += 1;
+                self.check_block(body, true);
+                self.txn_depth -= 1;
+                self.pop_scope();
+            }
             Stmt::ContextBlock { fields, body, span: _ } => {
                 for (field_name, value_expr, field_span) in fields.iter_mut() {
                     let ty = self.infer(value_expr);

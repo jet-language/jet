@@ -234,6 +234,7 @@ before continuing.
 | E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
 | E0745 | sema  | a `#Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
+| E0746 | sema  | an irreversible effect (Net/Fs/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
 | E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |
@@ -647,6 +648,7 @@ reported as **E0119** (unknown name).
 | E0741 | This `#Caps` region uses the effect `{effect}`, which it doesn't allow. | `#Caps(…)` restricts a region to a fixed set of effects; anything reached inside — even transitively through a call — must be in that set, so the region is a hard local ceiling. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
 | E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`#Pure fn hash(self)`, `fn render(self) #(Gpu)`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0745 | `{fn}` is `#Pure` but also declares effects. | `#Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `#Pure` to allow the listed effects. |
+| E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`Fs`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
 

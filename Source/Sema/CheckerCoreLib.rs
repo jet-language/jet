@@ -355,6 +355,15 @@ impl<'a> Checker<'a> {
         // function's inferred set (erased in codegen; purely a sema fact).
         if let Some(e) = core_effect(module, name) {
             self.record_effect(e);
+            // D-TXN2: an irreversible effect (Net/Fs/Exec — a network/file/
+            // subprocess effect) can't be rolled back, so it is rejected when it
+            // occurs directly inside a `#Transact { … }` block (E0746). The fix
+            // is to move it after the block, or register it via
+            // `name.on_commit(() => { … })` so it runs only on a clean commit.
+            if self.txn_depth > 0 && is_irreversible_effect(e) {
+                let api = format!("{}.{}", module_short_name(module), name);
+                self.diags.push(e0746(&api, e, span));
+            }
         }
         // E2-M15 / E3301: reject OS-dependent APIs in freestanding builds.
         if self.freestanding && is_freestanding_forbidden(module) {

@@ -223,7 +223,8 @@ fn scan_stmt(
         | Stmt::Unsafe { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Live { body, .. } => scan_stmts(body, caps, method_map, param_types),
+        | Stmt::Live { body, .. }
+        | Stmt::Transact { body, .. } => scan_stmts(body, caps, method_map, param_types),
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             scan_expr(cond, caps, method_map, param_types);
             scan_stmts(then_body, caps, method_map, param_types);

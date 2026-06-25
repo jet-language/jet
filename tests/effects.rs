@@ -282,3 +282,114 @@ fn main() { work(); }
     assert!(c.contains(&"E0119"), "expected E0119, got {:?}", c);
     assert!(!c.contains(&"E0740"), "unknown name should suppress E0740: {:?}", c);
 }
+
+// ── Transactions (D-TXN1–D-TXN4) ──────────────────────────────────────────────
+
+/// D-TXN2: an irreversible Core effect (Fs) reached DIRECTLY inside a
+/// `#Transact` block is E0746 at the call site.
+#[test]
+fn transact_irreversible_fs_is_e0746() {
+    let src = r#"
+use core.fs as fs
+fn main() {
+    #Transact(tx) {
+        text @= fs.read("x") ?? "";
+        print(text);
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0746"), "Fs in #Transact should be E0746: {:?}", codes(src));
+}
+
+/// D-TXN2: a Net effect directly in the block is also rejected (E0746).
+#[test]
+fn transact_irreversible_net_is_e0746() {
+    let src = r#"
+use jet.http as http
+fn main() {
+    #Transact(tx) {
+        r @= http.get("http://x") ?? "";
+        print(r);
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0746"), "Net in #Transact should be E0746: {:?}", codes(src));
+}
+
+/// D-TXN2: a reversible-or-benign effect (Io via `print`) is NOT rejected inside
+/// a `#Transact` block.
+#[test]
+fn transact_reversible_io_ok() {
+    let src = r#"
+fn main() {
+    #Transact(tx) {
+        print("reversible work");
+    }
+}
+"#;
+    assert!(codes(src).is_empty(), "Io in #Transact should compile: {:?}", codes(src));
+}
+
+/// D-TXN2 fix-it: the same Fs effect is accepted when registered via
+/// `name.on_commit(…)` — a deferred (post-commit) context.
+#[test]
+fn transact_fs_in_on_commit_ok() {
+    let src = r#"
+use core.fs as fs
+fn main() {
+    #Transact(tx) {
+        print("reversible work");
+        tx.on_commit(() => {
+            fs.write("x", "done") ?? panic("write failed");
+        });
+    }
+}
+"#;
+    assert!(codes(src).is_empty(), "Fs inside on_commit should compile: {:?}", codes(src));
+}
+
+/// D-TXN3/D-TXN4: `on_commit` needs a zero-parameter lambda (E0104).
+#[test]
+fn transact_on_commit_needs_zero_param_lambda() {
+    let src = r#"
+fn main() {
+    #Transact(tx) {
+        tx.on_commit((n: Int) => { print("{n}"); });
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0104"), "on_commit with a param should be E0104: {:?}", codes(src));
+}
+
+/// I3: a `#Transact` block + `on_commit` carry no effect/transaction machinery
+/// that leaks user-visible effect annotations; and generated Rust has NO `unsafe`.
+#[test]
+fn transact_generates_no_unsafe() {
+    let src = r#"
+fn main() {
+    #Transact(tx) {
+        print("work");
+        tx.on_commit(() => { print("hook"); });
+    }
+}
+"#;
+    let rust = jet::compile(src).expect("compiles").rust;
+    // The transaction lowers to the safe `JetTransaction` prelude + boxed hooks.
+    assert!(rust.contains("jet_transaction()"), "expected the transaction guard: {}", rust);
+    assert!(rust.contains(".on_commit(Box::new("), "expected a boxed commit hook: {}", rust);
+    // No `unsafe` word anywhere in generated code (golden grep parity).
+    assert!(!rust.contains("unsafe"), "transaction codegen must contain no `unsafe`");
+}
+
+/// D-TXN4: a bare `#Transact { … }` with no handle stays legal (no hooks).
+#[test]
+fn transact_bare_no_handle_ok() {
+    let src = r#"
+fn main() {
+    #Transact {
+        print("bare transaction");
+    }
+}
+"#;
+    assert!(codes(src).is_empty(), "bare #Transact should compile: {:?}", codes(src));
+}

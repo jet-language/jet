@@ -158,6 +158,38 @@ pub fn core_effect(module: &str, _method: &str) -> Option<Effect> {
     })
 }
 
+/// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
+/// effect that, once performed, cannot be rolled back. These are rejected when
+/// reached directly inside a `#Transact { … }` block (E0746). The remaining
+/// effects (Io/Time/Rand/Env/Db/Log/Gpu) are reversible-or-benign for this
+/// purpose: reads, clock/RNG reads, and logging leave no committed external
+/// state a rollback must undo, and Db rollback is the transaction's own job.
+pub fn is_irreversible_effect(e: Effect) -> bool {
+    matches!(e, Effect::Net | Effect::Fs | Effect::Exec)
+}
+
+/// E0746 (D-TXN2): an irreversible effect (Net/Fs/Exec) used directly inside a
+/// `#Transact { … }` block. Points at the offending call; the fix is to move it
+/// after the block or register it via `name.on_commit(() => { … })`.
+pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0746",
+        format!(
+            "`{}` has the `{}` effect, which can't be rolled back inside a `#{}` block",
+            api, e.name(), crate::Syntax::KW_TRANSACT
+        ),
+        format!(
+            "a `#{}` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{}`) leaves committed external state a rollback can't take back",
+            crate::Syntax::KW_TRANSACT, e.name()
+        ),
+        format!(
+            "move this call after the block, or register it with `<handle>.{}(() => {{ … }})` so it runs only on a clean commit",
+            crate::Syntax::TXN_ON_COMMIT
+        ),
+        Some(span),
+    )
+}
+
 /// The effect carried by an ambient builtin call (`print`, `input`, …).
 pub fn builtin_effect(name: &str) -> Option<Effect> {
     if crate::Syntax::IMPURE_BUILTINS.contains(&name) {

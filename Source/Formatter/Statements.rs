@@ -209,6 +209,17 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` (the handle
+            // is optional — a bare `#Transact { … }` with no hooks stays legal).
+            Stmt::Transact { name, body, .. } => {
+                match name {
+                    Some(name) => self.write(&format!("#{}({}) {{", Syntax::KW_TRANSACT, name)),
+                    None => self.write(&format!("#{} {{", Syntax::KW_TRANSACT)),
+                }
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
         }
     }
 

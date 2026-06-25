@@ -577,6 +577,25 @@ pub const KW_PURE: &str = "Pure";
 /// E0741. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Caps";
 
+/// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
+/// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
+/// (any lowercase ident, mirroring `region r { … }`). Inside the block an
+/// irreversible effect (Net/Fs/Exec) is rejected (E0746, D-TXN2); the fix is to
+/// move it after the block or register it on the handle via
+/// `order.on_commit(() => { … })` (D-TXN3), which runs Drop-backed on a clean
+/// commit. PascalCase per D-CASING1. Erased in codegen (I3).
+pub const KW_TRANSACT: &str = "Transact";
+
+/// D-TXN3 (ratified 2026-06-24): the post-commit hook method on a transaction
+/// handle — `order.on_commit(() => { … })`. Drop-backed (D-DEFER1 model), runs
+/// LIFO on a clean commit and is dropped (not run) on a `?`-failure/rollback.
+/// NO new keyword (library form, I7 untouched).
+pub const TXN_ON_COMMIT: &str = "on_commit";
+
+/// D-TXN4: the type of a transaction handle bound by `#Transact(name)`. An
+/// opaque sema-only handle; erased in codegen (I3).
+pub const TXN_HANDLE_TYPE: &str = "Transaction";
+
 /// S14 / D-CASING1 follow-on (2026-06-21): the retired lowercase spellings of
 /// the three marker keywords, recognized only for teaching errors that point at
 /// the `#Test` / `#Pure` / `#Todo` marker forms.
@@ -1110,6 +1129,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_STORED, KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1)
     KW_UNSAFE, KW_REGION, CTX_BLOCK, KW_LIVE,
+    // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
+    KW_TRANSACT,
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
     KW_TEST, KW_BENCH, KW_PURE, KW_TODO,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)

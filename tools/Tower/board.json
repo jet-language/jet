@@ -444,7 +444,7 @@
       "type": "idea",
       "title": "Scoped transactions (#transact rollback semantics)",
       "body": "#transact {} surface is ratified (S82); decide rollback semantics: per-type opt-in Rollback trait, reverse-chain on ?-failure, commit on success. After D-EFF1.",
-      "stage": "frozen",
+      "stage": "deciding",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-TXN1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -457,13 +457,16 @@
         {
           "t": "Reconciled 2026-06-22: plan exists, but implementation is parked until c66's D-EFF2/D-EFF3 unblock D-EFF1. Do not start as ready work yet.",
           "at": "2026-06-22"
+        },
+        {
+          "t": "[sweep] D-TXN3/4 shipped: #Transact(name){} block + name.on_commit(()=>{}) Drop-backed post-commit hooks (LIFO on commit, dropped on ?-failure). D-TXN1 rollback-REGISTRATION mechanism deferred to ballot D-TXN-ROLLBACK (ratified text named a Rollback trait but the symmetric design vs on_rollback is an owner fork). Block+hooks+rejection all shipped.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-22",
+      "updated": "2026-06-24",
       "decisions": [
-        "D-TXN1",
-        "D-TXN2"
+        "D-TXN-ROLLBACK"
       ],
       "plan": "transact-rollback-semantics",
       "priority": "P2",
@@ -732,7 +735,7 @@
       "type": "idea",
       "title": "Reject irreversible effects inside #transact",
       "body": "Companion to D-TXN1 (c72): sema rejects irreversible effects (send_email, net POST, fs write) inside `#transact { }` because rollback reverts memory but can't un-send. Fix: move after block or queue in on_commit { }. Rides D-EFF1 for effect classification. Ratify with D-TXN1. Ballot D-TXN2 queued.",
-      "stage": "frozen",
+      "stage": "done",
       "plan": null,
       "notes": [
         {
@@ -746,10 +749,14 @@
         {
           "t": "Reconciled 2026-06-22: decision is already ratified; parked with c72 until c66's D-EFF2/D-EFF3 unblock D-EFF1 implementation. Do not draft a duplicate D-TXN2 ballot.",
           "at": "2026-06-22"
+        },
+        {
+          "t": "[sweep] D-TXN2 shipped: irreversible effects (Net/Fs/Exec) directly inside #Transact are E0746 (allowed inside on_commit lambdas). Reuses the effect system. example 110_transact.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-22T00:00:00Z",
+      "updated": "2026-06-24",
       "decisions": [
         "D-TXN2"
       ],

@@ -303,6 +303,39 @@ impl<F: FnOnce()> Drop for JetScopeGuard<F> {
         if let Some(f) = self.f.take() { f(); }
     }
 }
+// ── D-TXN1–D-TXN4 (ratified 2026-06-24): #Transact transaction blocks ─────────
+// A `#Transact(tx) { … }` block lowers to:
+//   { let mut tx = jet_transaction(); <body>; tx.commit(); }
+// `tx.on_commit(() => { … })` lowers to `tx.on_commit(Box::new(move || { … }))`.
+// The registered hooks run LIFO in Drop — but only if `commit()` ran. A `?`-failure
+// (or any early return) inside the block skips `commit()`, so the hooks are dropped
+// un-run (D-TXN3): irreversible post-commit work happens only on a clean commit.
+// Purely safe std Rust; no runtime effect machinery (I3).
+struct JetTransaction {
+    hooks: Vec<Box<dyn FnOnce()>>,
+    committed: bool,
+}
+fn jet_transaction() -> JetTransaction {
+    JetTransaction { hooks: Vec::new(), committed: false }
+}
+impl JetTransaction {
+    fn on_commit(&mut self, f: Box<dyn FnOnce()>) {
+        self.hooks.push(f);
+    }
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+impl Drop for JetTransaction {
+    fn drop(&mut self) {
+        if self.committed {
+            // LIFO: reverse registration order, mirroring scope-guard drop order.
+            while let Some(f) = self.hooks.pop() {
+                f();
+            }
+        }
+    }
+}
 trait user_Serialize { fn to_json(&self) -> String; }
 
 // ── D-TERM1 (ratified 2026-06-22): terminal direct-input primitives ───────────
