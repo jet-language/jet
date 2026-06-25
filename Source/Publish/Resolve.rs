@@ -73,52 +73,25 @@ pub fn check_conflicts(
                     .any(|v| r.req.matches(v) && a.req.matches(v))
             });
             if let Some(b) = b {
-                let req_a_str = format!("{:?}", a.req).replace("VersionReq::", "");
-                let req_b_str = format!("{:?}", b.req).replace("VersionReq::", "");
-                diags.push(e2602(pkg, &req_a_str, &a.from, &req_b_str, &b.from));
+                diags.push(e2602(pkg, a.req.display(), &a.from, b.req.display(), &b.from));
             }
         }
         // When no candidates at all: surface if two constraints' ranges exclude each other.
         if candidates.is_empty() && reqs.len() >= 2 {
             for i in 0..reqs.len() {
                 for j in (i + 1)..reqs.len() {
-                    if ranges_disjoint(&reqs[i].req, &reqs[j].req) {
-                        let req_a_str = req_display(&reqs[i].req);
-                        let req_b_str = req_display(&reqs[j].req);
-                        diags.push(e2602(pkg, &req_a_str, &reqs[i].from, &req_b_str, &reqs[j].from));
+                    if !reqs[i].req.intersects(&reqs[j].req) {
+                        diags.push(e2602(
+                            pkg,
+                            reqs[i].req.display(),
+                            &reqs[i].from,
+                            reqs[j].req.display(),
+                            &reqs[j].from,
+                        ));
                     }
                 }
             }
         }
     }
     diags
-}
-
-fn req_display(r: &VersionReq) -> String {
-    match r {
-        VersionReq::Any => "*".into(),
-        VersionReq::Exact(v) => v.to_string(),
-        VersionReq::Caret { floor, .. } => format!("^{}", floor),
-    }
-}
-
-fn ranges_disjoint(a: &VersionReq, b: &VersionReq) -> bool {
-    match (a, b) {
-        (VersionReq::Caret { floor: fa, precision: pa }, VersionReq::Caret { floor: fb, precision: pb }) => {
-            // ^1.x and ^2.x are disjoint (different majors, or major=0 different minors).
-            if fa.major == 0 && fb.major == 0 && *pa >= 2 && *pb >= 2 {
-                fa.minor != fb.minor
-            } else {
-                fa.major != fb.major
-            }
-        }
-        (VersionReq::Exact(va), VersionReq::Exact(vb)) => va != vb,
-        (VersionReq::Exact(v), VersionReq::Caret { floor, precision }) => {
-            !VersionReq::Caret { floor: floor.clone(), precision: *precision }.matches(v)
-        }
-        (VersionReq::Caret { floor, precision }, VersionReq::Exact(v)) => {
-            !VersionReq::Caret { floor: floor.clone(), precision: *precision }.matches(v)
-        }
-        _ => false,
-    }
 }

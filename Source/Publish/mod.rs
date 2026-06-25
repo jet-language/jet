@@ -112,6 +112,129 @@ mod tests {
         assert!(req.matches(&sv("99.99.99")));
     }
 
+    // ── Full SemVer 2.0.0 coverage (D-PARSE-1) ──
+
+    #[test]
+    fn semver_parses_build_metadata() {
+        let v = sv("1.2.3+build.5");
+        assert_eq!(v.build.as_deref(), Some("build.5"));
+        assert_eq!(v.pre, None);
+        // Pre-release then build: 1.2.3-rc.1+exp.sha.
+        let v2 = sv("1.2.3-rc.1+exp.sha.5114f85");
+        assert_eq!(v2.pre.as_deref(), Some("rc.1"));
+        assert_eq!(v2.build.as_deref(), Some("exp.sha.5114f85"));
+        // Round-trips through Display.
+        assert_eq!(v2.to_string(), "1.2.3-rc.1+exp.sha.5114f85");
+    }
+
+    #[test]
+    fn semver_build_metadata_ignored_in_precedence() {
+        assert_eq!(sv("1.2.3+a"), sv("1.2.3+b"));
+        assert_eq!(sv("1.2.3+a").cmp(&sv("1.2.3")), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn semver_rejects_leading_zeros() {
+        assert!(SemVer::SemVer::parse("01.2.3").is_none());
+        assert!(SemVer::SemVer::parse("1.02.3").is_none());
+        assert!(SemVer::SemVer::parse("1.2.3-01").is_none()); // numeric pre-release id, leading zero
+        assert!(SemVer::SemVer::parse("1.2").is_none()); // not three components
+        assert!(SemVer::SemVer::parse("1.2.3.4").is_none());
+        // Build metadata may carry leading zeros.
+        assert!(SemVer::SemVer::parse("1.2.3+0010").is_some());
+    }
+
+    #[test]
+    fn semver_prerelease_precedence() {
+        // Spec example chain: alpha < alpha.1 < alpha.beta < beta < beta.2 < beta.11 < rc.1 < release.
+        let chain = [
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0-alpha.beta",
+            "1.0.0-beta",
+            "1.0.0-beta.2",
+            "1.0.0-beta.11",
+            "1.0.0-rc.1",
+            "1.0.0",
+        ];
+        for w in chain.windows(2) {
+            assert!(sv(w[0]) < sv(w[1]), "{} should be < {}", w[0], w[1]);
+        }
+    }
+
+    #[test]
+    fn version_req_operators() {
+        assert!(VersionReq::parse(">=1.2.0").unwrap().matches(&sv("1.5.0")));
+        assert!(!VersionReq::parse(">=1.2.0").unwrap().matches(&sv("1.1.9")));
+        assert!(VersionReq::parse("<2.0.0").unwrap().matches(&sv("1.9.9")));
+        assert!(!VersionReq::parse("<2.0.0").unwrap().matches(&sv("2.0.0")));
+        // AND of two simples (whitespace), with space after operator.
+        let r = VersionReq::parse(">=1.2.0 < 2.0.0").unwrap();
+        assert!(r.matches(&sv("1.5.0")));
+        assert!(!r.matches(&sv("2.0.0")));
+        assert!(!r.matches(&sv("1.0.0")));
+    }
+
+    #[test]
+    fn version_req_tilde() {
+        let r = VersionReq::parse("~1.2.3").unwrap();
+        assert!(r.matches(&sv("1.2.9")));
+        assert!(!r.matches(&sv("1.3.0")));
+        assert!(!r.matches(&sv("1.2.2")));
+        let r2 = VersionReq::parse("~1").unwrap();
+        assert!(r2.matches(&sv("1.9.9")));
+        assert!(!r2.matches(&sv("2.0.0")));
+    }
+
+    #[test]
+    fn version_req_x_ranges() {
+        let r = VersionReq::parse("1.2.x").unwrap();
+        assert!(r.matches(&sv("1.2.0")));
+        assert!(r.matches(&sv("1.2.99")));
+        assert!(!r.matches(&sv("1.3.0")));
+        let r2 = VersionReq::parse("1").unwrap();
+        assert!(r2.matches(&sv("1.9.9")));
+        assert!(!r2.matches(&sv("2.0.0")));
+    }
+
+    #[test]
+    fn version_req_hyphen_and_or() {
+        let r = VersionReq::parse("1.2.3 - 2.3.4").unwrap();
+        assert!(r.matches(&sv("1.2.3")));
+        assert!(r.matches(&sv("2.3.4")));
+        assert!(!r.matches(&sv("2.3.5")));
+        // Partial high bound: `1.2.3 - 2.3` → <2.4.0.
+        let r2 = VersionReq::parse("1.2.3 - 2.3").unwrap();
+        assert!(r2.matches(&sv("2.3.9")));
+        assert!(!r2.matches(&sv("2.4.0")));
+        // OR.
+        let r3 = VersionReq::parse("^1.0.0 || ^3.0.0").unwrap();
+        assert!(r3.matches(&sv("1.5.0")));
+        assert!(r3.matches(&sv("3.2.0")));
+        assert!(!r3.matches(&sv("2.0.0")));
+    }
+
+    #[test]
+    fn version_req_prerelease_rule() {
+        // `*` and bare ranges do not match pre-releases…
+        assert!(!VersionReq::parse(">=1.0.0").unwrap().matches(&sv("2.0.0-alpha")));
+        // …unless a comparator names the same tuple with a pre-release.
+        assert!(VersionReq::parse(">=1.2.3-alpha").unwrap().matches(&sv("1.2.3-beta")));
+        assert!(!VersionReq::parse(">=1.2.3-alpha").unwrap().matches(&sv("1.2.4-beta")));
+    }
+
+    #[test]
+    fn version_req_caret_zero() {
+        // ^0.2.3 → >=0.2.3 <0.3.0
+        let r = VersionReq::parse("^0.2.3").unwrap();
+        assert!(r.matches(&sv("0.2.9")));
+        assert!(!r.matches(&sv("0.3.0")));
+        // ^0.0.3 → >=0.0.3 <0.0.4
+        let r2 = VersionReq::parse("^0.0.3").unwrap();
+        assert!(r2.matches(&sv("0.0.3")));
+        assert!(!r2.matches(&sv("0.0.4")));
+    }
+
     #[test]
     fn conflict_detection_disjoint_majors() {
         let constraints = vec![
