@@ -105,6 +105,21 @@ and emit directly; only executable bodies go through the TIR.)
   core helpers that a checked program can call, and codegen emits only those
   helper templates. A program that imports every core module but calls none
   should stay in hello-world size territory.
+- **R11 — Generated code re-enters the front end.** Every build-time
+  code-generation step — a derive body, a comptime splice, any future
+  metaprogram — emits a **typed source fragment** that re-enters
+  lexer→parser→sema exactly like hand-written code. **No generation path may
+  inject pre-parsed AST past the sema gatekeeper** (R2). The guarantee that
+  buys: generated code is trustworthy-by-construction (R1 codegen-dumb, R2
+  sema-gatekeeper, R5/I2 rustc-never-speaks all keep holding through
+  generation), and any error in generated output surfaces as a **real sema
+  diagnostic pinned to the user's trigger site** — the struct, field, or
+  derive marker that caused it — with the generated fragment shown only as
+  optional context, never as raw rustc output. The shipped `#[Codable]` derive
+  already works this way; it is the required shape for all future derives and
+  build-time steps (S56 user derives, comptime). (D-CTCODEGEN1=A, ratified
+  2026-06-25; pairs with D-METADERIVE1=A, which makes a user derive's output a
+  source fragment for exactly this reason.)
 
 ## Exit codes (stable contract)
 
