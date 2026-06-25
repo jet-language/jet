@@ -529,6 +529,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     is_sanitizer: false,
                     declared_effects: None,
         effect_via: None,
+        state_requires: None,
+        state_transition: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body(
@@ -594,6 +596,14 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     let mut sanitizers: HashSet<String> = HashSet::new();
     collect_sanitizers(&prog.items, &mut sanitizers);
     check_program_taint(&prog.items, &sanitizers, &single_core_imports, &mut diags);
+
+    // D-STATE1: typestate — a value's state is threaded through each body; calling
+    // a `#State(S)`/`#Transition(From -> _)` operation in the wrong state is E0150.
+    // Static, erased in codegen (I3).
+    let state_tbl = crate::Sema::StateTable::build(&prog.items);
+    if !state_tbl.is_empty() {
+        crate::Sema::check_items_state(&prog.items, &state_tbl, &mut diags);
+    }
 
     diags
 }
@@ -1431,6 +1441,8 @@ pub(crate) fn check_error_conv_body(
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
+        state_requires: None,
+        state_transition: None,
         body: std::mem::take(&mut ec.body),
     };
     let d = check_func_body(
@@ -1718,6 +1730,8 @@ pub(crate) fn synthesize_delegation_method(
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
+        state_requires: None,
+        state_transition: None,
         body: vec![body_stmt],
     }
 }
@@ -1755,6 +1769,8 @@ pub(crate) fn synthesize_default_method(
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
+        state_requires: None,
+        state_transition: None,
         body: body.to_vec(),
     }
 }

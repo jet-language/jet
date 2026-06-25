@@ -615,6 +615,31 @@ pub const KW_TAINTED: &str = "Tainted";
 /// `#Sanitizer fn` the consistent default — a spelling fork queued as D-TAINT-SAN.
 pub const KW_SANITIZER: &str = "Sanitizer";
 
+/// D-STATE1 (ratified 2026-06-22, option A): the typestate **require-state** fn
+/// modifier — `#State(Confirmed) fn check_in(self, …)`. Declares the method valid
+/// only when its receiver is currently in state `Confirmed`. Calling it on a value
+/// in any other state is E0150. The state is an ordinary `tag` (D-QUAL2); the
+/// current state of a value is a compile-time fact threaded by forward dataflow,
+/// erased in codegen (I3 — zero runtime cost). A paren-arg fn marker, parallel to
+/// `#layout(c)` / `#UnitFamily(currency)`. The exact spelling is the implemented
+/// default queued for owner confirmation as D-STATE-REQ.
+pub const KW_STATE: &str = "State";
+
+/// D-STATE1 (ratified 2026-06-22, option A): the typestate **transition** fn
+/// modifier — `#Transition(Pending -> Confirmed) fn confirm(self) -> Reservation`.
+/// Declares a function that consumes a value in state `Pending` and yields one in
+/// state `Confirmed` (the ratified mechanism: "a fn takes the old state tag and
+/// returns the next"). The from-state may be `_` for an **entry** transition (a
+/// constructor that produces the initial state from nothing). Wrong from-state at a
+/// call site is E0150; the call advances the receiver/result to the to-state. The
+/// `->` inside reuses the return arrow. Tags erase (I3). Implemented default queued
+/// for owner confirmation as D-STATE-TRANS.
+pub const KW_TRANSITION: &str = "Transition";
+
+/// D-STATE1: the entry-transition placeholder — `#Transition(_ -> Pending)` means
+/// "from no prior state". Reuses the existing `_` wildcard glyph.
+pub const STATE_ENTRY: &str = "_";
+
 /// D-EFF1 / D-QUAL1 (ratified 2026-06-22): the effect-restriction region marker,
 /// written `#Caps(Net, Db) { … }`. Inside the block, the body (and everything it
 /// transitively calls) may use only the listed effects; an out-of-set effect is
@@ -1217,6 +1242,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TEST, KW_BENCH, KW_PURE, KW_TODO,
     // Taint tracking (D-TAINT1): value-fact tag + sanitizer modifier
     KW_TAINTED, KW_SANITIZER,
+    // Typestate (D-STATE1): require-state + transition fn modifiers
+    KW_STATE, KW_TRANSITION,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
     LIT_TRUE, LIT_FALSE, LIT_NULL, LIT_OK, LIT_ERR, KW_IT,
     // Binding sigils (SIGIL_BIND_IMMUT / SIGIL_BIND_MUT) are not words; omitted.

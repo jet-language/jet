@@ -161,6 +161,7 @@ before continuing.
 | E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |
 | E0141 | sema  | `#SingleUse` value consumed on only one `if` branch (D-LIN1) |
 | E0142 | sema  | `#SingleUse` value lent/shared instead of moved (D-LIN1) |
+| E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`~`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |
@@ -703,6 +704,34 @@ Error [E0731]: `Reviewed` is a tag, but `derive` needs a trait
     |            ^^^^^^^^
  Why: a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`
  Fix: declare `Reviewed` as a `trait` with the method(s) it should provide
+```
+
+## Typestate diagnostics (D-STATE1)
+
+A value moves through named **states** (each an ordinary `tag`). An operation
+declares the state it needs with `#State(S)` and the state it leaves the value in
+with `#Transition(From -> To)` — the ratified mechanism: *a fn takes the old state
+tag and returns the next.* Calling an operation on a value in the wrong state is
+**E0150**, caught at compile time. States are compile-time facts threaded through
+each function; they **erase in codegen** (zero runtime cost). When the checker
+cannot follow a value's state precisely (it escapes into a field, a non-local
+receiver, a state-divergent branch join) it stays silent rather than risk a false
+error on correct code.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
+
+`check_in` requires a `Confirmed` reservation, but the value is still `Pending`:
+
+```
+Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is in state `Pending`
+  --> reservation.jet:29:11
+    |
+ 29 |     r = r.check_in()
+    |           ^^^^^^^^
+ Why: typestate (D-STATE1): `check_in` is only valid in state `Confirmed`; calling it in `Pending` is the out-of-order-events bug it prevents
+ Fix: transition it first: call `pay` to reach `Confirmed`
 ```
 
 ## C FFI diagnostics (E2-M14, S59)

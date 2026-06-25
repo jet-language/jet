@@ -910,6 +910,19 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         }
     }
 
+    // D-STATE1: typestate across the whole bundle. The transition/require table is
+    // built program-wide (a transition declared in one module gates a call in
+    // another), then each module's bodies are checked. Erased in codegen (I3).
+    let mut state_tbl = crate::Sema::StateTable::default();
+    for module in &bundle.modules {
+        state_tbl.add_items(&module.items);
+    }
+    if !state_tbl.is_empty() {
+        for module in &bundle.modules {
+            crate::Sema::check_items_state(&module.items, &state_tbl, &mut diags);
+        }
+    }
+
     bundle.used_core = collect_used_core(bundle, &states);
     diags
 }
@@ -1414,6 +1427,8 @@ pub(crate) fn check_module_bodies(
                     is_sanitizer: false,
                     declared_effects: None,
         effect_via: None,
+        state_requires: None,
+        state_transition: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1447,6 +1462,8 @@ pub(crate) fn check_module_bodies(
                     is_sanitizer: false,
                     declared_effects: None,
         effect_via: None,
+        state_requires: None,
+        state_transition: None,
                     body: std::mem::take(&mut b.body),
                 };
                 diags.extend(check_func_body_bundle(

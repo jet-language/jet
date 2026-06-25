@@ -318,6 +318,17 @@ impl<'a> Fmt<'a> {
         if f.is_sanitizer {
             self.write(&format!("#{} ", Syntax::KW_SANITIZER));
         }
+        // D-STATE1: typestate markers precede `pub`/`fn`. `#State(S)` is the
+        // require-state guard; `#Transition(From -> To)` is the transition (the
+        // from-state is `_` for an entry transition). Round-tripped verbatim so
+        // `jet fmt` never drops a typestate contract.
+        if let Some((state, _)) = &f.state_requires {
+            self.write(&format!("#{}({}) ", Syntax::KW_STATE, state));
+        }
+        if let Some(tr) = &f.state_transition {
+            let from = tr.from.as_deref().unwrap_or(Syntax::STATE_ENTRY);
+            self.write(&format!("#{}({} -> {}) ", Syntax::KW_TRANSITION, from, tr.to));
+        }
         if top_level {
             self.fmt_pub(f.is_pub);
         } else if f.is_pub {

@@ -1,0 +1,30 @@
+// D-STATE1: calling a typestate operation in the wrong state is E0150. Here
+// `check_in` requires a `Confirmed` reservation, but `r` is still `Pending`
+// (payment was skipped) — the order-of-events bug typestate prevents.
+tag Pending {}
+tag Confirmed {}
+tag CheckedIn {}
+
+struct Reservation {
+    guest: String,
+}
+
+impl Reservation {
+    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+        return Reservation { guest: guest }
+    }
+
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+        return self
+    }
+
+    #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
+        return self
+    }
+}
+
+fn main() {
+    r := Reservation.book("Ada")
+    // BUG: skipped `pay()` — `r` is still `Pending`, not `Confirmed`.
+    r = r.check_in()
+}

@@ -604,6 +604,7 @@ mod Capability;
 mod Purity;
 mod Effects;
 mod Taint;
+mod State;
 mod SchemaMigration;
 pub mod HotSwap;
 
@@ -616,6 +617,8 @@ pub(crate) use Captures::*;
 pub(crate) use Purity::*;
 pub(crate) use Effects::*;
 pub(crate) use Taint::{check_func_taint, collect_sanitizers};
+// D-STATE1: typestate pass — wrong-state operation (E0150).
+pub(crate) use State::{check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
 // `e0140_unconsumed` is referenced only within that module; the other two fire
 // from CheckerCore (E0141) and CheckerInfer (E0142).

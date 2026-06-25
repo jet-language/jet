@@ -1,0 +1,596 @@
+//! Typestate (D-STATE1, option A).
+//!
+//! A value moves through an ordered set of *states*, each an ordinary `tag`
+//! (D-QUAL2). Operations declare the state they need and the state they leave the
+//! value in, via two fn markers:
+//!
+//!   - `#State(S) fn m(self, …)` — a **require-state** guard: `m` is valid only
+//!     when its receiver is currently in state `S`. Calling it in any other state
+//!     is **E0150**. The state is unchanged by the call.
+//!   - `#Transition(From -> To) fn m(self, …) -> T` — a **transition**: it consumes
+//!     a value in state `From` and yields one in state `To`. A call requires the
+//!     receiver be in `From` (E0150 otherwise) and **advances** it to `To`. The
+//!     from-state may be `_` (an *entry* transition: a constructor that produces the
+//!     initial state from nothing — e.g. `#Transition(_ -> Pending) fn new() -> R`).
+//!
+//! This is the ratified mechanism verbatim: "a fn takes the old state tag and
+//! returns the next; wrong-state call = E0150; tags erase." The current state of a
+//! value is a **compile-time fact** threaded by intraprocedural forward dataflow
+//! over locals (same shape as `Taint.rs`), keyed on a binding being a plain local.
+//! Nothing about the state reaches codegen — the markers erase (I3, zero runtime
+//! cost). When a value's state cannot be tracked precisely (it escapes into a field,
+//! a non-local receiver, a loop-carried position), the checker is **silent** rather
+//! than guessing: a missed guard is a soundness gap deferred to the fuller analysis,
+//! never a false E0150 on correct code (P1 — beginners never see a spurious error).
+//!
+//! The state-machine **set** is derived from the markers themselves (D-STATE-DECL
+//! option A): there is no separate `states { … }` declaration in v1.
+
+use crate::AST::{
+    Call, ElseBranch, Expr, Func, IfStmt, Item, LValue, Stmt,
+};
+use crate::Diagnostics::{Diagnostic, Span};
+use std::collections::HashMap;
+
+/// Program-wide typestate metadata, collected once before any body is walked.
+#[derive(Default)]
+pub struct StateTable {
+    /// `Type::method` → required state (`#State(S)`). The receiver must be in this
+    /// state at the call.
+    requires: HashMap<String, String>,
+    /// `Type::method` → (from-state, to-state) for a `#Transition(From -> To)`.
+    /// `from` is `None` for an entry transition.
+    transitions: HashMap<String, (Option<String>, String)>,
+    /// Free-function name → required state / transition (typestate on a free fn
+    /// whose first parameter is the tracked value).
+    fn_requires: HashMap<String, String>,
+    fn_transitions: HashMap<String, (Option<String>, String)>,
+    /// Type name → the to-state of its entry transition(s) keyed by the producing
+    /// method name (`Type::method` → to-state). Lets a binding `r := Type.ctor()`
+    /// seed `r`'s initial state.
+    entry_ctors: HashMap<String, String>,
+}
+
+impl StateTable {
+    /// Build the table from a program's items.
+    pub fn build(items: &[Item]) -> Self {
+        let mut t = StateTable::default();
+        t.add_items(items);
+        t
+    }
+
+    /// Register every typestate marker in `items` into this table. Methods key as
+    /// `Type::method`; entry transitions (`_ -> To`) also register under
+    /// `entry_ctors` so a constructor call can seed a local's initial state.
+    /// Idempotent across modules — call once per module for a bundle.
+    pub fn add_items(&mut self, items: &[Item]) {
+        for item in items {
+            match item {
+                Item::Func(f) => self.add_free_fn(f),
+                Item::Impl(i) => {
+                    for m in &i.methods {
+                        self.add_method(&i.type_name, m);
+                    }
+                }
+                Item::Struct(s) => {
+                    for m in &s.methods {
+                        self.add_method(&s.name, m);
+                    }
+                    for block in &s.trait_impls {
+                        for m in &block.methods {
+                            self.add_method(&s.name, m);
+                        }
+                    }
+                }
+                Item::Enum(e) => {
+                    for m in &e.methods {
+                        self.add_method(&e.name, m);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn add_method(&mut self, type_name: &str, m: &Func) {
+        let key = format!("{type_name}::{}", m.name);
+        if let Some((state, _)) = &m.state_requires {
+            self.requires.insert(key.clone(), state.clone());
+        }
+        if let Some(tr) = &m.state_transition {
+            self.transitions
+                .insert(key, (tr.from.clone(), tr.to.clone()));
+            if tr.from.is_none() {
+                self.entry_ctors
+                    .insert(format!("{type_name}::{}", m.name), tr.to.clone());
+            }
+        }
+    }
+
+    fn add_free_fn(&mut self, f: &Func) {
+        if let Some((state, _)) = &f.state_requires {
+            self.fn_requires.insert(f.name.clone(), state.clone());
+        }
+        if let Some(tr) = &f.state_transition {
+            self.fn_transitions
+                .insert(f.name.clone(), (tr.from.clone(), tr.to.clone()));
+        }
+    }
+
+    /// True when the program declares no typestate at all — lets the caller skip
+    /// the per-body walk entirely.
+    pub fn is_empty(&self) -> bool {
+        self.requires.is_empty()
+            && self.transitions.is_empty()
+            && self.fn_requires.is_empty()
+            && self.fn_transitions.is_empty()
+    }
+}
+
+/// Per-function typestate analyzer. Tracks each tracked local's current state.
+struct StateCtx<'a> {
+    tbl: &'a StateTable,
+    /// local name → current state tag.
+    states: HashMap<String, String>,
+    diags: Vec<Diagnostic>,
+}
+
+impl<'a> StateCtx<'a> {
+    fn new(tbl: &'a StateTable) -> Self {
+        StateCtx { tbl, states: HashMap::new(), diags: Vec::new() }
+    }
+
+    /// If `init` is a constructor call to an entry transition (`Type.ctor()`),
+    /// return the to-state the produced value starts in.
+    fn entry_state_of(&self, init: &Expr) -> Option<String> {
+        match init {
+            // `Type.ctor(…)` parses as a MethodCall with receiver `Ident(Type)`.
+            Expr::MethodCall { receiver, method, .. } => {
+                if let Expr::Ident(type_name, _) = receiver.as_ref() {
+                    let key = format!("{type_name}::{method}");
+                    return self.tbl.entry_ctors.get(&key).cloned();
+                }
+                None
+            }
+            // A free-function entry transition (`from = None`).
+            Expr::Call(Call { name, .. }) => match self.tbl.fn_transitions.get(name) {
+                Some((None, to)) => Some(to.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn check_block(&mut self, stmts: &[Stmt]) {
+        for s in stmts {
+            self.check_stmt(s);
+        }
+    }
+
+    fn check_stmt(&mut self, s: &Stmt) {
+        match s {
+            Stmt::Expr(e) => {
+                self.check_expr(e);
+            }
+            Stmt::Val(b) => {
+                self.check_expr(&b.init);
+                // A binding may rebind from a transition call: `r := r.confirm()`
+                // gives `r` the call's to-state. Otherwise seed from an entry ctor.
+                if !b.name.is_empty() {
+                    if let Some(to) = self.result_state_of(&b.init) {
+                        self.states.insert(b.name.clone(), to);
+                    } else if let Some(to) = self.entry_state_of(&b.init) {
+                        self.states.insert(b.name.clone(), to);
+                    } else {
+                        // The binding takes on the state of the local it aliases, if
+                        // any (`s := r`), else becomes untracked.
+                        if let Expr::Ident(src, _) = &b.init {
+                            if let Some(st) = self.states.get(src).cloned() {
+                                self.states.insert(b.name.clone(), st);
+                            } else {
+                                self.states.remove(&b.name);
+                            }
+                        } else {
+                            self.states.remove(&b.name);
+                        }
+                    }
+                }
+            }
+            Stmt::Assign { target, value, op, .. } => {
+                self.check_expr(value);
+                if op.is_none() {
+                    if let LValue::Local { name, .. } = target {
+                        if let Some(to) = self
+                            .result_state_of(value)
+                            .or_else(|| self.entry_state_of(value))
+                        {
+                            self.states.insert(name.clone(), to);
+                        } else {
+                            self.states.remove(name);
+                        }
+                    }
+                }
+            }
+            Stmt::Return(Some(e), _) => self.check_expr(e),
+            Stmt::Return(None, _) => {}
+            Stmt::If(ifs) => self.check_if(ifs),
+            Stmt::While { cond, body, .. } => {
+                self.check_expr(cond);
+                self.check_block(body);
+            }
+            Stmt::For { kind, body, .. } => {
+                if let crate::AST::ForKind::Range { start, end, step } = kind {
+                    self.check_expr(start);
+                    self.check_expr(end);
+                    if let Some(s) = step {
+                        self.check_expr(s);
+                    }
+                } else if let crate::AST::ForKind::In { collection } = kind {
+                    self.check_expr(collection);
+                }
+                self.check_block(body);
+            }
+            Stmt::Switch { subject, arms, else_body, .. } => {
+                self.check_expr(subject);
+                for a in arms {
+                    self.check_expr(&a.cond);
+                    self.check_block(&a.body);
+                }
+                if let Some(b) = else_body {
+                    self.check_block(b);
+                }
+            }
+            Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Live { body, .. } => self.check_block(body),
+            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+                self.check_expr(cond);
+                self.check_block(then_body);
+                if let Some(b) = else_body {
+                    self.check_block(b);
+                }
+            }
+            Stmt::ContextBlock { fields, body, .. } => {
+                for (_, e, _) in fields {
+                    self.check_expr(e);
+                }
+                self.check_block(body);
+            }
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::BreakLabel(..)
+            | Stmt::ContinueLabel(..) => {}
+        }
+    }
+
+    fn check_if(&mut self, ifs: &IfStmt) {
+        self.check_expr(&ifs.cond);
+        // Branches are checked against the state at the `if`; transitions inside a
+        // branch do not leak out (conservative — a value whose state diverges across
+        // arms becomes untracked at the join, handled by `join_after`).
+        let before = self.states.clone();
+        self.check_block(&ifs.then_body);
+        let after_then = std::mem::replace(&mut self.states, before.clone());
+        if let Some(e) = &ifs.else_branch {
+            self.check_else(e);
+        }
+        let after_else = std::mem::take(&mut self.states);
+        self.states = join_after(before, after_then, after_else);
+    }
+
+    fn check_else(&mut self, e: &ElseBranch) {
+        match e {
+            ElseBranch::Else(stmts) => self.check_block(stmts),
+            ElseBranch::ElseIf(ifs) => self.check_if(ifs),
+        }
+    }
+
+    /// The to-state a call expression leaves its receiver/result in, if it is a
+    /// tracked transition. Used to thread `r := r.confirm()` rebinding.
+    fn result_state_of(&self, e: &Expr) -> Option<String> {
+        match e {
+            Expr::MethodCall { receiver, method, recv_type, .. } => {
+                let ty = recv_type.as_ref()?;
+                let key = format!("{ty}::{method}");
+                let (_, to) = self.tbl.transitions.get(&key)?;
+                // Only meaningful when the receiver is a tracked local.
+                if let Expr::Ident(_, _) = receiver.as_ref() {
+                    Some(to.clone())
+                } else {
+                    None
+                }
+            }
+            Expr::Call(Call { name, args, .. }) => {
+                let (_, to) = self.tbl.fn_transitions.get(name)?;
+                // The first argument is the tracked value.
+                if let Some(first) = args.first() {
+                    if let Expr::Ident(_, _) = &first.expr {
+                        return Some(to.clone());
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Walk an expression for typestate violations and apply in-place transitions
+    /// (a transition call in expression-statement position advances the receiver).
+    fn check_expr(&mut self, e: &Expr) {
+        match e {
+            Expr::MethodCall { receiver, method, method_span, recv_type, args, .. } => {
+                self.check_expr(receiver);
+                for a in args {
+                    self.check_expr(&a.expr);
+                }
+                let Some(ty) = recv_type else { return };
+                let Expr::Ident(local, _) = receiver.as_ref() else { return };
+                let key = format!("{ty}::{method}");
+                let cur = self.states.get(local).cloned();
+                // A require-state guard: receiver must currently be in `req`.
+                if let Some(req) = self.tbl.requires.get(&key) {
+                    self.check_state(local, cur.as_deref(), req, ty, method, *method_span);
+                }
+                // A transition: require `from` (unless entry), then advance to `to`.
+                if let Some((from, to)) = self.tbl.transitions.get(&key) {
+                    if let Some(req) = from {
+                        self.check_state(local, cur.as_deref(), req, ty, method, *method_span);
+                    }
+                    self.states.insert(local.clone(), to.clone());
+                }
+            }
+            Expr::Call(Call { name, args, .. }) => {
+                for a in args {
+                    self.check_expr(&a.expr);
+                }
+                // Free-fn typestate operates on its first argument when it is a local.
+                let first_local = args.first().and_then(|a| match &a.expr {
+                    Expr::Ident(n, _) => Some(n.clone()),
+                    _ => None,
+                });
+                let Some(local) = first_local else { return };
+                let span = args.first().map(|a| a.expr.span()).unwrap_or(Span::new(0, 0));
+                let cur = self.states.get(&local).cloned();
+                if let Some(req) = self.tbl.fn_requires.get(name) {
+                    self.check_state(&local, cur.as_deref(), req, name, name, span);
+                }
+                if let Some((from, to)) = self.tbl.fn_transitions.get(name) {
+                    if let Some(req) = from {
+                        self.check_state(&local, cur.as_deref(), req, name, name, span);
+                    }
+                    self.states.insert(local, to.clone());
+                }
+            }
+            Expr::Tainted(inner, _)
+            | Expr::Unary(_, inner, _)
+            | Expr::Deref(inner, _)
+            | Expr::RawOf(inner, _)
+            | Expr::Field(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Try(inner, _, _) => self.check_expr(inner),
+            Expr::Binary(_, l, r, _) => {
+                self.check_expr(l);
+                self.check_expr(r);
+            }
+            Expr::CallValue { callee, args, .. } => {
+                self.check_expr(callee);
+                for a in args {
+                    self.check_expr(&a.expr);
+                }
+            }
+            Expr::OptField { base, .. } => self.check_expr(base),
+            Expr::Index { base, index, .. } => {
+                self.check_expr(base);
+                self.check_expr(index);
+            }
+            Expr::Slice { base, start, end, .. } => {
+                self.check_expr(base);
+                self.check_expr(start);
+                self.check_expr(end);
+            }
+            Expr::ListLit(elems, _) => elems.iter().for_each(|el| self.check_expr(el)),
+            Expr::MapLit(entries, _) => entries.iter().for_each(|(k, v)| {
+                self.check_expr(k);
+                self.check_expr(v);
+            }),
+            Expr::TupleLit(fields, _, _) => fields.iter().for_each(|(_, e)| self.check_expr(e)),
+            Expr::StructLit { fields, .. } => {
+                fields.iter().for_each(|(_, _, f)| self.check_expr(f))
+            }
+            Expr::EnumLit { args, .. } => args.iter().for_each(|a| match a {
+                crate::AST::EnumLitArg::Positional(e) => self.check_expr(e),
+                crate::AST::EnumLitArg::Named { expr, .. } => self.check_expr(expr),
+            }),
+            Expr::Str(parts, _) => parts.iter().for_each(|p| {
+                if let crate::AST::StrPart::Interp(e) = p {
+                    self.check_expr(e);
+                }
+            }),
+            Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+                self.check_expr(cond);
+                self.check_block(then_body);
+                self.check_expr(then_value);
+                self.check_block(else_body);
+                self.check_expr(else_value);
+            }
+            Expr::FanOut { items, callee, .. } => {
+                self.check_expr(callee);
+                items.iter().for_each(|e| self.check_expr(e));
+            }
+            Expr::PatternTest { subject, .. } => self.check_expr(subject),
+            Expr::PtrFromAddr { addr, .. } => self.check_expr(addr),
+            Expr::OrFallback { value, fallback, .. } => {
+                self.check_expr(value);
+                match fallback {
+                    crate::AST::OrFallback::Value(e) => self.check_expr(e),
+                    crate::AST::OrFallback::Return(Some(e), _) => self.check_expr(e),
+                    _ => {}
+                }
+            }
+            // Leaves and forms with no tracked sub-expression.
+            Expr::Ident(..)
+            | Expr::Int(..)
+            | Expr::Float(..)
+            | Expr::Bool(..)
+            | Expr::Char(..)
+            | Expr::Absent(_)
+            | Expr::Todo { .. }
+            | Expr::Lambda(_) => {}
+        }
+    }
+
+    /// Emit E0150 if the value's current state is known and differs from the
+    /// required state. When the state is unknown (untracked value), stay silent —
+    /// no false positive on code the dataflow can't follow.
+    fn check_state(
+        &mut self,
+        local: &str,
+        cur: Option<&str>,
+        required: &str,
+        owner: &str,
+        op: &str,
+        span: Span,
+    ) {
+        if let Some(cur) = cur {
+            if cur != required {
+                self.diags
+                    .push(e0150(local, owner, op, required, cur, &self.transition_hint(owner, required), span));
+            }
+        }
+    }
+
+    /// Find a transition whose to-state is `required` on the same owner, to name in
+    /// the fix-it ("call `<fn>` to reach `<state>`"). Returns the op name or "".
+    fn transition_hint(&self, owner: &str, required: &str) -> String {
+        // Method transitions: keys are `Owner::method`.
+        for (key, (_, to)) in &self.tbl.transitions {
+            if to == required {
+                if let Some((ty, m)) = key.split_once("::") {
+                    if ty == owner {
+                        return m.to_string();
+                    }
+                }
+            }
+        }
+        for (name, (_, to)) in &self.tbl.fn_transitions {
+            if to == required {
+                return name.clone();
+            }
+        }
+        String::new()
+    }
+}
+
+/// Join two branch state-maps back into one: a local keeps its state only when both
+/// branches agree (and it had one before, or both produced the same). Disagreement →
+/// untracked (no spurious guard error after a state-divergent `if`).
+fn join_after(
+    before: HashMap<String, String>,
+    then_s: HashMap<String, String>,
+    else_s: HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for (k, v) in &then_s {
+        if else_s.get(k) == Some(v) {
+            out.insert(k.clone(), v.clone());
+        }
+    }
+    // Keep pre-branch states for locals untouched by either branch.
+    for (k, v) in before {
+        if then_s.get(&k) == Some(&v) && else_s.get(&k) == Some(&v) {
+            out.insert(k, v);
+        }
+    }
+    out
+}
+
+/// Run the typestate pass over one function body. The receiver's incoming state is
+/// seeded from a `#State(S)`/`#Transition(S -> _)` marker on `self` so a method body
+/// that itself transitions starts from the declared state.
+pub fn check_func_state(f: &Func, tbl: &StateTable) -> Vec<Diagnostic> {
+    let mut ctx = StateCtx::new(tbl);
+    // Seed `self`'s incoming state from this function's own typestate marker so a
+    // chain of self-transitions inside one body checks correctly.
+    if f.self_param().is_some() {
+        let incoming = f
+            .state_requires
+            .as_ref()
+            .map(|(s, _)| s.clone())
+            .or_else(|| f.state_transition.as_ref().and_then(|t| t.from.clone()));
+        if let Some(s) = incoming {
+            ctx.states.insert(crate::Syntax::KW_SELF.to_string(), s);
+        }
+    }
+    ctx.check_block(&f.body);
+    ctx.diags
+}
+
+/// Run the typestate pass over every function/method body in a set of items.
+pub fn check_items_state(items: &[Item], tbl: &StateTable, diags: &mut Vec<Diagnostic>) {
+    for item in items {
+        match item {
+            Item::Func(f) => diags.extend(check_func_state(f, tbl)),
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    diags.extend(check_func_state(m, tbl));
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    diags.extend(check_func_state(m, tbl));
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        diags.extend(check_func_state(m, tbl));
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    diags.extend(check_func_state(m, tbl));
+                }
+            }
+            Item::Test(t) => diags.extend({
+                let mut ctx = StateCtx::new(tbl);
+                ctx.check_block(&t.body);
+                ctx.diags
+            }),
+            _ => {}
+        }
+    }
+}
+
+/// E0150 (D-STATE1): a typestate operation is called on a value in the wrong state.
+/// Names the operation, both states, and the transition that reaches the required
+/// state.
+pub fn e0150(
+    local: &str,
+    owner: &str,
+    op: &str,
+    required: &str,
+    current: &str,
+    transition: &str,
+    span: Span,
+) -> Diagnostic {
+    let fix = if transition.is_empty() {
+        format!("transition `{local}` into state `{required}` before calling `{op}`")
+    } else {
+        format!("transition it first: call `{transition}` to reach `{required}`")
+    };
+    Diagnostic::error(
+        "E0150",
+        format!("`{op}` needs `{owner}` in state `{required}`, but `{local}` is in state `{current}`"),
+        format!(
+            "typestate (D-STATE1): `{op}` is only valid in state `{required}`; calling it in `{current}` is the out-of-order-events bug it prevents"
+        ),
+        fix,
+        Some(span),
+    )
+}

@@ -290,6 +290,11 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
                 // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
                 TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
+                // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` typestate
+                // markers on a free function.
+                TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
+                    self.func().map(Item::Func)
+                }
                 // S14: bare lowercase `pure` is the retired spelling (E0053).
                 TokKind::Ident(n) if n == Syntax::FOREIGN_PURE && self.foreign_pure_follows() => {
                     let t = self.bump();
@@ -479,7 +484,7 @@ impl<'a> Parser<'a> {
                         format!("replace `{}` with `{}`", foreign, Syntax::KW_FN),
                         Some(t.span),
                     ));
-                    self.func_after_fn(false, false, false, false).map(Item::Func)
+                    self.func_after_fn(false, false, false, false, None, None).map(Item::Func)
                 }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_IMPORT => {
                     let t = self.bump();
@@ -626,6 +631,22 @@ impl<'a> Parser<'a> {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SANITIZER)
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// D-STATE1: true when the cursor is at `#State(…)` (a require-state fn marker).
+    /// Token stream: `# State (`.
+    pub(super) fn at_state_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE)
+            && matches!(self.peek3().kind, TokKind::LParen)
+    }
+
+    /// D-STATE1: true when the cursor is at `#Transition(…)` (a transition fn marker).
+    /// Token stream: `# Transition (`.
+    pub(super) fn at_transition_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSITION)
+            && matches!(self.peek3().kind, TokKind::LParen)
     }
 
     /// S14: bare lowercase `pure` introduces a function only when `fn`/`pub`
@@ -844,7 +865,7 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
-        self.func_after_fn(is_pub, true, false, false)
+        self.func_after_fn(is_pub, true, false, false, None, None)
     }
 
     /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#extern
@@ -1056,7 +1077,53 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
-        self.func_with_modifiers(is_pure, is_sanitizer)
+        // D-STATE1: `#State(S) fn …` / `#Transition(From -> To) fn …` typestate
+        // markers. Each appears at most once before `fn`; either may precede the
+        // (already-consumed) `#Pure`/`#Sanitizer` slots or follow them.
+        let mut state_requires = None;
+        let mut state_transition = None;
+        loop {
+            if state_requires.is_none() && self.at_state_fn() {
+                state_requires = Some(self.parse_state_require_marker()?);
+            } else if state_transition.is_none() && self.at_transition_fn() {
+                state_transition = Some(self.parse_transition_marker()?);
+            } else {
+                break;
+            }
+        }
+        self.func_with_modifiers_full(is_pure, is_sanitizer, state_requires, state_transition)
+    }
+
+    /// D-STATE1: parse `#State(StateName)` and return `(name, marker_span)`.
+    fn parse_state_require_marker(&mut self) -> Result<(String, Span), Diagnostic> {
+        let start = self.bump().span.start; // `#`
+        self.bump(); // `State`
+        self.expect(TokKind::LParen, "after `#State`")?;
+        let (name, _) = self.expect_ident("the required state inside `#State(…)`")?;
+        let end = self.peek().span.end;
+        self.expect(TokKind::RParen, "to close `#State(…)`")?;
+        Ok((name, Span::new(start, end)))
+    }
+
+    /// D-STATE1: parse `#Transition(From -> To)`. `From` may be the wildcard `_`
+    /// (an entry transition → `from = None`).
+    fn parse_transition_marker(&mut self) -> Result<crate::AST::StateTransition, Diagnostic> {
+        let start = self.bump().span.start; // `#`
+        self.bump(); // `Transition`
+        self.expect(TokKind::LParen, "after `#Transition`")?;
+        // From-state: `_` (entry) or a state-tag ident.
+        let from = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::STATE_ENTRY) {
+            self.bump();
+            None
+        } else {
+            let (n, _) = self.expect_ident("the from-state inside `#Transition(…)`")?;
+            Some(n)
+        };
+        self.expect(TokKind::Arrow, "between the from- and to-state in `#Transition(From -> To)`")?;
+        let (to, _) = self.expect_ident("the to-state inside `#Transition(…)`")?;
+        let end = self.peek().span.end;
+        self.expect(TokKind::RParen, "to close `#Transition(…)`")?;
+        Ok(crate::AST::StateTransition { from, to, span: Span::new(start, end) })
     }
 
     /// Parse a function whose purity is already known (the bare-`pure` teaching
@@ -1071,15 +1138,35 @@ impl<'a> Parser<'a> {
         is_pure: bool,
         is_sanitizer: bool,
     ) -> Result<Func, Diagnostic> {
+        self.func_with_modifiers_full(is_pure, is_sanitizer, None, None)
+    }
+
+    /// Parse a function whose `#Pure`/`#Sanitizer` and D-STATE1 typestate markers
+    /// are already known.
+    pub(super) fn func_with_modifiers_full(
+        &mut self,
+        is_pure: bool,
+        is_sanitizer: bool,
+        state_requires: Option<(String, Span)>,
+        state_transition: Option<crate::AST::StateTransition>,
+    ) -> Result<Func, Diagnostic> {
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-        self.func_after_fn(is_pub, false, is_pure, is_sanitizer)
+        self.func_after_fn(is_pub, false, is_pure, is_sanitizer, state_requires, state_transition)
     }
 
-    fn func_after_fn(&mut self, is_pub: bool, is_unsafe: bool, is_pure: bool, is_sanitizer: bool) -> Result<Func, Diagnostic> {
+    fn func_after_fn(
+        &mut self,
+        is_pub: bool,
+        is_unsafe: bool,
+        is_pure: bool,
+        is_sanitizer: bool,
+        state_requires: Option<(String, Span)>,
+        state_transition: Option<crate::AST::StateTransition>,
+    ) -> Result<Func, Diagnostic> {
         let (name, name_span) = self.expect_ident("after `fn`")?;
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LParen, "after the function name")?;
@@ -1133,6 +1220,8 @@ impl<'a> Parser<'a> {
                 is_sanitizer,
                 declared_effects,
                 effect_via,
+                state_requires,
+                state_transition,
                 body,
             });
         }
@@ -1151,6 +1240,8 @@ impl<'a> Parser<'a> {
             is_sanitizer,
             declared_effects,
             effect_via,
+            state_requires,
+            state_transition,
             body,
         })
     }
@@ -1320,7 +1411,9 @@ impl<'a> Parser<'a> {
                     || (matches!(self.peek().kind, TokKind::KwPub)
                         && matches!(self.peek2().kind, TokKind::KwFn))
                     || self.at_pure_fn()
-                    || self.at_sanitizer_fn();
+                    || self.at_sanitizer_fn()
+                    || self.at_state_fn()
+                    || self.at_transition_fn();
                 if is_method {
                     methods.push(self.method_in_type()?);
                 } else {
@@ -1905,12 +1998,25 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
+        // D-STATE1: `#State(S)` / `#Transition(From -> To)` typestate markers on
+        // methods — the common case (typestate methods carry `self`).
+        let mut state_requires = None;
+        let mut state_transition = None;
+        loop {
+            if state_requires.is_none() && self.at_state_fn() {
+                state_requires = Some(self.parse_state_require_marker()?);
+            } else if state_transition.is_none() && self.at_transition_fn() {
+                state_transition = Some(self.parse_transition_marker()?);
+            } else {
+                break;
+            }
+        }
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a method")?;
-        self.func_after_fn(is_pub, false, is_pure, is_sanitizer)
+        self.func_after_fn(is_pub, false, is_pure, is_sanitizer, state_requires, state_transition)
     }
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
@@ -2439,7 +2545,9 @@ impl<'a> Parser<'a> {
                     || (matches!(self.peek().kind, TokKind::KwPub)
                         && matches!(self.peek2().kind, TokKind::KwFn))
                     || self.at_pure_fn()
-                    || self.at_sanitizer_fn();
+                    || self.at_sanitizer_fn()
+                    || self.at_state_fn()
+                    || self.at_transition_fn();
                 if is_method {
                     methods.push(self.method_in_type()?);
                 } else {

@@ -180,6 +180,10 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
             // D-TAINT1: `#Sanitizer fn` inside a module body.
             TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
+            // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` in a module.
+            TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
+                self.func().map(Item::Func)
+            }
             // D-ATTR2 / D-SERDE: `#[Codable] struct …` inside a module body.
             TokKind::Hash
                 if matches!(self.peek2().kind, TokKind::LBracket) =>

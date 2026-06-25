@@ -1,0 +1,59 @@
+// Typestate (D-STATE1, option A): order-of-events safety, checked at compile time.
+//
+// A value moves through named *states* (each an ordinary `tag`). An operation
+// declares the state it needs and the state it leaves the value in:
+//
+//   #Transition(_ -> Pending)  fn book(...)      -- an *entry* transition: makes a
+//                                                   value in the initial state
+//   #Transition(Pending -> Confirmed) fn pay(self) -> R   -- advances the state
+//   #State(Confirmed) fn check_in(self)          -- valid only in `Confirmed`
+//
+// Calling an operation in the wrong state is the compile error E0150 (see the ui
+// snapshot `typestate_wrong_state` for the rejected case: `check_in` on a still
+// `#Pending` reservation). The states are compile-time facts, threaded through the
+// function by the checker and **erased in codegen** — a typestate program generates
+// the exact same Rust as the untagged version, at zero runtime cost.
+
+tag Pending {}
+tag Confirmed {}
+tag CheckedIn {}
+
+struct Reservation {
+    guest: String,
+}
+
+impl Reservation {
+    // Entry transition: a fresh booking starts life `#Pending`.
+    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+        return Reservation { guest: guest }
+    }
+
+    // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
+    // value (`^self` — a move), matching the ratified mechanism: a fn takes the old
+    // state and returns the next. Calling `pay` on anything but a pending
+    // reservation would be E0150.
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+        print("payment received for {self.guest}")
+        return self
+    }
+
+    // Checking in advances `Confirmed -> CheckedIn`.
+    #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
+        print("{self.guest} checked in")
+        return self
+    }
+
+    // A plain guarded read: only legal once checked in. No state change.
+    #State(CheckedIn) fn room_key(self) -> String {
+        return "key for {self.guest}"
+    }
+}
+
+fn main() {
+    // The correct lifecycle: book -> pay -> check_in -> use. `:=` so `r` can be
+    // rebound as it advances through its states.
+    r := Reservation.book("Ada")        // r: Pending
+    r = r.pay()                         // r: Confirmed
+    r = r.check_in()                    // r: CheckedIn
+    print(r.room_key())                 // valid: r is CheckedIn
+}

@@ -2026,6 +2026,29 @@ adds the effect-routing surface on top. Rejected: four kinds (option A —
 the status quo and the source of "what's a tag vs an attribute?" confusion); one "label"
 kind (option C — erases the dispatch-vs-marker distinction that actually matters).
 
+**D-STATE1 — Typestate via transitioning tags** *(ratified 2026-06-22, option A)*: a value
+moves through named **states**, each an ordinary `tag` (D-QUAL2). The ratified mechanism: *a
+fn takes the old state tag and returns the next; a wrong-state call is the compile error
+**E0150**; tags erase, zero runtime cost.*
+**(impl 2026-06-24)** Built end-to-end. Two fn-modifier markers (parallel to `#Sanitizer fn`
+/ `#layout(c)`): **`#State(S) fn m(self, …)`** is a require-state guard — `m` is valid only
+when its receiver is in state `S`; **`#Transition(From -> To) fn m(self) -> T`** is a
+transition — it consumes a value in `From` and yields one in `To`. The from-state may be `_`
+(an **entry** transition: a constructor producing the initial state from nothing). The
+current state of a value is an **intraprocedural forward-dataflow fact** (`Source/Sema/State.rs`,
+same shape as `Taint.rs`): seeded by an entry-transition constructor call, advanced by each
+transition call, threaded through `:=` rebindings; a require/transition call on a value in the
+wrong state is **E0150** (naming both states + the transition that reaches the required one).
+Markers are **erased in codegen** (I3 — generated Rust is identical to the untagged version;
+golden-verified). `tests/ui/typestate_wrong_state`, `examples/features/113_typestate.jet`,
+`tests/typestate.rs`. **Deferred forks (queued for owner confirmation, implemented as the
+defaults):** the exact marker spellings — **D-STATE-REQ** (`#State(S)` vs `#Requires(S)`),
+**D-STATE-TRANS** (`#Transition(A -> B)` arrow glyph), **D-STATE-DECL** (whether an explicit
+`states { … }` grouping is wanted for exhaustiveness) — and the upstream **D-QUAL4** (plain
+value-tag *type-position* spelling `#Tag Type` vs `Type #Tag`), which the typestate core does
+not depend on (states ride the value + the markers, never a signature type position). Rejected
+mechanisms were not on the ballot — A was the sole ratified option.
+
 **D-TAINT1 — Taint tracking** *(ratified 2026-06-21, option A; gated on D-EFF1; option B
 deferred post-Epoch-3)*: an untrusted value carries a **`#tainted`** tag, attached inline
 at its source (S82/D-ATTR1). The tag **spreads** — anything derived from a tainted value

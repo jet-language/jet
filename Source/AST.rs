@@ -883,7 +883,27 @@ pub struct Func {
     /// `declared_effects` (a `#(via f)` annotation occupies the same `#(…)` slot).
     /// Erased in codegen (I3).
     pub effect_via: Option<(String, Span)>,
+    /// D-STATE1 (ratified 2026-06-22): `#State(S) fn …` — a require-state marker.
+    /// `Some((state, span))` means the method's receiver must currently be in state
+    /// `state`; calling it on a value in any other state is E0150. `None` =
+    /// unguarded. Compile-time only, erased in codegen (I3).
+    pub state_requires: Option<(String, Span)>,
+    /// D-STATE1: `#Transition(From -> To) fn …` — a transition declaration. The fn
+    /// consumes a value in state `from` (the wildcard `_` → `None`, an entry
+    /// transition with no prior state) and produces one in state `to`. A call
+    /// requires the receiver/argument be in `from` (E0150 otherwise) and advances it
+    /// to `to`. The `Span` points at the marker. Erased in codegen (I3).
+    pub state_transition: Option<StateTransition>,
     pub body: Vec<Stmt>,
+}
+
+/// D-STATE1: the parsed `#Transition(From -> To)` declaration on a function. `from`
+/// is `None` for an entry transition (`_ -> To`).
+#[derive(Debug, Clone)]
+pub struct StateTransition {
+    pub from: Option<String>,
+    pub to: String,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

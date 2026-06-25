@@ -677,3 +677,36 @@ enum Shape {
         "enum tag + variant rename",
     );
 }
+
+#[test]
+fn fmt_keeps_typestate_markers() {
+    // D-STATE1: the `#State(S)` require-state guard and `#Transition(From -> To)`
+    // transition markers (including the entry form `_ -> To`) must survive fmt —
+    // dropping a typestate contract would silently change what the checker enforces.
+    let src = "\
+struct Reservation {
+    guest: String
+
+    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+        return Reservation{guest: guest}
+    }
+
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+        return self
+    }
+
+    #State(Confirmed) fn check_in(self) {
+        print(self.guest)
+    }
+}
+";
+    assert_fmt_keeps(
+        src,
+        &[
+            "#Transition(_ -> Pending)",
+            "#Transition(Pending -> Confirmed)",
+            "#State(Confirmed)",
+        ],
+        "typestate markers",
+    );
+}
