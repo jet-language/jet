@@ -322,6 +322,7 @@ impl<'a> Fmt<'a> {
                 receiver,
                 method,
                 method_span,
+                type_args,
                 args,
                 ..
             } => {
@@ -335,6 +336,7 @@ impl<'a> Fmt<'a> {
                         f.newline();
                         f.write(".");
                         f.write(method);
+                        f.fmt_method_type_args(type_args);
                         f.write("(");
                         f.fmt_call_args(args);
                         f.write(")");
@@ -342,6 +344,7 @@ impl<'a> Fmt<'a> {
                 } else {
                     self.write(".");
                     self.write(method);
+                    self.fmt_method_type_args(type_args);
                     self.write("(");
                     self.fmt_call_args(args);
                     self.write(")");
@@ -608,6 +611,22 @@ impl<'a> Fmt<'a> {
         self.write("(");
         self.fmt_call_args(&c.args);
         self.write(")");
+    }
+
+    /// D-SERDE6: call-site turbofish `<T, …>` on a method call (`decode<Order>(…)`).
+    /// No-op when the call carries no type arguments.
+    fn fmt_method_type_args(&mut self, type_args: &[crate::AST::Type]) {
+        if type_args.is_empty() {
+            return;
+        }
+        self.write("<");
+        for (i, t) in type_args.iter().enumerate() {
+            if i > 0 {
+                self.write(", ");
+            }
+            self.fmt_type(t);
+        }
+        self.write(">");
     }
 
     fn fmt_call_args(&mut self, args: &[CallArg]) {

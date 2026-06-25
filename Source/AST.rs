@@ -955,6 +955,14 @@ pub struct StructDef {
     /// D-SERDE3/8: container-level serde attribute markers (`RenameAll`,
     /// `DenyUnknownFields`) attached before the `struct`. Empty when none.
     pub serde_markers: Vec<Marker>,
+    /// Round-trip fidelity (formatter): the exact `#[…]` bracket-marker list the
+    /// user wrote before the type, verbatim and in source order (e.g. `Codable`,
+    /// `RenameAll(camel)`). Derive-trait markers here are *also* lowered into
+    /// `derives` (Codable → Encode+Decode) for sema/codegen, and serde attrs are
+    /// *also* copied into `serde_markers`; this field exists only so `jet fmt`
+    /// re-emits the surface the user actually typed instead of a lowered form.
+    /// Empty when the type had no leading `#[…]` list.
+    pub type_markers: Vec<Marker>,
 }
 
 /// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name @= distinct Base`.
@@ -1041,6 +1049,10 @@ pub struct EnumDef {
     /// D-SERDE3/7/8: container-level serde markers (`RenameAll`, `Tag`,
     /// `Untagged`, `DenyUnknownFields`) attached before the `enum`. Empty when none.
     pub serde_markers: Vec<Marker>,
+    /// Round-trip fidelity (formatter): the exact `#[…]` bracket-marker list the
+    /// user wrote before the `enum`, verbatim and in source order. See
+    /// `StructDef::type_markers`. Empty when none.
+    pub type_markers: Vec<Marker>,
 }
 
 #[derive(Debug)]

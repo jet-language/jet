@@ -537,3 +537,143 @@ fn fmt_preserves_single_line_if_expr_branch() {
     let src = "fn main() {\n    a @= true\n    n @= if a { 1 } else { 2 }\n    print(\"{n}\")\n}\n";
     assert_fmt_stable(src, "single-line if-expression");
 }
+
+// ── Marker / turbofish round-trip survival (the c-fmt data-loss regression) ──
+//
+// `fmt_is_idempotent_on_examples` only checks that fmt(fmt(x)) == fmt(x); it does
+// NOT catch a formatter that silently drops a token on the FIRST pass (the lost
+// `#[Rename]`/`#[Codable]`/turbofish bug). These tests assert that the load-bearing
+// surface tokens SURVIVE one fmt pass, then that the result is stable.
+
+/// Assert every needle appears in `format_source(src)`, then that fmt is stable.
+fn assert_fmt_keeps(src: &str, needles: &[&str], label: &str) {
+    let out = jet::format_source(src).unwrap_or_else(|d| {
+        panic!("fmt failed for {label}:\n{}", jet::render_diagnostics(label, src, &d))
+    });
+    for needle in needles {
+        assert!(
+            out.contains(needle),
+            "{label}: fmt dropped `{needle}`\n--- got ---\n{out}"
+        );
+    }
+    let twice = jet::format_source(&out).expect("second fmt should succeed");
+    assert_eq!(out, twice, "{label}: fmt is not idempotent\n--- got ---\n{out}");
+}
+
+#[test]
+fn fmt_keeps_codable_and_field_rename_and_turbofish() {
+    // The exact c-fmt regression: `#[Codable]`, a field `#[Rename("…")]`, and a
+    // method-call turbofish `decode<Order>` must all survive.
+    let src = "\
+#[Codable]
+struct Order {
+    id: Int
+    #[Rename(\"customer\")] who: String
+}
+
+fn main() {
+    raw @= \"x\"
+    back @= json.decode<Order>(raw) ?? panic(\"bad\")
+    print(back.who)
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["#[Codable]", "#[Rename(\"customer\")]", "decode<Order>"],
+        "codable + rename + turbofish",
+    );
+}
+
+#[test]
+fn fmt_keeps_container_rename_all() {
+    // A combined derive + container serde marker `#[Codable, RenameAll(camel)]`
+    // round-trips as the single bracket list the user wrote.
+    let src = "\
+#[Codable, RenameAll(camel)]
+struct Person {
+    full_name: String
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["#[Codable, RenameAll(camel)]"],
+        "container RenameAll",
+    );
+}
+
+#[test]
+fn fmt_keeps_layout_columnar_and_codable() {
+    // `#[Codable]` then `#layout(columnar)` on the same struct — both survive,
+    // neither is rewritten into body `derive` lines.
+    let src = "\
+#[Codable]
+#layout(columnar)
+struct Particle {
+    x: Float
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["#[Codable]", "#layout(columnar)"],
+        "layout columnar + codable",
+    );
+    // And no `derive Encode`/`derive Decode` body lines leak in.
+    let out = jet::format_source(src).unwrap();
+    assert!(!out.contains("derive Encode"), "no leaked body derive:\n{out}");
+    assert!(!out.contains("derive Decode"), "no leaked body derive:\n{out}");
+}
+
+#[test]
+fn fmt_keeps_single_use_marker() {
+    let src = "\
+#SingleUse struct Lock {
+    resource: String
+}
+";
+    assert_fmt_keeps(src, &["#SingleUse struct Lock"], "single-use struct");
+}
+
+#[test]
+fn fmt_keeps_layout_c_struct() {
+    let src = "\
+#layout(c)
+struct Header {
+    magic: Int
+}
+";
+    assert_fmt_keeps(src, &["#layout(c)"], "layout c struct");
+}
+
+#[test]
+fn fmt_keeps_body_derive_line_when_no_brackets() {
+    // A struct that uses ONLY a body `derive Comparable` line (no `#[…]` list)
+    // must keep emitting it in the body — the new bracket path must not eat it.
+    let src = "\
+struct Score {
+    points: Int
+
+    derive Comparable
+}
+";
+    assert_fmt_keeps(src, &["derive Comparable"], "body derive line");
+    // And it must NOT be promoted to a bracket marker.
+    let out = jet::format_source(src).unwrap();
+    assert!(!out.contains("#[Comparable]"), "body derive must not become bracket:\n{out}");
+}
+
+#[test]
+fn fmt_keeps_enum_variant_rename_and_tag() {
+    // Enum container `#[Tag("type")]` + a per-variant `#[Rename("…")]` both survive.
+    let src = "\
+#[Codable, Tag(\"type\")]
+enum Shape {
+    #[Rename(\"circle\")] Circle(Float)
+    Square(Float)
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["#[Codable, Tag(\"type\")]", "#[Rename(\"circle\")]"],
+        "enum tag + variant rename",
+    );
+}

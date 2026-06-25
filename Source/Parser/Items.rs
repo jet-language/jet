@@ -1348,6 +1348,7 @@ impl<'a> Parser<'a> {
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),
+            type_markers: Vec::new(),
         })
     }
 
@@ -1414,6 +1415,7 @@ impl<'a> Parser<'a> {
             is_single_use: false,
             single_use_span: None,
             serde_markers: Vec::new(),
+            type_markers: Vec::new(),
         })
     }
 
@@ -1715,10 +1717,12 @@ impl<'a> Parser<'a> {
         };
         Ok(match item {
             Item::Struct(mut s) => {
+                s.type_markers = markers.clone();
                 s.serde_markers = Self::split_type_markers(markers, &mut s.derives);
                 Item::Struct(s)
             }
             Item::Enum(mut e) => {
+                e.type_markers = markers.clone();
                 e.serde_markers = Self::split_type_markers(markers, &mut e.derives);
                 Item::Enum(e)
             }
@@ -2463,6 +2467,7 @@ impl<'a> Parser<'a> {
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),
+            type_markers: Vec::new(),
         })
     }
 

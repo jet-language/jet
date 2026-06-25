@@ -1,8 +1,8 @@
 use super::*;
 use crate::AST::{
     AccessConvention, ConstAttr, ConstDef, EnumDef, ExternFn, ExternRustBlock, Field, Func,
-    ImplDef, ImportDecl, ImportKind, Item, Param, StructDef, TraitImplBlock, TypeParam, Variant,
-    VariantPayload,
+    ImplDef, ImportDecl, ImportKind, Item, Marker, Param, StructDef, StructLayout, TraitImplBlock,
+    TypeParam, Variant, VariantPayload,
 };
 
 impl<'a> Fmt<'a> {
@@ -208,6 +208,85 @@ impl<'a> Fmt<'a> {
         self.write(trait_name);
     }
 
+    /// D-ATTR2 / D-SERDE2–8: render one `#[…]` marker (name + optional `(args)`).
+    fn fmt_marker(&mut self, m: &Marker) {
+        self.write(&m.name);
+        if !m.args.is_empty() {
+            self.write("(");
+            for (i, a) in m.args.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.fmt_expr(a, Prec::OrFallback);
+            }
+            self.write(")");
+        }
+    }
+
+    /// Render a leading `#[a, b(x), …]` bracket-marker list on its own line, the
+    /// exact surface the user wrote before a `struct`/`enum`. No-op when empty.
+    fn fmt_type_markers(&mut self, markers: &[Marker]) {
+        if markers.is_empty() {
+            return;
+        }
+        self.write("#[");
+        for (i, m) in markers.iter().enumerate() {
+            if i > 0 {
+                self.write(", ");
+            }
+            self.fmt_marker(m);
+        }
+        self.write("]");
+        self.newline();
+    }
+
+    /// D-REPRC1/D-SOA1: `#layout(c)` / `#layout(columnar)` on its own line.
+    fn fmt_layout(&mut self, layout: &Option<StructLayout>) {
+        if let Some(l) = layout {
+            let variant = match l {
+                StructLayout::C => Syntax::LAYOUT_C,
+                StructLayout::Columnar => Syntax::LAYOUT_COLUMNAR,
+            };
+            self.write(&format!("#{}({})", Syntax::ATTR_LAYOUT, variant));
+            self.newline();
+        }
+    }
+
+    /// Body `derive Name` lines for a type, minus the derives that the leading
+    /// `#[…]` markers already account for. `Codable` expands to `Encode`+`Decode`;
+    /// `Encode`/`Decode` and any user-trait marker map to themselves. The remaining
+    /// `derives` came from `derive Name` lines in the body and must re-emit there.
+    fn body_derive_lines(derives: &[(String, Span)], type_markers: &[Marker]) -> Vec<String> {
+        let mut covered: Vec<String> = Vec::new();
+        for m in type_markers {
+            match m.name.as_str() {
+                Syntax::ATTR_CODABLE => {
+                    covered.push(Syntax::ATTR_ENCODE.to_string());
+                    covered.push(Syntax::ATTR_DECODE.to_string());
+                }
+                // Serde *attribute* markers never reach `derives`; skip them.
+                Syntax::ATTR_RENAME_ALL
+                | Syntax::ATTR_DENY_UNKNOWN_FIELDS
+                | Syntax::ATTR_TAG
+                | Syntax::ATTR_UNTAGGED
+                | Syntax::ATTR_RENAME
+                | Syntax::ATTR_SKIP
+                | Syntax::ATTR_DEFAULT
+                | Syntax::ATTR_FLATTEN => {}
+                other => covered.push(other.to_string()),
+            }
+        }
+        let mut out = Vec::new();
+        for (name, _) in derives {
+            if let Some(pos) = covered.iter().position(|c| c == name) {
+                covered.remove(pos);
+            } else {
+                out.push(name.clone());
+            }
+        }
+        out
+    }
+
     fn fmt_trait_impl_block(&mut self, block: &TraitImplBlock) {
         self.write("impl ");
         self.write(&block.trait_name);
@@ -322,6 +401,19 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
+        // D-ATTR2/D-SERDE: the leading `#[…]` bracket-marker list (derives +
+        // container serde attrs), verbatim as the user wrote it.
+        self.fmt_type_markers(&s.type_markers);
+        // D-LIN1: `#SingleUse` precedes `pub`/`struct`, on the same line.
+        if s.is_single_use {
+            self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
+        }
+        // D-MIGRATE1: `#PublishedSchema` precedes `pub`/`struct`, on the same line.
+        if s.is_published_schema {
+            self.write(&format!("#{} ", Syntax::ATTR_PUBLISHED_SCHEMA));
+        }
+        // D-REPRC1/D-SOA1: `#layout(…)` sits on its own line before the struct.
+        self.fmt_layout(&s.layout);
         if top_level {
             self.fmt_pub(s.is_pub);
         }
@@ -330,6 +422,9 @@ impl<'a> Fmt<'a> {
         self.fmt_type_params(&s.type_params);
         self.write(" {");
         self.newline();
+        // Only `derive Name` lines the user wrote in the body re-emit here; derives
+        // lifted from the `#[…]` list are already rendered above.
+        let body_derives = Self::body_derive_lines(&s.derives, &s.type_markers);
         self.with_indent(|f| {
             for (i, field) in s.fields.iter().enumerate() {
                 if i > 0 {
@@ -337,14 +432,14 @@ impl<'a> Fmt<'a> {
                 }
                 f.fmt_field(field);
             }
-            for (i, (trait_name, _)) in s.derives.iter().enumerate() {
+            for (i, trait_name) in body_derives.iter().enumerate() {
                 if i > 0 || !s.fields.is_empty() {
                     f.newline();
                 }
                 f.fmt_derive_line(trait_name);
             }
             for (i, block) in s.trait_impls.iter().enumerate() {
-                if i > 0 || !s.fields.is_empty() || !s.derives.is_empty() {
+                if i > 0 || !s.fields.is_empty() || !body_derives.is_empty() {
                     f.newline();
                     f.newline();
                 }
@@ -353,7 +448,7 @@ impl<'a> Fmt<'a> {
             for (i, m) in s.methods.iter().enumerate() {
                 if i > 0
                     || !s.fields.is_empty()
-                    || !s.derives.is_empty()
+                    || !body_derives.is_empty()
                     || !s.trait_impls.is_empty()
                 {
                     f.newline();
@@ -366,6 +461,12 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_enum(&mut self, e: &EnumDef, top_level: bool) {
+        // D-ATTR2/D-SERDE: leading `#[…]` bracket-marker list, verbatim.
+        self.fmt_type_markers(&e.type_markers);
+        // D-LIN1: `#SingleUse` precedes `pub`/`enum`, on the same line.
+        if e.is_single_use {
+            self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
+        }
         if top_level {
             self.fmt_pub(e.is_pub);
         }
@@ -374,6 +475,7 @@ impl<'a> Fmt<'a> {
         self.fmt_type_params(&e.type_params);
         self.write(" {");
         self.newline();
+        let body_derives = Self::body_derive_lines(&e.derives, &e.type_markers);
         self.with_indent(|f| {
             for (i, v) in e.variants.iter().enumerate() {
                 if i > 0 {
@@ -381,14 +483,14 @@ impl<'a> Fmt<'a> {
                 }
                 f.fmt_variant(v);
             }
-            for (i, (trait_name, _)) in e.derives.iter().enumerate() {
+            for (i, trait_name) in body_derives.iter().enumerate() {
                 if i > 0 || !e.variants.is_empty() {
                     f.newline();
                 }
                 f.fmt_derive_line(trait_name);
             }
             for (i, block) in e.trait_impls.iter().enumerate() {
-                if i > 0 || !e.variants.is_empty() || !e.derives.is_empty() {
+                if i > 0 || !e.variants.is_empty() || !body_derives.is_empty() {
                     f.newline();
                     f.newline();
                 }
@@ -397,7 +499,7 @@ impl<'a> Fmt<'a> {
             for (i, m) in e.methods.iter().enumerate() {
                 if i > 0
                     || !e.variants.is_empty()
-                    || !e.derives.is_empty()
+                    || !body_derives.is_empty()
                     || !e.trait_impls.is_empty()
                 {
                     f.newline();
@@ -410,6 +512,17 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_variant(&mut self, v: &Variant) {
+        // D-SERDE5: per-variant `#[Rename("x")]` markers sit inline before the name.
+        if !v.serde_markers.is_empty() {
+            self.write("#[");
+            for (i, m) in v.serde_markers.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.fmt_marker(m);
+            }
+            self.write("] ");
+        }
         self.write(&v.name);
         match &v.payload {
             VariantPayload::Unit => {}
@@ -543,6 +656,18 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_field(&mut self, field: &Field) {
+        // D-SERDE5: per-field `#[Rename("x")]`/`#[Skip]`/`#[Default(…)]`/`#[Flatten]`
+        // markers sit inline before the field on the same line.
+        if !field.serde_markers.is_empty() {
+            self.write("#[");
+            for (i, m) in field.serde_markers.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.fmt_marker(m);
+            }
+            self.write("] ");
+        }
         if field.is_pub {
             self.write("pub ");
         }

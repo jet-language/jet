@@ -424,6 +424,7 @@ mod tests {
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),
+            type_markers: Vec::new(),
         })
     }
 
