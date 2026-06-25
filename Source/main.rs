@@ -21,7 +21,7 @@ mod CmdPkg;
 mod CmdSchema;
 mod CmdSupply;
 
-use CmdCompile::{run_compile_cmd, run_fix, run_fmt, run_new, run_test};
+use CmdCompile::{run_compile_cmd, run_fix, run_fmt, run_new, run_test, run_test_cov};
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_doctor, run_emit_rust, run_eval, run_explain,
     run_repl, run_serve, watch_policy_from, WatchPolicy,
@@ -647,9 +647,12 @@ fn main() {
         "new" => run_new(target, annotated),
         "test" => {
             let update_snapshots = jet_argv.iter().any(|a| a == "--update-snapshots" || a == "-u");
+            // D-COV1: `jet test --coverage` builds an instrumented harness and
+            // reports per-function / per-line coverage after the test results.
+            let coverage = jet_argv.iter().any(|a| a == "--coverage");
             // A directory target is a project root: resolve its entry.
             let resolved = resolve_source_path(target);
-            run_test(&resolved, update_snapshots, mode);
+            run_test_cov(&resolved, update_snapshots, coverage, mode);
         }
         "add" => run_add(&raw),
         "remove" => run_remove(target),

@@ -222,6 +222,7 @@ before continuing.
 | E0610 | sema  | `use alias.item` but alias is not a module (D-MOD3) |
 | E0611 | sema  | `use alias.item` but item is not defined (D-MOD3) |
 | E0612 | jet   | wildcard imports (`use math.*`) are not supported |
+| E0613 | sema  | property-test (`#Test fn`) parameter has a type the runner can't generate (D-TEST1) |
 | E0631 | sema  | an arena `view` escapes its region — returned, stored, given away, or captured (D-ALLOC2/D-REGION1) |
 | E0632 | sema  | an arena `view` is read after its arena was `reset`/`free`d (D-ALLOC2) |
 | E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |

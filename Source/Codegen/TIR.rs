@@ -69,6 +69,9 @@ pub(crate) struct TFunc {
     /// Emitted verbatim after the function name; empty for a non-generic function.
     pub(crate) generics: String,
     pub(crate) is_main: bool,
+    /// D-COV1: the 1-based Jet source line of this function's name, for the
+    /// `jet_cov(line)` coverage probe. Only read in coverage mode.
+    pub(crate) line: usize,
     /// c109 Phase 18: an `#Unsafe fn` (S58, E2-M13/D-LL1) lowers to a Rust `unsafe fn`
     /// (the `unsafe ` keyword prefixes the signature), so the body may use gated pointer
     /// ops directly — calling it is already gated to an `#Unsafe` block in sema (E3103).
@@ -4843,6 +4846,11 @@ fn lower_view_return(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     }
 }
 
+/// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
+fn cov_line(cx: &Cx, offset: usize) -> usize {
+    cx.src[..offset.min(cx.src.len())].bytes().filter(|&b| b == b'\n').count() + 1
+}
+
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.view_return = f.is_view_return;
@@ -4868,6 +4876,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         is_view: f.is_view_return,
         generics: render_generics(&f.type_params),
         is_main: f.name == "main",
+        line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
         body,
         kind: TFuncKind::TopLevel,
@@ -4883,6 +4892,21 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
 /// both paths embed the same trailing function name in any `?`/panic frame).
 pub(crate) fn emit_tir_test_body(body: &[Stmt], cx: &Cx, out: &mut String) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    let tbody = lower_stmts(body, cx, &mut env);
+    emit_tir_stmts(&tbody, cx, out, 1);
+}
+
+/// D-TEST1: lower + emit a property-test body. Identical to `emit_tir_test_body`
+/// except each property parameter is bound into the env first (by its mangled
+/// name, by value) so references inside the body resolve to the generated input.
+/// The caller emits `fn jet_prop_N(p0: T0, …) -> Result<(), String>` so the
+/// param names are real Rust locals; this binds them in the lowering env.
+pub(crate) fn emit_tir_property_test_body(body: &[Stmt], params: &[Param], cx: &Cx, out: &mut String) {
+    let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    for p in params {
+        let rust_name = mangle(&p.name);
+        env.bind(&p.name, rust_name, Some(p.ty.clone()));
+    }
     let tbody = lower_stmts(body, cx, &mut env);
     emit_tir_stmts(&tbody, cx, out, 1);
 }
@@ -4990,6 +5014,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         // caller opened it); `emit_method` renders no per-method clause.
         generics: String::new(),
         is_main: false,
+        line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
         body,
         kind,
@@ -5044,6 +5069,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         is_view: f.is_view_return,
         generics: String::new(),
         is_main: false,
+        line: cov_line(cx, f.name_span.start),
         // The trait-method `unsafe` prefix rides on `TFuncKind::TraitMethod.is_unsafe`
         // (the dedicated trait-method emit reads it there); the top-level flag is unused
         // for this kind, but keep it consistent.
@@ -5122,6 +5148,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_view: f.is_view_return,
         generics: String::new(),
         is_main: false,
+        line: cov_line(cx, f.name_span.start),
         // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
         is_unsafe: false,
         body: Vec::new(),
@@ -9005,6 +9032,10 @@ fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         params = params,
         ret = ret_clause,
     ));
+    // D-COV1: probe at the function head (skip the synthetic `main`).
+    if cx.coverage && !tir.is_main {
+        out.push_str(&format!("    jet_cov({});\n", tir.line));
+    }
     emit_tir_stmts(&tir.body, cx, out, 1);
     out.push_str("}\n\n");
 }
@@ -9050,6 +9081,10 @@ fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, ou
         params = params.join(", "),
         ret = ret_clause,
     ));
+    // D-COV1: probe at the method head.
+    if cx.coverage {
+        out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+    }
     emit_tir_stmts(&tir.body, cx, out, indent + 1);
     out.push_str(&format!("{pad}}}\n"));
 }
@@ -9098,6 +9133,10 @@ fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, self_conv: AccessConventi
         params = params.join(", "),
         ret = ret_clause,
     ));
+    // D-COV1: probe at the trait-method head.
+    if cx.coverage {
+        out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+    }
     emit_tir_stmts(&tir.body, cx, out, indent + 1);
     out.push_str(&format!("{pad}}}\n"));
 }

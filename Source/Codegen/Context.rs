@@ -46,6 +46,11 @@ pub(crate) struct Cx {
     pub(crate) file: String,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
     pub(crate) test_mode: bool,
+    /// D-COV1: `jet test --coverage`. When true, every emitted user function head
+    /// gets a `jet_cov(line)` probe and the harness carries the coverage recorder
+    /// + dump. Never set in normal builds, so codegen output is byte-identical
+    /// (golden tests never touch this path).
+    pub(crate) coverage: bool,
     /// Import alias -> Rust module name (`user_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
     /// Cross-module pub type name -> Rust module path (e.g. `Note` -> `user_note`).
@@ -464,6 +469,7 @@ pub(crate) fn build_cx_items(
         src: src.to_string(),
         file: file.to_string(),
         test_mode: false,
+        coverage: false,
         import_mods: HashMap::new(),
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),

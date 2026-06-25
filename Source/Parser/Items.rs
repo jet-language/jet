@@ -564,12 +564,43 @@ impl<'a> Parser<'a> {
     }
 
     fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
+        // D-TEST1 (ratified 2026-06-22, option B): the property-test form is
+        // `#Test fn name(params) { … }`. A parameter list means inputs are
+        // generated from the param types and shrunk on failure; the bare
+        // `#Test "name" { … }` block form is a plain unit test.
+        if matches!(self.peek().kind, TokKind::KwFn) {
+            let fn_span = self.bump().span; // the `fn` keyword
+            let (name, name_span) = self.expect_ident("after `fn`")?;
+            self.expect(TokKind::LParen, "after the property test name")?;
+            let mut params = Vec::new();
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                loop {
+                    params.push(self.param()?);
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    self.expect(TokKind::Comma, "between parameters")?;
+                }
+            }
+            self.expect(TokKind::RParen, "to close the parameter list")?;
+            self.expect(TokKind::LBrace, "to open the property test body")?;
+            let body = self.block_stmts();
+            return Ok(crate::AST::TestDef {
+                name,
+                name_span,
+                params,
+                fn_keyword_span: Some(fn_span),
+                body,
+            });
+        }
         let (name, name_span) = self.expect_test_name()?;
         self.expect(TokKind::LBrace, "to open the test body")?;
         let body = self.block_stmts();
         Ok(crate::AST::TestDef {
             name,
             name_span,
+            params: Vec::new(),
+            fn_keyword_span: None,
             body,
         })
     }

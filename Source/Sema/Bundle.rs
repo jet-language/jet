@@ -1414,12 +1414,21 @@ pub(crate) fn check_module_bodies(
                 }
             }
             Item::Test(t) if mode == CompileMode::Test => {
+                // D-TEST1: a parameterized `#Test fn` is a property test — its
+                // params must be generatable types so the runner can synthesize
+                // inputs. Validate before checking the body so the error points at
+                // the offending param type.
+                for p in &t.params {
+                    if let Some(d) = property_param_unsupported(&p.ty, p.ty_span) {
+                        diags.push(d);
+                    }
+                }
                 let mut synthetic = Func {
                     is_pub: false,
                     name: format!("__test_{}", t.name),
                     name_span: t.name_span,
                     type_params: Vec::new(),
-                    params: Vec::new(),
+                    params: t.params.clone(),
                     return_type: None,
                     is_view_return: false,
                     is_unsafe: false,
@@ -1658,5 +1667,46 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
         (Some(a), Some(b)) => a == b,
         _ => false,
     }
+}
+
+/// D-TEST1: which parameter types the property-test runner can synthesize inputs
+/// for. The generator (codegen) covers the scalar value types plus `[T]` and
+/// `T?` of a generatable element. Anything else (user structs/enums, `Map`,
+/// functions, trait objects) has no automatic generator yet, so reject it with a
+/// clear error rather than miscompile (I3 — checking lives in sema).
+fn property_param_generatable(ty: &Type) -> bool {
+    match ty {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::Float32
+        | Type::IntN { .. } => true,
+        Type::List(inner) | Type::Option(inner) => property_param_generatable(inner),
+        Type::FixedList { elem, .. } => property_param_generatable(elem),
+        _ => false,
+    }
+}
+
+/// E0613: a property-test parameter type with no automatic value generator.
+fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagnostic> {
+    if property_param_generatable(ty) {
+        return None;
+    }
+    Some(Diagnostic::error(
+        "E0613",
+        format!(
+            "a property test can't generate values of type `{}`",
+            ty.name()
+        ),
+        format!(
+            "a parameterized `#{} fn` is a property test (D-TEST1): {} generates inputs from each parameter's type, but this type has no built-in generator",
+            Syntax::KW_TEST,
+            Syntax::LANG_NAME
+        ),
+        "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" { … }` block and construct the value yourself".to_string(),
+        Some(span),
+    ))
 }
 

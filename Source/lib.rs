@@ -20,6 +20,7 @@ pub mod Codegen;
 pub mod Collections;
 pub mod Comptime;
 pub mod Diagnostics;
+pub mod Doctest;
 pub mod Doctor;
 pub mod ExitCodes;
 pub mod Explain;
@@ -327,6 +328,17 @@ pub fn compile_tests_with_path(
     src: &str,
     file: &str,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+    compile_tests_with_path_cov(src, file, false)
+}
+
+/// D-COV1: as `compile_tests_with_path`, but with optional `jet test --coverage`
+/// instrumentation. `coverage = false` produces the historical, uninstrumented
+/// harness.
+pub fn compile_tests_with_path_cov(
+    src: &str,
+    file: &str,
+    coverage: bool,
+) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
     let mut bundle = Loader::load_entry_with_overlay(file, None, false)?;
     let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Test);
@@ -343,7 +355,7 @@ pub fn compile_tests_with_path(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    Ok((Codegen::emit_bundle_tests(&bundle, ffi.as_ref()), ffi))
+    Ok((Codegen::emit_bundle_tests_cov(&bundle, ffi.as_ref(), coverage), ffi))
 }
 
 /// D-BENCH1: compile for `jet bench` when the file has `#Bench` blocks —
@@ -382,6 +394,70 @@ pub fn has_bench_blocks(file: &str) -> bool {
             .any(|i| matches!(i, AST::Item::Bench(_))),
         Err(_) => false,
     }
+}
+
+/// Does the entry file declare any `#Test` block? `jet test` runs the test
+/// harness when it does and skips it (running doctests only) when it doesn't, so
+/// a file with only doctests is still testable. A load failure returns `true` so
+/// the caller surfaces the real compile error on the normal harness path.
+pub fn has_test_blocks(file: &str) -> bool {
+    match Loader::load_entry_with_overlay(file, None, false) {
+        Ok(bundle) => bundle.modules[bundle.entry]
+            .items
+            .iter()
+            .any(|i| matches!(i, AST::Item::Test(_))),
+        Err(_) => true,
+    }
+}
+
+/// D-COV1: every user function the `jet test --coverage` probes can record, as
+/// `(name, 1-based line)`. Mirrors the probe set: free functions, inherent
+/// methods, and trait-impl methods in the entry file (`main` is excluded — it is
+/// never probed). The runner diffs the recorded hit lines against this set to
+/// report per-function / per-line coverage.
+pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
+    let bundle = match Loader::load_entry_with_overlay(file, None, false) {
+        Ok(b) => b,
+        Err(_) => return Vec::new(),
+    };
+    let entry = &bundle.modules[bundle.entry];
+    let src = &entry.source;
+    let line_of = |off: usize| src[..off.min(src.len())].bytes().filter(|&b| b == b'\n').count() + 1;
+    let mut out = Vec::new();
+    for item in &entry.items {
+        match item {
+            AST::Item::Func(f) if f.name != "main" => {
+                out.push((f.name.clone(), line_of(f.name_span.start)));
+            }
+            AST::Item::Struct(s) => {
+                for m in &s.methods {
+                    out.push((format!("{}.{}", s.name, m.name), line_of(m.name_span.start)));
+                }
+                for b in &s.trait_impls {
+                    for m in &b.methods {
+                        out.push((format!("{}.{}", s.name, m.name), line_of(m.name_span.start)));
+                    }
+                }
+            }
+            AST::Item::Enum(e) => {
+                for m in &e.methods {
+                    out.push((format!("{}.{}", e.name, m.name), line_of(m.name_span.start)));
+                }
+                for b in &e.trait_impls {
+                    for m in &b.methods {
+                        out.push((format!("{}.{}", e.name, m.name), line_of(m.name_span.start)));
+                    }
+                }
+            }
+            AST::Item::Impl(i) => {
+                for m in &i.methods {
+                    out.push((format!("{}.{}", i.type_name, m.name), line_of(m.name_span.start)));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn compile_with_mode(

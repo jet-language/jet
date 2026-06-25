@@ -2371,14 +2371,34 @@ cache-friendly path), `len`, `is_empty`, `push`, and iteration (`loop p in xs`).
 index-write `xs[i] = …`, and field-write `xs[i].f = …`. Codegen emits zero `unsafe` (I1).
 
 **D-TEST1 — a parameterized `#Test fn` is a property test** *(ratified 2026-06-22, option
-B)*: an `#Test fn` with parameters is a property test (inputs generated from the parameter
-types, automatic invisible shrinking); one with no parameters is a unit test. Zero new
-syntax — matches the S82 worked example. UNBLOCKED. (c51)
+B; implemented c51)*: an `#Test fn` with parameters is a property test (inputs generated from
+the parameter types, automatic invisible shrinking); one with no parameters is a unit test.
+Zero new syntax — matches the S82 worked example. **Implementation note (c51):** the spelling
+is `#Test fn name(p: T, …) { … }`; `jet test` generates ~200 cases per run from a deterministic
+seed (`JET_PROP_SEED` overrides), and on the first failing case greedily shrinks each argument
+to a minimal counterexample reported as `property failed for p = <value>, …`. Generatable
+parameter types: `Int`, `Float`, `Bool`, `String`, `Char`, sized integers, `F32`, and `[T]`/`T?`
+of those; any other type is **E0613** at compile time (no silent miscompile, I3). The generator
+is std-only (I6); the body type-checks with the params in scope exactly like a function body.
 
 **D-TEST4 — doctest: fenced ```jet block + `// =>` trailing comment** *(ratified 2026-06-22,
-option A)*: code examples inside `///` doc comments (S49) run as tests; expected output is a
-`// =>` comment on the producing line; a mismatch fires E2901. Reuses the `//` comment marker
-(S5); no new tokens. UNBLOCKED. (c51)
+option A; implemented c51)*: code examples inside `///` doc comments (S49) run as tests;
+expected output is a `// =>` comment on the producing line; a mismatch fires E2901. Reuses the
+`//` comment marker (S5); no new tokens. **Implementation note (c51):** `jet test` discovers
+every ```` ```jet ```` fenced block inside a `///` doc-comment run, compiles each as a
+self-contained program (setup lines verbatim; each `EXPR // => VALUE` line is run and its
+`JetShow` rendering compared to `VALUE`), and reports `doctest at <file>:<line>: pass/FAIL`. A
+mismatch fires **E2901** pointing at the producing line. A file with only doctests (no `#Test`
+blocks) is still testable.
+
+**D-COV1 — `jet test --coverage` (tooling, no syntax)** *(deferred-no-ballot; implemented
+c51)*: coverage is tooling only — no user-facing syntax. **Implementation note (c51):**
+`jet test --coverage` builds an instrumented test harness (probes are emitted only in this
+mode, so normal codegen stays byte-identical — golden tests untouched) that records which user
+functions ran, then prints a per-function `HIT`/`MISS` table with `file:line` plus an overall
+`covered/total functions (pct)` summary to stdout. Granularity is per-function (each function's
+source line); finer per-line/branch instrumentation (which needs statement-level spans carried
+through the typed IR) is a future refinement, not a syntax decision. Std-only (I6).
 
 **D-BIND2 — immutable binding spelled `@=`** *(ratified 2026-06-22, option A)*: the immutable
 binding is `name @= expr`. `:=` stays the mutable binding, `=` stays reassignment of a `:=`

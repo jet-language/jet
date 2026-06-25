@@ -170,9 +170,25 @@ impl<'a> Fmt<'a> {
     fn fmt_test(&mut self, t: &crate::AST::TestDef) {
         self.write(&format!("#{}", Syntax::KW_TEST));
         self.write(" ");
-        self.write("\"");
-        self.write(&t.name.replace('\\', "\\\\").replace('"', "\\\""));
-        self.write("\"");
+        // D-TEST1: a property test is `#Test fn name(params) { … }`; the unit-test
+        // block form is `#Test "name" { … }`. `params.is_empty()` chooses the form
+        // (the property form requires a parameter list, so the two never overlap).
+        if t.params.is_empty() && t.fn_keyword_span.is_none() {
+            self.write("\"");
+            self.write(&t.name.replace('\\', "\\\\").replace('"', "\\\""));
+            self.write("\"");
+        } else {
+            self.write("fn ");
+            self.write(&t.name);
+            self.write("(");
+            for (i, p) in t.params.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.fmt_param(p);
+            }
+            self.write(")");
+        }
         self.write(" ");
         self.write(Syntax::BLOCK_OPEN);
         self.newline();

@@ -1,11 +1,12 @@
 # Epoch 3 — testing & docs ergonomics (property tests, doctests, coverage)
 
-**Status:** tracked Epoch-3 milestone (owner, 2026-06-18). Moved out of the
-Epoch-2 GA bar. The E2 testing core ships: `#Test "…" { require/require_eq }`
-blocks, snapshot `expect(...).snapshot()` with `--update-snapshots`, the `#Todo`
-typed hole, and the whole-program `jet bench`. **All four ergonomics items below
-are now ratified with no open syntax gate** (D-TEST1, D-TEST4, coverage=tooling,
-D-BENCH1) — this plan is implement-ready for the burn-down.
+**Status:** D-TEST1, D-TEST4, D-COV1, and D-BENCH1 are all **implemented (c51)**.
+The E2 testing core (`#Test "…"` blocks, snapshot `expect(...).snapshot()`,
+`#Todo`, `jet bench`) now joins: property tests (`#Test fn name(p: T) { … }`),
+doctests (```` ```jet ```` blocks in `///` comments with `// =>`), and
+`jet test --coverage`. See the implementation notes under each decision in
+`docs/spec/syntax-decisions.md`. Remaining refinement (not blocking): finer
+per-line/branch coverage (coverage today is per-function granularity).
 
 ## Items
 

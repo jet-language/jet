@@ -837,6 +837,15 @@ pub struct ExternFn {
 pub struct TestDef {
     pub name: String,
     pub name_span: Span,
+    /// D-TEST1 (ratified 2026-06-22, option B): a property test is an `#Test fn`
+    /// with parameters — inputs are generated from the parameter types and a
+    /// failing case is automatically shrunk. An empty `params` (the
+    /// `#Test "name" { … }` block form) is a plain unit test. The two forms share
+    /// one AST node; `params.is_empty()` distinguishes them.
+    pub params: Vec<Param>,
+    /// D-TEST1: span of the `fn name(…)` signature for diagnostics on a property
+    /// test (param-type errors point here). `None` for the block form.
+    pub fn_keyword_span: Option<Span>,
     pub body: Vec<Stmt>,
 }
 

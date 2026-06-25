@@ -341,8 +341,6 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     "E1801",
     // E2202 (dev interpreter step budget) is covered by tests/dev.rs
     // (`infinite_loop_hits_e2202_fuel_stop` + the c77 battery boundary set).
-    // Doctest mismatch: E2901 requires `jet test --doctest` support which isn't wired up.
-    "E2901",
     // Cross-compilation: E3302 requires a target not in the test environment.
     "E3302",
     // Package build I/O: E3402 requires a sandboxed package build environment.

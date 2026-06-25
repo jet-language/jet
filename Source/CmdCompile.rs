@@ -230,7 +230,14 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
     println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
 }
 
-pub(crate) fn run_test(path: &str, _update_snapshots: bool, mode: OutputMode) {
+pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
+    run_test_cov(path, update_snapshots, false, mode)
+}
+
+/// `jet test [--coverage]`. With `coverage`, the harness is built with line/
+/// function probes (D-COV1) and a per-function coverage report prints after the
+/// test results.
+pub(crate) fn run_test_cov(path: &str, _update_snapshots: bool, coverage: bool, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
         eprintln!("error: can't find `{}`", path);
@@ -253,7 +260,7 @@ pub(crate) fn run_test(path: &str, _update_snapshots: bool, mode: OutputMode) {
         }
         let mut any_fail = false;
         for f in files {
-            if !run_test_file(&f, mode) {
+            if !run_test_file(&f, coverage, mode) {
                 any_fail = true;
             }
         }
@@ -263,14 +270,14 @@ pub(crate) fn run_test(path: &str, _update_snapshots: bool, mode: OutputMode) {
             ExitCodes::OK
         });
     }
-    exit(if run_test_file(p, mode) {
+    exit(if run_test_file(p, coverage, mode) {
         ExitCodes::OK
     } else {
         ExitCodes::USER_ERROR
     });
 }
 
-fn run_test_file(path: &Path, mode: OutputMode) -> bool {
+fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
     let shown = path.to_string_lossy();
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -279,7 +286,19 @@ fn run_test_file(path: &Path, mode: OutputMode) -> bool {
             return false;
         }
     };
-    let (rust_code, ffi_link) = match jet::compile_tests_with_path(&src, &shown) {
+    // D-TEST4: discover and run any `///` doctest examples first. They are
+    // independent of `#Test` blocks, so a file with only doctests is testable.
+    let has_doctests = !jet::Doctest::discover(&src).is_empty();
+    let doctests_ok = run_doctests(&shown, &src, mode);
+
+    // A file with doctests but no `#Test` blocks is testable on its doctests
+    // alone — skip the test harness (which would otherwise error E0601 "no #Test
+    // blocks"). A file with NEITHER falls through so the harness reports E0601.
+    if has_doctests && !jet::has_test_blocks(&shown) {
+        return doctests_ok;
+    }
+
+    let (rust_code, ffi_link) = match jet::compile_tests_with_path_cov(&src, &shown, coverage) {
         Ok(r) => r,
         Err(diags) => {
             report_problems(mode, &shown, &src, &diags);
@@ -298,7 +317,19 @@ fn run_test_file(path: &Path, mode: OutputMode) -> bool {
         None,
         mode,
     );
-    let out = Command::new(&bin).output().unwrap_or_else(|e| {
+    // D-COV1: run with `JET_COV_OUT` pointing at a temp file; the harness writes
+    // the executed-line set there, which we diff against the coverable functions.
+    let cov_out = if coverage {
+        Some(bin.with_extension("cov"))
+    } else {
+        None
+    };
+    let mut cmd = Command::new(&bin);
+    if let Some(co) = &cov_out {
+        let _ = fs::remove_file(co);
+        cmd.env("JET_COV_OUT", co);
+    }
+    let out = cmd.output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
         exit(ExitCodes::USER_ERROR);
     });
@@ -306,7 +337,145 @@ fn run_test_file(path: &Path, mode: OutputMode) -> bool {
     if !out.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
     }
-    out.status.success()
+    if let Some(co) = &cov_out {
+        report_coverage(&shown, co);
+    }
+    out.status.success() && doctests_ok
+}
+
+/// D-TEST4: compile and run each ```` ```jet ```` doctest block found in the file's
+/// `///` doc comments, comparing each `// =>` line to the produced value. A
+/// mismatch fires E2901; a block that fails to compile is reported with its own
+/// diagnostics. Returns true when every block (if any) passed. A file with no
+/// doctests passes trivially and prints nothing.
+fn run_doctests(shown: &str, src: &str, mode: OutputMode) -> bool {
+    let blocks = jet::Doctest::discover(src);
+    if blocks.is_empty() {
+        return true;
+    }
+    let mut all_ok = true;
+    for (n, block) in blocks.iter().enumerate() {
+        let label = format!("doctest at {}:{}", shown, block.fence_line);
+        let program = jet::Doctest::synth_program(block);
+        // Write the synthetic program to a temp file next to the build dir so the
+        // normal compile+build pipeline can consume it.
+        let _ = fs::create_dir_all("build");
+        let tmp = PathBuf::from("build").join(format!("{}__doctest_{}.jet", stem(shown), n));
+        if fs::write(&tmp, &program).is_err() {
+            eprintln!("error: couldn't stage doctest from `{}`", shown);
+            all_ok = false;
+            continue;
+        }
+        let tmp_shown = tmp.to_string_lossy().into_owned();
+        let compiled = jet::compile_with_path(&program, &tmp_shown);
+        let (rust_code, ffi_link) = match compiled {
+            Ok(out) => (out.rust, out.ffi),
+            Err(diags) => {
+                // The doctest source is wrong; surface its diagnostics against the
+                // synthetic program so the author sees the exact problem.
+                println!("{}: FAIL (does not compile)", label);
+                report_problems(mode, &tmp_shown, &program, &diags);
+                all_ok = false;
+                let _ = fs::remove_file(&tmp);
+                continue;
+            }
+        };
+        let bin = tmp.with_extension("");
+        build(
+            &tmp_shown,
+            &rust_code,
+            bin.clone(),
+            BuildProfile::Default,
+            ffi_link.as_ref(),
+            &[],
+            false,
+            None,
+            mode,
+        );
+        let out = match Command::new(&bin).output() {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("error: couldn't run {}: {}", label, e);
+                all_ok = false;
+                let _ = fs::remove_file(&tmp);
+                continue;
+            }
+        };
+        let _ = fs::remove_file(&tmp);
+        if !out.status.success() {
+            println!("{}: FAIL (runtime error)", label);
+            eprint!("{}", String::from_utf8_lossy(&out.stderr));
+            all_ok = false;
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let produced: Vec<&str> = stdout.lines().collect();
+        let mut block_ok = true;
+        for (i, e) in block.expects.iter().enumerate() {
+            let actual = produced.get(i).copied().unwrap_or("");
+            if actual != e.expected {
+                block_ok = false;
+                all_ok = false;
+                let span = doc_line_span(src, e.line);
+                let diag = jet::Doctest::mismatch_diag(shown, e, actual, span);
+                // Render against the original file so the line points at the doc
+                // comment's producing line.
+                eprint!("{}", jet::render_diagnostics(shown, src, &[diag]));
+            }
+        }
+        println!("{}: {}", label, if block_ok { "pass" } else { "FAIL" });
+    }
+    all_ok
+}
+
+/// D-TEST4: the byte span of the (1-based) `line` in `src`, for an E2901 report.
+fn doc_line_span(src: &str, line: usize) -> Option<jet::Diagnostics::Span> {
+    let mut start = 0usize;
+    for (i, l) in src.split_inclusive('\n').enumerate() {
+        if i + 1 == line {
+            let trimmed_len = l.trim_end_matches(['\n', '\r']).len();
+            return Some(jet::Diagnostics::Span::new(start, start + trimmed_len));
+        }
+        start += l.len();
+    }
+    None
+}
+
+/// D-COV1: read the executed-line set and print a per-function coverage table
+/// plus an overall line-coverage figure. Output format is an implementation
+/// choice (the spec scopes coverage as tooling); this prints a stdout summary.
+fn report_coverage(file: &str, cov_out: &Path) {
+    let hits: std::collections::BTreeSet<usize> = fs::read_to_string(cov_out)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.trim().parse::<usize>().ok())
+        .collect();
+    let _ = fs::remove_file(cov_out);
+    let funcs = jet::coverable_functions(file);
+    if funcs.is_empty() {
+        println!("\ncoverage: no functions to measure");
+        return;
+    }
+    let mut covered = 0usize;
+    println!("\ncoverage for {}", file);
+    let mut by_line = funcs.clone();
+    by_line.sort_by_key(|(_, l)| *l);
+    for (name, line) in &by_line {
+        let hit = hits.contains(line);
+        if hit {
+            covered += 1;
+        }
+        println!(
+            "  {:4}  {}  {}:{}",
+            if hit { "HIT " } else { "MISS" },
+            name,
+            file,
+            line
+        );
+    }
+    let total = funcs.len();
+    let pct = (covered as f64 / total as f64) * 100.0;
+    println!("  {}/{} functions covered ({:.0}%)", covered, total, pct);
 }
 
 pub(crate) fn run_fmt(file: &str, check_only: bool) {

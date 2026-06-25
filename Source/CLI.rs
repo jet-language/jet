@@ -102,6 +102,7 @@ pub const FLAGS: &[FlagSpec] = &[
     // E2-M11 flags.
     FlagSpec { long: "--capabilities-json", help: "with build: emit capability summary as JSON (D-TOOL5)" },
     FlagSpec { long: "--update-snapshots", help: "with test: update snapshot golden files (D-TOOL4)" },
+    FlagSpec { long: "--coverage", help: "with test: report per-function / per-line coverage (D-COV1)" },
     FlagSpec { long: "--rust", help: "with emit: print the generated Rust source (D-TOOL3)" },
     FlagSpec { long: "-u", help: "short form of --update-snapshots" },
 ];

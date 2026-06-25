@@ -69,6 +69,174 @@ impl JetExpect {
     }
 }
 "#;
+/// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
+/// the `jet test` harness only when the file declares a parameterized `#Test fn`.
+/// Std-only (I6): a deterministic splitmix64 PRNG, a `JetGen` trait that
+/// generates and shrinks values per type, and the driver loop that runs N cases
+/// and minimizes a failing input. The seed defaults to a fixed constant so a
+/// failure reproduces; `JET_PROP_SEED=<n>` overrides it.
+const PROP_PRELUDE: &str = r#"
+struct JetRng { s: u64 }
+impl JetRng {
+    fn new(seed: u64) -> JetRng { JetRng { s: seed } }
+    fn next_u64(&mut self) -> u64 {
+        self.s = self.s.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = self.s;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^ (z >> 31)
+    }
+    fn below(&mut self, n: u64) -> u64 { if n == 0 { 0 } else { self.next_u64() % n } }
+    fn coin(&mut self) -> bool { self.next_u64() & 1 == 1 }
+}
+/// A type that the property runner can generate and shrink. `shrink` returns
+/// progressively simpler candidates (closer to a minimal failing case); an empty
+/// list means "already minimal".
+trait JetGen: Sized + Clone {
+    fn generate(rng: &mut JetRng) -> Self;
+    fn shrink(&self) -> Vec<Self>;
+    fn render(&self) -> String;
+}
+impl JetGen for i64 {
+    fn generate(rng: &mut JetRng) -> i64 {
+        // Bias toward small magnitudes (edge cases) but cover the full range.
+        match rng.below(8) {
+            0 => 0, 1 => 1, 2 => -1, 3 => i64::MAX, 4 => i64::MIN,
+            _ => (rng.next_u64() as i64) % 1000,
+        }
+    }
+    fn shrink(&self) -> Vec<i64> {
+        if *self == 0 { return Vec::new(); }
+        let mut v = vec![0i64];
+        let half = *self / 2;
+        if half != 0 && half != *self { v.push(half); }
+        if *self > 0 { v.push(*self - 1); } else { v.push(*self + 1); }
+        v
+    }
+    fn render(&self) -> String { format!("{}", self) }
+}
+impl JetGen for f64 {
+    fn generate(rng: &mut JetRng) -> f64 {
+        match rng.below(6) {
+            0 => 0.0, 1 => 1.0, 2 => -1.0,
+            _ => ((rng.next_u64() % 200000) as f64) / 1000.0 - 100.0,
+        }
+    }
+    fn shrink(&self) -> Vec<f64> {
+        if *self == 0.0 { return Vec::new(); }
+        let mut v = vec![0.0f64];
+        let half = *self / 2.0;
+        if half != *self { v.push((half * 1000.0).round() / 1000.0); }
+        v
+    }
+    fn render(&self) -> String { format!("{:?}", self) }
+}
+impl JetGen for f32 {
+    fn generate(rng: &mut JetRng) -> f32 { f64::generate(rng) as f32 }
+    fn shrink(&self) -> Vec<f32> { (*self as f64).shrink().into_iter().map(|x| x as f32).collect() }
+    fn render(&self) -> String { format!("{:?}", self) }
+}
+impl JetGen for bool {
+    fn generate(rng: &mut JetRng) -> bool { rng.coin() }
+    fn shrink(&self) -> Vec<bool> { if *self { vec![false] } else { Vec::new() } }
+    fn render(&self) -> String { format!("{}", self) }
+}
+impl JetGen for char {
+    fn generate(rng: &mut JetRng) -> char {
+        let printable = b" abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        printable[(rng.below(printable.len() as u64)) as usize] as char
+    }
+    fn shrink(&self) -> Vec<char> { if *self == 'a' { Vec::new() } else { vec!['a'] } }
+    fn render(&self) -> String { format!("{:?}", self) }
+}
+impl JetGen for String {
+    fn generate(rng: &mut JetRng) -> String {
+        let len = rng.below(8) as usize;
+        (0..len).map(|_| char::generate(rng)).collect()
+    }
+    fn shrink(&self) -> Vec<String> {
+        if self.is_empty() { return Vec::new(); }
+        let mut v = vec![String::new()];
+        let chars: Vec<char> = self.chars().collect();
+        let half = chars.len() / 2;
+        if half > 0 && half < chars.len() { v.push(chars[..half].iter().collect()); }
+        if chars.len() > 1 { v.push(chars[..chars.len() - 1].iter().collect()); }
+        v
+    }
+    fn render(&self) -> String { format!("{:?}", self) }
+}
+impl<T: JetGen> JetGen for Option<T> {
+    fn generate(rng: &mut JetRng) -> Option<T> {
+        if rng.below(4) == 0 { None } else { Some(T::generate(rng)) }
+    }
+    fn shrink(&self) -> Vec<Option<T>> {
+        match self {
+            None => Vec::new(),
+            Some(x) => {
+                let mut v = vec![None];
+                for s in x.shrink() { v.push(Some(s)); }
+                v
+            }
+        }
+    }
+    fn render(&self) -> String {
+        match self { None => "none".to_string(), Some(x) => format!("{}", x.render()) }
+    }
+}
+impl<T: JetGen> JetGen for Vec<T> {
+    fn generate(rng: &mut JetRng) -> Vec<T> {
+        let len = rng.below(8) as usize;
+        (0..len).map(|_| T::generate(rng)).collect()
+    }
+    fn shrink(&self) -> Vec<Vec<T>> {
+        if self.is_empty() { return Vec::new(); }
+        let mut v: Vec<Vec<T>> = vec![Vec::new()];
+        // Drop the first element, then the last, then shrink the first element.
+        if self.len() > 1 {
+            v.push(self[1..].to_vec());
+            v.push(self[..self.len() - 1].to_vec());
+        }
+        if let Some(first) = self.first() {
+            for s in first.shrink() {
+                let mut c = self.clone();
+                c[0] = s;
+                v.push(c);
+            }
+        }
+        v
+    }
+    fn render(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.render()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+fn jet_prop_seed() -> u64 {
+    std::env::var("JET_PROP_SEED").ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0x5EED_1234_ABCD_0001)
+}
+"#;
+/// D-COV1 (`jet test --coverage`): the coverage recorder. Emitted only when the
+/// harness is built with `--coverage`. `jet_cov(line)` records that the function
+/// starting at `line` ran; on exit the hit set is written to the path in
+/// `JET_COV_OUT` so the `jet test` driver can report per-function/per-line
+/// coverage. Std-only (I6): a `Mutex<HashSet>` plus an exit guard.
+const COV_PRELUDE: &str = r#"
+use std::sync::Mutex;
+use std::collections::BTreeSet;
+static JET_COV_HITS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
+fn jet_cov(line: usize) {
+    if let Ok(mut s) = JET_COV_HITS.lock() { s.insert(line); }
+}
+fn jet_cov_dump() {
+    if let Ok(path) = std::env::var("JET_COV_OUT") {
+        if let Ok(s) = JET_COV_HITS.lock() {
+            let lines: Vec<String> = s.iter().map(|l| l.to_string()).collect();
+            let _ = std::fs::write(path, lines.join("\n"));
+        }
+    }
+}
+"#;
 const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
@@ -263,6 +431,9 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    if any_property_test(&tests) {
+        out.push_str(PROP_PRELUDE);
+    }
     out.push('\n');
 
     let mut cx = build_cx(prog, src, file);
@@ -327,13 +498,19 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
         }
     }
 
-    for (i, test) in tests.iter().enumerate() {
-        out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
-        emit_test_body(&cx, &test.body, &mut out);
-        out.push_str("    Ok(())\n");
-        out.push_str("}\n\n");
-    }
+    emit_test_fns(&cx, &tests, &mut out);
+    emit_test_main(&tests, &mut out);
+    strip_unused_term_prelude(strip_unused_mem_prelude(out))
+}
 
+/// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
+/// (unit or property) is invoked through its `jet_test_N()` entry; the loop is
+/// identical whichever kind it is.
+fn emit_test_main(tests: &[&TestDef], out: &mut String) {
+    emit_test_main_cov(tests, out, false)
+}
+
+fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("fn main() {\n");
     out.push_str("    let mut passed = 0usize;\n");
     out.push_str("    let mut failed = 0usize;\n");
@@ -358,9 +535,118 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
         out.push_str("    }\n");
     }
     out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
+    if coverage {
+        // D-COV1: write the hit set before any `exit` (which would skip Drop).
+        out.push_str("    jet_cov_dump();\n");
+    }
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
-    strip_unused_term_prelude(strip_unused_mem_prelude(out))
+}
+
+/// Does any test in the set declare property parameters (D-TEST1)? Drives whether
+/// the harness needs `PROP_PRELUDE`.
+fn any_property_test(tests: &[&TestDef]) -> bool {
+    tests.iter().any(|t| !t.params.is_empty())
+}
+
+/// D-TEST1: emit the per-test functions. A unit test (`#Test "name" { … }`, no
+/// params) becomes `fn jet_test_N() -> Result<(), String>` exactly as before. A
+/// property test (`#Test fn name(p…) { … }`) becomes a body fn `jet_prop_N(p…)`
+/// plus a driver `jet_test_N()` that generates inputs, runs cases, and shrinks
+/// the first failure to a minimal counterexample. Either way `jet_test_N()` is
+/// the single entry the main loop calls, so the reporting loop is shared.
+fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
+    const CASES: usize = 200;
+    const SHRINK_STEPS: usize = 2000;
+    for (i, test) in tests.iter().enumerate() {
+        if test.params.is_empty() {
+            out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
+            emit_test_body(cx, &test.body, out);
+            out.push_str("    Ok(())\n");
+            out.push_str("}\n\n");
+            continue;
+        }
+        // Property body: takes each generated input by value, returns the body's
+        // Result. Param Rust types come from `cx.rust_type` so the signature
+        // matches what the body expects.
+        let sig: Vec<String> = test
+            .params
+            .iter()
+            .map(|p| format!("{}: {}", mangle(&p.name), cx.rust_type(&p.ty)))
+            .collect();
+        out.push_str(&format!(
+            "fn jet_prop_{}({}) -> Result<(), String> {{\n",
+            i,
+            sig.join(", ")
+        ));
+        TIR::emit_tir_property_test_body(&test.body, &test.params, cx, out);
+        out.push_str("    Ok(())\n");
+        out.push_str("}\n\n");
+
+        // Driver: generate a tuple of inputs per case; on the first failing case,
+        // shrink each component greedily while it still fails, then report the
+        // minimal counterexample plus the assertion message.
+        let n = test.params.len();
+        let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
+        let tuple_ty = format!("({},)", types.join(", "));
+        out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
+        out.push_str("    let mut rng = JetRng::new(jet_prop_seed());\n");
+        // call helper that takes the tuple, returns Result
+        let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
+        out.push_str(&format!(
+            "    let run = |input: &{}| -> Result<(), String> {{ jet_prop_{}({}) }};\n",
+            tuple_ty, i, call_args.join(", ")
+        ));
+        out.push_str(&format!("    for _ in 0..{} {{\n", CASES));
+        let gen_components: Vec<String> = types
+            .iter()
+            .map(|t| format!("<{} as JetGen>::generate(&mut rng)", t))
+            .collect();
+        out.push_str(&format!(
+            "        let mut input: {} = ({},);\n",
+            tuple_ty,
+            gen_components.join(", ")
+        ));
+        out.push_str("        if let Err(first_msg) = run(&input) {\n");
+        out.push_str("            let mut msg = first_msg;\n");
+        out.push_str("            let mut improved = true;\n");
+        out.push_str("            let mut steps = 0usize;\n");
+        out.push_str(&format!(
+            "            while improved && steps < {} {{\n",
+            SHRINK_STEPS
+        ));
+        out.push_str("                improved = false;\n");
+        for k in 0..n {
+            out.push_str(&format!(
+                "                for cand in input.{}.shrink() {{\n",
+                k
+            ));
+            out.push_str("                    steps += 1;\n");
+            out.push_str("                    let mut trial = input.clone();\n");
+            out.push_str(&format!("                    trial.{} = cand;\n", k));
+            out.push_str("                    if let Err(m) = run(&trial) {\n");
+            out.push_str("                        input = trial; msg = m; improved = true; break;\n");
+            out.push_str("                    }\n");
+            out.push_str("                }\n");
+        }
+        out.push_str("            }\n");
+        // Render the minimized counterexample as `name = value` pairs.
+        let renders: Vec<String> = test
+            .params
+            .iter()
+            .enumerate()
+            .map(|(k, p)| format!("format!(\"{} = {{}}\", input.{}.render())", p.name, k))
+            .collect();
+        out.push_str(&format!(
+            "            let args = vec![{}];\n",
+            renders.join(", ")
+        ));
+        out.push_str("            return Err(format!(\"property failed for {}\\n  {}\", args.join(\", \"), msg));\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("    Ok(())\n");
+        out.push_str("}\n\n");
+    }
 }
 
 /// c109: emit a `#Test` block body through the TIR (R7 — the only codegen seam). A test
@@ -456,6 +742,14 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
+    emit_bundle_tests_cov(bundle, link, false)
+}
+
+/// D-COV1: emit the `jet test` harness, optionally with coverage instrumentation.
+/// `coverage = false` is byte-identical to the historical `emit_bundle_tests`
+/// (golden tests rely on this), so the probes/prelude only appear under
+/// `jet test --coverage`.
+pub fn emit_bundle_tests_cov(bundle: &ProgramBundle, link: Option<&FfiLink>, coverage: bool) -> String {
     let entry = &bundle.modules[bundle.entry];
     let tests: Vec<&TestDef> = entry
         .items
@@ -469,6 +763,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         !tests.is_empty(),
         "emit_bundle_tests called with no test blocks"
     );
+    let want_prop_prelude = any_property_test(&tests);
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -482,6 +777,12 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    if want_prop_prelude {
+        out.push_str(PROP_PRELUDE);
+    }
+    if coverage {
+        out.push_str(COV_PRELUDE);
+    }
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
     }
@@ -505,6 +806,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
             &extern_funcs,
         );
         cx.test_mode = true;
+        cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
@@ -530,6 +832,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         &extern_funcs,
     );
     cx.test_mode = true;
+    cx.coverage = coverage;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
@@ -544,39 +847,8 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, false);
 
-    for (i, test) in tests.iter().enumerate() {
-        out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
-        emit_test_body(&cx, &test.body, &mut out);
-        out.push_str("    Ok(())\n");
-        out.push_str("}\n\n");
-    }
-
-    out.push_str("fn main() {\n");
-    out.push_str("    let mut passed = 0usize;\n");
-    out.push_str("    let mut failed = 0usize;\n");
-    for (i, test) in tests.iter().enumerate() {
-        let name = escape_rust_str(&test.name);
-        out.push_str(&format!("    match jet_test_{}() {{\n", i));
-        out.push_str("        Ok(()) => {\n");
-        out.push_str(&format!(
-            "            println!(\"{{}}: pass\", {});\n",
-            name
-        ));
-        out.push_str("            passed += 1;\n");
-        out.push_str("        }\n");
-        out.push_str("        Err(msg) => {\n");
-        out.push_str(&format!(
-            "            println!(\"{{}}: FAIL\", {});\n",
-            name
-        ));
-        out.push_str("            eprintln!(\"  {}\", msg);\n");
-        out.push_str("            failed += 1;\n");
-        out.push_str("        }\n");
-        out.push_str("    }\n");
-    }
-    out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
-    out.push_str("    if failed > 0 { std::process::exit(1); }\n");
-    out.push_str("}\n");
+    emit_test_fns(&cx, &tests, &mut out);
+    emit_test_main_cov(&tests, &mut out, coverage);
     strip_unused_term_prelude(strip_unused_mem_prelude(out))
 }
 
@@ -601,6 +873,10 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         !benches.is_empty(),
         "emit_bundle_benches called with no bench blocks"
     );
+    // Benches never declare property params, so they never need the generator prelude.
+    let want_prop_prelude = false;
+    // D-COV1: coverage instrumentation is a `jet test` feature; benches don't use it.
+    let coverage = false;
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -614,6 +890,12 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    if want_prop_prelude {
+        out.push_str(PROP_PRELUDE);
+    }
+    if coverage {
+        out.push_str(COV_PRELUDE);
+    }
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
     }
@@ -637,6 +919,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             &extern_funcs,
         );
         cx.test_mode = true;
+        cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
@@ -662,6 +945,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         &extern_funcs,
     );
     cx.test_mode = true;
+    cx.coverage = coverage;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);

@@ -109,6 +109,145 @@ fn jet_test_fail_then_fixed() {
 }
 
 #[test]
+fn jet_property_test_passes() {
+    // D-TEST1: a parameterized `#Test fn` is a property test. The example's three
+    // properties all hold, so every line passes and the run succeeds.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/114_property_tests.jet");
+    let out = Command::new(&jet).arg("test").arg(&example).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "property test example failed:\nstdout: {}\nstderr: {}",
+        stdout,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for needle in [
+        "reverse_twice_is_identity: pass",
+        "reverse_keeps_length: pass",
+        "reverse of a known list: pass",
+        "3 passed, 0 failed",
+    ] {
+        assert!(stdout.contains(needle), "missing `{}`:\n{}", needle, stdout);
+    }
+}
+
+#[test]
+fn jet_property_test_shrinks_failure() {
+    // D-TEST1: a failing property is shrunk to a minimal counterexample. The
+    // fixture asserts `n < 50`; the runner must report the boundary value `50`.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/prop_shrink.jet");
+    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    assert!(!out.status.success(), "a failing property must exit nonzero");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains("always_small: FAIL"),
+        "expected a FAIL line:\n{}",
+        stdout
+    );
+    assert!(
+        stderr.contains("n = 50"),
+        "expected the shrunk counterexample `n = 50`:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn jet_property_test_rejects_ungeneratable_param() {
+    // D-TEST1: a property-test parameter whose type has no generator fires E0613.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/prop_bad_type.jet");
+    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    assert!(!out.status.success(), "an ungeneratable param must be rejected");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(combined.contains("E0613"), "expected E0613:\n{}", combined);
+}
+
+#[test]
+fn jet_doctest_passes() {
+    // D-TEST4: `jet test` discovers and runs `///` doctests. The example's
+    // `// =>` expectations all hold.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/115_doctests.jet");
+    let out = Command::new(&jet).arg("test").arg(&example).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "doctest example failed:\nstdout: {}\nstderr: {}",
+        stdout,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("doctest at") && stdout.contains("pass"), "no doctest pass line:\n{}", stdout);
+}
+
+#[test]
+fn jet_doctest_mismatch_fires_e2901() {
+    // D-TEST4: a `// =>` claim that doesn't match the produced value fires E2901
+    // and fails the run.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/doctest_fail.jet");
+    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    assert!(!out.status.success(), "a wrong doctest must exit nonzero");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E2901"), "expected E2901:\n{}", stderr);
+}
+
+#[test]
+fn jet_test_coverage_reports_hit_and_miss() {
+    // D-COV1: `jet test --coverage` reports per-function coverage. The fixture
+    // calls `used` from a test but never `unused`, so the report must mark one
+    // HIT and one MISS.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/coverage.jet");
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg("--coverage")
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "coverage run failed:\n{}", stdout);
+    assert!(stdout.contains("HIT") && stdout.contains("used"), "missing HIT used:\n{}", stdout);
+    assert!(stdout.contains("MISS") && stdout.contains("unused"), "missing MISS unused:\n{}", stdout);
+    assert!(stdout.contains("1/2 functions covered"), "wrong summary:\n{}", stdout);
+}
+
+#[test]
 fn jet_new_creates_project() {
     let jet = jet_bin();
     let dir = std::env::temp_dir().join(format!("jet_new_test_{}", std::process::id()));

@@ -98,7 +98,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "check", summary: "look for problems, build nothing", flags: &["json"], arg: Arg::File },
     CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json", "capabilities-json"], arg: Arg::File },
     CommandSpec { name: "run", summary: "build, then run (or run a project)", flags: &["small", "emit-rust", "json"], arg: Arg::File },
-    CommandSpec { name: "test", summary: "compile and run top-level test blocks", flags: &["json", "update-snapshots", "u"], arg: Arg::Path },
+    CommandSpec { name: "test", summary: "compile and run top-level test blocks", flags: &["json", "update-snapshots", "u", "coverage"], arg: Arg::Path },
     CommandSpec { name: "emit", summary: "emit the generated Rust source (D-TOOL3)", flags: &["rust"], arg: Arg::File },
     CommandSpec { name: "bench", summary: "benchmark a Jet program (D-TOOL5)", flags: &["json"], arg: Arg::File },
     CommandSpec { name: "new", summary: "create a new project folder", flags: &["annotated"], arg: Arg::Name },
