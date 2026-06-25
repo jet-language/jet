@@ -28,6 +28,10 @@ pub struct FuncSig {
     /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
     /// non-determinism. Call sites inside a `pure fn` must also be pure (E3401).
     pub is_pure: bool,
+    /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
+    /// The taint pass treats a call to such a function as producing a clean
+    /// (untainted) value regardless of the taint of its arguments.
+    pub is_sanitizer: bool,
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions (no label checking needed there).
     pub param_info: Vec<(String, bool)>,
@@ -216,6 +220,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         is_extern: false,
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
+        is_sanitizer: f.is_sanitizer,
     }
 }
 
@@ -237,6 +242,7 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         is_extern: true,
         is_unsafe: false,
         is_pure: false, // extern functions are always considered impure
+        is_sanitizer: false, // extern functions can't be sanitizers
     }
 }
 
@@ -576,6 +582,7 @@ mod Captures;
 mod Capability;
 mod Purity;
 mod Effects;
+mod Taint;
 mod SchemaMigration;
 pub mod HotSwap;
 
@@ -587,6 +594,7 @@ pub(crate) use Diagnostics::*;
 pub(crate) use Captures::*;
 pub(crate) use Purity::*;
 pub(crate) use Effects::*;
+pub(crate) use Taint::{check_func_taint, collect_sanitizers};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
 // `e0140_unconsumed` is referenced only within that module; the other two fire
 // from CheckerCore (E0141) and CheckerInfer (E0142).

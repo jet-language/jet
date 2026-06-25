@@ -3398,6 +3398,8 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         Expr::MethodCall { receiver, method, args, recv_type, .. } => {
             method_call_in_subset(receiver, method, args, recv_type, cx, locals)
         }
+        // D-TAINT1: `#Tainted expr` — the tag is erased; in-subset iff the inner is.
+        Expr::Tainted(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: optional constructors `value(x)` / `null`. Covered when the
         // inner value (if any) is in-subset — they lower to `Some(x)` / `None`.
         Expr::Present(inner, _) => expr_in_subset(inner, cx, locals),
@@ -7236,6 +7238,10 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        // D-TAINT1: `#Tainted expr` — the value-fact tag is **erased in codegen**
+        // (I3). Lower the inner expression unchanged; taint exists only as a
+        // compile-time sema proof, never a runtime value.
+        Expr::Tainted(inner, _) => lower_expr(inner, cx, env),
         // c109 Phase 8: `value(x)` → `Some(x)`. The result type is `T?` where `T` is
         // the inner's resolved type (totality). Mirrors `Expr::Present`.
         Expr::Present(inner, _) => {

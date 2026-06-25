@@ -131,7 +131,8 @@ pub(crate) fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], take
                 }
             }
         }
-        Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
+        Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
+        | Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
         Expr::Absent(_) | Expr::Todo { .. } => {}
         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken);
@@ -235,7 +236,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::CallValue { callee, args, .. } => {
             expr_refs_name(callee, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
         }
-        Expr::Field(inner, _, _) | Expr::Present(inner, _) | Expr::Try(inner, _, _) => {
+        Expr::Field(inner, _, _) | Expr::Tainted(inner, _) | Expr::Present(inner, _) | Expr::Try(inner, _, _) => {
             expr_refs_name(inner, name)
         }
         Expr::OptField { base, .. } => expr_refs_name(base, name),
@@ -513,6 +514,7 @@ pub(crate) fn expr_collect_captures(
             }
         }
         Expr::Field(inner, _, _)
+        | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Try(inner, _, _)
         | Expr::Ok(inner, _)

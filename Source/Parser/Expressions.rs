@@ -815,6 +815,23 @@ impl<'a> Parser<'a> {
                 let span = Span::new(start, self.bump().span.end); // `Todo`
                 return Ok(Expr::Todo { span, expected_type: None });
             }
+            TokKind::Hash
+                if matches!(
+                    self.toks.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokKind::Ident(n)) if n == Syntax::KW_TAINTED
+                ) =>
+            {
+                // D-TAINT1: `#Tainted expr` — a value-fact tag marking the value
+                // as untrusted at its source. The tag binds tightly to the
+                // following primary expression. Taint propagation + the E0721
+                // sink check run in the sema taint pass; codegen erases the tag
+                // (I3), emitting the inner expression unchanged.
+                let start = self.bump().span.start; // `#`
+                self.bump(); // `Tainted`
+                let inner = self.expr_primary(allow_struct_lit)?;
+                let span = Span::new(start, inner.span().end);
+                return Ok(Expr::Tainted(Box::new(inner), span));
+            }
             TokKind::Ident(name) if name == Syntax::FOREIGN_TODO => {
                 // S14: bare lowercase `todo` is the retired spelling (E0054).
                 let t = self.bump();

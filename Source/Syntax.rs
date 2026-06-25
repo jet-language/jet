@@ -571,6 +571,25 @@ pub const KW_TODO: &str = "Todo";
 /// error pointing at `#Pure`.
 pub const KW_PURE: &str = "Pure";
 
+/// D-TAINT1 (ratified 2026-06-21, option A; gated on D-EFF1): the value-fact tag
+/// that marks an untrusted value at its source — `#Tainted input`. The taint
+/// **spreads** along dataflow (assignment, interpolation, field store, return,
+/// arithmetic); a tainted value reaching a sink effect (`Db`/`Exec`/`Net`)
+/// without passing through a `#Sanitizer fn` is E0721. A value fact, not a
+/// declaration: it rides the value (D-QUAL1). PascalCase per D-CASING1 (the
+/// ratified card's lowercase `#tainted` is normalized to the tag convention).
+/// Static, erased in codegen (I3).
+pub const KW_TAINTED: &str = "Tainted";
+
+/// D-TAINT1: the `#Sanitizer fn name(…)` modifier — the one blessed way to strip
+/// taint. A sanitizer's return value is untainted by contract, regardless of
+/// whether its inputs were tainted (it is the audited cleaning step). A fn
+/// modifier in the `#Pure`/`#Unsafe` family; PascalCase per D-CASING1. Erased in
+/// codegen (I3). NOTE: the ratified card spells the modifier bare `sanitizer fn`;
+/// the D-CASING1 marker convention (which moved `pure fn` → `#Pure fn`) makes
+/// `#Sanitizer fn` the consistent default — a spelling fork queued as D-TAINT-SAN.
+pub const KW_SANITIZER: &str = "Sanitizer";
+
 /// D-EFF1 / D-QUAL1 (ratified 2026-06-22): the effect-restriction region marker,
 /// written `#Caps(Net, Db) { … }`. Inside the block, the body (and everything it
 /// transitively calls) may use only the listed effects; an out-of-set effect is
@@ -1151,6 +1170,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TRANSACT,
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
     KW_TEST, KW_BENCH, KW_PURE, KW_TODO,
+    // Taint tracking (D-TAINT1): value-fact tag + sanitizer modifier
+    KW_TAINTED, KW_SANITIZER,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
     LIT_TRUE, LIT_FALSE, LIT_NULL, LIT_OK, LIT_ERR, KW_IT,
     // Binding sigils (SIGIL_BIND_IMMUT / SIGIL_BIND_MUT) are not words; omitted.

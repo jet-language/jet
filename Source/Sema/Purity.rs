@@ -408,7 +408,7 @@ fn check_pure_expr_with_path(
             }
             None
         }
-        Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _) => rec!(inner),
+        Expr::Tainted(inner, _) | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _) => rec!(inner),
         Expr::Try(inner, _, _) => rec!(inner),
         Expr::OrFallback { value, fallback, .. } => {
             rec!(value).or_else(|| {
@@ -814,7 +814,7 @@ fn walk_expr_for_calls(
                 if !diags.is_empty() { return; }
             }
         }
-        Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _) => {
+        Expr::Tainted(inner, _) | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _) => {
             walk_expr_for_calls(inner, root_fn, funcs_sig, ast_funcs, path, visited, diags);
         }
         Expr::Try(inner, _, _) => {

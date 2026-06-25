@@ -288,6 +288,8 @@ impl<'a> Parser<'a> {
                 TokKind::KwFn => self.func().map(Item::Func),
                 // S60 (D-CASING1 follow-on): `#Pure fn name(…)` purity modifier.
                 TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
+                // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
+                TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
                 // S14: bare lowercase `pure` is the retired spelling (E0053).
                 TokKind::Ident(n) if n == Syntax::FOREIGN_PURE && self.foreign_pure_follows() => {
                     let t = self.bump();
@@ -467,7 +469,7 @@ impl<'a> Parser<'a> {
                         format!("replace `{}` with `{}`", foreign, Syntax::KW_FN),
                         Some(t.span),
                     ));
-                    self.func_after_fn(false, false, false).map(Item::Func)
+                    self.func_after_fn(false, false, false, false).map(Item::Func)
                 }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_IMPORT => {
                     let t = self.bump();
@@ -606,6 +608,13 @@ impl<'a> Parser<'a> {
     pub(super) fn at_pure_fn(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
+            && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// D-TAINT1: true when the cursor is at `#Sanitizer fn`/`#Sanitizer pub fn`.
+    pub(super) fn at_sanitizer_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SANITIZER)
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
     }
 
@@ -825,7 +834,7 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
-        self.func_after_fn(is_pub, true, false)
+        self.func_after_fn(is_pub, true, false, false)
     }
 
     /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#extern
@@ -1028,21 +1037,39 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
-        self.func_with_purity(is_pure)
+        // D-TAINT1: `#Sanitizer fn` / `#Sanitizer pub fn` — the taint-strip
+        // modifier (guaranteed by `at_sanitizer_fn` when present at dispatch).
+        let is_sanitizer = if self.at_sanitizer_fn() {
+            self.bump(); // `#`
+            self.bump(); // `Sanitizer`
+            true
+        } else {
+            false
+        };
+        self.func_with_modifiers(is_pure, is_sanitizer)
     }
 
     /// Parse a function whose purity is already known (the bare-`pure` teaching
     /// path enters here after emitting E0053 and consuming the `pure` word).
     pub(super) fn func_with_purity(&mut self, is_pure: bool) -> Result<Func, Diagnostic> {
+        self.func_with_modifiers(is_pure, false)
+    }
+
+    /// Parse a function whose `#Pure`/`#Sanitizer` modifiers are already known.
+    pub(super) fn func_with_modifiers(
+        &mut self,
+        is_pure: bool,
+        is_sanitizer: bool,
+    ) -> Result<Func, Diagnostic> {
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-        self.func_after_fn(is_pub, false, is_pure)
+        self.func_after_fn(is_pub, false, is_pure, is_sanitizer)
     }
 
-    fn func_after_fn(&mut self, is_pub: bool, is_unsafe: bool, is_pure: bool) -> Result<Func, Diagnostic> {
+    fn func_after_fn(&mut self, is_pub: bool, is_unsafe: bool, is_pure: bool, is_sanitizer: bool) -> Result<Func, Diagnostic> {
         let (name, name_span) = self.expect_ident("after `fn`")?;
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LParen, "after the function name")?;
@@ -1092,6 +1119,7 @@ impl<'a> Parser<'a> {
                 is_view_return,
                 is_unsafe,
                 is_pure,
+                is_sanitizer,
                 declared_effects,
                 body,
             });
@@ -1108,6 +1136,7 @@ impl<'a> Parser<'a> {
             is_view_return,
             is_unsafe,
             is_pure,
+            is_sanitizer,
             declared_effects,
             body,
         })
@@ -1255,7 +1284,9 @@ impl<'a> Parser<'a> {
             } else {
                 let is_method = matches!(self.peek().kind, TokKind::KwFn)
                     || (matches!(self.peek().kind, TokKind::KwPub)
-                        && matches!(self.peek2().kind, TokKind::KwFn));
+                        && matches!(self.peek2().kind, TokKind::KwFn))
+                    || self.at_pure_fn()
+                    || self.at_sanitizer_fn();
                 if is_method {
                     methods.push(self.method_in_type()?);
                 } else {
@@ -1828,12 +1859,20 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
+        // D-TAINT1: `#Sanitizer fn` is valid on methods too.
+        let is_sanitizer = if self.at_sanitizer_fn() {
+            self.bump(); // `#`
+            self.bump(); // `Sanitizer`
+            true
+        } else {
+            false
+        };
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a method")?;
-        self.func_after_fn(is_pub, false, is_pure)
+        self.func_after_fn(is_pub, false, is_pure, is_sanitizer)
     }
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
@@ -2301,7 +2340,9 @@ impl<'a> Parser<'a> {
             } else {
                 let is_method = matches!(self.peek().kind, TokKind::KwFn)
                     || (matches!(self.peek().kind, TokKind::KwPub)
-                        && matches!(self.peek2().kind, TokKind::KwFn));
+                        && matches!(self.peek2().kind, TokKind::KwFn))
+                    || self.at_pure_fn()
+                    || self.at_sanitizer_fn();
                 if is_method {
                     methods.push(self.method_in_type()?);
                 } else {

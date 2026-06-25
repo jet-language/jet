@@ -551,6 +551,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                     is_extern: false,
                     is_unsafe: f.is_unsafe,
                     is_pure: f.is_pure,
+                    is_sanitizer: f.is_sanitizer,
                     param_info: f.params.iter().map(|p| (p.name.clone(), p.default.is_some())).collect(),
                     defaults: f.params.iter().map(|p| p.default.as_ref().map(|d| *d.clone())).collect(),
                 });

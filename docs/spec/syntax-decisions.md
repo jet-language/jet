@@ -2041,6 +2041,22 @@ research-grade ceremony for the v1 injection-class win (I8). It is **deferred to
 post-Epoch-3** as the dedicated IFC ballot — tracked as **D-IFC1** in the deferred-ballots
 list (board items #30/#33). Rejected-for-now: shipping IFC as the v1 taint model (B —
 wrong altitude for the 80% case one `#tainted` bit already covers).
+**(impl 2026-06-24)** Built end-to-end: the value-fact tag is spelled **`#Tainted`**
+(PascalCase per D-CASING1 — the card's lowercase `#tainted` is normalized to the tag
+convention) as a prefix on a value expression (`#Tainted expr`, `Expr::Tainted` in the
+AST, `KW_TAINTED` in Syntax.rs). Taint is an **intraprocedural forward dataflow**
+(`Source/Sema/Taint.rs`): it spreads through bindings, reassignment, arithmetic, field/
+index reads, string interpolation, and collection/struct construction. The
+taint-strip contract is **`#Sanitizer fn`** (a fn/method modifier in the `#Pure`/
+`#Unsafe` family; `KW_SANITIZER`, `Func.is_sanitizer`) — its result is untainted by
+contract. **Sinks are effect-based** (the card's `#db`/`#exec`/`#net`): a Core call
+carrying the **`Db`/`Exec`/`Net`** effect with a tainted argument is **E0721**, with a
+"pass it through a `#Sanitizer fn`" fix-it. The tag is static, **erased in codegen**
+(I3 — `#Tainted x` lowers to `x` unchanged). `tests/ui/taint_sink_unsanitized`,
+`examples/features/90_taint.jet`, `tests/taint.rs`. **One spelling fork deferred:** the
+ratified card writes the modifier bare `sanitizer fn`, but the D-CASING1 follow-on (which
+moved `pure fn` → `#Pure fn`) makes `#Sanitizer fn` the consistent marker spelling —
+implemented as the default, queued as **D-TAINT-SAN** for owner confirmation.
 
 **D-ALLOC2 — Arena `alloc` return + reset/free safety** *(ratified 2026-06-21, option A;
 gated on a new region rule)*: `arena.alloc(value)` returns a **scope-bound `view`** into the
@@ -2566,7 +2582,7 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-21 | D-OBS2 | debug line-table is a sidecar `<file>.jetmap` JSON (versioned, std-only); part of the DAP debugger | owner |
 | 2026-06-21 | D-ALLOC2 | arena `alloc` returns scope-bound `view`; use-after-reset/escape = compile error (E0631/E0632); region rule ratified (D-REGION1) → unblocked | owner |
 | 2026-06-21 | D-REGION1 | allocation regions: implicit scope-inferred (A, beginner) + explicit `region r { … }` (B, expert) — both; unblocks D-ALLOC2 | owner |
-| 2026-06-21 | D-TAINT1 | `#tainted` tag + `sanitizer fn`; tainted→sink is E0721 (gated on D-EFF1); full IFC (opt B) deferred post-Epoch-3 → D-IFC1 | owner |
+| 2026-06-21 | D-TAINT1 | `#tainted` tag + `sanitizer fn`; tainted→sink is E0721 (gated on D-EFF1); full IFC (opt B) deferred post-Epoch-3 → D-IFC1. **(impl 2026-06-24)** value-fact tag `#Tainted expr` (PascalCase, D-CASING1) + `#Sanitizer fn` modifier; intraprocedural forward dataflow in `Source/Sema/Taint.rs`; sinks are `Db`/`Exec`/`Net`-effect Core calls; E0721 with sanitizer fix-it; erased in codegen (I3). Spelling fork `sanitizer fn` vs `#Sanitizer fn` deferred → D-TAINT-SAN (default `#Sanitizer fn` shipped). | owner |
 | 2026-06-21 | D-QUAL2 | two qualifier kinds — `trait` (methods, dispatches) vs `tag` (no methods, erases); unblocks value-tags cluster | owner |
 | 2026-06-21 | D-UNINIT1 | `#uninit` binding marker, gated by `use core.mem`; write-before-read proof (E0420) | owner |
 | 2026-06-21 | D-REGEX1 | `jet.regex` on the Rust `regex` crate (owner-approved I6 bootstrap; native-ize before Epoch 3 ends) | owner |

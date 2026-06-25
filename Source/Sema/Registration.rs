@@ -519,6 +519,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
+                    is_sanitizer: false,
                     declared_effects: None,
                     body: std::mem::take(&mut t.body),
                 };
@@ -573,7 +574,56 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     check_effect_boundaries(&prog.items, &solved, &mut diags);
     check_region_caps(&effect_summaries, &solved, &mut diags);
 
+    // D-TAINT1: taint tracking — `#Tainted` value-facts propagate, a `#Sanitizer
+    // fn` clears taint, and a tainted value reaching a sink effect (Db/Exec/Net)
+    // without sanitizing is E0721. Static, erased in codegen (I3).
+    let mut sanitizers: HashSet<String> = HashSet::new();
+    collect_sanitizers(&prog.items, &mut sanitizers);
+    check_program_taint(&prog.items, &sanitizers, &single_core_imports, &mut diags);
+
     diags
+}
+
+/// D-TAINT1: run the taint pass over every function/method body in a single
+/// Program (the legacy single-file path). `core_imports` resolves Core aliases
+/// to module paths so a sink call (Db/Exec/Net effect) can be recognized.
+fn check_program_taint(
+    items: &[Item],
+    sanitizers: &HashSet<String>,
+    core_imports: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let run = |body: &[crate::AST::Stmt], diags: &mut Vec<Diagnostic>| {
+        diags.extend(check_func_taint(body, sanitizers, core_imports));
+    };
+    for item in items {
+        match item {
+            Item::Func(f) => run(&f.body, diags),
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    run(&m.body, diags);
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    run(&m.body, diags);
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        run(&m.body, diags);
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    run(&m.body, diags);
+                }
+            }
+            Item::Test(t) => run(&t.body, diags),
+            Item::ErrorConv(ec) => run(&ec.body, diags),
+            _ => {}
+        }
+    }
 }
 
 /// D-EFF1: enforce declared `#(…)` effect bounds against inferred sets. For each
@@ -1359,6 +1409,7 @@ pub(crate) fn check_error_conv_body(
         is_view_return: false,
         is_unsafe: false,
         is_pure: false,
+        is_sanitizer: false,
         declared_effects: None,
         body: std::mem::take(&mut ec.body),
     };
@@ -1644,6 +1695,7 @@ pub(crate) fn synthesize_delegation_method(
         is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
+        is_sanitizer: false,
         declared_effects: None,
         body: vec![body_stmt],
     }
@@ -1679,6 +1731,7 @@ pub(crate) fn synthesize_default_method(
         is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
+        is_sanitizer: false,
         declared_effects: None,
         body: body.to_vec(),
     }

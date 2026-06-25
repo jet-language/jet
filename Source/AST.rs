@@ -809,6 +809,11 @@ pub struct Func {
     pub is_unsafe: bool,
     /// S60 (E2-M16): `pure fn` — impure calls inside the body are E3401.
     pub is_pure: bool,
+    /// D-TAINT1 (ratified 2026-06-21): `#Sanitizer fn` — the blessed taint-strip
+    /// function. Its return value is **untainted by contract** even when its
+    /// inputs are tainted; this is the one place taint is cleared before a sink.
+    /// Static, erased in codegen (I3).
+    pub is_sanitizer: bool,
     /// D-EFF1 / D-QUAL1: a `#(Net, Db)` effect bound on the signature, between
     /// the parameter list and the return arrow. `None` = unannotated (effects
     /// inferred). `Some(list)` = a declared upper bound; the inferred set must be
@@ -1599,6 +1604,13 @@ pub enum Expr {
         args: Vec<EnumLitArg>,
         span: Span,
     },
+    /// D-TAINT1 (ratified 2026-06-21): `#Tainted expr` — marks a value as
+    /// untrusted at its source. A value-fact tag (D-QUAL1): it rides the value,
+    /// taint spreads to anything derived from it, and a tainted value reaching a
+    /// sink effect (`Db`/`Exec`/`Net`) without passing through a `#Sanitizer fn`
+    /// is E0721. The tag is static and **erased in codegen** (I3) — lowering
+    /// emits the inner expression unchanged, like `Expr::Present` but unwrapped.
+    Tainted(Box<Expr>, Span),
     /// S32: `value(expr)` — present optional.
     Present(Box<Expr>, Span),
     /// S32: bare `null` — absent optional.
@@ -1698,6 +1710,7 @@ impl Expr {
             | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }
             | Expr::EnumLit { span: s, .. }
+            | Expr::Tainted(_, s)
             | Expr::Present(_, s)
             | Expr::Absent(s)
             | Expr::Todo { span: s, .. }

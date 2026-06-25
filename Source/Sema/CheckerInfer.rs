@@ -507,6 +507,11 @@ impl<'a> Checker<'a> {
                 args,
                 span,
             } => Some(self.check_enum_lit(type_name, variant, args, *span)),
+            // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
+            // Its type is exactly the inner's type; taint propagation + the E0721
+            // sink check run in the dedicated taint pass (Sema/Taint.rs), erased
+            // in codegen (I3).
+            Expr::Tainted(inner, _span) => self.infer(inner),
             Expr::Present(inner, _span) => {
                 let t = self.infer(inner)?;
                 Some(Type::Option(Box::new(t)))

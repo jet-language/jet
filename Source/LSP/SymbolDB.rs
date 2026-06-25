@@ -815,7 +815,8 @@ fn collect_expr(e: &AST::Expr, mp: &str, db: &mut SymbolDB) {
                 }
             }
         }
-        AST::Expr::Present(inner, _)
+        AST::Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
+        | AST::Expr::Present(inner, _)
         | AST::Expr::Ok(inner, _)
         | AST::Expr::Err(inner, _)
         | AST::Expr::Try(inner, _, _) => collect_expr(inner, mp, db),

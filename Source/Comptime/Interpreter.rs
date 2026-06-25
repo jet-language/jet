@@ -682,6 +682,8 @@ impl<'a> Interp<'a> {
                     _ => Err(unsupported("slicing this value", *span)),
                 }
             }
+            // D-TAINT1: the value-fact tag is erased; evaluate the inner value.
+            Expr::Tainted(inner, _) => self.eval(inner, scope),
             Expr::Present(inner, _) => Ok(CtValue::Some(Box::new(self.eval(inner, scope)?))),
             Expr::Absent(_) => Ok(CtValue::None(Type::Int)),
             Expr::Call(call) => self.eval_call(&call.name, call.name_span, &call.args, scope),

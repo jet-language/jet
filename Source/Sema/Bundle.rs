@@ -144,6 +144,7 @@ pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<Stri
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Field(inner, _, _)
+        | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
@@ -877,8 +878,60 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         check_effect_boundaries(&module.items, &solved, &mut diags);
     }
     check_region_caps(&effect_summaries, &solved, &mut diags);
+
+    // D-TAINT1: taint tracking across every module. `#Sanitizer fn`s are
+    // collected program-wide (a sanitizer in one module clears taint at a call in
+    // another); each module's bodies are checked against its own Core aliases so
+    // a sink call (Db/Exec/Net effect) resolves correctly. Erased in codegen (I3).
+    let mut sanitizers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for module in &bundle.modules {
+        collect_sanitizers(&module.items, &mut sanitizers);
+    }
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        let core_imports = &states[idx].core_imports;
+        for item in &module.items {
+            taint_check_item(item, &sanitizers, core_imports, &mut diags);
+        }
+    }
+
     bundle.used_core = collect_used_core(bundle, &states);
     diags
+}
+
+/// D-TAINT1: run the taint pass over one item's function/method bodies in the
+/// bundle path, using `core_imports` to classify sink calls.
+fn taint_check_item(
+    item: &Item,
+    sanitizers: &std::collections::HashSet<String>,
+    core_imports: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    match item {
+        Item::Func(f) => diags.extend(check_func_taint(&f.body, sanitizers, core_imports)),
+        Item::Impl(i) => {
+            for m in &i.methods {
+                diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+            }
+        }
+        Item::Struct(s) => {
+            for m in &s.methods {
+                diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+            }
+            for block in &s.trait_impls {
+                for m in &block.methods {
+                    diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+                }
+            }
+        }
+        Item::Enum(e) => {
+            for m in &e.methods {
+                diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+            }
+        }
+        Item::Test(t) => diags.extend(check_func_taint(&t.body, sanitizers, core_imports)),
+        Item::ErrorConv(ec) => diags.extend(check_func_taint(&ec.body, sanitizers, core_imports)),
+        _ => {}
+    }
 }
 
 pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec<Diagnostic>) {
@@ -1143,6 +1196,7 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
         Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
@@ -1340,6 +1394,7 @@ pub(crate) fn check_module_bodies(
                     is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
+                    is_sanitizer: false,
                     declared_effects: None,
                     body: std::mem::take(&mut t.body),
                 };
@@ -1371,6 +1426,7 @@ pub(crate) fn check_module_bodies(
                     is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
+                    is_sanitizer: false,
                     declared_effects: None,
                     body: std::mem::take(&mut b.body),
                 };

@@ -229,6 +229,10 @@ impl<'a> Fmt<'a> {
         if f.is_pure {
             self.write(&format!("#{} ", Syntax::KW_PURE));
         }
+        // D-TAINT1: the `#Sanitizer` taint-strip modifier precedes `pub`/`fn`.
+        if f.is_sanitizer {
+            self.write(&format!("#{} ", Syntax::KW_SANITIZER));
+        }
         if top_level {
             self.fmt_pub(f.is_pub);
         } else if f.is_pub {

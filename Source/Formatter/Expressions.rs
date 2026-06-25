@@ -389,6 +389,11 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                 }
             }
+            // D-TAINT1: `#Tainted expr` — prefix value-fact tag, space-separated.
+            Expr::Tainted(inner, _) => {
+                self.write(&format!("#{} ", Syntax::KW_TAINTED));
+                self.fmt_expr(inner, Prec::Unary);
+            }
             Expr::Present(inner, _) => {
                 self.write("value(");
                 self.fmt_expr(inner, Prec::OrFallback);

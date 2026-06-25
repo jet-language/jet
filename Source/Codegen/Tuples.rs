@@ -109,6 +109,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)

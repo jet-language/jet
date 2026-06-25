@@ -178,6 +178,8 @@ impl<'a> Parser<'a> {
             TokKind::KwFn => self.func().map(Item::Func),
             // S60 (D-CASING1 follow-on): `#Pure fn` inside a module body.
             TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
+            // D-TAINT1: `#Sanitizer fn` inside a module body.
+            TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
             // D-ATTR2 / D-SERDE: `#[Codable] struct …` inside a module body.
             TokKind::Hash
                 if matches!(self.peek2().kind, TokKind::LBracket) =>
