@@ -1,5 +1,5 @@
 {
-  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better\n- Use Jai-style build system\n- Cross platform native raylib builtin\n- Consider how to improve using concepts from Zig build system\n- Cleanup old std.mem syntax (Ptr<T>)\n- Relook what labeled ref field in struct\n- Relook original ownership model - outdated example\n- Relook if switch statements -> 07_switch still uses || to check multiple patterns on the input var -> should be | with || for additional expressions alongside the pattern\n- Jet fmt should not drop parenthesis used for visual/functional grouping\n- Use Jai . operator for Enum \"expansion\" and maybe for implied constructors?",
+  "scratch": "",
   "cards": [
     {
       "id": "c26",
@@ -188,6 +188,10 @@
         },
         {
           "t": "[sweep] D-TXN-ROLLBACK=C(layered) shipped: layer 1 auto-snapshot (clones every root local/param the #Transact block ASSIGNS, restores LIFO on ?-failure — magic by default) + layer 3 explicit tx.on_rollback(()=>{}) (Drop-backed mirror of on_commit, runs on failure path). The one raw-pointer snapshot-restore is confined to the vetted jet_txn prelude module (stripped from golden like jet_mem), never user code. Layer 2 (Rollback trait method shape) deferred → ballot D-ROLLBACK-TRAIT (trait name reserved). Deferred corners: ~self-method-only mutation + deep-alias not auto-snapshotted; on_rollback composes with (not suppresses) layer-1 snapshots. example 110 (6 paths), effects 47/47.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[recovery 2026-06-25] D-ROLLBACK-TRAIT ratified=A (paired snapshot/restore + associated `type Snapshot`), recorded in syntax-decisions.md, open ballot card stripped. BUILD GATE FOUND for layer 2: option A's `type Snapshot` associated type is non-functional today — `assoc_type_impls` is parsed and formatted but never resolved in sema/codegen (only the Formatter reads it; a trait method returning an associated type fails E0907 'doesn't match the trait signature'). D-LIB2 (generics v1: associated types, ratified 2026-06-17) was built parse-only. So shipping layer 2 requires FIRST completing associated-type resolution: sema signature substitution (`Item`→concrete) + codegen of `type X = Y` and `Self::X` in bounds/returns. Recommend a dedicated assoc-types build card sequenced ahead of layer 2. Layers 1+3 remain shipped. D-PARSE-1 is the other unblocked stream (no prerequisite gate).",
           "at": "2026-06-25"
         }
       ],
