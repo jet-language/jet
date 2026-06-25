@@ -1,0 +1,9 @@
+Error [E0912]: the public capability signature of `scale` changed since `vecmath` froze it at version `1.0.0`
+  --> tests/ui/cap_freeze_drift.jet:11:8
+    |
+ 11 | pub fn scale(v: Vec3, factor: Float) {
+    |        ^^^^^
+ Why: an `api: stable`/`api: explicit` library freezes each public function's resolved capabilities into its contract. A param that callers could pass by read now demands a stronger capability (`~` edit / `^` take / `&` share), which silently breaks every caller.
+   | was: fn scale(v: Vec3, factor: Float)
+   | now: fn scale(v: ~Vec3, factor: Float)
+ Fix: if the new capability is intended, this is a breaking change — bump the major version and re-run `jet publish` to re-freeze the contract. Otherwise restore the original signature of `scale` (or add the capability sigil to the published api so the freeze records it).

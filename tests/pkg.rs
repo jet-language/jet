@@ -323,20 +323,39 @@ fn tree_hash_changes_on_content_change() {
 
 #[test]
 fn fingerprint_is_deterministic() {
-    let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
-    let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
+    let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"], "");
+    let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"], "");
     assert_eq!(fp1, fp2);
     assert!(fp1.starts_with("sha256-"));
 }
 
 #[test]
 fn fingerprint_changes_with_deps() {
-    let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &[]);
-    let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
+    let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "");
+    let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"], "");
     assert_ne!(
         fp1, fp2,
         "fingerprint must change when dep fingerprints differ"
     );
+}
+
+// c129: the frozen capability contract is part of the pin — changing a public
+// param's resolved capability (read → ~/^/&) must shift the fingerprint even when
+// the source tree hash and deps are identical.
+#[test]
+fn fingerprint_changes_with_capability_digest() {
+    let fp_read = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "pkg\nfn scale(v: Vec3)");
+    let fp_write = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "pkg\nfn scale(v: ~Vec3)");
+    assert_ne!(
+        fp_read, fp_write,
+        "fingerprint must change when a public capability changes"
+    );
+    // An empty digest skips the cap block entirely, so a package with no frozen
+    // surface fingerprints identically regardless of the (empty) digest argument.
+    let fp_none_a = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-x"], "");
+    let fp_none_b = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-x"], "");
+    assert_eq!(fp_none_a, fp_none_b);
+    assert_ne!(fp_none_a, fp_read, "a frozen digest must differ from none");
 }
 
 // ─────────────────────────────────────────────

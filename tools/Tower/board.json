@@ -1145,10 +1145,10 @@
       "type": "task",
       "title": "Freeze resolved capability signatures into api=stable|explicit metadata",
       "body": "Public functions' resolved capabilities become part of the API contract; a read -> ~/^/& change is a breaking change. Wire through the existing api = stable | explicit manifest mode (D-CAP4/D-CAP6) and include capability signatures in package pinning/hash. Aligned with ratified work, so this is build, not a fresh decision.",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P3",
       "workOrder": null,
-      "plan": "memory-capability-model",
+      "plan": null,
       "notes": [
         {
           "t": "Aligns with already-ratified D-CAP4/D-CAP6; no new owner decision needed, just implementation once the model lands.",
@@ -1165,10 +1165,14 @@
         {
           "t": "Resolved sigils frozen into the published API surface; api: stable/explicit gating may remain.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] c129 shipped under D-CAP4/6/8: api: manifest mode surfaced (Inferred/Stable/Explicit); resolved public-fn capability signatures frozen to durable .jet/cache/api/<pkg>.api at jet publish (when api mode freezes); a read->~/^/& drift vs the frozen signature is E0912 at build (CapabilityFreeze pass after resolve_capabilities); capability digest folded into the package pin/hash (Lock fingerprint). Verified live: jet publish froze fn double; jet build on drifted bump(~Counter) fired E0912. example/ui cap_freeze_drift, 8+ tests. Only registry UPLOAD of the .api gated on c96 (open).",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-25",
       "decisions": [
         "D-CAP4",
         "D-CAP6"

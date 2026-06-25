@@ -330,13 +330,28 @@ pub fn verify_lock_matches_manifest(
 /// Compute the plan fingerprint for a package.
 /// `tree_hash` is the sha256 hash of the source tree (from `SHA256::tree_hash`).
 /// `dep_fingerprints` is the sorted list of direct dep fingerprints.
-pub fn compute_fingerprint(tree_hash: &str, dep_fingerprints: &[&str]) -> String {
+/// `cap_digest` (c129) is the package's frozen public-capability contract
+/// (`Publish::ApiFreeze::project_capability_digest`); folding it in means a
+/// public capability change (read → `~`/`^`/`&`) shifts the pin even when the
+/// source tree hash would otherwise match. Empty for a package with no frozen
+/// `api: stable|explicit` surface — the fingerprint is then unchanged from the
+/// pre-c129 form (tree + deps only), so existing locks stay stable.
+pub fn compute_fingerprint(
+    tree_hash: &str,
+    dep_fingerprints: &[&str],
+    cap_digest: &str,
+) -> String {
     let mut data = tree_hash.as_bytes().to_vec();
     data.push(0);
     let mut sorted = dep_fingerprints.to_vec();
     sorted.sort_unstable();
     for fp in sorted {
         data.extend_from_slice(fp.as_bytes());
+        data.push(0);
+    }
+    if !cap_digest.is_empty() {
+        data.extend_from_slice(b"cap:");
+        data.extend_from_slice(cap_digest.as_bytes());
         data.push(0);
     }
     format!("sha256-{}", sha256_hex(&data))

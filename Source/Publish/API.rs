@@ -77,7 +77,6 @@ fn format_type(ty: &crate::AST::Type) -> String {
 }
 
 fn format_fn_sig(f: &crate::AST::Func) -> String {
-    use crate::AST::AccessConvention;
     let params: Vec<String> = f
         .params
         .iter()
@@ -87,14 +86,7 @@ fn format_fn_sig(f: &crate::AST::Func) -> String {
             // (D-CAP8) has resolved every `Infer` to a concrete convention, so
             // the published surface carries the sigil the caller must honor.
             // Plain read is the unmarked default and emits no sigil.
-            let sigil = match p.convention {
-                AccessConvention::Read | AccessConvention::Infer => "",
-                AccessConvention::Write => "~",
-                AccessConvention::Move => "^",
-                AccessConvention::Share => "&",
-                AccessConvention::Raw => "*",
-            };
-            format!("{}: {}{}", p.name, sigil, format_type(&p.ty))
+            format!("{}: {}{}", p.name, p.convention.sigil(), format_type(&p.ty))
         })
         .collect();
     let ret = match &f.return_type {

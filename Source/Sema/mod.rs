@@ -601,6 +601,7 @@ mod CheckerItems;
 mod Diagnostics;
 mod Captures;
 mod Capability;
+mod CapabilityFreeze;
 mod Purity;
 mod Effects;
 mod Taint;
@@ -631,3 +632,5 @@ pub use FFI::{e3202, e3301, e3302, e3303};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.
 pub use SchemaMigration::check_schema_migrations;
+pub use CapabilityFreeze::check_capability_freeze;
+pub(crate) use Capability::resolve_capabilities;

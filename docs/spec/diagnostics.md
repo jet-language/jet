@@ -286,6 +286,7 @@ before continuing.
 | E0909 | sema  | generic instantiation too deep |
 | E0910 | sema  | `#PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
+| E0912 | sema  | a frozen public capability signature drifted: a param a caller could pass by read now demands `~`/`^`/`&` in an `api: stable`/`api: explicit` library (c129, D-CAP8) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -926,6 +927,19 @@ E0910 checks intent only.
 | `drop` (D-MIGRATE2D) | `drop` isn't a migration verb — use `remove`. | A migration deletes a field with `remove`; `drop` is not a Jet keyword here. | Write `remove <field>`. |
 | `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `#PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
 | other | `{op}` isn't a known migration verb. | A migration block contains `rename`, `add`, `remove`, or `change` operations. | Use one of those four verbs. |
+
+### E0912 — Frozen capability signature drift (c129)
+
+A `library { api: stable }` (or `api: explicit`) target freezes each public
+function's *resolved* capability signature into a durable contract
+(`.jet/cache/api/<package>.api`, written by `jet publish`). D-CAP8 says a later
+read → `~`/`^`/`&` change is a breaking change, **not a silent flip** — so the
+next build diffs the resolved signature against the frozen one and fires E0912 on
+any drift.
+
+| What | Why | Fix |
+|------|-----|-----|
+| The public capability signature of `{fn}` changed since `{package}` froze it at version `{version}` (shows `was:`/`now:`). | An `api: stable`/`api: explicit` library freezes each public function's resolved capabilities. A param callers could pass by read now demands a stronger capability (`~` edit / `^` take / `&` share), which silently breaks every caller. | If the new capability is intended, this is a breaking change — bump the major version and re-run `jet publish` to re-freeze the contract. Otherwise restore the original signature of `{fn}` (or annotate the published api so the freeze records the new capability deliberately). |
 
 ## Process for a new diagnostic
 

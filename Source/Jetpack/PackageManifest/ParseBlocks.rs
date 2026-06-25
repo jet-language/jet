@@ -2,7 +2,7 @@
 //! `packages:`.
 
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
-use super::{Dep, DepSource, ManifestError, PackageEntry, PackageMeta, Target};
+use super::{ApiMode, Dep, DepSource, ManifestError, PackageEntry, PackageMeta, Target};
 use crate::Jetpack::RefSpec;
 use crate::Syntax;
 
@@ -140,21 +140,22 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
         // targets inferred from the module's `fn main` (D-ILE1); `name: <target>`
         // is the single-target shorthand (D-TGT3); `name: { targets: [ … ] }` lists
         // them.
-        let (name, targets) = match entry.split_once(':') {
+        let (name, targets, api) = match entry.split_once(':') {
             Some((k, v)) => {
                 let name = k.trim().to_string();
                 let value = v.trim();
-                let targets = if let Some(inner) = value.strip_prefix('{') {
+                if let Some(inner) = value.strip_prefix('{') {
                     let inner = inner.trim_end().strip_suffix('}').unwrap_or(inner.trim_end());
-                    parse_package_entry_block(&name, inner)?
+                    let (targets, api) = parse_package_entry_block(&name, inner)?;
+                    (name, targets, api)
                 } else {
-                    vec![parse_target(&name, value)?]
-                };
-                (name, targets)
+                    let (target, api) = parse_target(&name, value)?;
+                    (name, vec![target], api)
+                }
             }
-            None => (entry.to_string(), Vec::new()),
+            None => (entry.to_string(), Vec::new(), ApiMode::Inferred),
         };
-        packages.push(PackageEntry { name, targets });
+        packages.push(PackageEntry { name, targets, api });
     }
     Ok(packages)
 }
@@ -163,7 +164,7 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
 /// (`executable { entry: "…" }`; D-TGT3/D-TGT4/D-CAP4). The keyword must be a
 /// shipped target; the block may carry only `entry:`/`name:`/`api:`, and `api:`
 /// must be `stable`/`explicit`.
-fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
+fn parse_target(name: &str, value: &str) -> Result<(Target, ApiMode), ManifestError> {
     let (keyword, block) = match value.split_once('{') {
         Some((kw, rest)) => {
             let body = rest.trim_end().strip_suffix('}').unwrap_or(rest.trim_end());
@@ -189,21 +190,30 @@ fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
             });
         }
     };
-    if let Some(body) = block {
-        validate_target_block(name, body)?;
-    }
-    Ok(kind)
+    let api = match block {
+        Some(body) => validate_target_block(name, body)?,
+        None => ApiMode::Inferred,
+    };
+    // D-CAP5: only library targets emit capability metadata; `api:` on a non-library
+    // target is meaningless and is ignored (never frozen).
+    let api = if kind == Target::Library { api } else { ApiMode::Inferred };
+    Ok((kind, api))
 }
 
 /// A target block (`{ entry: …, name: …, api: … }`) accepts only those three
 /// fields, and `api:` only `stable`/`explicit` (D-TGT3/D-TGT4/D-CAP4).
-fn validate_target_block(name: &str, body: &str) -> Result<(), ManifestError> {
+fn validate_target_block(name: &str, body: &str) -> Result<ApiMode, ManifestError> {
+    let mut api = ApiMode::Inferred;
     for (key, value) in key_value_entries(body) {
         if key == Syntax::TARGET_FIELD_ENTRY || key == Syntax::TARGET_FIELD_NAME {
             // entry/name are free-form strings consumed by the build pipeline.
         } else if key == Syntax::TARGET_FIELD_API {
             let v = unquote(&value);
-            if v != Syntax::API_MODE_STABLE && v != Syntax::API_MODE_EXPLICIT {
+            api = if v == Syntax::API_MODE_STABLE {
+                ApiMode::Stable
+            } else if v == Syntax::API_MODE_EXPLICIT {
+                ApiMode::Explicit
+            } else {
                 return Err(ManifestError::BadTargetField {
                     name: name.to_string(),
                     detail: format!(
@@ -214,7 +224,7 @@ fn validate_target_block(name: &str, body: &str) -> Result<(), ManifestError> {
                         v,
                     ),
                 });
-            }
+            };
         } else {
             return Err(ManifestError::BadTargetField {
                 name: name.to_string(),
@@ -227,10 +237,13 @@ fn validate_target_block(name: &str, body: &str) -> Result<(), ManifestError> {
             });
         }
     }
-    Ok(())
+    Ok(api)
 }
 
-fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, ManifestError> {
+fn parse_package_entry_block(
+    name: &str,
+    body: &str,
+) -> Result<(Vec<Target>, ApiMode), ManifestError> {
     for (key, value) in key_value_entries(body) {
         if key == Syntax::PACKAGE_FIELD_KIND_REMOVED {
             // D-TGT1: `kind:` was removed in favor of `targets:`.
@@ -244,22 +257,28 @@ fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, Mani
     }
     // No `targets:` field — kind is inferred at realize time (D-ILE1). Other
     // fields (version/bin) are accepted and ignored for now.
-    Ok(Vec::new())
+    Ok((Vec::new(), ApiMode::Inferred))
 }
 
-/// Parse a `[ library, executable { entry: "…" }, … ]` target list.
-fn parse_targets_list(name: &str, value: &str) -> Result<Vec<Target>, ManifestError> {
+/// Parse a `[ library, executable { entry: "…" }, … ]` target list. The package's
+/// `api:` mode is the mode of its `library` target (D-CAP4/D-CAP5).
+fn parse_targets_list(name: &str, value: &str) -> Result<(Vec<Target>, ApiMode), ManifestError> {
     let inner = value
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(value);
     let mut targets = Vec::new();
+    let mut api = ApiMode::Inferred;
     for entry in top_level_commas(inner) {
         let entry = entry.trim();
         if entry.is_empty() {
             continue;
         }
-        targets.push(parse_target(name, entry)?);
+        let (target, mode) = parse_target(name, entry)?;
+        if mode.freezes() {
+            api = mode;
+        }
+        targets.push(target);
     }
-    Ok(targets)
+    Ok((targets, api))
 }

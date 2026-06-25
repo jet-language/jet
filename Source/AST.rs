@@ -30,6 +30,22 @@ pub enum AccessConvention {
     Raw,
 }
 
+impl AccessConvention {
+    /// The D-CAP7 prefix sigil for this resolved capability, as it appears on a
+    /// public type (`~T`/`^T`/`&T`/`*T`). Read — the unmarked default — and the
+    /// not-yet-resolved `Infer` emit no sigil. Used by the published-API surface
+    /// (c129) so the frozen signature carries the sigil the caller must honour.
+    pub fn sigil(self) -> &'static str {
+        match self {
+            AccessConvention::Read | AccessConvention::Infer => "",
+            AccessConvention::Write => "~",
+            AccessConvention::Move => "^",
+            AccessConvention::Share => "&",
+            AccessConvention::Raw => "*",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Type {
     Int,

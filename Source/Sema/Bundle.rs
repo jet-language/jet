@@ -424,6 +424,11 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         diags.extend(validate_serde_items(&module.items, &st.trait_reg));
         // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
         diags.extend(check_schema_migrations(&module.items, &bundle.project_root));
+        // c129 (D-CAP4/D-CAP6/D-CAP8): capability-freeze drift pass (E0912). Runs
+        // after `Capability::resolve_capabilities` (above) so it diffs the resolved
+        // signature against the frozen `.api` contract. No-op without a frozen
+        // snapshot (inferred-default library / first release).
+        diags.extend(check_capability_freeze(&module.items, &bundle.project_root));
     }
 
     // S62 E2401: delegation validation — check field exists and implements trait.

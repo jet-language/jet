@@ -1209,6 +1209,13 @@ pub const DBG_QUIT: &str = "quit"; // D-DBG3 (alias `q`): end the session (E2204
 /// `<project_root>/.jet/cache/schema/<TypeName>.snapshot`.
 pub const SCHEMA_CACHE_SUBDIR: &str = "cache/schema"; // D-MIGRATE1
 
+/// c129 (D-CAP4/D-CAP6/D-CAP8): subdirectory under the project `.jet/` managed
+/// folder where frozen public-API capability snapshots are stored. Full path is
+/// `<project_root>/.jet/cache/api/<package>.api`. Written at `jet publish` time
+/// for an `api: stable|explicit` library target; read by the sema drift pass
+/// (E0912). Committed — it is a durable interface contract, not a build artifact.
+pub const API_CACHE_SUBDIR: &str = "cache/api";
+
 /// D-DETACH1 (ratified; D-DETACH1 = A): consumes a Task handle without joining
 /// — fire-and-forget daemon semantics. Main may return while the task runs.
 /// Only valid on owned tasks; capturing a `view` borrow is rejected at spawn

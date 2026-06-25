@@ -1813,11 +1813,24 @@ Rejected: reusing `mut` for the edit slot (option B — reads as Rust `&mut`); `
 (option D — orphans the live `take` / `view` keywords).
 
 **D-CAP4 — `api:` is a per-target field** *(ratified 2026-06-21, option D; rides
-D-TGT3 blocks)*: a library target records its public capability signatures by setting
-**`api:`** inside its target block — `library { api: stable }` (record + flag API
-breaks) or `library { api: explicit }`. Default is inference (D-CAP6). Rejected: a
-top-level `api:` field (option A), a `payload api = …` statement (option B), an
-attribute (option C).
+D-TGT3 blocks; **c129 implemented 2026-06-25**)*: a library target records its public
+capability signatures by setting **`api:`** inside its target block —
+`library { api: stable }` (record + flag API breaks) or `library { api: explicit }`.
+Default is inference (D-CAP6). Rejected: a top-level `api:` field (option A), a
+`payload api = …` statement (option B), an attribute (option C).
+
+**c129 — capability freeze (implemented 2026-06-25, under D-CAP4/D-CAP6/D-CAP8).** The
+manifest `api:` mode is now surfaced (`PackageManifest::ApiMode`, default `Inferred`).
+For a `stable`/`explicit` library, `jet publish` freezes each public function's resolved
+capability signature into durable interface metadata at
+`.jet/cache/api/<package>.api` (`Publish::ApiFreeze`). A sema pass
+(`Sema::CapabilityFreeze`, runs after `resolve_capabilities`) diffs the resolved
+signature against that frozen contract on every build: a read → `~`/`^`/`&` drift is
+**E0912**, a breaking change, never a silent flip (D-CAP8). The frozen capability digest
+is folded into the package pin (`Lock::compute_fingerprint`), so a public capability
+change shifts the lock hash. Gated on unbuilt publish/registry: only the *registry
+upload* of the frozen `.api` (D-PKGS1 deferred, c96 ballot) is outstanding — the in-
+compiler freeze, drift detection, and pin are complete.
 
 **D-CAP5 — which targets emit capability metadata** *(ratified 2026-06-21, option A)*:
 **any target that produces a consumable library artifact** emits capability metadata;

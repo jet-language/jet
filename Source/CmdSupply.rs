@@ -97,6 +97,25 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
         );
     }
 
+    // c129 (D-CAP4/D-CAP6/D-CAP8): for an `api: stable|explicit` library target,
+    // freeze the resolved public capability signature into durable interface
+    // metadata. A later read → ~/^/& drift against this snapshot is then a
+    // breaking change (E0912), caught at build time.
+    if let Ok(pm) = jet::Jetpack::PackageManifest::parse(&raw) {
+        let freezes = pm.packages.iter().any(|p| p.api.freezes());
+        if freezes {
+            match jet::Publish::ApiFreeze::write_api_snapshot_for_entry(&root, &entry_str, name, version) {
+                Some(n) => println!(
+                    "  api: capability contract frozen ({} public fn signature(s)) in .jet/cache/api/{}.api",
+                    n, name
+                ),
+                None => eprintln!(
+                    "warning: could not freeze capability contract (entry didn't load); skipping"
+                ),
+            }
+        }
+    }
+
     if !build_ok || !tests_ok {
         if force {
             eprintln!("warning [--force]: pre-publish gate failed but continuing anyway.");

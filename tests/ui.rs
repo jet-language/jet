@@ -89,6 +89,27 @@ fn ui_snapshots() {
             std::env::remove_var("JET_SCHEMA_CACHE_DIR");
         }
 
+        // c129: if a sibling NAME.frozen.api exists, install it in a temp dir and set
+        // JET_API_CACHE_DIR so the capability-freeze drift pass (E0912) finds the
+        // prior contract.
+        let api_path = path.with_extension("frozen.api");
+        if api_path.is_file() {
+            let api_text = fs::read_to_string(&api_path).unwrap();
+            let package = api_text
+                .lines()
+                .find(|l| l.starts_with("package = "))
+                .and_then(|l| l.strip_prefix("package = "))
+                .unwrap_or("pkg")
+                .trim()
+                .to_string();
+            let tmp = std::env::temp_dir().join(format!("jet_api_ui_{}", std::process::id()));
+            fs::create_dir_all(&tmp).ok();
+            fs::write(tmp.join(format!("{}.api", package)), &api_text).ok();
+            std::env::set_var("JET_API_CACHE_DIR", &tmp);
+        } else {
+            std::env::remove_var("JET_API_CACHE_DIR");
+        }
+
         let file_arg = path.to_string_lossy();
         // E2-M15: files marked with `// @freestanding` are compiled with
         // the freestanding profile (E3301 checks enabled).

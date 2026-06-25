@@ -260,7 +260,9 @@ impl<'a> Resolver<'a> {
                     .iter()
                     .filter_map(|d| self.resolved.get(d).map(|r| r.fingerprint.as_str()))
                     .collect();
-                let fp = Lock::compute_fingerprint(&th, &dep_fps);
+                // c129: fold the dep's frozen capability contract into its pin.
+                let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&abs_path);
+                let fp = Lock::compute_fingerprint(&th, &dep_fps, &cap_digest);
 
                 // Store the path dep (copy to store for inode sharing).
                 let store_path = Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
@@ -350,7 +352,9 @@ impl<'a> Resolver<'a> {
                     .iter()
                     .filter_map(|d| self.resolved.get(d).map(|r| r.fingerprint.as_str()))
                     .collect();
-                let fp = Lock::compute_fingerprint(&git_tree_hash, &dep_fps);
+                // c129: fold the dep's frozen capability contract into its pin.
+                let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&clone_dir);
+                let fp = Lock::compute_fingerprint(&git_tree_hash, &dep_fps, &cap_digest);
 
                 // Store.
                 let store_path = Store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)

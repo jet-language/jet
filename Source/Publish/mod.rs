@@ -13,6 +13,7 @@
 
 pub mod Advisory;
 mod API;
+pub mod ApiFreeze;
 mod Diff;
 mod Registry;
 mod Resolve;

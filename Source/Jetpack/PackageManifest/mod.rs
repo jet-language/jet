@@ -79,6 +79,30 @@ pub enum Target {
     Example,
 }
 
+/// The capability-API mode of a library target (D-CAP4/D-CAP6). Default is
+/// `Inferred` (no `api:` field) — capabilities are inferred and never frozen.
+/// `Stable` and `Explicit` both freeze the resolved public capability signature
+/// into durable interface metadata (c129); the difference is documentation
+/// strictness, not freeze behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ApiMode {
+    /// No `api:` field — inference only, signatures never frozen (D-CAP6 default).
+    #[default]
+    Inferred,
+    /// `api: stable` — record resolved capability signatures and flag breaks.
+    Stable,
+    /// `api: explicit` — same freeze, plus hand-written annotations expected.
+    Explicit,
+}
+
+impl ApiMode {
+    /// `true` when this mode freezes the public capability signature into durable
+    /// interface metadata (c129) — i.e. anything but the inferred default.
+    pub fn freezes(self) -> bool {
+        matches!(self, ApiMode::Stable | ApiMode::Explicit)
+    }
+}
+
 /// One entry in the `packages: { … }` block (U10 + D-TGT1). `targets` is empty when
 /// the manifest declares none (D-ILE1) — the kind is then inferred from the module's
 /// `fn main` at realize time.
@@ -86,6 +110,9 @@ pub enum Target {
 pub struct PackageEntry {
     pub name: String,
     pub targets: Vec<Target>,
+    /// The `api:` mode of this package's `library` target (D-CAP4). `Inferred`
+    /// when no library target sets `api:`. Drives the c129 capability freeze.
+    pub api: ApiMode,
 }
 
 /// Where a dependency resolves from.
