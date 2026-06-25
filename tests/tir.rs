@@ -790,7 +790,7 @@ fn mut_self_method_body() {
 struct Acc {
     total: Int
 
-    fn doubled(mut self) -> Int {
+    fn doubled(~self) -> Int {
         return (self.total + self.total)
     }
 }
@@ -2165,19 +2165,19 @@ fn generic_free_fns() {
         return;
     }
     let src = "\
-fn id<T>(take x: T) -> T {
+fn id<T>(x: ^T) -> T {
     return x
 }
-fn pick<T>(take a: T, take b: T, first: Bool) -> T {
+fn pick<T>(a: ^T, b: ^T, first: Bool) -> T {
     if first {
         return a
     }
     return b
 }
-fn firstof<T>(take xs: [T]) -> T {
+fn firstof<T>(xs: ^[T]) -> T {
     return xs[0]
 }
-fn wrap<T>(take x: T) -> [T] {
+fn wrap<T>(x: ^T) -> [T] {
     return [x]
 }
 fn main() {
@@ -2193,7 +2193,7 @@ fn main() {
     assert_eq!(stdout, "5\n1\n10\n7\n");
 }
 
-/// c109 Phase 17: a `-> view T` function returns a borrow. The signature renders `&T`
+/// c109 Phase 17: a `-> &T` function returns a borrow. The signature renders `&T`
 /// and the body's `return field.name` lowers via `emit_view_return` to `&((*field)).name`
 /// (a field read of an owned param, address taken). A `view` ident param returns the bare
 /// borrow.
@@ -2207,7 +2207,7 @@ struct Rec {
     name: String
     value: String
 }
-fn name_of(rec: Rec) -> view String {
+fn name_of(rec: Rec) -> &String {
     return rec.name
 }
 fn main() {
@@ -2609,7 +2609,7 @@ fn run() -> Int {
     d @= math.clamp(15, 0, 10)
     io.eprint(\"trace: {a} {b} {c} {d}\")
     xs := [1, 2, 3]
-    random.shuffle(mut xs)
+    random.shuffle(~xs)
     p @= random.pick(xs)
     return ((((a + b) + c) + d) + (p ?? 0))
 }
@@ -3120,7 +3120,7 @@ pub struct Note {
     pub note_type: NoteType
     pub parent: String?
 }
-pub fn make_note(take name: String, take t: NoteType) -> Note {
+pub fn make_note(name: ^String, t: ^NoteType) -> Note {
     return Note {name: name, note_type: t, parent: null}
 }
 pub fn kind_str(n: Note) -> String {
@@ -3315,19 +3315,19 @@ fn free_call_arg_conventions() {
 fn show(msg: String) {
     print(msg)
 }
-fn bump(mut n: Int) {
+fn bump(n: ~Int) {
     n += 1
 }
-fn archive(take name: String) -> String {
+fn archive(name: ^String) -> String {
     return name
 }
 fn main() {
     score: Int := 41
-    bump(mut score)
+    bump(~score)
     print(score)
     greeting: String @= \"hello\"
     show(greeting)
-    saved: String @= archive(take \"vault\")
+    saved: String @= archive(^\"vault\")
     print(saved)
 }
 ";
@@ -3607,7 +3607,7 @@ fn main() {
     assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
 }
 
-/// c109 (view-trait fix): a `view`-returning TRAIT method `fn label(self) -> view String`
+/// c109 (view-trait fix): a `view`-returning TRAIT method `fn label(self) -> &String`
 /// implemented in an `impl Dog: Named` block. This was a latent I2 hole on BOTH paths:
 /// `emit_trait_def` rendered the trait DECLARATION's return as `-> String` (ignoring
 /// `is_view_return`) while the impl emitted `-> &String`, so rustc rejected the generated
@@ -3622,13 +3622,13 @@ fn view_returning_trait_method() {
     }
     let src = "\
 trait Named {
-    fn label(self) -> view String
+    fn label(self) -> &String
 }
 struct Dog {
     name: String
 }
 impl Dog: Named {
-    fn label(self) -> view String {
+    fn label(self) -> &String {
         return self.name
     }
 }
@@ -3653,10 +3653,10 @@ fn mut_self_field_assign() {
     let src = "\
 struct Counter {
     n: Int
-    fn bump(mut self) {
+    fn bump(~self) {
         self.n = self.n + 1
     }
-    fn add(mut self, k: Int) {
+    fn add(~self, k: Int) {
         self.n += k
     }
 }
@@ -3683,7 +3683,7 @@ fn mut_self_whole_reassignment() {
     let src = "\
 struct Counter {
     n: Int
-    fn reset(mut self) {
+    fn reset(~self) {
         self = Counter { n: 0 }
     }
 }
@@ -3708,13 +3708,13 @@ fn mut_self_trait_method_field_assign() {
     }
     let src = "\
 trait Bumpable {
-    fn bump(mut self)
+    fn bump(~self)
 }
 struct Counter {
     n: Int
 }
 impl Counter: Bumpable {
-    fn bump(mut self) {
+    fn bump(~self) {
         self.n = self.n + 1
     }
 }

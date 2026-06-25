@@ -48,6 +48,28 @@ fn fmt_preserves_s61_call_labels() {
 }
 
 #[test]
+fn fmt_rewrites_capability_keywords_to_sigils() {
+    // D-CAP7: the retired `mut`/`take`/`view` capability keywords parse as
+    // teaching errors that recover, and fmt rewrites them to the `~`/`^`/`&`
+    // sigils — on the type for params, on `self` for receivers, after `->`
+    // for a borrowed return, and at the call site.
+    let src = "fn bump(mut n: Int) {\n    n += 1\n}\n\nfn archive(take name: String) -> view String {\n    return name\n}\n\nstruct Acc {\n    n: Int\n\n    fn step(mut self) {\n        self.n += 1\n    }\n}\n\nfn main() {\n    x: Int := 1\n    bump(mut x)\n    print(archive(take \"v\"))\n}\n";
+    let out = jet::format_source(src).expect("fmt should recover capability keywords");
+    assert!(out.contains("n: ~Int"), "param write → `: ~T`, got:\n{out}");
+    assert!(out.contains("name: ^String"), "param move → `: ^T`, got:\n{out}");
+    assert!(out.contains("-> &String"), "view return → `-> &T`, got:\n{out}");
+    assert!(out.contains("fn step(~self)"), "receiver write → `~self`, got:\n{out}");
+    assert!(out.contains("bump(~x)"), "call-site write → `~x`, got:\n{out}");
+    assert!(out.contains("archive(^\"v\")"), "call-site move → `^…`, got:\n{out}");
+    // No retired keyword spelling survives.
+    assert!(!out.contains("mut "), "no `mut ` keyword left, got:\n{out}");
+    assert!(!out.contains("take "), "no `take ` keyword left, got:\n{out}");
+    assert!(!out.contains("view "), "no `view ` keyword left, got:\n{out}");
+    let twice = jet::format_source(&out).expect("sigil output re-fmts");
+    assert_eq!(out, twice, "sigil fmt must be idempotent");
+}
+
+#[test]
 fn fmt_preserves_block_comments() {
     // S5: `/* … */` block comments, nesting allowed.
     let src = r#"/* a leading block comment */

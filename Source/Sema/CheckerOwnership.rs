@@ -601,9 +601,9 @@ impl<'a> Checker<'a> {
                         ),
                         "this function has read access only and does not own the value".to_string(),
                         format!(
-                            "call it on a copy, or take ownership with `{} {}: {}`",
-                            Syntax::KW_MOVE,
+                            "call it on a copy, or take ownership with `{}: {}{}`",
                             name,
+                            Syntax::SIGIL_MOVE,
                             info.ty.name()
                         ),
                         Some(*span),
@@ -658,15 +658,15 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::lint(
                                 "L0201",
                                 format!(
-                                    "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
+                                    "implicit clone of `{}`; write `{}{}` to transfer ownership or `.clone()` to silence this warning",
                                     name,
-                                    Syntax::KW_MOVE,
+                                    Syntax::SIGIL_MOVE,
                                     name
                                 ),
                                 format!("`{}` expects to take ownership of this value", call_name),
                                 format!(
-                                    "write `{} {}` to move, or `{} .clone()` to copy explicitly",
-                                    Syntax::KW_MOVE,
+                                    "write `{}{}` to move, or `{}.clone()` to copy explicitly",
+                                    Syntax::SIGIL_MOVE,
                                     name,
                                     name
                                 ),
@@ -679,15 +679,15 @@ impl<'a> Checker<'a> {
                             format!(
                                 "`{}` needs `{}` here — this value can't be copied",
                                 call_name,
-                                Syntax::KW_MOVE
+                                Syntax::SIGIL_MOVE
                             ),
                             format!(
                                 "parameter {} takes ownership (`^`); passing `{}` without `{}` would have to copy it, but this type can't be copied",
                                 idx + 1,
                                 name,
-                                Syntax::KW_MOVE
+                                Syntax::SIGIL_MOVE
                             ),
-                            format!("write `{} {}` to move ownership to `{}`", Syntax::KW_MOVE, name, call_name),
+                            format!("write `{}{}` to move ownership to `{}`", Syntax::SIGIL_MOVE, name, call_name),
                             Some(*span),
                         ));
                     }

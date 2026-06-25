@@ -736,10 +736,7 @@ impl<'a> Parser<'a> {
         let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
             self.bump();
-            if matches!(self.peek().kind, TokKind::KwView) {
-                is_view_return = true;
-                self.bump();
-            }
+            is_view_return = self.parse_view_return_marker();
             let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
@@ -1059,10 +1056,7 @@ impl<'a> Parser<'a> {
         let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
             self.bump();
-            if matches!(self.peek().kind, TokKind::KwView) {
-                is_view_return = true;
-                self.bump();
-            }
+            is_view_return = self.parse_view_return_marker();
             let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
@@ -1134,6 +1128,25 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RParen, "to close the effect list")?;
         Ok(Some(effects))
+    }
+
+    /// D-CAP7: the view-return marker after `->`. `&T` is the sigil spelling
+    /// (`fn name_of(...) -> &String`). The retired `view` keyword still lexes,
+    /// so route it to the E0058 teaching error and recover as a view return
+    /// (S14 idiom). Returns true when a view-return marker was consumed.
+    fn parse_view_return_marker(&mut self) -> bool {
+        match self.peek().kind {
+            TokKind::Amp => {
+                self.bump();
+                true
+            }
+            TokKind::KwView => {
+                let span = self.bump().span;
+                self.push_cap_keyword_teach("E0058", Syntax::KW_VIEW, Syntax::SIGIL_VIEW, span);
+                true
+            }
+            _ => false,
+        }
     }
 
     fn param(&mut self) -> Result<Param, Diagnostic> {
@@ -1747,10 +1760,7 @@ impl<'a> Parser<'a> {
         let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
             self.bump();
-            if matches!(self.peek().kind, TokKind::KwView) {
-                is_view_return = true;
-                self.bump();
-            }
+            is_view_return = self.parse_view_return_marker();
             let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }

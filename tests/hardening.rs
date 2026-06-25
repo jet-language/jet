@@ -175,7 +175,7 @@ fn main() {
 fn view_result_cannot_be_stored() {
     expect_error(
         r#"
-fn pick(items: List<String>) -> view List<String> {
+fn pick(items: List<String>) -> &List<String> {
     return items
 }
 
@@ -196,7 +196,7 @@ fn mut_self_method_requires_var_receiver() {
 struct Bag {
     n: Int
 
-    fn poke(mut self) {
+    fn poke(~self) {
         x @= self.n
         print(x)
     }
@@ -218,7 +218,7 @@ fn take_self_on_borrowed_param_is_error() {
 struct Token {
     s: String
 
-    fn consume(take self) {
+    fn consume(^self) {
         print(0)
     }
 }
@@ -290,7 +290,7 @@ fn statement_can_start_with_self() {
 struct Bag {
     items: List<Int>
 
-    fn add(mut self, n: Int) {
+    fn add(~self, n: Int) {
         self.items.push(n)
     }
 }
@@ -332,7 +332,7 @@ struct NoClone {
     n: Int
 }
 
-fn eat(take v: NoClone) {
+fn eat(v: ^NoClone) {
     print(v.n)
 }
 
@@ -374,13 +374,13 @@ struct S {
     n: Int
 }
 
-fn bump(mut n: Int) {
+fn bump(n: ~Int) {
     n = n + 1
 }
 
 fn main() {
     s @= S { n: 1 }
-    bump(mut s.n)
+    bump(~s.n)
 }
 "#,
         "E0202",

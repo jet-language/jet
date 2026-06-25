@@ -52,25 +52,25 @@ fn view_return_case(src: Source) -> Case {
     let (label, body) = match src {
         Source::Param => (
             "view_return/param",
-            "fn make(p: String) -> view String {\n    return p;\n}\n".to_string(),
+            "fn make(p: String) -> &String {\n    return p;\n}\n".to_string(),
         ),
         Source::Local => (
             "view_return/local",
-            "fn make(p: String) -> view String {\n    val local: String = \"x\";\n    return local;\n}\n"
+            "fn make(p: String) -> &String {\n    val local: String = \"x\";\n    return local;\n}\n"
                 .to_string(),
         ),
         Source::FieldOfParam => (
             "view_return/field_of_param",
-            "struct Bin { v: String; }\nfn make(b: Bin) -> view String {\n    return b.v;\n}\n"
+            "struct Bin { v: String; }\nfn make(b: Bin) -> &String {\n    return b.v;\n}\n"
                 .to_string(),
         ),
         Source::IndexOfParam => (
             "view_return/index_of_param",
-            "fn make(xs: [String]) -> view String {\n    return xs[0];\n}\n".to_string(),
+            "fn make(xs: [String]) -> &String {\n    return xs[0];\n}\n".to_string(),
         ),
         Source::FreshLiteral => (
             "view_return/fresh_literal",
-            "fn make(p: String) -> view String {\n    return \"fresh\";\n}\n".to_string(),
+            "fn make(p: String) -> &String {\n    return \"fresh\";\n}\n".to_string(),
         ),
     };
     Case {
@@ -115,16 +115,16 @@ fn ref_field_case(src: Source) -> Case {
 }
 
 /// Generic-wrapper variants of the `view` return (the generic matrix cell):
-/// `-> view T` through a `Wrap<T>` parameter / local.
+/// `-> &T` through a `Wrap<T>` parameter / local.
 fn generic_view_cases() -> Vec<Case> {
     vec![
         Case {
             label: "view_return/generic_field_of_param".to_string(),
-            src: "struct Wrap<T> { item: T; }\nfn make<T>(w: Wrap<T>) -> view T {\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
+            src: "struct Wrap<T> { item: T; }\nfn make<T>(w: Wrap<T>) -> &T {\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
         },
         Case {
             label: "view_return/generic_field_of_local".to_string(),
-            src: "struct Wrap<T> { item: T; }\nfn make<T>(x: T) -> view T {\n    val w: Wrap<T> = Wrap<T> { item: x };\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
+            src: "struct Wrap<T> { item: T; }\nfn make<T>(x: T) -> &T {\n    val w: Wrap<T> = Wrap<T> { item: x };\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
         },
     ]
 }

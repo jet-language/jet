@@ -3,7 +3,7 @@
 use core.io as io
 use core.fs as fs
 use core.process as process
-fn count_file(path: String, mut counts: [String, Int]) {
+fn count_file(path: String, counts: ~[String, Int]) {
     if fs.read(path) == {
         ok(text) -> {
             flat @= text.replace("\n", " ")
@@ -21,14 +21,14 @@ fn count_file(path: String, mut counts: [String, Int]) {
 
     }
 }
-fn count_dir(dir: String, mut counts: [String, Int]) {
+fn count_dir(dir: String, counts: ~[String, Int]) {
     if fs.list_dir(dir) == {
         ok(entries) -> {
             loop entry in entries {
                 if entry.is_dir {
-                    count_dir(entry.path, mut counts)
+                    count_dir(entry.path, ~counts)
                 } else if entry.name.ends_with(".txt") {
-                    count_file(entry.path, mut counts)
+                    count_file(entry.path, ~counts)
                 }
             }
         }
@@ -47,9 +47,9 @@ fn main() {
     }
     counts: [String, Int] := [:]
     if fs.is_dir(target) {
-        count_dir(target, mut counts)
+        count_dir(target, ~counts)
     } else {
-        count_file(target, mut counts)
+        count_file(target, ~counts)
     }
     pairs: [(n: Int, word: String)] := []
     loop word, n in counts {

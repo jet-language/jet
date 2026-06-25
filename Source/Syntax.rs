@@ -108,13 +108,28 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
     TYPE_F64,
 ];
 
-/// S10 (ratified M2): caller-site mutable borrow on a parameter or binding.
+/// D-CAP7 (ratified): capability sigils. These SUPERSEDE the word spellings of
+/// S10 (`mut`/`take`/`view`). The keyword forms below are retired — recognized
+/// only to fire the E0056/E0057/E0058 teaching errors that point at the sigil.
+///
+/// `~T` = write (edit in place), `^T` = move (consume), `&T` = share (borrow).
+/// `copy` stays a verb (no sigil — D-CAP7 closed the set at these three sigils
+/// plus `copy`).
+pub const SIGIL_MUTATE: &str = "~";
+pub const SIGIL_MOVE: &str = "^";
+pub const SIGIL_VIEW: &str = "&";
+
+/// S10 (M2) → D-CAP7: the retired write keyword. Recognized only for the E0056
+/// teaching error that points at the `~` sigil.
 pub const KW_MUTATE: &str = "mut";
 
-/// S10 (ratified M2): caller-site move; ownership transfers permanently.
+/// S10 (M2) → D-CAP7: the retired move keyword. Recognized only for the E0057
+/// teaching error that points at the `^` sigil. (`.take(n)` stays a valid method
+/// name in dot position; `take(names)` stays the lambda capture prefix.)
 pub const KW_MOVE: &str = "take";
 
-/// S10 (ratified M2): return type — a borrow tied to self (elided lifetime).
+/// S10 (M2) → D-CAP7: the retired share/borrow keyword. Recognized only for the
+/// E0058 teaching error that points at the `&` sigil.
 pub const KW_VIEW: &str = "view";
 
 /// S10 (ratified M2, tier 2): field annotation — a stored reference.
@@ -1080,8 +1095,10 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_TAG, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
     KW_MIGRATION, KW_RENAME, KW_ADD, KW_REMOVE, KW_CHANGE, KW_VIA,
-    // Ownership / borrow keywords (S10, M2)
-    KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
+    // Ownership / borrow keywords (S10, M2). D-CAP7 retired KW_MUTATE/KW_MOVE/
+    // KW_VIEW in favor of the `~`/`^`/`&` sigils — they live only as teaching
+    // errors (E0056/E0057/E0058) now, so they are NOT in the keyword list.
+    KW_STORED, KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1)
     KW_UNSAFE, KW_REGION, CTX_BLOCK, KW_LIVE,
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)

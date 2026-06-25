@@ -3,7 +3,7 @@
 #[test]
 fn implicit_clone_is_lint_not_error() {
     let src = r#"
-fn consume(take s: String) {
+fn consume(s: ^String) {
     print(s)
 }
 
@@ -23,7 +23,7 @@ fn main() {
 #[test]
 fn mutate_required_at_call_site() {
     let src = r#"
-fn touch(mut n: Int) {
+fn touch(n: ~Int) {
     print(n)
 }
 
@@ -39,7 +39,7 @@ fn main() {
 #[test]
 fn move_non_clonable_is_hard_error() {
     let src = r#"
-fn consume(take item: NoClone) {
+fn consume(item: ^NoClone) {
     print(0)
 }
 
@@ -55,7 +55,7 @@ fn main() {
 #[test]
 fn view_return_transpiles_to_ref() {
     let src = r#"
-fn peek(msg: String) -> view String {
+fn peek(msg: String) -> &String {
     return msg
 }
 
@@ -79,7 +79,7 @@ fn main() {
 #[test]
 fn view_return_local_text_is_error() {
     let src = r#"
-fn bad() -> view String {
+fn bad() -> &String {
     msg: String @= "ok"
     return msg
 }
@@ -165,13 +165,13 @@ fn main() {
 #[test]
 fn same_call_mut_and_read_is_error() {
     let src = r#"
-fn both(mut a: Int, b: Int) {
+fn both(a: ~Int, b: Int) {
     print(b)
 }
 
 fn main() {
     x: Int := 1
-    both(mut x, x)
+    both(~x, x)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
@@ -183,7 +183,7 @@ fn main() {
 #[test]
 fn implicit_clone_silent_when_value_live_after_call() {
     let src = r#"
-fn consume(take s: String) {
+fn consume(s: ^String) {
     print(s)
 }
 
@@ -207,7 +207,7 @@ fn main() {
 #[test]
 fn implicit_clone_fires_when_value_dead_after_call() {
     let src = r#"
-fn consume(take s: String) {
+fn consume(s: ^String) {
     print(s)
 }
 
@@ -243,7 +243,7 @@ fn main() {
 #[test]
 fn implicit_clone_silent_when_live_in_enclosing_block() {
     let src = r#"
-fn consume(take s: String) {
+fn consume(s: ^String) {
     print(s)
 }
 
@@ -270,7 +270,7 @@ fn main() {
 #[test]
 fn implicit_clone_fires_when_dead_in_all_enclosing_blocks() {
     let src = r#"
-fn consume(take s: String) {
+fn consume(s: ^String) {
     print(s)
 }
 

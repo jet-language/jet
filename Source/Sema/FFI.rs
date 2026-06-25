@@ -42,7 +42,7 @@ pub(crate) fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mu
     let mut ok = true;
     if ef.is_view_return {
         diags.push(ffi_type_error(
-            "a `view` return can't cross into Rust",
+            "a `&` return can't cross into Rust",
             "foreign functions must return owned values — nothing borrowed across the boundary",
             "return the value directly, or wrap it in a `List` or `String`",
             ef.name_span,
@@ -55,8 +55,8 @@ pub(crate) fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mu
         if !matches!(p.convention, AccessConvention::Read | AccessConvention::Infer) {
             diags.push(ffi_type_error(
                 &format!("`{}` can't use `{}` at the FFI boundary", p.name, access_keyword(p.convention)),
-                "foreign functions take owned copies — `mut`, `take`, and `view` aren't allowed here",
-                "remove the access keyword and pass by value",
+                "foreign functions take owned copies — `~`, `^`, and `&` aren't allowed here",
+                "remove the capability sigil and pass by value",
                 p.name_span,
             ));
             ok = false;
@@ -210,8 +210,8 @@ pub(crate) fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut 
             if !matches!(p.convention, AccessConvention::Read | AccessConvention::Infer) {
                 diags.push(ffi_type_error(
                     &format!("`{}` can't use `{}` at the C boundary", p.name, access_keyword(p.convention)),
-                    "C functions take values by copy — `mut`, `take`, and `view` aren't allowed here",
-                    "remove the access keyword and pass by value",
+                    "C functions take values by copy — `~`, `^`, and `&` aren't allowed here",
+                    "remove the capability sigil and pass by value",
                     p.name_span,
                 ));
                 ok = false;
@@ -241,9 +241,9 @@ pub(crate) fn access_keyword(c: AccessConvention) -> &'static str {
     match c {
         AccessConvention::Read => "read",
         AccessConvention::Infer => "read", // unmarked defaults to read pre-resolution
-        AccessConvention::Write => Syntax::KW_MUTATE,
-        AccessConvention::Move => Syntax::KW_MOVE,
-        AccessConvention::Share => "share",
+        AccessConvention::Write => Syntax::SIGIL_MUTATE,
+        AccessConvention::Move => Syntax::SIGIL_MOVE,
+        AccessConvention::Share => Syntax::SIGIL_VIEW,
         AccessConvention::Raw => "raw",
     }
 }

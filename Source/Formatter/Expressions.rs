@@ -592,22 +592,15 @@ impl<'a> Fmt<'a> {
             if i > 0 {
                 self.write(", ");
             }
-            // Convention prefix comes first: the parser reads `mut`/`take`
-            // before the label (`f(mut x: v)`), so fmt must emit it in that
-            // order or the output won't re-parse.
+            // D-CAP7: the call-site capability is a sigil that attaches to the
+            // argument with no space (`~x`, `^x`, `&x`). The parser reads it
+            // before the label, so fmt emits it in that order to round-trip.
+            // `Read`/`Infer` are unmarked; `Raw` (`*`) is handled apart.
             match arg.convention {
-                // D-CAP8/9: Infer is unmarked (renders nothing); Share/Raw aren't
-                // produced yet — the D-CAP7 keyword→sigil migration rewrites this.
-                AccessConvention::Read
-                | AccessConvention::Infer
-                | AccessConvention::Share
-                | AccessConvention::Raw => {}
-                AccessConvention::Write => {
-                    self.write("mut ");
-                }
-                AccessConvention::Move => {
-                    self.write("take ");
-                }
+                AccessConvention::Read | AccessConvention::Infer | AccessConvention::Raw => {}
+                AccessConvention::Write => self.write(Syntax::SIGIL_MUTATE),
+                AccessConvention::Move => self.write(Syntax::SIGIL_MOVE),
+                AccessConvention::Share => self.write(Syntax::SIGIL_VIEW),
             }
             // S61: preserve the call-site argument label `name:` (canonical
             // `name: value` spacing, matching struct-literal field init).

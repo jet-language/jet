@@ -22,63 +22,63 @@ struct Pack {
     overlays: [Overlay]
     prompt: String
 }
-fn nix_source(take name: String, take upstream: String) -> Source {
+fn nix_source(name: ^String, upstream: ^String) -> Source {
     return Source {name: name, upstream: upstream, via: "nix"}
 }
-fn core_source(take name: String, take upstream: String) -> Source {
+fn core_source(name: ^String, upstream: ^String) -> Source {
     return Source {name: name, upstream: upstream, via: "core"}
 }
-fn overlay(take source: String, take packages: [String]) -> Overlay {
+fn overlay(source: ^String, packages: ^[String]) -> Overlay {
     return Overlay {source: source, packages: packages}
 }
-fn pack_item(take source: String, take name: String) -> Package {
+fn pack_item(source: ^String, name: ^String) -> Package {
     return Package {source: source, name: name}
 }
-fn flatten_overlay(take o: Overlay) -> [Package] {
+fn flatten_overlay(o: ^Overlay) -> [Package] {
     out: [Package] := []
     names @= o.packages
     source @= o.source
     loop name in names {
-        out.push(pack_item(source.clone(), take name))
+        out.push(pack_item(source.clone(), ^name))
     }
     return out
 }
-fn packages(take pack: Pack) -> [Package] {
+fn packages(pack: ^Pack) -> [Package] {
     out: [Package] := []
     overlays @= pack.overlays
     loop o in overlays {
-        grouped @= flatten_overlay(take o)
+        grouped @= flatten_overlay(^o)
         loop p in grouped {
             out.push(p)
         }
     }
     return out
 }
-fn source_ref(take p: Package) -> String {
+fn source_ref(p: ^Package) -> String {
     return "{p.source}:{p.name}"
 }
-fn package_refs(take pack: Pack) -> [String] {
+fn package_refs(pack: ^Pack) -> [String] {
     out: [String] := []
-    loop p in packages(take pack) {
-        out.push(source_ref(take p))
+    loop p in packages(^pack) {
+        out.push(source_ref(^p))
     }
     return out
 }
-fn source_directives(take sources: [Source]) -> [JSON] {
+fn source_directives(sources: ^[Source]) -> [JSON] {
     out: [JSON] := []
     loop s in sources {
-        out.push(source_json(take s))
+        out.push(source_json(^s))
     }
     return out
 }
-fn text_array(take items: [String]) -> [JSON] {
+fn text_array(items: ^[String]) -> [JSON] {
     out: [JSON] := []
     loop item in items {
         out.push(JSON.Text(item))
     }
     return out
 }
-fn source_json(take s: Source) -> JSON {
+fn source_json(s: ^Source) -> JSON {
     m: [String, JSON] := [:]
     m["kind"] = JSON.Text("source")
     m["name"] = JSON.Text(s.name)
@@ -86,13 +86,13 @@ fn source_json(take s: Source) -> JSON {
     m["via"] = JSON.Text(s.via)
     return JSON.Object(m)
 }
-fn packages_json(take pack: Pack) -> JSON {
+fn packages_json(pack: ^Pack) -> JSON {
     m: [String, JSON] := [:]
     m["kind"] = JSON.Text("packages")
-    m["items"] = JSON.Array(text_array(package_refs(take pack)))
+    m["items"] = JSON.Array(text_array(package_refs(^pack)))
     return JSON.Object(m)
 }
-fn prompt_json(take label: String) -> JSON {
+fn prompt_json(label: ^String) -> JSON {
     m: [String, JSON] := [:]
     m["kind"] = JSON.Text("prompt")
     m["label"] = JSON.Text(label)

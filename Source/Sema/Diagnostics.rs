@@ -56,8 +56,8 @@ pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
         ),
         "while something is being changed, nobody else may be looking at it".to_string(),
         format!(
-            "pass `{} {}` only once, or copy first with `{} .clone()`",
-            Syntax::KW_MUTATE,
+            "pass `{}{}` only once, or copy first with `{}.clone()`",
+            Syntax::SIGIL_MUTATE,
             name,
             name
         ),
@@ -532,7 +532,7 @@ pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> Stri
                 name
             )
         }
-        SendProblemKind::ViewBorrow => "`view` results are shared views, not owned values".to_string(),
+        SendProblemKind::ViewBorrow => "`&` results are shared views, not owned values".to_string(),
     }
 }
 

@@ -1,24 +1,25 @@
-// 83 — Self-mutation in `mut self` methods (D-MUTSELF1).
-// A `mut self` method may change its receiver in place: assign a field
+// 83 — Self-mutation in `~self` methods (D-MUTSELF1 / D-CAP7).
+// A `~self` method may change its receiver in place: assign a field
 // (`self.field = v`), update one in place (`self.field += v`, S17), or
 // reassign the whole receiver (`self = New{…}`).
 struct Tracker {
     hits: Int
     streak: Int
 
-    // Field assignment + compound update on `self`.
-    fn take_hit(mut self) {
-        self.hits = self.hits + 1
+    fn take_hit(~self) {
+        // Field assignment + compound update on `self`.
+        self.hits = (self.hits + 1)
         self.streak += 1
     }
 
-    // Whole-`self` reassignment back to a fresh value.
-    fn reset(mut self) {
-        self = Tracker { hits: 0, streak: 0 }
+    fn reset(~self) {
+        // Whole-`self` reassignment back to a fresh value.
+        self = Tracker{hits: 0, streak: 0}
     }
 }
+
 fn main() {
-    t: Tracker := Tracker { hits: 0, streak: 0 }
+    t: Tracker := Tracker{hits: 0, streak: 0}
     t.take_hit()
     t.take_hit()
     t.take_hit()

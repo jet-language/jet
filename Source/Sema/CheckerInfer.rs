@@ -1294,9 +1294,9 @@ impl<'a> Checker<'a> {
                                 ),
                                 "this function has read access only and does not own the value".to_string(),
                                 format!(
-                                    "take ownership in this function with `{} {}: {}`",
-                                    Syntax::KW_MOVE,
+                                    "take ownership in this function with `{}: {}{}`",
                                     name,
+                                    Syntax::SIGIL_MOVE,
                                     info.ty.name()
                                 ),
                                 Some(*span),
@@ -1358,8 +1358,8 @@ impl<'a> Checker<'a> {
                                     Syntax::KW_SELF
                                 ),
                                 format!(
-                                    "declare the enclosing method with `{} {}`",
-                                    Syntax::KW_MUTATE,
+                                    "declare the enclosing method with `{}{}`",
+                                    Syntax::SIGIL_MUTATE,
                                     Syntax::KW_SELF
                                 ),
                             )
@@ -2530,8 +2530,8 @@ impl<'a> Checker<'a> {
                                     Syntax::KW_SELF
                                 ),
                                 format!(
-                                    "declare the enclosing method with `{} {}`",
-                                    Syntax::KW_MUTATE,
+                                    "declare the enclosing method with `{}{}`",
+                                    Syntax::SIGIL_MUTATE,
                                     Syntax::KW_SELF
                                 ),
                             )
@@ -2580,11 +2580,11 @@ impl<'a> Checker<'a> {
                             ),
                             "this function has read access only and does not own the value".to_string(),
                             format!(
-                                "call it on a copy: `{}.clone().{}(...)` — or take ownership with `{} {}: {}`",
+                                "call it on a copy: `{}.clone().{}(...)` — or take ownership with `{}: {}{}`",
                                 n,
                                 method,
-                                Syntax::KW_MOVE,
                                 n,
+                                Syntax::SIGIL_MOVE,
                                 info.ty.name()
                             ),
                             Some(*nspan),
@@ -3469,13 +3469,13 @@ impl<'a> Checker<'a> {
                     "E0202",
                     format!(
                         "`{}` needs a plain named binding after it",
-                        Syntax::KW_MUTATE
+                        Syntax::SIGIL_MUTATE
                     ),
                     "write access (`~`) can only be granted to a named binding, not an expression".to_string(),
                     format!(
-                        "bind the value first: `x {} ...` then pass `{} x`",
+                        "bind the value first: `x {} ...` then pass `{}x`",
                         Syntax::SIGIL_BIND_MUT,
-                        Syntax::KW_MUTATE
+                        Syntax::SIGIL_MUTATE
                     ),
                     Some(arg.span),
                 ));
@@ -3522,9 +3522,9 @@ impl<'a> Checker<'a> {
                                 self.diags.push(Diagnostic::lint(
                                     "L0201",
                                     format!(
-                                        "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
+                                        "implicit clone of `{}`; write `{}{}` to transfer ownership or `.clone()` to silence this warning",
                                         name,
-                                        Syntax::KW_MOVE,
+                                        Syntax::SIGIL_MOVE,
                                         name
                                     ),
                                     format!(
@@ -3532,8 +3532,8 @@ impl<'a> Checker<'a> {
                                         call.name
                                     ),
                                     format!(
-                                        "write `{} {}` to move, or `{} .clone()` to copy explicitly",
-                                        Syntax::KW_MOVE,
+                                        "write `{}{}` to move, or `{}.clone()` to copy explicitly",
+                                        Syntax::SIGIL_MOVE,
                                         name,
                                         name
                                     ),
@@ -3546,17 +3546,17 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "`{}` needs `{}` here — this value can't be copied",
                                     call.name,
-                                    Syntax::KW_MOVE
+                                    Syntax::SIGIL_MOVE
                                 ),
                                 format!(
                                     "parameter {} takes ownership (`^`); passing `{}` without `{}` would have to copy it, but this type can't be copied",
                                     i + 1,
                                     name,
-                                    Syntax::KW_MOVE
+                                    Syntax::SIGIL_MOVE
                                 ),
                                 format!(
-                                    "write `{} {}` to move ownership to `{}`",
-                                    Syntax::KW_MOVE,
+                                    "write `{}{}` to move ownership to `{}`",
+                                    Syntax::SIGIL_MOVE,
                                     name,
                                     call.name
                                 ),
@@ -3584,11 +3584,11 @@ impl<'a> Checker<'a> {
                             format!(
                                 "`{}` needs to edit (`~`) this value; passing it without `{}` grants only read access",
                                 call.name,
-                                Syntax::KW_MUTATE
+                                Syntax::SIGIL_MUTATE
                             ),
                             format!(
-                                "write `{} {}` when calling `{}`",
-                                Syntax::KW_MUTATE,
+                                "write `{}{}` when calling `{}`",
+                                Syntax::SIGIL_MUTATE,
                                 name,
                                 call.name
                             ),
@@ -3625,12 +3625,13 @@ impl<'a> Checker<'a> {
                         "E0203",
                         format!(
                             "`{}` passed to a parameter that does not consume",
-                            Syntax::KW_MOVE
+                            Syntax::SIGIL_MOVE
                         ),
-                        "only `take` parameters accept a moved value at the call site".to_string(),
+                        "only move (`^`) parameters accept a moved value at the call site".to_string(),
                         format!(
-                            "remove `{}` or change the parameter to `take`",
-                            Syntax::KW_MOVE
+                            "remove `{}` or change the parameter to take ownership (`{}`)",
+                            Syntax::SIGIL_MOVE,
+                            Syntax::SIGIL_MOVE
                         ),
                         Some(arg.span),
                     ));

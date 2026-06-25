@@ -79,7 +79,7 @@ before continuing.
 | E0015 | parse | teaching: `import` → `use` (S16, D-S16-USE) |
 | E0016 | parse | teaching: `match` → `when` (S24)          |
 | E0017 | parse | teaching: `read` → default parameter access (S10) |
-| E0018 | parse | teaching: `write` → `mut` (S10)          |
+| E0018 | parse | teaching: `write` → `~` sigil (S10, D-CAP7) |
 | E0019 | parse | *retired in M6* (was: `import` staged; S16 shipped) |
 | E0020 | parse | teaching: `None`/`Some`/… → `null`/`value` (S32) |
 | E0021 | parse | teaching: `class` → `struct` (S29)              |
@@ -116,6 +116,9 @@ before continuing.
 | E0053 | parse | teaching: bare `pure fn` → `#Pure fn` (D-CASING1 follow-on) |
 | E0054 | parse | teaching: bare `todo` → `#Todo` (D-CASING1 follow-on) |
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
+| E0056 | parse | teaching: `mut` capability keyword → `~` sigil (D-CAP7) |
+| E0057 | parse | teaching: `take` capability keyword → `^` sigil (D-CAP7) |
+| E0058 | parse | teaching: `view` return keyword → `&` sigil (D-CAP7) |
 | E0984 | parse | teaching: `when` → `if subject { arm -> body }` (D-IF1) |
 | E0985 | parse | teaching: `val`/`var` keyword → `name @=`/`name :=` sigil (D-BIND2) |
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |

@@ -75,6 +75,9 @@ by D-CAP7** — `mut`→`~`, `take`→`^`, `view`→`&`, default-read→bare `T`
 (mutable borrow), `**take**` (move), `**view**` (borrow return type),
 `**ref**` (stored field, tier 2). Default parameter access has no keyword
 (shared read). Rejected: `read` / `write` / `owned` as canonical forms.
+**Retired 2026-06-24:** `mut`/`take`/`view` are no longer keywords — they lex only
+to fire the E0056/E0057/E0058 teaching errors pointing at `~`/`^`/`&` (see D-CAP7
+migration note). `ref` stays a live keyword.
 
 **S6 — Statement separators** *(ratified 2026-06-11; **superseded 2026-06-18 by
 S6-R = B**)*: **no visible semicolons.** A statement ends at the end of its
@@ -1889,9 +1892,11 @@ The call site mirrors the type — `damage(~player, 10)`, `close(^file)`, `cache
 Rejected: keeping the word vocabulary (D-CAP1/2/3 as-was); a words-in-libraries /
 sigils-in-apps split; a sixth sigil for `copy`.
 
-**Migration note — `mut`/`take`/`view` → sigils.** The old S10 keywords still parse today
-(retained for compatibility) but are planned to become S14 teaching errors once the
-sigil surface is fully validated. Until then, treat them as deprecated spellings:
+**Migration note — `mut`/`take`/`view` → sigils (RETIRED 2026-06-24).** The old S10
+keywords are no longer valid syntax: they are removed from `JET_KEYWORD_LIST` and lex
+only to fire S14 teaching errors — **E0056** (`mut` → `~`), **E0057** (`take` → `^`),
+**E0058** (`view` return → `&`) — which recover by parsing as if the sigil were written,
+and `jet fmt` rewrites them to the sigil. The migration table:
 
 | Old | New | Position |
 |-----|-----|----------|

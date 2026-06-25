@@ -1,25 +1,29 @@
-// Ownership (M2): default shared access, `mut` to change, `take` to move,
-// `.clone()` to copy, and `view` to hand back a borrow.
+// Ownership (M2 / D-CAP7): default shared access, `~` to change, `^` to move,
+// `.clone()` to copy, and `&` to hand back a borrow.
 fn show(msg: String) {
     print(msg)
 }
-fn bump(mut n: Int) {
-    n+= 1
+
+fn bump(n: ~Int) {
+    n += 1
 }
-fn archive(take name: String) -> String {
+
+fn archive(name: ^String) -> String {
     return name
 }
-fn headline(text: String) -> view String {
+
+fn headline(text: String) -> &String {
     return text
 }
+
 fn main() {
     score: Int := 41
-    bump(mut score)
+    bump(~score)
     print(score)
     greeting: String @= "hello"
     show(greeting)
     print(greeting)
-    saved: String @= archive(take "vault")
+    saved: String @= archive(^"vault")
     print(saved)
     print(headline("Jet"))
 }

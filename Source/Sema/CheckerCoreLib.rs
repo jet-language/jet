@@ -167,16 +167,16 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "parameter `{}` requires `{}` at the call site",
                                     n,
-                                    Syntax::KW_MUTATE
+                                    Syntax::SIGIL_MUTATE
                                 ),
                                 format!(
                                     "`{}` needs to edit (`~`) this value; passing it without `{}` grants only read access",
                                     name,
-                                    Syntax::KW_MUTATE
+                                    Syntax::SIGIL_MUTATE
                                 ),
                                 format!(
-                                    "write `{} {}` when calling `{}`",
-                                    Syntax::KW_MUTATE,
+                                    "write `{}{}` when calling `{}`",
+                                    Syntax::SIGIL_MUTATE,
                                     n,
                                     name
                                 ),
@@ -680,8 +680,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         "`shuffle` edits its list in place".to_string(),
-                        "write access (`~`) is required; the list must be passed with `mut`".to_string(),
-                        "write `random.shuffle(mut xs)`".to_string(),
+                        "write access (`~`) is required; the list must be passed with `~`".to_string(),
+                        "write `random.shuffle(~xs)`".to_string(),
                         Some(arg.span),
                     ));
                 }
@@ -960,7 +960,7 @@ impl<'a> Checker<'a> {
                     "E0202",
                     format!("argument {} to `{}` requires write access (`~`)", i + 1, name),
                     "this standard library call edits that value in place".to_string(),
-                    format!("write `{} value` for this argument", Syntax::KW_MUTATE),
+                    format!("write `{}value` for this argument", Syntax::SIGIL_MUTATE),
                     Some(arg.span),
                 ));
             }
@@ -1049,10 +1049,10 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(Diagnostic::error(
                 "E0203",
-                format!("`{}` passed to a parameter that does not consume", Syntax::KW_MOVE),
+                format!("`{}` passed to a parameter that does not consume", Syntax::SIGIL_MOVE),
                 "standard library functions in M10 read their ordinary arguments unless documented otherwise"
                     .to_string(),
-                format!("remove `{}` here", Syntax::KW_MOVE),
+                format!("remove `{}` here", Syntax::SIGIL_MOVE),
                 Some(arg.span),
             ));
         }

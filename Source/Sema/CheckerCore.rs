@@ -527,9 +527,9 @@ impl<'a> Checker<'a> {
                             };
                             let fix = if info.param_conv.is_some() {
                                 format!(
-                                    "mark the parameter `{} {}: {}` if the function should change it",
-                                    Syntax::KW_MUTATE,
+                                    "mark the parameter `{}: {}{}` if the function should change it",
                                     name,
+                                    Syntax::SIGIL_MUTATE,
                                     info.ty.name()
                                 )
                             } else {
@@ -545,7 +545,7 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "only `{}` bindings (and `{}` parameters) can be changed",
                                     Syntax::SIGIL_BIND_MUT,
-                                    Syntax::KW_MUTATE
+                                    Syntax::SIGIL_MUTATE
                                 ),
                                 fix,
                                 Some(name_span),
@@ -740,15 +740,15 @@ impl<'a> Checker<'a> {
                                     };
                                     let fix = if is_self {
                                         format!(
-                                            "write the receiver as `{} {}` to grant write access",
-                                            Syntax::KW_MUTATE,
+                                            "write the receiver as `{}{}` to grant write access",
+                                            Syntax::SIGIL_MUTATE,
                                             Syntax::KW_SELF
                                         )
                                     } else if info.param_conv.is_some() {
                                         format!(
-                                            "mark the parameter `{} {}: {}` to grant write access",
-                                            Syntax::KW_MUTATE,
+                                            "mark the parameter `{}: {}{}` to grant write access",
                                             root,
+                                            Syntax::SIGIL_MUTATE,
                                             info.ty.name()
                                         )
                                     } else {
@@ -844,10 +844,10 @@ impl<'a> Checker<'a> {
                                         "this function has read access only and does not own the value"
                                             .to_string(),
                                         format!(
-                                            "return a copy: `return {}.clone();` — or take ownership with `{} {}: {}`",
+                                            "return a copy: `return {}.clone();` — or take ownership with `{}: {}{}`",
                                             n,
-                                            Syntax::KW_MOVE,
                                             n,
+                                            Syntax::SIGIL_MOVE,
                                             info.ty.name()
                                         ),
                                         Some(*nspan),
@@ -875,7 +875,7 @@ impl<'a> Checker<'a> {
                                         .to_string(),
                                     "indexing or slicing builds a fresh, owned piece, so there's no longer-lived value for a view to point at — the piece would vanish the moment this function returns"
                                         .to_string(),
-                                    "return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it"
+                                    "return the piece owned (drop the `&`; the caller keeps its own copy), or hand back a whole field with `&` and let the caller index it"
                                         .to_string(),
                                     Some(e.span()),
                                 ));
@@ -897,8 +897,8 @@ impl<'a> Checker<'a> {
                                 self.diags.push(Diagnostic::error(
                                     "E0206",
                                     "this value can't be handed back as a shared view".to_string(),
-                                    "a `view` return may only point at a parameter, a whole-number or yes/no name, or a const — not at fresh text you just made here".to_string(),
-                                    "return a parameter or const, copy with `.clone()` into an owned return type, or change `-> view` to `->`".to_string(),
+                                    "a `&` return may only point at a parameter, a whole-number or yes/no name, or a const — not at fresh text you just made here".to_string(),
+                                    "return a parameter or const, copy with `.clone()` into an owned return type, or change `-> &` to `->`".to_string(),
                                     Some(e.span()),
                                 ));
                             }

@@ -11229,7 +11229,7 @@ fn mk() {
     #[test]
     fn covers_mut_self_method_body() {
         // A `mut self` receiver (→ `&mut self`) whose body only reads is covered.
-        let src = "struct Acc {\n total: Int\n fn doubled(mut self) -> Int {\n return (self.total + self.total)\n }\n}\n";
+        let src = "struct Acc {\n total: Int\n fn doubled(~self) -> Int {\n return (self.total + self.total)\n }\n}\n";
         assert!(covers_method(src, "Acc", "doubled"));
     }
 
@@ -11252,7 +11252,7 @@ fn mk() {
         // D-MUTSELF1: a `mut self` method that reassigns `self` (`self = …`) is NOW
         // covered — the `mut self` slot derefs (`(*self)`), so the LHS lowers to
         // `(*self) = …` (the prior AST-path I2 hole is closed).
-        let src = "struct Acc {\n n: Int\n fn reset(mut self) {\n self = Acc { n: 0 }\n }\n}\n";
+        let src = "struct Acc {\n n: Int\n fn reset(~self) {\n self = Acc { n: 0 }\n }\n}\n";
         assert!(covers_method(src, "Acc", "reset"));
     }
 
@@ -11260,9 +11260,9 @@ fn mk() {
     fn covers_self_field_assign_method() {
         // D-MUTSELF1: a `mut self` method assigning a field (`self.field = v`, S17
         // compound `+=` too) is covered — lowers to `((*self)).field = v`.
-        let src = "struct Acc {\n n: Int\n fn bump(mut self) {\n self.n = self.n + 1\n }\n}\n";
+        let src = "struct Acc {\n n: Int\n fn bump(~self) {\n self.n = self.n + 1\n }\n}\n";
         assert!(covers_method(src, "Acc", "bump"));
-        let compound = "struct Acc {\n n: Int\n fn bump(mut self) {\n self.n += 1\n }\n}\n";
+        let compound = "struct Acc {\n n: Int\n fn bump(~self) {\n self.n += 1\n }\n}\n";
         assert!(covers_method(compound, "Acc", "bump"));
     }
 
@@ -11599,11 +11599,11 @@ fn greet() -> String { return input() }
         // c109 Phase 26: ALL three free-call arg conventions route — `Read` (`&(…)`),
         // `Move` (`take`-marked), and `Mutate` (`mut place` → `&mut (…)`).
         assert!(covers(
-            "fn bump(mut n: Int) { n += 1 }\nfn f() { s: Int := 1\nbump(mut s) }",
+            "fn bump(n: ~Int) { n += 1 }\nfn f() { s: Int := 1\nbump(~s) }",
             "f"
         ));
         assert!(covers(
-            "fn keep(take s: String) -> String { return s }\nfn f() -> String { return keep(take \"v\") }",
+            "fn keep(s: ^String) -> String { return s }\nfn f() -> String { return keep(^\"v\") }",
             "f"
         ));
     }
@@ -12121,13 +12121,13 @@ fn takes_shapes(xs: [Shape]) {
         // The borrow shape is the existing total `TStmt::ViewReturn { wrap }` (Phase 17).
         let src = "\
 trait Named {
-    fn label(self) -> view String
+    fn label(self) -> &String
 }
 struct Dog {
     name: String
 }
 impl Dog: Named {
-    fn label(self) -> view String {
+    fn label(self) -> &String {
         return self.name
     }
 }

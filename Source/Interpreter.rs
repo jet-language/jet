@@ -293,7 +293,7 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
     let boundary = |conv: AccessConvention, span: Span| {
         let feature = match conv {
             AccessConvention::Write => {
-                "passes a `mut` argument to a function (writeback isn't interpreted yet)"
+                "passes a `~` argument to a function (writeback isn't interpreted yet)"
             }
             _ => "passes a moved (`^`) variable to a function (move binding isn't interpreted yet)",
         };

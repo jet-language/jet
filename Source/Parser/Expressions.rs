@@ -1675,7 +1675,7 @@ impl<'a> Parser<'a> {
                         "E0018",
                         format!(
                             "changeable access is written `{}`, not `{}`",
-                            Syntax::KW_MUTATE,
+                            Syntax::SIGIL_MUTATE,
                             Syntax::FOREIGN_WRITE
                         ),
                         "Jet has exactly one spelling for each thing, so all code reads the same"
@@ -1683,7 +1683,7 @@ impl<'a> Parser<'a> {
                         format!(
                             "replace `{}` with `{}`",
                             Syntax::FOREIGN_WRITE,
-                            Syntax::KW_MUTATE
+                            Syntax::SIGIL_MUTATE
                         ),
                         Some(span),
                     ));
@@ -1693,13 +1693,15 @@ impl<'a> Parser<'a> {
             }
         }
         match self.peek().kind {
+            // D-CAP7: `mut` is retired in favor of `~`. Teach + recover as Write.
             TokKind::KwMutate => {
-                self.bump();
+                let span = self.bump().span;
+                self.push_cap_keyword_teach("E0056", Syntax::KW_MUTATE, Syntax::SIGIL_MUTATE, span);
                 AccessConvention::Write
             }
             TokKind::KwMove => {
                 // `take(names) () =>` is a lambda take-prefix, not an arg convention.
-                // Only consume `take` as an arg convention when NOT followed by `(`.
+                // Only treat bare `take name` as the retired move keyword.
                 let is_lambda_take = matches!(
                     self.toks.get(self.pos + 1).map(|t| &t.kind),
                     Some(TokKind::LParen)
@@ -1709,7 +1711,9 @@ impl<'a> Parser<'a> {
                     // here is unmarked, so it infers (D-CAP8).
                     AccessConvention::Infer
                 } else {
-                    self.bump();
+                    // D-CAP7: `take` is retired in favor of `^`. Teach + recover as Move.
+                    let span = self.bump().span;
+                    self.push_cap_keyword_teach("E0057", Syntax::KW_MOVE, Syntax::SIGIL_MOVE, span);
                     AccessConvention::Move
                 }
             }
@@ -1717,6 +1721,28 @@ impl<'a> Parser<'a> {
             // resolved from body usage by Sema::Capability before checks/codegen.
             _ => AccessConvention::Infer,
         }
+    }
+
+    /// D-CAP7: the `mut`/`take`/`view` capability words are retired in favor of
+    /// the `~`/`^`/`&` sigils. Recognized only to fire this teaching error
+    /// (E0056/E0057/E0058), which then recovers as if the sigil were written
+    /// (S14 idiom — see `is_teaching_parse_diag`).
+    pub(super) fn push_cap_keyword_teach(
+        &mut self,
+        code: &'static str,
+        keyword: &str,
+        sigil: &str,
+        span: Span,
+    ) {
+        self.diags.push(Diagnostic::error(
+            code,
+            format!("`{}` is now the `{}` sigil", keyword, sigil),
+            "capability is written with a sigil on the type, not a word — so all \
+             code reads the same"
+                .to_string(),
+            format!("write `{}` in place of `{}`", sigil, keyword),
+            Some(span),
+        ));
     }
 
     fn starts_expr(&self, kind: &TokKind) -> bool {
