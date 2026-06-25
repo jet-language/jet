@@ -201,7 +201,7 @@
       "type": "idea",
       "title": "Qualifier system: traits vs attributes vs tags",
       "body": "Fix the trait/attribute/tag boundary (the owner’s “one primary note”) as a decision rule, then maturity tags, capabilities/prohibitions, and uncertainty/cost as policies on one shared tag engine. Linchpin: §1 taxonomy can be ratified alone. `pure fn` (S60) is already a tag; capabilities reopen S60’s rejected full effects system. Report: tools/Tower/docs/proposals/P1-qualifier-system.md",
-      "stage": "deciding",
+      "stage": "building",
       "plan": "qualifier-system-implementation",
       "notes": [
         {
@@ -234,6 +234,10 @@
         },
         {
           "t": "[sweep] D-EFF1=B follow-ons developed: D-EFF4 (effect vocabulary — closed ten vs extensible) + D-EFF5 (flat vs hierarchical lattice) added to ballot (rec A/A). The de-facto code answers (closed ten in Effects.rs, flat lattice) can ship; these only re-bless E0119/E0740 snapshots if the owner picks differently. D-SOA1 follow-ons needed no cards (already ratified D-SOA2A-D).",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-EFF4=B (closed ten + reserved extensibility) + D-EFF5=A (flat lattice) ratified. Effect-system cluster unblocked -> building: effect-tracking pass + #(...) surface + the gated cluster (D-TAINT1/D-DET1/D-TXN1-2/D-SCAP1/D-LIN1).",
           "at": "2026-06-24"
         }
       ],
@@ -1293,6 +1297,65 @@
       "updated": "2026-06-24T22:45:02.236Z",
       "priority": "P2",
       "workOrder": 0
+    },
+    {
+      "id": "c139",
+      "type": "idea",
+      "title": "JIT tier-1: Cranelift backend over the JitBackend seam",
+      "body": "D-JITDEP1 = approve. Implement a CraneliftBackend satisfying the JitBackend seam (shipped c77) as JIT tier-1 for fast hot-swap / live-state in jet serve. Cranelift is runtime-side ONLY (never compiler Source/) so I6 holds; scoped + owner-signed like D-REGEX1. Production stays AOT (compile-to-Rust); this is the resident dev-loop speedup. Needs a sidequest plan (integration + executable-memory/W^X + tier-0/tier-1 switch).",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[sweep] From D-JITDEP1 (2026-06-24): approve Cranelift tier-1 now; own bytecode VM then own native JIT are the planned progression, frozen so they are not lost.",
+          "at": "2026-06-24"
+        }
+      ],
+      "created": "2026-06-24",
+      "updated": "2026-06-24",
+      "decisions": [
+        "D-JITDEP1"
+      ],
+      "priority": "P2",
+      "workOrder": null
+    },
+    {
+      "id": "c140",
+      "type": "idea",
+      "title": "JIT tier-1b: own bytecode VM (replace Cranelift, zero runtime dep)",
+      "body": "Planned successor to the Cranelift tier-1: a Jet-owned register/stack bytecode VM (bytecode design + compiler from TIR + VM loop), roughly 5-20x over the tree-walking tier-0 interpreter with ZERO runtime dependencies, removing the Cranelift exception. Not native speed. FROZEN: pursue after Cranelift tier-1 is proven. Owner: plan to move to our own bytecode VM.",
+      "stage": "frozen",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[sweep] From D-JITDEP1 (2026-06-24): approve Cranelift tier-1 now; own bytecode VM then own native JIT are the planned progression, frozen so they are not lost.",
+          "at": "2026-06-24"
+        }
+      ],
+      "created": "2026-06-24",
+      "updated": "2026-06-24",
+      "decisions": [],
+      "priority": "P3",
+      "workOrder": null
+    },
+    {
+      "id": "c141",
+      "type": "idea",
+      "title": "JIT backend: own native JIT from scratch (master-of-all, eventual)",
+      "body": "Eventual Jet-owned native codegen backend (instruction selection, register allocation, x64 + aarch64, calling conventions, relocations, W^X executable memory, JIT hardening) replacing Cranelift AND the bytecode VM. Multi-year effort with miscompilation + security surface; justified only as the long-horizon master-of-all goal since production is AOT. FROZEN: post-v1 / far-horizon. Owner: then eventually our own native jit.",
+      "stage": "frozen",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[sweep] From D-JITDEP1 (2026-06-24): approve Cranelift tier-1 now; own bytecode VM then own native JIT are the planned progression, frozen so they are not lost.",
+          "at": "2026-06-24"
+        }
+      ],
+      "created": "2026-06-24",
+      "updated": "2026-06-24",
+      "decisions": [],
+      "priority": "P4",
+      "workOrder": null
     }
   ],
   "questions": [
