@@ -25,7 +25,7 @@ it's time to decide it.
 
 ## Open decisions
 
-_Two card groups open for the owner: **c96** registry / jet publish (D-PUBLISH1A, D-VERSION1, D-RESOLVE1, D-LOCK1) and **c136** generic-type serde (D-SERDE9–D-SERDE12). All developed to the house format and agent-reviewed._
+_Three card groups open for the owner: **c96** registry / jet publish (D-PUBLISH1A, D-VERSION1, D-RESOLVE1, D-LOCK1), **c136** generic-type serde (D-SERDE9–D-SERDE12), and **c50** build-from-source + wave-2 deps (D-DEP-ARCHIVE1, D-DEP-DB1, D-BFS1). All developed to the house format and agent-reviewed._
 
 
 ## M12.2 registry + jet publish UX — board card c96
@@ -494,6 +494,292 @@ struct Page<T> { items: [T] }
 ---
 
 **Cross-cutting note (no decision):** Implementation reuses existing precedent — `rust_extra_clone_bounds`/`rust_extra_jetshow_bounds` (`Source/Generics.rs:447`/`:455`) already prove the per-param extra-bound pattern; the generic `JetShow` impl at `Source/Codegen/Items.rs:114-124` is the exact template for a derived-trait impl over a generic type. New `rust_extra_encode_bounds`/`rust_extra_decode_bounds` feed `rust_type_param_list` in `emit_struct_serde`/`emit_enum_serde`. rustc verifies every monomorphization, so I2 holds.
+
+---
+
+## Package build-from-source + M9 wave-2 — board card c50
+
+_Three cards open under I6 + D-DEP1: each new Rust crate behind a wrapping Jet
+package needs its own owner sign-off (like `regex`/D-REGEX1). **D-DEP-ARCHIVE1**
+(zip/tar crate for `jet.archive`), **D-DEP-DB1** (sqlite crate for `jet.db`), and
+**D-BFS1** (where a wrapped crate's source lives for an offline build). All to the
+house format and subagent-reviewed. Build-from-source mechanics themselves are
+already ratified (D-BUILD1 C-FFI bridge + `Provider.rs` realize step); these cards
+only decide the dependency surface c50 ships on top._
+
+> Cross-checked against `syntax-decisions.md`: deps ship as **FFI-wrapping Jet
+> packages** (D-DEP1), manifest is **`pkg.jet`** (`PAYLOAD_FILE` in
+> `Source/Syntax.rs`), the version pin is **inline in `extern rust "crate@version"`**
+> (S50, authoritative), and consumers depend on the *package* not the crate. Each
+> approval is an I6 **bootstrap** sanction carrying D-REGEX1's standing native-ize
+> obligation (replace the crate before the dependency-free end state). Precedents:
+> `jet.tls`/`rustls` (D-NET1), `jet.regex`/`regex` (D-REGEX1), Cranelift runtime
+> dep (D-JITDEP1).
+
+---
+
+### D-DEP-ARCHIVE1 — which crate(s) `jet.archive` wraps
+
+**Gist:** Pick the zip + tar crate the `jet.archive` package wraps to read/write `.zip` and `.tar.gz`.
+
+**Story.** Walter ships a CLI that bundles a project's logs into a single
+`backup.zip` and also unpacks vendor `.tar.gz` releases. He wants `use jet.archive`
+to just work — pure-Jet API, no crate names in his code — and he trusts that
+whatever the package wraps was vetted once by the owner, not chosen per-install.
+
+**In the wild:**
+```jet
+// his code — no crate ever appears
+use jet.archive as ar
+
+fn backup(logs: [Path]) -> Result<Unit> {
+  val z = ar.zip_writer("backup.zip")?
+  for f in logs { z.add(f.name, fs.read(f)?)? }
+  z.finish()
+}
+```
+```jet
+// jet.archive/pkg.jet  — the wrapping package the owner is approving
+payload: { name: "jet.archive", version: "0.1.0", license: "MIT OR Apache-2.0" }
+packages: { jet.archive: library }
+// no deps: block — the crate pin lives inline in the extern rust block (S50)
+```
+```jet
+// jet.archive body — the extern rust block carrying the approved crate pins.
+// Pins are EXACT (S50) so they match the vendored source tree (see D-BFS1).
+extern rust "zip@2.1.3" {
+  fn zip_open(bytes: Bytes) -> ZipHandle           = "zip::ZipArchive::new";
+  fn zip_entry(h: ZipHandle, i: Int) -> Bytes      = "::jet_archive::zip_entry";
+}
+extern rust "tar@0.4.40" {
+  fn tar_entries(gz: Bytes) -> [TarEntry]          = "::jet_archive::tar_list";
+}
+```
+
+**Other languages:** Rust uses the `zip` crate (de-facto) + `tar` + `flate2` for
+gzip. Go has `archive/zip` and `archive/tar` **in its standard library** (no third
+party). Node leans on `adm-zip` (pure-JS) / `tar` npm modules. Python ships
+`zipfile` + `tarfile` in stdlib. Jet is in Go/Python's eventual position (stdlib
+archive) but bootstraps via Rust crates first, then native-izes (I6).
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Crates | Pure-Rust (no C) | Coverage | Supply-chain surface | Native-ize path |
+|---|---|---|---|---|---|
+| A `zip` + `tar` + `flate2` (recommended) | 3 well-known, pure-Rust | yes | zip, tar, tar.gz | 3 crates, all widely-audited, no C | clean — port deflate + zip + tar reader to Jet |
+| B `zip` only (gzip/tar later) | 1 | yes | zip only at first | smallest now, but reopens the dep question for tar | partial — still owes tar |
+| C bundled C (`libzip` via `jet bind`) | 0 Rust, 1 C lib | n/a (C) | zip, tar w/ libarchive | a C build dep + cflags-hash cache (D-BUILD1 Phase-3) | different axis — C lib not Rust crate |
+
+- **Option A — `zip` + `tar` + `flate2`, all pure-Rust. (recommended)**
+```jet
+// covers the whole "Walter" story in one approval; flate2 is the gzip layer
+extern rust "zip@2.1.3"   { fn zip_open(b: Bytes) -> ZipHandle = "zip::ZipArchive::new"; }
+extern rust "tar@0.4.40"  { fn tar_list(b: Bytes) -> [TarEntry] = "::jet_archive::tar_list"; }
+extern rust "flate2@1.0"  { fn gunzip(b: Bytes) -> Bytes        = "::jet_archive::gunzip"; }
+```
+All three are pure-Rust (no C toolchain on the user's machine), MIT/Apache,
+heavily used. One owner approval covers the common archive needs end to end.
+
+- **Option B — `zip` only now, defer tar/gzip.**
+```jet
+extern rust "zip@2.1.3" { fn zip_open(b: Bytes) -> ZipHandle = "zip::ZipArchive::new"; }
+// .tar.gz unsupported → Walter's vendor-unpack path errors until a second ballot
+```
+Smaller surface today, but `.tar.gz` is half the real-world need; it reopens the
+dependency question almost immediately and ships an incomplete `jet.archive`.
+
+- **Option C — bundle C `libarchive`/`libzip` via `jet bind`.**
+```jet
+// jet.archive/pkg.jet
+deps: { archive: c@"libarchive" }   // C build dep, not a Rust crate
+```
+Zero Rust crates, but forces a C toolchain + `pkg-config` on every consumer and
+rides the not-yet-landed C-FFI Phase-3 cflags-hash cache — heavier and breaks the
+"just works, no system deps" beginner path.
+
+**Recommendation:** A — one approval covers zip + tar + tar.gz with three
+pure-Rust, widely-audited crates and no C toolchain requirement; the native-ize
+path (port deflate + zip + tar to Jet) is the cleanest of the three.
+
+**Owner Q (D-DEP-ARCHIVE1):** Approve all three pure-Rust crates (`zip@2`,
+`tar@0.4`, `flate2@1`) in one go, or only `zip` now and ballot tar/gzip
+separately? Approving all three lets `jet.archive` ship complete; the cost is
+three crates entering the bootstrap-dep set at once (all carry the I6 native-ize
+obligation).
+
+---
+
+### D-DEP-DB1 — which sqlite crate `jet.db` wraps
+
+**Gist:** Pick the SQLite crate behind `jet.db` — the ergonomic `rusqlite` or the thin `sqlite` binding — and whether SQLite's C is bundled or system-linked.
+
+**Story.** Ruth builds a small expense tracker. She wants `use jet.db`, open a
+file, run parameterized queries, and have it work on a fresh laptop with **no
+system SQLite install**. She never wants to see a crate name, a `Connection`
+type from Rust, or a "could not find libsqlite3" linker error.
+
+**In the wild:**
+```jet
+use jet.db as db
+
+fn record(amount: Money, memo: Text) -> Result<Unit> {
+  val conn = db.open("expenses.db")?
+  conn.exec("create table if not exists tx(amount int, memo text)")?
+  conn.run("insert into tx(amount, memo) values (?, ?)", [amount, memo])?  // bound params
+}
+```
+```jet
+// jet.db/pkg.jet — the wrapping package the owner is approving
+payload: { name: "jet.db", version: "0.1.0", license: "MIT OR Apache-2.0" }
+packages: { jet.db: library }
+```
+```jet
+// jet.db body — extern rust over the approved crate; bundled C so users need no system lib
+extern rust "rusqlite@0.31" {        // feature "bundled" compiles SQLite's own C in
+  fn db_open(path: Text) -> Conn                       = "::jet_db::open";
+  fn db_run(c: Conn, sql: Text, args: [Value]) -> Int  = "::jet_db::run";
+}
+```
+
+**Other languages:** Rust's two options are exactly this card — `rusqlite` (high
+level, owns the `Connection`/`Statement` ergonomics, optional `bundled` feature
+that compiles SQLite's amalgamation) vs `sqlite` (thinner). Go uses
+`mattn/go-sqlite3` (cgo, bundles the C) or the pure-Go `modernc.org/sqlite`.
+Node: `better-sqlite3` (native, bundles C). Python ships `sqlite3` **in stdlib**
+(bundled C). The cross-language norm is to **bundle SQLite's C amalgamation** so
+the user needs no system library — Jet should match that.
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Crate | SQLite C source | API ergonomics | User system deps | FFI boundary fit (S50 by-value) |
+|---|---|---|---|---|---|
+| A `rusqlite` + bundled (recommended) | `rusqlite@0.31` | bundled (compiled from amalgamation) | high — params, rows, txns | none | needs a thin `jet_db` shim to flatten Connection/rows to by-value |
+| B `rusqlite` + system libsqlite3 | `rusqlite@0.31` | system `-l sqlite3` | high | requires libsqlite3 installed | same shim; plus a linker-error footgun |
+| C `sqlite` thin binding | `sqlite@0.36` | bundled | low — closer to C API | none | thinner but more shim work to reach Ruth's clean API |
+
+- **Option A — `rusqlite` with the `bundled` feature. (recommended)**
+```jet
+extern rust "rusqlite@0.31" {   // Cargo feature "bundled" → SQLite amalgamation compiled in
+  fn db_open(path: Text) -> Conn = "::jet_db::open";
+}
+// Ruth's fresh laptop: no system SQLite, it just builds and runs.
+```
+Most-used Rust SQLite crate, mature, and `bundled` removes the system-library
+footgun entirely (matches Python/Node/Go-cgo norms). The clean Jet API is short
+to build over its ergonomic surface.
+
+- **Option B — `rusqlite` linking the system `libsqlite3`.**
+```jet
+extern rust "rusqlite@0.31" { fn db_open(path: Text) -> Conn = "::jet_db::open"; }
+// on a machine without libsqlite3-dev:
+//   error: linking with `cc` failed: cannot find -lsqlite3
+```
+Same ergonomic crate but reintroduces exactly the "could not find libsqlite3"
+error Ruth must never see — fails the beginner-safety bar.
+
+- **Option C — the thin `sqlite` crate (bundled).**
+```jet
+extern rust "sqlite@0.36" { fn db_open(path: Text) -> Conn = "::jet_db::open"; }
+// closer to the raw C API → more shim code to reach the bound-params/rows API above
+```
+Smaller crate, but its low-level surface pushes more of the ergonomic API into the
+wrapping shim with no safety or supply-chain win over A.
+
+**Recommendation:** A — `rusqlite@0.31` with the `bundled` feature: the standard
+Rust choice, no system dependency (the cross-language norm), and its high-level
+surface makes the clean Jet API short. Note for native-ize: SQLite's
+public-domain C amalgamation is arguably already the "native" artifact, so the I6
+obligation here may resolve to "keep bundled SQLite" rather than rewrite it —
+flag for a later frozen card.
+
+**Owner Q (D-DEP-DB1):** Approve `rusqlite@0.31` **with bundled SQLite C** (no
+system dep, recommended)? And for the I6 native-ize obligation, is keeping
+bundled public-domain SQLite C an acceptable end state, or must `jet.db`
+eventually move to a native-Jet embedded store?
+
+---
+
+### D-BFS1 — where a wrapped crate's source lives for an offline build
+
+**Gist:** When build-from-source compiles a wrapping package's `extern rust` crate, do the crate sources ship vendored in the package, or get fetched once and locked?
+
+**Story.** Dale runs a locked CI build of an app that depends on `jet.archive`.
+The build must be **offline and byte-reproducible** — no surprise network call to
+crates.io mid-build, and the same crate source every time. He needs to know where
+the `zip@2` source actually comes from when `jetpack build` compiles the wrapping
+package.
+
+**In the wild:**
+```shell
+# Dale's CI, network disabled
+$ jetpack build --locked
+  compiling jet.archive (zip@2, tar@0.4, flate2@1) from source …
+  # where does zip@2's source come from with no network?
+```
+```jet
+// jet.archive/pkg.jet under option A (vendored): crate source committed in-package
+// jet.archive/
+//   pkg.jet
+//   vendor/zip-2.1.3/…   ← crate source travels WITH the package
+extern rust "zip@2.1.3" { … }   // exact pin matches the vendored tree
+```
+
+**Other languages:** Cargo fetches from crates.io into `~/.cargo`, locks exact
+versions in `Cargo.lock`, and `cargo vendor` copies sources into a `vendor/` dir
+for offline/audited builds. Go's module proxy + `GOFLAGS=-mod=vendor` is the same
+pattern. npm has `npm ci` against a committed `package-lock.json`. The split is
+always "fetch-then-lock (default)" vs "vendor-in-tree (offline/audit)".
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Crate source location | Offline by default | Reproducible | Package size | Audit transparency | One-path fit |
+|---|---|---|---|---|---|---|
+| A vendored-in-package (recommended) | committed in the wrapping package's `vendor/` | yes — no network ever | yes — tree is the source | larger packages | high — source travels with the dep, hash-pinned in `.jet/lock` | strong — matches Jet's offline/deterministic stance (D-BUILD1) |
+| B fetch-then-lock | crates.io → hangar store, pinned in `.jet/lock` | no — first build needs network | yes after lock | small | medium — must trust crates.io + checksum | familiar (cargo), but a network step in the magic path |
+| C hybrid: fetch on publish, vendor in published artifact | author fetches; registry artifact carries vendored source | yes for consumers | yes | larger published artifacts | high for consumers | strong but adds a publish-time step |
+
+- **Option A — vendored in the wrapping package. (recommended)**
+```shell
+$ jetpack build --locked      # network OFF
+  compiling jet.archive from vendored zip@2.1.3 …   ✓ no network
+```
+The crate source is committed inside `jet.archive` and hash-pinned in `.jet/lock`.
+Builds are offline from the first run, byte-reproducible, and the exact wrapped
+source is auditable in the dependency tree (supply-chain transparency). Matches
+the existing offline/deterministic build stance (D-BUILD1 runs offline by
+default; `jetpack` never realizes on demand).
+
+- **Option B — fetch from crates.io, lock the pin.**
+```shell
+$ jetpack build               # first build, no lock yet
+  fetching zip@2.1.3 from crates.io …   # ← network in the magic path
+  locked → .jet/lock
+$ jetpack build --locked      # network OFF after lock: ok
+```
+Smaller packages and the familiar cargo flow, but the **first** build of any new
+dependency needs network, and supply-chain trust rests on crates.io + the
+checksum rather than source that travels with the package.
+
+- **Option C — author fetches, published artifact carries vendored source.**
+```shell
+# author side
+$ jet publish jet.archive     # fetches zip@2.1.3, vendors it into the artifact
+# consumer side (Dale)
+$ jetpack build --locked      # vendored source already inside the fetched package → offline
+```
+Consumers get A's offline/auditable property without bloating the source repo, at
+the cost of a publish-time vendoring step and larger published artifacts.
+
+**Recommendation:** A — vendored-in-package: offline and reproducible from the
+first build with no network in the magic path, the wrapped crate source is
+auditable in the dep tree (the strongest supply-chain posture), and it matches
+Jet's already-offline build model. C is the fallback if committing crate sources
+into source repos proves unwieldy at scale.
+
+**Owner Q (D-BFS1):** Vendor crate source inside the wrapping package (A,
+offline-first + max audit transparency), or fetch-then-lock from crates.io (B,
+smaller repos, cargo-familiar, but network on first build)? This sets the default
+supply-chain posture for every D-DEP1 package, not just c50's.
 
 ---
 
