@@ -956,6 +956,13 @@ pub const NS_ENV: &str = "env";
 pub const NS_SYSTEM: &str = "system";
 pub const NS_IMAGE: &str = "image";
 
+/// D-WORKSPACE2 (ratified 2026-06-25, option A): the monorepo index is the
+/// reserved namespace `workspace` — `module workspace { members: … }` in
+/// `workspace.jet` (D-WORKSPACE1=B; see WORKSPACE_FILE). Owner kept the
+/// industry-standard term over the aviation menu (`fleet`/`wing`/…). Not yet wired
+/// (resolver rides board card c156).
+pub const NS_WORKSPACE: &str = "workspace";
+
 /// U3 (ratified 2026-06-16): the type matching each reserved namespace.
 pub const TYPE_ENV: &str = "Env";
 pub const TYPE_SYSTEM: &str = "System";
@@ -1000,6 +1007,13 @@ pub const IMAGE_FORMAT_RAW: &str = "raw";
 /// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
 pub const ENV_FILE: &str = "env.jet";
 pub const CONFIG_FILE: &str = "config.jet";
+
+/// D-WORKSPACE1 (B) + D-WORKSPACE2 (A), ratified 2026-06-25: the monorepo index
+/// is a `module workspace { members: … }` written in `workspace.jet`, parallel to
+/// `env.jet`/`config.jet` — retiring the root `jetpack.toml` index so the whole
+/// project is one grammar (Jet). `members:` may run arbitrary `comptime`
+/// (D-WORKSPACE1=B). Not yet wired (resolver rides board card c156).
+pub const WORKSPACE_FILE: &str = "workspace.jet";
 
 /// U15 (ratified 2026-06-16): the jetos tier is the `jetpack os <verb>`
 /// subcommand group — not a separate `jetos` binary, not under `jet`.

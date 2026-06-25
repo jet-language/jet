@@ -205,7 +205,7 @@
       "type": "task",
       "title": "`plugin` target support",
       "body": "Build the plugin target backend + loader (reserved by D-TGT2). Until then `plugin` is a reserved manifest keyword that errors with no-backend.",
-      "stage": "deciding",
+      "stage": "ready",
       "plan": "plugin-target",
       "notes": [
         {
@@ -215,12 +215,25 @@
         {
           "t": "[sweep 2026-06-25] Plan written+vetted; zero dynamic-loading machinery today. Foundational substrate is an owner decision → ballot D-PLUGIN1 (native cdylib / WASM sandbox / RPC; rec B). Versioning + export-surface deferred until it lands.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[ratified 2026-06-25] D-PLUGIN1=B — target: plugin compiles to a sandboxed WASM module; loading an untrusted plugin is safe by default with NO #Unsafe gate (I1). Native cdylib (A) is the future expert opt-in on top of B, deferred to its own card; RPC (C) rejected. Versioning/ABI handshake + export-surface spelling (#Plugin vs entry:+pub) deferred (Owner Q1). Recorded in syntax-decisions.md.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[gate->ballot 2026-06-25] The WASM-runtime is a new I6 external dep (the sandbox D-PLUGIN1=B requires) — an OWNER decision, so it became its own ballot D-DEP-WASM1, NOT buried as a prose gate.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[ratified 2026-06-25] D-DEP-WASM1=A — approve WASMTIME + Component Model as the plugin sandbox engine. Reuses the already-approved Cranelift (D-JITDEP1); Component Model gives the typed host<->plugin interface (.wit, deny-by-default caps) D-PLUGIN1 promised. wasmi (B, pure-Rust interp) / wasmer (C) / own-now (D) rejected. Runtime-side only (I6 holds, never in Source/); hash-pinned in .jet/lock; native-ize obligation = frozen own-runtime end-state (option D). UNBLOCKED -> ready: plugin-target backend + loader is Epoch 3 (wrap the wasmtime crate when built). Follow-ons now promotable to full cards: versioning/ABI handshake + export-surface spelling (#Plugin vs entry:+pub) on wasmtime's interface model.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
       "updated": "2026-06-25",
       "decisions": [
-        "D-PLUGIN1"
+        "D-PLUGIN1",
+        "D-DEP-WASM1"
       ],
       "priority": "P2",
       "workOrder": null
@@ -560,7 +573,7 @@
       "type": "task",
       "title": "User-authored derives + reflection (S56) — the D-METADEPTH1=A v1 ceiling",
       "body": "D-METADEPTH1=A (ratified 2026-06-25) sets the v1 user-metaprogramming ceiling at reflection/derives only. Build the S56 surface: user code READS type info via reflection and authors derives (derive Encode for T) on top of the compiler-provided built-ins (S55, e.g. #[Codable]); no rewrite/inject/macros. Pairs with D-CTCODEGEN1=A (generated code re-enters lexer->parser->sema) so a user derive's output is sema-checked with diagnostics pinned at the user trigger site. B (read-only rejection lint) and C (full Jai, c154) stay off v1.",
-      "stage": "deciding",
+      "stage": "ready",
       "plan": "user-derives-reflection",
       "notes": [
         {
@@ -569,6 +582,14 @@
         },
         {
           "t": "[sweep 2026-06-25] Plan written+vetted (folds the E3 milestone doc). Two new user-facing surfaces need owner picks → ballots D-METAREFLECT1 (reflection API; rec B handle) + D-METADERIVE1 (derive authoring + output mechanism; rec A source-fragment). $name splice impl rides c162.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[ratified 2026-06-25] D-METAREFLECT1=B — reflection read-API is ONE reflected handle: T.reflect() returns a Type with .name/.fields, each field carrying .name/.ty/.markers + .has_marker(\"Skip\") (PascalCase, D-CASING1). Free-fns (A) + comptime-for (C) rejected.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[ratified 2026-06-25] D-METADERIVE1=A — user-derive authoring = `derive Trait for T { … }` whose body emits a Jet SOURCE FRAGMENT that re-enters lexer->parser->sema (the D-CTCODEGEN1=A path), so errors pin at the user's #[…] derive trigger and rustc never speaks (I2); reuses the existing #[…] marker router (split_type_markers), Rust-style local-only orphan rule. Typed-AST return (B) + attribute-skeleton (C) rejected. Matches Rust quote! + Swift @attached. Emit-template quoting left as a deferred sub-decision (Owner Q1). BOTH c155 decisions (D-METAREFLECT1=B read half + D-METADERIVE1=A authoring half) now ratified; D-METADEPTH1=A ceiling already ratified. Recorded in syntax-decisions.md; cards stripped. No open decision -> ready (Epoch 3; rides the S56 reflection + $-splice build, c162).",
           "at": "2026-06-25"
         }
       ],
@@ -587,7 +608,7 @@
       "type": "task",
       "title": "Monorepo: workspace.jet index (D-WORKSPACE1=B) + package addressing (D-MONOREF1=A)",
       "body": "Two ratified monorepo decisions, built together. D-WORKSPACE1=B (owner chose full power over rec A): retire the root jetpack.toml monorepo index for a fully-computable 'module workspace' in workspace.jet (parallel to env.jet/system.jet) whose members: field may run arbitrary comptime — one grammar (Jet), ends the sources: double-home; external tools must evaluate Jet (mitigate with a generated lock for the common case). D-MONOREF1=A: address one package as source.package (dot form, e.g. mono.ranker) with path-style infra/logging for in-repo siblings (bare name as sugar when unambiguous), resolved index-first then sparse fetch of the named subtree + transitive in-repo deps. Confirm keyword 'module workspace' + filename workspace.jet (D-WORKSPACE1 Owner Q4) before code.",
-      "stage": "deciding",
+      "stage": "ready",
       "plan": "monorepo-workspace",
       "notes": [
         {
@@ -596,6 +617,10 @@
         },
         {
           "t": "[sweep 2026-06-25] Plan written+vetted. Owner asked to confirm keyword+filename before code → ballot D-WORKSPACE2 (aviation-themed menu; rec B `module fleet`/`fleet.jet`). Arbitrary-comptime members impl-gated on c162+c157.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[ratified 2026-06-25] D-WORKSPACE2=A — owner kept the INDUSTRY term: keyword `workspace`, filename `workspace.jet` (over rec B `fleet`/`fleet.jet` and the rest of the aviation menu; `hangar` collided with the Jetpack store, `manifest` overloaded vs pkg.jet). Confirms D-WORKSPACE1's Owner Q4. All three card decisions (D-WORKSPACE1=B / D-MONOREF1=A / D-WORKSPACE2=A) now ratified. Registered WORKSPACE_FILE=\"workspace.jet\" + reserved namespace `workspace` in Source/Syntax.rs (I7). Recorded in syntax-decisions.md; card stripped. No open decision → ready; arbitrary-comptime members impl-gated on c162 (comptime block/$splice) + c157.",
           "at": "2026-06-25"
         }
       ],
@@ -639,7 +664,7 @@
       "type": "task",
       "title": "Dot-inferred construction .{ } / T.{ } (D-DOTCTOR1=A)",
       "body": "D-DOTCTOR1=A (ratified 2026-06-25): replace U18 with one leading-dot rule for every inferred construction, structs and enums alike — .{ name: ..., grade: .A } when the type is known from context, T.{ ... } when it must be named, matching the shipped enum-variant dot. Parser + sema + codegen + formatter + examples + re-bless snapshots. Owner-Q defaults (confirmable): .{} is the empty/unit construct; .{ } works in return position when -> T supplies the type; positional T.(a,b) deferred (named-fields only for v1).",
-      "stage": "deciding",
+      "stage": "ready",
       "plan": "dot-construction",
       "notes": [
         {
@@ -648,6 +673,10 @@
         },
         {
           "t": "[sweep 2026-06-25] Plan written+vetted. D-DOTCTOR1=A settled the dot rule; the consequence for S29's dotless `T { }` is open → ballot D-DOTCTOR2 (retire S29 / coexist / inference-only; rec A retire). Formatter round-trip + fmt-stability test required.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[ratified 2026-06-25] D-DOTCTOR2=A — RETIRE the dotless `T { }`: `T.{ … }` is the sole named-construction spelling (matches T.Variant / .{ } / .Variant — one rule: a leading dot means construct). Typing the old `Type { … }` is teaching error E0320 (auto-fixed by inserting `.`, and by jet fmt). Coexist (B, I8 violation) + inference-only-dot (C, asymmetric) rejected. Both card decisions (D-DOTCTOR1=A / D-DOTCTOR2=A) now ratified. Amended S29 / S29-FLUSH / U18 escape-hatch in syntax-decisions.md; recorded in the decision log; card stripped. No open decision → ready. IMPL is a wide clean break: parser/sema/formatter + E0320 + a fmt round-trip stability test + migrate EVERY struct literal & flush destructuring pattern across examples/tests + re-bless snapshots (rides this card with D-DOTCTOR1).",
           "at": "2026-06-25"
         }
       ],
@@ -1055,6 +1084,14 @@
       "status": "answered",
       "answer": "Full writeup on the D-CTMARKER1 ballot card as Owner Q3 (with a Jet↔C3 table and the Jai #run breakdown). Jai's #run does two jobs: (a) bake a compile-time value into the binary (X :: #run f();), and (b) a free-standing #run { … } block of arbitrary build-time statements that can even generate source via add_build_string — and it is UNGATED (any I/O, no reproducibility wall). Jet already has (a): a `comptime` binding IS #run-for-a-value (`comptime ICONS = pack(@embed(\"icons/\"))`), but GATED — comptime runs only the curated pure-Core whitelist (D-CTCORE1), and world-touching effects are hashed-reproducible (Tier 1 @embed/find/fetch(…,sha256:)) or behind #Impure (Tier 2) per D-CTEFFECT1. Jai's source-generating add_build_string is exactly what D-CTCODEGEN1=A (generated code re-enters lexer→parser→sema, never injected) and D-METADEPTH1=A (reflection/derives only, no user macros) deliberately fence off — so Jet gives you #run's POWER (compute at build time, derive code) without #run's FOOTGUNS (ungated RCE + post-sema injection). C3 vs Jet in practice = the same program with C3's `$` sigil vs Jet's `comptime` keyword: $crc/comptime crc, $if/comptime if, $foreach/comptime loop — identical for everything EXCEPT a build-time statement BLOCK, which Jet does NOT have today (only comptime bindings + comptime if; 'no comptime blocks'). That is the genuine gap and the real thing to add. Sharpened recommendation: add a keyword-spelled `comptime { … }` block (Jet's gated equivalent of Jai's free-standing #run {}, consistent with comptime if) and reserve `$` for the metaprogramming SPLICE site only (rec C: $name = a comptime value woven into runtime/generated code) — Jai's full reach behind Jet's reproducible-by-default wall, no $if/comptime-if I8 fork. Added Owner Q4 to the card to pick the block form. Decision stays open.",
       "created": "2026-06-25T19:05:14.125Z"
+    },
+    {
+      "id": "cmqtzbvbslq",
+      "decisionId": "D-METADERIVE1",
+      "text": "This seems to use outdated syntax. Please update based on the latest syntax & ensure there are examples of the best in class handling for this",
+      "status": "answered",
+      "answer": "Done — the card was written before several recent ratifications, so the syntax had drifted. Brought every line to current ratified syntax: (1) marker sigil @ -> # in derive-bracket form, so a user derive reads #[Wire] exactly like the built-in #[Codable] (D-ATTR1 reversed @->#; D-ATTR2 bracket form for trait-attaching markers); (2) dotless struct literal Packet{...} -> Packet.{ ... } (D-DOTCTOR2=A); (3) Bytes / b\"hi\" (neither exists) -> [U8] + byte-array literal [0x68,0x69], matching embed_bytes/sized-int examples; (4) splices made bare-identifier $name via local bindings ($fname/$tn) to respect the ratified D-CTMARKER1=C grammar (no $f.name expression-splice to invent); (5) buf: Buffer -> buf: edit Buffer (D-CAP3 capability-on-type, since the encoder mutates the buffer); sibling card D-METAREFLECT1 brought to the same sigil (#[Row]/#[Skip], has_marker(\"Skip\")). Best-in-class examples: the 'Other languages' block now shows the two canonical author-side derive systems in full — Rust proc-macro derive returning a quote! TokenStream the compiler re-parses, and Swift @attached(extension) macros returning SwiftSyntax source the compiler re-checks — and notes both emit re-checked SOURCE (never a pre-validated tree), which is precisely the recommended Option A and why errors pin at the user's tag. Added Owner Q1 flagging the one genuinely-open sub-spelling (emit-template quoting: reuse \"...\"/\"\"\"...\"\"\" with {}-interpolation off inside emit, vs a distinct code-quote). Rec stays A. Decision stays open and pickable.",
+      "created": "2026-06-25T20:53:30.328Z"
     }
   ],
   "ingest": []

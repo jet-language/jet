@@ -9,11 +9,8 @@
 ## Language Surface And Code Organization
 
 - **Coroutines / async-await / Go-scale networking:** Add a high-concurrency async runtime rather than only blocking tasks. Status: `Planned/Reopen` via Epoch 3 `async-networking.md`; current shipped model teaches against `async`/`await` and uses tasks/channels.
-- **No function colors:** Keep ordinary-looking code and avoid async-coloring where possible. Status: `Implemented` for blocking tasks/channels; Epoch 3 async would revisit how visible the async boundary is.
-- **Selective imports:** Bring specific items into scope, optionally grouped. Status: `Implemented` as `use math.item` / `use math.{a, b}`; old `use a::b::{X}` syntax is stale.
-- **Aliased imports:** Rename an imported module/file namespace at the use site. Status: `Implemented` for `use core.fs as fs`; item-level alias inside grouped imports was not found.
+- **Selective imports with aliases:** Bring specific items into scope, optionally grouped. `use math.item` / `use math.{a, b as c}`
 - **Glob imports:** `use module.*` / `use a::*` to import everything. Status: `Reopen` because D-MOD2 rejects wildcard imports with E0612.
-- **`pub use` re-export facades:** Public API can differ from file layout by re-exporting submodule items. Status: `Implemented` by D-MOD4 with `pub use sub.Item`.
 - **`pub(package)` visibility tier:** Visible within the package, hidden outside it. Status: `New/Reopen`; S18/D-MOD3 currently have only private + `pub`.
 - **Public-by-default or `#scope_file` visibility:** Flip private-by-default or make a positional public/private split. Status: `Reopen`; S18 explicitly chose private-by-default plus per-item `pub`.
 - **In-file namespace subgrouping:** Optional grouping block inside one file without creating a separate file. Status: `Partially implemented` as inline `module name { ... }`; `namespace {}` as a separate spelling is `New/Reopen`.
@@ -26,11 +23,9 @@
 - **Full CoreLib in the REPL:** Make the REPL able to execute Core calls inline. Status: `Tower c133` ready plan.
 - **`$` for comptime or macros:** Reserve a sigil for generated-code splice/comptime. Status: `Ratified/Tower c162` as `$` splice plus `comptime {}`; full macro meaning is rejected for v1 by D-METADEPTH1.
 - **Dot-inferred construction:** Use `.{ ... }` / `T.{ ... }` for inferred construction. Status: `Ratified/Tower c158`; implementation pending, and exact Zig-style `.field =` syntax would still be a reopen.
-- **Enum dot expansion / implied constructors:** Use `.Variant` and dot inference where the type is known. Status: `Implemented` for enum variants; generalized dot construction is c158.
 - **Switch/multi-pattern cleanup:** Use single `|` for structural pattern alternatives and reserve `||` for boolean logic. Status: `Implemented` by D-PATO; older `switch`/`when` examples are stale after D-IF revisions.
 - **Formatter preserves grouping parentheses:** `jet fmt` should not erase author-written parentheses used for clarity. Status: `New` if it still happens; no current Tower card found.
 - **Formatter preserves single-line bodies:** Keep compact one-line bodies when author wrote them that way. Status: `Ratified` D-FMT1.
-- **One canonical syntax policy:** Teach foreign spellings but do not accept aliases long-term. Status: `Implemented/Ratified` by S14.
 
 ## Metaprogramming, Build-Time Code, And Extensibility
 
@@ -53,15 +48,7 @@
 
 - **Effect system:** Infer and expose each function's effects (`Net`, `Fs`, `Db`, etc.). Status: `Ratified/Implemented` D-EFF1/2/3/4/5.
 - **Effect ceilings / `#(no_net)` prohibitions:** Prove a call graph cannot perform a forbidden effect. Status: `Deferred` D-PROP1.
-- **Scoped capabilities:** Grant a power for a lexical scope, revoke on exit, prevent escape. Status: `Implemented` D-SCAP1 with `#grant(...)`.
-- **Smart Context:** Lexically swap ambient context fields such as allocator/logger. Status: `Implemented` D-CTX1 with `#Context(field: value)`.
-- **Checked determinism:** `#Pure fn` means reproducible, not just "no obvious side effects." Status: `Implemented` D-DET1.
-- **Injected Clock/Rng:** Time/randomness passed as deterministic capabilities instead of globals. Status: `Implemented` D-DET1/D-DET-CAPAPI.
-- **`assume_deterministic` escape:** Expert block that suspends determinism checks. Status: `Implemented` D-DET1.
-- **Taint tracking:** Untrusted values cannot reach sinks without sanitizer. Status: `Implemented` D-TAINT1 / D-TAINT-SAN.
 - **Full information-flow/compliance tracking:** Security-label lattice such as "EU data cannot leave EU." Status: `Deferred` D-IFC1.
-- **Units of measure:** Dollars vs euros, ms vs seconds, typed dimensions. Status: `Implemented` D-UNIT1/D-QUAL3 via `#UnitFamily` minting distinct numeric types.
-- **Distinct IDs/newtypes:** Prevent mixing `OrderId` and `CustomerId`. Status: `Implemented` D-DIST1/2/3.
 - **Single-use / linear values:** Values that must be consumed exactly once. Status: `Implemented` D-LIN1 `#SingleUse`; explicit audited drop hatch remains unspecified.
 - **Must-use results:** Ignored important results are errors unless intentionally discarded. Status: `Ratified/Partial`; `#SingleUse` and fallible ignored-result diagnostics cover core cases.
 - **Typestate:** Order-sensitive APIs, wrong-state calls are compile errors. Status: `Implemented` D-STATE1; `state {}` declaration follow-up is Tower c163.
@@ -74,26 +61,21 @@
 ## Transactions, Rollback, And Reliability
 
 - **Transactional blocks:** Roll back mutations on failure. Status: `Implemented/Ratified` D-TXN1; rollback trait shape ratified as D-ROLLBACK-TRAIT.
-- **Irreversible-effect guard in transactions:** Reject network/fs/exec inside rollback blocks unless deferred post-commit. Status: `Implemented` D-TXN2.
-- **Post-commit hooks:** Run irreversible effects only after transaction commit. Status: `Implemented` D-TXN3/D-TXN4 with named transaction handles.
 - **Rollback hooks / custom rollback:** User customizes snapshot/restore or registers undo hooks. Status: `Ratified/Partial` D-ROLLBACK-TRAIT; associated-types completion gates full trait dispatch.
 - **Try-both-keep-the-winner / race winner:** Run alternatives and keep the successful/winning one. Status: `New/Planned-adjacent`; transaction covers rollback, not general racing.
 - **Bare `undo` keyword:** Explicit language keyword to reverse an operation. Status: `Reopen`; D-SUGAR5 declined nearby cleanup sugar and transactions use `#Transact`.
 - **Record-and-replay:** Deterministically replay executions for debugging. Status: `Deferred` D-REPLAY1.
 - **Reversible computation / solve for input:** Run functions backward or solve constraints. Status: `Deferred` D-REVERSE1.
-- **Safe schema changes:** Breaking data-shape changes require migrations. Status: `Implemented/Ratified` D-MIGRATE1/2.
 - **Self-versioning values:** Values carry version and conversion history. Status: `Partial`; schema snapshots/migrations cover published shapes, not every value.
 
 ## Type System And Bug Prevention
 
 - **Make bad states impossible:** Sum types, distinct types, typestate, and linear/single-use values. Status: `Implemented/Ratified` across S30, D-DIST, D-STATE, D-LIN.
-- **No null / forced maybe handling:** Absence is `T?`, not ambient null. Status: `Implemented` S32/S71.
 - **First-class unknown/loading/pending/never:** Model loading/pending/never explicitly. Status: `Already expressible` with enums/options; no special feature needed.
 - **General refinement types:** User-defined constraints such as positive integers. Status: `Deferred` D-REFINE1; `[T#N]` fixed-size arrays are the implemented narrow case.
 - **Formal verification / proof integration:** SMT/proof-carrying code, liveness/always-responds proofs. Status: `Deferred` D-VERIFY1.
 - **Out-of-bounds checks with proof escape:** Bounds checked by default, prove in-range to elide. Status: `Partial`; safe indexing exists, proof-based unchecked tier not found.
 - **Assignment in conditions guard:** Ban or teach `if x = 5`. Status: `Likely already grammar-rejected/New`; no dedicated card found.
-- **Checked integer overflow:** Trap by default; explicit wrapping/saturating/checked opt-ins. Status: `Implemented` D-NUMOPS1/2.
 - **Decimal money type:** Exact base-10 type plus lint against float money. Status: `New`; no `Decimal`/money lint card found.
 - **Honest numbers:** Numeric values track precision/error bounds. Status: `New/library`; overlaps uncertainty tags but not carded.
 - **Float equality / semantic smell lints:** Warn on plausible bugs like float `==`, constant conditions, duplicate branches. Status: `New`; no Tower card found.
@@ -108,7 +90,6 @@
 - **Coroutines as primitives:** Suspend/resume execution without full async function coloring. Status: `New/Reopen`; async plan uses `@async`/`await`, not generic coroutines.
 - **Auto-parallelism:** Sequential-looking maps/folds run in parallel when proven safe. Status: `New/Reopen`; current design favors explicit tasks and rejects hidden machinery in D-REACT1.
 - **Living graph / core reactivity:** Values update dependents like a spreadsheet. Status: `Reopen`; D-REACT1 chooses library/tooling, not core evaluation semantics.
-- **Reactive library:** Signals/derived/effects as ordinary values. Status: `Implemented` D-REACT1 with `jet.reactive`.
 - **Ask-why / value provenance:** Ask a value where it came from. Status: `New/Reopen`; not covered by current logging/tracing.
 - **Time-travel variable history:** Keep variable histories for debugging. Status: `New/Reopen`; related to debugger, but no value-history feature found.
 - **Failure-as-hole / return-a-hole:** Typed missing/hole values flow instead of crashing. Status: `Partial/Reopen`; options/results/enums cover explicit cases, no universal hole.
@@ -136,16 +117,11 @@
 
 ## Standard Library, Core Library, And Packages
 
-- **Tiny composable interfaces:** Reader/Writer/Iterator underpin files, sockets, encoders. Status: `Implemented` for streaming I/O and iterators.
 - **Full lazy iterator adapter set:** Rich map/filter/fold/window/chunk/group_by/etc. Status: `Ratified/Implemented` D-ITER1; verify individual gaps only if needed.
 - **Errors as values with context:** Fallible values plus cause/context chain. Status: `Implemented` for `T ? E`, `?`, rich `Error`, and conversions.
 - **Safe-by-default sharp-on-request APIs:** Verified TLS, linear regex, explicit unsafe. Status: `Implemented/Ratified`; Decimal remains a separate gap.
 - **One-line common case, layered expert path:** Simple helpers plus deeper APIs. Status: `Implemented/design principle`.
 - **Observability in the box:** Structured logs, tracing, metrics. Status: `Implemented` E2-M12/D-OBS3; OTel exporter remains package-level future.
-- **Doc examples run as tests:** Examples are tests and docs. Status: `Implemented` D-TEST4.
-- **Property-based testing / self-fuzzing:** Parameterized tests with generation/shrinking. Status: `Implemented` D-TEST1.
-- **Coverage:** `jet test --coverage` tooling. Status: `Implemented` D-COV1.
-- **Editions/epochs:** Controlled evolution without breaking old code. Status: `Implemented`.
 - **Stdlib ergonomic laws/checklist:** Written API review rubric for safe, obvious APIs. Status: `New/doc`; principles are mostly practiced but not a standalone checklist.
 - **Collections breadth:** Add `Set<T>` and `Deque<T>`/ring buffer. Status: `New`; no card found.
 - **Text grapheme iteration/normalization:** Human-visible Unicode clusters and normalization. Status: `New/std`; strings are Unicode-aware but grapheme API was not found.
@@ -156,7 +132,6 @@
 - **Path objects and atomic write/dir-walk:** Safer filesystem API than raw strings. Status: `Partial`; path/list_dir work exists, full Path/atomic-write surface may need verification.
 - **Safe subprocess:** Arg-list process APIs, never shell strings by default. Status: `Implemented`.
 - **Unified serde data model:** One derive for JSON/CSV/TOML/YAML/etc. Status: `Implemented/Ratified` D-SERDE1–12/D-ENC1.
-- **Dynamic `Data` tree for formats:** One rich parse tree across JSON/TOML/YAML/CSV. Status: `Implemented` D-ENC-DYN1.
 - **JSON/CSV/TOML/YAML/archive modules:** First-party data format ring. Status: `Implemented/Planned`; YAML core implemented, full YAML tags are Tower c153.
 - **Compression formats:** zip/tar/gzip/zstd/brotli-style support. Status: `Partial`; `jet.archive` planned/built-from-source track c50, broader codecs not all verified.
 - **Linear-time regex:** RE2-style non-backtracking default. Status: `Implemented` D-REGEX1; native engine remains an obligation/future.
@@ -199,12 +174,9 @@
 - **Implicit swappable allocator context:** Jai-style ambient allocator. Status: `Implemented/Ratified` as `#Context(allocator: ...)` plus explicit allocator APIs; broad policy still evolving.
 - **Arena allocator compiler inference:** Compiler chooses arena placement. Status: `Tower c26` far-horizon.
 - **Manual scoped cleanup / defer:** Run cleanup at scope exit. Status: `Implemented` as `core.scope.guard`; `defer` keyword remains a reopen.
-- **Low-level pointer syntax cleanup:** Retire `Ptr<T>`/old `std.mem` syntax. Status: `Implemented` D-CAP9 uses `*T` and postfix `p.*`; Core naming replaced `std`.
 - **Labeled `ref` fields / original ownership model relook:** Revisit stored references and ownership vocabulary. Status: `Partial/Implemented`; capability sigils and `ref` hardening landed, exact old note likely stale.
 - **Visible uninitialization:** Opt out of zero-fill with write-before-read proof. Status: `Tower c76` ready; fixed-array prerequisite is now satisfied.
-- **Columnar/SoA layout:** Struct-of-arrays storage for cache-friendly data. Status: `Implemented` D-SOA1/2 with `#layout(columnar)`.
 - **C-compatible layout:** `#layout(c)` and related layout controls. Status: `Ratified/Implemented` D-REPRC1.
-- **Portable SIMD:** Safe lane types and operations. Status: `Implemented` D-SIMD1/2.
 - **JIT tier:** Add Cranelift JIT, later own bytecode/native JIT. Status: `Tower c139 ready`, c140/c141 frozen.
 
 ## Research / Far-Horizon Notes
