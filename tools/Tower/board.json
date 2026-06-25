@@ -609,11 +609,15 @@
       "type": "idea",
       "title": "Complete associated-type resolution (D-LIB2 generics v1)",
       "body": "D-LIB2 (generics v1: associated types + default method bodies, ratified 2026-06-17) was built PARSE-ONLY: `assoc_types` on TraitDef and `assoc_type_impls` on ImplDef are parsed and formatted but never resolved in sema or codegen — only the Formatter reads them. A trait method whose return/param uses an associated type fails E0907 ('doesn't match the trait signature') because sema compares the trait's abstract type (e.g. `Item`) against the impl's concrete type literally. SCOPE: sema must substitute the impl's `type X = Concrete` during signature matching, method resolution, and return/param typing; codegen must emit the Rust associated-type binding and `Self::X` in bounds/returns. Hard prerequisite for c72 layer 2 (the Rollback trait's `type Snapshot`). Sequenced against D-PARSE-1 by decision D-ASSOC-NOW.",
-      "stage": "deciding",
+      "stage": "building",
       "plan": null,
       "notes": [
         {
-          "t": "[handoff 2026-06-25] Discovered while building c72 layer 2. NOT started. Gated on decision D-ASSOC-NOW (priority: assoc-types vs D-PARSE-1; recommend B = D-PARSE-1 first). REPRO today: trait `Container { type Item  fn first(self) -> Item }` + `impl Bag: Container { type Item = Int  fn first(self) -> Int { ... } }` fails E0907. FILES: Source/Parser/Items.rs (parse — done), Source/AST.rs (TraitDef.assoc_types ~L777, ImplDef.assoc_type_impls ~L1142), Source/Sema (signature-match needs assoc-type substitution), Source/Codegen (emit assoc binding + Self::X). BLOCKS c72 layer 2.",
+          "t": "[handoff 2026-06-25] Discovered while building c72 layer 2. Gated on decision D-ASSOC-NOW (priority: assoc-types vs D-PARSE-1). REPRO today: trait `Container { type Item  fn first(self) -> Item }` + `impl Bag: Container { type Item = Int  fn first(self) -> Int { ... } }` fails E0907. FILES: Source/Parser/Items.rs (parse — done), Source/AST.rs (TraitDef.assoc_types ~L777, ImplDef.assoc_type_impls ~L1142), Source/Sema (signature-match needs assoc-type substitution), Source/Codegen (emit assoc binding + Self::X). BLOCKS c72 layer 2.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[build 2026-06-25] D-ASSOC-NOW=C — both streams greenlit; assoc-types now BUILDING. Plan: (1) sema substitution — when matching an impl method against a trait sig, resolve the trait's associated type to the impl's `type X = Concrete` before comparing (kills the spurious E0907); (2) thread the resolved type through return/param typing + method resolution; (3) codegen emit. Verify with the Container/Bag repro + a snapshot test, then unblock c72 layer 2.",
           "at": "2026-06-25"
         }
       ],

@@ -1,6 +1,6 @@
 # Owner ballot results
 
-_submitted 2026-06-25 11:55_
+_submitted 2026-06-25 13:55_
 
 Decisions captured from Tower. Tell Claude **"go"** to ratify these
 into syntax-decisions.md, strip the cards, and implement the plans.
@@ -238,3 +238,6 @@ Decision: **B**
 
 **D-ROLLBACK-TRAIT** — the `Rollback` trait's method shape
 Decision: **A**
+
+**D-ASSOC-NOW** — complete associated types now, or ship D-PARSE-1 first?
+Decision: **C**
