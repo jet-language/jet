@@ -17,11 +17,10 @@
 ## New Scratch Notes
 
 - Verse style concurrency/async task types (race, wait all, etc.) [Verse Concurrency](https://verselang.github.io/book/14_concurrency/)
-- Fix inferred vs explicit const/var binding syntax -> CONSTVAL @ String = "string" or CONSTVAL @= "string" && VARIABLE: int = 3 or VARIABLE := 3
 - Allow ignore multiple return values -> Jai can ignore errors: `content := read_entire_file(...);` works, even though the function returns an error. could accept the error value as `content, ok := read_entire_file(...);`
-- Relook if switch statements -> 07_switch still uses || to check multiple patterns on the input var -> should be | with || for additional expressions alongside the pattern
 - Broad gated build-time I/O: allow comptime code to read env vars, hit the network, run a subprocess, or codegen at build time (Jai's #run / Zig @embedFile-plus territory), behind a sandbox + an auditable .jet/build-io.lock of every accessed path + cache-invalidation on change. Powerful (full build scripting without a separate build step), but it adds a supply-chain attack surface that the S26 "no ambient I/O at comptime" law was written to refuse — the Nim/Jai evidence shows un-auditable spread once it ships.
-- Following constructor syntax: fmt: Fmt = .{
+- Consider modifying the contructor syntax to use the following so that LSP could provide suggestions for fields when user types "."
+fmt: Fmt = .{
         .gpa = gpa,
         .arena = arena,
         .io = io,
@@ -35,13 +34,11 @@
     };
 
 - **First-class unknown/loading/pending/never:** Model loading/pending/never explicitly. Status: `Already expressible` with enums/options; no special feature needed.
-- **Switch/multi-pattern cleanup:** Use single `|` for structural pattern alternatives and reserve `||` for boolean logic. Older `switch`/`when` examples are stale after D-IF revisions.
-- **Transactional blocks:** Roll back mutations on failure. Status: `Implemented/Ratified` D-TXN1; rollback trait shape ratified as D-ROLLBACK-TRAIT.
 - **Blessed protocol hooks:** Core syntax delegates to fixed hooks like iterator/index/literal suffix. Status: `Ratified/Implemented in pieces`; D-EXT1 formalizes the policy. Bundle-risk: individual hooks can have different implementation status.
 - **Safety ladder documentation:** Beginner/working/expert tiers as an explicit model. Status: `Implemented/philosophy`; Tower c120 audits separation.
 - **Full lazy iterator adapter set:** Rich map/filter/fold/window/chunk/group_by/etc. Status: `Ratified/Implemented` D-ITER1; verify individual gaps only if needed. Bundle-risk: adapter-by-adapter coverage may differ.
 - **Observability in the box:** Structured logs, tracing, metrics. Status: `Implemented` E2-M12/D-OBS3; OTel exporter remains package-level future. Bundle-risk: exporter work should not be closed by core observability alone.
-- <a id="idea-component-wise-vector-arithmetic"></a>**Component-wise vector arithmetic:** Vector operators apply lane-wise by default. Status: `Implemented` for closed SIMD lane types; broader user vector overloading is not open. Bundle-risk: closed SIMD behavior and user-defined overloading are different decisions.
+- <a id="idea-component-wise-vector-arithmetic"></a>**Component-wise vector arithmetic:** Vector operators apply lane-wise by default. Want jai style auto inferred types & excellent component wise arithmetic, vector support, etc. for closed SIMD lane types; broader user vector overloading is not open. Bundle-risk: closed SIMD behavior and user-defined overloading are different decisions.
 - <a id="idea-arenas-temp-storage"></a>**Arenas/temp storage:** First-class arena and bump allocation patterns. Status: `Implemented/Ratified` core arena regions; compiler inference remains Tower c26. Bundle-risk: allocator API and compiler inference are separable.
 - <a id="idea-implicit-swappable-allocator-context"></a>**Implicit swappable allocator context:** Jai-style ambient allocator. Status: `Implemented/Ratified` as `#Context(allocator: ...)` plus explicit allocator APIs; broad policy still evolving. Bundle-risk: shipped mechanism and policy completion differ.
 - **Single-use / linear values:** Values that must be consumed exactly once. Status: `Implemented` D-LIN1 `#SingleUse`; explicit audited drop hatch remains unspecified. Bundle-risk: core feature and drop hatch are separable.

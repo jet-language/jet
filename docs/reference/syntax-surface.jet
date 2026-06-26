@@ -26,13 +26,16 @@
 // read as working syntax — they sit under their `# RATIFIED…` marker.
 //
 // OWNER MARKUP (flag a change you want; an agent harvests the marks later):
-//   //<<< OWNER <area>: <what's wrong>
-//   // HAVE:  <current spelling>
-//   // WANT:  <spelling you want>
+//   //<<< Owner <area>: <what's wrong>
+//   // HAVE:
+//   <current spelling — live code lines>
+//   // WANT:
+//   <spelling you want — live code lines>
 //   //>>>
-//   //!! OWNER: <note>            inline form, for a one-line tweak
+//   //!! Owner: <note>            inline form, for a one-line tweak
 //   list every open mark:  rg '//<<<|//!!' docs/reference/syntax-surface.jet
-// Marking here is not deciding — each WANT becomes a Tower v2 decision card.
+// Marking is not deciding — each WANT is now a Tower v2 decision card; a
+// `//>>> tracked: #N D-ID` tag on a closer means it's already balloted.
 
 
 // ============================================================================
@@ -40,6 +43,15 @@
 // ============================================================================
 // `@=` binds immutable (D-BIND2); `:=` binds mutable; `=` reassigns a `:=`
 // binding (S17). Optional type annotation before the sigil (S4).
+
+//<<< Owner Bindings: Incorrect explicit binding syntax.
+// HAVE:
+nameImmut: String @= "Jet" // Immutable binding with explicit type annotation.
+nameMut: String := "Jet" // Mutable binding with explicit type annotation.
+// WANT:
+nameImmut@ String = "Jet" // Immutable binding with explicit type annotation.
+nameMut: String = "Jet" // Mutable binding with explicit type annotation.
+//>>> tracked: #29 D-BINDEXPLICIT1
 
 fn values() {
     name: String @= "Jet"          // annotated immutable (S4 + D-BIND2)
@@ -144,11 +156,20 @@ fn control() {
     }
 
     // labeled loops + labeled break/continue (D-LABEL1; labels keep `@`, D-ATTR3)
+    //<<< Owner Labeled Loops: Modify syntax for consistency.
+    // HAVE:
     @outer loop row in [1, 2, 3] {
         loop col in [1, 2, 3] {
             break @outer
         }
     }
+    // WANT:
+    outer@ loop row in [1, 2, 3] {
+        loop col in [1, 2, 3] {
+            break outer@
+        }
+    }
+    //>>> tracked: #30 D-LOOPLABEL2
 }
 
 // `if` is the universal branching keyword (D-IF1).
@@ -157,12 +178,24 @@ fn branch(a: Int, b: Int) -> Int {
     m @= if a > b { a } else { b }
 
     // multi-arm dispatch; bare-value arms compare against the subject (D-IF1/D-IF2)
+    //<<< Owner Multi-Arm Dispatch: Modify syntax for consistency.
+    // HAVE:
     label @= if m {
-        200 -> "ok"                       // means `m == 200`
-        400 || 404 -> "client error"      // `||` joins arms; comparison distributes (S25)
-        else -> "other"                   // catch-all is `else ->`
+        200 -> "ok"
+        400 || 404 -> "client error"
+        else -> "other"
     }
     return m
+    // WANT:
+    label @= if m {
+        200 -> "ok"
+        400 | 404 -> "client error"
+        500 | 501 || n == false -> "server error" // Better pattern matching expressiveness, support joining boolean expressions. If no "left hand" value is provided, the subject is used.
+        (600 | 601) && (n != false) -> "other" // Optional parenthesis grouping for visual clarity
+        else -> "other"
+    }
+    return m
+    //>>> tracked: #31 D-MATCHARM1
 }
 
 
@@ -211,6 +244,8 @@ enum Shape {
     Empty
 }
 
+//<<< Owner Enum Switch: Enum variants syntax cleanup
+// HAVE:
 fn describe(s: Shape) -> String {
     return if s {
         Circle(r) -> "circle {r}"             // binds `r`
@@ -218,6 +253,15 @@ fn describe(s: Shape) -> String {
         Empty -> "nothing"
     }
 }
+// WANT:
+fn describe(s: Shape) -> String {
+    return if s {
+        .Circle(r) -> "circle {r}"             // binds `r`
+        .Rect(w, h) -> "rect {w}x{h}"
+        .Empty -> "nothing"
+    }
+}
+//>>> tracked: #32 D-ENUMDOT1
 
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
 fn nested(r: Shape ? Error) -> Bool {
@@ -256,10 +300,16 @@ fn optionals(user: User?) -> String {
 }
 
 // Error conversion: opt-in via the `Fallible` trait; `?` applies it (S80/D-ERR-CONV).
+//<<< Owner Trait Implementation Syntax: Update trait implementation syntax
+// HAVE:
 impl FileErr: Fallible {
     fn to_error(self) -> Error { return Error }
 }
-
+// WANT:
+impl FileErr.Fallible {
+    fn to_error(self) -> Error { return Error }
+}
+//>>> tracked: #33 D-IMPLDOT1
 // # RATIFIED, NOT YET IMPLEMENTED (S80)
 // Rich default `Error` carrier (message + optional code + optional source) and a
 // fallible `fn main() -> Unit ?`. (The `Fallible` conversion above ships; the
@@ -305,7 +355,12 @@ fn total_area(shapes: [Shape2]) -> Float {     // boxed dynamic dispatch
 }
 
 // Trait delegation: forward one trait to one field (S62).
+//<<< Owner Trait Forwarding: Update trait forwarding syntax
+// HAVE:
 impl App: Logger using logger
+// WANT:
+impl App.Logger using logger
+//>>> tracked: #33 D-IMPLDOT1
 
 // Built-in derives (S55): auto Printable/Equatable; opt-in Comparable/Serialize.
 // DISPUTED: `#[Serialize]` vs the serde umbrella `#[Codable]` (D-SERDE4) — both
@@ -436,11 +491,20 @@ fn run_all(cb: #Pure fn(Int) -> Int) { }      // lever 1: param-type effect boun
 fn map_each(f: fn(Int) -> Int) #(via f) { }   // lever 2: `#(via f)` pass-through
 
 // Scoped capability: granted into a lexical scope, revoked at scope end (D-SCAP1).
+//<<< Owner Scoped Capability: Update scoped capability syntax
+// HAVE:
 fn with_fs() {
     #grant(Fs) { caps ->
         // Fs effect authorized only inside this block
     }
 }
+// WANT:
+fn with_fs() {
+    #Grant(Fs) { caps ->
+        // Fs effect authorized only inside this block
+    }
+}
+//>>> tracked: #34 D-MARKERCASE1
 
 
 // ============================================================================
@@ -573,8 +637,14 @@ fn price() -> Usd {
 // ============================================================================
 
 // Layout control (D-SOA1/D-SOA2): whole-struct columnar (struct-of-arrays).
+//<<< Owner Layout Control: Update layout control syntax
+// HAVE:
 #layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
+// WANT:
+#Layout(columnar)
+struct Particle { x: Float, y: Float, vx: Float, vy: Float }
+//>>> tracked: #34 D-MARKERCASE1
 
 #layout(C)                                      // C-compatible repr for FFI
 struct CView { a: Int, b: Int }
@@ -607,9 +677,16 @@ fn c_ffi() {
 // ============================================================================
 // `#Test` blocks/fns (S43/D-TEST1). A parameterized `#Test fn` is a property test.
 
+//<<< Owner Test Blocks: Update test block syntax
+// HAVE:
 #Test "reversing twice is identity" {
     require_eq(reverse(reverse([1, 2, 3])), [1, 2, 3])
 }
+//WANT:
+#Test("reversing twice is identity") {
+    require_eq(reverse(reverse([1, 2, 3])), [1, 2, 3])
+}
+//>>> tracked: #35 D-TESTPAREN1
 
 #Test fn addition_commutes(a: Int, b: Int) {   // property test (inputs generated)
     require_eq(a + b, b + a)
