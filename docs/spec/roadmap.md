@@ -10,6 +10,12 @@ Each milestone is done when its exit criteria pass as tests. Examples are the
 executable spec: a milestone ships with new `examples/` programs and new
 `tests/ui` fixtures, all green.
 
+> **Competitive lens (owner, 2026-06-26, D-TSSWIFT1=B):** the "replace
+> TypeScript / Swift" gap analysis (typed client/server protocols, reactive UI,
+> interop, web/app backends) stays folded into these milestone descriptions —
+> no separate gap doc. When prioritizing Epoch 3 work, weigh each feature
+> against what a credible TS/Swift replacement needs.
+
 > **Naming canon (owner, 2026-06-15):** **jet** is the language + compiler;
 > **jetpack** is the package-manager engine/binary; **jetos** is the operating
 > system (working title), built on jetpack. Single-file `jet run` stays

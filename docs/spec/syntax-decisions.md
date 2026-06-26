@@ -209,6 +209,9 @@ chains (`x == 1 || 2 || 3`) and every comparison operator
 values really are different things, write the full comparisons as usual.
 Rejected: always requiring full repetition (noisy), a set-membership
 construct like `x in (1, 2)` (a whole new form for the same idea).
+**[reopened 2026-06-26 by D-MATCHARM1]** in match arms `||`/`&&` stop distributing the
+comparison and become boolean combinators; a new single `|` takes over value-alternation
+(`400 | 404`), parens group, and a left-value-less boolean tests the subject implicitly.
 
 **S14 — Alias policy** *(ratified 2026-06-10)*: One canonical spelling per
 construct; **no aliases, ever**. v1: the compiler recognizes common foreign
@@ -218,9 +221,14 @@ Later (M6): the LSP offers an autocorrect quick-fix for foreign syntax and
 `fmt` canonicalizes, so non-canonical input never survives to disk. True
 dual forms are rejected permanently.
 
-**S4 — Type annotations (M1)** *(ratified 2026-06-11)*: `**name: Type`**
+**S4 — Type annotations (M1)** *(ratified 2026-06-11; **explicit-binding form amended
+2026-06-26 by D-BINDEXPLICIT1**)*: `**name: Type`**
 after the binding or parameter name (e.g. `val x: Int = 1`). Rejected:
-`Type name` before (C/Java).
+`Type name` before (C/Java). **[D-BINDEXPLICIT1, 2026-06-26]** in an explicit-typed
+*binding* the mutability marker now hugs the name and the type goes bare: `name@ Type = val`
+(immutable) / `name: Type = val` (mutable), with `=` binding-or-reassigning per the name's
+marker. The inferred `name @= val` / `name := val` forms are unchanged; this reopens D-BIND2's
+`=`-is-reassignment-only invariant.
 
 **S5 — Comments** *(ratified 2026-06-11; amended 2026-06-15)*: `**//`** to end
 of line, plus `**/* … */`** block comments (Rust/Go/C++ spelling). Block
@@ -313,6 +321,9 @@ type in the declaration and positional args at the call site;
 multi-payload variants require named fields in both places. Rejected:
 `Shape::Variant` (`::`), enums without payloads in v1, named fields on
 single-payload variants.
+**[amended 2026-06-26 by D-ENUMDOT1]** enum-variant patterns in match arms take a leading dot
+(`.Circle(r)`, `.Empty`), reading as "a member of the inferred enum". Value-position dot
+(`.Red` where the type is known) is the open follow-on D-ENUMDOT2.
 
 **S31 — Pattern tests (M3)** *(ratified 2026-06-11)*: `**==`** with a
 pattern right-hand side when the left operand is an enum or `T?` —
@@ -323,6 +334,8 @@ sema checks exhaustiveness and `else` may be omitted; mixed arms keep
 S24's mandatory `else`. Otherwise `==` is ordinary value equality (S13).
 A bare name on the right is a variable when one is in scope; to test a
 unit variant with the same spelling, qualify it (e.g. `Light.Red`).
+**[amended 2026-06-26 by D-ENUMDOT1]** a variant pattern in a match arm now takes a leading dot
+(`.Circle(r)`), which resolves this bare-name-vs-variable ambiguity directly.
 **Nested patterns (amended 2026-06-16, D-PAT1):** a pattern may appear inside a
 payload slot — `r == ok(Rect(w, h))`, `x == ok(value(n))` — binding the inner
 names; nesting composes to any depth, so `when`/`if` arms can destructure a
@@ -404,7 +417,10 @@ bounds (`<T: Comparable>`): `impl other.Point: Serialize { … }` extends a
 dependency's type. `::` is reserved for foreign Rust paths in `extern rust`
 (S50), not user-facing Jet paths. Orphan rule: at least one of trait/type
 defined in this program. Rejected: `impl Trait for Type`, `impl Type.Trait`,
-Go implicit interfaces, `::` in Jet paths. Jet defaults to PascalCase for
+Go implicit interfaces, `::` in Jet paths. **[reopened 2026-06-26 by D-IMPLDOT1]** the trait
+separator is now `.` (`impl Type.Trait`, reading "Type's Trait"), overriding this entry's
+explicit rejection of that spelling and retiring the S83-reserved `~~` trait-attach direction.
+Jet defaults to PascalCase for
 types/traits/enums (S54); v1: signatures only —
 no default bodies, associated types, or trait inheritance.
 *Future relook (owner, 2026-06-15; updated 2026-06-18):* the owner may revisit
@@ -600,6 +616,9 @@ top-level **`#Test "name" { … }`** blocks, using `**require**` and `**require_
 `test` (lowercase) is a teaching error pointing at `#Test` (E0052). Rejected: `#[test]`
 attributes, `fn test_*` naming convention, `@test fn` (former S82 form), quoted-name
 test blocks without the `#Test` marker (former S43 spelling).
+**[amended 2026-06-26 by D-TESTPAREN1]** a named test wraps its name as a parenthesized marker
+argument: `#Test("name") { … }`. The `#Test fn` property form (D-TEST1) is unchanged — it has
+no name string to wrap.
 
 **S44 — Formatter style (M6)** *(ratified 2026-06-12)*: one true style,
 zero config — **4-space indent**, **same-line `{`**, **line width 100**,
@@ -741,6 +760,8 @@ named field. Mirrors S28's two impl spellings: in-type
 the trait; forwarding is all-or-nothing in v1 (partial override
 deferred). Rejected: Jai-style field hoisting / `using` member
 injection (invisible names), Rust Deref-abuse delegation.
+**[amended 2026-06-26 by D-IMPLDOT1]** the forwarding separator follows S28's switch to `.`:
+`impl App.Logger using logger`.
 
 **S63 — Resource cleanup** *(ratified 2026-06-12; binding from
 streaming-I/O work onward)*: **automatic scope-end cleanup (RAII)** is
@@ -1666,6 +1687,9 @@ so it can never be confused with a labeled argument (S61). Diagnostics
 (`@name` not before a `loop`). Codegen maps `@name` → Rust `'name:` labels.
 Rejected: bare `name: loop` (option A — visually collides with S61 labeled
 args); Rust-style `'outer` (S41 already makes `'x'` a char literal — lexer clash).
+**[amended 2026-06-26 by D-LOOPLABEL2]** the `@` moves from a prefix to a **suffix** on the
+label name, at declaration and at break/continue: `outer@ loop { break outer@ }`. Codegen still
+maps to Rust `'name:` labels.
 
 **S6-R — No visible semicolons** *(ratified 2026-06-18, option B; supersedes
 S6's required-`;` rule)*: see **S6** — no `;` in source; the lexer inserts
@@ -1691,6 +1715,10 @@ top-level comparison/logical operator is a bare value (compiler prepends
 `subject ==`), an arm with one is a full `Bool` condition, mixed freely. Rejected:
 keeping `if`/`when` separate (D-IF1 option B); `...` catch-all and mandatory arm
 braces (D-IF2 alternatives).
+**[amended 2026-06-26 by D-MATCHARM1]** the arm-head operator model is reopened: single `|`
+alternates values, `||`/`&&` combine a value-pattern with a boolean expr (no longer
+distribute the comparison, per S25), and parens group. Precedence is the open follow-on
+D-MATCHARM2.
 
 ### Next-Tasks wave (ratified 2026-06-19)
 
@@ -1713,8 +1741,9 @@ D-ATTR1 = B)*: multiple markers list plainly inside brackets —
 stays rejected, as S55 already declined it; only the sigil changed, not the list
 shape.
 
-**D-ATTR3 — Loop labels stay `@`** *(ratified 2026-06-19, option B; live with
-D-ATTR1 = B)*: attributes move to `#` but labels (D-LABEL1) keep `@` —
+**D-ATTR3 — Loop labels stay `@`** *(ratified 2026-06-19, option B; **reversed
+2026-06-26 by D-LOOPLABEL2** — label `@` is now a suffix `outer@`, not a prefix)*: attributes
+move to `#` but labels (D-LABEL1) keep `@` —
 `@outer loop { break @outer }`. Source therefore carries two marker sigils: `#`
 for attributes/markers, `@` for loop labels (and the U6/U16 ref/host `@`, which
 lives in CLI/manifest strings, not source). The plan flagged the mixed-sigil
@@ -2175,6 +2204,10 @@ The lowercase spellings (`test`/`todo`/`pure`) are retired to teaching errors po
 `#`-marker forms (S14 pattern). Amends S43, S60, D-TOOL2, S82 on spelling only — semantics
 unchanged.
 
+**[confirmed 2026-06-26 by D-MARKERCASE1]** rule 1 (every `#`-marker is PascalCase) is
+reaffirmed for `#Grant` and `#Layout`; the lowercase `#grant` (D-SCAP1 impl note) and
+`#layout` (D-SOA1/2) spellings are pre-existing drift to fix, not an exception.
+
 ### Owner batch (ratified 2026-06-22)
 
 This batch drains the open ballot (cards c06, c09, c51, c64–c66, c73, c77–c78, c82,
@@ -2433,7 +2466,9 @@ binding is `name @= expr`. `:=` stays the mutable binding, `=` stays reassignmen
 binding (S17). This is a fundamental token change: **`@=` supersedes the `::` immutable
 binding** spent by D-BIND1/S2 (2026-06-18). Owner picked A (`@=`), not the card's rec C
 (`$=`). Requires a repo-wide migration of `::`-bindings to `@=` (implementation). UNBLOCKED.
-(c102)
+(c102) **[reopened 2026-06-26 by D-BINDEXPLICIT1]** the `=`-is-reassignment-only invariant is
+reopened: in the explicit-typed binding form (`name@ Type = val` / `name: Type = val`) `=` also
+binds when a mutability marker precedes the name. The inferred `@=`/`:=` forms here are unchanged.
 
 **D-NUMOPS1 — checked-by-default integer overflow + expert numeric surface** *(ratified
 2026-06-22, option A)*: plain integer arithmetic **traps on overflow** by default
@@ -2967,3 +3002,36 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-26 | D-HTTPLIB3 | **`jet.http` v1 protocol scope** (C — HTTP/1.1 + HTTP/2 + WebSocket): the first-party `jet.http` covers all three in v1. HTTP/1.1 only (A — too limited for real deployment) and HTTP/1.1 + HTTP/2 without WebSocket (B) rejected: WebSocket is table-stakes for any TypeScript replacement (every modern web app uses it); HTTP/2 is required for gRPC. Bootstrap crates (`ureq`, hyper, tungstenite) are all owner-approved on the same posture as rusqlite — runtime-side, I6 holds, native-ize obligation. **Ratified — not yet implemented** (c164). c164 | owner |
 | 2026-06-26 | D-HTTPLIB4 | **`jet.http` TLS** (B — rustls, pure Rust): HTTPS works out of the box via `rustls` + `webpki-roots` (cert bundle embedded, ~3MB overhead, zero system dep). System TLS / `native-tls` (A — links OpenSSL/SecureTransport/SChannel; non-Nix Linux users need `libssl-dev`) rejected in favor of zero-friction installs; HTTP-only v1 (C — makes the library unusable for any real-world API) rejected. Consistent with the native-ize obligation (pure Rust). **Ratified — not yet implemented** (c164). c164 | owner |
 | 2026-06-25 | D-DEP-WASM1 | **plugin-sandbox WASM runtime** (A — wasmtime + Component Model): approve **wasmtime** as the runtime-side dependency that backs D-PLUGIN1=B's `plugin` sandbox — the audited, widely-embedded (Zed/Shopify/Fastly/Envoy) secure WASM engine. It is Cranelift-based, so it **reuses the dep already approved in D-JITDEP1** (no new codegen backend), and its **Component Model** delivers the typed host↔plugin interface D-PLUGIN1 promised (a `.wit` contract, deny-by-default capabilities) without hand-marshaling. wasmi (B — tiny pure-Rust core-wasm interpreter, closest to the I6 end-state but hand-marshaled interface + interpreted speed), wasmer (C — no Cranelift reuse, less-mature Component Model), and write-our-own-now (D — standing up a security sandbox from scratch spends the one resource, safety, we don't) rejected. **Runtime-side only — I6 holds** (never in `Source/`; like Cranelift/regex/sqlite); hash-pinned in `.jet/lock`; carries the D-REGEX1 native-ize obligation whose frozen end-state IS option D (our own WASM runtime). Unblocks D-PLUGIN1 — and the deferred versioning/ABI + export-surface sub-decisions now promote to full cards on wasmtime's interface model. **Ratified — not yet implemented** (plugin-target backend + loader, Epoch 3; the wasmtime crate is wrapped when that backend is built). c81 | owner |
+| 2026-06-26 | D-PROP1 | **whole-graph effect prohibition** (A — a prohibition marker naming one forbidden effect): a function may forbid a single effect across its entire reachable call graph via a marker that is the exact inverse of D-EFF1's positive effect set, run on the ratified propagation engine — no new machinery. Whitelist-the-allowed-set (B — must restate every permitted effect, reads oddly to ban one thing) and lean-on-`#()` (C — all-or-nothing, can't express "no Net while Io stays fine") rejected. **Ratified — not yet implemented** (sema inverse-propagation pass + E-code + ui snapshot + example). c18 | owner |
+| 2026-06-26 | D-ROLE1 | **temporal state ordering falls out of typestate** (A — no new surface): the legal order of a value's states is already pinned by D-STATE1's `#Transition(A -> B)` edges — the only path to a late state runs through the earlier ones — so no dedicated ordering surface is added. Declared edge-list in the `state` block (B — states each edge twice) and a `#timeline` happy-path annotation (C — second place to keep in sync, drifts) rejected. **Ratified (confirmed — no new surface)** (ordering is emergent from existing typestate edges). c19 | owner |
+| 2026-06-26 | D-PROTO1 | **session/protocol declaration + stub generation** (A — declare the exchange once, generate both handles): a user writes the ordered request/response exchange once and the compiler generates `Handshake.Client`/`Handshake.Server` handle types, each step consuming and returning the handle on the ratified linear (D-LIN1) + typestate (D-STATE1) machinery, so out-of-order sends are caught at compile time. Hand-written `#SingleUse` + `#Transition` duals (B — the boilerplate a protocol decl exists to erase) and comptime-read-a-value (C — buries the sequence in a struct literal) rejected. **Ratified — not yet implemented** (protocol-decl parser + handle codegen over D-LIN1/D-STATE1 + example). c20 | owner |
+| 2026-06-26 | D-QUAL4 | **type-position marker is prefix** (A — `#Tainted String`): a value-tag decorating a type in a signature sits before the type, matching every existing Jet marker (`#Pure fn`, `#Unsafe`, `#SingleUse struct`) — one mental rule for markers everywhere. Postfix `String #Tainted` (B — points the opposite way from every other `#`-marker, two rules for where a marker lives) rejected. **Ratified — not yet implemented** (parser type-marker position + Syntax.rs + re-bless snapshots). c21 | owner |
+| 2026-06-26 | D-SERDE-ACCESS | **fluent accessors over dynamic Data trees** (B — small `?`-chaining accessor set): reading an untyped `Data`/`Json` tree gains `.field(name)`, `.at(i)`, and leaf coercions `.int()`/`.text()`/`.bool()`/`.float()` — each returning a `Result` so `?` chains cleanly — atop the shipped pattern-match floor. Match-only status quo (A — a tower of nested matches to reach one field) and a path mini-language (C — a query DSL in string literals, a second grammar, I8 collision) rejected. **Ratified — not yet implemented** (accessor methods on `DataTree` in the prelude + golden example). c22 | owner |
+| 2026-06-26 | D-REPLAY1 | **deterministic-replay opt-in marker** (A — a `#Replayable` marker proving no hidden non-determinism): a function marker rejects any reachable `#(Time/Rand/Net/Io)` not routed through a mockable capability, via the same inverse-propagation walk as D-PROP1, so replay-soundness is proven statically and cannot silently rot. Library-by-convention (B — one forgotten `clock.now()` silently breaks replay, no compile error) rejected; the record/replay runtime harness (C's second half) is separable post-v1 build work, not decided here. **Ratified — not yet implemented** (sema replay-soundness pass + marker in Syntax.rs + E-code + ui snapshot). c23 | owner |
+| 2026-06-26 | D-BINDEXPLICIT1 | **explicit-type binding: mutability marker hugs the name** (A — `name@ Type = val` / `name: Type = val`): the explicit-typed binding collapses to one marker fused to the name (`@`=immutable, `:`=mutable), a bare type, and a plain `=` that binds-or-reassigns depending on the name's marker (the Go/Odin/Pascal `:=` family). The inferred `name @= val` / `name := val` forms are unchanged. Amends **S4** (annotation position) and reopens **D-BIND2**'s `=`-is-reassignment-only invariant. Status-quo two-marker form (B — type with `:`, mutability with `@=`/`:=`) rejected. **Ratified — not yet implemented** (parser binding-head grammar + Syntax.rs + migrate every explicit-typed binding in canon/examples + re-bless snapshots). c29 | owner |
+| 2026-06-26 | D-LOOPLABEL2 | **loop labels become a suffix `outer@`** (A — suffix at declaration and at break/continue): the loop-label `@` moves from prefix to suffix everywhere it appears — `outer@ loop { break outer@ }` — matching the binding-card marker-suffixes-the-name direction. Reverses **D-ATTR3** (which deliberately kept the `@` prefix with the mixed-sigil trap flagged) and amends **D-LABEL1**. Codegen still maps to Rust `'name:` labels. Status-quo prefix `@outer` (B) rejected. **Ratified — not yet implemented** (parser label-position rule + Syntax.rs + migrate every labeled loop in canon/examples + re-bless snapshots). c30 | owner |
+| 2026-06-26 | D-MATCHARM1 | **richer match-arm patterns** (A — `\|` alternates values, `\|\|`/`&&` combine with booleans, parens group): a single `\|` takes over value-alternation (`400 \| 404`), `\|\|`/`&&` become boolean combinators joining a value-pattern with a real boolean expr, parens group, and a left-value-less boolean tests the subject implicitly. Reopens **S25** (where `\|\|` distributed the comparison across values) and amends **D-IF1/D-IF2**'s arm-head model. Status-quo `\|\|`-distributes (B) and a conservative `if <bool>` guard clause (C) rejected. Precedence of `\|` vs `\|\|`/`&&` is the open follow-on **D-MATCHARM2**. **Ratified — gated on D-MATCHARM2** (arm-head precedence); parser arm-head grammar + migrate canon/examples + re-bless snapshots ride the precedence resolution. c31 | owner |
+| 2026-06-26 | D-ENUMDOT1 | **leading dot on enum-variant patterns** (A — `.Circle(r)` in match arms): variant patterns in arms take a leading `.`, matching dot-construction and signalling inferred-enum-member resolution, also resolving S31's bare-name-vs-variable ambiguity. Amends **S30/S31**. Status-quo bare variant (B — a name shadowing an in-scope variable must be qualified `Light.Red`) rejected. Whether the leading dot also applies to value-position enum access is the open follow-on **D-ENUMDOT2**. **Ratified — not yet implemented** (parser pattern grammar + migrate every enum match arm in canon/examples + re-bless snapshots). c32 | owner |
+| 2026-06-26 | D-IMPLDOT1 | **impl/forwarding trait separator becomes `.`** (A — `impl Type.Trait`): the trait attaches to the type with `.` for both plain impls (`impl FileErr.Fallible`) and `using` forwarding (`impl App.Logger using logger`), reading "Type's Trait". Reopens **S28** (which explicitly rejected `impl Type.Trait` and chose `:`) and amends **S62**, retiring the **S83**-reserved `~~` trait-attach direction. Status-quo `:` separator (B) rejected. **Ratified — not yet implemented** (parser impl-head grammar + Syntax.rs + migrate every `impl Type: Trait` in canon/examples + re-bless snapshots). c33 | owner |
+| 2026-06-26 | D-MARKERCASE1 | **`#Grant`/`#Layout` are PascalCase** (A — confirm, lowercase is drift): rubber-stamps **D-CASING1**'s blanket "every `#`-marker is PascalCase" rule for two markers whose lowercase spellings (`#grant` in D-SCAP1's impl note, `#layout` throughout D-SOA1/2) are pre-existing drift, not a new rule. Intentional-lowercase-exception (B — a carve-out from D-CASING1) rejected. **Ratified — not yet implemented** (rename `KW_GRANT` + the `#layout` parse + Syntax.rs + every `#grant`/`#layout` in canon/examples/docs + re-bless snapshots). c34 | owner |
+| 2026-06-26 | D-TESTPAREN1 | **test name as a parenthesized argument** (A — `#Test("name") { }`): a named test writes its name as a normal marker argument in parens, consistent with the argument-carrying marker family. Amends **S43**. The `#Test fn` property form (D-TEST1) is unchanged — it draws its name from the function, so there is no string to wrap. Status-quo bare adjacent string `#Test "name" { }` (B) rejected. **Ratified — not yet implemented** (parser `#Test` head grammar + `jet test` name extraction + E0052 + migrate every `#Test "..."` block in canon/examples + re-bless snapshots). c35 | owner |
+| 2026-06-26 | D-CONCCOMB1 | **Verse-style structured task combinators** (A — `race`/`all`/`any` as first-class core combinators): adopt race (cancels losers), all (waits all, fails fast), any (first Ok, waits rest) over the S53 task primitives. Library-only `jet.tasks` (B — worse beginner experience, combinators end up there anyway unblessed) and defer entirely (C — roadmap gap) rejected. The task/channel primitives themselves (D-NURSERY1) are still open and the memory-capability model review the owner required is a prerequisite. **Ratified — gated on D-NURSERY1** (the concurrency primitives); combinator semantics land once the primitives + memory-capability model settle. c36 | owner |
+| 2026-06-26 | D-IGNORERET1 | **explicit discard of a fallible result** (B — a visible mandatory discard sigil): a caller may silence a `#MustUse`/`T ? E` result only through a visible, deliberate discard sigil at the call site, with sema emitting a lint (not an error) pointing at what was dropped — the footgun stays opt-in and visible (I1 holds). Status-quo mandatory-handling (A — `?? ()` only) rejected as too rigid; Jai-style implicit ignore (C — silent error loss, the I1 footgun beginners must never hit) rejected. **Ratified — not yet implemented** (parser discard sigil + sema `#MustUse` lint + W-code + ui snapshot). c37 | owner |
+| 2026-06-26 | D-VECARITH1 | **lane-wise arithmetic stays closed to built-ins** (A — confirm, no user opt-in): lane-wise `+`/`-`/`*`/`/` stays on the compiler-provided types (`F32x4`/`F64x2`, `Vec2`/`Vec3`/`Vec4`, `Mat*`); user structs use method calls. Confirms D-SIMD2's closure. A `#ComponentWise` derive for user structs (B — a new derivable surface, surprising results) and free `impl Add for MyType` (C — operator soup, the exact problem I8 prevents) rejected. **Ratified (confirmed — no new surface)** (the closed lane-wise set is already shipped; no expert escape added). c42 | owner |
+| 2026-06-26 | D-TSSWIFT1 | **TS/Swift competitive lens stays in the roadmap** (B — no standalone doc): the replace-TypeScript/Swift gap analysis stays folded into roadmap milestone descriptions rather than a separate maintained doc. A standalone one-page gap table (A — another doc to keep current) rejected. **Ratified (declined — no new surface)** (the competitive lens lives in the roadmap, not a new file). c43 | owner |
+| 2026-06-26 | D-ASSIGNCOND1 | **assignment-in-condition teaching diagnostic** (A — grammar-reject `=` in condition + dedicated what/why/fix): confirm (or add) grammar rejection of `if x = 5` and wire a dedicated diagnostic ("looks like assignment in a condition; did you mean `==`?") with a code and `tests/ui` snapshot, the I4-compliant path. Do-nothing/raw-parse-error (B — against I4 and beginner-first) rejected. **Ratified — not yet implemented** (parser/sema condition-position guard + E-code + ui snapshot). c47 | owner |
+| 2026-06-26 | D-SMELLLINT1 | **semantic-smell lints** (A — float `==` + duplicate branch default-on, constant condition opt-in): ship high-signal lints — comparing floats with `==` and duplicate match/if branches default-on, always-true/false conditions opt-in (legitimate in comptime-adjacent code) — each with a W-code, message, fix, and ui snapshot (I4); split-shipping allowed. All-opt-in under a `#lint(smell)` profile (B — lower beginner value) and build-infra-first then defer (C — same bugs keep shipping) rejected. **Ratified — not yet implemented** (sema AST lint passes + W-codes + ui snapshots). c48 | owner |
+| 2026-06-26 | D-CONFUSE1 | **confusable-name lint** (A — homoglyphs default-on, plural/singular opt-in): a lint fires at declaration when a new identifier is confusable with one already in scope — homoglyphs (`l`/`1`/`I`, `O`/`0`) default-on (almost never intentional), plural/singular near-names (`user`/`users`) opt-in (frequently legitimate); two codes, two snapshots. No-default-warnings (B — misses the beginner safety net) and defer-until-lint-profiles-land (C — a real cost to beginners) rejected. **Ratified — not yet implemented** (sema same-scope confusable lint + two W-codes + ui snapshots). c49 | owner |
+| 2026-06-26 | D-DISPLAYDBG1 | **Display vs Debug rendering split** (A — two blessed protocol hooks): add `Display` (user-facing, explicit impl, no default) and `Debug` (developer-facing, auto-derived like Rust) as two distinct hooks; interpolation uses `{}` for Display and `{:?}` for Debug (Jet-idiomatic spelling ratified separately). Two distinct jobs, so no I8 conflict. One-hook (B — forces one representation serving both) and auto-Debug-only-no-redaction (C — Debug can't redact sensitive fields) rejected. **Ratified — not yet implemented** (Display/Debug hooks + Debug auto-derive + interpolation surface + golden example). c51 | owner |
+| 2026-06-26 | D-TIMEDEPTH1 | **full civil-time `jet.time` in Core** (A — Date/DateTime/Duration/Zone, IANA-backed): `jet.time` grows to cover civil dates, durations, calendar math, and time zones via the IANA tz database (tz data from the host OS on Nix, bundled fallback with a clear error otherwise), layered on the existing injectable Clock. Instants-only-in-Core + civil-in-a-package (B — splits a naturally unified API, two imports) and status-quo Clock/Instant only (C — significant omission for a general-purpose language) rejected. **Ratified — not yet implemented** (`jet.time` Core module + tz-data sourcing + golden examples). c53 | owner |
+| 2026-06-26 | D-COLLBREADTH1 | **Set and Deque in Core collections** (A — `Set<T: Hash + Eq>` + ring-buffer `Deque<T>`): add hash-backed `Set<T>` and a ring-buffer-backed `Deque<T>` to `jet.collections`; `OrderedSet<T: Ord>` is a follow-on, the ring buffer is the Deque backing not a separate type (I8). Set-now-Deque-later (B — BFS/sliding-window patterns still need workarounds) and ship-as-packages (C — fragments a unified collections story, can't integrate with type inference) rejected. **Ratified — not yet implemented** (Core `Set`/`Deque` types + golden examples). c55 | owner |
+| 2026-06-26 | D-UUIDENC1 | **UUID + hex/base64 codecs in Core** (A — `jet.uuid` + `jet.encoding`): ship `jet.encoding` (hex, base64) and `jet.uuid` (v4 via system CSPRNG, v7 via the injectable Clock) in Core; the CSPRNG is system-sourced with an injectable interface for deterministic tests. Hex/base64-Core-but-UUID-package (B — a two-import pattern for the common case) and FFI/community-only (C — generating an ID should not need unsafe glue) rejected. **Ratified — not yet implemented** (Core `jet.encoding`/`jet.uuid` + injectable CSPRNG + golden examples). c56 | owner |
+| 2026-06-26 | D-DECIMAL1 | **exact Decimal type + float-money lint** (A — `Decimal` in Core + default-on `E-FLOATMONEY`): ship an arbitrary-precision base-10 `Decimal` in `jet.numeric` plus a default-on lint that fires when a money-named field (price/cost/amount/total/fee/balance/tax) holds a float, suppressible with `#[allow(float_money)]`. Decimal-as-a-package no-lint (B — the footgun stays the silent default) and lint-only-no-Decimal (C — nowhere first-class to point the user) rejected. The lint is buildable now; the `Decimal` type needs a BigInt backing and is **gated on card #65** (the BigInt decision, still open). **Ratified — gated on c65** (Decimal's bigint backing); the float-money lint (W-code + ui snapshot) ships independently. c57 | owner |
+| 2026-06-26 | D-PATHFS1 | **typed Path API in Core** (A — `jet.fs.Path` + atomic write + dir-walk): ship a Core `Path` type (`from`, `join`, `parent`, `extension`, `stem` as pure methods), `write_atomic()` (temp-file-then-rename), and `walk()` (lazy iterator with symlink-cycle detection); the thin raw-string `path`/`list_dir` helpers become teaching errors pointing to `Path` (I8: one way to work with paths). Functions-on-str (B — platform separator bugs persist, no type-level path/string distinction) and raw-strings status quo (C — leaves separator + torn-write footguns) rejected. **Ratified — not yet implemented** (Core `jet.fs.Path` + atomic write + walk + teaching errors + golden example). c58 | owner |
+| 2026-06-26 | D-OWNCOMP1 | **copy-in-and-own UI component distribution** (B — `jetpack add` copies source the user owns): UI components are copied into the user's tree and owned outright (shadcn-style), no version lock; patches don't auto-propagate (user re-runs add or diffs). Fits the ownership ethos and I8 (one distribution path). Block-until-the-stack-is-ratified (A) and locked versioned dependency (C — conflicts with the ownership ethos) rejected. The reactive-UI stack itself (**D-REACTUI1**) is still open and gates what these components target. **Ratified — gated on D-REACTUI1** (the reactive-UI stack); the `jetpack add` copy mechanism lands once the stack is chosen. c61 | owner |
+| 2026-06-26 | D-DEFERKW1 | **no `defer` keyword** (B — `core.scope.guard` stays canonical): decline the `defer` keyword; the existing `core.scope.guard` remains the one scope-exit cleanup path, so no new parse surface and no I8 violation (the ergonomic gap is one extra let-binding). Adding `defer` as canonical with `core.scope.guard` deprecated (A) rejected. **Ratified (declined — no new surface)** (`core.scope.guard` is the sole cleanup mechanism). c62 | owner |
+| 2026-06-26 | D-CRYPTOENV1 | **misuse-resistant crypto envelope** (A — `seal`/`open` + `sign`/`verify` as the blessed default): ship a high-level envelope (libsodium model) that hides nonce/IV/mode selection; raw AES/ChaCha/RSA primitives require an explicit expert import, making misuse a deliberate opt-in (I1). Raw-primitives-direct (B — maximum footgun surface) and hold-for-post-quantum-agility (C — delays a useful safe-by-default API) rejected. **Ratified — not yet implemented** (Core `crypto.seal`/`open`/`sign`/`verify` over the ratified CSPRNG + golden example). c64 | owner |
+| 2026-06-26 | D-HONESTNUM1 | **measurement-uncertainty type as a package** (A — `jet.science.measurement`, no language change): a `Measurement<T>` library type carrying `±` error-bound propagation ships as a first-party package, not Core — a scientific niche that doesn't warrant a Core footprint (I8: one numeric type per job). Add to core std (B — a type most programs never need, I8 risk vs a future units story) and align-with-a-tracked-uncertainty-card (C) rejected. **Ratified — not yet implemented** (first-party `jet.science.measurement` package; pure library, no compiler change). c68 | owner |
+| 2026-06-26 | D-OPTGC1 | **opt-in GC library** (A — `Gc<T>` traced handle): ship a `gc` stdlib module with a `Gc<T>` smart pointer whose backing allocation is traced and collected on a side thread, for cyclic heap data (graphs, back-edges); ownership stays the default, `Gc<T>` is a deliberate expert import and the library itself is safe Jet — no sema/codegen/default-allocation changes. Status-quo arenas-only (B) and decide-later (C) rejected. The backing Rust GC crate is a new I6 exemption requiring **owner approval** (a separate ballot). **Ratified — not yet implemented** (gated on the backing-crate I6 ballot; `gc` module + `Gc<T>` once approved). c69 | owner |
+| 2026-06-26 | D-SELIMPORT1 | **grouped + aliased selective imports** (A — `use mod.{a, b as c}`): add `use math.{sin, cos}` (bring items into scope) and `use math.{sin as s}` (alias); single-item `use math.sin` is the degenerate case. Additive to the module-qualified path style (no glob reopen — D-MOD2's E0612 stands); one mechanism (selective bring-into-scope + optional rename), no I8 conflict. Single-item-only no-grouping-no-alias (B — multiple `use` lines, no aliases) and qualify-everything (C — verbose at call sites) rejected. **Ratified — not yet implemented** (parser `use` grammar + sema scope-binding + golden example). c72 | owner |
+| 2026-06-26 | D-NAMESPACE1 | **no `namespace { }` spelling** (A — keep `module name { }` only): decline a distinct `namespace { }` keyword; inline `module name { }` already groups items into a named in-file scope, so a second spelling is an I8 violation with no expressiveness gain (a confusing word is a docs problem, not a language one). Both-keywords (B — I8 violation) and reserve-`module`-for-files-only-use-`namespace`-inline (C — breaks existing code) rejected. **Ratified (declined — no new surface)** (`module name { }` is the sole in-file grouping spelling). c75 | owner |
