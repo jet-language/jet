@@ -1434,6 +1434,7 @@ mod tests {
             parse_teaching: Vec::new(),
             used_core: std::collections::HashSet::new(),
             cffi: crate::CFFI::CFfi::default(),
+            comptime_inputs: Vec::new(),
         };
         bundle.cffi = crate::CFFI::assemble(&mut bundle).expect("cffi assemble failed");
         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);

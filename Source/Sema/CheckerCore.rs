@@ -2318,7 +2318,7 @@ impl<'a> Checker<'a> {
             // whitelisted pure Core calls (e.g. `math.sqrt(x)`).
             // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
             // start with the gate already open.
-            match crate::Comptime::evaluate_owned_with_imports_opts(
+            match crate::Comptime::evaluate_owned_with_imports_opts_collecting(
                 &b.init,
                 self.ct_funcs,
                 self.ct_externs,
@@ -2328,9 +2328,11 @@ impl<'a> Checker<'a> {
                 self.allow_impure && self.ct_impure_depth > 0,
                 self.ct_impure_depth,
             ) {
-                Ok(v) => {
+                Ok((v, inputs)) => {
                     b.ct = Some(v.clone());
                     self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+                    // D-CTEFFECT1 Tier-1: accumulate embed inputs for .jet/lock.
+                    self.ct_embed_inputs.extend(inputs);
                 }
                 Err(d) => self.diags.push(d),
             }

@@ -177,6 +177,7 @@ impl<'a> Resolver<'a> {
             version: Lock::LOCK_VERSION,
             packages,
             root_dependencies: root_deps,
+            comptime_inputs: Vec::new(),
         };
 
         // Build dep_dirs map.

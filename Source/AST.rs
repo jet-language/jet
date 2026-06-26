@@ -404,6 +404,10 @@ pub struct ProgramBundle {
     /// S59 (E2-M14): C-FFI artifacts produced by `CFFI::assemble` after loading
     /// — per-file `use c.<lib>` bindings and the libraries to link against.
     pub cffi: crate::CFFI::CFfi,
+    /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated by sema.
+    /// Each entry records the path and sha256 of a file embedded at compile
+    /// time. Written to `.jet/lock` by the build driver for reproducibility.
+    pub comptime_inputs: Vec<crate::Lock::ComptimeInput>,
 }
 
 #[derive(Debug)]

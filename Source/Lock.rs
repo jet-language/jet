@@ -45,6 +45,17 @@ pub struct LockedRevision {
     pub last_modified: u64,
 }
 
+/// D-CTEFFECT1 (Tier-1): one comptime embed input recorded for reproducibility.
+/// Written to `.jet/lock` under `[[comptime_inputs]]` so a changed embedded
+/// file changes its hash and the build warns the lock is stale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComptimeInput {
+    /// Path relative to the source file that embeds it.
+    pub path: String,
+    /// sha256 hex of the file bytes at the time of embedding.
+    pub hash: String,
+}
+
 /// The full lock graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockFile {
@@ -52,6 +63,11 @@ pub struct LockFile {
     pub packages: Vec<LockedPackage>,
     /// Root dependency names (direct deps of the workspace root).
     pub root_dependencies: Vec<String>,
+    /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs hashed at compile
+    /// time. An entry per `embed_file`/`embed_bytes` call, recording the
+    /// relative path and the sha256 of the file bytes. Verifying builds can
+    /// detect embedded files that changed since the last clean build.
+    pub comptime_inputs: Vec<ComptimeInput>,
 }
 
 // ──────────────────────────────────────────────
@@ -111,6 +127,14 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str("dependencies = []\n");
     }
 
+    // D-CTEFFECT1 Tier-1: embed inputs.
+    for ci in &lock.comptime_inputs {
+        out.push('\n');
+        out.push_str("[[comptime_inputs]]\n");
+        out.push_str(&format!("path = \"{}\"\n", escape_str(&ci.path)));
+        out.push_str(&format!("hash = \"{}\"\n", ci.hash));
+    }
+
     out
 }
 
@@ -126,7 +150,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut version: Option<u32> = None;
     let mut packages: Vec<LockedPackage> = Vec::new();
     let mut root_deps: Vec<String> = Vec::new();
+    let mut comptime_inputs: Vec<ComptimeInput> = Vec::new();
     let mut current_pkg: Option<PartialPkg> = None;
+    let mut current_ci: Option<PartialCi> = None;
     let mut in_root = false;
 
     for line in raw.lines() {
@@ -134,7 +160,25 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
+        if line == "[[comptime_inputs]]" {
+            if let Some(ci) = current_ci.take() {
+                if let Some(c) = ci.finish() {
+                    comptime_inputs.push(c);
+                }
+            }
+            if let Some(p) = current_pkg.take() {
+                packages.push(p.finish()?);
+            }
+            current_ci = Some(PartialCi::default());
+            in_root = false;
+            continue;
+        }
         if line == "[[package]]" {
+            if let Some(ci) = current_ci.take() {
+                if let Some(c) = ci.finish() {
+                    comptime_inputs.push(c);
+                }
+            }
             if let Some(p) = current_pkg.take() {
                 packages.push(p.finish()?);
             }
@@ -170,6 +214,14 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             continue;
         }
 
+        if let Some(ref mut ci) = current_ci {
+            match key {
+                "path" => ci.path = Some(val.trim_matches('"').to_string()),
+                "hash" => ci.hash = Some(val.trim_matches('"').to_string()),
+                _ => {}
+            }
+            continue;
+        }
         if let Some(ref mut pkg) = current_pkg {
             match key {
                 "name" => pkg.name = Some(val.trim_matches('"').to_string()),
@@ -182,6 +234,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             }
         }
     }
+    if let Some(ci) = current_ci {
+        if let Some(c) = ci.finish() {
+            comptime_inputs.push(c);
+        }
+    }
     if let Some(p) = current_pkg {
         packages.push(p.finish()?);
     }
@@ -190,6 +247,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         version: version.unwrap_or(0),
         packages,
         root_dependencies: root_deps,
+        comptime_inputs,
     })
 }
 
@@ -202,6 +260,21 @@ fn parse_string_array(val: &str) -> Vec<String> {
         .map(|s| s.trim().trim_matches('"').to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+#[derive(Default)]
+struct PartialCi {
+    path: Option<String>,
+    hash: Option<String>,
+}
+
+impl PartialCi {
+    fn finish(self) -> Option<ComptimeInput> {
+        Some(ComptimeInput {
+            path: self.path?,
+            hash: self.hash?,
+        })
+    }
 }
 
 #[derive(Default)]

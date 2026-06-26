@@ -257,6 +257,7 @@ pub fn load_entry_with_overlay(
         parse_teaching,
         used_core: HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
+        comptime_inputs: Vec::new(),
     };
     // S59 (E2-M14): fold every `@extern`/`@bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.

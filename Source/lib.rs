@@ -61,6 +61,10 @@ pub struct CompileOutput {
     pub clinks: Vec<String>,
     /// D-TOOL5 (E2-M11): capability flags inferred from the generated code.
     pub capabilities: Capabilities,
+    /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs seen during sema.
+    /// Each entry: relative path + sha256 of the bytes at compile time.
+    /// Written to `.jet/lock` by the build driver for reproducibility.
+    pub comptime_inputs: Vec<Lock::ComptimeInput>,
 }
 
 /// D-TOOL5 (E2-M11, ratified as option C): capability summary emitted by
@@ -225,6 +229,7 @@ pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         cffi: CFFI::CFfi::default(),
+        comptime_inputs: Vec::new(),
     };
     bundle.cffi = match CFFI::assemble(&mut bundle) {
         Ok(c) => c,
@@ -309,6 +314,7 @@ fn compile_bundle_path_opts(
         bundle_uses_unsafe(&bundle),
         ffi.is_some() || bundle.cffi.links_c(),
     );
+    let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     Ok(CompileOutput {
         rust,
         lints,
@@ -318,6 +324,7 @@ fn compile_bundle_path_opts(
         // see `resolve_c_links`.
         clinks: Vec::new(),
         capabilities,
+        comptime_inputs,
     })
 }
 
@@ -494,6 +501,7 @@ fn compile_with_mode(
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         cffi: CFFI::CFfi::default(),
+        comptime_inputs: Vec::new(),
     };
     // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
     bundle.cffi = match CFFI::assemble(&mut bundle) {
@@ -524,12 +532,14 @@ fn compile_with_mode(
         bundle_uses_unsafe(&bundle),
         ffi.is_some() || bundle.cffi.links_c(),
     );
+    let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     Ok(CompileOutput {
         rust,
         lints,
         ffi,
         clinks: Vec::new(),
         capabilities,
+        comptime_inputs,
     })
 }
 

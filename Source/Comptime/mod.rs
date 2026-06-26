@@ -100,9 +100,44 @@ pub fn evaluate_with_imports_opts(
         cur_func: "main".to_string(),
         impure_depth: initial_impure_depth,
         allow_impure,
+        embed_inputs: Vec::new(),
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
+}
+
+/// Like [`evaluate_with_imports_opts`] but also returns the Tier-1 embed
+/// inputs accumulated during evaluation (D-CTEFFECT1). The caller (sema
+/// Checker) drains these into `CompileOutput.comptime_inputs`.
+pub fn evaluate_with_imports_opts_collecting(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    allow_impure: bool,
+    initial_impure_depth: usize,
+) -> Result<(CtValue, Vec<crate::Lock::ComptimeInput>), Diagnostic> {
+    if initial_impure_depth == 0 {
+        check_purity(init, funcs, extern_names)?;
+    }
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel: FUEL_BUDGET,
+        sink: None,
+        core_imports,
+        debugger: None,
+        depth: 0,
+        cur_func: "main".to_string(),
+        impure_depth: initial_impure_depth,
+        allow_impure,
+        embed_inputs: Vec::new(),
+    };
+    let mut scope = globals.clone();
+    let val = interp.eval(init, &mut scope)?;
+    Ok((val, interp.embed_inputs))
 }
 
 /// Whole-program dev interpretation (E2-M4 `jet dev`). Runs `main`'s body
@@ -132,6 +167,7 @@ pub fn run_main(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        embed_inputs: Vec::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -163,6 +199,7 @@ pub fn run_main_debug(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        embed_inputs: Vec::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -190,6 +227,7 @@ pub fn run_main_value(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        embed_inputs: Vec::new(),
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope)? {
@@ -220,6 +258,7 @@ pub fn run_main_with_fuel(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        embed_inputs: Vec::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -264,6 +303,7 @@ pub fn run_repl_step(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        embed_inputs: Vec::new(),
     };
     // Split: run all statements except the last; then handle the last specially
     // if it is a bare expression (for display) and not suppressed.
@@ -371,4 +411,20 @@ pub fn evaluate_owned_with_imports_opts(
 ) -> Result<CtValue, Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
     evaluate_with_imports_opts(init, &refs, extern_names, base_dir, globals, core_imports, allow_impure, initial_impure_depth)
+}
+
+/// Like [`evaluate_owned_with_imports_opts`] but also returns Tier-1 embed
+/// inputs (D-CTEFFECT1). Used by the sema Checker to collect embed hashes.
+pub fn evaluate_owned_with_imports_opts_collecting(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    allow_impure: bool,
+    initial_impure_depth: usize,
+) -> Result<(CtValue, Vec<crate::Lock::ComptimeInput>), Diagnostic> {
+    let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
+    evaluate_with_imports_opts_collecting(init, &refs, extern_names, base_dir, globals, core_imports, allow_impure, initial_impure_depth)
 }

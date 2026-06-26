@@ -889,6 +889,9 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
 
     // D-EFF1: collect effect summaries across every module, then run the
     // whole-program fixpoint and enforce each `#(…)` bound once.
+    // D-CTEFFECT1 Tier-1: accumulate embed inputs from all module checks.
+    // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
+    let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         diags.extend(check_module_bodies(
@@ -899,8 +902,10 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             freestanding,
             allow_impure,
             &mut effect_summaries,
+            &mut embed_inputs,
         ));
     }
+    bundle.comptime_inputs = embed_inputs;
     // D-EFF2 (`#(via f)`): seed each via-fn's summary with its callback's bound
     // before the fixpoint, so its published effect set is a tight pass-through.
     for module in &bundle.modules {
@@ -1383,6 +1388,7 @@ pub(crate) fn check_module_bodies(
     freestanding: bool,
     allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
+    embed_inputs_out: &mut Vec<crate::Lock::ComptimeInput>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -1407,6 +1413,7 @@ pub(crate) fn check_module_bodies(
                     freestanding,
                     allow_impure,
                     summaries,
+                    embed_inputs_out,
                 ));
             }
             Item::Struct(s) => {
@@ -1423,6 +1430,7 @@ pub(crate) fn check_module_bodies(
                         freestanding,
                         allow_impure,
                         summaries,
+                        embed_inputs_out,
                     ));
                 }
             }
@@ -1440,6 +1448,7 @@ pub(crate) fn check_module_bodies(
                         freestanding,
                         allow_impure,
                         summaries,
+                        embed_inputs_out,
                     ));
                 }
             }
@@ -1457,6 +1466,7 @@ pub(crate) fn check_module_bodies(
                         freestanding,
                         allow_impure,
                         summaries,
+                        embed_inputs_out,
                     ));
                 }
             }
@@ -1499,6 +1509,7 @@ pub(crate) fn check_module_bodies(
                     freestanding,
                     allow_impure,
                     summaries,
+                    embed_inputs_out,
                 ));
                 t.body = synthetic.body;
             }
@@ -1535,6 +1546,7 @@ pub(crate) fn check_module_bodies(
                     freestanding,
                     allow_impure,
                     summaries,
+                    embed_inputs_out,
                 ));
                 b.body = synthetic.body;
             }
@@ -1557,6 +1569,7 @@ pub(crate) fn check_module_bodies(
                                 freestanding,
                                 allow_impure,
                                 summaries,
+                                embed_inputs_out,
                             ));
                         }
                     }
@@ -1597,6 +1610,7 @@ pub(crate) fn check_func_body_bundle(
     freestanding: bool,
     allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
+    embed_inputs_out: &mut Vec<crate::Lock::ComptimeInput>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -1656,6 +1670,7 @@ pub(crate) fn check_func_body_bundle(
         freestanding,
         allow_impure,
         ct_impure_depth: 0,
+        ct_embed_inputs: Vec::new(),
         in_dropped_comptime_arm: false,
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,
@@ -1666,6 +1681,8 @@ pub(crate) fn check_func_body_bundle(
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }
+    // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
+    embed_inputs_out.extend(std::mem::take(&mut ck.ct_embed_inputs));
     // D-EFF1: record this function's effect summary for the whole-program
     // fixpoint (keyed by bare name / `Type::method`; cross-module effect
     // propagation is a later slice — intra-module + Core/builtin direct effects

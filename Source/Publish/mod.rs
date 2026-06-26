@@ -303,6 +303,7 @@ mod tests {
             version: 1,
             packages: pkgs,
             root_dependencies: vec![],
+            comptime_inputs: Vec::new(),
         }
     }
 

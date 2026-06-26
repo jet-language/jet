@@ -188,6 +188,7 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
         version: 1,
         packages: Vec::new(),
         root_dependencies: Vec::new(),
+        comptime_inputs: Vec::new(),
     });
 
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);

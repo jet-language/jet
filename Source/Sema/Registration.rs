@@ -1383,6 +1383,7 @@ pub(crate) fn check_func_body(
         freestanding,
         allow_impure: false,
         ct_impure_depth: 0,
+        ct_embed_inputs: Vec::new(),
         in_dropped_comptime_arm: false,
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,

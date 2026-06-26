@@ -266,8 +266,11 @@ impl<'a> Interp<'a> {
     /// Shared `embed_file`/`embed_bytes` front half: validate the path (E0957)
     /// and read the file (E0955 missing/unreadable). Returns the relative path
     /// (for messages) and the raw bytes; the UTF-8 decision is the caller's.
+    ///
+    /// D-CTEFFECT1 Tier-1: the sha256 of the bytes is pushed to `self.embed_inputs`
+    /// so the caller can record it in `.jet/lock` for reproducible builds.
     fn read_embed(
-        &self,
+        &mut self,
         builtin: &str,
         args: &[CallArg],
         span: Span,
@@ -278,7 +281,15 @@ impl<'a> Interp<'a> {
         let rel = check_embed_path(builtin, arg, span)?;
         let full = self.base_dir.join(&rel);
         match std::fs::read(&full) {
-            Ok(bytes) => Ok((rel, bytes)),
+            Ok(bytes) => {
+                // D-CTEFFECT1 Tier-1: record the embed input hash for .jet/lock.
+                let hash = crate::SHA256::sha256_hex(&bytes);
+                self.embed_inputs.push(crate::Lock::ComptimeInput {
+                    path: rel.clone(),
+                    hash,
+                });
+                Ok((rel, bytes))
+            }
             Err(e) => Err(Diagnostic::error(
                 "E0955",
                 format!("`{builtin}` can't open `{rel}`"),

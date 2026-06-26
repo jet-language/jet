@@ -1297,6 +1297,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             dependencies: vec![],
         }],
         root_dependencies: vec![name.into()],
+        comptime_inputs: Vec::new(),
     }
 }
 
@@ -1386,7 +1387,7 @@ fn e1217_missing_locked_revision() {
     let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
 
     // Empty lock — greeter is declared but not pinned.
-    let empty_lock = LockFile { version: 1, packages: vec![], root_dependencies: vec![] };
+    let empty_lock = LockFile { version: 1, packages: vec![], root_dependencies: vec![], comptime_inputs: Vec::new() };
     let err = verify_all_manifest_deps_locked(&mf, &empty_lock)
         .expect_err("missing locked revision must fail");
     assert_eq!(err.code, "E1217");

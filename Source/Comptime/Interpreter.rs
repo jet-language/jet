@@ -119,6 +119,11 @@ pub(super) struct Interp<'a> {
     /// Without this, `#Impure` blocks are syntactically valid but Tier-2
     /// effect calls inside them still fail with E3411.
     pub(super) allow_impure: bool,
+    /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated during
+    /// this evaluation. Each entry records the relative path and the sha256
+    /// of the bytes read, for recording in `.jet/lock`. Drained by the
+    /// `evaluate_*_collecting` variants after evaluation.
+    pub(super) embed_inputs: Vec<crate::Lock::ComptimeInput>,
 }
 
 impl<'a> Interp<'a> {
