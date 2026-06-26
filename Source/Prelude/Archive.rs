@@ -72,3 +72,97 @@ pub fn jet_archive_zip_decompress(data: &[u8]) -> Vec<u8> {
     let _ = file.read_to_end(&mut out);
     out
 }
+
+// ---- tar support (D-DEP-ARCHIVE1=A) ----------------------------------------
+
+/// Read all entries from a tar archive. Returns (name, data) pairs.
+fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
+    use tar::Archive;
+    use std::io::Read;
+    let mut entries = Vec::new();
+    if data.is_empty() {
+        return entries;
+    }
+    let mut ar = Archive::new(data);
+    let Ok(iter) = ar.entries() else { return entries };
+    for entry in iter.flatten() {
+        let mut e = entry;
+        let name = e.path()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_string()))
+            .unwrap_or_default();
+        let mut buf = Vec::new();
+        let _ = e.read_to_end(&mut buf);
+        entries.push((name, buf));
+    }
+    entries
+}
+
+/// Write (name, data) pairs into a fresh tar archive. Returns the tar bytes.
+fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    use tar::{Builder, Header};
+    let mut buf = Vec::new();
+    {
+        let mut ar = Builder::new(&mut buf);
+        for (name, data) in entries {
+            let mut header = Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            let _ = ar.append_data(&mut header, name, data.as_slice());
+        }
+        let _ = ar.finish();
+    }
+    buf
+}
+
+/// Append one file entry to a tar archive. Returns the new tar bytes.
+/// If `archive` is empty, a fresh archive is created.
+/// If an entry with the same name already exists, it is replaced.
+pub fn jet_archive_tar_add(archive: &[u8], name: &str, data: &[u8]) -> Vec<u8> {
+    let mut entries = tar_read_all(archive);
+    // Replace existing entry with the same name, or append.
+    if let Some(pos) = entries.iter().position(|(n, _)| n == name) {
+        entries[pos] = (name.to_string(), data.to_vec());
+    } else {
+        entries.push((name.to_string(), data.to_vec()));
+    }
+    tar_write_all(&entries)
+}
+
+/// Extract one file by name from a tar archive. Returns the file bytes.
+/// Returns an empty vec if the entry is not found or the archive is invalid.
+pub fn jet_archive_tar_get(archive: &[u8], name: &str) -> Vec<u8> {
+    for (n, data) in tar_read_all(archive) {
+        if n == name {
+            return data;
+        }
+    }
+    Vec::new()
+}
+
+/// List all entry names in a tar archive as a JSON array string.
+/// Returns `"[]"` on an empty or invalid archive.
+pub fn jet_archive_tar_names_json(archive: &[u8]) -> String {
+    let entries = tar_read_all(archive);
+    let mut out = String::from("[");
+    for (i, (name, _)) in entries.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        for ch in name.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    out.push(']');
+    out
+}

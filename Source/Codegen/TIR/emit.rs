@@ -1967,6 +1967,34 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         ("jet.archive", "zip_decompress") => {
             format!("{}(&({}))", regex_fn("jet_archive_zip_decompress"), arg(0))
         }
+        // D-DEP-ARCHIVE1=A: tar_add / tar_get / tar_names_json via the FFI bridge.
+        // All three take &[u8] / &str args (non-scalar → borrow); none take scalars.
+        ("jet.archive", "tar_add") => {
+            format!("{}(&({}), &({}), &({}))", regex_fn("jet_archive_tar_add"), arg(0), arg(1), arg(2))
+        }
+        ("jet.archive", "tar_get") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_archive_tar_get"), arg(0), arg(1))
+        }
+        ("jet.archive", "tar_names_json") => {
+            format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
+        }
+        // D-DEP-DB1: jet.db — SQLite via the FFI bridge crate.
+        // The u64 handle is a scalar — passed by value (no &). String/slice args get &.
+        ("jet.db", "open") => {
+            format!("{}(&({}))", regex_fn("jet_db_open"), arg(0))
+        }
+        ("jet.db", "open_memory") => {
+            format!("{}()", regex_fn("jet_db_open_memory"))
+        }
+        ("jet.db", "close") => {
+            format!("{}({})", regex_fn("jet_db_close"), arg(0))
+        }
+        ("jet.db", "exec") => {
+            format!("{}({}, &({}))", regex_fn("jet_db_exec"), arg(0), arg(1))
+        }
+        ("jet.db", "query_json") => {
+            format!("{}({}, &({}))", regex_fn("jet_db_query_json"), arg(0), arg(1))
+        }
         // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.
         // Their return type is arg-type dependent (resolved by sema's bespoke
         // `infer_core_call` and written onto the node's `resolved_ret`, read at

@@ -673,16 +673,17 @@ pub fn is_ring_module(name: &str) -> bool {
         // D-REGEX1: `regex` is now shipped (was staged).
         // D-ENC1: csv/toml/yaml/json retired from the `jet.` ring root — now `core.encoding.*`.
         // D-REACT1=B: opt-in reactive library (signals/derived/effects).
-        // D-DEP-ARCHIVE1=A: gzip compress/decompress via the `flate2` crate FFI bridge.
-        "log" | "time" | "crypto" | "http" | "regex" | "reactive" | "archive"
+        // D-DEP-ARCHIVE1=A: gzip + zip + tar via the `flate2`/`zip`/`tar` crate FFI bridge.
+        // D-DEP-DB1: SQLite via the `rusqlite` (bundled) crate FFI bridge.
+        "log" | "time" | "crypto" | "http" | "regex" | "reactive" | "archive" | "db"
     )
 }
 
 /// E2-M9: ring modules not yet available (blocked on external deps or future milestones).
 /// `archive` graduated to `is_ring_module` (D-DEP-ARCHIVE1=A shipped).
-/// `db` blocked on E2-M14 (jet bind C-FFI backend).
-pub fn is_ring_module_staged(name: &str) -> bool {
-    matches!(name, "db")
+/// `db` graduated to `is_ring_module` (D-DEP-DB1 shipped).
+pub fn is_ring_module_staged(_name: &str) -> bool {
+    false
 }
 
 pub fn is_legacy_std_import(name: &str) -> bool {
@@ -739,6 +740,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "jet.regex",
     // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
     "jet.archive",
+    // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
+    "jet.db",
     // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
     // derived values, and effects. Pure std runtime (no external crate).
     "jet.reactive",

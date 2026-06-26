@@ -2207,6 +2207,57 @@ pub(crate) fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::List(Box::new(u8_ty()))),
         )),
+        // D-DEP-ARCHIVE1=A: tar_add — append/replace a named entry in a tar archive.
+        // Takes (archive: [U8], name: String, data: [U8]) → [U8].
+        ("jet.archive", "tar_add") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::String),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        // D-DEP-ARCHIVE1=A: tar_get — extract a named entry from a tar archive.
+        // Takes (archive: [U8], name: String) → [U8]. Empty on not-found or bad input.
+        ("jet.archive", "tar_get") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::String)],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        // D-DEP-ARCHIVE1=A: tar_names_json — list entry names as a JSON array string.
+        // Takes [U8] → String. Returns "[]" on empty or invalid archive.
+        ("jet.archive", "tar_names_json") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::String),
+        )),
+        // D-DEP-DB1: jet.db — SQLite via rusqlite (bundled).
+        // open/open_memory return a u64 handle (0 = error).
+        ("jet.db", "open") => Some((
+            vec![(read, Type::String)],
+            Some(Type::IntN { signed: false, bits: 64 }),
+        )),
+        ("jet.db", "open_memory") => Some((
+            vec![],
+            Some(Type::IntN { signed: false, bits: 64 }),
+        )),
+        // close/exec/query_json take the handle by value (u64 is a scalar).
+        ("jet.db", "close") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 })],
+            Some(Type::Bool),
+        )),
+        ("jet.db", "exec") => Some((
+            vec![
+                (read, Type::IntN { signed: false, bits: 64 }),
+                (read, Type::String),
+            ],
+            Some(Type::Bool),
+        )),
+        ("jet.db", "query_json") => Some((
+            vec![
+                (read, Type::IntN { signed: false, bits: 64 }),
+                (read, Type::String),
+            ],
+            Some(Type::String),
+        )),
         // D-ARGS1 (ratified 2026-06-22): `args.spec()` → `ArgsSpec` builder.
         // The builder methods (.flag/.option/.positional/.help/.parse) are handled
         // in `args_spec_method_return` / `parsed_args_method_return` below.
@@ -2404,8 +2455,14 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "jet.regex" => &[
             "is_match", "match", "find", "find_all", "replace", "replace_all", "split",
         ],
-        // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip.
-        "jet.archive" => &["gzip_compress", "gzip_decompress", "zip_compress", "zip_decompress"],
+        // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip + tar.
+        "jet.archive" => &[
+            "gzip_compress", "gzip_decompress",
+            "zip_compress", "zip_decompress",
+            "tar_add", "tar_get", "tar_names_json",
+        ],
+        // D-DEP-DB1: SQLite ring package.
+        "jet.db" => &["open", "open_memory", "close", "exec", "query_json"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         "jet.reactive" => &["signal", "derived", "effect"],
         _ => &[],

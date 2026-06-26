@@ -1,0 +1,19 @@
+// D-DEP-DB1: jet.db — SQLite via rusqlite (bundled) through the hidden FFI
+// bridge. The compiler crate stays zero-dependency (I6). Connections are
+// managed through opaque u64 handles; 0 is the error sentinel.
+use jet.db as db
+
+fn main() {
+    // Open an in-memory database (no file, no cleanup needed).
+    h @= db.open_memory()
+
+    // DDL and DML both go through exec; returns true on success.
+    db.exec(h, "CREATE TABLE greet (msg TEXT)")
+    db.exec(h, "INSERT INTO greet VALUES ('hello, jet.db!')")
+
+    // query_json returns a JSON array of row objects.
+    rows @= db.query_json(h, "SELECT msg FROM greet")
+    print(rows)
+
+    db.close(h)
+}

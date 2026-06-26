@@ -927,8 +927,8 @@ ships as versioned `jet.*` packages. These shipped in Epoch 2:
 | `jet.time` | Calendar dates, time zones, formatted dates |
 | `jet.crypto` | Hash, HMAC, vetted random primitives |
 | `jet.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
-| `jet.archive` | zip / tar / gzip (staged — not yet available) |
-| `jet.db` | SQLite (FFI-tier) (staged — not yet available) |
+| `jet.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
+| `jet.db` | SQLite — open/exec/query_json/close via rusqlite bundled (D-DEP-DB1) |
 
 ---
 

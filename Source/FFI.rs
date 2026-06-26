@@ -66,15 +66,16 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 }
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
-/// program has no `extern rust` declarations and does not use `jet.regex` or
-/// `jet.archive`.
+/// program has no `extern rust` declarations and does not use `jet.regex`,
+/// `jet.archive`, or `jet.db`.
 ///
-/// `jet.regex` (D-REGEX1) and `jet.archive` (D-DEP-ARCHIVE1) are delivered
-/// through this same hidden-cargo bridge: when a program imports either, the
-/// bridge crate gains the matching dependency and a hand-written runtime
-/// (`Source/Prelude/Regex.rs`, `Source/Prelude/Archive.rs`). The compiler
-/// crate (`Source/`) stays zero-dependency (I6). These are the owner-approved
-/// I6 bootstrap exceptions, to be native-ized before the end of Epoch 3.
+/// `jet.regex` (D-REGEX1), `jet.archive` (D-DEP-ARCHIVE1), and `jet.db`
+/// (D-DEP-DB1) are delivered through this same hidden-cargo bridge: when a
+/// program imports any of them, the bridge crate gains the matching dependency
+/// and a hand-written runtime (`Source/Prelude/Regex.rs`,
+/// `Source/Prelude/Archive.rs`, `Source/Prelude/Db.rs`). The compiler crate
+/// (`Source/`) stays zero-dependency (I6). These are the owner-approved I6
+/// bootstrap exceptions, to be native-ized before the end of Epoch 3.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
     let entries = collect_externs(bundle);
     // `used_core` entries are `"{module}::{method}"` (e.g. `jet.regex::is_match`),
@@ -87,11 +88,15 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         .used_core
         .iter()
         .any(|u| u == "jet.archive" || u.starts_with("jet.archive::"));
-    if entries.is_empty() && !needs_regex && !needs_archive {
+    let needs_db = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "jet.db" || u.starts_with("jet.db::"));
+    if entries.is_empty() && !needs_regex && !needs_archive && !needs_db {
         return Ok(None);
     }
 
-    build_bridge(&entries, needs_regex, needs_archive).map(Some)
+    build_bridge(&entries, needs_regex, needs_archive, needs_db).map(Some)
 }
 
 /// The `regex` crate version that backs `jet.regex` (D-REGEX1). Lives only here,
@@ -106,18 +111,38 @@ pub const ARCHIVE_CRATE_SPEC: (&str, &str) = ("flate2", "1");
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const ZIP_CRATE_SPEC: (&str, &str) = ("zip", "2");
 
+/// The `tar` crate version that backs `jet.archive` tar (D-DEP-ARCHIVE1).
+/// Lives only here — never in the compiler's Cargo.toml (I6).
+pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
+
+/// The `rusqlite` crate version that backs `jet.db` (D-DEP-DB1).
+/// Lives only here — never in the compiler's Cargo.toml (I6).
+pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
+
+/// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
+/// These are emitted verbatim as the right-hand side of the `name = …` line.
+const FEATURED_DEPS: &[(&str, &str)] = &[(
+    "rusqlite",
+    "{ version = \"0.31\", features = [\"bundled\"] }",
+)];
+
 /// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
 /// used. This is the only code that touches the `regex` crate.
 const REGEX_RUNTIME: &str = include_str!("Prelude/Regex.rs");
 
 /// Hand-written archive runtime emitted into the bridge crate when `jet.archive`
-/// is used. This is the only code that touches the `flate2` crate.
+/// is used. This is the only code that touches the `flate2`, `zip`, and `tar` crates.
 const ARCHIVE_RUNTIME: &str = include_str!("Prelude/Archive.rs");
+
+/// Hand-written database runtime emitted into the bridge crate when `jet.db`
+/// is used. This is the only code that touches the `rusqlite` crate.
+const DB_RUNTIME: &str = include_str!("Prelude/Db.rs");
 
 pub fn build_bridge(
     entries: &[ExternEntry],
     needs_regex: bool,
     needs_archive: bool,
+    needs_db: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
@@ -126,8 +151,12 @@ pub fn build_bridge(
     if needs_archive {
         deps.insert(ARCHIVE_CRATE_SPEC.0.to_string(), ARCHIVE_CRATE_SPEC.1.to_string());
         deps.insert(ZIP_CRATE_SPEC.0.to_string(), ZIP_CRATE_SPEC.1.to_string());
+        deps.insert(TAR_CRATE_SPEC.0.to_string(), TAR_CRATE_SPEC.1.to_string());
     }
-    let key = cache_key_full(entries, &deps, needs_regex, needs_archive);
+    if needs_db {
+        deps.insert(DB_CRATE_SPEC.0.to_string(), DB_CRATE_SPEC.1.to_string());
+    }
+    let key = cache_key_full(entries, &deps, needs_regex, needs_archive, needs_db);
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
 
@@ -153,7 +182,7 @@ pub fn build_bridge(
     let lib_rs = src_dir.join("lib.rs");
     fs::write(&manifest, emit_cargo_toml(&crate_name, &deps))
         .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
-    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex, needs_archive))
+    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex, needs_archive, needs_db))
         .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
     let target_dir = cache_root.join("target");
@@ -263,6 +292,7 @@ fn cache_key_full(
     deps: &BTreeMap<String, String>,
     needs_regex: bool,
     needs_archive: bool,
+    needs_db: bool,
 ) -> u64 {
     let mut h = DefaultHasher::new();
     // Only perturb the key when a ring module is actually needed, so programs
@@ -273,6 +303,9 @@ fn cache_key_full(
     }
     if needs_archive {
         needs_archive.hash(&mut h);
+    }
+    if needs_db {
+        needs_db.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -355,13 +388,24 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>) -> String 
     if !deps.is_empty() {
         s.push_str("[dependencies]\n");
         for (name, ver) in deps {
-            s.push_str(&format!("{name} = \"{ver}\"\n"));
+            // Some crates need feature flags or other TOML table syntax — check
+            // the allowlist first; fall back to the plain `name = "version"` form.
+            if let Some((_, toml_val)) = FEATURED_DEPS.iter().find(|(n, _)| *n == name) {
+                s.push_str(&format!("{name} = {toml_val}\n"));
+            } else {
+                s.push_str(&format!("{name} = \"{ver}\"\n"));
+            }
         }
     }
     s
 }
 
-fn emit_wrapper_lib(entries: &[ExternEntry], needs_regex: bool, needs_archive: bool) -> String {
+fn emit_wrapper_lib(
+    entries: &[ExternEntry],
+    needs_regex: bool,
+    needs_archive: bool,
+    needs_db: bool,
+) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
     );
@@ -371,8 +415,14 @@ fn emit_wrapper_lib(entries: &[ExternEntry], needs_regex: bool, needs_archive: b
         out.push('\n');
     }
     if needs_archive {
-        // D-DEP-ARCHIVE1: the archive runtime is the only place `flate2` is touched.
+        // D-DEP-ARCHIVE1: the archive runtime is the only place `flate2`, `zip`,
+        // and `tar` crates are touched.
         out.push_str(ARCHIVE_RUNTIME);
+        out.push('\n');
+    }
+    if needs_db {
+        // D-DEP-DB1: the database runtime is the only place `rusqlite` is touched.
+        out.push_str(DB_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();
