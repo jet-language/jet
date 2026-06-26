@@ -21,10 +21,10 @@ executable spec: a milestone ships with new `examples/` programs and new
 |---|---|
 | Ratified syntax & owner decisions | [`syntax-decisions.md`](syntax-decisions.md) |
 | Language behavior today | [`spec.md`](spec.md) |
-| Open owner ballots | [`decision-ballots.md`](decision-ballots.md) |
+| Open owner ballots | [`decision-ballots.md`](../../tools/Tower/docs/ballots/decision-ballots.md) |
 | Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
-| Jetpack & jetos sequencing + live status | [`tools/Tower/docs/plans/jetpack-jetos/`](../../tools/Tower/docs/plans/jetpack-jetos/) |
+| Jetpack & jetos sequencing + live status | [`tools/Tower/docs/plans/epoch-5/`](../../tools/Tower/docs/plans/epoch-5/) |
 | Implementing-agent protocol | [`tools/Tower/docs/plans/README.md`](../../tools/Tower/docs/plans/README.md) |
 
 Plans are gated on ratified decisions in `syntax-decisions.md` (see
@@ -163,14 +163,14 @@ git-based dependencies. `jet gc` is a stub pending M12.2. TLS requires the
 **jetos is deferred to post-Epoch-3** (owner, 2026-06-18) — research track only;
 do not ratify its config/surface syntax during Epoch 2 or 3. **Jetpack** Phase 1
 environments and the typed `module { … }` surface stay active: see
-[`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/jetpack-jetos/README.md). **Live
+[`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/epoch-5/README.md). **Live
 built-vs-pending status:**
-[`jetpack-jetos/IMPLEMENTATION-STATUS.md`](../../tools/Tower/docs/plans/jetpack-jetos/IMPLEMENTATION-STATUS.md).
+[`jetpack-jetos/IMPLEMENTATION-STATUS.md`](../../tools/Tower/docs/plans/epoch-5/IMPLEMENTATION-STATUS.md).
 
 ### Epoch 1 tail
 
 **M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
-(architecture: [`unified-ecosystem.md`](../../tools/Tower/docs/plans/jetpack-jetos/unified-ecosystem.md) §10). M12.1 verified
+(architecture: [`unified-ecosystem.md`](../../tools/Tower/docs/plans/epoch-5/unified-ecosystem.md) §10). M12.1 verified
 2026-06-13.
 
 ---
