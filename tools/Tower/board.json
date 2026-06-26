@@ -711,7 +711,7 @@
       "type": "task",
       "title": "Compile-time effect boundary (D-CTEFFECT1=A): tiers + #Impure gate",
       "body": "D-CTEFFECT1=A (ratified 2026-06-25). Three tiers for build-time/comptime code: Tier 0 pure (always on), Tier 1 hashed-reproducible effects (@embed, find, fetch(url, sha256:)) recorded in .jet/lock, Tier 2 ambient/non-deterministic effects gated behind #Impure(reason) AND --allow-impure so CI is hermetic by default. Reuses the #Unsafe audited-gate + #(fs,net,exec) effect-tag machinery. Owner: a project build file may alias/relax the impure gate (a config knob to drop the --allow-impure requirement per-project). Gate name #Impure (alternatives offered). Gates D-BUILDPROFILE1's hermeticity (c159).",
-      "stage": "deciding",
+      "stage": "ready",
       "plan": "qualifier-system-implementation",
       "notes": [
         {
@@ -728,6 +728,10 @@
         },
         {
           "t": "[handoff 2026-06-26] STATUS: core shipped (commit fe7dd8e). DONE: tier 0/1/2 model, #Impure(reason) audited gate (KW_IMPURE, mirrors #Unsafe), --allow-impure flag (hermetic-by-default), @embed/find Tier-1 input hashing into .jet/lock; diagnostics E3410/E3411/E3412 + L3102; example 117_comptime_tiers. TO FINISH 100%: ONLY fetch(url,sha256:) — BLOCKED on OPEN ballot D-NETDEP1 (which HTTP backend; rec A = small pure-Rust crate, runtime-side). Stub = E3412 in Source/Comptime/Methods.rs (~line 570). When owner picks D-NETDEP1: wrap the chosen crate (NOT in Source/, like the regex/flate2 bridge), implement download + sha256 verify + hash into .jet/lock, replace the E3412 stub. VERIFY: a comptime fetch(url,sha256:) downloads/verifies/bakes-in; full suite green.",
+          "at": "2026-06-26"
+        },
+        {
+          "t": "[ratified 2026-06-26] D-NETDEP1=A — approve a small pure-Rust HTTP crate (ureq/minreq, runtime-side, owner-gated like Cranelift/regex/sqlite/wasmtime; I6 holds, hash-pinned in .jet/lock, carries native-ize obligation). UNBLOCKED → stage ready. IMPL: wrap the chosen crate outside Source/ (regex/flate2 bridge pattern), implement download + sha256 verify + hash into .jet/lock, replace the E3412 stub in Source/Comptime/Methods.rs (~line 570); verify a comptime fetch(url,sha256:) downloads/verifies/bakes-in, full suite green. NOTE: owner EXPANDED the mandate — end goal is a full HTTP library (client+server, better than Go's net/http) as a Jet core library; the crate is only the bootstrap. That larger track is a NEW card c164; this card delivers ONLY the fetch backend. Recorded in syntax-decisions.md; card stripped from decision-ballots.md.",
           "at": "2026-06-26"
         }
       ],
@@ -914,6 +918,27 @@
       "decisions": [
         "D-STATE-DECL",
         "D-STATE-TRANS"
+      ]
+    },
+    {
+      "id": "c164",
+      "type": "feature",
+      "title": "Full HTTP core library — client + server (D-NETDEP1=A, owner-expanded mandate)",
+      "body": "Owner mandate (2026-06-26, expanding D-NETDEP1=A): Jet ships a full, complete HTTP library — both client AND server — as a core library, better than Go's net/http. D-NETDEP1's approved pure-Rust crate (ureq/minreq) is only the BOOTSTRAP backing c157's build-time fetch(url, sha256:); the native-ize end-state (Epoch-3 dep rule) is a first-party Jet/Rust HTTP stdlib. SCOPE: client (request/response, methods, headers, body, streaming, TLS, redirects, timeouts) + server (listener, router, handler, middleware, request/response types, graceful shutdown). The client+server API surface (naming + shapes) is SYNTAX/stdlib-surface design needing its own decision docs + ballots BEFORE code — drive from a real-world example per owner-anti-repetition + owner-decision-doc-style. NOT this card: c157's fetch backend (ships first against the bootstrap crate).",
+      "stage": "deciding",
+      "plan": null,
+      "notes": [
+        {
+          "t": "[created 2026-06-26] Opened from D-NETDEP1=A owner comment: \"I want a full, complete http library, both server and client, better than go as part of the core libraries in jet.\" NEXT (PM pipeline): write+vet a plan (docs/plans or sidequests) driven from a worked real-world example; develop the client+server API-surface decision cards (request/response/handler/router/middleware naming + shapes), agent-review them, queue in the ballot. NO code until the API surface is ratified (owner-facing stdlib surface = syntax approval required). The native-ize obligation from D-NETDEP1 lands HERE: this library is the first-party replacement for the bootstrap HTTP crate.",
+          "at": "2026-06-26"
+        }
+      ],
+      "created": "2026-06-26",
+      "updated": "2026-06-26",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-NETDEP1"
       ]
     }
   ],
