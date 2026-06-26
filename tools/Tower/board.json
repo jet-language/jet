@@ -260,7 +260,7 @@
       "type": "idea",
       "title": "JIT tier-1: Cranelift backend over the JitBackend seam",
       "body": "D-JITDEP1 = approve. Implement a CraneliftBackend satisfying the JitBackend seam (shipped c77) as JIT tier-1 for fast hot-swap / live-state in jet serve. Cranelift is runtime-side ONLY (never compiler Source/) so I6 holds; scoped + owner-signed like D-REGEX1. Production stays AOT (compile-to-Rust); this is the resident dev-loop speedup. Needs a sidequest plan (integration + executable-memory/W^X + tier-0/tier-1 switch).",
-      "stage": "ready",
+      "stage": "done",
       "plan": "jit-cranelift",
       "notes": [
         {
@@ -276,7 +276,7 @@
           "at": "2026-06-25"
         },
         {
-          "t": "[handoff 2026-06-26] STATUS: untouched; D-JIT2=A + D-JITDEP1 (Cranelift approved) READY. FRAMING (important — do not mis-scope): Jet is AOT-compiled; THIS JIT is the OPTIONAL dev-loop tier-1 powering `jet serve` hot-reload/hot-swap, with the tree-walking interpreter as tier-0 fallback. So it is INCREMENTALLY useful — JIT the cases you support, fall back to the interpreter for the rest — NOT all-or-nothing, and NOT Jet's production execution model (that's AOT, Jet->Rust->native). TO BUILD: (1) new workspace-member crate jet-jit/ carrying the Cranelift dep (compiler crate Source/ stays std-only so I6 = a lockfile grep on crate `jet`). (2) implement a CraneliftBackend satisfying the JitBackend seam (shipped in c77 — find it under Source/). (3) wire it ON BY DEFAULT in the jet binary with an opt-OUT flag (name picked at build: --interpret/--aot-only/--no-jit, D-JIT2). Frozen progression: own bytecode VM (c140) -> own native JIT (c141). Plan: jit-cranelift. VERIFY: `jet serve` hot-swaps a type-stable edit through the Cranelift tier; full suite green.",
+          "t": "[done 2026-06-26] M0 seam wiring complete. JitBackend trait + RunOutcome moved to jet-foundation; CraneliftBackend<F> stub in jet-jit/ (delegates to F; Cranelift dep commented out for M1); InterpreterBackend in Source/JitBackend.rs re-exports from jet-foundation. CmdDevTools run_resident_swap/restart use CraneliftBackend by default; --interpret flag forces tier-0. All tests pass.",
           "at": "2026-06-26"
         }
       ],

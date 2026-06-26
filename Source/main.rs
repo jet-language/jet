@@ -573,6 +573,9 @@ fn main() {
             // feedback. The interpreter is a dev convenience only — `jet build`/
             // `jet run` never touch it (I2/I3).
             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+            // c139 (D-JIT2=A): --interpret forces tier-0 interpreter; otherwise
+            // CraneliftBackend wraps it (M0 delegates, M1+ JIT-compiles).
+            let use_interpreter = raw.iter().any(|a| a == "--interpret");
             // c77 (D-DEVMODE1=A): default auto-detect; experts force a mode with
             // --restart / --swap / --watch=off.
             let policy = watch_policy_from(&raw, WatchPolicy::Auto);
@@ -587,7 +590,7 @@ fn main() {
                     exit(ExitCodes::USAGE);
                 }
             };
-            run_dev(file, try_anyway, policy, mode);
+            run_dev(file, try_anyway, policy, mode, use_interpreter);
             return;
         }
         "serve" => {
@@ -595,6 +598,8 @@ fn main() {
             // Force the resident/swap path — a type-stable edit hot-swaps, a
             // type-changing edit announces a clean restart (D-HOTSWAP1).
             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+            // c139 (D-JIT2=A): --interpret forces tier-0 interpreter.
+            let use_interpreter = raw.iter().any(|a| a == "--interpret");
             let file = match args.get(1) {
                 Some(f) => f.as_str(),
                 None => {
@@ -612,7 +617,7 @@ fn main() {
             // `serve` forces the swap path by default, but `--watch=off` still
             // runs once and exits.
             let policy = watch_policy_from(&raw, WatchPolicy::Swap);
-            run_serve(file, try_anyway, policy, mode);
+            run_serve(file, try_anyway, policy, mode, use_interpreter);
             return;
         }
         "debug" => {

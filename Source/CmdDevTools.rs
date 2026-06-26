@@ -47,7 +47,13 @@ pub(crate) fn watch_policy_from(raw: &[String], default: WatchPolicy) -> WatchPo
 /// per-iteration work lives in `jet::Interpreter::dev_iteration` (so it can be
 /// golden-tested); this is the thin std-only watcher around it (I6: no `notify`
 /// crate — we poll the file's mtime in a loop).
-pub(crate) fn run_dev(file: &str, try_anyway: bool, policy: WatchPolicy, mode: OutputMode) {
+pub(crate) fn run_dev(
+    file: &str,
+    try_anyway: bool,
+    policy: WatchPolicy,
+    mode: OutputMode,
+    use_interpreter: bool,
+) {
     let path = Path::new(file);
     if !path.exists() {
         eprintln!("error: can't find the file `{}`", file);
@@ -79,7 +85,7 @@ pub(crate) fn run_dev(file: &str, try_anyway: bool, policy: WatchPolicy, mode: O
             // A debounce sleep lets editors finish writing before we read.
             std::thread::sleep(std::time::Duration::from_millis(30));
             prev_bundle =
-                render_dev_change(file, try_anyway, policy, prev_bundle.as_ref(), mode);
+                render_dev_change(file, try_anyway, policy, prev_bundle.as_ref(), mode, use_interpreter);
         }
     }
 }
@@ -89,8 +95,18 @@ pub(crate) fn run_dev(file: &str, try_anyway: bool, policy: WatchPolicy, mode: O
 /// a clean restart. Shares the whole watch loop with `jet dev`. `policy`
 /// defaults to `Swap` but `--watch=off` (run once) and the other overrides
 /// still apply.
-pub(crate) fn run_serve(file: &str, try_anyway: bool, policy: WatchPolicy, mode: OutputMode) {
-    run_dev(file, try_anyway, policy, mode);
+///
+/// `use_interpreter` — D-JIT2=A opt-out flag (`--interpret`): forces tier-0
+/// interpreter; otherwise `CraneliftBackend` is used (M0 still delegates,
+/// M1+ will JIT-compile the covered subset).
+pub(crate) fn run_serve(
+    file: &str,
+    try_anyway: bool,
+    policy: WatchPolicy,
+    mode: OutputMode,
+    use_interpreter: bool,
+) {
+    run_dev(file, try_anyway, policy, mode, use_interpreter);
 }
 
 /// Handle one detected file change: pick swap vs rerun vs restart and render.
@@ -102,6 +118,7 @@ fn render_dev_change(
     policy: WatchPolicy,
     prev: Option<&jet::AST::ProgramBundle>,
     mode: OutputMode,
+    use_interpreter: bool,
 ) -> Option<jet::AST::ProgramBundle> {
     // Load+check the new bundle so we can both diff its type surface and run it.
     let new_bundle = match jet::Loader::load_entry(file) {
@@ -153,7 +170,7 @@ fn render_dev_change(
                 match jet::Sema::HotSwap::type_stable_check(old, &new_bundle, &module_name) {
                     Ok(()) => {
                         println!("\n[hot-swap] {} — types stable, code re-applied", module_name);
-                        run_resident_swap(&new_bundle, try_anyway, &module_name, file, mode);
+                        run_resident_swap(&new_bundle, try_anyway, &module_name, file, mode, use_interpreter);
                     }
                     Err(diags) => {
                         // E2210 names what changed; surface it on the restart line.
@@ -162,14 +179,14 @@ fn render_dev_change(
                             .map(|d| d.what.clone())
                             .unwrap_or_default();
                         println!("\n[restart] {} — {}", module_name, what);
-                        run_resident_restart(&new_bundle, try_anyway, file, mode);
+                        run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter);
                     }
                 }
             }
             None => {
                 // No baseline yet (first run after an error): a clean restart.
                 println!("\n[restart] {} — first run", module_name);
-                run_resident_restart(&new_bundle, try_anyway, file, mode);
+                run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter);
             }
         }
     } else {
@@ -181,19 +198,28 @@ fn render_dev_change(
     Some(new_bundle)
 }
 
-/// Tier-0 hot-swap: re-apply the new bundle via the `JitBackend` seam and
-/// render. (Live-heap-preserving swap is the future Cranelift tier-1.)
+/// Hot-swap via the JitBackend seam. `use_interpreter` forces tier-0;
+/// otherwise `CraneliftBackend` wraps the interpreter (M0: delegates,
+/// M1+: JIT-compiles the covered subset).
 fn run_resident_swap(
     bundle: &jet::AST::ProgramBundle,
     try_anyway: bool,
     module_name: &str,
     file: &str,
     mode: OutputMode,
+    use_interpreter: bool,
 ) {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
-    let mut backend = InterpreterBackend::new();
-    match backend.hot_swap(module_name, bundle, try_anyway) {
-        Ok(outcome) => render_outcome(outcome, file, mode),
+    use jet_jit::CraneliftBackend;
+    let outcome = if use_interpreter {
+        let mut b = InterpreterBackend::new();
+        b.hot_swap(module_name, bundle, try_anyway)
+    } else {
+        let mut b = CraneliftBackend::new(InterpreterBackend::new());
+        b.hot_swap(module_name, bundle, try_anyway)
+    };
+    match outcome {
+        Ok(o) => render_outcome(o, file, mode),
         Err(diags) => {
             let src = fs::read_to_string(file).unwrap_or_default();
             report_problems(mode, file, &src, &diags);
@@ -201,16 +227,24 @@ fn run_resident_swap(
     }
 }
 
-/// Tier-0 restart: a clean fresh evaluation via the seam's `restart` path.
+/// Clean restart via the JitBackend seam.
 fn run_resident_restart(
     bundle: &jet::AST::ProgramBundle,
     try_anyway: bool,
     file: &str,
     mode: OutputMode,
+    use_interpreter: bool,
 ) {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
-    let mut backend = InterpreterBackend::new();
-    render_outcome(backend.restart(bundle, try_anyway), file, mode);
+    use jet_jit::CraneliftBackend;
+    let outcome = if use_interpreter {
+        let mut b = InterpreterBackend::new();
+        b.restart(bundle, try_anyway)
+    } else {
+        let mut b = CraneliftBackend::new(InterpreterBackend::new());
+        b.restart(bundle, try_anyway)
+    };
+    render_outcome(outcome, file, mode);
 }
 
 /// `jet repl` — interactive REPL session (E2-M18, D-REPL3=A).

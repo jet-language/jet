@@ -19,18 +19,10 @@ use std::collections::HashMap;
 use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
 
-/// What a single dev iteration produced: either problems to show (front-end
-/// diagnostics, an E2201 boundary note, or an E2202/E0956 run-time stop), or
-/// the program's buffered output.
-#[derive(Debug, Clone)]
-pub enum RunOutcome {
-    /// The program ran to completion in the interpreter. `stdout`/`stderr`
-    /// are byte-identical to the compiled program.
-    Ran { stdout: String, stderr: String },
-    /// The front end (or the interpreter) reported problems; show them as in
-    /// batch compilation. Includes E2201 boundary notes and E2202 fuel stops.
-    Problems(Vec<Diagnostic>),
-}
+// c139: RunOutcome moved to jet-foundation so the jet-jit/ sibling crate
+// can implement JitBackend without a dep cycle. Re-exported here so callers
+// using `jet::Interpreter::RunOutcome` still work unchanged.
+pub use jet_foundation::JitBackend::RunOutcome;
 
 /// c77 (D-DEVMODE1=A): how `jet dev` should react to a save.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
