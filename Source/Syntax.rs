@@ -171,6 +171,12 @@ pub const KW_LOOP: &str = "loop";
 /// to emit a teaching error.
 pub const KW_UNSAFE: &str = "Unsafe";
 
+/// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the audited
+/// Tier-2 comptime effect gate. Both this block AND `--allow-impure` at build
+/// are required to execute ambient comptime I/O (Fs/Env/Exec/Io). PascalCase
+/// per D-CASING1 (consistent with `Unsafe`).
+pub const KW_IMPURE: &str = "Impure";
+
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
 pub const FOREIGN_UNSAFE: &str = "unsafe";
@@ -1396,8 +1402,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // KW_VIEW in favor of the `~`/`^`/`&` sigils — they live only as teaching
     // errors (E0056/E0057/E0058) now, so they are NOT in the keyword list.
     KW_STORED, KW_SELF,
-    // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1)
-    KW_UNSAFE, KW_REGION, CTX_BLOCK, KW_LIVE,
+    // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1, D-CTEFFECT1)
+    KW_UNSAFE, KW_IMPURE, KW_REGION, CTX_BLOCK, KW_LIVE,
     // Determinism escape (D-DET1): `assume_deterministic { … }`
     KW_ASSUME_DET,
     // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`

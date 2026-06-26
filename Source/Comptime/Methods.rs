@@ -326,6 +326,34 @@ impl<'a> Interp<'a> {
                 for a in args {
                     argv.push(self.eval(&a.expr, scope)?);
                 }
+                // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate.
+                let is_tier2 = matches!(module.as_str(),
+                    "core.fs" | "core.env" | "core.io" | "core.exec" | "core.net");
+                if is_tier2 {
+                    if self.impure_depth == 0 {
+                        return Err(Diagnostic::error(
+                            "E3410",
+                            format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate", module, method),
+                            "ambient I/O (filesystem, environment, process) is not allowed in \
+                             pure comptime evaluation".to_string(),
+                            "wrap the comptime binding in `#Impure(\"reason\") { … }` and \
+                             pass `--allow-impure` to the build".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    // Gate present (impure_depth > 0) but check --allow-impure flag too.
+                    if !self.allow_impure {
+                        return Err(Diagnostic::error(
+                            "E3411",
+                            format!("`{}.{}()` inside `#Impure` gate, but `--allow-impure` was not passed", module, method),
+                            "the `#Impure` block opts in to ambient comptime I/O, but the build \
+                             flag is required so CI can audit builds that touch the host".to_string(),
+                            "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    return apply_impure_core_call(&module, method, argv, span, self.base_dir);
+                }
                 return apply_core_call(&module, method, argv, span);
             }
         }
@@ -470,21 +498,76 @@ fn apply_core_call(
             let to = as_string(one(2)?, span)?.to_string();
             Ok(CtValue::Str(s.replace(&from, &to)))
         }
-        // --- impure / build-time I/O → teaching diagnostic ---
-        ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.net", _) => {
+        // --- impure / build-time I/O → teaching diagnostic (reached only when
+        // no #Impure gate intercepts first in eval_method) ---
+        ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {
             Err(Diagnostic::error(
-                "E0958",
-                format!("`{}.{}()` cannot run at comptime — it performs I/O", module, method),
-                "comptime is pure and deterministic; I/O functions are not".to_string(),
-                "use `embed_file(\"path\")` or `embed_bytes(\"path\")` for build-time \
-                 file reads; other I/O must remain in runtime code"
-                    .to_string(),
+                "E3410",
+                format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate", module, method),
+                "ambient I/O (filesystem, environment, process) is not allowed in \
+                 pure comptime evaluation".to_string(),
+                format!("wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
+                         pass `--allow-impure` to the build"),
                 Some(span),
             ))
         }
         // --- unknown / not yet whitelisted ---
         _ => Err(unsupported(
             &format!("`{}.{}()` at comptime", module, method),
+            span,
+        )),
+    }
+}
+
+/// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect.
+/// Only called from `eval_method` when `impure_depth > 0` and `allow_impure`.
+/// Supports: `core.fs.read`, `core.env.get`. `core.net.*` is E3412 pending ballot.
+fn apply_impure_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    base_dir: &std::path::Path,
+) -> Result<CtValue, Diagnostic> {
+    let one = |i: usize| args.get(i).ok_or_else(|| unsupported(
+        &format!("`{}.{}` (wrong number of arguments)", module, method),
+        span,
+    ));
+    match (module, method) {
+        ("core.fs", "read") => {
+            let path_str = as_string(one(0)?, span)?;
+            let path = base_dir.join(path_str);
+            match std::fs::read_to_string(&path) {
+                Ok(s) => Ok(CtValue::Str(s)),
+                Err(e) => Err(Diagnostic::error(
+                    "E3410",
+                    format!("comptime `core.fs.read({:?})` failed: {}", path, e),
+                    "the file could not be read at compile time".to_string(),
+                    "check that the path is correct and readable".to_string(),
+                    Some(span),
+                )),
+            }
+        }
+        ("core.env", "get") => {
+            let key = as_string(one(0)?, span)?;
+            match std::env::var(key) {
+                Ok(v) => Ok(CtValue::Str(v)),
+                // env var absent → null (Option None)
+                Err(_) => Ok(CtValue::None(crate::AST::Type::String)),
+            }
+        }
+        // E3412: network calls pending owner ballot on D-NETDEP1.
+        ("core.net", _) => Err(Diagnostic::error(
+            "E3412",
+            format!("`core.net.{}()` is not available at comptime yet", method),
+            "network access at compile time requires a fetch mechanism with \
+             content-hash pinning, which is pending an owner decision".to_string(),
+            "use `embed_file` or `embed_bytes` for local build-time data; \
+             track D-NETDEP1 in Tower for network support".to_string(),
+            Some(span),
+        )),
+        _ => Err(unsupported(
+            &format!("`{}.{}()` at comptime (impure tier)", module, method),
             span,
         )),
     }

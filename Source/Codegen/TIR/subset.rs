@@ -1188,6 +1188,8 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // nothing. I1: this is the source gate — the only place a Rust `unsafe` block is
         // produced — so admitting it here cannot introduce an ungated `unsafe`.
         Stmt::Unsafe { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (I3).
+        Stmt::Impure { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) lowers to a plain Rust
         // block; the body's `let`s LEAK into the outer scope (the AST shares `&mut env`),
         // so the gate checks the body on the SAME `locals`.

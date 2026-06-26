@@ -1408,6 +1408,17 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the
+    /// audited Tier-2 comptime effect gate. `reason` is the argument of
+    /// `#Impure` itself (lint L3102 fires when it is `None`). Both this gate
+    /// AND `--allow-impure` at build time are required to execute ambient
+    /// comptime I/O (Fs/Env/Exec/Io). Erases to a plain block at codegen;
+    /// the gate is enforced entirely in the comptime interpreter (I3).
+    Impure {
+        reason: Option<String>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation region
     /// `region r { … }`. `name` names the region; arena `view`s allocated
     /// inside may not escape it (E0631). A lexical scope like `loop`/`#Unsafe`,
@@ -1546,6 +1557,7 @@ impl Stmt {
             | Stmt::Switch { span, .. }
             | Stmt::Loop { span, .. }
             | Stmt::Unsafe { span, .. }
+            | Stmt::Impure { span, .. }
             | Stmt::Region { span, .. }
             | Stmt::Caps { span, .. }
             | Stmt::Grant { span, .. }

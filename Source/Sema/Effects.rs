@@ -652,6 +652,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
             .or_else(|| else_body.as_ref().and_then(|b| block(b))),
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }

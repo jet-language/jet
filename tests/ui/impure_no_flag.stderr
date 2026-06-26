@@ -1,0 +1,7 @@
+Error [E3411]: `core.fs.read()` inside `#Impure` gate, but `--allow-impure` was not passed
+  --> tests/ui/impure_no_flag.jet:5:27
+    |
+  5 |         comptime cfg = fs.read("config.txt")
+    |                           ^^^^
+ Why: the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host
+ Fix: add `--allow-impure` to your `jet build` / `jet run` invocation

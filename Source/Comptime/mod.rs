@@ -64,7 +64,31 @@ pub fn evaluate_with_imports(
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
 ) -> Result<CtValue, Diagnostic> {
-    check_purity(init, funcs, extern_names)?;
+    evaluate_with_imports_opts(init, funcs, extern_names, base_dir, globals, core_imports, false, 0)
+}
+
+/// Like `evaluate_with_imports` but with `allow_impure` and `initial_impure_depth`
+/// for D-CTEFFECT1. When called from inside a sema `#Impure` block, pass
+/// `initial_impure_depth: 1` (and `allow_impure: true`) so the interpreter
+/// starts with the gate already open for Tier-2 calls.
+pub fn evaluate_with_imports_opts(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    allow_impure: bool,
+    initial_impure_depth: usize,
+) -> Result<CtValue, Diagnostic> {
+    // Only run the purity check when there is no active #Impure gate (i.e.
+    // the expression is not nested inside a `#Impure` block at sema time).
+    // When initial_impure_depth > 0, the gate is active — skip check_purity
+    // so that Tier-2 calls fire E3411 ("gate present, flag absent") instead
+    // of E0951 ("impure call at comptime"), giving a better fix message.
+    if initial_impure_depth == 0 {
+        check_purity(init, funcs, extern_names)?;
+    }
     let mut interp = Interp {
         funcs,
         base_dir,
@@ -74,6 +98,8 @@ pub fn evaluate_with_imports(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
+        impure_depth: initial_impure_depth,
+        allow_impure,
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
@@ -104,6 +130,8 @@ pub fn run_main(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
+        impure_depth: 0,
+        allow_impure: false,
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -133,6 +161,8 @@ pub fn run_main_debug(
         debugger: Some(debugger),
         depth: 0,
         cur_func: "main".to_string(),
+        impure_depth: 0,
+        allow_impure: false,
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -158,6 +188,8 @@ pub fn run_main_value(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
+        impure_depth: 0,
+        allow_impure: false,
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope)? {
@@ -186,6 +218,8 @@ pub fn run_main_with_fuel(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
+        impure_depth: 0,
+        allow_impure: false,
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -228,6 +262,8 @@ pub fn run_repl_step(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
+        impure_depth: 0,
+        allow_impure: false,
     };
     // Split: run all statements except the last; then handle the last specially
     // if it is a bare expression (for display) and not suppressed.
@@ -316,6 +352,23 @@ pub fn evaluate_owned_with_imports(
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
 ) -> Result<CtValue, Diagnostic> {
+    evaluate_owned_with_imports_opts(init, funcs, extern_names, base_dir, globals, core_imports, false, 0)
+}
+
+/// Like `evaluate_owned_with_imports` but with D-CTEFFECT1 `allow_impure` flag
+/// and `initial_impure_depth`. Pass `initial_impure_depth: 1` when evaluating a
+/// comptime binding inside a `#Impure` block so the interpreter starts with the
+/// gate already open for Tier-2 calls.
+pub fn evaluate_owned_with_imports_opts(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    allow_impure: bool,
+    initial_impure_depth: usize,
+) -> Result<CtValue, Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
-    evaluate_with_imports(init, &refs, extern_names, base_dir, globals, core_imports)
+    evaluate_with_imports_opts(init, &refs, extern_names, base_dir, globals, core_imports, allow_impure, initial_impure_depth)
 }

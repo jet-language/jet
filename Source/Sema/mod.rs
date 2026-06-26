@@ -571,6 +571,13 @@ pub(crate) struct Checker<'a> {
     type_param_scope: Vec<crate::AST::TypeParam>,
     /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
     freestanding: bool,
+    /// D-CTEFFECT1: `--allow-impure` was passed — `#Impure` blocks may execute
+    /// Tier-2 ambient comptime effects (Fs/Env/Exec/Io) at compile time.
+    allow_impure: bool,
+    /// D-CTEFFECT1: nesting depth of `#Impure` blocks currently being checked.
+    /// Passed as `initial_impure_depth` to comptime evaluation of bindings
+    /// inside, so the interpreter starts with the gate already open.
+    ct_impure_depth: usize,
     /// D-WHEN2 (ratified 2026-06-19): when true, we are inside a dropped
     /// `comptime if` arm — name-resolution runs normally (so unknown-name
     /// typos are caught) but all other diagnostics are suppressed and the arm
@@ -627,7 +634,7 @@ pub(crate) use CheckerOwnership::{e0141_unconsumed_branch, e0142_aliased, e0143_
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Registration::{check, check_with_mode};
-pub use Bundle::{check_bundle, check_bundle_freestanding};
+pub use Bundle::{check_bundle, check_bundle_freestanding, check_bundle_allow_impure};
 pub use FFI::{e3202, e3301, e3302, e3303};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.

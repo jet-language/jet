@@ -111,6 +111,14 @@ pub(super) struct Interp<'a> {
     /// the breakpoint banner (`in main()`). Top level / `main` until a call
     /// swaps it.
     pub(super) cur_func: String,
+    /// D-CTEFFECT1: nesting depth of active `#Impure("reason") { … }` blocks.
+    /// Tier-2 comptime effect calls (core.fs/env/exec/io) are allowed only
+    /// while this is `> 0` AND `allow_impure` is true.
+    pub(super) impure_depth: usize,
+    /// D-CTEFFECT1: true when the caller compiled with `--allow-impure`.
+    /// Without this, `#Impure` blocks are syntactically valid but Tier-2
+    /// effect calls inside them still fail with E3411.
+    pub(super) allow_impure: bool,
 }
 
 impl<'a> Interp<'a> {
@@ -327,6 +335,27 @@ impl<'a> Interp<'a> {
                 Ok(Flow::Normal)
             }
             Stmt::Unsafe { span, .. } => Err(unsupported("an `#Unsafe` block", *span)),
+            // D-CTEFFECT1: `#Impure("reason") { … }` — gate for Tier-2 ambient
+            // comptime effects. Increments impure_depth around the body so that
+            // `apply_core_call` knows we're inside a gate. The E3411 (gate but no
+            // flag) check is in `apply_impure_core_call`; the body always runs so
+            // the interpreter can reach the impure call and produce a good span.
+            Stmt::Impure { body, span, .. } => {
+                if !self.allow_impure {
+                    // E3411: gate present but --allow-impure not passed.
+                    return Err(Diagnostic::error(
+                        "E3411",
+                        "comptime Tier-2 effect inside `#Impure` gate, but `--allow-impure` was not passed".to_string(),
+                        "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required too".to_string(),
+                        "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
+                        Some(*span),
+                    ));
+                }
+                self.impure_depth += 1;
+                let result = self.exec_block(body, scope);
+                self.impure_depth -= 1;
+                result
+            }
             // D-REGION1: allocation regions are a runtime/codegen construct; the
             // comptime interpreter has no arenas, so a `region` block is declined.
             Stmt::Region { span, .. } => Err(unsupported("a `region` block", *span)),

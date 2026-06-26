@@ -241,19 +241,26 @@ fn compile_bundle_path(
     file: &str,
     mode: Sema::CompileMode,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, mode, false)
+    compile_bundle_path_opts(file, mode, false, false)
 }
 
 /// Like `compile_with_path` but with `--freestanding` mode (E2-M15).
 /// Rejects OS-dependent std APIs (E3301) and emits `panic = "abort"` hint.
 pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, true)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, false)
+}
+
+/// Like `compile_with_path` but with `--allow-impure` (D-CTEFFECT1).
+/// Enables Tier-2 ambient comptime effects inside `#Impure` gates.
+pub fn compile_allow_impure(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true)
 }
 
 fn compile_bundle_path_opts(
     file: &str,
     mode: Sema::CompileMode,
     freestanding: bool,
+    allow_impure: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     let timing = PhaseTiming::enabled();
     let mut timer = PhaseTiming::PhaseTimer::new();
@@ -263,6 +270,8 @@ fn compile_bundle_path_opts(
     }
     let diags = if freestanding {
         Sema::check_bundle_freestanding(&mut bundle, mode)
+    } else if allow_impure {
+        Sema::check_bundle_allow_impure(&mut bundle, mode)
     } else {
         Sema::check_bundle(&mut bundle, mode)
     };

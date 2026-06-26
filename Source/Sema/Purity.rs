@@ -191,7 +191,7 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
-        Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
+        Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
             for st in body {
                 if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
                     return Some(d);
@@ -557,7 +557,7 @@ fn check_pure_stmt_with_path(
             }
             None
         }
-        Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
+        Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
             for st in body {
                 if let Some(d) = rec_s!(st) {
                     return Some(d);
@@ -920,7 +920,7 @@ fn walk_stmt_for_calls(
                 }
             }
         }
-        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
             for st in body {
                 walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
                 if !diags.is_empty() { return; }

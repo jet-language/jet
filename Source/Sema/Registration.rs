@@ -1381,6 +1381,8 @@ pub(crate) fn check_func_body(
         ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
         freestanding,
+        allow_impure: false,
+        ct_impure_depth: 0,
         in_dropped_comptime_arm: false,
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,

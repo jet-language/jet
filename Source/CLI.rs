@@ -101,6 +101,8 @@ pub const FLAGS: &[FlagSpec] = &[
     // E2-M16 flags.
     FlagSpec { long: "--pure", help: "with eval: require the program to be pure (S60 / D-PURE2)" },
     FlagSpec { long: "--freestanding", help: "with build/run: no OS; rejects std-only APIs (E2-M15)" },
+    // D-CTEFFECT1: comptime effect tier gate.
+    FlagSpec { long: "--allow-impure", help: "with build/run: allow Tier-2 ambient comptime effects inside #Impure gates (D-CTEFFECT1)" },
     FlagSpec { long: "--target", help: "with build: cross-compile for a rustc target triple (E2-M15)" },
     // E2-M11 flags.
     FlagSpec { long: "--capabilities-json", help: "with build: emit capability summary as JSON (D-TOOL5)" },

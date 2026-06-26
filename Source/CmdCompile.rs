@@ -15,6 +15,7 @@ pub(crate) fn run_compile_cmd(
     emit_rust: bool,
     small: bool,
     freestanding: bool,
+    allow_impure: bool,
     cross_target: Option<&str>,
     verbose: bool,
     capabilities_json: bool,
@@ -66,6 +67,8 @@ pub(crate) fn run_compile_cmd(
 
     let compile_result = if freestanding {
         jet::compile_freestanding(file)
+    } else if allow_impure {
+        jet::compile_allow_impure(file)
     } else {
         jet::compile_with_path(&src, file)
     };

@@ -1291,6 +1291,25 @@ impl<'a> Checker<'a> {
                 self.check_block(body, true);
                 self.in_unsafe = prev;
             }
+            // D-CTEFFECT1: `#Impure("reason") { … }` — the Tier-2 comptime effect
+            // gate. At runtime (which is what sema is checking here), this block is
+            // semantically a plain block: it has no runtime significance. The gate is
+            // enforced only inside the comptime interpreter. L3102 fires when no
+            // reason was given (matches L3101 pattern for #Unsafe).
+            Stmt::Impure { reason, body, span } => {
+                if reason.is_none() {
+                    self.diags.push(Diagnostic::lint(
+                        "L3102",
+                        "this `#Impure` block has no reason".to_string(),
+                        "every comptime effect gate records why ambient I/O is needed".to_string(),
+                        "add the reason: `#Impure(\"reading build config\") { … }`".to_string(),
+                        Some(*span),
+                    ));
+                }
+                self.ct_impure_depth += 1;
+                self.check_block(body, true);
+                self.ct_impure_depth -= 1;
+            }
             // D-REGION1 (opt B): an explicit `region r { … }`. A fresh lexical
             // scope: arena `view`s allocated inside cannot escape it (the
             // E0631 escape rule is enforced against the scope floor, identical
@@ -1650,13 +1669,15 @@ impl<'a> Checker<'a> {
         // Step 1: evaluate the condition at comptime.
         // D-CTCORE1: pass core_imports for whitelisted pure Core calls.
         let globals = self.current_ct_globals();
-        let selected = match crate::Comptime::evaluate_owned_with_imports(
+        let selected = match crate::Comptime::evaluate_owned_with_imports_opts(
             cond,
             self.ct_funcs,
             self.ct_externs,
             self.ct_base_dir,
             &globals,
             self.core_imports,
+            self.allow_impure && self.ct_impure_depth > 0,
+            self.ct_impure_depth,
         ) {
             Ok(crate::Comptime::CtValue::Bool(b)) => b,
             Ok(_) => {
@@ -2295,13 +2316,17 @@ impl<'a> Checker<'a> {
             let globals = self.current_ct_globals();
             // D-CTCORE1: pass core_imports so the interpreter can evaluate
             // whitelisted pure Core calls (e.g. `math.sqrt(x)`).
-            match crate::Comptime::evaluate_owned_with_imports(
+            // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
+            // start with the gate already open.
+            match crate::Comptime::evaluate_owned_with_imports_opts(
                 &b.init,
                 self.ct_funcs,
                 self.ct_externs,
                 self.ct_base_dir,
                 &globals,
                 self.core_imports,
+                self.allow_impure && self.ct_impure_depth > 0,
+                self.ct_impure_depth,
             ) {
                 Ok(v) => {
                     b.ct = Some(v.clone());

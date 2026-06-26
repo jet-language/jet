@@ -316,6 +316,7 @@ impl<'a> StateCtx<'a> {
             }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }

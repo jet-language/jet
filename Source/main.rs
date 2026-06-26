@@ -303,6 +303,7 @@ fn main() {
     let json = jet_argv.iter().any(|a| a == "--json");
     let small = jet_argv.iter().any(|a| a == "--small");
     let freestanding = jet_argv.iter().any(|a| a == "--freestanding");
+    let allow_impure = jet_argv.iter().any(|a| a == "--allow-impure");
     let locked = jet_argv.iter().any(|a| a == "--locked");
     let annotated = jet_argv.iter().any(|a| a == "--annotated");
     let verbose = jet_argv.iter().any(|a| a == "--verbose" || a == "-v");
@@ -640,6 +641,7 @@ fn main() {
                                     emit_rust,
                                     small,
                                     freestanding,
+                                    allow_impure,
                                     cross_target.as_deref(),
                                     verbose,
                                     capabilities_json,
@@ -721,7 +723,7 @@ fn main() {
             } else {
                 target.to_string()
             };
-            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, cross_target.as_deref(), verbose, capabilities_json, sbom, &program_args, mode);
+            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, allow_impure, cross_target.as_deref(), verbose, capabilities_json, sbom, &program_args, mode);
         }
     }
 }

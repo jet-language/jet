@@ -256,6 +256,7 @@ before continuing.
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
 | E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
 | L3101 | sema  | `#Unsafe` block missing its reason argument — write `#Unsafe("…") { … }` (D-UNSAFE2) |
+| L3102 | sema  | `#Impure` block missing its reason argument — write `#Impure("…") { … }` (D-CTEFFECT1) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
 | E3203 | sema  | non-C-ABI type in `@extern` / `@bindgen` fn signature |
@@ -269,6 +270,9 @@ before continuing.
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
+| E3410 | sema  | Tier-2 comptime effect (`core.fs`/`env`/`io`/`exec`) called outside a `#Impure` gate (D-CTEFFECT1) |
+| E3411 | sema  | Tier-2 comptime effect inside `#Impure` gate but `--allow-impure` not passed (D-CTEFFECT1) |
+| E3412 | sema  | `core.net` at comptime requires owner ballot — stub only (D-CTEFFECT1) |
 | E3401 | sema  | impure call inside a `#Pure fn` / pure-eval context (call-trace path) |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
@@ -299,7 +303,7 @@ before continuing.
 | E0955 | sema  | `embed_file`/`embed_bytes`: missing / unreadable file (`embed_file` also: not UTF-8) |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
 | E0957 | sema  | `embed_file`/`embed_bytes` path not a literal, absolute, or escaping via `..` |
-| E0958 | sema  | an I/O Core call (`core.fs`/`io`/`env`/`net`) can't run at comptime (D-CTCORE1) |
+| E0958 | sema  | **retired** (D-CTEFFECT1 2026-06-25): replaced by E3410 (Tier-2 effect without `#Impure` gate) |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E0961 | sema  | fan-out callee is not callable with exactly one argument (S75) |
 | E0962 | sema  | fan-out item doesn't fit the parameter type (S75) |
@@ -669,6 +673,19 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Unsafe("…") { … }`. |
 | E3104 | `{arena}` was already {reset/freed}; this value lives in `{arena}` which is gone. | Calling `arena.reset()` or `arena.free()` invalidates all values allocated in it. | Move the `alloc` call before the `reset`/`free`, or create a new allocator. |
 | L3101 | This `#Unsafe` block has no reason. | Every gated region records, in one line, why it can't break memory safety. | Add the reason: `#Unsafe("why this is safe") { … }`. |
+| L3102 | This `#Impure` block has no reason. | Every comptime effect gate records, in one line, why ambient I/O is needed. | Add the reason: `#Impure("reading build config") { … }`. |
+
+## Comptime effect tiers (D-CTEFFECT1)
+
+Tier-0 (pure) calls are whitelisted Core builtins — always safe, no gate needed.
+Tier-1 (`embed_file`/`embed_bytes`) hashes inputs into `.jet/lock`.
+Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--allow-impure`.
+
+| code | what | why | fix |
+|------|------|-----|-----|
+| E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.fs`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call: `#Impure("reading config") { comptime val x = core.fs.read("…") }`. |
+| E3411 | `#Impure` gate present but `--allow-impure` was not passed. | The `#Impure` block opts in to ambient I/O, but the build flag is also required so CI can audit builds that touch the host. | Add `--allow-impure` to your `jet build` / `jet run` invocation. |
+| E3412 | `core.net` at comptime is not yet available. | Network access at compile time needs an owner-ratified design for caching, retries, and hermetic builds. | Use `core.fs.read` on a pre-fetched file, or `fetch(url, sha256: "…")` once the ballot is decided. |
 
 ## Arena region diagnostics (D-ALLOC2 / D-REGION1)
 

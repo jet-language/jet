@@ -730,6 +730,34 @@ fn fmt_box_drawing_comment_does_not_panic() {
 }
 
 #[test]
+fn fmt_impure_block_round_trips() {
+    // D-CTEFFECT1: `#Impure("reason") { … }` must survive a format round-trip
+    // with the reason string and body intact.
+    let src = "fn main() {\n    #Impure(\"reading build config\") {\n        print(\"inside\")\n    }\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on #Impure block");
+    assert!(
+        out.contains("#Impure(\"reading build config\")"),
+        "#Impure reason dropped by fmt:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("#Impure fmt must re-fmt");
+    assert_eq!(out, twice, "#Impure fmt must be idempotent");
+}
+
+#[test]
+fn fmt_impure_block_no_reason_round_trips() {
+    // D-CTEFFECT1: `#Impure { … }` without a reason also round-trips (triggers
+    // L3102 lint but is parseable).
+    let src = "fn main() {\n    #Impure {\n        print(\"inside\")\n    }\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on #Impure block without reason");
+    assert!(
+        out.contains("#Impure {") || out.contains("#Impure{"),
+        "#Impure block without reason dropped by fmt:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("#Impure (no reason) fmt must re-fmt");
+    assert_eq!(out, twice, "#Impure (no reason) fmt must be idempotent");
+}
+
+#[test]
 fn fmt_keeps_parens_around_binary_receiver() {
     // c143(b): `(a + b).method()` must keep its parens — dropping them rebinds
     // the `.method()` to `b` alone and changes the meaning. Likewise `(a + b) * c`

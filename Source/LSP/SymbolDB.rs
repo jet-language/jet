@@ -602,6 +602,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
         }
         AST::Stmt::Loop { body, .. }
         | AST::Stmt::Unsafe { body, .. }
+        | AST::Stmt::Impure { body, .. }
         | AST::Stmt::Region { body, .. }
         | AST::Stmt::Caps { body, .. }
         | AST::Stmt::Grant { body, .. }

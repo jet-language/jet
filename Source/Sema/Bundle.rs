@@ -78,7 +78,7 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
-            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Grant { body: inner, .. } | Stmt::Transact { body: inner, .. } | Stmt::AssumeDet { body: inner, .. } => {
+            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Impure { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Grant { body: inner, .. } | Stmt::Transact { body: inner, .. } | Stmt::AssumeDet { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);
             }
             // D-CTMARKER1: rewrite inline calls in comptime block body.
@@ -240,15 +240,20 @@ pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<Stri
 }
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    check_bundle_opts(bundle, mode, false)
+    check_bundle_opts(bundle, mode, false, false)
 }
 
 /// Like `check_bundle` but with extra build options (E2-M15).
 pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    check_bundle_opts(bundle, mode, true)
+    check_bundle_opts(bundle, mode, true, false)
 }
 
-pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding: bool) -> Vec<Diagnostic> {
+/// Like `check_bundle` but with D-CTEFFECT1 `--allow-impure` flag.
+pub fn check_bundle_allow_impure(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
+    check_bundle_opts(bundle, mode, false, true)
+}
+
+pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding: bool, allow_impure: bool) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
@@ -892,6 +897,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             &states,
             mode,
             freestanding,
+            allow_impure,
             &mut effect_summaries,
         ));
     }
@@ -1121,7 +1127,7 @@ pub(crate) fn collect_core_stmts(
                     collect_core_stmts(body, imports, used);
                 }
             }
-            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used),
+            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used),
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
             // D-CTMARKER1: collect Core usage from comptime block body.
             Stmt::ComptimeBlock { body, .. } => collect_core_stmts(body, imports, used),
@@ -1375,6 +1381,7 @@ pub(crate) fn check_module_bodies(
     states: &[ModuleState],
     mode: CompileMode,
     freestanding: bool,
+    allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
@@ -1398,6 +1405,7 @@ pub(crate) fn check_module_bodies(
                     &ct_base_dir,
                     &ct_globals,
                     freestanding,
+                    allow_impure,
                     summaries,
                 ));
             }
@@ -1413,6 +1421,7 @@ pub(crate) fn check_module_bodies(
                         &ct_base_dir,
                         &ct_globals,
                         freestanding,
+                        allow_impure,
                         summaries,
                     ));
                 }
@@ -1429,6 +1438,7 @@ pub(crate) fn check_module_bodies(
                         &ct_base_dir,
                         &ct_globals,
                         freestanding,
+                        allow_impure,
                         summaries,
                     ));
                 }
@@ -1445,6 +1455,7 @@ pub(crate) fn check_module_bodies(
                         &ct_base_dir,
                         &ct_globals,
                         freestanding,
+                        allow_impure,
                         summaries,
                     ));
                 }
@@ -1486,6 +1497,7 @@ pub(crate) fn check_module_bodies(
                     &ct_base_dir,
                     &ct_globals,
                     freestanding,
+                    allow_impure,
                     summaries,
                 ));
                 t.body = synthetic.body;
@@ -1521,6 +1533,7 @@ pub(crate) fn check_module_bodies(
                     &ct_base_dir,
                     &ct_globals,
                     freestanding,
+                    allow_impure,
                     summaries,
                 ));
                 b.body = synthetic.body;
@@ -1542,6 +1555,7 @@ pub(crate) fn check_module_bodies(
                                 &ct_base_dir,
                                 &ct_globals,
                                 freestanding,
+                                allow_impure,
                                 summaries,
                             ));
                         }
@@ -1581,6 +1595,7 @@ pub(crate) fn check_func_body_bundle(
     ct_base_dir: &std::path::Path,
     ct_globals: &HashMap<String, crate::Comptime::CtValue>,
     freestanding: bool,
+    allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
@@ -1639,6 +1654,8 @@ pub(crate) fn check_func_body_bundle(
         ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
         freestanding,
+        allow_impure,
+        ct_impure_depth: 0,
         in_dropped_comptime_arm: false,
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,

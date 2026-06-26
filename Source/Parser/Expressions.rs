@@ -1590,6 +1590,7 @@ impl<'a> Parser<'a> {
                         Stmt::Assign { value, .. } => value.span().end,
                         Stmt::Loop { span: s, .. } => s.end,
                         Stmt::Unsafe { span, .. } => span.end,
+                        Stmt::Impure { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
                         Stmt::Caps { span, .. } => span.end,
                         Stmt::Grant { span, .. } => span.end,

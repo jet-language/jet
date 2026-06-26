@@ -82,6 +82,34 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-CTEFFECT1 (ratified 2026-06-25): parse `#Impure("reason") { … }` in
+    /// statement position. Mirrors `at_unsafe_stmt`. Missing reason → L3102 in sema.
+    fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // `#`
+        self.bump(); // `Impure`
+        // Optional `("reason")` argument — absent means L3102 fires in sema.
+        let mut reason = None;
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // `(`
+            let (r, _) = self.expect_plain_string(
+                "for the impure reason",
+                "`#Impure` takes one piece of quoted text explaining why ambient I/O is needed here",
+                "write: #Impure(\"reading build config\") { … }",
+            )?;
+            self.expect(TokKind::RParen, "after the impure reason")?;
+            reason = Some(r);
+        }
+        self.expect(TokKind::LBrace, "after `#Impure(…)`")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Impure {
+            reason,
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
     /// unknown fields.
@@ -783,6 +811,10 @@ impl<'a> Parser<'a> {
                 // D-TXN1–D-TXN4: `#Transact(name) { … }` transaction block.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSACT) {
                     return self.at_transact_stmt();
+                }
+                // D-CTEFFECT1: `#Impure("reason") { … }` comptime effect gate.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_IMPURE) {
+                    return self.at_impure_stmt();
                 }
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()

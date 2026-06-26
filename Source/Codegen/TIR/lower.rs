@@ -206,6 +206,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::For { body, .. }
             | Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
@@ -1070,6 +1071,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
         Stmt::Unsafe { body, .. } => TStmt::Unsafe(lower_stmts(body, cx, env)),
+        // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (comptime-only gate, I3).
+        Stmt::Impure { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1). The AST emits a plain
         // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
         // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.

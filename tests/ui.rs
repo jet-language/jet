@@ -114,8 +114,26 @@ fn ui_snapshots() {
         // E2-M15: files marked with `// @freestanding` are compiled with
         // the freestanding profile (E3301 checks enabled).
         let freestanding = src.lines().any(|l| l.trim() == "// @freestanding");
-        let actual = if freestanding {
+        // I4: files marked with `// @all_diags` run `check_with_path` and include
+        // ALL diagnostics (errors + lints) so lint codes can have UI snapshots.
+        let all_diags = src.lines().any(|l| l.trim() == "// @all_diags");
+        // D-CTEFFECT1: files marked `// @allow_impure` compile with the
+        // allow-impure flag so E3411/E3412 snapshots can exercise the gate.
+        let allow_impure = src.lines().any(|l| l.trim() == "// @allow_impure");
+        let actual = if all_diags {
+            let diags = jet::check_with_path(&file_arg);
+            if diags.is_empty() {
+                "(no errors)\n".to_string()
+            } else {
+                jet::render_diagnostics(&shown_path, &src, &diags)
+            }
+        } else if freestanding {
             match jet::compile_freestanding(&file_arg) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
+        } else if allow_impure {
+            match jet::compile_allow_impure(&file_arg) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
