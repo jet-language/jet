@@ -1,12 +1,37 @@
-//! publish / vendor / audit / sbom supply-chain subcommand handlers (E2-M8).
+//! publish / vendor / audit / sbom / yank supply-chain subcommand handlers (E2-M8).
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::exit;
+use std::process::{exit, Command};
 
 use jet::ExitCodes;
 
 use crate::{find_project_entry, report_problems, OutputMode};
+
+// ──────────────────────────────────────────────
+// Git dirty-tree check
+// ──────────────────────────────────────────────
+
+/// Returns `Some(list_of_dirty_lines)` when the working tree has uncommitted
+/// changes; `None` when the tree is clean or when `git` is not available (in
+/// which case we treat it as clean so a non-git project isn't broken).
+fn git_dirty_files(root: &std::path::Path) -> Option<Vec<String>> {
+    let out = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None; // not a git repo (or git absent) — treat as clean
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let dirty: Vec<String> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+    if dirty.is_empty() { None } else { Some(dirty) }
+}
 
 /// `jet publish [--force]` — pre-publish gate + SemVer API diff.
 ///
@@ -34,6 +59,45 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
 
     let version = &mf.package.version;
     let name = &mf.package.name;
+
+    // Pre-publish gate step 0: dirty working tree (E2605, D-PUBLISH1A).
+    // A dirty tree means uncommitted changes would be silently excluded from
+    // the published artifact, making it unreproducible.
+    if let Some(dirty) = git_dirty_files(&root) {
+        if force {
+            eprintln!(
+                "warning [--force]: working tree has {} uncommitted change(s) — publishing anyway.",
+                dirty.len()
+            );
+            for line in dirty.iter().take(5) {
+                eprintln!("  {}", line);
+            }
+            if dirty.len() > 5 {
+                eprintln!("  … and {} more", dirty.len() - 5);
+            }
+        } else {
+            eprintln!(
+                "Error [E2605]: `{}` v{} cannot be published from a dirty working tree.",
+                name, version
+            );
+            eprintln!(
+                " Why: the registry records the exact source revision. \
+                 Uncommitted changes would be silently excluded, making \
+                 the published package unreproducible."
+            );
+            eprintln!(" Fix: commit or stash all uncommitted changes, then run `jet publish` again.");
+            eprintln!("      use `jet publish --force` to bypass with an explicit warning banner.");
+            eprintln!();
+            eprintln!("  uncommitted changes ({}):", dirty.len());
+            for line in dirty.iter().take(10) {
+                eprintln!("    {}", line);
+            }
+            if dirty.len() > 10 {
+                eprintln!("    … and {} more", dirty.len() - 10);
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
 
     println!("publishing `{}` v{} ...", name, version);
 
@@ -369,4 +433,87 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
         jet::Publish::emit_spdx(&lock, &mf.package.name, &mf.package.version)
     };
     print!("{}", out);
+}
+
+/// `jet yank <version> [--message <reason>]` — mark a published version as yanked.
+///
+/// D-VERSION1=A (version immutability): a published version can't be re-published;
+/// `jet yank` marks it yanked (doesn't delete). Until the hosted registry exists
+/// (board card c56), this records a local yank marker in `.jet/yank/` and reports
+/// a clear "upload pending c56" note.
+pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
+    let version = match version {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+            eprintln!("Error [E2606]: `jet yank` requires a version argument.");
+            eprintln!(" Why: a yank marks one specific published version as deprecated;");
+            eprintln!("      without a version the command doesn't know which one to yank.");
+            eprintln!(" Fix: run `jet yank <version>`, e.g. `jet yank 1.2.3`.");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+
+    // Validate the version is parseable as SemVer.
+    if jet::Publish::SemVer::SemVer::parse(version).is_none() {
+        eprintln!("error: `{}` is not a valid SemVer version (expected major.minor.patch)", version);
+        eprintln!(" Fix: use a version like `1.2.3`.");
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
+        eprintln!("error: no `pkg.jet` found — run `jet yank` inside a project");
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read {}: {}", jet::Syntax::PAYLOAD_FILE, e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
+        eprint!("{}", jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d]));
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    let name = &mf.package.name;
+
+    // Write a local yank marker to `.jet/yank/<name>-<version>.yank`.
+    // The content records the reason and timestamp for audit purposes.
+    let yank_dir = root.join(".jet").join("yank");
+    if let Err(e) = fs::create_dir_all(&yank_dir) {
+        eprintln!("error: couldn't create .jet/yank/: {}", e);
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let marker_name = format!("{}-{}.yank", name, version);
+    let marker_path = yank_dir.join(&marker_name);
+
+    // Use a Unix-epoch timestamp so the marker is portable and machine-readable.
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let reason = message.unwrap_or("no reason given");
+    let marker_content = format!(
+        "package = \"{}\"\nversion = \"{}\"\nyank_time = {}\nreason = \"{}\"\n",
+        name, version, ts, reason.replace('"', "\\\"")
+    );
+
+    if let Err(e) = fs::write(&marker_path, &marker_content) {
+        eprintln!("error: couldn't write yank marker: {}", e);
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    println!("ok: yank marker recorded for `{}` v{}.", name, version);
+    if let Some(msg) = message {
+        println!("  reason: {}", msg);
+    }
+    println!("  marker: .jet/yank/{}", marker_name);
+    println!(
+        "note: registry yank upload not yet implemented (c56 — no registry service exists).\n\
+         commit the .jet/yank/ directory to record the intent; a future `jet publish` run\n\
+         will sync yank records to the registry when c56 is complete."
+    );
 }

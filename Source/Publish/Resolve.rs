@@ -4,6 +4,70 @@ use std::collections::BTreeMap;
 use super::SemVer::{SemVer, VersionReq};
 
 // ──────────────────────────────────────────────
+// Highest-compatible resolver (D-RESOLVE1=A)
+// ──────────────────────────────────────────────
+
+/// Select the highest version from `available` for `package` that satisfies
+/// all `constraints`. Returns the winner, or E2602 if no candidate qualifies.
+///
+/// This implements the D-RESOLVE1=A policy: **highest-compatible** within the
+/// intersection of every constraint's semver range, exactly as `npm` / `cargo`
+/// do. When the available set is empty (no registry yet), the check reduces to
+/// the syntactic intersection test (`intersects`).
+pub fn select_highest_compatible<'a>(
+    package: &str,
+    constraints: &[&VersionConstraint],
+    available: &'a [SemVer],
+) -> Result<&'a SemVer, Diagnostic> {
+    // Filter to candidates that satisfy every constraint.
+    let winner = available
+        .iter()
+        .filter(|v| constraints.iter().all(|c| c.req.matches(v)))
+        .max(); // SemVer: Ord derived via precedence
+
+    if let Some(v) = winner {
+        return Ok(v);
+    }
+
+    // Build an informative E2602: pick the first pair of constraints whose
+    // ranges don't intersect, or fall back to the first two if all intersect
+    // but no candidate exists.
+    if constraints.len() >= 2 {
+        // Try to find a genuinely contradictory pair first.
+        for i in 0..constraints.len() {
+            for j in (i + 1)..constraints.len() {
+                if !constraints[i].req.intersects(&constraints[j].req) {
+                    return Err(e2602(
+                        package,
+                        constraints[i].req.display(),
+                        &constraints[i].from,
+                        constraints[j].req.display(),
+                        &constraints[j].from,
+                    ));
+                }
+            }
+        }
+        // All intersect syntactically but no candidate available — report first two.
+        return Err(e2602(
+            package,
+            constraints[0].req.display(),
+            &constraints[0].from,
+            constraints[1].req.display(),
+            &constraints[1].from,
+        ));
+    }
+
+    // Single constraint with no candidates (empty registry).
+    Err(e2602(
+        package,
+        constraints.first().map(|c| c.req.display()).unwrap_or("*"),
+        constraints.first().map(|c| c.from.as_str()).unwrap_or(""),
+        "(no versions available)",
+        "registry",
+    ))
+}
+
+// ──────────────────────────────────────────────
 // Registry resolver (PubGrub-style conflict detection)
 // ──────────────────────────────────────────────
 

@@ -31,7 +31,7 @@ use CmdPkg::{
     run_store_verify, run_update,
 };
 use CmdSchema::run_schema;
-use CmdSupply::{run_audit, run_publish, run_sbom, run_vendor};
+use CmdSupply::{run_audit, run_publish, run_sbom, run_vendor, run_yank};
 
 /// How diagnostics should be presented this run, resolved once from flags +
 /// environment and threaded through the diagnostic-printing helpers.
@@ -413,7 +413,7 @@ fn main() {
         || matches!(
             cmd,
             "lsp" | "install" | "doctor" | "completions" | "man" | "dev" | "serve" | "debug"
-                | "publish" | "vendor" | "audit" | "sbom"
+                | "publish" | "yank" | "vendor" | "audit" | "sbom"
                 | "emit" | "bench" | "repl" | "schema"
         );
     if !known {
@@ -442,7 +442,7 @@ fn main() {
     let owns_flags = matches!(
         cmd,
         "env" | "dev" | "serve" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
-            | "publish" | "vendor" | "audit" | "sbom" | "repl" | "schema"
+            | "publish" | "yank" | "vendor" | "audit" | "sbom" | "repl" | "schema"
     );
     if !owns_flags {
         check_flags(jet_argv, cmd);
@@ -497,6 +497,14 @@ fn main() {
         "publish" => {
             let force = raw.iter().any(|a| a == "--force");
             run_publish(force, mode);
+            return;
+        }
+        "yank" => {
+            // D-VERSION1=A: mark a published version as yanked (no delete).
+            // `jet yank <version> [--message <reason>]`
+            let version = args.get(1).map(|s| s.as_str());
+            let message = flag_value(&raw, "--message");
+            run_yank(version, message);
             return;
         }
         "vendor" => {

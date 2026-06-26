@@ -1476,3 +1476,195 @@ fn pre_publish_gate_passes_with_no_breaks_and_minor_bump() {
     assert!(!gate.is_blocked());
     assert!(gate.semver_errors().is_empty());
 }
+
+// ─────────────────────────────────────────────
+// D-PUBLISH1A: dirty-tree refusal (E2605)
+// ─────────────────────────────────────────────
+
+#[test]
+fn cli_publish_refuses_dirty_git_tree() {
+    // D-PUBLISH1A: `jet publish` must refuse (E2605) when the git working tree
+    // has uncommitted changes. This test initialises a fresh git repo with one
+    // commit, adds an uncommitted file, then runs `jet publish` and asserts it
+    // exits nonzero with E2605 in stderr.
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_publish_refuses_dirty_git_tree (run `cargo build` first)");
+        return;
+    }
+    if !have_git() {
+        eprintln!("note: skipping cli_publish_refuses_dirty_git_tree (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("pub_dirty");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    // Create a minimal project.
+    write(&tmp, "pkg.jet", &min_manifest("dirtypkg", "1.0.0"));
+    write(&tmp, "main.jet", "fn main() { print(\"hello\"); }\n");
+
+    // Init git, commit everything (clean tree first).
+    for cmd_args in &[
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "test@jet.test"],
+        vec!["config", "user.name", "Jet Test"],
+        vec!["add", "."],
+        vec!["commit", "-m", "initial"],
+    ] {
+        Command::new("git")
+            .args(cmd_args)
+            .current_dir(&tmp)
+            .output()
+            .unwrap();
+    }
+
+    // Add a new uncommitted file → dirty tree.
+    write(&tmp, "untracked.jet", "// dirty\n");
+
+    let out = jet_cmd(&["publish"], &tmp, &store);
+    assert!(
+        !out.status.success(),
+        "jet publish must fail on a dirty tree"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E2605"),
+        "jet publish must cite E2605 for a dirty tree:\n{stderr}"
+    );
+
+    // With --force it must emit a warning but succeed (past the dirty gate).
+    // The build may fail (no Rust toolchain in test), so only check the dirty warning.
+    let out_force = jet_cmd(&["publish", "--force"], &tmp, &store);
+    let stderr_force = String::from_utf8_lossy(&out_force.stderr);
+    assert!(
+        stderr_force.contains("warning") && stderr_force.contains("uncommitted"),
+        "jet publish --force must warn about uncommitted changes:\n{stderr_force}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+// ─────────────────────────────────────────────
+// D-VERSION1: yank local marker
+// ─────────────────────────────────────────────
+
+#[test]
+fn cli_yank_creates_local_marker() {
+    // D-VERSION1=A: `jet yank <version>` must write a local yank marker file
+    // to `.jet/yank/<name>-<version>.yank` and print a c56 note about upload.
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_yank_creates_local_marker (run `cargo build` first)");
+        return;
+    }
+
+    let tmp = tmp_dir("yank_marker");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(&tmp, "pkg.jet", &min_manifest("mypkg", "2.0.0"));
+
+    let out = jet_cmd(&["yank", "1.5.0", "--message", "regression in parser"], &tmp, &store);
+    assert!(
+        out.status.success(),
+        "jet yank should exit 0:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("mypkg") && stdout.contains("1.5.0"), "yank stdout must name pkg/version:\n{stdout}");
+    assert!(stdout.contains("c56"), "yank must mention c56 upload gate:\n{stdout}");
+
+    // Marker file must exist.
+    let marker = tmp.join(".jet/yank/mypkg-1.5.0.yank");
+    assert!(marker.is_file(), "yank marker file must be written at {}", marker.display());
+
+    let content = fs::read_to_string(&marker).unwrap();
+    assert!(content.contains("package = \"mypkg\""), "marker must record package name");
+    assert!(content.contains("version = \"1.5.0\""), "marker must record version");
+    assert!(content.contains("regression in parser"), "marker must record reason");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_yank_requires_version_arg() {
+    // E2606: `jet yank` with no version must exit nonzero with E2606.
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_yank_requires_version_arg (run `cargo build` first)");
+        return;
+    }
+
+    let tmp = tmp_dir("yank_no_ver");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(&tmp, "pkg.jet", &min_manifest("mypkg", "1.0.0"));
+
+    let out = jet_cmd(&["yank"], &tmp, &store);
+    assert!(!out.status.success(), "jet yank with no version must fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E2606"), "must cite E2606:\n{stderr}");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+// ─────────────────────────────────────────────
+// D-RESOLVE1: highest-compatible resolver
+// ─────────────────────────────────────────────
+
+#[test]
+fn resolver_selects_highest_compatible() {
+    // D-RESOLVE1=A: given a list of candidates and constraints, the resolver
+    // picks the highest version satisfying all constraints.
+    use jet::Publish::{VersionConstraint, VersionReq, select_highest_compatible};
+    use jet::Publish::SemVer::SemVer;
+
+    fn sv(s: &str) -> SemVer { SemVer::parse(s).unwrap() }
+
+    let candidates = vec![sv("1.0.0"), sv("1.2.0"), sv("1.5.0"), sv("2.0.0")];
+
+    // ^1.0 && ^1.2 → highest compatible is 1.5.0 (both within major 1).
+    let c1 = VersionConstraint {
+        package: "log".into(),
+        req: VersionReq::parse("^1.0").unwrap(),
+        from: "app".into(),
+    };
+    let c2 = VersionConstraint {
+        package: "log".into(),
+        req: VersionReq::parse("^1.2").unwrap(),
+        from: "lib".into(),
+    };
+    let winner = select_highest_compatible("log", &[&c1, &c2], &candidates)
+        .expect("compatible constraints with candidates should resolve");
+    assert_eq!(winner.to_string(), "1.5.0", "must pick the highest satisfying candidate");
+
+    // ^2.0 → 2.0.0 only.
+    let c3 = VersionConstraint {
+        package: "log".into(),
+        req: VersionReq::parse("^2.0").unwrap(),
+        from: "other".into(),
+    };
+    let winner2 = select_highest_compatible("log", &[&c3], &candidates)
+        .expect("^2.0 should resolve to 2.0.0");
+    assert_eq!(winner2.to_string(), "2.0.0");
+
+    // Conflicting ^1.0 && ^2.0 → E2602.
+    let err = select_highest_compatible("log", &[&c1, &c3], &candidates)
+        .expect_err("incompatible constraints must fail");
+    assert_eq!(err.code, "E2602", "conflict must be E2602");
+}
+
+#[test]
+fn resolver_no_candidates_returns_e2602() {
+    // With an empty candidate list and a single constraint, we get E2602.
+    use jet::Publish::{VersionConstraint, VersionReq, select_highest_compatible};
+
+    let c = VersionConstraint {
+        package: "missing".into(),
+        req: VersionReq::parse("^1.0").unwrap(),
+        from: "app".into(),
+    };
+    let err = select_highest_compatible("missing", &[&c], &[])
+        .expect_err("no candidates must be an error");
+    assert_eq!(err.code, "E2602");
+}
