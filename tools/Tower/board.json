@@ -731,7 +731,7 @@
       "type": "task",
       "title": "Build profiles: named + flag-selected (D-BUILDPROFILE1=A)",
       "body": "D-BUILDPROFILE1=A (ratified 2026-06-25): a package's build { } surface defines named profiles (release/debug/ci as Build.{ optimize: ..., targets: [...] }); the active profile is chosen by an explicit flag (--release sugar for --profile=release, general --profile=<name>), never by ambient environment — same commit + flag yields byte-identical binaries. Blessed names release/debug carry built-in defaults; others user-defined. Aligns with D-CTEFFECT1 (no ungated ambient read on the default build) — so gated on c157's effect model.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "build-profiles",
       "notes": [
         {
@@ -741,6 +741,10 @@
         {
           "t": "[sweep 2026-06-25] plan written+vetted (D-BUILDPROFILE1=A). Impl-gated on c157 (no-ambient-read) + c158 (Build.{} literal); build{} placement baked to pack.jet. No open owner decision → ready.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-26] DONE + merged, full suite 1154 green / 0 fail. `build { release: Build.{ optimize: …, targets: […] }, debug: …, <custom>: … }` parses in pkg.jet (uses the c158 Build.{} dot-literal); --release (sugar) + --profile=<name> SELECT the profile; blessed release/debug carry defaults, user names read from build{}; unknown profile = E1219 + ui snapshot. WIRED END-TO-END (verified in code): flag → run_compile_cmd builds BuildProfile (freestanding>small>named>default precedence) → resolve_named_profile reads pkg.jet → build() applies real rustc flags (release=opt-level=3+strip, debug=0, Named=None/Basic/Full, Small=opt-level=z+panic=abort). Cache key includes profile_tag. --small confirmed intact (BuildProfile::Small). Example 126_build_profiles. Owner-modified D-JIT2-style on-by-default N/A here. (moved to done.)",
+          "at": "2026-06-26"
         }
       ],
       "created": "2026-06-25",
