@@ -23,16 +23,16 @@ struct Pack {
     prompt: String
 }
 fn nix_source(name: ^String, upstream: ^String) -> Source {
-    return Source {name: name, upstream: upstream, via: "nix"}
+    return Source.{name: name, upstream: upstream, via: "nix"}
 }
 fn core_source(name: ^String, upstream: ^String) -> Source {
-    return Source {name: name, upstream: upstream, via: "core"}
+    return Source.{name: name, upstream: upstream, via: "core"}
 }
 fn overlay(source: ^String, packages: ^[String]) -> Overlay {
-    return Overlay {source: source, packages: packages}
+    return Overlay.{source: source, packages: packages}
 }
 fn pack_item(source: ^String, name: ^String) -> Package {
-    return Package {source: source, name: name}
+    return Package.{source: source, name: name}
 }
 fn flatten_overlay(o: ^Overlay) -> [Package] {
     out: [Package] := []
@@ -99,7 +99,7 @@ fn prompt_json(label: ^String) -> Json {
     return Json.Object(m)
 }
 pub fn shell() -> [Json] {
-    pack @= Pack {sources: [nix_source("stable", "github:NixOS/nixpkgs/nixos-24.05"), nix_source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable"), core_source("mine", "path:./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"}
+    pack @= Pack.{sources: [nix_source("stable", "github:NixOS/nixpkgs/nixos-24.05"), nix_source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable"), core_source("mine", "path:./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"}
     directives := source_directives(pack.sources.clone())
     directives.push(packages_json(pack.clone()))
     directives.push(prompt_json(pack.prompt.clone()))

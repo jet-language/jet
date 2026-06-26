@@ -1833,11 +1833,18 @@ impl<'a> Parser<'a> {
                 true
             }
             // Destructuring targets: scan ahead to a `::`/`:=` after the matching
-            // close. Cheap bounded lookahead. `[a, b] ::`, `(a, b) ::`, and
-            // `Type { … } ::`.
+            // close. Cheap bounded lookahead. `[a, b] ::`, `(a, b) ::`,
+            // `Type { … } ::` (E0320 recovery), and `Type.{ … } ::` (D-DOTCTOR1).
             TokKind::LBracket | TokKind::LParen => self.pattern_target_is_binding(),
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
                 self.pattern_target_is_binding()
+            }
+            // D-DOTCTOR1: `Type.{ … } @=` — new form.
+            TokKind::Ident(_)
+                if matches!(self.peek2().kind, TokKind::Dot)
+                    && matches!(self.peek3().kind, TokKind::LBrace) =>
+            {
+                self.pattern_target_is_binding_dot()
             }
             _ => false,
         }
@@ -1856,6 +1863,43 @@ impl<'a> Parser<'a> {
             Some(TokKind::LBracket) => (TokKind::LBracket, TokKind::RBracket),
             Some(TokKind::LBrace) => (TokKind::LBrace, TokKind::RBrace),
             Some(TokKind::LParen) => (TokKind::LParen, TokKind::RParen),
+            _ => return false,
+        };
+        let mut depth = 0usize;
+        while i < n {
+            let k = &self.toks[i].kind;
+            if std::mem::discriminant(k) == std::mem::discriminant(&open) {
+                depth += 1;
+            } else if std::mem::discriminant(k) == std::mem::discriminant(&close) {
+                depth -= 1;
+                if depth == 0 {
+                    return matches!(
+                        self.toks.get(i + 1).map(|t| &t.kind),
+                        Some(TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq)
+                    );
+                }
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// D-DOTCTOR1: like `pattern_target_is_binding` but skips `Ident Dot` before
+    /// the opening `{`, for the `Type.{ … } @= expr` destructuring form.
+    fn pattern_target_is_binding_dot(&self) -> bool {
+        let mut i = self.pos;
+        let n = self.toks.len();
+        // Skip the type name (Ident).
+        if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_))) {
+            i += 1;
+        }
+        // Skip the dot.
+        if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Dot)) {
+            i += 1;
+        }
+        // Now expect `{` to open the struct pattern body.
+        let (open, close) = match self.toks.get(i).map(|t| &t.kind) {
+            Some(TokKind::LBrace) => (TokKind::LBrace, TokKind::RBrace),
             _ => return false,
         };
         let mut depth = 0usize;
@@ -1950,8 +1994,49 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end.end),
                 }))
             }
-            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
+            // D-DOTCTOR1: `Type.{ x, y }` new form (new) or `Type { x, y }` (E0320 recovery).
+            TokKind::Ident(_)
+                if matches!(self.peek2().kind, TokKind::Dot)
+                    && matches!(self.peek3().kind, TokKind::LBrace) =>
+            {
                 let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
+                self.expect(TokKind::Dot, "in a struct pattern")?;
+                self.expect(TokKind::LBrace, "to open the struct pattern")?;
+                let mut fields = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RBrace) {
+                    loop {
+                        let (name, span) = self.expect_ident("for a struct-pattern field")?;
+                        fields.push(BindName { name, span });
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                let end = self.peek().span;
+                self.expect(TokKind::RBrace, "to close the struct pattern")?;
+                Ok(Some(BindPattern::Struct {
+                    type_name,
+                    type_span,
+                    fields,
+                    span: Span::new(type_span.start, end.end),
+                }))
+            }
+            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
+                // D-DOTCTOR2: old dotless `Type { x, y }` — E0320 recovery.
+                let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
+                let brace_span = self.peek().span;
+                self.diags.push(Diagnostic::error(
+                    "E0320",
+                    format!(
+                        "struct pattern uses `{}.{{…}}`, not `{} {{…}}`",
+                        type_name, type_name
+                    ),
+                    "the struct pattern needs a dot before the brace (D-DOTCTOR1)".to_string(),
+                    format!("write `{}.{{…}}` instead", type_name),
+                    Some(brace_span),
+                ));
                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
                 let mut fields = Vec::new();
                 if !matches!(self.peek().kind, TokKind::RBrace) {

@@ -160,11 +160,11 @@ enum Light {
     Green
 }
 
-comptime P = Pair {left: 7, right: "seven"}
+comptime P = Pair.{left: 7, right: "seven"}
 comptime L = Light.Green
 
 fn main() {
-    p @= Pair {left: 7, right: "seven"}
+    p @= Pair.{left: 7, right: "seven"}
     l @= Light.Green
     print("{P.left}")
     print("{p.left}")

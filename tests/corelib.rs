@@ -620,11 +620,11 @@ struct Id<K> {
 }
 
 fn main() {
-    wi @= Wrap<Int> { value: 7 }
+    wi @= Wrap<Int>.{ value: 7 }
     print(json.to_string(wi))
     back @= json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
-    id @= Id<Wrap<Int>> { raw: 9, marker: null }
+    id @= Id<Wrap<Int>>.{ raw: 9, marker: null }
     print(json.to_string(id))
     rid @= json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)

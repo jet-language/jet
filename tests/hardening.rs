@@ -53,7 +53,7 @@ struct Greeter {
 }
 
 fn main() {
-    g @= Greeter { prefix: "hi" }
+    g @= Greeter.{ prefix: "hi" }
     name @= "bob"
     print(g.greet(name))
 }
@@ -74,7 +74,7 @@ struct P {
 }
 
 fn main() {
-    p @= P { name: "x" }
+    p @= P.{ name: "x" }
     s @= p.name
     t @= p.name
     print(s)
@@ -142,7 +142,7 @@ struct S {
 }
 
 fn main() {
-    s := S { scores: [:] }
+    s := S.{ scores: [:] }
     s.scores["a"] = 1
     print(s.scores["a"])
 }
@@ -164,7 +164,7 @@ struct S {
 }
 
 fn main() {
-    s := S { scores: [:] }
+    s := S.{ scores: [:] }
     print(s.scores.len())
 }
 "#;
@@ -203,7 +203,7 @@ struct Bag {
 }
 
 fn main() {
-    b @= Bag { n: 1 }
+    b @= Bag.{ n: 1 }
     b.poke()
 }
 "#,
@@ -296,7 +296,7 @@ struct Bag {
 }
 
 fn main() {
-    b := Bag { items: [0] }
+    b := Bag.{ items: [0] }
     b.add(5)
     print(b.items.len())
 }
@@ -337,7 +337,7 @@ fn eat(v: ^NoClone) {
 }
 
 fn main() {
-    v @= NoClone { n: 1 }
+    v @= NoClone.{ n: 1 }
     eat(v)
 }
 "#;
@@ -379,7 +379,7 @@ fn bump(n: ~Int) {
 }
 
 fn main() {
-    s @= S { n: 1 }
+    s @= S.{ n: 1 }
     bump(~s.n)
 }
 "#,
@@ -432,12 +432,12 @@ fn imported_struct_constructs_and_reads_fields() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"shapes\"\nfn main() {\n    p @= shapes.Point { x: 1, y: 2 }\n    print(p.x)\n}\n",
+        "use \"shapes\"\nfn main() {\n    p @= shapes.Point.{ x: 1, y: 2 }\n    print(p.x)\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
     assert!(
-        rust.contains("user_shapes::user_Point { user_x:"),
+        rust.contains("user_shapes::user_Point { user_x:") || rust.contains("user_shapes::user_Point{user_x:"),
         "cross-module struct literal must match the declaration: {rust}"
     );
     assert!(

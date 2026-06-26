@@ -467,8 +467,9 @@ impl<'a> Fmt<'a> {
             BindPattern::Struct {
                 type_name, fields, ..
             } => {
+                // D-DOTCTOR1: emit `Type.{ x, y }` (auto-fixes E0320 recovery).
                 self.write(type_name);
-                self.write("{");
+                self.write(".{");
                 for (i, f) in fields.iter().enumerate() {
                     if i > 0 {
                         self.write(", ");

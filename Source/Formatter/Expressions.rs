@@ -360,24 +360,32 @@ impl<'a> Fmt<'a> {
                 type_args,
                 import_ns,
                 fields,
+                inferred,
                 ..
             } => {
-                if let Some(ns) = import_ns {
-                    self.write(ns.as_str());
-                    self.write(".");
-                }
-                self.write(type_name);
-                if !type_args.is_empty() {
-                    self.write("<");
-                    for (i, a) in type_args.iter().enumerate() {
-                        if i > 0 {
-                            self.write(", ");
-                        }
-                        self.fmt_type(a);
+                // D-DOTCTOR1: emit `Type.{ … }` (named) or `.{ … }` (inferred).
+                // The formatter is also the auto-fixer for E0320: any old `Type { … }`
+                // (recovered with `inferred: false`) is re-emitted in the new form.
+                if *inferred {
+                    // `.{ field: val, … }` — type inferred from context.
+                } else {
+                    if let Some(ns) = import_ns {
+                        self.write(ns.as_str());
+                        self.write(".");
                     }
-                    self.write(">");
+                    self.write(type_name);
+                    if !type_args.is_empty() {
+                        self.write("<");
+                        for (i, a) in type_args.iter().enumerate() {
+                            if i > 0 {
+                                self.write(", ");
+                            }
+                            self.fmt_type(a);
+                        }
+                        self.write(">");
+                    }
                 }
-                self.write("{");
+                self.write(".{");
                 for (i, (name, _, expr)) in fields.iter().enumerate() {
                     if i > 0 {
                         self.write(", ");

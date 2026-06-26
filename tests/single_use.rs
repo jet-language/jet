@@ -11,7 +11,7 @@ const LOCK: &str = r#"
     resource: String,
 }
 fn acquire(resource: String) -> Lock {
-    return Lock { resource: resource }
+    return Lock.{ resource: resource }
 }
 fn release(lock: ^Lock) {
     print(lock.resource)

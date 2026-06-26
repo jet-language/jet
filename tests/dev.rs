@@ -308,14 +308,14 @@ fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
     jet::Loader::load_entry(p.to_str().unwrap()).expect("bundle should load")
 }
 
-const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn main() {\n    print(f(P {x: 1}))\n}\n";
+const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn main() {\n    print(f(P.{x: 1}))\n}\n";
 
 /// A body-only edit keeps the type surface stable → swap (Ok).
 #[test]
 fn body_only_edit_is_type_stable() {
     let old = bundle_of(STRUCT_OLD, "stable_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x + 1\n}\nfn main() {\n    print(f(P {x: 2}))\n}\n",
+        "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x + 1\n}\nfn main() {\n    print(f(P.{x: 2}))\n}\n",
         "stable_new",
     );
     assert!(
@@ -329,7 +329,7 @@ fn body_only_edit_is_type_stable() {
 fn struct_field_change_emits_e2210() {
     let old = bundle_of(STRUCT_OLD, "field_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn main() {\n    print(f(P {x: 1, y: 2}))\n}\n",
+        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn main() {\n    print(f(P.{x: 1, y: 2}))\n}\n",
         "field_new",
     );
     match jet::Sema::HotSwap::type_stable_check(&old, &new, "main") {

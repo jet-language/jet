@@ -52,7 +52,7 @@ mod tests {
     fn evaluates_plain_scalar_and_packages() {
         let src = r#"
 module dev {
-    env.dev: Env {
+    env.dev: Env.{
         packages: [default.[ripgrep, fd], unstable.neovim],
         prompt: "wordstats",
     }
@@ -82,7 +82,7 @@ module dev {
     fn evaluates_computed_scalar_via_if_else() {
         let src = r#"
 module dev {
-    env.dev: Env {
+    env.dev: Env.{
         prompt: if 3 > 2 { "yes" } else { "no" },
     }
 }
@@ -99,7 +99,7 @@ module dev {
     fn disabled_module_is_skipped() {
         let src = r#"
 module _gaming {
-    env.gaming: Env {
+    env.gaming: Env.{
         prompt: "should not appear",
     }
 }
@@ -110,19 +110,19 @@ module _gaming {
 
     #[test]
     fn wrong_namespace_type_is_a_pinned_diagnostic() {
-        let src = "\nmodule dev {\n    env.dev: System {\n        prompt: \"wrong type\",\n    }\n}\n";
+        let src = "\nmodule dev {\n    env.dev: System.{\n        prompt: \"wrong type\",\n    }\n}\n";
         let err = evaluate_source(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0966");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
         assert_eq!(
             rendered,
-            "Error [E0966]: expected a `Env` literal here, found `System`\n  --> env.jet:3:14\n    |\n  3 |     env.dev: System {\n    |              ^^^^^^^^\n Why: a contribution to this namespace must use the matching type `Env`\n Fix: change `System { … }` to `Env { … }`\n"
+            "Error [E0966]: expected a `Env` literal here, found `System`\n  --> env.jet:3:14\n    |\n  3 |     env.dev: System.{\n    |              ^^^^^^^^\n Why: a contribution to this namespace must use the matching type `Env`\n Fix: change `System.{…}` to `Env.{…}`\n"
         );
     }
 
     #[test]
     fn ambient_io_in_build_is_e3402() {
-        let src = "\nmodule dev {\n    env.dev: Env {\n        prompt: read_file(\"/etc/hostname\"),\n    }\n}\n";
+        let src = "\nmodule dev {\n    env.dev: Env.{\n        prompt: read_file(\"/etc/hostname\"),\n    }\n}\n";
         let err = evaluate_source(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E3402");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
@@ -150,7 +150,7 @@ module _gaming {
         let src = r#"
 module dev {
     sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
-    env.dev: Env {
+    env.dev: Env.{
         packages: [default.[ripgrep, fd]],
         prompt: "wordstats",
     }
@@ -175,7 +175,7 @@ module dev {
         let src = r#"
 module dev {
     sources: { up: github@acme/jet-pkgs/v1 }
-    env.dev: Env { packages: [up.hello] }
+    env.dev: Env.{ packages: [up.hello] }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -188,7 +188,7 @@ module dev {
         let src = r#"
 module dev {
     sources: { default: nixpkgs@nixpkgs-unstable }
-    env.dev: Env { packages: [default.fd] }
+    env.dev: Env.{ packages: [default.fd] }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -200,7 +200,7 @@ module dev {
         let src = r#"
 module dev {
     sources: { default: nixpkgs@nixpkgs-unstable }
-    env.dev: Env { packages: [ripgrep] }
+    env.dev: Env.{ packages: [ripgrep] }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -209,7 +209,7 @@ module dev {
 
     #[test]
     fn evaluate_env_rejects_non_provider_source_ref() {
-        let src = "\nmodule dev {\n    sources: { default: nixos-24.05 }\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let src = "\nmodule dev {\n    sources: { default: nixos-24.05 }\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0968");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
@@ -224,11 +224,11 @@ module dev {
         let src = r#"
 module a {
     sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
-    env.dev: Env { packages: [default.ripgrep] }
+    env.dev: Env.{ packages: [default.ripgrep] }
 }
 module b {
     sources: { default: github@NixOS/nixpkgs/nixos-23.11 }
-    env.dev: Env { packages: [default.fd] }
+    env.dev: Env.{ packages: [default.fd] }
 }
 "#;
         let err = evaluate_env(src, &base_dir()).unwrap_err();
@@ -239,12 +239,12 @@ module b {
     fn merges_packages_across_modules_and_dedupes() {
         let src = r#"
 module a {
-    env.dev: Env {
+    env.dev: Env.{
         packages: [default.ripgrep],
     }
 }
 module b {
-    env.dev: Env {
+    env.dev: Env.{
         packages: [default.ripgrep, default.fd],
     }
 }
@@ -267,12 +267,12 @@ module b {
     fn conflicting_scalar_contributions_are_a_merge_error() {
         let src = r#"
 module a {
-    env.dev: Env {
+    env.dev: Env.{
         prompt: "one",
     }
 }
 module b {
-    env.dev: Env {
+    env.dev: Env.{
         prompt: "two",
     }
 }
@@ -297,10 +297,10 @@ module b {
         std::fs::create_dir_all(dir.join("modules")).unwrap();
         std::fs::write(
             dir.join("modules/tools.jet"),
-            "module tools { env.dev: Env { packages: [default.jq] } }",
+            "module tools { env.dev: Env.{ packages: [default.jq] } }",
         )
         .unwrap();
-        let src = "module dev {\n    sources: { default: nixpkgs@nixpkgs-unstable }\n    imports: find(\"./modules\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let src = "module dev {\n    sources: { default: nixpkgs@nixpkgs-unstable }\n    imports: find(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
         let plan = evaluate_env(src, &dir).unwrap();
         assert_eq!(plan.package_refs, vec!["default:ripgrep", "default:jq"]);
         assert_eq!(plan.table.upstream("default"), Some("nixpkgs:nixpkgs-unstable"));
@@ -309,7 +309,7 @@ module b {
 
     #[test]
     fn find_missing_directory_is_a_pinned_diagnostic() {
-        let src = "\nmodule dev {\n    imports: find(\"./nope\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let src = "\nmodule dev {\n    imports: find(\"./nope\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
         let dir = fresh_dir("find-missing");
         let err = evaluate_env(src, &dir).unwrap_err();
         assert_eq!(err.code, "E0970");
@@ -322,7 +322,7 @@ module b {
 
     #[test]
     fn non_find_import_directive_is_e0969() {
-        let src = "\nmodule dev {\n    imports: gather(\"./modules\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let src = "\nmodule dev {\n    imports: gather(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0969");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
@@ -454,17 +454,17 @@ module net {
         assert_eq!(plan.images[0].from, "my-host");
     }
 
-    /// U18: an explicit `System { … }` / `Service { … }` / `Image { … }` is still
+    /// U18: an explicit `System.{ … }` / `Service { … }` / `Image { … }` is still
     /// legal alongside the inferred bare form.
     #[test]
     fn explicit_type_names_still_parse() {
         let src = r#"
 module m {
-    system.box: System {
+    system.box: System.{
         target: linux.arm64,
-        services: { sshd: Service { enable: false } },
+        services: { sshd: Service.{ enable: false } },
     }
-    image.box_iso: Image { from: system.box }
+    image.box_iso: Image.{ from: system.box }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -565,10 +565,10 @@ module m {
         std::fs::create_dir_all(dir.join("modules")).unwrap();
         std::fs::write(
             dir.join("modules/nested.jet"),
-            "module nested {\n    imports: find(\"./more\")\n    env.dev: Env { packages: [default.jq] }\n}\n",
+            "module nested {\n    imports: find(\"./more\")\n    env.dev: Env.{ packages: [default.jq] }\n}\n",
         )
         .unwrap();
-        let src = "module dev {\n    imports: find(\"./modules\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let src = "module dev {\n    imports: find(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
         let err = evaluate_env(src, &dir).unwrap_err();
         assert_eq!(err.code, "E0971");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));

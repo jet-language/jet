@@ -144,7 +144,7 @@ fn add(a: Int, b: Int) -> Int {
     return (a + b)
 }
 fn main() {
-    c @= Counter { n: 41 }
+    c @= Counter.{ n: 41 }
     print(add(c.bumped(), 0))
 }
 ";
@@ -280,10 +280,10 @@ fn sum_pt(p: Point) -> Int {
     return (p.x + p.y)
 }
 fn origin() -> Point {
-    return Point { x: 0, y: 0 }
+    return Point.{ x: 0, y: 0 }
 }
 fn main() {
-    p @= Point { x: 3, y: 4 }
+    p @= Point.{ x: 3, y: 4 }
     print(sum_pt(p))
     print(p.x)
     o @= origin()
@@ -313,7 +313,7 @@ fn describe(p: Person) {
 }
 fn main() {
     label @= \"Ada\"
-    p @= Person { name: label, age: 36 }
+    p @= Person.{ name: label, age: 36 }
     describe(p)
     print(p.age)
 }
@@ -324,7 +324,7 @@ fn main() {
 }
 
 /// Nested struct: a struct field whose type is itself a covered struct. Both the
-/// nested literal (`Outer { inner: Inner { … }, … }`) and the chained field read
+/// nested literal (`Outer.{ inner: Inner { … }, … }`) and the chained field read
 /// (`o.inner.v`) are covered, so `deep` and `main` route through the TIR.
 #[test]
 fn nested_struct_literal_and_chained_field() {
@@ -343,7 +343,7 @@ fn deep(o: Outer) -> Int {
     return (o.inner.v + o.label)
 }
 fn main() {
-    o @= Outer { inner: Inner { v: 10 }, label: 5 }
+    o @= Outer.{ inner: Inner.{ v: 10 }, label: 5 }
     print(deep(o))
     print(o.inner.v)
 }
@@ -589,7 +589,7 @@ fn name_of(p: Person) -> String {
     return p.name
 }
 fn main() {
-    p @= Person { name: \"Grace\", age: 40 }
+    p @= Person.{ name: \"Grace\", age: 40 }
     print(name_of(p))
 }
 ";
@@ -619,7 +619,7 @@ fn run(c: Calc) -> Int {
     return c.add(10, 20)
 }
 fn main() {
-    c @= Calc { base: 1 }
+    c @= Calc.{ base: 1 }
     print(run(c))
 }
 ";
@@ -649,7 +649,7 @@ fn run(b: Crate) -> String {
     return b.combine(name)
 }
 fn main() {
-    b @= Crate { label: \"t\" }
+    b @= Crate.{ label: \"t\" }
     print(run(b))
 }
 ";
@@ -682,7 +682,7 @@ fn describe(d: Dog) -> String {
     return d.label()
 }
 fn main() {
-    d @= Dog { sound: \"woof\" }
+    d @= Dog.{ sound: \"woof\" }
     print(describe(d))
 }
 ";
@@ -763,7 +763,7 @@ struct Counter {
     n: Int
 
     fn make(v: Int) -> Counter {
-        return Counter { n: v }
+        return Counter.{ n: v }
     }
     fn value(self) -> Int {
         return self.n
@@ -795,7 +795,7 @@ struct Acc {
     }
 }
 fn main() {
-    a := Acc { total: 7 }
+    a := Acc.{ total: 7 }
     print(a.doubled())
 }
 ";
@@ -852,13 +852,13 @@ struct Vec2 {
     y: Int
 
     fn make(x: Int, y: Int) -> Vec2 {
-        return Vec2 { x: x, y: y }
+        return Vec2.{ x: x, y: y }
     }
     fn sum(self) -> Int {
         return (self.x + self.y)
     }
     fn shifted(self, dx: Int) -> Vec2 {
-        return Vec2 { x: (self.x + dx), y: self.y }
+        return Vec2.{ x: (self.x + dx), y: self.y }
     }
 }
 fn main() {
@@ -985,8 +985,8 @@ fn handle_of(a: (Account?)) -> (String?) {
     return a?.profile?.handle
 }
 fn main() {
-    p @= Profile { handle: value(\"jay\") }
-    acct @= Account { profile: p }
+    p @= Profile.{ handle: value(\"jay\") }
+    acct @= Account.{ profile: p }
     print(handle_of(value(acct)) ?? \"none\")
     missing: (Account?) @= null
     print(handle_of(missing) ?? \"none\")
@@ -1492,7 +1492,7 @@ fn describe(s: Shape) -> String {
     return \"{s.name()}: {s.area()}\"
 }
 fn main() {
-    shapes: [Shape] @= [Circle {radius: 2.0}, Square {side: 3.0}]
+    shapes: [Shape] @= [Circle.{radius: 2.0}, Square.{side: 3.0}]
     shapes.each((s) => {
         print(describe(s))
     })
@@ -1978,8 +1978,8 @@ struct Megaphone {
 }
 impl Megaphone: Speaker using inner
 fn main() {
-    v := Voice { prefix: \"HEY\" }
-    m := Megaphone { inner: v }
+    v := Voice.{ prefix: \"HEY\" }
+    m := Megaphone.{ inner: v }
     print(m.say(\"go\"))
 }
 ";
@@ -2114,7 +2114,7 @@ fn first(s: Shape) -> Int {
     return 0
 }
 fn main() {
-    pt @= Point { x: 3, y: 4 }
+    pt @= Point.{ x: 3, y: 4 }
     sh @= mk(pt)
     print(\"{first(sh)}\")
 }
@@ -2145,7 +2145,7 @@ fn mk(xs: [Int]) -> Holder {
     return Holder.Nums(xs)
 }
 fn main() {
-    b @= Bag { items: [1, 2, 3], label: \"x\" }
+    b @= Bag.{ items: [1, 2, 3], label: \"x\" }
     d @= mk([4, 5])
     print(b.label)
 }
@@ -2211,7 +2211,7 @@ fn name_of(rec: Rec) -> &String {
     return rec.name
 }
 fn main() {
-    r @= Rec { name: \"alpha\", value: \"beta\" }
+    r @= Rec.{ name: \"alpha\", value: \"beta\" }
     print(\"{name_of(r)}\")
 }
 ";
@@ -2231,10 +2231,10 @@ fn main() {
 fn prelude_struct_construction() {
     let src = "\
 fn build_resp(body: String) -> HttpResponse {
-    return HttpResponse {status: \"200 OK\", body: body, headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: body, headers: [:]}
 }
 fn build_req() -> HttpRequest {
-    return HttpRequest {method: \"GET\", path: \"/\", body: \"\", headers: [:]}
+    return HttpRequest.{method: \"GET\", path: \"/\", body: \"\", headers: [:]}
 }
 fn main() {
     r @= build_resp(\"hi\")
@@ -2409,13 +2409,13 @@ struct Pair<T> {
     second: T
 }
 fn make_pair<T>(a: T, b: T) -> Pair<T> {
-    return Pair<T> {first: a, second: b}
+    return Pair<T>.{first: a, second: b}
 }
 struct Stack<T> {
     items: [T]
 }
 fn empty_stack<T>() -> Stack<T> {
-    return Stack<T> {items: []}
+    return Stack<T>.{items: []}
 }
 fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
     copy := s
@@ -2453,7 +2453,7 @@ fn foreign_struct_construction() {
     let main_src = "\
 use \"note\"
 fn make() -> Note {
-    return note.Note { title: \"hello\", pages: 3 }
+    return note.Note.{ title: \"hello\", pages: 3 }
 }
 fn main() {
     n := make()
@@ -2646,7 +2646,7 @@ fn handle(req: HttpRequest) -> HttpResponse {
     h @= req.header(\"host\")
     q @= req.param(\"id\")
     body @= \"m={m} p={p}\"
-    return HttpResponse {status: \"200 OK\", body: body, headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: body, headers: [:]}
 }
 fn describe(resp: HttpResponse) -> String {
     s @= resp.status()
@@ -3121,7 +3121,7 @@ pub struct Note {
     pub parent: String?
 }
 pub fn make_note(name: ^String, t: ^NoteType) -> Note {
-    return Note {name: name, note_type: t, parent: null}
+    return Note.{name: name, note_type: t, parent: null}
 }
 pub fn kind_str(n: Note) -> String {
     k @= n.note_type
@@ -3186,7 +3186,7 @@ struct Rect {
 }
 impl Rect {
     fn new(width: Int, height: Int) -> Rect {
-        return Rect{width: width, height: height}
+        return Rect.{width: width, height: height}
     }
     fn area(self) -> Int {
         return (self.width * self.height)
@@ -3240,11 +3240,11 @@ fn http_router_dispatch() {
     let src = "\
 use jet.http as http
 fn handle_root(req: HttpRequest) -> HttpResponse {
-    return HttpResponse {status: \"200 OK\", body: \"welcome\", headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: \"welcome\", headers: [:]}
 }
 fn handle_user(req: HttpRequest) -> HttpResponse {
     id @= req.param(\"id\") ?? \"unknown\"
-    return HttpResponse {status: \"200 OK\", body: \"user={id}\", headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: \"user={id}\", headers: [:]}
 }
 fn main() {
     router @= http.router()
@@ -3362,7 +3362,7 @@ fn main() {
 
 /// c109 Phase 27: a fn-typed VALUE stored in a local + a struct fn-FIELD method
 /// (24_callbacks). `double_fn @= double` binds a bare fn-name as a value; `apply_twice`
-/// takes it (and a lambda) as a Fn arg; `Worker { step: … }` constructs a struct with a
+/// takes it (and a lambda) as a Fn arg; `Worker.{ step: … }` constructs a struct with a
 /// fn-typed field; `w.step(4)` calls THROUGH that field. All route through the TIR.
 #[test]
 fn fn_value_and_struct_fn_field() {
@@ -3383,7 +3383,7 @@ fn main() {
     double_fn @= double
     print(apply_twice(double_fn, 3))
     print(apply_twice((x: Int) => (x + 1), 5))
-    w @= Worker {step: (n: Int) => (n * n)}
+    w @= Worker.{step: (n: Int) => (n * n)}
     print(w.step(4))
 }
 ";
@@ -3590,13 +3590,13 @@ struct Score {
     derive Comparable
 }
 fn main() {
-    shapes: [Shape] @= [Circle {radius: 1.0}, Square {side: 2.0}]
+    shapes: [Shape] @= [Circle.{radius: 1.0}, Square.{side: 2.0}]
     shapes.each((s) => {
         print_area(s)
     })
     nums @= [3, 1, 4, 1, 5]
     print(largest(nums))
-    scores := [Score {points: 10}, Score {points: 20}]
+    scores := [Score.{points: 10}, Score.{points: 20}]
     scores.sort_by((s: Score) => s.points)
     print(scores[0].points)
 }
@@ -3614,7 +3614,7 @@ fn main() {
 /// Rust with E0053 ("incompatible type for trait"). The fix threads `is_view_return` into
 /// the declared return type so the trait says `-> &String` to match the impl. The method
 /// now compiles AND routes through the TIR (the gate's view-trait exclusion is dropped; the
-/// borrow shape is the existing total `TStmt::ViewReturn { wrap }` from Phase 17).
+/// borrow shape is the existing total `TStmt::ViewReturn.{ wrap }` from Phase 17).
 #[test]
 fn view_returning_trait_method() {
     if !have_rustc() {
@@ -3633,7 +3633,7 @@ impl Dog: Named {
     }
 }
 fn main() {
-    d @= Dog { name: \"Rex\" }
+    d @= Dog.{ name: \"Rex\" }
     print(d.label())
 }
 ";
@@ -3691,7 +3691,7 @@ struct Counter {
     }
 }
 fn main() {
-    c: Counter := Counter { n: 0 }
+    c: Counter := Counter.{ n: 0 }
     c.bump()
     c.add(10)
     print(c.n)
@@ -3714,11 +3714,11 @@ fn mut_self_whole_reassignment() {
 struct Counter {
     n: Int
     fn reset(~self) {
-        self = Counter { n: 0 }
+        self = Counter.{ n: 0 }
     }
 }
 fn main() {
-    c: Counter := Counter { n: 9 }
+    c: Counter := Counter.{ n: 9 }
     c.reset()
     print(c.n)
 }
@@ -3749,7 +3749,7 @@ impl Counter: Bumpable {
     }
 }
 fn main() {
-    c: Counter := Counter { n: 0 }
+    c: Counter := Counter.{ n: 0 }
     c.bump()
     c.bump()
     print(c.n)
@@ -3763,7 +3763,7 @@ fn main() {
 /// c109 (recursive struct): a self-referential struct field has Rust type
 /// `Box<…>` (`cx.boxed_edges`), so its construction value must be wrapped
 /// `Box::new(…)` (E0308 otherwise — the AST `emit_struct_lit` was not wrapping).
-/// A nested inline `Tree { value, child: value(Tree { … }) }` exercises the boxed
+/// A nested inline `Tree.{ value, child: value(Tree { … }) }` exercises the boxed
 /// wrap at multiple levels; the boxed field READ stays on the AST path (deref), so
 /// `main` reads only the non-boxed scalar `value`. Both construction levels and
 /// `main` route through the TIR.
@@ -3778,11 +3778,11 @@ struct Tree {
     child: Tree?
 }
 fn main() {
-    root @= Tree {
+    root @= Tree.{
         value: 3,
-        child: value(Tree {
+        child: value(Tree.{
             value: 2,
-            child: value(Tree { value: 1, child: null })
+            child: value(Tree.{ value: 1, child: null })
         })
     }
     print(root.value)
@@ -3794,7 +3794,7 @@ fn main() {
 }
 
 /// c109 (foreign struct literal): an UNqualified cross-module foreign struct literal
-/// (`Note { text: "hi" }` written in an importing module, no `note.` namespace) must
+/// (`Note.{ text: "hi" }` written in an importing module, no `note.` namespace) must
 /// prefix the foreign module (`user_notes::user_Note`) or rustc can't find the type
 /// (E0422). The AST `emit_struct_lit` plain branch only prefixed via `user_type_apply_rust`
 /// once `cx.foreign_types` is consulted (the fix); the TIR reproduces the prefixed head.
@@ -3807,7 +3807,7 @@ fn unqualified_foreign_struct_literal() {
     let main_src = "\
 use \"notes\"
 fn main() {
-    n @= Note { text: \"hi\" }
+    n @= Note.{ text: \"hi\" }
     print(n.text)
 }
 ";
@@ -3847,7 +3847,7 @@ struct Bag {
     }
 }
 fn main() {
-    b @= Bag { items: [1, 2, 3] }
+    b @= Bag.{ items: [1, 2, 3] }
     print(b.get())
     print(b.len())
 }
@@ -3947,11 +3947,11 @@ fn sum(t: Tree) -> Int {
     return total
 }
 fn main() {
-    root @= Tree {
+    root @= Tree.{
         value: 3,
-        child: value(Tree {
+        child: value(Tree.{
             value: 2,
-            child: value(Tree { value: 1, child: null })
+            child: value(Tree.{ value: 1, child: null })
         })
     }
     print(sum(root))
@@ -3963,7 +3963,7 @@ fn main() {
 }
 
 /// c109 (borrowed struct-lit value clone): a struct literal whose field value is a
-/// bare borrowed-in-env non-Copy ident (`Person { name: n }` where `n: String` is a
+/// bare borrowed-in-env non-Copy ident (`Person.{ name: n }` where `n: String` is a
 /// `read` param → `&String`) emitted `user_name: (*user_n)` → rustc E0507 ("cannot
 /// move out of `*user_n`"). `field_read_to_clone` clones owning field READS but not a
 /// bare borrowed ident used as a struct-lit value; the fix clones it in sema's
@@ -3978,7 +3978,7 @@ struct Person {
     name: String
 }
 fn make(n: String) -> Person {
-    return Person { name: n }
+    return Person.{ name: n }
 }
 fn main() {
     p @= make(\"Ada\")
@@ -3990,7 +3990,7 @@ fn main() {
     assert_eq!(stdout, "Ada\n");
 }
 
-/// c109 (B3): a struct-destructuring binding `Type { x, y } @= p` routes through
+/// c109 (B3): a struct-destructuring binding `Type.{ x, y } @= p` routes through
 /// the TIR and prints the field sum (byte-for-byte the AST `BindPattern::Struct`).
 #[test]
 fn struct_destructure_binding() {
@@ -4000,8 +4000,8 @@ fn struct_destructure_binding() {
     let src = "\
 struct Point { x: Int, y: Int }
 fn main() {
-    p @= Point { x: 1, y: 2 }
-    Point { x, y } @= p
+    p @= Point.{ x: 1, y: 2 }
+    Point.{ x, y } @= p
     print(x + y)
 }
 ";
@@ -4053,7 +4053,7 @@ fn firstof(xs: [Int#3]) -> Int {
 }
 fn main() {
     print(firstof(double.[1, 2, 3]))
-    g @= Grid { row: double.[1, 2, 3] }
+    g @= Grid.{ row: double.[1, 2, 3] }
     print(g.row[1])
 }
 ";
@@ -4080,9 +4080,9 @@ fn f(h: Holder) -> Int {
     }
 }
 fn main() {
-    hold @= Holder { val: value(5) }
+    hold @= Holder.{ val: value(5) }
     print(f(hold))
-    empty @= Holder { val: null }
+    empty @= Holder.{ val: null }
     print(f(empty))
 }
 ";
@@ -4238,7 +4238,7 @@ struct P {
 }
 
 fn main() {
-    p @= P { name: \"x\" }
+    p @= P.{ name: \"x\" }
     s @= p.name
     t @= p.name
     print(s)
@@ -4272,7 +4272,7 @@ struct S {
 }
 
 fn main() {
-    s := S { scores: [:] }
+    s := S.{ scores: [:] }
     s.scores[\"a\"] = 1
     print(s.scores[\"a\"])
 }
@@ -4304,7 +4304,7 @@ struct S {
 }
 
 fn main() {
-    s := S { scores: [:] }
+    s := S.{ scores: [:] }
     print(s.scores.len())
 }
 ";
@@ -4340,11 +4340,11 @@ enum Light {
     Green
 }
 
-comptime P = Pair {left: 7, right: \"seven\"}
+comptime P = Pair.{left: 7, right: \"seven\"}
 comptime L = Light.Green
 
 fn main() {
-    p @= Pair {left: 7, right: \"seven\"}
+    p @= Pair.{left: 7, right: \"seven\"}
     l @= Light.Green
     print(\"{P.left}\")
     print(\"{p.left}\")
@@ -4484,8 +4484,8 @@ fn total(ps: [P]) -> Float {
     return s
 }
 fn main() {
-    ps: [P] := [P { x: 0.0, mass: 1.0 }, P { x: 1.0, mass: 2.0 }]
-    ps.push(P { x: 2.0, mass: 3.0 })
+    ps: [P] := [P.{ x: 0.0, mass: 1.0 }, P.{ x: 1.0, mass: 2.0 }]
+    ps.push(P.{ x: 2.0, mass: 3.0 })
     print(ps.len())
     print(ps[2].x)
     print(ps[1].mass)
@@ -4540,8 +4540,8 @@ struct Pt { a: Int, b: Int }
 #[Codable]
 struct PlainPt { a: Int, b: Int }
 fn main() {
-    cs: [Pt] := [Pt { a: 1, b: 2 }, Pt { a: 3, b: 4 }]
-    ps: [PlainPt] := [PlainPt { a: 1, b: 2 }, PlainPt { a: 3, b: 4 }]
+    cs: [Pt] := [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]
+    ps: [PlainPt] := [PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 }]
     print(json.to_string(cs) == json.to_string(ps))
     print(json.to_string(cs))
 }
@@ -4619,7 +4619,7 @@ fn user_type_shadows_builtin_math_name() {
     let src = "\
 struct Vec3 { x: Int, y: Int }
 fn main() {
-    v: Vec3 := Vec3 { x: 3, y: 4 }
+    v: Vec3 := Vec3.{ x: 3, y: 4 }
     print(v.x)
     print(v.y)
 }

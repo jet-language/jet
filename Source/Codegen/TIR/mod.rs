@@ -1545,7 +1545,7 @@ struct Person {
     name: String
 }
 fn make(n: String) -> Person {
-    return Person { name: n }
+    return Person.{ name: n }
 }
 ";
         assert!(covers(src, "make"));
@@ -1576,7 +1576,7 @@ fn make(n: String) -> Person {
         // param/return type and the turbofish construction (`user_Pair::<T> { … }`) are now
         // covered. The struct's type-var fields are admitted by `field_ty_covered`; the
         // turbofish head is resolved at lowering.
-        let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) -> Pair<T> {\n return Pair<T> {first: a, second: b}\n}\n";
+        let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) -> Pair<T> {\n return Pair<T>.{first: a, second: b}\n}\n";
         assert!(covers(src, "mk"));
     }
 
@@ -1634,7 +1634,7 @@ fn make(n: String) -> Person {
         // (E0422) before; the fix prefixes the foreign module.
         let src = "\
 fn mk() {
-    n @= Note { text: \"hi\" }
+    n @= Note.{ text: \"hi\" }
     print(n.text)
 }
 ";
@@ -1704,7 +1704,7 @@ fn mk() {
     #[test]
     fn rejects_method_call_in_body() {
         // A method call (`.bumped()`) is not a covered construct.
-        let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x @= C { n: 1 }\n return x.bumped()\n}\n";
+        let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x @= C.{ n: 1 }\n return x.bumped()\n}\n";
         assert!(!covers(src, "caller"));
     }
 
@@ -1714,7 +1714,7 @@ fn mk() {
     fn covers_struct_param_and_scalar_field_read() {
         // A plain struct param with a scalar field read (borrow position) and a
         // struct literal + struct return are all in the subset.
-        let src = "struct Point { x: Int\n y: Int }\nfn sum_pt(p: Point) -> Int {\n return (p.x + p.y)\n}\nfn origin() -> Point {\n return Point { x: 0, y: 0 }\n}\n";
+        let src = "struct Point { x: Int\n y: Int }\nfn sum_pt(p: Point) -> Int {\n return (p.x + p.y)\n}\nfn origin() -> Point {\n return Point.{ x: 0, y: 0 }\n}\n";
         assert!(covers(src, "sum_pt"));
         assert!(covers(src, "origin"));
     }
@@ -1750,7 +1750,7 @@ fn mk() {
         // c109 Phase 19: a generic struct literal (`Pair<Int> { … }`) carries non-empty
         // `type_args` (the turbofish `user_Pair::<i64> { … }`) and its field types reference
         // type vars — both now covered. The owning fn routes through the TIR.
-        let src = "struct Pair<T> { first: T\n second: T }\nfn mk() -> Pair<Int> {\n return Pair<Int> { first: 1, second: 2 }\n}\n";
+        let src = "struct Pair<T> { first: T\n second: T }\nfn mk() -> Pair<Int> {\n return Pair<Int>.{ first: 1, second: 2 }\n}\n";
         assert!(covers(src, "mk"));
     }
 
@@ -2082,7 +2082,7 @@ fn mk() {
     #[test]
     fn covers_static_constructor() {
         // A static (no-`self`) associated function returning the owning type.
-        let src = "struct Cell {\n n: Int\n fn make(v: Int) -> Cell {\n return Cell { n: v }\n }\n}\n";
+        let src = "struct Cell {\n n: Int\n fn make(v: Int) -> Cell {\n return Cell.{ n: v }\n }\n}\n";
         assert!(covers_method(src, "Cell", "make"));
     }
 
@@ -2098,7 +2098,7 @@ fn mk() {
         // D-MUTSELF1: a `mut self` method that reassigns `self` (`self = …`) is NOW
         // covered — the `mut self` slot derefs (`(*self)`), so the LHS lowers to
         // `(*self) = …` (the prior AST-path I2 hole is closed).
-        let src = "struct Acc {\n n: Int\n fn reset(~self) {\n self = Acc { n: 0 }\n }\n}\n";
+        let src = "struct Acc {\n n: Int\n fn reset(~self) {\n self = Acc.{ n: 0 }\n }\n}\n";
         assert!(covers_method(src, "Acc", "reset"));
     }
 
@@ -2377,7 +2377,7 @@ fn mk() {
         let src = "\
 struct Rect { width: Int height: Int }
 impl Rect {
-    fn new(width: Int, height: Int) -> Rect { return Rect{width: width, height: height} }
+    fn new(width: Int, height: Int) -> Rect { return Rect.{width: width, height: height} }
 }
 fn build() -> Rect { return Rect.new(4, 3) }
 ";
@@ -2435,7 +2435,7 @@ fn greet() -> String { return input() }
         // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
         // `P{x} @= p` struct-destructure are both covered; the fn routes through TIR.
         assert!(covers(
-            "struct P { x: Int }\nfn f() { p @= P{x: 1}\n#Caps(Io) { P{x} @= p\nprint(x) } }",
+            "struct P { x: Int }\nfn f() { p @= P.{x: 1}\n#Caps(Io) { P.{x} @= p\nprint(x) } }",
             "f"
         ));
     }
@@ -2470,7 +2470,7 @@ fn greet() -> String { return input() }
         // when the init is in-subset — the AST `BindPattern::Struct` arm is covered
         // byte-for-byte (per-field type from `cx.struct_fields`).
         assert!(covers(
-            "struct Point { x: Int, y: Int }\nfn f() { p @= Point { x: 1, y: 2 }\nPoint { x, y } @= p\nprint(x + y) }",
+            "struct Point { x: Int, y: Int }\nfn f() { p @= Point.{ x: 1, y: 2 }\nPoint.{ x, y } @= p\nprint(x + y) }",
             "f"
         ));
     }
@@ -2859,7 +2859,7 @@ struct PR {
     note: String?
 }
 fn mk(p: String) -> PR {
-    return PR {file_path: p, note: null}
+    return PR.{file_path: p, note: null}
 }
 ";
         assert!(covers(src, "mk"));
@@ -3028,7 +3028,7 @@ struct Tree {
     child: Tree?
 }
 fn build() {
-    root @= Tree { value: 1, child: value(Tree { value: 2, child: null }) }
+    root @= Tree.{ value: 1, child: value(Tree.{ value: 2, child: null }) }
     print(root.value)
 }
 ";
@@ -3075,7 +3075,7 @@ struct P {
 }
 
 fn main() {
-    p @= P { name: "x" }
+    p @= P.{ name: "x" }
     s @= p.name
     t @= p.name
     print(s)
@@ -3099,7 +3099,7 @@ struct S {
 }
 
 fn main() {
-    s := S { scores: [:] }
+    s := S.{ scores: [:] }
     s.scores["a"] = 1
     print(s.scores["a"])
 }
@@ -3122,7 +3122,7 @@ struct S {
 }
 
 fn main() {
-    s := S { scores: [:] }
+    s := S.{ scores: [:] }
     print(s.scores.len())
 }
 "#;
@@ -3148,7 +3148,7 @@ enum Light {
     Green
 }
 
-comptime P = Pair {left: 7, right: "seven"}
+comptime P = Pair.{left: 7, right: "seven"}
 comptime L = Light.Green
 
 fn main() {

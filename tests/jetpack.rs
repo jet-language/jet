@@ -494,7 +494,7 @@ fn typed_core_source_inferred_from_pack_jet() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env {{\n        packages: [mine.hello],\n    }}\n}}\n",
+            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env.{{\n        packages: [mine.hello],\n    }}\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -549,7 +549,7 @@ fn core_provider_builds_library_package_without_nix() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env {{\n        packages: [mine.mathlib],\n    }}\n}}\n",
+            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env.{{\n        packages: [mine.mathlib],\n    }}\n}}\n",
             repo.to_string_lossy()
         ),
     )

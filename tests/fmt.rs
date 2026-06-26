@@ -265,21 +265,21 @@ fn fmt_rewrites_retired_or_fallback_to_question_question() {
 
 #[test]
 fn fmt_preserves_destructuring_targets() {
-    // S74: `val`/`var` destructuring of a struct and a list round-trips.
-    // S29-FLUSH: the canonical destructuring form is flush — `Point{x, y}` — so a
-    // spaced input normalizes to the flush form on format.
+    // S74: destructuring of a struct and a list round-trips.
+    // D-DOTCTOR1: the canonical destructuring form is `Point.{x, y}`; old dotless
+    // form (E0320 recovery) is auto-fixed to the new form by fmt.
     let src = r#"struct Point { x: Int, y: Int }
 
 fn main() {
-    Point { x, y } @= make()
+    Point.{ x, y } @= make()
     [a, b, c] := nums()
     print("{x}{y}{a}{b}{c}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept destructuring targets");
     assert!(
-        out.contains("Point{x, y} @= make()"),
-        "expected flush struct destructuring (S29-FLUSH), got:\n{out}"
+        out.contains("Point.{x, y} @= make()"),
+        "expected dot struct destructuring (D-DOTCTOR1), got:\n{out}"
     );
     assert!(
         out.contains("[a, b, c] := nums()"),
@@ -291,19 +291,19 @@ fn main() {
 
 #[test]
 fn fmt_flush_construction() {
-    // S29-FLUSH: a struct literal hugs its field block — `Point{x: 1, y: 2}`, no
-    // space before the brace. A spaced input normalizes to the flush form.
+    // D-DOTCTOR1: the canonical form is `Point.{x: 1, y: 2}` (dot before brace).
+    // Old dotless input (E0320 recovery) is auto-fixed by fmt.
     let src = r#"struct Point { x: Int, y: Int }
 
 fn main() {
-    p @= Point { x: 1, y: 2 }
+    p @= Point.{ x: 1, y: 2 }
     print("{p.x}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept struct construction");
     assert!(
-        out.contains("Point{x: 1, y: 2}"),
-        "expected flush construction (S29-FLUSH), got:\n{out}"
+        out.contains("Point.{x: 1, y: 2}"),
+        "expected dot construction (D-DOTCTOR1), got:\n{out}"
     );
     assert!(
         !out.contains("Point {x: 1"),
@@ -690,7 +690,7 @@ struct Reservation {
     guest: String
 
     #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
-        return Reservation{guest: guest}
+        return Reservation.{guest: guest}
     }
 
     #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
@@ -800,4 +800,39 @@ fn main() {
     );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "comptime block formatting must be idempotent");
+}
+
+#[test]
+fn fmt_dot_construction_d_dotctor1() {
+    // D-DOTCTOR1 (ratified 2026-06-25): named struct construction `Type.{ … }` and
+    // inferred `.{ … }` survive fmt unchanged (stability), and the old dotless
+    // `Type { … }` form (E0320 recovery) is auto-fixed to `Type.{ … }`.
+
+    // Named form round-trips unchanged.
+    let named = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p @= Pt.{ x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+    let out_named = jet::format_source(named).expect("fmt should accept Pt.{ … }");
+    assert!(
+        out_named.contains("Pt.{"),
+        "named form `Pt.{{` must survive fmt, got:\n{out_named}"
+    );
+    assert!(
+        !out_named.contains("Pt {x") && !out_named.contains("p @= Pt {"),
+        "fmt must not regress to dotless construction form, got:\n{out_named}"
+    );
+    let twice_named = jet::format_source(&out_named).expect("named form must re-fmt");
+    assert_eq!(out_named, twice_named, "named form must be fmt-idempotent");
+
+    // Old dotless form (E0320 recovery) is auto-fixed to `Type.{`.
+    let old = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p @= Pt { x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+    let out_old = jet::format_source(old).expect("fmt should recover dotless E0320 form");
+    assert!(
+        out_old.contains("Pt.{"),
+        "E0320 recovery must auto-fix to `Pt.{{`, got:\n{out_old}"
+    );
+    assert!(
+        !out_old.contains("Pt {x") && !out_old.contains("p @= Pt {"),
+        "dotless construction form must not survive fmt, got:\n{out_old}"
+    );
+    let twice_old = jet::format_source(&out_old).expect("fixed form must re-fmt");
+    assert_eq!(out_old, twice_old, "fixed form must be fmt-idempotent");
 }

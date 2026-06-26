@@ -60,9 +60,9 @@ pub(super) fn not_a_namespace_literal(expected: &str, span: Span) -> Diagnostic 
         "E0966",
         format!("a module contribution must be a `{expected}` literal"),
         format!(
-            "a contribution's value describes its namespace with a typed struct literal, e.g. `env.dev: {expected} {{ … }}`"
+            "a contribution's value describes its namespace with a typed struct literal, e.g. `env.dev: {expected}.{{…}}`"
         ),
-        format!("wrap the value in `{expected} {{ … }}`"),
+        format!("wrap the value in `{expected}.{{…}}`"),
         Some(span),
     )
 }
@@ -72,7 +72,7 @@ pub(super) fn wrong_namespace_type(expected: &str, got: &str, span: Span) -> Dia
         "E0966",
         format!("expected a `{expected}` literal here, found `{got}`"),
         format!("a contribution to this namespace must use the matching type `{expected}`"),
-        format!("change `{got} {{ … }}` to `{expected} {{ … }}`"),
+        format!("change `{got}.{{…}}` to `{expected}.{{…}}`"),
         Some(span),
     )
 }

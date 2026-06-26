@@ -195,6 +195,7 @@ before continuing.
 | E0317 | sema  | D-PATO: or-pattern alternatives bind different names or types |
 | E0318 | parse | C25/D-RANGE2: `..=` in an arm head — Jet's `..` is already inclusive; write `lo..hi` |
 | E0319 | parse | C25/D-RANGE2: `step` in an arm head — `step` is a loop modifier, not an arm construct |
+| E0320 | parse | teaching: `Type { … }` dotless construction → `Type.{ … }` (D-DOTCTOR1) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |

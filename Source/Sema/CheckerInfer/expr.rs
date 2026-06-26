@@ -477,15 +477,41 @@ impl<'a> Checker<'a> {
                 type_args,
                 import_ns,
                 fields,
+                inferred,
                 span,
                 ..
-            } => Some(self.check_struct_lit(
-                type_name,
-                type_args,
-                import_ns.as_deref(),
-                fields,
-                *span,
-            )),
+            } => {
+                // D-DOTCTOR1: inferred `.{ … }` form — resolve type_name from context
+                // and write it back so later passes (TIR lowering, codegen) see it.
+                if *inferred {
+                    match self.expected_type.clone() {
+                        Some(Type::Named(ctx_name)) => {
+                            *type_name = ctx_name;
+                        }
+                        _ => {
+                            self.diags.push(Diagnostic::error(
+                                "E0119",
+                                "`.{ … }` needs a known struct type here".to_string(),
+                                "the inferred construction form requires an expected type \
+                                 from the surrounding context (binding annotation, return type, etc.)"
+                                    .to_string(),
+                                "add a type annotation, e.g. `val x: Point = .{ x: 1, y: 2 }`"
+                                    .to_string(),
+                                Some(*span),
+                            ));
+                            for (_, _, e) in fields.iter_mut() { self.infer(e); }
+                            return None;
+                        }
+                    }
+                }
+                Some(self.check_struct_lit(
+                    type_name,
+                    type_args,
+                    import_ns.as_deref(),
+                    fields,
+                    *span,
+                ))
+            }
             Expr::EnumLit {
                 type_name,
                 variant,

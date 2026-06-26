@@ -530,6 +530,15 @@ impl<'a> Parser<'a> {
                 let full = Span::new(span.start, inner.span().end);
                 Ok(Expr::RawOf(Box::new(inner), full))
             }
+            // D-DOTCTOR1: `.{ … }` inferred struct literal (type from context).
+            // A leading `.` immediately followed by `{` is unambiguous — it is not
+            // valid as a field access (no receiver) or any other production.
+            TokKind::Dot if allow_struct_lit
+                && matches!(self.peek2().kind, TokKind::LBrace) =>
+            {
+                let dot_start = self.bump().span.start; // consume `.`
+                self.struct_lit_inferred(dot_start)
+            }
             _ => self.expr_postfix(allow_struct_lit),
         }
     }
@@ -553,6 +562,23 @@ impl<'a> Parser<'a> {
                         let full = Span::new(expr.span().start, star.end);
                         expr = Expr::Deref(Box::new(expr), full);
                         continue;
+                    }
+                    // D-DOTCTOR1: `alias.Type.{ … }` — named construction through
+                    // an import namespace. `expr` at this point is
+                    // `Expr::Field(Ident(alias), type_name)`.
+                    if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                        let start = expr.span().start;
+                        if let Expr::Field(inner, type_name, _) = &expr {
+                            if let Expr::Ident(alias, _) = inner.as_ref() {
+                                let alias = alias.clone();
+                                let type_name = type_name.clone();
+                                expr = self.struct_lit_after_import(alias, type_name, start)?;
+                                continue;
+                            }
+                        }
+                        // Non-import chain (e.g. `x.Foo.{`): not valid — fall
+                        // through to break so the `{` opens a block.
+                        break;
                     }
                     let (member, member_span) = self.expect_field_name()?;
                     // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)` — a typed
@@ -655,8 +681,8 @@ impl<'a> Parser<'a> {
                     // In a control-flow header (`for … in expr {`, `if cond {`, …)
                     // the `{` opens the body, never a struct literal — even after a
                     // field chain like `recv.field`. Only treat `expr.Type { … }` as
-                    // an import-namespace struct literal when struct literals are
-                    // allowed in this position.
+                    // an old-form import-namespace struct literal (E0320 recovery)
+                    // when struct literals are allowed in this position.
                     let import_lit = if !allow_struct_lit {
                         None
                     } else if let Expr::Field(inner, type_name, _) = &expr {
@@ -669,6 +695,18 @@ impl<'a> Parser<'a> {
                         None
                     };
                     if let Some((alias, type_name)) = import_lit {
+                        // D-DOTCTOR2: old dotless `alias.Type { … }` — E0320 recovery.
+                        let brace_span = self.peek().span;
+                        self.diags.push(Diagnostic::error(
+                            "E0320",
+                            format!(
+                                "struct construction uses `{}.{}.{{…}}`, not `{}.{} {{…}}`",
+                                alias, type_name, alias, type_name
+                            ),
+                            "named construction has a dot before the brace (D-DOTCTOR1)".to_string(),
+                            format!("write `{}.{}.{{…}}` instead", alias, type_name),
+                            Some(brace_span),
+                        ));
                         let start = expr.span().start;
                         expr = self.struct_lit_after_import(alias, type_name, start)?;
                     } else {
@@ -1167,6 +1205,19 @@ impl<'a> Parser<'a> {
                     self.expect_type_args_close(&format!("after `{type_name}<…>`"))?;
                 }
                 if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                    // D-DOTCTOR2: old dotless `Type { … }` form — teaching error E0320.
+                    // Recover: parse the fields as if the user had written `Type.{ … }`.
+                    let brace_span = self.peek().span;
+                    self.diags.push(Diagnostic::error(
+                        "E0320",
+                        format!(
+                            "struct construction uses `{}.{{…}}`, not `{} {{…}}`",
+                            type_name, type_name
+                        ),
+                        "named construction has a dot before the brace (D-DOTCTOR1)".to_string(),
+                        format!("write `{}.{{…}}` instead", type_name),
+                        Some(brace_span),
+                    ));
                     return self.struct_lit_after_name(type_name, type_args, span);
                 }
                 if matches!(self.peek().kind, TokKind::Dot) {
@@ -1186,6 +1237,10 @@ impl<'a> Parser<'a> {
                             Box::new(Expr::Ident(type_name, span)),
                             full,
                         ));
+                    }
+                    // D-DOTCTOR1: `Type.{ … }` named construction.
+                    if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                        return self.struct_lit_after_name(type_name, type_args, span);
                     }
                     let (member, member_span) = self.expect_field_name()?;
                     // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)` — a typed
@@ -1324,6 +1379,7 @@ impl<'a> Parser<'a> {
             import_ns: None,
             as_trait: None,
             fields,
+            inferred: false,
             span: Span::new(start_span.start, end),
         })
     }
@@ -1359,7 +1415,40 @@ impl<'a> Parser<'a> {
             import_ns: Some(alias),
             as_trait: None,
             fields,
+            inferred: false,
             span: Span::new(start, end),
+        })
+    }
+
+    /// D-DOTCTOR1: inferred struct lit `.{ field: val, … }`.
+    /// The leading `.` was already consumed. Parses `{ field: val, … }`.
+    fn struct_lit_inferred(&mut self, dot_start: usize) -> Result<Expr, Diagnostic> {
+        self.expect(TokKind::LBrace, "to open an inferred struct literal")?;
+        let mut fields = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            let (field, field_span) = self.expect_ident("for a field name")?;
+            let value = if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                self.expr()?
+            } else {
+                Expr::Ident(field.clone(), field_span)
+            };
+            fields.push((field, field_span, value));
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        let end = self.peek().span.end;
+        self.bump();
+        Ok(Expr::StructLit {
+            type_name: String::new(),
+            type_args: Vec::new(),
+            import_ns: None,
+            as_trait: None,
+            fields,
+            inferred: true,
+            span: Span::new(dot_start, end),
         })
     }
 

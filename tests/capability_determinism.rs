@@ -35,10 +35,10 @@ fn drain(t: Token) {
 }
 
 fn main() {
-    p := Player { hp: 90, name: "Aria" }
+    p := Player.{ hp: 90, name: "Aria" }
     heal(~p)
     print(name_of(p))
-    tok := Token { id: 7 }
+    tok := Token.{ id: 7 }
     drain(^tok)
 }
 "#;
@@ -75,7 +75,7 @@ fn heal(p: Player) {
 }
 
 fn main() {
-    p := Player { hp: 100 }
+    p := Player.{ hp: 100 }
     heal(~p)
     print(p.hp)
 }
@@ -101,7 +101,7 @@ fn name_of(p: Player) -> String {
 }
 
 fn main() {
-    p := Player { hp: 100, name: "Aria" }
+    p := Player.{ hp: 100, name: "Aria" }
     print(name_of(p))
 }
 "#;
@@ -125,7 +125,7 @@ fn drain(t: Token) {
 }
 
 fn main() {
-    tok := Token { id: 42 }
+    tok := Token.{ id: 42 }
     drain(^tok)
     print("done")
 }

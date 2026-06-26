@@ -404,15 +404,36 @@ impl<'a> Parser<'a> {
     }
 
     /// U18: an optional record type name before `{`. Returns its span when the
-    /// author wrote it (`System { … }` / `Image { … }` / `Service { … }`), `None`
-    /// for a bare `{ … }`. A type name other than `expected` is left for `{` to
-    /// reject, so the message stays about the record shape.
+    /// author wrote it (`System.{ … }` / `Image.{ … }` / `Service.{ … }`), `None`
+    /// for a bare `{ … }`. D-DOTCTOR1: also accepts the old dotless `System { … }`
+    /// form (E0320 recovery — `jet fmt` auto-fixes).
     fn opt_record_type(&mut self, expected: &str) -> Result<Option<Span>, Diagnostic> {
-        if self.peek_is_ident(expected) && matches!(self.peek2().kind, TokKind::LBrace) {
-            Ok(Some(self.bump().span))
-        } else {
-            Ok(None)
+        // D-DOTCTOR1: new form `TypeName.{` — consume Ident and Dot.
+        if self.peek_is_ident(expected)
+            && matches!(self.peek2().kind, TokKind::Dot)
+            && matches!(self.peek3().kind, TokKind::LBrace)
+        {
+            let span = self.bump().span; // consume type name
+            self.bump(); // consume dot
+            return Ok(Some(span));
         }
+        // D-DOTCTOR2 recovery: old dotless `TypeName {` — emit E0320, consume Ident.
+        if self.peek_is_ident(expected) && matches!(self.peek2().kind, TokKind::LBrace) {
+            let span = self.bump().span;
+            let brace_span = self.peek().span;
+            self.diags.push(Diagnostic::error(
+                "E0320",
+                format!(
+                    "struct construction uses `{}.{{…}}`, not `{} {{…}}`",
+                    expected, expected
+                ),
+                "named construction has a dot before the brace (D-DOTCTOR1)".to_string(),
+                format!("write `{}.{{…}}` instead", expected),
+                Some(brace_span),
+            ));
+            return Ok(Some(span));
+        }
+        Ok(None)
     }
 
     /// U11/U12/U13: one field inside a `System { … }` record.

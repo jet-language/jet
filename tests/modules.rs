@@ -1,6 +1,6 @@
 //! Stage 1a — `module name { … }` declarations (U3, unified-ecosystem §4).
 //! Parser-level: the module shell (many per file, leading-`_` disable) and its
-//! typed namespace contributions (`env.dev: Env { … }`). Contribution *values*
+//! typed namespace contributions (`env.dev: Env.{ … }`). Contribution *values*
 //! reuse the existing struct-literal expression parser.
 
 use jet::AST::{Call, Contribution, Expr, Item, Namespace, StrPart};
@@ -15,7 +15,7 @@ fn parse_items(src: &str) -> Vec<Item> {
 fn parses_module_shell_with_contribution() {
     let src = r#"
 module dev {
-    env.dev: Env {
+    env.dev: Env.{
         prompt: "wordstats",
     }
 }
@@ -38,12 +38,12 @@ module dev {
 #[test]
 fn parses_nested_sources_and_imports() {
     // U8: `sources:` / `imports:` nest inside the module body, as siblings of
-    // the `env.dev: Env { … }` contribution (owner, 2026-06-16; amends U4).
+    // the `env.dev: Env.{ … }` contribution (owner, 2026-06-16; amends U4).
     let src = r#"
 module dev {
     sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
     imports: find("./modules")
-    env.dev: Env {
+    env.dev: Env.{
         prompt: "wordstats",
     }
 }
@@ -88,7 +88,7 @@ module dev {
 fn module_without_sources_or_imports_has_empty_fields() {
     let src = r#"
 module dev {
-    env.dev: Env { prompt: "x" }
+    env.dev: Env.{ prompt: "x" }
 }
 "#;
     let items = parse_items(src);
@@ -104,7 +104,7 @@ module dev {
 fn leading_underscore_disables_module() {
     let src = r#"
 module _gaming {
-    system.gaming: System {
+    system.gaming: System.{
         target: linux.x64,
     }
 }
@@ -122,10 +122,10 @@ module _gaming {
 fn many_modules_per_file() {
     let src = r#"
 module laptop {
-    system.laptop: System { target: linux.x64 }
+    system.laptop: System.{ target: linux.x64 }
 }
 module installer {
-    image.installer: Image { from: system.laptop, target: linux.arm64 }
+    image.installer: Image.{ from: system.laptop, target: linux.arm64 }
 }
 "#;
     let items = parse_items(src);

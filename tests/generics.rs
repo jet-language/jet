@@ -30,7 +30,7 @@ fn generic_scalar_matrix() {
         let src = format!(
             r#"
 fn twice<T>(x: T) -> Pair<T> {{
-    return Pair<T> {{ first: x, second: x }}
+    return Pair<T>.{{ first: x, second: x }}
 }}
 
 struct Pair<T> {{
@@ -53,7 +53,7 @@ fn main() {{
 fn generic_fn_with_scalar_types() {
     let src = r#"
 fn twice<T>(x: T) -> Pair<T> {
-    return Pair<T> { first: x, second: x }
+    return Pair<T>.{ first: x, second: x }
 }
 
 struct Pair<T> {

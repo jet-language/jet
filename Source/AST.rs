@@ -1875,16 +1875,22 @@ pub enum Expr {
         /// call shape (their type comes from a `cx` table or is unused).
         resolved_ret: Option<Type>,
     },
-    /// S29: `Type { field: expr, ... }` or `Type<Args> { ... }` or `alias.Type { ... }`.
+    /// D-DOTCTOR1 (ratified 2026-06-25): `Type.{ field: expr, ... }` (named) or
+    /// `.{ field: expr, ... }` (inferred — type from context). Replaces the old
+    /// dotless `Type { … }` form (E0320). Also: `Type<Args>.{ … }` and
+    /// `alias.Type.{ … }` for generic / namespaced structs.
     StructLit {
         type_name: String,
-        /// S45: generic args in `Pair<Int> { … }`.
+        /// S45: generic args in `Pair<Int>.{ … }`.
         type_args: Vec<Type>,
         /// When set, the struct type lives in the imported module `alias`.
         import_ns: Option<String>,
         /// S48: box as `Box<dyn Trait>` when coerced into a trait-object list.
         as_trait: Option<String>,
         fields: Vec<(String, Span, Expr)>,
+        /// `true` for the `.{ … }` inferred form (type resolved by sema from
+        /// the expected-type context). `false` for the `Type.{ … }` named form.
+        inferred: bool,
         span: Span,
     },
     /// S30: `Type.Variant(args)`.

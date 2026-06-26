@@ -59,12 +59,12 @@ pub fn build(dir: String) -> Index ? String {
         if note.parse(full, text) == {
             ok(n) -> {
                 no_err: String? @= null
-                results.push(ParsedResult {file_path: full, note: value(n), error_msg: no_err})
+                results.push(ParsedResult.{file_path: full, note: value(n), error_msg: no_err})
             }
             err(e) -> {
                 msg @= parse_error_msg(e)
                 no_note: Note? @= null
-                results.push(ParsedResult {file_path: full, note: no_note, error_msg: value(msg)})
+                results.push(ParsedResult.{file_path: full, note: no_note, error_msg: value(msg)})
             }
 
         }
@@ -99,7 +99,7 @@ pub fn build(dir: String) -> Index ? String {
         }
     }
     errors.sort()
-    return ok(Index {notes: notes, backlinks: backlinks, errors: errors})
+    return ok(Index.{notes: notes, backlinks: backlinks, errors: errors})
 }
 pub fn dead_links(idx: Index) -> [String] {
     return idx.errors.filter((e) => e.starts_with("dead link:"))

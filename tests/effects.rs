@@ -21,7 +21,7 @@ impl Square: Shape { fn area(self) -> Int { return self.side * self.side; } }
 #Pure fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) #(Io) { print(p); }
 fn run(n: Int) #(Io) { load("{sq(n)}"); }
-fn main() { s @= Square { side: 3 }; print("{s.area()}"); run(2); }
+fn main() { s @= Square.{ side: 3 }; print("{s.area()}"); run(2); }
 "#;
     let plain = r#"
 trait Shape { fn area(self) -> Int; }
@@ -30,7 +30,7 @@ impl Square: Shape { fn area(self) -> Int { return self.side * self.side; } }
 fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) { print(p); }
 fn run(n: Int) { load("{sq(n)}"); }
-fn main() { s @= Square { side: 3 }; print("{s.area()}"); run(2); }
+fn main() { s @= Square.{ side: 3 }; print("{s.area()}"); run(2); }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
@@ -150,7 +150,7 @@ struct Doc { path: String }
 impl Doc: Hasher {
     fn hash(self) -> Int { body @= fs.read(self.path) ?? ""; return body.len(); }
 }
-fn main() { d @= Doc { path: "x" }; print(d.hash()); }
+fn main() { d @= Doc.{ path: "x" }; print(d.hash()); }
 "#;
     assert!(codes(src).contains(&"E0742"), "impl exceeding #Pure bound should be E0742: {:?}", codes(src));
 }
@@ -164,7 +164,7 @@ struct Square { side: Int }
 impl Square: Shape {
     fn area(self) -> Int { return self.side * self.side; }
 }
-fn main() { s @= Square { side: 5 }; print("{s.area()}"); }
+fn main() { s @= Square.{ side: 5 }; print("{s.area()}"); }
 "#;
     assert!(codes(src).is_empty(), "conformant impl should compile: {:?}", codes(src));
 }

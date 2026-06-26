@@ -77,7 +77,7 @@ fn take_prefix_moves_non_clone_capture() {
     let src = r#"
 struct NoClone { label: Int }
 fn main() {
-    item @= NoClone { label: 7 }
+    item @= NoClone.{ label: 7 }
     f @= take(item) (n: Int) => n + item.label
     print(f(1))
 }
@@ -90,7 +90,7 @@ fn fn_field_callback() {
     let src = r#"
 struct Worker { step: fn(Int) -> Int }
 fn main() {
-    w @= Worker { step: (n: Int) => n + 1 }
+    w @= Worker.{ step: (n: Int) => n + 1 }
     print(w.step(4))
 }
 "#;

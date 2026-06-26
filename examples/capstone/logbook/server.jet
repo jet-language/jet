@@ -30,7 +30,7 @@ fn graph_json(idx: Index) -> Json {
 
 fn html_response(body: String) -> HttpResponse {
     empty_hdrs: [String, String] @= [:]
-    return HttpResponse{status: "200 OK", body: body.clone(), headers: empty_hdrs}
+    return HttpResponse.{status: "200 OK", body: body.clone(), headers: empty_hdrs}
 }
 
 fn route(req: HttpRequest, idx: Index) -> HttpResponse {
@@ -46,11 +46,11 @@ fn route(req: HttpRequest, idx: Index) -> HttpResponse {
                 g @= graph_json(idx)
                 body @= json.to_string_pretty(g)
                 hdrs: [String, String] @= ["Content-Type": "application/json"]
-                return HttpResponse{status: "200 OK", body: body, headers: hdrs}
+                return HttpResponse.{status: "200 OK", body: body, headers: hdrs}
             }
             if p == "/health" {
                 empty_hdrs: [String, String] @= [:]
-                return HttpResponse{status: "200 OK", body: "ok", headers: empty_hdrs}
+                return HttpResponse.{status: "200 OK", body: "ok", headers: empty_hdrs}
             }
             if p.starts_with("/note/") {
                 name @= p.slice(6, (p.len() - 1))
@@ -64,11 +64,11 @@ fn route(req: HttpRequest, idx: Index) -> HttpResponse {
                         etag @= crypto.sha256(note_val.body)
                         hdrs: [String, String] := [:]
                         hdrs.insert("ETag", etag)
-                        return HttpResponse{status: "200 OK", body: body, headers: hdrs}
+                        return HttpResponse.{status: "200 OK", body: body, headers: hdrs}
                     }
                     null -> {
                         empty_hdrs: [String, String] @= [:]
-                        return HttpResponse{status: "404 Not Found", body: "note not found: {name}", headers: empty_hdrs}
+                        return HttpResponse.{status: "404 Not Found", body: "note not found: {name}", headers: empty_hdrs}
                     }
 
                 }
@@ -80,11 +80,11 @@ fn route(req: HttpRequest, idx: Index) -> HttpResponse {
                 return html_response(body)
             }
             empty_hdrs: [String, String] @= [:]
-            return HttpResponse{status: "404 Not Found", body: "not found: {p}", headers: empty_hdrs}
+            return HttpResponse.{status: "404 Not Found", body: "not found: {p}", headers: empty_hdrs}
         }
         else -> {
             empty_hdrs: [String, String] @= [:]
-            return HttpResponse{status: "405 Method Not Allowed", body: "only GET is supported", headers: empty_hdrs}
+            return HttpResponse.{status: "405 Method Not Allowed", body: "only GET is supported", headers: empty_hdrs}
         }
     }
 }

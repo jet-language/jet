@@ -1186,6 +1186,13 @@ pub const JTOML_KEY_NAME: &str = "name";
 /// D-JPK-FILES (ratified 2026-06-18): `version` key in `[repo]`.
 pub const JTOML_KEY_VERSION: &str = "version";
 
+/// D-DOTCTOR1 (ratified 2026-06-25): named struct construction `Type.{ field: val }`.
+/// The dot immediately before `{` is the canonical construction sigil.
+/// Inferred form (type from context): `.{ field: val }` — leading dot with no type name.
+/// Both are parser-level adjacency of `.` and `{`; the lexer emits no dedicated token.
+/// The old dotless `Type { … }` form is teaching error E0320, auto-fixed by `jet fmt`.
+pub const OP_NAMED_CTOR: &str = ".{";
+
 /// S75 (ratified 2026-06-16): the fan-out operator — `f.[a, b, c]` desugars to
 /// `[f(a), f(b), f(c)]`. `.[` is a parser-level adjacency of `.` and `[`;
 /// there is no dedicated two-character lexer token (the parser detects `.`

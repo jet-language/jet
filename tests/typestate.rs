@@ -28,7 +28,7 @@ struct Reservation {
 
 impl Reservation {
     #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
-        return Reservation { guest: guest }
+        return Reservation.{ guest: guest }
     }
     #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
         return self
@@ -87,7 +87,7 @@ impl Box {
     fn get(self) -> Int { return self.n }
 }
 fn main() {
-    b @= Box { n: 1 }
+    b @= Box.{ n: 1 }
     print(b.get())
 }
 "#;
