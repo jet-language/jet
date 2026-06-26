@@ -625,7 +625,7 @@
       "type": "task",
       "title": "User-authored derives + reflection (S56) — the D-METADEPTH1=A v1 ceiling",
       "body": "D-METADEPTH1=A (ratified 2026-06-25) sets the v1 user-metaprogramming ceiling at reflection/derives only. Build the S56 surface: user code READS type info via reflection and authors derives (derive Encode for T) on top of the compiler-provided built-ins (S55, e.g. #[Codable]); no rewrite/inject/macros. Pairs with D-CTCODEGEN1=A (generated code re-enters lexer->parser->sema) so a user derive's output is sema-checked with diagnostics pinned at the user trigger site. B (read-only rejection lint) and C (full Jai, c154) stay off v1.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "user-derives-reflection",
       "notes": [
         {
@@ -653,7 +653,7 @@
           "at": "2026-06-26"
         },
         {
-          "t": "[handoff 2026-06-26] STATUS: core shipped (commit 7184f1c). DONE: $name splice (TokKind::Dollar), T.reflect() handle (.name/.fields/.has_marker), derive Trait for T{} parse + comptime-eval + emit() source-fragment re-entry (R11) via the split_type_markers router; example 128_user_derive runs end-to-end. TO FINISH 100%: (1) wire derive expansion into Source/Sema/Registration.rs (currently ONLY in Source/Sema/Bundle.rs) so single-file `jet compile <file>` expands user derives — mirror Bundle.rs's expand_user_derives pre-pass. (2) expose in-body derive + type_markers in the reflected FieldInfo (.markers today only shows bracket #[Skip]-style serde_markers). (3) enforce the local-only orphan rule (D-METADERIVE1=A). (4) parse $name as a standalone expression outside emit() templates. VERIFY: full suite green + a #[SomeDerive] struct works under `jet compile` (not only `jet run`).",
+          "t": "[done 2026-06-26] All gaps closed (commit 3e80aeb). (1) Derive expansion wired into Registration.rs (REPL path) mirroring Bundle.rs. (2) FieldInfo gains `is_pub` field (Bool). (3) E2711 orphan rule enforced in Bundle.rs when idx>0 + derive block in same imported module — ui test + diagnostics.md entry. (4) Expr::ComptimeSplice {name,span} AST node: parser (TokKind::Dollar + ident), formatter (emits `$name`), sema E2712 guard (in_comptime flag set BEFORE infer() on comptime binding RHS — prior placement was post-infer, a no-op), comptime interpreter (scope lookup), all exhaustive match sites. Example 129_comptime_splice golden-tests standalone $name resolving in derive body. 1163 tests passing, 0 failed.",
           "at": "2026-06-26"
         }
       ],
