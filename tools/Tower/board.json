@@ -697,7 +697,7 @@
       "type": "task",
       "title": "Dot-inferred construction .{ } / T.{ } (D-DOTCTOR1=A)",
       "body": "D-DOTCTOR1=A (ratified 2026-06-25): replace U18 with one leading-dot rule for every inferred construction, structs and enums alike — .{ name: ..., grade: .A } when the type is known from context, T.{ ... } when it must be named, matching the shipped enum-variant dot. Parser + sema + codegen + formatter + examples + re-bless snapshots. Owner-Q defaults (confirmable): .{} is the empty/unit construct; .{ } works in return position when -> T supplies the type; positional T.(a,b) deferred (named-fields only for v1).",
-      "stage": "ready",
+      "stage": "done",
       "plan": "dot-construction",
       "notes": [
         {
@@ -710,6 +710,10 @@
         },
         {
           "t": "[ratified 2026-06-25] D-DOTCTOR2=A — RETIRE the dotless `T { }`: `T.{ … }` is the sole named-construction spelling (matches T.Variant / .{ } / .Variant — one rule: a leading dot means construct). Typing the old `Type { … }` is teaching error E0320 (auto-fixed by inserting `.`, and by jet fmt). Coexist (B, I8 violation) + inference-only-dot (C, asymmetric) rejected. Both card decisions (D-DOTCTOR1=A / D-DOTCTOR2=A) now ratified. Amended S29 / S29-FLUSH / U18 escape-hatch in syntax-decisions.md; recorded in the decision log; card stripped. No open decision → ready. IMPL is a wide clean break: parser/sema/formatter + E0320 + a fmt round-trip stability test + migrate EVERY struct literal & flush destructuring pattern across examples/tests + re-bless snapshots (rides this card with D-DOTCTOR1).",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] DONE + merged, full suite 1152 green / 0 fail. Parser accepts T.{…} (named) + .{…} (inferred, type from context) + the T.{x,y} destructuring; rejects dotless T{…} with teaching error E0320 (auto-fixed by inserting the dot + by jet fmt). Sema expected-type elaboration for .{…}; formatter emits the dot form + auto-fixes old; fmt round-trip/idempotence stability test added. ~150 files migrated across examples + tests (every struct literal + flush destructuring). E0320 in diagnostics.md + ui snapshot. NOTE: the agent branched right after c163, so it missed ~9 embedded-Jet fixtures from c148/c156/c157/c163 that landed later — I found every one via the full suite (dotless now fails a test) and migrated them. Positional T.(a,b) deferred per D-DOTCTOR1 owner-Q (named-fields v1). Unblocks c159 (Build.{} literal). (moved to done.)",
           "at": "2026-06-25"
         }
       ],
