@@ -4,4 +4,12 @@ Error [E0052]: test blocks are written with `#Test`, not bare `test`
   5 | test "double works" {
     | ^^^^
  Why: `#Test` is a marker, like every other `#`-tag, so a test declaration draws the eye
- Fix: write: #Test "name" { ... }
+ Fix: write: #Test ("name") { ... }
+
+Error [E0052]: test name must be parenthesized: `#Test("name")`
+  --> tests/ui/foreign_test_keyword.jet:5:6
+    |
+  5 | test "double works" {
+    |      ^^^^^^^^^^^^^^
+ Why: the name is now an argument to the marker, not a bare adjacent string
+ Fix: write: #Test ("describes this block") { ... }

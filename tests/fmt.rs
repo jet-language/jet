@@ -861,3 +861,19 @@ fn fmt_comptime_splice_stability() {
         "`$name` expression must be fmt-idempotent"
     );
 }
+
+#[test]
+fn fmt_test_paren_name_stability() {
+    // D-TESTPAREN1=A: `#Test("name") { … }` must survive fmt unchanged.
+    let src = "\
+fn main() {}
+#Test(\"double returns twice\") {
+    require_eq(2 * 2, 4)
+}
+";
+    assert_fmt_keeps(src, &["#Test(\"double returns twice\")"], "test paren name");
+    // Idempotence: formatting twice produces the same output.
+    let once = jet::format_source(src).expect("fmt should accept #Test(\"name\")");
+    let twice = jet::format_source(&once).expect("second fmt of #Test(\"name\") must succeed");
+    assert_eq!(once, twice, "#Test(\"name\") must be fmt-idempotent");
+}

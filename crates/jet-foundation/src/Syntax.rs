@@ -643,9 +643,11 @@ pub const BUILTIN_EMBED_FILE: &str = "embed_file";
 pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
 
 /// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
-/// top-level test-declaration block, written as the marker `#Test "name" { … }`.
+/// top-level test-declaration block, written as the marker `#Test("name") { … }`.
+/// D-TESTPAREN1=A (ratified 2026-06-26): the name is now a parenthesized string
+/// argument, matching the `#Caps(…)` / `#Grant(…)` marker family.
 /// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,
-/// recognized only to emit the E0052 teaching error pointing at `#Test`.
+/// recognized only to emit the E0052 teaching error pointing at `#Test("name")`.
 pub const KW_TEST: &str = "Test";
 
 /// D-BENCH1 (ratified 2026-06-24): top-level region-benchmark block, written as

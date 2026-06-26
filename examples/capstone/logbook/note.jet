@@ -142,15 +142,15 @@ pub fn kind_str(n: Note) -> String {
 fn main() {
     print("note module loaded")
 }
-#Test "extract_links deduplicates preserving order" {
+#Test("extract_links deduplicates preserving order") {
     body @= "See [[jet-philosophy]] and [[syntax-decisions]] and [[jet-philosophy]] again."
     require_eq(extract_links(body).join(","), "jet-philosophy,syntax-decisions")
 }
-#Test "extract_tags returns sorted deduped list" {
+#Test("extract_tags returns sorted deduped list") {
     body @= "some text\n\n#design #owner"
     require_eq(extract_tags(body).join(","), "design,owner")
 }
-#Test "parse succeeds on well-formed frontmatter" {
+#Test("parse succeeds on well-formed frontmatter") {
     doc @= """
     ---
     name: owner-design
@@ -170,7 +170,7 @@ fn main() {
     require_eq(note.description, "owner design preferences and workflow constraints")
     require_eq(note_kind, "feedback")
 }
-#Test "parse error on bad type string" {
+#Test("parse error on bad type string") {
     doc @= """
     ---
     name: test

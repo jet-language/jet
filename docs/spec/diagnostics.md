@@ -112,7 +112,7 @@ before continuing.
 | E0049 | parse | teaching: `.0` field access → named members (S73, D-SG7) |
 | E0050 | parse | teaching: `while` → `loop cond { }` (S19-amend) |
 | E0051 | parse | teaching: `for x in` → `loop x in` (S19-amend) |
-| E0052 | parse | teaching: bare `test "name" { }` → `#Test "name" { }` (D-CASING1 follow-on) |
+| E0052 | parse | teaching: bare `test "name" { }` → `#Test("name") { }` (D-CASING1 follow-on) |
 | E0053 | parse | teaching: bare `pure fn` → `#Pure fn` (D-CASING1 follow-on) |
 | E0054 | parse | teaching: bare `todo` → `#Todo` (D-CASING1 follow-on) |
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |

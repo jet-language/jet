@@ -442,8 +442,17 @@ impl<'a> Parser<'a> {
                 let span = self.peek().span;
                 self.bump(); // `#`
                 self.bump(); // `Test`
-                if matches!(self.peek().kind, TokKind::Str(_)) {
-                    self.bump();
+                // Recovery: consume `("name")` or bare `"name"` (old form) before `{`.
+                if matches!(self.peek().kind, TokKind::LParen) {
+                    self.bump(); // `(`
+                    if matches!(self.peek().kind, TokKind::Str(_)) {
+                        self.bump();
+                    }
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        self.bump(); // `)`
+                    }
+                } else if matches!(self.peek().kind, TokKind::Str(_)) {
+                    self.bump(); // old bare-string form
                 }
                 if matches!(self.peek().kind, TokKind::LBrace) {
                     self.bump();
@@ -457,7 +466,7 @@ impl<'a> Parser<'a> {
                     "test blocks group checks that `jet test` runs separately from `main`"
                         .to_string(),
                     format!(
-                        "move this block to the top level, after your functions: #{} \"name\" {{ ... }}",
+                        "move this block to the top level, after your functions: #{} (\"name\") {{ ... }}",
                         Syntax::KW_TEST
                     ),
                     Some(span),

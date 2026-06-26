@@ -666,7 +666,7 @@ impl<'a> Parser<'a> {
                 "`#{}` is a marker, like every other `#`-tag, so a test declaration draws the eye",
                 Syntax::KW_TEST
             ),
-            format!("write: #{} \"name\" {{ ... }}", Syntax::KW_TEST),
+            format!("write: #{} (\"name\") {{ ... }}", Syntax::KW_TEST),
             Some(span),
         )
     }
@@ -750,9 +750,64 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// Test names are plain string literals — no interpolation (S43).
+    /// D-TESTPAREN1=A: `#Test` block name is a parenthesized string — `#Test("name")`.
+    /// Old bare-string form `#Test "name"` emits a teaching error (E0052).
     fn expect_test_name(&mut self) -> Result<(String, Span), Diagnostic> {
-        self.expect_marker_name(Syntax::KW_TEST)
+        // Detect old form: bare string directly after `#Test` — teaching error.
+        if matches!(&self.peek().kind, TokKind::Str(_)) {
+            let span = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0052",
+                format!("test name must be parenthesized: `#{}(\"name\")`", Syntax::KW_TEST),
+                "the name is now an argument to the marker, not a bare adjacent string".to_string(),
+                format!("write: #{} (\"describes this block\") {{ ... }}", Syntax::KW_TEST),
+                Some(span),
+            ));
+        }
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_TEST))?;
+        let (name, name_span) = self.expect_test_name_str()?;
+        self.expect(TokKind::RParen, &format!("to close `#{}(…)`", Syntax::KW_TEST))?;
+        Ok((name, name_span))
+    }
+
+    /// Inner: parse the plain string literal inside `#Test("…")`.
+    fn expect_test_name_str(&mut self) -> Result<(String, Span), Diagnostic> {
+        let parts = match &self.peek().kind {
+            TokKind::Str(parts) => parts.clone(),
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected a name in quotes inside `#{}(…)`, found {}",
+                        Syntax::KW_TEST,
+                        describe(other)
+                    ),
+                    "each test needs a name so failures are easy to find".to_string(),
+                    format!("write: #{} (\"describes this test\") {{ ... }}", Syntax::KW_TEST),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        let span = self.bump().span;
+        if parts.len() != 1 {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a test name must be one piece of quoted text".to_string(),
+                "names are labels, not interpolated messages".to_string(),
+                format!("write: #{} (\"my name\") {{ ... }}", Syntax::KW_TEST),
+                Some(span),
+            ));
+        }
+        match &parts[0] {
+            StrTokPart::Lit(s) => Ok((s.clone(), span)),
+            StrTokPart::Interp(_) => Err(Diagnostic::error(
+                "E0003",
+                "a test name can't contain `{ }` interpolation".to_string(),
+                "names are fixed labels".to_string(),
+                format!("write: #{} (\"my name\") {{ ... }}", Syntax::KW_TEST),
+                Some(span),
+            )),
+        }
     }
 
     /// A `#Test`/`#Bench` block name: one plain string literal, no

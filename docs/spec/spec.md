@@ -503,7 +503,7 @@ Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 
 ## M6 phase 2 — `jet test` + `jet new` (done)
 
-**`#Test "name" { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
+**`#Test("name") { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
 Bodies parse like a parameterless function; use **`require(cond)`** /
 **`require(cond, "msg")`** and **`require_eq(a, b)`** (S36) for checks. Duplicate
 test names → **E0105**; a nested `#Test` block → **E0601**; bare `test "name"` →

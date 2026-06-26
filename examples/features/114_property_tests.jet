@@ -3,7 +3,7 @@
 // A parameterized `#Test fn` is a *property* test: `jet test` generates inputs
 // from each parameter's type, runs the body across many cases, and — on the
 // first failing case — automatically shrinks the input to a minimal
-// counterexample. A `#Test "name" { … }` block (no params) stays a unit test.
+// counterexample. A `#Test("name") { … }` block (no params) stays a unit test.
 fn reverse(xs: [Int]) -> [Int] {
     out: [Int] := []
     loop x in xs {
@@ -28,6 +28,6 @@ fn main() {
 }
 
 // A plain unit test still works alongside property tests.
-#Test "reverse of a known list" {
+#Test("reverse of a known list") {
     require_eq(reverse([1, 2, 3]), [3, 2, 1])
 }
