@@ -2,7 +2,6 @@
 
 use crate::AST::ProgramBundle;
 use crate::Diagnostics::{Diagnostic, TextEdit};
-use crate::Sema::CompileMode;
 use std::path::{Path, PathBuf};
 
 // ── Document check (used by LSP and tests) ────────────────────────────────────
@@ -10,14 +9,8 @@ use std::path::{Path, PathBuf};
 /// Check one document (disk path + in-memory text). Used by LSP and tests.
 pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
     let abs = canonical_path(path);
-    match crate::Loader::load_entry_with_overlay(path, Some((&abs, text)), true) {
-        Ok(mut bundle) => {
-            let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            diags.extend(crate::Sema::check_bundle(&mut bundle, CompileMode::Check));
-            diags
-        }
-        Err(diags) => diags,
-    }
+    let (diags, _) = crate::Driver::check_file(path, Some((&abs, text)), true);
+    diags
 }
 
 /// Check one document, also returning the bundle for symbol analysis.
@@ -26,14 +19,7 @@ pub fn check_document_with_bundle(
     text: &str,
 ) -> (Vec<Diagnostic>, Option<ProgramBundle>) {
     let abs = canonical_path(path);
-    match crate::Loader::load_entry_with_overlay(path, Some((&abs, text)), true) {
-        Ok(mut bundle) => {
-            let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            diags.extend(crate::Sema::check_bundle(&mut bundle, CompileMode::Check));
-            (diags, Some(bundle))
-        }
-        Err(diags) => (diags, None),
-    }
+    crate::Driver::check_file(path, Some((&abs, text)), true)
 }
 
 /// Apply a single teaching edit to source text (for scripted LSP tests and the

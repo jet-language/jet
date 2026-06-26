@@ -21,6 +21,7 @@ pub mod Collections;
 pub mod Comptime;
 pub mod Debug;
 pub mod Diagnostics;
+pub mod Driver;
 pub mod Doctest;
 pub mod Doctor;
 pub mod ExitCodes;
@@ -48,7 +49,7 @@ pub mod SHA256;
 pub mod Store;
 pub mod Syntax;
 
-use Diagnostics::{Diagnostic, Severity};
+use Diagnostics::Diagnostic;
 
 /// Result of a successful compile: generated Rust plus any lint warnings.
 #[derive(Debug)]
@@ -157,7 +158,7 @@ impl Capabilities {
 /// method, or trait-impl method). An `#Unsafe { … }` *block* always contains a
 /// `core.mem` low-level op (that is what the gate is for), so it is detected via
 /// the resolved-Core set in `from_sema`; this catches the whole-function form.
-fn bundle_uses_unsafe(bundle: &AST::ProgramBundle) -> bool {
+pub(crate) fn bundle_uses_unsafe(bundle: &AST::ProgramBundle) -> bool {
     use AST::Item;
     bundle.modules.iter().any(|m| {
         m.items.iter().any(|it| match it {
@@ -190,14 +191,8 @@ pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Dia
 /// Front-end check for a file on disk (and its imports). Library modules
 /// need not define `main`; use `compile_with_path` when building or running.
 pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
-    match Loader::load_entry_with_overlay(file, None, true) {
-        Ok(mut bundle) => {
-            let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            diags.extend(Sema::check_bundle(&mut bundle, Sema::CompileMode::Check));
-            diags
-        }
-        Err(diags) => diags,
-    }
+    let (diags, _) = Driver::check_file(file, None, true);
+    diags
 }
 
 /// Full sema type-check for `jet eval`: runs the same pipeline as `compile`
@@ -205,41 +200,7 @@ pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
 /// while all other diagnostics (type errors, unknown identifiers, etc.) still
 /// fire. Returns the error diagnostics, or an empty vec on success.
 pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
-    let (toks, lex_diags) = Lexer::lex(src);
-    if !lex_diags.is_empty() {
-        return lex_diags;
-    }
-    let mut prog = match Parser::parse(&toks) {
-        Ok(p) => p,
-        Err(ds) => return ds,
-    };
-    let mut bundle = AST::ProgramBundle {
-        entry: 0,
-        project_root: std::path::PathBuf::from(
-            std::path::Path::new(file).parent().unwrap_or(std::path::Path::new(".")),
-        ),
-        modules: vec![AST::LoadedModule {
-            path: std::path::PathBuf::from(file),
-            display: file.to_string(),
-            alias: "main".to_string(),
-            imports: std::mem::take(&mut prog.imports),
-            items: std::mem::take(&mut prog.items),
-            source: src.to_string(),
-        }],
-        parse_teaching: Vec::new(),
-        used_core: std::collections::HashSet::new(),
-        cffi: CFFI::CFfi::default(),
-        comptime_inputs: Vec::new(),
-    };
-    bundle.cffi = match CFFI::assemble(&mut bundle) {
-        Ok(c) => c,
-        Err(diags) => return diags,
-    };
-    let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Eval);
-    diags
-        .into_iter()
-        .filter(|d| d.severity == Severity::Error)
-        .collect()
+    Driver::check_eval(src, file)
 }
 
 fn compile_bundle_path(
@@ -267,65 +228,7 @@ fn compile_bundle_path_opts(
     freestanding: bool,
     allow_impure: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let timing = PhaseTiming::enabled();
-    let mut timer = PhaseTiming::PhaseTimer::new();
-    let mut bundle = Loader::load_entry_with_overlay(file, None, false)?;
-    if timing {
-        timer.lap("load"); // lex + parse + module resolution
-    }
-    let diags = if freestanding {
-        Sema::check_bundle_freestanding(&mut bundle, mode)
-    } else if allow_impure {
-        Sema::check_bundle_allow_impure(&mut bundle, mode)
-    } else {
-        Sema::check_bundle(&mut bundle, mode)
-    };
-    if timing {
-        timer.lap("sema");
-    }
-    let mut errors = Vec::new();
-    let mut lints = Vec::new();
-    for d in diags {
-        match d.severity {
-            Severity::Error => errors.push(d),
-            Severity::Lint => lints.push(d),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    let ffi = match FFI::prepare(&bundle) {
-        Ok(link) => link,
-        Err(ffi_diags) => return Err(ffi_diags),
-    };
-    if timing {
-        timer.lap("ffi");
-    }
-    let rust = Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
-    if timing {
-        timer.lap("codegen");
-        timer.metric("rust_bytes", rust.len() as u128);
-        timer.write_to(&bundle.project_root);
-    }
-    // c110: capabilities are derived from semantic facts (resolved Core calls,
-    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
-    let capabilities = Capabilities::from_sema(
-        &bundle.used_core,
-        bundle_uses_unsafe(&bundle),
-        ffi.is_some() || bundle.cffi.links_c(),
-    );
-    let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
-    Ok(CompileOutput {
-        rust,
-        lints,
-        ffi,
-        // Native C link flags are resolved separately at build time (so that
-        // codegen / front-end checks never depend on system link discovery);
-        // see `resolve_c_links`.
-        clinks: Vec::new(),
-        capabilities,
-        comptime_inputs,
-    })
+    Driver::compile_bundle_path_opts(file, mode, freestanding, allow_impure)
 }
 
 /// Resolve native C-library link args for a built program (S59 / E2-M14),
@@ -357,22 +260,7 @@ pub fn compile_tests_with_path_cov(
     coverage: bool,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
-    let mut bundle = Loader::load_entry_with_overlay(file, None, false)?;
-    let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Test);
-    let mut errors = Vec::new();
-    for d in diags {
-        if d.severity == Severity::Error {
-            errors.push(d);
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    let ffi = match FFI::prepare(&bundle) {
-        Ok(link) => link,
-        Err(ffi_diags) => return Err(ffi_diags),
-    };
-    Ok((Codegen::emit_bundle_tests_cov(&bundle, ffi.as_ref(), coverage), ffi))
+    Driver::compile_tests(file, coverage)
 }
 
 /// D-BENCH1: compile for `jet bench` when the file has `#Bench` blocks —
@@ -381,22 +269,7 @@ pub fn compile_tests_with_path_cov(
 pub fn compile_benches_with_path(
     file: &str,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    let mut bundle = Loader::load_entry_with_overlay(file, None, false)?;
-    let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Bench);
-    let mut errors = Vec::new();
-    for d in diags {
-        if d.severity == Severity::Error {
-            errors.push(d);
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    let ffi = match FFI::prepare(&bundle) {
-        Ok(link) => link,
-        Err(ffi_diags) => return Err(ffi_diags),
-    };
-    Ok((Codegen::emit_bundle_benches(&bundle, ffi.as_ref()), ffi))
+    Driver::compile_benches(file)
 }
 
 /// D-BENCH1: does this entry file declare any `#Bench` blocks? `jet bench`
@@ -482,65 +355,7 @@ fn compile_with_mode(
     file: &str,
     mode: Sema::CompileMode,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let (toks, lex_diags) = Lexer::lex(src);
-    if !lex_diags.is_empty() {
-        return Err(lex_diags);
-    }
-    let mut prog = Parser::parse(&toks)?;
-    let mut bundle = AST::ProgramBundle {
-        entry: 0,
-        project_root: std::path::PathBuf::from("."),
-        modules: vec![AST::LoadedModule {
-            path: std::path::PathBuf::from(file),
-            display: file.to_string(),
-            alias: "main".to_string(),
-            imports: std::mem::take(&mut prog.imports),
-            items: std::mem::take(&mut prog.items),
-            source: src.to_string(),
-        }],
-        parse_teaching: Vec::new(),
-        used_core: std::collections::HashSet::new(),
-        cffi: CFFI::CFfi::default(),
-        comptime_inputs: Vec::new(),
-    };
-    // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
-    bundle.cffi = match CFFI::assemble(&mut bundle) {
-        Ok(c) => c,
-        Err(diags) => return Err(diags),
-    };
-    let diags = Sema::check_bundle(&mut bundle, mode);
-    let mut errors = Vec::new();
-    let mut lints = Vec::new();
-    for d in diags {
-        match d.severity {
-            Severity::Error => errors.push(d),
-            Severity::Lint => lints.push(d),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    let ffi = match FFI::prepare(&bundle) {
-        Ok(link) => link,
-        Err(ffi_diags) => return Err(ffi_diags),
-    };
-    let rust = Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
-    // c110: capabilities are derived from semantic facts (resolved Core calls,
-    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
-    let capabilities = Capabilities::from_sema(
-        &bundle.used_core,
-        bundle_uses_unsafe(&bundle),
-        ffi.is_some() || bundle.cffi.links_c(),
-    );
-    let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
-    Ok(CompileOutput {
-        rust,
-        lints,
-        ffi,
-        clinks: Vec::new(),
-        capabilities,
-        comptime_inputs,
-    })
+    Driver::compile_src(src, file, mode)
 }
 
 /// Back-compat: compile and return only Rust (drops lints).
