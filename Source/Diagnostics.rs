@@ -8,7 +8,7 @@
 //! (owner, 2026-06-11) — and width-aware caret columns so the underline
 //! lines up even when the source line holds wide characters or emoji.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     /// Byte offset into the source, inclusive.
     pub start: usize,

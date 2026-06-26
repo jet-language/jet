@@ -100,6 +100,7 @@ pub fn compile_src(
         used_core: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
+        import_targets: std::collections::HashMap::new(),
     };
     // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
@@ -191,6 +192,7 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         used_core: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
+        import_targets: std::collections::HashMap::new(),
     };
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,

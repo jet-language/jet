@@ -9,7 +9,7 @@ use crate::Generics::{
     self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type, unify_types,
     BUILTIN_TRAITS, COMPARABLE, DECODE, ENCODE, EQUATABLE, PRINTABLE, SERIALIZE,
 };
-use crate::Sema::FuncSig;
+use crate::AST::FuncSig;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 

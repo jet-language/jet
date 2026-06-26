@@ -13,12 +13,18 @@
 
 pub mod Advisory;
 mod API;
-pub mod ApiFreeze;
+// ApiFreeze and Schema moved to Sema/ (sema-layer concerns); re-export for callers.
+pub use crate::Sema::ApiFreeze;
+// Schema types re-exported at the Publish:: path so CmdSchema/CmdSupply callers are unchanged.
+pub use crate::Sema::Schema::{
+    SchemaSnapshot, SnapshotField, SNAPSHOT_VERSION,
+    snapshot_from_struct, load_snapshot, save_snapshot,
+    write_schema_snapshots_for_entry, schema_cache_dir, load_all_snapshots,
+};
 mod Diff;
 mod Registry;
 mod Resolve;
 mod SBOM;
-mod Schema;
 pub mod SemVer;
 mod Vendor;
 
@@ -28,7 +34,6 @@ pub use Diff::*;
 pub use Registry::*;
 pub use Resolve::*;
 pub use SBOM::*;
-pub use Schema::*;
 pub use SemVer::*;
 pub use Vendor::*;
 

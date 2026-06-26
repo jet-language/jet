@@ -373,6 +373,34 @@ pub struct ImportDecl {
     pub is_pub: bool,
 }
 
+impl ImportDecl {
+    /// The effective alias for this import: the user-given alias if present,
+    /// otherwise the default derived from the import kind.
+    pub fn import_alias(&self) -> String {
+        if self.alias.is_empty() {
+            match &self.kind {
+                ImportKind::File(path, _) => {
+                    path.rsplit('/').next().unwrap_or("module").to_string()
+                }
+                ImportKind::Module(name, _) => name.clone(),
+                ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
+            }
+        } else {
+            self.alias.clone()
+        }
+    }
+
+    /// If this import refers to a compiler-known core/ring module, return its
+    /// canonical path (e.g. `"core.fs"`, `"jet.http"`). Returns `None` for
+    /// file/unqualified imports and unknown module names.
+    pub fn core_module_path(&self) -> Option<String> {
+        let ImportKind::Module(name, _) = &self.kind else {
+            return None;
+        };
+        Syntax::normalize_core_module(name)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ImportKind {
     /// Quoted path relative to this file's directory (no `.jet` suffix).
@@ -408,6 +436,11 @@ pub struct ProgramBundle {
     /// Each entry records the path and sha256 of a file embedded at compile
     /// time. Written to `.jet/lock` by the build driver for reproducibility.
     pub comptime_inputs: Vec<crate::Lock::ComptimeInput>,
+    /// Pre-resolved import target indices: `(from_module_idx, import_span) → to_module_idx`.
+    /// Populated by `Loader::load_entry_with_overlay` after all modules are loaded.
+    /// Core-module imports and C imports are absent (they have no loaded module index).
+    /// Empty for single-module bundles created inline (compile_src / check_eval paths).
+    pub import_targets: std::collections::HashMap<(usize, Span), usize>,
 }
 
 #[derive(Debug)]
@@ -2064,4 +2097,29 @@ impl Func {
     pub fn is_static_method(&self) -> bool {
         self.self_param().is_none()
     }
+}
+
+/// Semantic signature of a function — the compiler's internal view after
+/// registration. Lives in `AST` so that `Traits`, `Codegen`, and `Sema` can
+/// all depend on it without creating cycles.
+#[derive(Debug, Clone)]
+pub struct FuncSig {
+    pub params: Vec<(AccessConvention, Type)>,
+    pub return_type: Option<Type>,
+    pub is_view_return: bool,
+    /// S50: declared in `extern rust`, implemented by the FFI bridge.
+    pub is_extern: bool,
+    /// S58 (E2-M13): `@unsafe fn` — calling it requires an enclosing `@unsafe`
+    /// block (E3103).
+    pub is_unsafe: bool,
+    /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
+    /// non-determinism. Call sites inside a `pure fn` must also be pure (E3401).
+    pub is_pure: bool,
+    /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
+    pub is_sanitizer: bool,
+    /// S61: parameter names and default-value presence, parallel to `params`.
+    /// Empty for extern/built-in functions.
+    pub param_info: Vec<(String, bool)>,
+    /// S61: default expressions for parameters that have them, parallel to `params`.
+    pub defaults: Vec<Option<Expr>>,
 }

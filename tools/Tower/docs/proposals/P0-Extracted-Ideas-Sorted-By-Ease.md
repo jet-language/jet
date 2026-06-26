@@ -16,7 +16,8 @@
 
 ## New Scratch Notes
 
-- Verse style async task types (race, wait all, etc.)
+- Verse style concurrency/async task types (race, wait all, etc.) [Verse Concurrency](https://verselang.github.io/book/14_concurrency/)
+- Fix inferred vs explicit const/var binding syntax -> CONSTVAL @ String = "string" or CONSTVAL @= "string" && VARIABLE: int = 3 or VARIABLE := 3
 - Allow ignore multiple return values -> Jai can ignore errors: `content := read_entire_file(...);` works, even though the function returns an error. could accept the error value as `content, ok := read_entire_file(...);`
 - Relook if switch statements -> 07_switch still uses || to check multiple patterns on the input var -> should be | with || for additional expressions alongside the pattern
 - Broad gated build-time I/O: allow comptime code to read env vars, hit the network, run a subprocess, or codegen at build time (Jai's #run / Zig @embedFile-plus territory), behind a sandbox + an auditable .jet/build-io.lock of every accessed path + cache-invalidation on change. Powerful (full build scripting without a separate build step), but it adds a supply-chain attack surface that the S26 "no ambient I/O at comptime" law was written to refuse — the Nim/Jai evidence shows un-auditable spread once it ships.
@@ -66,29 +67,20 @@
 
 - **First-class unknown/loading/pending/never:** Model loading/pending/never explicitly. Status: `Already expressible` with enums/options; no special feature needed.
 - <a id="idea-switch-multi-pattern-cleanup"></a>**Switch/multi-pattern cleanup:** Use single `|` for structural pattern alternatives and reserve `||` for boolean logic. Status: `Implemented` by D-PATO; older `switch`/`when` examples are stale after D-IF revisions.
-- **Effect system:** Infer and expose each function's effects (`Net`, `Fs`, `Db`, etc.). Status: `Ratified/Implemented` D-EFF1/2/3/4/5.
 - **Transactional blocks:** Roll back mutations on failure. Status: `Implemented/Ratified` D-TXN1; rollback trait shape ratified as D-ROLLBACK-TRAIT.
 - **Make bad states impossible:** Sum types, distinct types, typestate, and linear/single-use values. Status: `Implemented/Ratified` across S30, D-DIST, D-STATE, D-LIN. Bundle-risk: broad summary of several separate features.
-- **Tasks and channels:** Safe concurrency without shared mutable state. Status: `Implemented` in `core.tasks`; task detach is D-DETACH1.
 - **Errors as values with context:** Fallible values plus cause/context chain. Status: `Implemented` for `T ? E`, `?`, rich `Error`, and conversions.
-- **One-line common case, layered expert path:** Simple helpers plus deeper APIs. Status: `Implemented/design principle`.
-- **Safe subprocess:** Arg-list process APIs, never shell strings by default. Status: `Implemented`.
-- **Unified serde data model:** One derive for JSON/CSV/TOML/YAML/etc. Status: `Implemented/Ratified` D-SERDE1–12/D-ENC1. Bundle-risk: many formats and derive details are grouped under one item.
-- **CLI arg parsing:** Declarative args with generated help. Status: `Implemented/Ratified` D-ARGS1.
-- **C-compatible layout:** `#layout(c)` and related layout controls. Status: `Ratified/Implemented` D-REPRC1.
 - **Library extensibility tier policy:** Define allowed power tiers from protocols to DSLs to macros. Status: `Ratified` D-EXT1; Tier 1 hooks open to all, stdlib-only marked DSLs, proc/reader macros rejected for v1.
 - **Blessed protocol hooks:** Core syntax delegates to fixed hooks like iterator/index/literal suffix. Status: `Ratified/Implemented in pieces`; D-EXT1 formalizes the policy. Bundle-risk: individual hooks can have different implementation status.
 - **Safety ladder documentation:** Beginner/working/expert tiers as an explicit model. Status: `Implemented/philosophy`; Tower c120 audits separation.
 - **Full lazy iterator adapter set:** Rich map/filter/fold/window/chunk/group_by/etc. Status: `Ratified/Implemented` D-ITER1; verify individual gaps only if needed. Bundle-risk: adapter-by-adapter coverage may differ.
 - **Safe-by-default sharp-on-request APIs:** Verified TLS, linear regex, explicit unsafe. Status: `Implemented/Ratified`; Decimal remains a separate gap. Bundle-risk: groups unrelated safety APIs.
 - **Observability in the box:** Structured logs, tracing, metrics. Status: `Implemented` E2-M12/D-OBS3; OTel exporter remains package-level future. Bundle-risk: exporter work should not be closed by core observability alone.
-- **Linear-time regex:** RE2-style non-backtracking default. Status: `Implemented` D-REGEX1; native engine remains an obligation/future. Bundle-risk: default semantics and native engine are separable.
 - <a id="idea-component-wise-vector-arithmetic"></a>**Component-wise vector arithmetic:** Vector operators apply lane-wise by default. Status: `Implemented` for closed SIMD lane types; broader user vector overloading is not open. Bundle-risk: closed SIMD behavior and user-defined overloading are different decisions.
 - <a id="idea-arenas-temp-storage"></a>**Arenas/temp storage:** First-class arena and bump allocation patterns. Status: `Implemented/Ratified` core arena regions; compiler inference remains Tower c26. Bundle-risk: allocator API and compiler inference are separable.
 - <a id="idea-implicit-swappable-allocator-context"></a>**Implicit swappable allocator context:** Jai-style ambient allocator. Status: `Implemented/Ratified` as `#Context(allocator: ...)` plus explicit allocator APIs; broad policy still evolving. Bundle-risk: shipped mechanism and policy completion differ.
 - **Single-use / linear values:** Values that must be consumed exactly once. Status: `Implemented` D-LIN1 `#SingleUse`; explicit audited drop hatch remains unspecified. Bundle-risk: core feature and drop hatch are separable.
 - **Typestate:** Order-sensitive APIs, wrong-state calls are compile errors. Status: `Implemented` D-STATE1; `state {}` declaration follow-up is Tower c163. Bundle-risk: typestate semantics and declaration sugar are separable.
-- **Narrow build-time embedding:** `embed_file` / `embed_bytes` only, literal paths. Status: `Ratified` D-CTIO1; broader I/O is the c157 follow-on.
 
 ## Level 1 - Documentation, Review Checklists, Formatter, And Tiny Diagnostics
 

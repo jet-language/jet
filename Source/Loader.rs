@@ -250,6 +250,39 @@ pub fn load_entry_with_overlay(
         }
     }
 
+    // Pre-resolve every file import to its loaded module index so Codegen doesn't
+    // need to call back into Loader (breaks the Codegen→Loader dep cycle).
+    let mut import_targets = HashMap::new();
+    for module_idx in 0..modules.len() {
+        let (module_path, imports) = {
+            let m = &modules[module_idx];
+            (m.path.clone(), m.imports.clone())
+        };
+        for imp in &imports {
+            if matches!(imp.kind, ImportKind::Unqualified { .. }) {
+                continue;
+            }
+            if crate::CFFI::is_c_import(imp) {
+                continue;
+            }
+            if core_module_path(imp).is_some() {
+                continue;
+            }
+            if let Ok(target_path) = resolve_import(
+                imp,
+                &module_path,
+                &project_root,
+                &pkg_dep_dirs,
+                &pkg_resolution,
+            ) {
+                let norm = normalize_path(&target_path);
+                if let Some(&target_idx) = path_to_idx.get(&norm) {
+                    import_targets.insert((module_idx, imp.span), target_idx);
+                }
+            }
+        }
+    }
+
     let mut bundle = ProgramBundle {
         entry: entry_idx,
         project_root,
@@ -258,6 +291,7 @@ pub fn load_entry_with_overlay(
         used_core: HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
+        import_targets,
     };
     // S59 (E2-M14): fold every `@extern`/`@bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
@@ -637,123 +671,19 @@ fn resolve_import(
     }
 }
 
+// ── Pure module-name helpers ──────────────────────────────────────────────────
+// Canonical implementations live in Syntax (strings-only) and AST (uses
+// ImportDecl). These forwarding fns keep existing call-sites working while
+// the workspace split proceeds.
+
 pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
-    let ImportKind::Module(name, _) = &imp.kind else {
-        return None;
-    };
-    normalize_core_module(name)
+    imp.core_module_path()
 }
 
-pub fn normalize_core_module(name: &str) -> Option<String> {
-    if name == Syntax::CORE_SHORT {
-        return Some(Syntax::CORE_SHORT.to_string());
-    }
-    if let Some(rest) = name.strip_prefix("core.") {
-        return Some(format!("core.{rest}"));
-    }
-    if name == Syntax::CORE_CANONICAL {
-        return Some(Syntax::CORE_SHORT.to_string());
-    }
-    if let Some(rest) = name.strip_prefix("jet.core.") {
-        return Some(format!("core.{rest}"));
-    }
-    // E2-M9: first-party ring packages — `jet.csv`, `jet.toml`, etc.
-    if let Some(ring) = name.strip_prefix("jet.") {
-        if is_ring_module(ring) {
-            return Some(format!("jet.{ring}"));
-        }
-    }
-    None
-}
-
-/// E2-M9: ring module names that resolve as compiler-known modules.
-pub fn is_ring_module(name: &str) -> bool {
-    matches!(
-        name,
-        // D-REGEX1: `regex` is now shipped (was staged).
-        // D-ENC1: csv/toml/yaml/json retired from the `jet.` ring root — now `core.encoding.*`.
-        // D-REACT1=B: opt-in reactive library (signals/derived/effects).
-        // D-DEP-ARCHIVE1=A: gzip + zip + tar via the `flate2`/`zip`/`tar` crate FFI bridge.
-        // D-DEP-DB1: SQLite via the `rusqlite` (bundled) crate FFI bridge.
-        "log" | "time" | "crypto" | "http" | "regex" | "reactive" | "archive" | "db"
-    )
-}
-
-/// E2-M9: ring modules not yet available (blocked on external deps or future milestones).
-/// `archive` graduated to `is_ring_module` (D-DEP-ARCHIVE1=A shipped).
-/// `db` graduated to `is_ring_module` (D-DEP-DB1 shipped).
-pub fn is_ring_module_staged(_name: &str) -> bool {
-    false
-}
-
-pub fn is_legacy_std_import(name: &str) -> bool {
-    name == Syntax::LEGACY_STD_SHORT
-        || name.starts_with("std.")
-        || name == Syntax::LEGACY_STD_CANONICAL
-        || name.starts_with("jet.std.")
-}
-
-/// Single canonical source of truth for all known Core modules (c45).
-///
-/// `is_known_core_module` and `core_modules_list` both derive from this slice.
-/// `core_module_items` in Sema/CheckerCoreLib.rs has per-module item data and
-/// cannot collapse here, but a drift-guard test (tests/corelib.rs) asserts its
-/// key set equals this slice.
-pub const KNOWN_CORE_MODULES: &[&str] = &[
-    "core",
-    "core.fs",
-    "core.io",
-    "core.env",
-    "core.process",
-    "core.math",
-    "core.random",
-    "core.time",
-    "core.tasks",
-    "core.mem",
-    // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
-    "core.mem.alloc",
-    // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
-    "core.files",
-    "core.path",
-    // E2-M10: TCP/UDP sockets.
-    "core.net",
-    // D-DEFER1 option B: scope-exit guard (RAII cleanup via closure).
-    "core.scope",
-    // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing builder.
-    "core.args",
-    // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
-    "core.term",
-    // D-ENC1 (ratified 2026-06-24): unified serialization library `core.encoding` with
-    // per-format submodules. Supersedes `core.json` + `jet.{csv,toml,yaml}` (clean break).
-    "core.encoding",
-    "core.encoding.json",
-    "core.encoding.csv",
-    "core.encoding.toml",
-    "core.encoding.yaml",
-    // E2-M9: first-party ring packages.
-    "jet.log",
-    "jet.time",
-    "jet.crypto",
-    // E2-M10: HTTP client/server ring package.
-    "jet.http",
-    // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.
-    "jet.regex",
-    // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
-    "jet.archive",
-    // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
-    "jet.db",
-    // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
-    // derived values, and effects. Pure std runtime (no external crate).
-    "jet.reactive",
-];
-
-pub fn is_known_core_module(name: &str) -> bool {
-    KNOWN_CORE_MODULES.contains(&name)
-}
-
-pub fn core_modules_list() -> String {
-    KNOWN_CORE_MODULES.join(", ")
-}
+pub use crate::Syntax::{
+    normalize_core_module, is_ring_module, is_ring_module_staged,
+    is_legacy_std_import, KNOWN_CORE_MODULES, is_known_core_module, core_modules_list,
+};
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
     if let Some(module) = core_module_path(imp) {
@@ -1023,14 +953,6 @@ fn sanitize_alias(raw: &str) -> String {
     out
 }
 
-fn default_import_alias(kind: &ImportKind) -> String {
-    match kind {
-        ImportKind::File(path, _) => path.rsplit('/').next().unwrap_or("module").to_string(),
-        ImportKind::Module(name, _) => name.clone(),
-        ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
-    }
-}
-
 pub fn resolve_import_target(
     bundle: &ProgramBundle,
     importing_idx: usize,
@@ -1075,11 +997,7 @@ pub fn resolve_import_target(
 }
 
 pub fn import_alias(imp: &ImportDecl) -> String {
-    if imp.alias.is_empty() {
-        default_import_alias(&imp.kind)
-    } else {
-        imp.alias.clone()
-    }
+    imp.import_alias()
 }
 
 /// E0982 (U17): `use <pkg>` named a package declared `executable` in the

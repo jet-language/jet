@@ -1475,3 +1475,116 @@ pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
 pub const IMPURE_BUILTINS: &[&str] = &[
     BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "read_all_input",
 ];
+
+// ── Module name resolution helpers ───────────────────────────────────────────
+//
+// These are pure string functions used by both Sema and Codegen to identify
+// compiler-known ("core") modules. They live here so that neither Sema nor
+// Codegen need to depend on Loader (which does file I/O and belongs in the
+// driver layer).
+
+/// Single canonical source of truth for all known Core modules (c45).
+///
+/// `is_known_core_module` and `core_modules_list` both derive from this slice.
+/// `core_module_items` in Sema/CheckerCoreLib.rs has per-module item data and
+/// cannot collapse here, but a drift-guard test (tests/corelib.rs) asserts its
+/// key set equals this slice.
+pub const KNOWN_CORE_MODULES: &[&str] = &[
+    "core",
+    "core.fs",
+    "core.io",
+    "core.env",
+    "core.process",
+    "core.math",
+    "core.random",
+    "core.time",
+    "core.tasks",
+    "core.mem",
+    // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
+    "core.mem.alloc",
+    // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
+    "core.files",
+    "core.path",
+    // E2-M10: TCP/UDP sockets.
+    "core.net",
+    // D-DEFER1 option B: scope-exit guard (RAII cleanup via closure).
+    "core.scope",
+    // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing builder.
+    "core.args",
+    // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
+    "core.term",
+    // D-ENC1 (ratified 2026-06-24): unified serialization library `core.encoding` with
+    // per-format submodules. Supersedes `core.json` + `jet.{csv,toml,yaml}` (clean break).
+    "core.encoding",
+    "core.encoding.json",
+    "core.encoding.csv",
+    "core.encoding.toml",
+    "core.encoding.yaml",
+    // E2-M9: first-party ring packages.
+    "jet.log",
+    "jet.time",
+    "jet.crypto",
+    // D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
+    "jet.http",
+    // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.
+    "jet.regex",
+    // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
+    "jet.archive",
+    // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
+    "jet.db",
+    // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
+    // derived values, and effects. Pure std runtime (no external crate).
+    "jet.reactive",
+];
+
+pub fn is_known_core_module(name: &str) -> bool {
+    KNOWN_CORE_MODULES.contains(&name)
+}
+
+pub fn core_modules_list() -> String {
+    KNOWN_CORE_MODULES.join(", ")
+}
+
+/// Normalize a module import name to a canonical core-module path, or `None`
+/// if the import is not a core/ring module.
+pub fn normalize_core_module(name: &str) -> Option<String> {
+    if name == CORE_SHORT {
+        return Some(CORE_SHORT.to_string());
+    }
+    if let Some(rest) = name.strip_prefix("core.") {
+        return Some(format!("core.{rest}"));
+    }
+    if name == CORE_CANONICAL {
+        return Some(CORE_SHORT.to_string());
+    }
+    if let Some(rest) = name.strip_prefix("jet.core.") {
+        return Some(format!("core.{rest}"));
+    }
+    // E2-M9: first-party ring packages — `jet.http`, `jet.db`, etc.
+    if let Some(ring) = name.strip_prefix("jet.") {
+        if is_ring_module(ring) {
+            return Some(format!("jet.{ring}"));
+        }
+    }
+    None
+}
+
+/// E2-M9: ring module names that resolve as compiler-known modules.
+pub fn is_ring_module(name: &str) -> bool {
+    matches!(
+        name,
+        "log" | "time" | "crypto" | "http" | "regex" | "reactive" | "archive" | "db"
+    )
+}
+
+/// E2-M9: ring modules not yet available (always false now; kept for API stability).
+pub fn is_ring_module_staged(_name: &str) -> bool {
+    false
+}
+
+pub fn is_legacy_std_import(name: &str) -> bool {
+    name == LEGACY_STD_SHORT
+        || name.starts_with("std.")
+        || name == LEGACY_STD_CANONICAL
+        || name.starts_with("jet.std.")
+}

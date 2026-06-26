@@ -1,10 +1,16 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, ImportKind, Item, ProgramBundle, Type,
+    AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type,
 };
-use crate::Loader;
 use crate::Traits;
 use std::collections::HashMap;
+
+/// Look up the pre-resolved module index for an import. Returns `None` for
+/// core modules, C imports, and unqualified imports (they have no file target).
+#[inline]
+fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
+    bundle.import_targets.get(&(module_idx, imp.span)).copied()
+}
 /// After `cx.foreign_types` is populated, add the foreign type names to
 /// `cx.type_names` and re-run the cloneable/comparable checks for any local
 /// structs or enums that reference those foreign types as fields.
@@ -48,7 +54,7 @@ pub(crate) fn foreign_type_map(bundle: &ProgramBundle, module_idx: usize) -> Has
         if crate::CFFI::is_c_import(imp) {
             continue;
         }
-        if let Ok(target) = Loader::resolve_import_target(bundle, module_idx, imp) {
+        if let Some(target) = resolve_target(bundle, module_idx, imp) {
             let rust_mod = format!("user_{}", bundle.modules[target].alias);
             for item in &bundle.modules[target].items {
                 match item {
@@ -74,7 +80,7 @@ pub(crate) fn register_foreign_enum_variants(cx: &mut Cx, bundle: &ProgramBundle
         if crate::CFFI::is_c_import(imp) {
             continue;
         }
-        if let Ok(target) = Loader::resolve_import_target(bundle, module_idx, imp) {
+        if let Some(target) = resolve_target(bundle, module_idx, imp) {
             for item in &bundle.modules[target].items {
                 if let Item::Enum(e) = item {
                     if e.is_pub {
@@ -100,7 +106,7 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        let alias = Loader::import_alias(imp);
+        let alias = imp.import_alias();
         // S59: C `use` forms target a synthetic merged module by alias.
         if crate::CFFI::is_c_import(imp) {
             if let Some(target) = bundle.cffi.target_for(module_idx, &alias) {
@@ -109,7 +115,7 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
             }
             continue;
         }
-        if let Ok(target) = Loader::resolve_import_target(bundle, module_idx, imp) {
+        if let Some(target) = resolve_target(bundle, module_idx, imp) {
             let stem = &bundle.modules[target].alias;
             map.insert(alias, format!("user_{}", stem));
         }
@@ -131,8 +137,8 @@ pub(crate) fn reexport_call_map(
         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
             continue;
         }
-        let alias = Loader::import_alias(imp);
-        let Ok(target_idx) = Loader::resolve_import_target(bundle, module_idx, imp) else {
+        let alias = imp.import_alias();
+        let Some(target_idx) = resolve_target(bundle, module_idx, imp) else {
             continue;
         };
         let target = &bundle.modules[target_idx];
@@ -148,8 +154,8 @@ pub(crate) fn reexport_call_map(
                 .imports
                 .iter()
                 .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
-                .filter(|i2| Loader::import_alias(i2) == *module_alias)
-                .find_map(|i2| Loader::resolve_import_target(bundle, target_idx, i2).ok());
+                .filter(|i2| i2.import_alias() == *module_alias)
+                .find_map(|i2| resolve_target(bundle, target_idx, i2));
             if let Some(real_idx) = real_idx {
                 let real_mod = format!("user_{}", bundle.modules[real_idx].alias);
                 for item in items {
@@ -168,8 +174,8 @@ pub(crate) fn core_import_map(bundle: &ProgramBundle, module_idx: usize) -> Hash
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        if let Some(core_module) = Loader::core_module_path(imp) {
-            map.insert(Loader::import_alias(imp), core_module);
+        if let Some(core_module) = imp.core_module_path() {
+            map.insert(imp.import_alias(), core_module);
             continue;
         }
         // D-MOD3: `use core.item` / `use core.{a,b}` — bind each item name to its
@@ -179,7 +185,7 @@ pub(crate) fn core_import_map(bundle: &ProgramBundle, module_idx: usize) -> Hash
             if module_alias == "core" || module_alias == "jet" {
                 for item in items {
                     let full = format!("core.{}", item);
-                    if Loader::is_known_core_module(&full) {
+                    if crate::Syntax::is_known_core_module(&full) {
                         map.insert(item.clone(), full);
                     }
                 }
@@ -231,8 +237,8 @@ pub(crate) fn unqualified_import_maps(
             .imports
             .iter()
             .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
-            .filter(|i2| Loader::import_alias(i2) == *module_alias)
-            .find_map(|i2| Loader::resolve_import_target(bundle, module_idx, i2).ok())
+            .filter(|i2| i2.import_alias() == *module_alias)
+            .find_map(|i2| resolve_target(bundle, module_idx, i2))
         {
             // File module: resolve the file-import whose alias matches, then point
             // each unqualified item at that Rust module.
@@ -252,7 +258,7 @@ pub(crate) fn import_sig_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        let alias = Loader::import_alias(imp);
+        let alias = imp.import_alias();
         // S59: C `use` forms — pull boundary fn sigs from the synthetic module.
         let target = if crate::CFFI::is_c_import(imp) {
             match bundle.cffi.target_for(module_idx, &alias) {
@@ -260,9 +266,9 @@ pub(crate) fn import_sig_map(
                 None => continue,
             }
         } else {
-            match Loader::resolve_import_target(bundle, module_idx, imp) {
-                Ok(t) => t,
-                Err(_) => continue,
+            match resolve_target(bundle, module_idx, imp) {
+                Some(t) => t,
+                None => continue,
             }
         };
         for item in &bundle.modules[target].items {
@@ -326,16 +332,16 @@ pub(crate) fn import_ret_map(
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        let alias = Loader::import_alias(imp);
+        let alias = imp.import_alias();
         let target = if crate::CFFI::is_c_import(imp) {
             match bundle.cffi.target_for(module_idx, &alias) {
                 Some(t) => t,
                 None => continue,
             }
         } else {
-            match Loader::resolve_import_target(bundle, module_idx, imp) {
-                Ok(t) => t,
-                Err(_) => continue,
+            match resolve_target(bundle, module_idx, imp) {
+                Some(t) => t,
+                None => continue,
             }
         };
         for item in &bundle.modules[target].items {

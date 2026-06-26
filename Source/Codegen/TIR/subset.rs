@@ -2417,7 +2417,7 @@ pub(crate) fn method_call_in_subset(
                 if !locals.contains(alias) {
                     if let Some(ns) = cx.core_imports.get(alias) {
                         let submodule = format!("{}.{}", ns, leaf);
-                        if crate::Loader::is_known_core_module(&submodule) {
+                        if crate::Syntax::is_known_core_module(&submodule) {
                             return core_call_covered(&submodule, method)
                                 && args.iter().all(|a| {
                                     a.label.is_none() && expr_in_subset(&a.expr, cx, locals)

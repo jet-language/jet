@@ -23,7 +23,7 @@
 //! I3: all checking here; codegen sees nothing of migration state.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Publish::load_snapshot;
+use crate::Sema::Schema::load_snapshot;
 use crate::AST::{Item, MigrationOp};
 use std::collections::HashMap;
 use std::path::Path;

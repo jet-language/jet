@@ -22,7 +22,7 @@
 //! I3: all checking here; codegen sees nothing of the freeze.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Publish::ApiFreeze::{self, fn_signature};
+use crate::Sema::ApiFreeze::{self, fn_signature};
 use crate::AST::Item;
 use std::collections::HashMap;
 use std::path::Path;

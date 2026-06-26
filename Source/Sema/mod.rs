@@ -15,30 +15,8 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-#[derive(Debug, Clone)]
-pub struct FuncSig {
-    pub params: Vec<(AccessConvention, Type)>,
-    pub return_type: Option<Type>,
-    pub is_view_return: bool,
-    /// S50: declared in `extern rust`, implemented by the FFI bridge.
-    pub is_extern: bool,
-    /// S58 (E2-M13): `@unsafe fn` — calling it requires an enclosing `@unsafe`
-    /// block (E3103).
-    pub is_unsafe: bool,
-    /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
-    /// non-determinism. Call sites inside a `pure fn` must also be pure (E3401).
-    pub is_pure: bool,
-    /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
-    /// The taint pass treats a call to such a function as producing a clean
-    /// (untainted) value regardless of the taint of its arguments.
-    pub is_sanitizer: bool,
-    /// S61: parameter names and default-value presence, parallel to `params`.
-    /// Empty for extern/built-in functions (no label checking needed there).
-    pub param_info: Vec<(String, bool)>,
-    /// S61: default expressions for parameters that have them, parallel to `params`.
-    /// `None` when no default; only trailing params may have defaults.
-    pub defaults: Vec<Option<crate::AST::Expr>>,
-}
+/// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.
+pub use crate::AST::FuncSig;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MethodSig {
@@ -615,6 +593,8 @@ mod CheckerItems;
 mod Diagnostics;
 mod Captures;
 mod Capability;
+pub mod ApiFreeze;
+pub mod Schema;
 mod CapabilityFreeze;
 mod Purity;
 mod Effects;

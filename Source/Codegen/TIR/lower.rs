@@ -3539,7 +3539,7 @@ pub(crate) fn lower_method_call(
                 if !env.locals.contains_key(alias) {
                     if let Some(ns) = cx.core_imports.get(alias).cloned() {
                         let submodule = format!("{}.{}", ns, leaf);
-                        if crate::Loader::is_known_core_module(&submodule) {
+                        if crate::Syntax::is_known_core_module(&submodule) {
                             let targs: Vec<TExpr> =
                                 args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
                             return TExpr {
