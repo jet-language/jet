@@ -363,17 +363,63 @@ impl<'a> Interp<'a> {
     ///   6. Return `CtValue::Str(content)` (non-UTF-8 content needs its own code).
     fn eval_net_fetch(
         &mut self,
-        _args: Vec<CtValue>,
+        args: Vec<CtValue>,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
-        Err(Diagnostic::error(
-            "E3412",
-            "`core.net.fetch()` backend not yet built".to_string(),
-            "D-NETDEP1=A ratified `ureq`/`minreq` as the HTTP backend (workspace member, \
-             runtime-side), but the `jet-net/` crate has not been wired yet".to_string(),
-            "track c157 in Tower; use `embed_file` for local build-time data meanwhile".to_string(),
+        let url = match args.first() {
+            Some(CtValue::Str(s)) => s.clone(),
+            _ => return Err(Diagnostic::error(
+                "E3414",
+                "fetch: first argument must be a string URL".to_string(),
+                "`core.net.fetch` expects a string URL as its first argument".to_string(),
+                "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`".to_string(),
+                Some(span),
+            )),
+        };
+        let expected = match args.get(1) {
+            Some(CtValue::Str(s)) => s.clone(),
+            _ => return Err(Diagnostic::error(
+                "E3414",
+                "fetch: `sha256:` argument missing or not a string".to_string(),
+                "`core.net.fetch` requires a `sha256:` labelled argument for content verification".to_string(),
+                "add `sha256: '<64-hex-chars>'` as the second argument".to_string(),
+                Some(span),
+            )),
+        };
+
+        let bytes = jet_net::fetch(&url).map_err(|e| Diagnostic::error(
+            "E3414",
+            format!("fetch failed: {e}"),
+            format!("could not retrieve `{url}`"),
+            "check the URL is reachable and the network is available; use `file://` for local paths".to_string(),
             Some(span),
-        ))
+        ))?;
+
+        let actual = crate::SHA256::sha256_hex(&bytes);
+        if actual != expected {
+            return Err(Diagnostic::error(
+                "E3413",
+                format!("fetch: sha256 mismatch for `{url}`"),
+                format!("expected `{expected}` but content hashes to `{actual}`"),
+                "update the `sha256:` pin to match the content, or verify the URL is correct".to_string(),
+                Some(span),
+            ));
+        }
+
+        let content = String::from_utf8(bytes).map_err(|_| Diagnostic::error(
+            "E3414",
+            format!("fetch: content at `{url}` is not valid UTF-8"),
+            "the downloaded bytes could not be decoded as UTF-8 text".to_string(),
+            "binary content is not supported by comptime fetch; use `embed_bytes` for binary data".to_string(),
+            Some(span),
+        ))?;
+
+        self.embed_inputs.push(crate::AST::ComptimeInput {
+            path: format!("url:{url}"),
+            hash: actual,
+        });
+
+        Ok(CtValue::Str(content))
     }
 
     pub(super) fn eval_method(

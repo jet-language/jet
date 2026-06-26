@@ -273,7 +273,9 @@ before continuing.
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
 | E3410 | sema  | Tier-2 comptime effect (`core.fs`/`env`/`io`/`exec`) called outside a `#Impure` gate (D-CTEFFECT1) |
 | E3411 | sema  | Tier-2 comptime effect inside `#Impure` gate but `--allow-impure` not passed (D-CTEFFECT1) |
-| E3412 | sema  | `core.net` comptime methods not yet available; `fetch(url, sha256:)` planned (D-CTEFFECT1 / D-NETDEP1) |
+| E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
+| E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
+| E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3401 | sema  | impure call inside a `#Pure fn` / pure-eval context (call-trace path) |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
@@ -693,7 +695,9 @@ Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--all
 |------|------|-----|-----|
 | E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.fs`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call: `#Impure("reading config") { comptime val x = core.fs.read("…") }`. |
 | E3411 | `#Impure` gate present but `--allow-impure` was not passed. | The `#Impure` block opts in to ambient I/O, but the build flag is also required so CI can audit builds that touch the host. | Add `--allow-impure` to your `jet build` / `jet run` invocation. |
-| E3412 | `core.net.{method}()` is not available at comptime. | `core.net.fetch(url, sha256:)` is planned as a Tier-1 (hermetic, sha256-pinned) comptime download (D-CTEFFECT1 / D-NETDEP1=A); the `jet-net` workspace-member backend has not been wired yet. Other `core.net` methods are not planned for comptime access. | Use `embed_file` for local build-time data; track c157 in Tower for the backend implementation. |
+| E3412 | `core.net.{method}()` is not available at comptime. | Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect. Other `core.net` methods are not planned for comptime access. | Use `core.net.fetch(url, sha256: "…")` for content-hash-pinned downloads. |
+| E3413 | fetch: sha256 mismatch for `{url}`. | The downloaded content does not hash to the expected `sha256:` value. The pin ensures every machine gets byte-identical content; a mismatch means the URL content changed or the pin is wrong. | Update the `sha256:` argument to match the actual content hash shown in the Why line, or verify the URL points to the correct file. |
+| E3414 | fetch failed / bad argument / non-UTF-8 content (message varies). | Common causes: unsupported URL scheme (only `file://`, `http://`, `https://`), unreachable host, missing `sha256:` argument, or binary content (use `embed_bytes` for that). | Check the URL and arguments; use `file://` for local test paths. |
 
 ## Arena region diagnostics (D-ALLOC2 / D-REGION1)
 
