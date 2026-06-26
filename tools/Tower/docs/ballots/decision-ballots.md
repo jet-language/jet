@@ -25,7 +25,53 @@ it's time to decide it.
 
 ## Open decisions
 
-_**No decisions are open.** All 2026-06-25 cards — **D-DOTCTOR2=A**, **D-METAREFLECT1=B**, **D-PLUGIN1=B**, **D-WORKSPACE2=A**, **D-METADERIVE1=A**, and the dependency gate **D-DEP-WASM1=A** (wasmtime) — are decided, ratified into `syntax-decisions.md`, and stripped. Every non-frozen board card has a vetted plan and is ready to implement._
+_One decision is open: **D-NETDEP1** — the build-time `fetch(url, sha256:)` network dependency (the last unbuilt piece of D-CTEFFECT1/c157; everything else in that card shipped). Surfaced as a ballot, not buried — see below._
+
+## Build-time fetch dependency — board card c157
+
+### D-NETDEP1 — Build-time `fetch(url, sha256:)` network backend (rec A)
+
+**Gist:** D-CTEFFECT1's Tier-1 includes `fetch(url, sha256:)`, but Jet has no HTTP client — making it actually download needs a new dependency, which is an I6 owner decision.
+
+**Story.** Greg ships a CLI that bakes in a snapshot of a public dataset — the IANA TLD list — so it works offline. He wants `comptime tlds = fetch("https://data.iana.org/TLD/tlds-alpha-by-domain.txt", sha256: "8f9a…").lines()` to download the file **once at build time**, verify it against the pinned hash, bake it into the binary, and record the hash in `.jet/lock` so every machine's build is byte-identical. D-CTEFFECT1 ratified this as a Tier-1 reproducible effect — but the compiler can't fetch anything today (jetpack only shells out to `git`), so calling it currently errors **E3412**. This card picks how the download actually happens.
+
+**In the wild:**
+```jet
+// build-time fetch, hash-pinned and baked in (the whole Tier-1 promise):
+comptime tlds = fetch("https://data.iana.org/TLD/tlds-alpha-by-domain.txt",
+                      sha256: "8f9a0c…").lines()
+// .jet/lock records { url, sha256 } so the next build is identical — or fails if the bytes changed.
+```
+
+**Other languages:**
+```nix
+# Nix fetchurl IS this model — fetch pinned by hash, fully reproducible:
+fetchurl { url = "https://…/tlds.txt"; sha256 = "8f9a0c…"; }
+```
+```rust
+// Rust: no std HTTP; build.rs reaches for reqwest/ureq — but UNPINNED and unsandboxed.
+// Cargo itself fetches crates with checksums. Zig's build.zig.zon hashes every fetched dep.
+```
+The hash-pinned-fetch pattern is well-trodden (Nix, Cargo, Zig, Bazel); the only Jet-specific question is which HTTP backend, given I6.
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Makes `fetch` work | New dep (I6) | Portability | Reproducible |
+|---|---|---|---|---|
+| A pure-Rust HTTP crate (`ureq`/`minreq`) (rec) | Yes | One runtime-side crate, owner-gated like Cranelift/regex/sqlite; pure-Rust, no C | Everywhere | Yes — sha256: pin + `.jet/lock` |
+| B shell out to `curl`/`wget` | Yes, if present | None | Fragile — not guaranteed installed; Windows gaps | Yes (hash still pins) |
+| C git-only fetch (reuse existing infra) | Only for git URLs | None | OK | Yes |
+| D defer fetch | No | None | — | — (`@embed`/`find` cover local inputs) |
+
+- **Option A — a tiny pure-Rust HTTP client (recommended).** Wrap a small pure-Rust, blocking HTTP crate (`ureq` or `minreq` — no async runtime, no C) as a **runtime-side** dependency, approved exactly like Cranelift (D-JITDEP1), regex (D-REGEX1), sqlite (D-DEP-DB1): scoped, hash-pinned in `.jet/lock`, carrying the native-ize obligation. The `sha256:` pin already guarantees integrity, so a hostile mirror can't poison the build. This is the only option that delivers `fetch(url, sha256:)` exactly as D-CTEFFECT1 ratified it. I6 holds — it never enters compiler `Source/`; it's the same runtime-tier exception the other deps use.
+```jet
+comptime cfg = fetch("https://example.com/schema.json", sha256: "…").parse_json()
+```
+- **Option B — shell out to `curl`/`wget`.** No new crate; the compiler runs the system downloader. But `curl` isn't guaranteed present (esp. Windows), error handling is brittle, and it trades a vetted dependency for an unvetted ambient tool — the opposite of hermetic.
+- **Option C — git-only fetch.** Reuse the existing `git`-shell infra (jetpack already clones repos), so `fetch` only works for git-hosted resources, not arbitrary HTTPS. Smaller surface, no new dep, but it can't fetch a plain file URL — which is the common case the story needs.
+- **Option D — defer fetch.** Drop `fetch` from Tier-1 for now; `@embed`/`find` already cover **local** reproducible inputs, which is most build-time I/O. Keeps the dep surface minimal until a real consumer appears. Cost: the ratified `fetch(url, sha256:)` stays a stub (E3412) indefinitely.
+
+**Recommendation:** A — a small pure-Rust HTTP client, runtime-side and owner-gated like the other approved deps, is the only path that honors D-CTEFFECT1's ratified `fetch(url, sha256:)`; the hash pin makes it safe and the `.jet/lock` record makes it reproducible. If you'd rather keep the dependency surface minimal until something actually needs remote build-time fetch, **D (defer)** is the clean fallback — `@embed`/`find` cover local inputs today, and the rest of c157 already shipped.
 
 ## Recently ratified — context (no action)
 

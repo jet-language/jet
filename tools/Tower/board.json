@@ -663,7 +663,7 @@
       "type": "task",
       "title": "Compile-time effect boundary (D-CTEFFECT1=A): tiers + #Impure gate",
       "body": "D-CTEFFECT1=A (ratified 2026-06-25). Three tiers for build-time/comptime code: Tier 0 pure (always on), Tier 1 hashed-reproducible effects (@embed, find, fetch(url, sha256:)) recorded in .jet/lock, Tier 2 ambient/non-deterministic effects gated behind #Impure(reason) AND --allow-impure so CI is hermetic by default. Reuses the #Unsafe audited-gate + #(fs,net,exec) effect-tag machinery. Owner: a project build file may alias/relax the impure gate (a config knob to drop the --allow-impure requirement per-project). Gate name #Impure (alternatives offered). Gates D-BUILDPROFILE1's hermeticity (c159).",
-      "stage": "ready",
+      "stage": "deciding",
       "plan": "qualifier-system-implementation",
       "notes": [
         {
@@ -673,6 +673,10 @@
         {
           "t": "[sweep 2026-06-25] plan rewritten for D-CTEFFECT1=A three tiers + #Impure gate (old plan predated it). Effects engine D-EFF1/2/3 already built; gaps = fetch()/embed-hash/.jet/lock effect-inputs/--allow-impure. No open decision → ready.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[mostly-shipped 2026-06-25] CORE built + merged, full suite green (1127): tier 0/1/2 model, the #Impure(\"reason\") audited gate (KW_IMPURE, mirrors #Unsafe) + --allow-impure flag (hermetic-by-default), and @embed/find Tier-1 input hashing into .jet/lock ([[comptime_inputs]]). New diagnostics E3410/E3411/E3412/L3102 + ui snapshots; example 117_comptime_tiers. NOT 100% done: `fetch(url, sha256:)` (the network Tier-1 effect) errors E3412 because Jet has no HTTP client and one is an I6 owner dep — surfaced as ballot D-NETDEP1 (rec A: tiny pure-Rust HTTP crate, runtime-side). Card stays 'deciding' on D-NETDEP1; once decided, only fetch's backend remains.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-25",
@@ -680,7 +684,8 @@
       "priority": "P2",
       "workOrder": null,
       "decisions": [
-        "D-CTEFFECT1"
+        "D-CTEFFECT1",
+        "D-NETDEP1"
       ]
     },
     {
