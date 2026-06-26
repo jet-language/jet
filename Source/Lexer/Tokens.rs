@@ -125,6 +125,8 @@ pub enum TokKind {
     ShrEq,
     /// S76 (2026-06-16): `#` separates the element type and size in `[T#N]`.
     Hash,
+    /// D-CTMARKER1=C: `$` — comptime splice marker in `emit()` templates.
+    Dollar,
     /// S5: `//` through end of line (M6 fmt preserves these).
     LineComment(String),
     /// S5: `/* … */` block comment, nesting allowed (M6 fmt preserves these).
@@ -255,6 +257,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::ShlEq => "`<<=`".to_string(),
         TokKind::ShrEq => "`>>=`".to_string(),
         TokKind::Hash => "`#`".to_string(),
+        TokKind::Dollar => "`$`".to_string(),
         TokKind::LineComment(_) => "a comment".to_string(),
         TokKind::BlockComment(_) => "a comment".to_string(),
         TokKind::Eof => "the end of the file".to_string(),

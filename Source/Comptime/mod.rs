@@ -101,6 +101,7 @@ pub fn evaluate_with_imports_opts(
         impure_depth: initial_impure_depth,
         allow_impure,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
@@ -134,6 +135,7 @@ pub fn evaluate_with_imports_opts_collecting(
         impure_depth: initial_impure_depth,
         allow_impure,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     let mut scope = globals.clone();
     let val = interp.eval(init, &mut scope)?;
@@ -168,6 +170,7 @@ pub fn run_main(
         impure_depth: 0,
         allow_impure: false,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -200,6 +203,7 @@ pub fn run_main_debug(
         impure_depth: 0,
         allow_impure: false,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -228,6 +232,7 @@ pub fn run_main_value(
         impure_depth: 0,
         allow_impure: false,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope)? {
@@ -259,6 +264,7 @@ pub fn run_main_with_fuel(
         impure_depth: 0,
         allow_impure: false,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -304,6 +310,7 @@ pub fn run_repl_step(
         impure_depth: 0,
         allow_impure: false,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     // Split: run all statements except the last; then handle the last specially
     // if it is a bare expression (for display) and not suppressed.
@@ -371,6 +378,7 @@ pub fn run_block_with_imports(
         allow_impure: false,
         impure_depth: 0,
         embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
     };
     let mut scope = globals.clone();
     interp.exec_block(stmts, &mut scope).map(|_| ())
@@ -433,4 +441,34 @@ pub fn evaluate_owned_with_imports_opts_collecting(
 ) -> Result<(CtValue, Vec<crate::Lock::ComptimeInput>), Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
     evaluate_with_imports_opts_collecting(init, &refs, extern_names, base_dir, globals, core_imports, allow_impure, initial_impure_depth)
+}
+
+/// D-METADERIVE1=A: evaluate the body of a user-authored `derive Trait for T { … }`
+/// block in a comptime scope where `type_param` is bound to `type_info`.
+/// Returns the source fragments emitted by `emit(…)` calls (D-CTCODEGEN1=A).
+pub fn evaluate_derive_body(
+    body: &[crate::AST::Stmt],
+    type_param: &str,
+    type_info: CtValue,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+) -> Result<Vec<String>, Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel: FUEL_BUDGET,
+        sink: None,
+        core_imports: empty_imports(),
+        debugger: None,
+        depth: 0,
+        cur_func: "derive".to_string(),
+        impure_depth: 0,
+        allow_impure: false,
+        embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
+    };
+    let mut scope = HashMap::new();
+    scope.insert(type_param.to_string(), type_info);
+    interp.exec_block(body, &mut scope)?;
+    Ok(interp.emitted_fragments)
 }

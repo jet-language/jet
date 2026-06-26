@@ -124,6 +124,9 @@ pub(super) struct Interp<'a> {
     /// of the bytes read, for recording in `.jet/lock`. Drained by the
     /// `evaluate_*_collecting` variants after evaluation.
     pub(super) embed_inputs: Vec<crate::Lock::ComptimeInput>,
+    /// D-METADERIVE1=A: source fragments emitted by `emit(…)` calls inside
+    /// a user-authored `derive` body. Drained by `evaluate_derive_body`.
+    pub(super) emitted_fragments: Vec<String>,
 }
 
 impl<'a> Interp<'a> {
@@ -693,11 +696,16 @@ impl<'a> Interp<'a> {
             }
             Expr::Field(inner, member, span) => {
                 if let Expr::Ident(type_name, _) = inner.as_ref() {
-                    return Ok(CtValue::Enum {
-                        type_name: type_name.clone(),
-                        variant: member.clone(),
-                        args: Vec::new(),
-                    });
+                    // If the name is in scope as a variable, do field access on
+                    // the value (e.g. TypeInfo struct from a derive body).
+                    // Otherwise it is an enum-variant literal (Color.Red).
+                    if !scope.contains_key(type_name.as_str()) {
+                        return Ok(CtValue::Enum {
+                            type_name: type_name.clone(),
+                            variant: member.clone(),
+                            args: Vec::new(),
+                        });
+                    }
                 }
                 let v = self.eval(inner, scope)?;
                 match v {

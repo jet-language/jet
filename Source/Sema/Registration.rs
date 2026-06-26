@@ -255,6 +255,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::Migration(_) => {}
             // D-STATE-DECL: state-set declarations are sema-only (I3); no type to register.
             Item::StateDecl(_) => {}
+            // D-METADERIVE1=A: user-authored derive blocks are expanded in Bundle.rs.
+            Item::UserDerive(_) => {}
         }
     }
 
@@ -585,7 +587,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types at registration
             | Item::Bench(_)
             | Item::Migration(_) // D-MIGRATE1
-            | Item::StateDecl(_) => {} // D-STATE-DECL: state-set decls are sema-only (I3)
+            | Item::StateDecl(_) // D-STATE-DECL: state-set decls are sema-only (I3)
+            | Item::UserDerive(_) => {} // D-METADERIVE1=A: expanded in Bundle.rs
         }
     }
 
@@ -994,7 +997,8 @@ pub(crate) fn comptime_context_from_items(
             | Item::UnitFamily(_) // D-QUAL3: contributes no comptime context
             | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
-            | Item::StateDecl(_) => {} // D-STATE-DECL
+            | Item::StateDecl(_) // D-STATE-DECL
+            | Item::UserDerive(_) => {} // D-METADERIVE1=A: expanded in Bundle.rs
         }
     }
     (funcs, externs, globals)

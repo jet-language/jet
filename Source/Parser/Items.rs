@@ -418,6 +418,8 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(n) if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
                     self.state_decl(false).map(Item::StateDecl)
                 }
+                // D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive.
+                TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
                 TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
                 TokKind::At => {
                     let t = self.bump();
@@ -2812,5 +2814,24 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::RBrace, "to close the state declaration block")?;
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::AST::StateDecl { is_pub, type_name, type_name_span, states, span: Span::new(start.start, end) })
+    }
+
+    /// D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive block.
+    fn user_derive_def(&mut self) -> Result<crate::AST::DeriveDef, Diagnostic> {
+        let start = self.peek().span.start;
+        self.bump(); // consume `derive`
+        let (trait_name, trait_span) = self.expect_ident("after `derive`")?;
+        self.expect(TokKind::KwFor, "after the trait name in `derive Trait for T`")?;
+        let (type_param, _) = self.expect_ident("after `for` in `derive Trait for T`")?;
+        self.expect(TokKind::LBrace, "after the type parameter in `derive Trait for T`")?;
+        let body = self.block_stmts(); // consumes `}`
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::DeriveDef {
+            trait_name,
+            trait_span,
+            type_param,
+            body,
+            span: Span::new(start, end),
+        })
     }
 }

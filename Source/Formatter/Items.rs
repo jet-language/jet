@@ -75,6 +75,12 @@ impl<'a> Fmt<'a> {
                 self.write(&text);
                 self.newline();
             }
+            // D-METADERIVE1=A: derive blocks are emitted verbatim (non-destructive).
+            Item::UserDerive(d) => {
+                let text = self.src[d.span.start..d.span.end].to_string();
+                self.write(&text);
+                self.newline();
+            }
         }
     }
 

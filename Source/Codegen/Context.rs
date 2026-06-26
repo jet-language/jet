@@ -647,7 +647,8 @@ pub(crate) fn build_cx_items(
             Item::Tag(_) => {}
             Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
-            | Item::StateDecl(_) => {} // D-STATE-DECL: erases
+            | Item::StateDecl(_) // D-STATE-DECL: erases
+            | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());
                 cx.distinct_types

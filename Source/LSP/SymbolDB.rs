@@ -438,6 +438,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::Migration(_) => {}
         // D-STATE-DECL: state-set declarations aren't yet indexed for symbols/hover.
         Item::StateDecl(_) => {}
+        // D-METADERIVE1=A: user-authored derive blocks aren't indexed (expanded in sema).
+        Item::UserDerive(_) => {}
     }
 }
 

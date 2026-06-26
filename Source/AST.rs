@@ -551,6 +551,8 @@ pub enum Item {
     /// no outgoing `#Transition` is a dead-end warning (L0151). Declaration family sibling
     /// of `tag`/`struct`/`enum`.
     StateDecl(StateDecl),
+    /// D-METADERIVE1=A: `derive Trait for T { … }` user-authored derive.
+    UserDerive(DeriveDef),
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
@@ -820,6 +822,16 @@ pub struct StateDecl {
     pub type_name_span: Span,
     /// Declared state labels in declaration order, with their name spans for diagnostics.
     pub states: Vec<(String, Span)>,
+    pub span: Span,
+}
+
+/// D-METADERIVE1=A: `derive Trait for T { … }` user-authored derive.
+#[derive(Debug, Clone)]
+pub struct DeriveDef {
+    pub trait_name: String,
+    pub trait_span: Span,
+    pub type_param: String,
+    pub body: Vec<Stmt>,
     pub span: Span,
 }
 
@@ -1172,7 +1184,7 @@ pub struct ImplDef {
     pub assoc_type_impls: Vec<(String, Span, Type)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Field {
     /// S18: visible to other files via `import` when true.
     pub is_pub: bool,

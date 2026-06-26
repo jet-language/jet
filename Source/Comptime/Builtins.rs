@@ -301,6 +301,22 @@ pub(super) fn apply_method(
                 format!("cannot parse `{}` as an integer", s),
             ))),
         }),
+        // D-METAREFLECT1=B: `.reflect()` on a TypeInfo struct is identity.
+        (CtValue::Struct { type_name, .. }, "reflect") if type_name == "TypeInfo" => {
+            Ok(recv.clone())
+        }
+        // D-METAREFLECT1=B: `.has_marker(name)` on a FieldInfo struct.
+        (CtValue::Struct { type_name, fields }, "has_marker") if type_name == "FieldInfo" => {
+            let needle = match args.into_iter().next() {
+                Some(CtValue::Str(s)) => s,
+                _ => return Err(unsupported("`has_marker` requires a string argument", span)),
+            };
+            if let Some((_, CtValue::List(markers))) = fields.iter().find(|(n, _)| n == "markers") {
+                let found = markers.iter().any(|m| matches!(m, CtValue::Str(s) if *s == needle));
+                return Ok(CtValue::Bool(found));
+            }
+            Ok(CtValue::Bool(false))
+        }
         _ => Err(unsupported(
             &format!("the method `.{}` at compile time", method),
             span,

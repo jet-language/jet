@@ -199,6 +199,8 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Migration(m) => m.span.start,
         // D-STATE-DECL: use the state block's own span.
         Item::StateDecl(s) => s.span.start,
+        // D-METADERIVE1=A: use the derive block's own span.
+        Item::UserDerive(d) => d.span.start,
     }
 }
 
@@ -271,6 +273,8 @@ fn item_span_end(item: &Item) -> usize {
         Item::Migration(m) => m.span.end,
         // D-STATE-DECL: use the state block's own span end.
         Item::StateDecl(s) => s.span.end,
+        // D-METADERIVE1=A: use the derive block's own span end.
+        Item::UserDerive(d) => d.span.end,
     }
 }
 

@@ -131,6 +131,7 @@ impl<'a> Lexer<'a> {
                 '@' if next == '=' => toks.push(simple(self, TokKind::AtEq, 2)),
                 '@' => toks.push(simple(self, TokKind::At, 1)),
                 '#' => toks.push(simple(self, TokKind::Hash, 1)),
+                '$' => toks.push(simple(self, TokKind::Dollar, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),
                 '?' => toks.push(simple(self, TokKind::Question, 1)),

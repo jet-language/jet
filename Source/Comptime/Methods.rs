@@ -59,6 +59,39 @@ fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
     Diagnostic::error("E0957", msg, why, fix, Some(span))
 }
 
+/// D-CTMARKER1=C: substitute `$name` splices in a string using values from the
+/// comptime scope. Unknown names are left as-is (`$unknown`). Used by `emit(…)`.
+fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' {
+            let mut name = String::new();
+            while let Some(&nc) = chars.peek() {
+                if nc.is_alphanumeric() || nc == '_' {
+                    name.push(nc);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if !name.is_empty() {
+                if let Some(val) = scope.get(&name) {
+                    result.push_str(&val.jet_show());
+                } else {
+                    result.push('$');
+                    result.push_str(&name);
+                }
+            } else {
+                result.push('$');
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 impl<'a> Interp<'a> {
     /// `f.[a, b, c]` → `[f(a), f(b), f(c)]` (fan-out, ratified in
     /// docs/spec/spec.md (S75 fan-out). Comptime only supports
@@ -147,6 +180,19 @@ impl<'a> Interp<'a> {
         }
         if name == "require" || name == "require_eq" {
             return self.eval_require(name, args, span, scope);
+        }
+        // D-METADERIVE1=A: `emit(source_string)` — push a re-entry fragment.
+        if name == "emit" {
+            let val = match args.first() {
+                Some(a) => self.eval(&a.expr, scope)?,
+                None => return Err(unsupported("`emit` requires one argument", span)),
+            };
+            if let CtValue::Str(s) = val {
+                let fragment = apply_dollar_splices(&s, scope);
+                self.emitted_fragments.push(fragment);
+                return Ok(CtValue::Unit);
+            }
+            return Err(unsupported("`emit` argument must be a string", span));
         }
         // A user function: bind params, run the body in a fresh frame.
         let func = self

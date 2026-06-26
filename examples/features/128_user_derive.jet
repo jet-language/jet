@@ -1,0 +1,26 @@
+// 128 — D-METADERIVE1=A: user-authored derive + D-METAREFLECT1=B: T.reflect()
+// Demonstrates: derive block emits impl via emit() + $name splice (D-CTMARKER1=C).
+// Braces in emit templates are escaped as {{ / }} (Jet string interpolation escape).
+
+derive Debug for T {
+    info @= T.reflect()
+    tname @= info.name
+    emit("""
+impl $tname {{
+    fn debug_string(self) -> String {{
+        return "$tname"
+    }}
+}}
+""")
+}
+
+#[Debug]
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn main() {
+    p @= Point.{ x: 3, y: 4 }
+    print(p.debug_string())
+}

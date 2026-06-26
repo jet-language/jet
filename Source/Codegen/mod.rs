@@ -430,7 +430,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
-            | Item::StateDecl(_) => {} // D-STATE-DECL: state-set decls erase (I3)
+            | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
+            | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
         }
     }
 
@@ -526,7 +527,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
-            | Item::StateDecl(_) => {} // D-STATE-DECL: state-set decls erase (I3)
+            | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
+            | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
         }
     }
 
