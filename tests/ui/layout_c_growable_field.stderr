@@ -1,15 +1,7 @@
-Error [E1104]: `#layout(c)` struct `Packet` has a growable field `payload` ([Int])
-  --> tests/ui/layout_c_growable_field.jet:2:1
+Error [E0003]: `#layout` isn't a known attribute on a const
+  --> tests/ui/layout_c_growable_field.jet:2:8
     |
   2 | #layout(c)
-    | ^^^^^^^^^^
- Why: growable types (`[T]`, `Map`, `String`) don't have a stable C layout
- Fix: use a fixed-size array `[T#N]` instead, or remove `#layout(c)`
-
-Error [E1104]: `#layout(c)` struct `Packet` has a growable field `label` (String)
-  --> tests/ui/layout_c_growable_field.jet:2:1
-    |
-  2 | #layout(c)
-    | ^^^^^^^^^^
- Why: growable types (`[T]`, `Map`, `String`) don't have a stable C layout
- Fix: use a fixed-size array `[T#N]` instead, or remove `#layout(c)`
+    |        ^
+ Why: only `#static` and `#inline` are supported on const declarations
+ Fix: remove the attribute or use `#static` or `#inline`

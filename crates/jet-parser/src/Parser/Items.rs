@@ -2403,17 +2403,17 @@ impl<'a> Parser<'a> {
         self.bump(); // consume `#`
         let (attr_name, attr_name_span) = self.expect_ident("after `#`")?;
         debug_assert_eq!(attr_name, Syntax::ATTR_LAYOUT);
-        self.expect(TokKind::LParen, "after `#layout`")?;
-        let (variant, variant_span) = self.expect_ident("inside `#layout(…)`")?;
+        self.expect(TokKind::LParen, "after `#Layout`")?;
+        let (variant, variant_span) = self.expect_ident("inside `#Layout(…)`")?;
         // D-SOA2B: partial columnar (`#layout(columnar: x, y)`) is deferred — a
         // `:` after the variant is the partial form. Reject with a clear message.
         if variant == Syntax::LAYOUT_COLUMNAR && matches!(&self.peek().kind, TokKind::Colon) {
             let colon_span = self.peek().span;
             return Err(Diagnostic::error(
                 "E1109",
-                "partial `#layout(columnar: …)` isn't supported yet".to_string(),
+                "partial `#Layout(columnar: …)` isn't supported yet".to_string(),
                 "v1 supports whole-struct columnar only — every field becomes a column".to_string(),
-                "write `#layout(columnar)` to convert the whole struct".to_string(),
+                "write `#Layout(columnar)` to convert the whole struct".to_string(),
                 Some(Span::new(variant_span.start, colon_span.end)),
             ));
         }
@@ -2423,24 +2423,24 @@ impl<'a> Parser<'a> {
             v if v == Syntax::LAYOUT_PACKED || v == Syntax::LAYOUT_ALIGN => {
                 return Err(Diagnostic::error(
                     "E1105",
-                    format!("`#layout({})` is reserved and not yet supported", v),
+                    format!("`#Layout({})` is reserved and not yet supported", v),
                     "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
-                    "use `#layout(c)` or `#layout(columnar)`, or omit `#layout` for the default".to_string(),
+                    "use `#Layout(c)` or `#Layout(columnar)`, or omit `#Layout` for the default".to_string(),
                     Some(variant_span),
                 ));
             }
             _ => {
                 return Err(Diagnostic::error(
                     "E1105",
-                    format!("`#layout({})` isn't a known layout variant", variant),
+                    format!("`#Layout({})` isn't a known layout variant", variant),
                     "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
-                    "write `#layout(c)` or `#layout(columnar)`".to_string(),
+                    "write `#Layout(c)` or `#Layout(columnar)`".to_string(),
                     Some(variant_span),
                 ));
             }
         };
         let attr_end = self.peek().span;
-        self.expect(TokKind::RParen, "to close `#layout(…)`")?;
+        self.expect(TokKind::RParen, "to close `#Layout(…)`")?;
         let attr_span = Span::new(attr_start.start, attr_end.end);
         // Consume optional semicolons (newline-inserted) before `struct`/`pub`.
         while matches!(&self.peek().kind, TokKind::Semi) {

@@ -268,7 +268,7 @@ impl<'a> Fmt<'a> {
         self.newline();
     }
 
-    /// D-REPRC1/D-SOA1: `#layout(c)` / `#layout(columnar)` on its own line.
+    /// D-REPRC1/D-SOA1: `#Layout(c)` / `#Layout(columnar)` on its own line.
     fn fmt_layout(&mut self, layout: &Option<StructLayout>) {
         if let Some(l) = layout {
             let variant = match l {

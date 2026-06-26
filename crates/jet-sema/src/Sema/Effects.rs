@@ -303,7 +303,7 @@ pub struct RegionAccum {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// D-SCAP1: true for a `#grant(…)` region (authorizes the listed effects via
+    /// D-SCAP1: true for a `#Grant(…)` region (authorizes the listed effects via
     /// a handle), false for a `#Caps(…)` region (restricts to the listed set).
     /// Both share the subset machinery; the flag selects the diagnostic — an
     /// out-of-set effect is E0712 (no capability) for a grant, E0741 (out of the
@@ -320,9 +320,9 @@ pub struct RegionSummary {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// Span of the `#Caps(…)` / `#grant(…)` list, for the diagnostic.
+    /// Span of the `#Caps(…)` / `#Grant(…)` list, for the diagnostic.
     pub caps_span: Span,
-    /// D-SCAP1: a `#grant(…)` region (E0712 on overflow) vs `#Caps(…)` (E0741).
+    /// D-SCAP1: a `#Grant(…)` region (E0712 on overflow) vs `#Caps(…)` (E0741).
     pub grant: bool,
 }
 
@@ -608,7 +608,7 @@ pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
     )
 }
 
-/// D-SCAP1: detect whether the capability handle `handle` bound by a `#grant(…)`
+/// D-SCAP1: detect whether the capability handle `handle` bound by a `#Grant(…)`
 /// region escapes its block — returned, stored, passed, captured, or otherwise
 /// used as a value that outlives the scope. Returns the span of the first escape,
 /// or `None` if the handle is only ever used in place (as the receiver of a
@@ -795,9 +795,9 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
     }
 }
 
-/// E0712 (D-SCAP1): an effect used inside a `#grant(…)` region that the grant
+/// E0712 (D-SCAP1): an effect used inside a `#Grant(…)` region that the grant
 /// doesn't authorize — there is no capability in scope backing it. The dual of
-/// E0741: `#grant(…)` *authorizes* exactly the listed effects through its handle,
+/// E0741: `#Grant(…)` *authorizes* exactly the listed effects through its handle,
 /// so an effect reached inside (even through a call) that the grant omits has no
 /// capability to perform it.
 pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
@@ -825,7 +825,7 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
     )
 }
 
-/// E0711 (D-SCAP1): the capability handle bound by a `#grant(…)` region escapes
+/// E0711 (D-SCAP1): the capability handle bound by a `#Grant(…)` region escapes
 /// its scope — returned, stored in an outer binding, or captured by an escaping
 /// value. The capability is revoked at scope end (RAII, S63), so a reference that
 /// outlives the block would name a revoked authority.

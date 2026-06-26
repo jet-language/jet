@@ -180,7 +180,7 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-SCAP1: `#grant(Fs) { caps -> … }` scoped-capability grant region.
+            // D-SCAP1: `#Grant(Fs) { caps -> … }` scoped-capability grant region.
             Stmt::Grant { caps, binding, body, .. } => {
                 let list = caps
                     .iter()

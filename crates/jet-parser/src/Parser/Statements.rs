@@ -210,15 +210,15 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-SCAP1: parse a `#grant(Fs) { caps -> … }` scoped-capability grant region
+    /// D-SCAP1: parse a `#Grant(Fs) { caps -> … }` scoped-capability grant region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents (sema validates them, E0119); `caps` binds the first-class
-    /// capability handle for the block. The dual of `#Caps`: `#grant` authorizes
+    /// capability handle for the block. The dual of `#Caps`: `#Grant` authorizes
     /// the listed effects through the handle, RAII-revoked at scope end.
     fn at_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // `#`
-        self.bump(); // `grant`
+        self.bump(); // `Grant`
         let lparen = self.peek().span;
         self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_GRANT))?;
         let mut caps = Vec::new();

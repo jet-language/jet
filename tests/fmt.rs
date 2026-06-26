@@ -605,18 +605,18 @@ struct Person {
 
 #[test]
 fn fmt_keeps_layout_columnar_and_codable() {
-    // `#[Codable]` then `#layout(columnar)` on the same struct — both survive,
+    // `#[Codable]` then `#Layout(columnar)` on the same struct — both survive,
     // neither is rewritten into body `derive` lines.
     let src = "\
 #[Codable]
-#layout(columnar)
+#Layout(columnar)
 struct Particle {
     x: Float
 }
 ";
     assert_fmt_keeps(
         src,
-        &["#[Codable]", "#layout(columnar)"],
+        &["#[Codable]", "#Layout(columnar)"],
         "layout columnar + codable",
     );
     // And no `derive Encode`/`derive Decode` body lines leak in.
@@ -638,12 +638,12 @@ fn fmt_keeps_single_use_marker() {
 #[test]
 fn fmt_keeps_layout_c_struct() {
     let src = "\
-#layout(c)
+#Layout(c)
 struct Header {
     magic: Int
 }
 ";
-    assert_fmt_keeps(src, &["#layout(c)"], "layout c struct");
+    assert_fmt_keeps(src, &["#Layout(c)"], "layout c struct");
 }
 
 #[test]

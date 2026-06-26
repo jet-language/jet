@@ -439,7 +439,7 @@ impl Circle {
   edits only `.jet/cache/schema/`, never user source. There is **no `jet schema
   check` verb** — `jet build`'s E0910 is already the CI gate.
 
-- **Struct layout control (D-REPRC1):** `#layout(c)` before a struct stamps
+- **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
   sharing. Field order is preserved as written. Growable fields (`[T]`, `Map`,
   `String`) are rejected with **E1104** because they lack a stable C layout;

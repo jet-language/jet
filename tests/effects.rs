@@ -285,14 +285,14 @@ fn main() { work(); }
 
 // ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────
 
-/// D-SCAP1: a `#grant(Fs) { caps -> … }` whose body stays within the granted set
+/// D-SCAP1: a `#Grant(Fs) { caps -> … }` whose body stays within the granted set
 /// compiles clean — the grant authorizes the listed effects.
 #[test]
 fn grant_within_set_ok() {
     let src = r#"
 use core.fs as fs
 fn main() {
-    #grant(Fs, Io) { caps ->
+    #Grant(Fs, Io) { caps ->
         text @= fs.read("x") ?? "";
         print(text);
     }
@@ -301,14 +301,14 @@ fn main() {
     assert!(codes(src).is_empty(), "in-set grant should compile: {:?}", codes(src));
 }
 
-/// D-SCAP1: an effect used inside a `#grant(…)` that the grant doesn't authorize
+/// D-SCAP1: an effect used inside a `#Grant(…)` that the grant doesn't authorize
 /// has no capability — E0712 (the dual of E0741).
 #[test]
 fn grant_out_of_set_is_e0712() {
     let src = r#"
 use core.fs as fs
 fn main() {
-    #grant(Net) { caps ->
+    #Grant(Net) { caps ->
         text @= fs.read("x") ?? "";
         print(text);
     }
@@ -325,7 +325,7 @@ fn grant_transitive_is_e0712() {
 use core.fs as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn main() {
-    #grant(Io) { caps ->
+    #Grant(Io) { caps ->
         text @= helper("x");
         print(text);
     }
@@ -340,7 +340,7 @@ fn main() {
 fn grant_handle_alias_is_e0711() {
     let src = r#"
 fn main() {
-    #grant(Io) { caps ->
+    #Grant(Io) { caps ->
         alias @= caps;
         print("hi");
     }
@@ -355,7 +355,7 @@ fn main() {
 fn grant_unused_handle_ok() {
     let src = r#"
 fn main() {
-    #grant(Io) { caps ->
+    #Grant(Io) { caps ->
         print("granted");
     }
 }
@@ -363,13 +363,13 @@ fn main() {
     assert!(codes(src).is_empty(), "an unused grant handle should compile: {:?}", codes(src));
 }
 
-/// D-SCAP1: an unknown effect name in a `#grant(…)` list is E0119 (shared with
+/// D-SCAP1: an unknown effect name in a `#Grant(…)` list is E0119 (shared with
 /// `#Caps`/`#(…)`), and suppresses the E0712 subset check.
 #[test]
 fn grant_unknown_effect_is_e0119() {
     let src = r#"
 fn main() {
-    #grant(Bogus) { caps ->
+    #Grant(Bogus) { caps ->
         print("hi");
     }
 }
@@ -379,14 +379,14 @@ fn main() {
     assert!(!c.contains(&"E0712"), "unknown name should suppress E0712: {:?}", c);
 }
 
-/// I3: a `#grant(…)` region lowers to a plain lexical block — the generated Rust
+/// I3: a `#Grant(…)` region lowers to a plain lexical block — the generated Rust
 /// carries no capability machinery (no handle value, no grant/revoke), no effect
 /// annotation, and NO `unsafe`. The body runs unchanged.
 #[test]
 fn grant_region_erases_to_plain_block() {
     let src = r#"
 fn main() {
-    #grant(Io) { caps ->
+    #Grant(Io) { caps ->
         print("inside");
     }
     print("outside");
@@ -400,15 +400,15 @@ fn main() {
     assert!(rust.contains("inside") && rust.contains("outside"), "region body must survive:\n{rust}");
 }
 
-/// I3 (D-SCAP1): a `#grant(…)` region lowers to the SAME plain Rust block as the
+/// I3 (D-SCAP1): a `#Grant(…)` region lowers to the SAME plain Rust block as the
 /// already-erased `#Caps(…)` region — the grant carries no machinery `#Caps`
-/// doesn't, so swapping `#grant(E) { h -> … }` for `#Caps(E) { … }` is identical
+/// doesn't, so swapping `#Grant(E) { h -> … }` for `#Caps(E) { … }` is identical
 /// generated code (the handle is sema-only and erased).
 #[test]
 fn grant_lowers_like_caps_region() {
     let granted = r#"
 fn main() {
-    #grant(Io) { caps ->
+    #Grant(Io) { caps ->
         print("a");
         print("b");
     }
@@ -424,7 +424,7 @@ fn main() {
 "#;
     let a = jet::compile(granted).expect("granted compiles").rust;
     let b = jet::compile(caps).expect("caps compiles").rust;
-    assert_eq!(a, b, "a #grant region must lower identically to the erased #Caps region (I3)");
+    assert_eq!(a, b, "#Grant region must lower identically to the erased #Caps region (I3)");
 }
 
 // ── Transactions (D-TXN1–D-TXN4) ──────────────────────────────────────────────

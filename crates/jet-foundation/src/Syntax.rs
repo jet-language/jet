@@ -741,8 +741,8 @@ pub const KW_CAPS: &str = "Caps";
 /// **revokes** the capability at scope end (RAII, S63) — the handle is bound only
 /// for the block. The dual of `#Caps` (which restricts): an effect used inside
 /// that the grant doesn't cover has no capability (E0712); letting the handle
-/// escape is E0711. Erased in codegen (I3). Lowercase per the ratified spelling.
-pub const KW_GRANT: &str = "grant";
+/// escape is E0711. Erased in codegen (I3). PascalCase per D-MARKERCASE1=A.
+pub const KW_GRANT: &str = "Grant";
 
 /// D-SCAP1: the `->` token between the grant handle and the block body —
 /// `#grant(Fs) { caps -> … }`.
@@ -1337,11 +1337,12 @@ pub const API_CACHE_SUBDIR: &str = "cache/api";
 /// time (E1102) and flagged again at the detach site (E1103).
 pub const TASK_DETACH: &str = "detach"; // D-DETACH1
 
-/// D-REPRC1 (ratified; D-REPRC1 = B): `#layout(…)` struct attribute — controls
-/// the memory layout of the generated Rust struct. `#layout(c)` stamps
+/// D-REPRC1 (ratified; D-REPRC1 = B): `#Layout(…)` struct attribute — controls
+/// the memory layout of the generated Rust struct. `#Layout(c)` stamps
 /// `#[repr(C)]` for C interop. Field order is preserved as written.
 /// Growable fields (`[T]`, `Map`, `String`) are rejected (E1104).
-pub const ATTR_LAYOUT: &str = "layout"; // D-REPRC1
+/// PascalCase per D-MARKERCASE1=A.
+pub const ATTR_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
 /// D-REPRC1: the C-compatible layout variant — `#layout(c)` → `#[repr(C)]`.
 pub const LAYOUT_C: &str = "c"; // D-REPRC1
 /// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
