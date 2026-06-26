@@ -71,7 +71,7 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::StoreEnt
         offline: true,
     };
     let r = Provider::realize(&spec, &table, &ctx).expect("library realizes offline");
-    Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin)
+    Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin, &r.rlib)
         .expect("records into hangar")
 }
 

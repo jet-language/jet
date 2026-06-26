@@ -241,7 +241,7 @@ fn realize_ref(
         Ok(r) => {
             theme.ok(&format!("{} ready", theme.bold(&r.name)));
             theme.detail(&theme.gray(&r.out));
-            match Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin) {
+            match Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin, &r.rlib) {
                 Ok(entry) => Some(entry),
                 Err(e) => {
                     theme.error(

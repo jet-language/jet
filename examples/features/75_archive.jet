@@ -1,0 +1,19 @@
+// D-DEP-ARCHIVE1=A: jet.archive — gzip compress / decompress.
+// Ships on the `flate2` crate (pure-Rust, no C dependency) via the hidden FFI
+// bridge. The compiler crate stays zero-dependency (I6).
+use jet.archive as ar
+
+fn main() {
+    // Compress some bytes with gzip. The type annotation `[U8]` tells the
+    // compiler to interpret the integer literals as unsigned bytes (U8).
+    original: [U8] @= [72, 101, 108, 108, 111]   // ASCII "Hello"
+    compressed @= ar.gzip_compress(original)
+
+    // A gzip stream is always longer than 5 bytes (header alone is 10).
+    print((compressed.len() > 5))
+
+    // Round-trip: decompress must recover the original bytes exactly.
+    restored @= ar.gzip_decompress(compressed)
+    print((restored.len() == original.len()))
+    print((restored == original))
+}

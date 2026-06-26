@@ -109,6 +109,10 @@ pub struct StoreEntry {
     pub out: String,
     /// The `bin` directory to add to PATH.
     pub bin: String,
+    /// Path to the built Rust rlib artifact, when a library package was compiled
+    /// from its Cargo.toml by the core provider (D-BFS1). Empty for executable
+    /// packages and for library packages that are consumed as staged source only.
+    pub rlib: String,
 }
 
 impl StoreEntry {
@@ -119,6 +123,7 @@ impl StoreEntry {
             ("ref", &self.reference),
             ("out", &self.out),
             ("bin", &self.bin),
+            ("rlib", &self.rlib),
         ])
     }
 }
@@ -146,6 +151,7 @@ pub fn record(
     reference: &str,
     out: &str,
     bin: &str,
+    rlib: &str,
 ) -> std::io::Result<StoreEntry> {
     let id = entry_id(name, version, reference, out);
     let entry = StoreEntry {
@@ -155,6 +161,7 @@ pub fn record(
         reference: reference.to_string(),
         out: out.to_string(),
         bin: bin.to_string(),
+        rlib: rlib.to_string(),
     };
     let dir = roots.hangar_dir().join(&id);
     fs::create_dir_all(&dir)?;
@@ -187,6 +194,8 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
                 reference,
                 out: o,
                 bin: b,
+                // Older records predate the rlib field; treat as no compiled artifact.
+                rlib: get("rlib").unwrap_or_default(),
             });
         }
     }
@@ -236,6 +245,7 @@ mod tests {
             "nixpkgs:fastfetch",
             "/nix/store/x",
             "/nix/store/x/bin",
+            "",
         )
         .unwrap();
         // Name-and-version first, fingerprint last (D-PM1).
@@ -248,8 +258,8 @@ mod tests {
     #[test]
     fn clean_removes_entries() {
         let (roots, _g) = temp_roots();
-        record(&roots, "a", "1.0", "nixpkgs:a", "/nix/store/a", "/nix/store/a/bin").unwrap();
-        record(&roots, "b", "1.0", "nixpkgs:b", "/nix/store/b", "/nix/store/b/bin").unwrap();
+        record(&roots, "a", "1.0", "nixpkgs:a", "/nix/store/a", "/nix/store/a/bin", "").unwrap();
+        record(&roots, "b", "1.0", "nixpkgs:b", "/nix/store/b", "/nix/store/b/bin", "").unwrap();
         assert_eq!(clean(&roots).unwrap(), 2);
         assert!(list(&roots).is_empty());
     }

@@ -66,14 +66,15 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 }
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
-/// program has no `extern rust` declarations and does not use `jet.regex`.
+/// program has no `extern rust` declarations and does not use `jet.regex` or
+/// `jet.archive`.
 ///
-/// `jet.regex` (D-REGEX1) is delivered through this same hidden-cargo bridge:
-/// when the program imports it, the bridge crate gains the `regex` dependency
-/// and a hand-written regex runtime (`Source/Prelude/Regex.rs`). This keeps the
-/// `regex` crate strictly inside the FFI bridge — the compiler crate (`Source/`)
-/// stays zero-dependency (I6). It is the owner-approved I6 bootstrap exception,
-/// to be native-ized before the end of Epoch 3.
+/// `jet.regex` (D-REGEX1) and `jet.archive` (D-DEP-ARCHIVE1) are delivered
+/// through this same hidden-cargo bridge: when a program imports either, the
+/// bridge crate gains the matching dependency and a hand-written runtime
+/// (`Source/Prelude/Regex.rs`, `Source/Prelude/Archive.rs`). The compiler
+/// crate (`Source/`) stays zero-dependency (I6). These are the owner-approved
+/// I6 bootstrap exceptions, to be native-ized before the end of Epoch 3.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
     let entries = collect_externs(bundle);
     // `used_core` entries are `"{module}::{method}"` (e.g. `jet.regex::is_match`),
@@ -82,27 +83,46 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         .used_core
         .iter()
         .any(|u| u == "jet.regex" || u.starts_with("jet.regex::"));
-    if entries.is_empty() && !needs_regex {
+    let needs_archive = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "jet.archive" || u.starts_with("jet.archive::"));
+    if entries.is_empty() && !needs_regex && !needs_archive {
         return Ok(None);
     }
 
-    build_bridge(&entries, needs_regex).map(Some)
+    build_bridge(&entries, needs_regex, needs_archive).map(Some)
 }
 
 /// The `regex` crate version that backs `jet.regex` (D-REGEX1). Lives only here,
 /// never in the compiler's Cargo.toml (I6).
 pub const REGEX_CRATE_SPEC: (&str, &str) = ("regex", "1");
 
+/// The `flate2` crate version that backs `jet.archive` (D-DEP-ARCHIVE1).
+/// Lives only here — never in the compiler's Cargo.toml (I6).
+pub const ARCHIVE_CRATE_SPEC: (&str, &str) = ("flate2", "1");
+
 /// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
 /// used. This is the only code that touches the `regex` crate.
 const REGEX_RUNTIME: &str = include_str!("Prelude/Regex.rs");
 
-pub fn build_bridge(entries: &[ExternEntry], needs_regex: bool) -> Result<FfiLink, Vec<Diagnostic>> {
+/// Hand-written archive runtime emitted into the bridge crate when `jet.archive`
+/// is used. This is the only code that touches the `flate2` crate.
+const ARCHIVE_RUNTIME: &str = include_str!("Prelude/Archive.rs");
+
+pub fn build_bridge(
+    entries: &[ExternEntry],
+    needs_regex: bool,
+    needs_archive: bool,
+) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
         deps.insert(REGEX_CRATE_SPEC.0.to_string(), REGEX_CRATE_SPEC.1.to_string());
     }
-    let key = cache_key_full(entries, &deps, needs_regex);
+    if needs_archive {
+        deps.insert(ARCHIVE_CRATE_SPEC.0.to_string(), ARCHIVE_CRATE_SPEC.1.to_string());
+    }
+    let key = cache_key_full(entries, &deps, needs_regex, needs_archive);
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
 
@@ -128,7 +148,7 @@ pub fn build_bridge(entries: &[ExternEntry], needs_regex: bool) -> Result<FfiLin
     let lib_rs = src_dir.join("lib.rs");
     fs::write(&manifest, emit_cargo_toml(&crate_name, &deps))
         .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
-    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex))
+    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex, needs_archive))
         .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
     let target_dir = cache_root.join("target");
@@ -237,14 +257,17 @@ fn cache_key_full(
     entries: &[ExternEntry],
     deps: &BTreeMap<String, String>,
     needs_regex: bool,
+    needs_archive: bool,
 ) -> u64 {
     let mut h = DefaultHasher::new();
-    // Only perturb the key when regex is actually needed, so non-regex programs
-    // keep their historical cache key (and pinned snapshots stay stable). The
-    // `regex` dep is already in `deps`, so regex programs hash distinctly anyway;
-    // this extra bit just guards the (currently impossible) empty-deps regex case.
+    // Only perturb the key when a ring module is actually needed, so programs
+    // without those modules keep their historical cache key. The dep is already
+    // in `deps`; the flag guards the (currently impossible) empty-deps case.
     if needs_regex {
         needs_regex.hash(&mut h);
+    }
+    if needs_archive {
+        needs_archive.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -333,13 +356,18 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>) -> String 
     s
 }
 
-fn emit_wrapper_lib(entries: &[ExternEntry], needs_regex: bool) -> String {
+fn emit_wrapper_lib(entries: &[ExternEntry], needs_regex: bool, needs_archive: bool) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
     );
     if needs_regex {
         // D-REGEX1: the regex runtime is the only place the `regex` crate is touched.
         out.push_str(REGEX_RUNTIME);
+        out.push('\n');
+    }
+    if needs_archive {
+        // D-DEP-ARCHIVE1: the archive runtime is the only place `flate2` is touched.
+        out.push_str(ARCHIVE_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();

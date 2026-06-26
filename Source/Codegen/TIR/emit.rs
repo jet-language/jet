@@ -1951,6 +1951,14 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
             "{}(&({}), &({}), &({}))",
             regex_fn("jet_regex_replace_all"), arg(0), arg(1), arg(2)
         ),
+        // D-DEP-ARCHIVE1=A: jet.archive — gzip compress/decompress via the FFI bridge crate.
+        // Arguments are `[U8]` (Vec<u8>); bridge functions take `&[u8]` (auto-coerce from &Vec<u8>).
+        ("jet.archive", "gzip_compress") => {
+            format!("{}(&({}))", regex_fn("jet_archive_gzip_compress"), arg(0))
+        }
+        ("jet.archive", "gzip_decompress") => {
+            format!("{}(&({}))", regex_fn("jet_archive_gzip_decompress"), arg(0))
+        }
         // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.
         // Their return type is arg-type dependent (resolved by sema's bespoke
         // `infer_core_call` and written onto the node's `resolved_ret`, read at

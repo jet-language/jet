@@ -28,6 +28,9 @@ pub struct Realized {
     pub reference: String,
     pub out: String,
     pub bin: String,
+    /// Path to the built Rust rlib artifact (D-BFS1). Set when the core provider
+    /// compiles a library package that carries a `Cargo.toml`. Empty otherwise.
+    pub rlib: String,
 }
 
 /// What can go wrong realizing a ref through a provider. Each maps to a
@@ -215,11 +218,25 @@ impl Provider for CoreProvider {
             .as_ref()
             .map(|pm| pm.package.version.clone())
             .unwrap_or_default();
-        let bin = match kind {
+        let (bin, rlib) = match kind {
             PackageManifest::PackageKind::Executable => {
-                out_dir.join("bin").to_string_lossy().into_owned()
+                (out_dir.join("bin").to_string_lossy().into_owned(), String::new())
             }
-            PackageManifest::PackageKind::Library => String::new(),
+            PackageManifest::PackageKind::Library => {
+                // D-BFS1: if the package ships a Cargo.toml, compile it to an
+                // rlib now and cache the artifact in the store. The rlib is
+                // stored in a build-cache dir keyed by the same fingerprint that
+                // keys the source dir, so unchanged packages hit the cache and
+                // need no rebuild.
+                let cargo_toml = out_dir.join("Cargo.toml");
+                let rlib = if cargo_toml.is_file() {
+                    build_rlib_from_cargo(&out_dir, ctx.store_dir)
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                (String::new(), rlib)
+            }
         };
         Ok(Realized {
             name: spec.package.clone(),
@@ -227,8 +244,58 @@ impl Provider for CoreProvider {
             reference: spec.raw.clone(),
             out: out_dir.to_string_lossy().into_owned(),
             bin,
+            rlib,
         })
     }
+}
+
+/// D-BFS1: compile a library package's `Cargo.toml` to an rlib artifact.
+///
+/// The build is run in the package's own directory (so `.cargo/config.toml`
+/// vendor patches are respected). The Cargo target dir is placed in
+/// `<store_dir>/build-cache/<package-dir-name>/` so repeated realizes of the
+/// same content-addressed package skip the rebuild. Returns the absolute path to
+/// the built rlib, or an empty string if `cargo build` is unavailable or fails.
+fn build_rlib_from_cargo(pkg_dir: &Path, store_dir: &Path) -> Option<String> {
+    if Command::new("cargo").arg("--version").output().is_err() {
+        return None;
+    }
+    let cache_key = pkg_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "pkg".to_string());
+    let target_dir = store_dir
+        .parent()
+        .unwrap_or(store_dir)
+        .join("build-cache")
+        .join(&cache_key);
+    let out = Command::new("cargo")
+        .arg("build")
+        .arg("--lib")
+        .arg("--release")
+        .arg("--manifest-path")
+        .arg(pkg_dir.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    // Find the rlib: `<target_dir>/release/lib<crate_name>.rlib`. The crate
+    // name is the `package.name` with hyphens replaced by underscores.
+    let release = target_dir.join("release");
+    let rlib = std::fs::read_dir(&release)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("rlib")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("lib"))
+                    .unwrap_or(false)
+        })?;
+    Some(rlib.to_string_lossy().into_owned())
 }
 
 /// D-ILE1: infer a package's kind from its source. A top-level `fn main` in any
@@ -729,6 +796,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         reference: spec.raw.clone(),
         out: out.to_string(),
         bin,
+        rlib: String::new(),
     })
 }
 
