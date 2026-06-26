@@ -54,7 +54,7 @@
       "type": "task",
       "title": "Package build-from-source + M9 wave-2 (regex/archive/db)",
       "body": "E2 loose end → E3. jetpack step to compile a dependency from its Jet source (provider.rs realize()); wave-2 rings ship on top. Plan: tools/Tower/docs/plans/epoch-3/package-build-from-source.md.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "c50-build-from-source",
       "notes": [
         {
@@ -96,13 +96,18 @@
         {
           "t": "[partial 2026-06-26 session2] DONE: jet.archive zip API (zip_compress/zip_decompress via the zip crate FFI-bridge — Archive.rs + FFI.rs ZIP_CRATE_SPEC + CheckerCoreLib.rs sigs + TIR/emit.rs arms + 127_archive.jet extended); c156 load_workspace wired into cmd_build (workspace.jet detected → members built via CoreProvider realize_ref). HARD BLOCKERS (owner decision required): (1) tar_pack/tar_unpack BLOCKED — Jet tuple type [(String,[U8])] maps to Vec<JetTup_xxx> in codegen; bridge crate has no access to JetTup types (different compilation unit). Need either a builtin-prelude approach or a new codegen type-conversion mechanism. (2) jet.db BLOCKED — rusqlite uses build.rs to compile bundled SQLite C; FFI bridge only supports pure-Rust crates (build.rs not supported). Different implementation strategy required. Both need owner direction.",
           "at": "2026-06-26"
+        },
+        {
+          "t": "[shipped 2026-06-26 session3] DONE. Both prior blockers resolved: (1) tar via parallel-array API (archive: &[u8], name: &str, data: &[u8]) — no tuple boundary needed; tar_add/tar_get/tar_names_json in Archive.rs + FFI.rs TAR_CRATE_SPEC + sema + emit. (2) jet.db via rusqlite bundled: the FFI bridge runs `cargo build` which invokes build.rs and compiles bundled SQLite C. FEATURED_DEPS pattern in FFI.rs emits rusqlite with features=[\"bundled\"]. Full wave-2 now ships: gzip+zip+tar+db. All golden tests green (1162). Example 128_db added. (moved to done.)",
+          "at": "2026-06-26"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
       "updated": "2026-06-26",
       "priority": "P2",
       "workOrder": null,
-      "decisions": []
+      "decisions": [],
+      "stage": "done"
     },
     {
       "id": "c56",
@@ -749,7 +754,8 @@
       "workOrder": null,
       "decisions": [
         "D-CTEFFECT1",
-        "D-NETDEP1"
+        "D-NETDEP1",
+        "D-CTFIND1"
       ]
     },
     {
@@ -820,7 +826,7 @@
       "type": "task",
       "title": "Compiler internal seams refactor (D-COMPILERLIB1=A) — Epoch 3",
       "body": "D-COMPILERLIB1=A (ratified 2026-06-25): factor Source/ into internal Rust library seams (lexer / parser / sema / tir / codegen / comptime + a driver that composes them), each owning its types behind a small documented API, with today's coarse lib.rs (check_*/compile_*/render_*) kept as a thin facade. Lets the build driver + LSP drive each stage as a library call (and inspect the typed IR between sema and codegen) instead of re-deriving the pipeline, and gives the self-host port crisp crate-by-crate boundaries. I6-safe (compiler's OWN internal crates, no external deps, no carve-out). Scheduled for Epoch 3.",
-      "stage": "ready",
+      "stage": "deciding",
       "plan": "split-compiler-modules",
       "notes": [
         {
@@ -834,6 +840,10 @@
         {
           "t": "[handoff 2026-06-26] STATUS: untouched, P3, Epoch 3. D-COMPILERLIB1=A READY: factor Source/ into internal Rust library seams (lexer/parser/sema/tir/codegen/comptime + a driver that composes them), each behind a small documented API; keep the coarse lib.rs (check_*/compile_*/render_*) as a thin façade over them. PURE refactor — NO behavior change; the full suite must stay green byte-for-byte throughout (main hazard = silent regression; do it incrementally, one seam at a time, full suite after each). I6-safe (internal crates, not external deps). Goal: build-driver + LSP drive each stage as a library call (collapsing the LSP's forked pipeline). Plan: split-compiler-modules. VERIFY: full suite green after each seam split. NOTE: low immediate user value — finish feature cards first unless owner says otherwise.",
           "at": "2026-06-26"
+        },
+        {
+          "t": "[partial 2026-06-26 session3] STEP 1+2 SHIPPED: (1) Driver extraction — Source/Driver/mod.rs extracts the compile pipeline composition from lib.rs; lib.rs is now a thin façade; LSP/Check.rs retargeted onto Driver::check_file (one composition path). (2) TIR seam API — Source/Codegen/mod.rs makes TIR public; TIR/mod.rs promotes all 38+ pub(crate) struct/enum types to pub. Full suite green (1162) after each step. STEP 3b PENDING: workspace-member crate promotion — dependency map shows foundation crate needed (Syntax→Diagnostics→AST, zero-dep leaf); TIR+Codegen must stay one crate (mutual Cx dependency confirmed). Step 3b coordinated with c157 (jet-net/) + c139 (jet-jit/) workspace creation.",
+          "at": "2026-06-26"
         }
       ],
       "created": "2026-06-25",
@@ -841,7 +851,8 @@
       "priority": "P3",
       "workOrder": null,
       "decisions": [
-        "D-COMPILERLIB1"
+        "D-COMPILERLIB1",
+        "D-COMPILERSEAMS1"
       ]
     },
     {
@@ -946,7 +957,8 @@
       "priority": "P2",
       "workOrder": null,
       "decisions": [
-        "D-NETDEP1"
+        "D-NETDEP1",
+        "D-HTTPLIB1"
       ]
     }
   ],
