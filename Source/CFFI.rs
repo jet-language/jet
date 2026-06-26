@@ -27,26 +27,8 @@ use crate::Syntax;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// The result of resolving one C `use` in one file: which synthetic module it
-/// binds to. Keyed for sema's per-module import map.
-#[derive(Debug, Clone)]
-pub struct CImportLink {
-    /// Index of the importing module in `bundle.modules`.
-    pub importing_idx: usize,
-    /// The alias the user bound (`rl`).
-    pub alias: String,
-    /// Index of the synthetic merged C module in `bundle.modules`.
-    pub target_idx: usize,
-}
-
-/// One C library that the program links against, with the discovered surface.
-#[derive(Debug, Clone)]
-pub struct CLib {
-    /// Link key — last `c.<lib>` segment (`raylib`).
-    pub lib: String,
-    /// Index of the synthetic merged module in `bundle.modules`.
-    pub module_idx: usize,
-}
+// Struct defs live in AST for cross-seam sharing; re-export for callers.
+pub use crate::AST::{CFfi, CImportLink, CLib};
 
 /// `Module("c.<lib>")` → `Some("<lib>")` (the logical-module C `use` form).
 pub fn c_module_lib(imp: &ImportDecl) -> Option<String> {
@@ -159,64 +141,37 @@ fn e3204(lib: &str, header: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// Gathered C-FFI artifacts to thread into sema and codegen.
-#[derive(Debug, Default, Clone)]
-pub struct CFfi {
-    /// Per-file C import → synthetic module bindings.
-    pub import_links: Vec<CImportLink>,
-    /// Libraries the program links against.
-    pub libs: Vec<CLib>,
-}
-
-impl CFfi {
-    /// Synthetic-module index for an importing module + alias, if it is a C use.
-    pub fn target_for(&self, importing_idx: usize, alias: &str) -> Option<usize> {
-        self.import_links
-            .iter()
-            .find(|l| l.importing_idx == importing_idx && l.alias == alias)
-            .map(|l| l.target_idx)
-    }
-
-    /// True when the program links against at least one C library.
-    pub fn links_c(&self) -> bool {
-        !self.libs.is_empty()
-    }
-
-    /// Resolve native-library linker arguments for every C library this program
-    /// uses (D-CFFI2). On any unresolved lib, returns the E3201 diagnostics.
-    /// The returned strings are ready to append to a `rustc`/`cc` command:
-    /// `-L native=<dir>` for lib dirs and `-l <name>` for each link name.
-    pub fn rustc_link_args(&self, project_root: &Path) -> Result<Vec<String>, Vec<Diagnostic>> {
-        let mut args = Vec::new();
-        let mut diags = Vec::new();
-        for lib in &self.libs {
-            match resolve_link(&lib.lib, project_root) {
-                Ok(flags) => {
-                    for dir in &flags.lib_dirs {
-                        args.push("-L".to_string());
-                        args.push(format!("native={dir}"));
-                    }
-                    for name in &flags.link_names {
-                        args.push("-l".to_string());
-                        args.push(name.clone());
-                    }
-                    // rpath so the built binary finds shared libs (e.g. a
-                    // /nix/store libraylib.so.600) at run time without any
-                    // LD_LIBRARY_PATH. Each dir is one `-C link-arg=…` pair.
-                    for dir in &flags.rpath_dirs {
-                        args.push("-C".to_string());
-                        args.push(format!("link-arg=-Wl,-rpath,{dir}"));
-                    }
+/// Resolve native-library linker arguments for every C library this program
+/// uses (D-CFFI2). On any unresolved lib, returns the E3201 diagnostics.
+/// The returned strings are ready to append to a `rustc`/`cc` command.
+pub fn rustc_link_args(cffi: &CFfi, project_root: &Path) -> Result<Vec<String>, Vec<Diagnostic>> {
+    let mut args = Vec::new();
+    let mut diags = Vec::new();
+    for lib in &cffi.libs {
+        match resolve_link(&lib.lib, project_root) {
+            Ok(flags) => {
+                for dir in &flags.lib_dirs {
+                    args.push("-L".to_string());
+                    args.push(format!("native={dir}"));
                 }
-                Err(d) => diags.push(d),
+                for name in &flags.link_names {
+                    args.push("-l".to_string());
+                    args.push(name.clone());
+                }
+                for dir in &flags.rpath_dirs {
+                    args.push("-C".to_string());
+                    args.push(format!("link-arg=-Wl,-rpath,{dir}"));
+                }
             }
+            Err(d) => diags.push(d),
         }
-        if !diags.is_empty() {
-            return Err(diags);
-        }
-        Ok(args)
     }
+    if !diags.is_empty() {
+        return Err(diags);
+    }
+    Ok(args)
 }
+
 
 /// Run the whole C-FFI assembly pass over a freshly loaded bundle. Removes
 /// `Item::CModule`s from user files, merges them, appends synthetic modules,

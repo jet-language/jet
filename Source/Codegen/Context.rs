@@ -165,26 +165,9 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
-/// D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types map to
-/// structs inside the `jet_mem` module emitted from Source/Prelude/Mem.rs.
-pub(crate) fn alloc_handle_rust_type(name: &str) -> Option<&'static str> {
-    match name {
-        "Arena" => Some("jet_mem::JetArena"),
-        "Bump" => Some("jet_mem::JetBump"),
-        "Pool" => Some("jet_mem::JetPool"),
-        "Fixed" => Some("jet_mem::JetFixed"),
-        _ => None,
-    }
-}
-
-/// D-ARGS1 (ratified 2026-06-22): ArgsSpec and ParsedArgs are top-level prelude structs.
-pub(crate) fn args_handle_rust_type(name: &str) -> Option<&'static str> {
-    match name {
-        "ArgsSpec" => Some("JetArgsSpec"),
-        "ParsedArgs" => Some("JetParsedArgs"),
-        _ => None,
-    }
-}
+// Re-export from Syntax so submodules (lower.rs, subset.rs) find them via `use super::*`.
+pub(crate) use crate::Syntax::alloc_handle_rust_type;
+pub(crate) use crate::Syntax::args_handle_rust_type;
 
 impl Cx {
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {

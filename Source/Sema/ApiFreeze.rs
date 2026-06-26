@@ -178,33 +178,6 @@ fn collect_pub_fns(items: &[Item], out: &mut Vec<FrozenFn>) {
     }
 }
 
-/// Freeze the public capability surface of `package` to disk for an
-/// `api: stable|explicit` library target. Loads the entry bundle, resolves
-/// D-CAP8 inference (so the snapshot carries concrete sigils, never `Infer`),
-/// snapshots the entry module's `pub fn`s, and writes
-/// `<project_root>/.jet/cache/api/<package>.api`. Returns the number of public
-/// functions frozen, or `None` if the entry couldn't be loaded.
-///
-/// Called from `jet publish` after the pre-publish gate passes. Idempotent —
-/// re-publishing the same contract rewrites the identical snapshot; publishing a
-/// *changed* contract overwrites it (the new release is the new baseline), while
-/// the sema drift pass (E0912) catches an *unbumped* drift at build time.
-pub fn write_api_snapshot_for_entry(
-    project_root: &Path,
-    entry_file: &str,
-    package: &str,
-    version: &str,
-) -> Option<usize> {
-    let mut bundle = crate::Loader::load_entry_with_overlay(entry_file, None, true).ok()?;
-    // D-CAP8: resolve every `Infer` param to a concrete capability before snapshot.
-    crate::Sema::resolve_capabilities(&mut bundle);
-    let entry = &bundle.modules[bundle.entry];
-    let snap = snapshot_from_items(&entry.items, package, version);
-    let count = snap.funcs.len();
-    save_snapshot(project_root, &snap).ok()?;
-    Some(count)
-}
-
 /// The API cache directory for a project (`<root>/.jet/cache/api/`), honouring the
 /// `JET_API_CACHE_DIR` test override (mirrors the schema cache override).
 pub fn api_cache_dir(project_root: &Path) -> PathBuf {

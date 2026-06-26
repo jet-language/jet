@@ -562,7 +562,7 @@ pub(crate) struct Checker<'a> {
     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated while
     /// checking this function body. Drained into `CompileOutput.comptime_inputs`
     /// by Bundle.rs after the full bundle is checked.
-    pub(super) ct_embed_inputs: Vec<crate::Lock::ComptimeInput>,
+    pub(super) ct_embed_inputs: Vec<crate::AST::ComptimeInput>,
     /// D-WHEN2 (ratified 2026-06-19): when true, we are inside a dropped
     /// `comptime if` arm — name-resolution runs normally (so unknown-name
     /// typos are caught) but all other diagnostics are suppressed and the arm

@@ -1588,3 +1588,29 @@ pub fn is_legacy_std_import(name: &str) -> bool {
         || name == LEGACY_STD_CANONICAL
         || name.starts_with("jet.std.")
 }
+
+/// D-ALLOC1/D-ALLOC-C: allocator opaque types → jet_mem Rust types.
+pub fn alloc_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "Arena" => Some("jet_mem::JetArena"),
+        "Bump" => Some("jet_mem::JetBump"),
+        "Pool" => Some("jet_mem::JetPool"),
+        "Fixed" => Some("jet_mem::JetFixed"),
+        _ => None,
+    }
+}
+
+/// D-ARGS1: ArgsSpec/ParsedArgs → prelude Rust types.
+pub fn args_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "ArgsSpec" => Some("JetArgsSpec"),
+        "ParsedArgs" => Some("JetParsedArgs"),
+        _ => None,
+    }
+}
+
+/// True when a crate spec string needs an explicit version (i.e. it's not
+/// "std" and doesn't already contain `@`).
+pub fn crate_spec_needs_version(spec: &str) -> bool {
+    spec != "std" && spec.split_once('@').is_none()
+}

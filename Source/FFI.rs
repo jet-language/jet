@@ -12,13 +12,8 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Built FFI bridge artifact paths for rustc linking.
-#[derive(Debug, Clone)]
-pub struct FfiLink {
-    pub crate_name: String,
-    pub rlib_path: PathBuf,
-    pub deps_dir: PathBuf,
-}
+// FfiLink struct lives in AST for cross-seam sharing; re-export here.
+pub use crate::AST::FfiLink;
 
 /// One foreign function collected from the import graph.
 #[derive(Debug, Clone)]
@@ -281,10 +276,6 @@ pub fn parse_crate_spec(spec: &str) -> Option<(String, String)> {
         return None;
     }
     Some((name.to_string(), ver.to_string()))
-}
-
-pub fn crate_spec_needs_version(spec: &str) -> bool {
-    spec != "std" && spec.split_once('@').is_none()
 }
 
 fn cache_key_full(

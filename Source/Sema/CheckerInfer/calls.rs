@@ -737,7 +737,7 @@ impl<'a> Checker<'a> {
             if let Expr::Ident(alias, alias_span) = &**base {
                 if let Some(ns) = self.core_imports.get(alias).cloned() {
                     let submodule = format!("{}.{}", ns, leaf);
-                    if crate::Loader::is_known_core_module(&submodule) {
+                    if crate::Syntax::is_known_core_module(&submodule) {
                         let ret =
                             self.infer_core_call(&submodule, method, *alias_span, span, type_args, args);
                         if is_polymorphic_core_special(&submodule, method) {

@@ -68,9 +68,6 @@
 - **First-class unknown/loading/pending/never:** Model loading/pending/never explicitly. Status: `Already expressible` with enums/options; no special feature needed.
 - <a id="idea-switch-multi-pattern-cleanup"></a>**Switch/multi-pattern cleanup:** Use single `|` for structural pattern alternatives and reserve `||` for boolean logic. Status: `Implemented` by D-PATO; older `switch`/`when` examples are stale after D-IF revisions.
 - **Transactional blocks:** Roll back mutations on failure. Status: `Implemented/Ratified` D-TXN1; rollback trait shape ratified as D-ROLLBACK-TRAIT.
-- **Make bad states impossible:** Sum types, distinct types, typestate, and linear/single-use values. Status: `Implemented/Ratified` across S30, D-DIST, D-STATE, D-LIN. Bundle-risk: broad summary of several separate features.
-- **Errors as values with context:** Fallible values plus cause/context chain. Status: `Implemented` for `T ? E`, `?`, rich `Error`, and conversions.
-- **Library extensibility tier policy:** Define allowed power tiers from protocols to DSLs to macros. Status: `Ratified` D-EXT1; Tier 1 hooks open to all, stdlib-only marked DSLs, proc/reader macros rejected for v1.
 - **Blessed protocol hooks:** Core syntax delegates to fixed hooks like iterator/index/literal suffix. Status: `Ratified/Implemented in pieces`; D-EXT1 formalizes the policy. Bundle-risk: individual hooks can have different implementation status.
 - **Safety ladder documentation:** Beginner/working/expert tiers as an explicit model. Status: `Implemented/philosophy`; Tower c120 audits separation.
 - **Full lazy iterator adapter set:** Rich map/filter/fold/window/chunk/group_by/etc. Status: `Ratified/Implemented` D-ITER1; verify individual gaps only if needed. Bundle-risk: adapter-by-adapter coverage may differ.

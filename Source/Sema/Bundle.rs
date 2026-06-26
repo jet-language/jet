@@ -5,7 +5,6 @@ use crate::AST::{
     OrFallback, ProgramBundle, RustConstKind, Stmt, StrPart, Type,
 };
 use crate::Diagnostics::Diagnostic;
-use crate::Loader;
 use crate::Traits::TraitRegistry;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
@@ -646,8 +645,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 .imports
                 .iter()
                 .filter_map(|imp| {
-                    let path = Loader::core_module_path(imp)?;
-                    let alias = Loader::import_alias(imp);
+                    let path = imp.core_module_path()?;
+                    let alias = imp.import_alias();
                     Some((alias, path))
                 })
                 .collect()
@@ -678,7 +677,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             if matches!(&imp.kind, ImportKind::Unqualified { .. }) {
                 continue;
             }
-            let alias = Loader::import_alias(imp);
+            let alias = imp.import_alias();
             if st.imports.contains_key(&alias) {
                 diags.push(Diagnostic::error(
                     "E0105",
@@ -700,7 +699,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 continue;
             }
             if let ImportKind::Module(name, _) = &imp.kind {
-                if Loader::is_legacy_std_import(name) {
+                if crate::Syntax::is_legacy_std_import(name) {
                     diags.push(Diagnostic::error(
                         "E0019",
                         format!("`{name}` is the old standard-library import spelling"),
@@ -715,14 +714,14 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     continue;
                 }
             }
-            if let Some(module) = Loader::core_module_path(imp) {
-                if !Loader::is_known_core_module(&module) {
+            if let Some(module) = imp.core_module_path() {
+                if !crate::Syntax::is_known_core_module(&module) {
                     diags.push(Diagnostic::error(
                         "E1001",
                         format!("there is no core module `{}`", module),
                         "`core` is compiler-known in M10, and only the frozen core modules exist"
                             .to_string(),
-                        format!("import one of: {}", Loader::core_modules_list()),
+                        format!("import one of: {}", crate::Syntax::core_modules_list()),
                         Some(imp.span),
                     ));
                     continue;
@@ -732,17 +731,14 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             }
             // S59 (E2-M14): C `use` forms bind to a synthetic merged module
             // resolved by `CFFI::assemble` (E3204 already reported there).
-            if crate::CFFI::is_c_import(imp) {
+            if imp.is_c_import() {
                 if let Some(target) = bundle.cffi.target_for(idx, &alias) {
                     st.imports.insert(alias, target);
                 }
                 continue;
             }
-            match Loader::resolve_import_target(bundle, idx, imp) {
-                Ok(target) => {
-                    st.imports.insert(alias, target);
-                }
-                Err(d) => diags.push(d),
+            if let Some(target) = bundle.import_targets.get(&(idx, imp.span)).copied() {
+                st.imports.insert(alias, target);
             }
         }
     }
@@ -789,12 +785,12 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 let st = &mut states[idx];
                 for item in items {
                     let full = format!("core.{}", item);
-                    if !Loader::is_known_core_module(&full) {
+                    if !crate::Syntax::is_known_core_module(&full) {
                         diags.push(Diagnostic::error(
                             "E1001",
                             format!("there is no core module `{}`", full),
                             "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
-                            format!("import one of: {}", Loader::core_modules_list()),
+                            format!("import one of: {}", crate::Syntax::core_modules_list()),
                             Some(*module_alias_span),
                         ));
                     } else if st.core_imports.contains_key(item) {
@@ -1370,7 +1366,7 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
                 if let Expr::Ident(alias, _) = base.as_ref() {
                     if let Some(ns) = imports.get(alias) {
                         let submodule = format!("{ns}.{leaf}");
-                        if crate::Loader::is_known_core_module(&submodule) {
+                        if crate::Syntax::is_known_core_module(&submodule) {
                             used.insert(format!("{submodule}::{method}"));
                         }
                     }
@@ -1526,7 +1522,7 @@ pub(crate) fn check_module_bodies(
     freestanding: bool,
     allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::Lock::ComptimeInput>,
+    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -1748,7 +1744,7 @@ pub(crate) fn check_func_body_bundle(
     freestanding: bool,
     allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
-    embed_inputs_out: &mut Vec<crate::Lock::ComptimeInput>,
+    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {

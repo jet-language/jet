@@ -240,7 +240,7 @@ pub fn resolve_c_links(file: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
     if !bundle.cffi.links_c() {
         return Ok(Vec::new());
     }
-    bundle.cffi.rustc_link_args(&bundle.project_root)
+    crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root)
 }
 
 /// Compile for `jet test`: optional `main`, at least one test block required.

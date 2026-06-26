@@ -1488,7 +1488,7 @@ impl<'a> Checker<'a> {
                             // Must be one of the known allocator handle types.
                             let ok = match &ty {
                                 Some(Type::Named(n)) => {
-                                    crate::Codegen::alloc_handle_rust_type(n).is_some()
+                                    crate::Syntax::alloc_handle_rust_type(n).is_some()
                                 }
                                 _ => false,
                             };

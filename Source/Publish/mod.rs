@@ -13,14 +13,17 @@
 
 pub mod Advisory;
 mod API;
-// ApiFreeze and Schema moved to Sema/ (sema-layer concerns); re-export for callers.
-pub use crate::Sema::ApiFreeze;
-// Schema types re-exported at the Publish:: path so CmdSchema/CmdSupply callers are unchanged.
+// ApiFreeze: pure sema types from Sema::ApiFreeze; driver-level write_api_snapshot_for_entry
+// lives in Publish/ApiFreeze.rs which re-exports the pure items and adds the loader call.
+pub mod ApiFreeze;
+// Schema: pure types from Sema::Schema; write_schema_snapshots_for_entry in Publish/Schema.rs.
 pub use crate::Sema::Schema::{
     SchemaSnapshot, SnapshotField, SNAPSHOT_VERSION,
     snapshot_from_struct, load_snapshot, save_snapshot,
-    write_schema_snapshots_for_entry, schema_cache_dir, load_all_snapshots,
+    schema_cache_dir, load_all_snapshots,
 };
+mod Schema;
+pub use Schema::write_schema_snapshots_for_entry;
 mod Diff;
 mod Registry;
 mod Resolve;

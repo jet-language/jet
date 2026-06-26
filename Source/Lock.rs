@@ -11,6 +11,9 @@ use crate::Syntax;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+// ComptimeInput struct lives in AST for cross-seam sharing; re-export here.
+pub use crate::AST::ComptimeInput;
+
 // ──────────────────────────────────────────────
 // Public types
 // ──────────────────────────────────────────────
@@ -43,17 +46,6 @@ pub struct LockedRevision {
     pub rev: String,
     pub tree_hash: String,
     pub last_modified: u64,
-}
-
-/// D-CTEFFECT1 (Tier-1): one comptime embed input recorded for reproducibility.
-/// Written to `.jet/lock` under `[[comptime_inputs]]` so a changed embedded
-/// file changes its hash and the build warns the lock is stale.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ComptimeInput {
-    /// Path relative to the source file that embeds it.
-    pub path: String,
-    /// sha256 hex of the file bytes at the time of embedding.
-    pub hash: String,
 }
 
 /// The full lock graph.

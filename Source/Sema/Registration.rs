@@ -482,7 +482,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         .imports
         .iter()
         .filter_map(|imp| {
-            let module = crate::Loader::core_module_path(imp)?;
+            let module = imp.core_module_path()?;
             Some((imp.alias.clone(), module))
         })
         .collect();

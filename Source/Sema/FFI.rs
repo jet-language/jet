@@ -13,7 +13,7 @@ pub(crate) fn check_extern_block(
     diags: &mut Vec<Diagnostic>,
 ) -> bool {
     let mut ok = true;
-    if crate::FFI::crate_spec_needs_version(&block.crate_spec) {
+    if crate::Syntax::crate_spec_needs_version(&block.crate_spec) {
         diags.push(Diagnostic::error(
             "E0701",
             format!(

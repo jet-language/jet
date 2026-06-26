@@ -148,34 +148,6 @@ pub fn save_snapshot(project_root: &std::path::Path, snap: &SchemaSnapshot) -> R
         .map_err(|e| format!("could not write schema snapshot: {}", e))
 }
 
-/// Write schema snapshots for all `#PublishedSchema` structs found in the entry
-/// bundle. Called during `jet publish` after the pre-publish gate passes.
-/// Returns the number of snapshots written.
-pub fn write_schema_snapshots_for_entry(
-    project_root: &std::path::Path,
-    entry_file: &str,
-    version: &str,
-) -> usize {
-    let bundle = match crate::Loader::load_entry_with_overlay(entry_file, None, true) {
-        Ok(b) => b,
-        Err(_) => return 0,
-    };
-    let mut count = 0;
-    for module in &bundle.modules {
-        for item in &module.items {
-            if let crate::AST::Item::Struct(s) = item {
-                if s.is_published_schema {
-                    let snap = snapshot_from_struct(s, version);
-                    if save_snapshot(project_root, &snap).is_ok() {
-                        count += 1;
-                    }
-                }
-            }
-        }
-    }
-    count
-}
-
 /// The schema cache directory for a project (`<root>/.jet/cache/schema/`),
 /// honouring the `JET_SCHEMA_CACHE_DIR` test override.
 pub fn schema_cache_dir(project_root: &std::path::Path) -> std::path::PathBuf {
