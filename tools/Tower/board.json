@@ -6,7 +6,7 @@
       "type": "idea",
       "title": "Arena allocator compiler inference (far horizon)",
       "body": "Compiler infers arena placement.",
-      "stage": "ready",
+      "stage": "backlog",
       "plan": "arena-allocator-inference",
       "notes": [
         {
@@ -27,7 +27,7 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-26",
+      "updated": "2026-06-26T16:42:07.901Z",
       "priority": "P2",
       "workOrder": null
     },
@@ -256,39 +256,6 @@
       "updated": "2026-06-24T13:55:29.159Z"
     },
     {
-      "id": "c139",
-      "type": "idea",
-      "title": "JIT tier-1: Cranelift backend over the JitBackend seam",
-      "body": "D-JITDEP1 = approve. Implement a CraneliftBackend satisfying the JitBackend seam (shipped c77) as JIT tier-1 for fast hot-swap / live-state in jet serve. Cranelift is runtime-side ONLY (never compiler Source/) so I6 holds; scoped + owner-signed like D-REGEX1. Production stays AOT (compile-to-Rust); this is the resident dev-loop speedup. Needs a sidequest plan (integration + executable-memory/W^X + tier-0/tier-1 switch).",
-      "stage": "done",
-      "plan": "jit-cranelift",
-      "notes": [
-        {
-          "t": "[sweep] From D-JITDEP1 (2026-06-24): approve Cranelift tier-1 now; own bytecode VM then own native JIT are the planned progression, frozen so they are not lost.",
-          "at": "2026-06-24"
-        },
-        {
-          "t": "[sweep] Plan written + independently vetted (jit-cranelift.md): Cranelift JIT tier-1 over the JitBackend seam (c77), TIR->CLIF dumb backend (I3), resident hot-swap for jet serve/dev, AOT path unchanged. Milestones M0-M3 with byte-differential exit criteria. One open gate → ballot D-JIT2: WHERE the Cranelift dep lives (A workspace member jet-jit/ = I6 machine-checkable; B in-crate cfg-gated + I6 carve-out; C out-of-tree). Vet confirmed single-crate w/ jet+jetpack bins, TIR types pub(crate) today, seam construct-point in CmdDevTools run_resident_*.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[sweep 2026-06-25] D-JIT2 ratified A (2026-06-25): Cranelift in workspace member jet-jit/, JIT on by default + opt-out flag. JitBackend seam shipped (c77). No open decision → ready (was stale \"deciding\").",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[done 2026-06-26] M0 seam wiring complete. JitBackend trait + RunOutcome moved to jet-foundation; CraneliftBackend<F> stub in jet-jit/ (delegates to F; Cranelift dep commented out for M1); InterpreterBackend in Source/JitBackend.rs re-exports from jet-foundation. CmdDevTools run_resident_swap/restart use CraneliftBackend by default; --interpret flag forces tier-0. All tests pass.",
-          "at": "2026-06-26"
-        }
-      ],
-      "created": "2026-06-24",
-      "updated": "2026-06-26",
-      "decisions": [
-        "D-JIT2"
-      ],
-      "priority": "P2",
-      "workOrder": null
-    },
-    {
       "id": "c140",
       "type": "idea",
       "title": "JIT tier-1b: own bytecode VM (replace Cranelift, zero runtime dep)",
@@ -412,97 +379,6 @@
       "priority": "P3",
       "workOrder": null,
       "decisions": []
-    },
-    {
-      "id": "c156",
-      "type": "task",
-      "title": "Monorepo: workspace.jet index (D-WORKSPACE1=B) + package addressing (D-MONOREF1=A)",
-      "body": "Two ratified monorepo decisions, built together. D-WORKSPACE1=B (owner chose full power over rec A): retire the root jetpack.toml monorepo index for a fully-computable 'module workspace' in workspace.jet (parallel to env.jet/system.jet) whose members: field may run arbitrary comptime — one grammar (Jet), ends the sources: double-home; external tools must evaluate Jet (mitigate with a generated lock for the common case). D-MONOREF1=A: address one package as source.package (dot form, e.g. mono.ranker) with path-style infra/logging for in-repo siblings (bare name as sugar when unambiguous), resolved index-first then sparse fetch of the named subtree + transitive in-repo deps. Confirm keyword 'module workspace' + filename workspace.jet (D-WORKSPACE1 Owner Q4) before code.",
-      "stage": "ready",
-      "plan": "monorepo-workspace",
-      "notes": [
-        {
-          "t": "[ratified 2026-06-25] D-WORKSPACE1=B + D-MONOREF1=A. Consolidated — both touch the jetpack monorepo index. Aligns with the owner's computed-modules/pure-eval direction. Needs a build plan + the workspace keyword/filename confirmation.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[sweep 2026-06-25] Plan written+vetted. Owner asked to confirm keyword+filename before code → ballot D-WORKSPACE2 (aviation-themed menu; rec B `module fleet`/`fleet.jet`). Arbitrary-comptime members impl-gated on c162+c157.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[ratified 2026-06-25] D-WORKSPACE2=A — owner kept the INDUSTRY term: keyword `workspace`, filename `workspace.jet` (over rec B `fleet`/`fleet.jet` and the rest of the aviation menu; `hangar` collided with the Jetpack store, `manifest` overloaded vs pkg.jet). Confirms D-WORKSPACE1's Owner Q4. All three card decisions (D-WORKSPACE1=B / D-MONOREF1=A / D-WORKSPACE2=A) now ratified. Registered WORKSPACE_FILE=\"workspace.jet\" + reserved namespace `workspace` in Source/Syntax.rs (I7). Recorded in syntax-decisions.md; card stripped. No open decision → ready; arbitrary-comptime members impl-gated on c162 (comptime block/$splice) + c157.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[partial 2026-06-25] SURFACE shipped + merged + full suite green (1151): workspace.jet grammar (`module workspace { members: <expr> }`), computable `members:` (find()/list/comptime → WorkspacePlan, Source/Jetpack/WorkspaceFile.rs), .jet/workspace.lock writer, and D-MONOREF1 `source.package` addressing CLASSIFICATION (RefSpec::classify_in dot form + AmbiguousBare); diagnostics E0995/E0996/E0997; example examples/workspace + 12 tests. NOT 100%: `load_workspace` has ZERO callers — the plan is computed + unit-tested but NOT wired into any real build/resolve command, and D-MONOREF1 member RESOLUTION (resolve+build a member, local in-repo first, then remote sparse/full-clone fetch + transitive in-repo deps) is unbuilt. That wiring is the same resolve/fetch/build layer as c50 → FOLDED INTO c50 to finish. Card stays 'ready' (not done) until the end-to-end build wiring lands.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[handoff 2026-06-26] STATUS: surface shipped (commit aa8968f). DONE: workspace.jet grammar (module workspace { members: <expr> }), members eval (Source/Jetpack/WorkspaceFile.rs — find()/list/comptime), source.package addressing CLASSIFICATION (RefSpec::classify_in), diagnostics E0995/E0996/E0997. TO FINISH 100% — member RESOLUTION (the deferred half): load_workspace (Source/Jetpack/CLI.rs) has ZERO callers — wire it into the real build/resolve command so a workspace.jet monorepo's members resolve+build: in-repo siblings resolve to their local dir + build through c50's realize() flow; remote source.package = full-clone fallback (sparse-checkout = optional optimization). VERIFY: a multi-package examples/workspace builds its members via a real jet/jetpack command (NOT just parser unit tests — that was the gap).",
-          "at": "2026-06-26"
-        },
-        {
-          "t": "[done 2026-06-26] VERIFIED: load_workspace IS wired into cmd_build at crates/jet-driver/src/Jetpack/CLI.rs:493 (predates this session; handoff note 'ZERO callers' was stale). `jetpack build` in examples/workspace iterates members, calls realize_ref via CoreProvider (path: upstream), and materializes hello + ranker in the store — 'built 2 workspace member(s).' Full suite green (12 workspace tests pass). No code changes needed.",
-          "at": "2026-06-26"
-        }
-      ],
-      "created": "2026-06-25",
-      "updated": "2026-06-26",
-      "priority": "P2",
-      "workOrder": null,
-      "decisions": [
-        "D-WORKSPACE1",
-        "D-MONOREF1",
-        "D-WORKSPACE2"
-      ]
-    },
-    {
-      "id": "c157",
-      "type": "task",
-      "title": "Compile-time effect boundary (D-CTEFFECT1=A): tiers + #Impure gate",
-      "body": "D-CTEFFECT1=A (ratified 2026-06-25). Three tiers for build-time/comptime code: Tier 0 pure (always on), Tier 1 hashed-reproducible effects (@embed, find, fetch(url, sha256:)) recorded in .jet/lock, Tier 2 ambient/non-deterministic effects gated behind #Impure(reason) AND --allow-impure so CI is hermetic by default. Reuses the #Unsafe audited-gate + #(fs,net,exec) effect-tag machinery. Owner: a project build file may alias/relax the impure gate (a config knob to drop the --allow-impure requirement per-project). Gate name #Impure (alternatives offered). Gates D-BUILDPROFILE1's hermeticity (c159).",
-      "stage": "ready",
-      "plan": "qualifier-system-implementation",
-      "notes": [
-        {
-          "t": "[ratified 2026-06-25] D-CTEFFECT1=A. Plan tentatively linked to qualifier-system-implementation (the effect-tag system); confirm scope. The $-as-comptime-marker idea split to open ballot D-CTMARKER1.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[sweep 2026-06-25] plan rewritten for D-CTEFFECT1=A three tiers + #Impure gate (old plan predated it). Effects engine D-EFF1/2/3 already built; gaps = fetch()/embed-hash/.jet/lock effect-inputs/--allow-impure. No open decision → ready.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[mostly-shipped 2026-06-25] CORE built + merged, full suite green (1127): tier 0/1/2 model, the #Impure(\"reason\") audited gate (KW_IMPURE, mirrors #Unsafe) + --allow-impure flag (hermetic-by-default), and @embed/find Tier-1 input hashing into .jet/lock ([[comptime_inputs]]). New diagnostics E3410/E3411/E3412/L3102 + ui snapshots; example 117_comptime_tiers. NOT 100% done: `fetch(url, sha256:)` (the network Tier-1 effect) errors E3412 because Jet has no HTTP client and one is an I6 owner dep — surfaced as ballot D-NETDEP1 (rec A: tiny pure-Rust HTTP crate, runtime-side). Card stays 'deciding' on D-NETDEP1; once decided, only fetch's backend remains.",
-          "at": "2026-06-25"
-        },
-        {
-          "t": "[handoff 2026-06-26] STATUS: core shipped (commit fe7dd8e). DONE: tier 0/1/2 model, #Impure(reason) audited gate (KW_IMPURE, mirrors #Unsafe), --allow-impure flag (hermetic-by-default), @embed/find Tier-1 input hashing into .jet/lock; diagnostics E3410/E3411/E3412 + L3102; example 117_comptime_tiers. TO FINISH 100%: ONLY fetch(url,sha256:) — BLOCKED on OPEN ballot D-NETDEP1 (which HTTP backend; rec A = small pure-Rust crate, runtime-side). Stub = E3412 in Source/Comptime/Methods.rs (~line 570). When owner picks D-NETDEP1: wrap the chosen crate (NOT in Source/, like the regex/flate2 bridge), implement download + sha256 verify + hash into .jet/lock, replace the E3412 stub. VERIFY: a comptime fetch(url,sha256:) downloads/verifies/bakes-in; full suite green.",
-          "at": "2026-06-26"
-        },
-        {
-          "t": "[ratified 2026-06-26] D-NETDEP1=A — approve a small pure-Rust HTTP crate (ureq/minreq, runtime-side, owner-gated like Cranelift/regex/sqlite/wasmtime; I6 holds, hash-pinned in .jet/lock, carries native-ize obligation). UNBLOCKED → stage ready. IMPL: wrap the chosen crate outside Source/ (regex/flate2 bridge pattern), implement download + sha256 verify + hash into .jet/lock, replace the E3412 stub in Source/Comptime/Methods.rs (~line 570); verify a comptime fetch(url,sha256:) downloads/verifies/bakes-in, full suite green. NOTE: owner EXPANDED the mandate — end goal is a full HTTP library (client+server, better than Go's net/http) as a Jet core library; the crate is only the bootstrap. That larger track is a NEW card c164; this card delivers ONLY the fetch backend. Recorded in syntax-decisions.md; card stripped from decision-ballots.md.",
-          "at": "2026-06-26"
-        },
-        {
-          "t": "[handoff 2026-06-26] PARTIAL: Tier-1 routing wired correctly — eval_net_fetch is a &mut self method, pre-check before the is_tier2 block in eval_method (so fetch needs no #Impure gate per D-CTEFFECT1). Stub returns E3412 'backend not yet built' (correct per D-NETDEP1=A: ballot explicitly REJECTED curl by name; crate lives in jet-net/ workspace member, NOT in Source/). E3413/E3414 codes removed from diagnostics.md and no UI snapshots (I4 compliant). Architecture is correct and in place. TO FINISH: (1) create jet-net/ workspace member with ureq/minreq; (2) call it from eval_net_fetch (replace Err stub body with download+sha256 verify+embed_inputs.push+return); (3) allocate E3413 (sha256 mismatch) + E3414 (fetch failed) in diagnostics.md + add UI snapshots; (4) full suite green. VERIFY: comptime fetch('file:///dev/null', sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855') succeeds; mismatched hash → E3413; bad URL → E3414.",
-          "at": "2026-06-26"
-        },
-        {
-          "t": "[done 2026-06-26] COMPLETE. jet-net/ workspace member created (ureq 2, no-default-features; file:// via std::fs, http(s):// via ureq). eval_net_fetch replaced: validates args, fetches, sha256-verifies (E3413 mismatch), pushes embed_inputs, returns CtValue::Str. E3413/E3414 allocated in diagnostics.md. Three UI snapshots: comptime_net_fetch_ok (no errors), comptime_net_fetch_bad_hash (E3413), comptime_net_fetch_bad_url (E3414). Full suite green. commit b33c423.",
-          "at": "2026-06-26"
-        }
-      ],
-      "created": "2026-06-25",
-      "updated": "2026-06-26",
-      "priority": "P2",
-      "workOrder": null,
-      "decisions": [
-        "D-CTEFFECT1",
-        "D-NETDEP1",
-        "D-CTFIND1",
-        "D-CTFIND2"
-      ]
     },
     {
       "id": "c164",
