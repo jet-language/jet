@@ -9,7 +9,7 @@ use super::Provider::{self, ProviderError};
 use super::RefSpec::{self, ProviderKind};
 use super::Shell::{self, Env, ShellKind};
 use super::Store::{self, Roots};
-use super::{EnvFile, ModuleEval, RefSpec::RefError};
+use super::{EnvFile, ModuleEval, RefSpec::RefError, WorkspaceFile, WorkspaceLock};
 use crate::Syntax;
 use std::path::{Path, PathBuf};
 
@@ -103,6 +103,34 @@ pub fn main(args: Vec<String>) -> i32 {
 /// requires fixtures for Nix-backed refs; core refs use the source cache.
 fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     Provider::fixtures_from_env(flags.fixtures.clone())
+}
+
+/// Load and evaluate `workspace.jet` from `dir`, emit the workspace lock, and
+/// return the `WorkspacePlan`. Returns `None` when the file is absent. Prints
+/// the diagnostic to stderr and returns `Err(2)` if the file exists but fails
+/// to evaluate (D-WORKSPACE1=B clean break: workspace.jet is the sole index).
+pub fn load_workspace(
+    dir: &Path,
+) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
+    let result = WorkspaceFile::load(dir)?;
+    match result {
+        Ok(plan) => {
+            // Best-effort: write the generated lock for external tools.
+            WorkspaceLock::write(dir, &plan);
+            Some(Ok(plan))
+        }
+        Err(d) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    Syntax::WORKSPACE_FILE,
+                    "",
+                    std::slice::from_ref(&d)
+                )
+            );
+            Some(Err(2))
+        }
+    }
 }
 
 /// Load `[sources]` from `jetpack.toml` in `dir`, print any parse errors, and

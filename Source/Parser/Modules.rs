@@ -13,11 +13,13 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the module body")?;
         let mut sources = Vec::new();
         let mut imports = Vec::new();
+        let mut members = Vec::new();
         let mut contributions = Vec::new();
-        // A module body holds three kinds of entry (U3/U8): `sources:` and
-        // `imports:` fields, and typed `namespace.path: Value` contributions.
-        // The first two are distinguished by their reserved name followed by
-        // `:`; contributions begin with a namespace name followed by `.`.
+        // A module body holds four kinds of entry (U3/U8/D-WORKSPACE1):
+        // `sources:`, `imports:`, and `members:` fields, and typed
+        // `namespace.path: Value` contributions. The first three are
+        // distinguished by their reserved name followed by `:`; contributions
+        // begin with a namespace name followed by `.`.
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             match &self.peek().kind {
@@ -33,6 +35,12 @@ impl<'a> Parser<'a> {
                 {
                     imports.push(self.module_import()?);
                 }
+                TokKind::Ident(n)
+                    if n == Syntax::MODULE_FIELD_MEMBERS
+                        && matches!(self.peek2().kind, TokKind::Colon) =>
+                {
+                    members.push(self.module_members()?);
+                }
                 _ => contributions.push(self.contribution()?),
             }
         }
@@ -44,6 +52,7 @@ impl<'a> Parser<'a> {
             disabled,
             sources,
             imports,
+            members,
             contributions,
             span: Span::new(start.start, end),
         })
@@ -95,10 +104,11 @@ impl<'a> Parser<'a> {
                     // with `#` inside a code-module body.
                     | TokKind::Hash
                     | TokKind::RBrace => true,
-                    // JetOS body starters: `sources:`, `imports:`, or `ident .`
+                    // JetOS body starters: `sources:`, `imports:`, `members:`, or `ident .`
                     TokKind::Ident(n)
                         if n == Syntax::MODULE_FIELD_SOURCES
-                            || n == Syntax::MODULE_FIELD_IMPORTS =>
+                            || n == Syntax::MODULE_FIELD_IMPORTS
+                            || n == Syntax::MODULE_FIELD_MEMBERS =>
                     {
                         false
                     }
@@ -297,6 +307,18 @@ impl<'a> Parser<'a> {
     fn module_import(&mut self) -> Result<Expr, Diagnostic> {
         self.bump(); // `imports`
         self.expect(TokKind::Colon, "after `imports`")?;
+        let value = self.expr()?;
+        if matches!(self.peek().kind, TokKind::Comma) {
+            self.bump();
+        }
+        Ok(value)
+    }
+
+    /// D-WORKSPACE1=B: `members: <expr>` in `module workspace { … }`. The value
+    /// is any expression — most commonly `find("./packages")` or a list literal.
+    fn module_members(&mut self) -> Result<Expr, Diagnostic> {
+        self.bump(); // `members`
+        self.expect(TokKind::Colon, "after `members`")?;
         let value = self.expr()?;
         if matches!(self.peek().kind, TokKind::Comma) {
             self.bump();

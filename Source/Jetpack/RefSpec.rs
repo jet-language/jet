@@ -182,6 +182,9 @@ pub enum RefError {
         raw: String,
         declared: Vec<String>,
     },
+    /// D-MONOREF1=A: bare name with no source prefix, and no workspace member
+    /// matches, or the match was ambiguous.
+    AmbiguousBare(String),
 }
 
 /// Classify a `<source>:<package/path>` ref against only the built-in sources.
@@ -193,31 +196,54 @@ pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
 /// Classify a ref, accepting built-in sources plus any named source declared in
 /// `table` (D-JPK17). The split is on the *first* `:` so a package path may
 /// itself contain a colon.
+///
+/// D-MONOREF1=A: also accepts the dot form `source.package` (e.g. `mono.ranker`)
+/// when the left side of the first `.` matches a declared named source. The
+/// colon form (`source:package`) is always tried first; the dot form is a
+/// fallback when no `:` is present.
 pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> {
     let raw = raw.trim();
-    let (source, package) = match raw.split_once(Syntax::REF_SEPARATOR) {
-        Some(parts) => parts,
-        None => return Err(RefError::MissingSeparator(raw.to_string())),
-    };
-    if source.is_empty() || package.is_empty() {
-        return Err(RefError::EmptyHalf(raw.to_string()));
-    }
-    let source = match Source::builtin(source) {
-        Some(b) => b,
-        None if table.upstream(source).is_some() => Source::Named(source.to_string()),
-        None => {
-            return Err(RefError::UnknownSource {
-                source: source.to_string(),
-                raw: raw.to_string(),
-                declared: table.declared_names(),
-            })
+
+    // Primary form: `source:package` (colon separator).
+    if let Some((source, package)) = raw.split_once(Syntax::REF_SEPARATOR) {
+        if source.is_empty() || package.is_empty() {
+            return Err(RefError::EmptyHalf(raw.to_string()));
         }
-    };
-    Ok(RefSpec {
-        source,
-        package: package.to_string(),
-        raw: raw.to_string(),
-    })
+        let src = match Source::builtin(source) {
+            Some(b) => b,
+            None if table.upstream(source).is_some() => Source::Named(source.to_string()),
+            None => {
+                return Err(RefError::UnknownSource {
+                    source: source.to_string(),
+                    raw: raw.to_string(),
+                    declared: table.declared_names(),
+                })
+            }
+        };
+        return Ok(RefSpec {
+            source: src,
+            package: package.to_string(),
+            raw: raw.to_string(),
+        });
+    }
+
+    // D-MONOREF1=A: dot form `source.package` — only when the left side of the
+    // first `.` is a declared named source. Built-ins (`nixpkgs`, `github`,
+    // `path`) never use the dot form (they use colon).
+    if let Some((source_candidate, package)) = raw.split_once('.') {
+        if !source_candidate.is_empty()
+            && !package.is_empty()
+            && table.upstream(source_candidate).is_some()
+        {
+            return Ok(RefSpec {
+                source: Source::Named(source_candidate.to_string()),
+                package: package.to_string(),
+                raw: raw.to_string(),
+            });
+        }
+    }
+
+    Err(RefError::MissingSeparator(raw.to_string()))
 }
 
 // ──────────────────────────────────────────────

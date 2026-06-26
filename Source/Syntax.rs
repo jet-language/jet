@@ -1029,8 +1029,12 @@ pub const CONFIG_FILE: &str = "config.jet";
 /// is a `module workspace { members: … }` written in `workspace.jet`, parallel to
 /// `env.jet`/`config.jet` — retiring the root `jetpack.toml` index so the whole
 /// project is one grammar (Jet). `members:` may run arbitrary `comptime`
-/// (D-WORKSPACE1=B). Not yet wired (resolver rides board card c156).
+/// (D-WORKSPACE1=B). Wired by the resolver (board card c156). `NS_WORKSPACE` is
+/// declared with the other reserved namespaces near `NS_ENV`.
 pub const WORKSPACE_FILE: &str = "workspace.jet";
+/// D-WORKSPACE1=B: the `members:` field in a workspace module — the comptime
+/// expression that evaluates to the list of member package paths.
+pub const MODULE_FIELD_MEMBERS: &str = "members";
 
 /// U15 (ratified 2026-06-16): the jetos tier is the `jetpack os <verb>`
 /// subcommand group — not a separate `jetos` binary, not under `jet`.

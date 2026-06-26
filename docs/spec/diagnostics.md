@@ -876,6 +876,56 @@ use.
 |------|------|-----|-----|
 | L2101 | `jet doctor` found an environment problem with a known fix. | Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build. | Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet doctor --fix`. |
 
+## Workspace diagnostics (D-WORKSPACE1=B, D-WORKSPACE2=A)
+
+These diagnostics are emitted by the `workspace.jet` evaluator when the file
+exists but can't be evaluated to a valid `WorkspacePlan`.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0995 | `workspace.jet` has no `module workspace { … }` declaration. | `workspace.jet` is the monorepo index (D-WORKSPACE2=A); it must contain exactly one `module workspace { members: … }` body. | Write `module workspace { members: find("./packages") }` (or an explicit list) in `workspace.jet`. |
+| E0996 | `members:` evaluated to something other than a list of strings. | The `members:` value must evaluate to `[String]` — a list of relative package directory paths. | Use `find("./packages")` or a list literal like `["./packages/hello", "./packages/ranker"]`. |
+| E0997 | `find("…")` in `members:` names a directory that doesn't exist. | `find` scans that directory for subdirectories containing `pkg.jet`; the directory must exist relative to `workspace.jet`. | Create the directory or correct the path in `members: find("…")`. |
+
+### E0995 — No workspace module
+
+```
+error[E0995]: `workspace.jet` must declare `module workspace { … }`
+  --> workspace.jet
+  |
+  = `workspace.jet` is the monorepo workspace index (D-WORKSPACE2=A); it must
+    contain exactly one `module workspace { members: … }` declaration
+  = write `module workspace { members: find("./packages") }` in `workspace.jet`
+```
+
+### E0996 — members: not a list
+
+```
+error[E0996]: `members:` must evaluate to a list of package paths
+  --> workspace.jet:2:14
+  |
+2 |     members: 42
+  |              ^^ not a `[String]`
+  |
+  = `members:` describes the packages in this workspace; it must be a `[String]`
+    list of relative paths or a `find("…")` call
+  = example: `members: find("./packages")` or `members: ["./pkg/hello"]`
+```
+
+### E0997 — find dir missing
+
+```
+error[E0997]: `find` can't read the directory `./no-such-packages`
+  --> workspace.jet:2:14
+  |
+2 |     members: find("./no-such-packages")
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = `members: find("<dir>")` scans that directory for package subdirectories;
+    it must exist relative to this file
+  = create the directory, or fix the path so it points at your packages folder
+```
+
 ## Package management diagnostics (M12, D-JPK-FILES)
 
 `jetpack.toml` is read by the `jetpack` CLI (never by `jet run`/`jet build` —

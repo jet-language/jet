@@ -126,5 +126,12 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
                 &format!("add `pkg.source(\"{source}\", \"<upstream>\")`, or use a known name."),
             )
         }
+        // D-MONOREF1=A: bare name with no separator that didn't match a workspace member.
+        RefError::AmbiguousBare(raw) => theme.error(
+            &format!("`{raw}` is ambiguous — no workspace member matches"),
+            "A bare package name (no `source:` prefix) resolves against the workspace \
+             member list. Either this name isn't a member, or there are multiple matches.",
+            "use `source:package` or `source.package` to be explicit.",
+        ),
     }
 }

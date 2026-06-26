@@ -601,6 +601,10 @@ pub struct ModuleDecl {
     /// U8: `imports: find("./modules")` import-tree directives, parsed as
     /// ordinary call expressions; the `find` walk lands with U4 discovery.
     pub imports: Vec<Expr>,
+    /// D-WORKSPACE1=B: `members: <expr>` in `module workspace { … }` — the
+    /// comptime expression that yields the list of member package paths. Only
+    /// meaningful in `workspace.jet`; ignored in other module files.
+    pub members: Vec<Expr>,
     pub contributions: Vec<Contribution>,
     pub span: Span,
 }
