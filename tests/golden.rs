@@ -54,7 +54,7 @@ fn examples_compile_and_run() {
     for (path, stem, shown) in entries {
         let src = fs::read_to_string(&path).unwrap();
 
-        if (stem == "22_ffi" || stem == "75_archive") && !have_cargo {
+        if (stem == "22_ffi" || stem == "127_archive") && !have_cargo {
             eprintln!("note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)");
             checked += 1;
             continue;
