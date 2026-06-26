@@ -20,6 +20,19 @@
 // `#` in the actual code below (e.g. `#Pure`, `#Unsafe`, `#[Serialize]`,
 // `[T#N]`) is REAL Jet syntax — an attribute/marker sigil — not a comment.
 // Only a full line beginning `# RATIFIED…` is a not-yet-implemented marker.
+//
+// Implemented features are written as live code. Ratified-but-UNIMPLEMENTED
+// examples are COMMENTED OUT (every code line prefixed `// `) so they never
+// read as working syntax — they sit under their `# RATIFIED…` marker.
+//
+// OWNER MARKUP (flag a change you want; an agent harvests the marks later):
+//   //<<< OWNER <area>: <what's wrong>
+//   // HAVE:  <current spelling>
+//   // WANT:  <spelling you want>
+//   //>>>
+//   //!! OWNER: <note>            inline form, for a one-line tweak
+//   list every open mark:  rg '//<<<|//!!' docs/reference/syntax-surface.jet
+// Marking here is not deciding — each WANT becomes a Tower v2 decision card.
 
 
 // ============================================================================
@@ -54,14 +67,14 @@ fn sized() {
     n @= f.to_int()
 }
 
-# RATIFIED, NOT YET IMPLEMENTED (D-NUMOPS1)
+// # RATIFIED, NOT YET IMPLEMENTED (D-NUMOPS1)
 // Integer arithmetic traps on overflow by default; experts opt a single op into
 // wrapping/saturating/checked, visible at the use site.
-fn overflow_surface() {
-    a @= wrapping(255 + 1)
-    b @= saturating(big_int + 1)
-    c @= checked(x + y)            // -> T?
-}
+// fn overflow_surface() {
+//     a @= wrapping(255 + 1)
+//     b @= saturating(big_int + 1)
+//     c @= checked(x + y)            // -> T?
+// }
 
 
 // ============================================================================
@@ -92,11 +105,11 @@ fn call_with_labels() {
     schedule("ping")                               // trailing defaults fill
 }
 
-# RATIFIED, NOT YET IMPLEMENTED (S83)
+// # RATIFIED, NOT YET IMPLEMENTED (S83)
 // Multi-head functions — same name, different parameter patterns, dispatched by
 // argument shape; heads must be exhaustive (S83).
-fn area(Circle(r: Float)) -> Float { return 3.14 * r * r }
-fn area(Rect(w: Float, h: Float)) -> Float { return w * h }
+// fn area(Circle(r: Float)) -> Float { return 3.14 * r * r }
+// fn area(Rect(w: Float, h: Float)) -> Float { return w * h }
 
 
 // ============================================================================
@@ -247,28 +260,28 @@ impl FileErr: Fallible {
     fn to_error(self) -> Error { return Error }
 }
 
-# RATIFIED, NOT YET IMPLEMENTED (S80)
+// # RATIFIED, NOT YET IMPLEMENTED (S80)
 // Rich default `Error` carrier (message + optional code + optional source) and a
 // fallible `fn main() -> Unit ?`. (The `Fallible` conversion above ships; the
 // structured carrier + fallible main are unbuilt.)
-fn load() -> Config ? {
-    return err(Error.message("bad config").code(2).with_source(io_err))
-}
-fn main() -> Unit ? {
-    cfg @= load()?
-    return ok(())
-}
+// fn load() -> Config ? {
+//     return err(Error.message("bad config").code(2).with_source(io_err))
+// }
+// fn main() -> Unit ? {
+//     cfg @= load()?
+//     return ok(())
+// }
 
-# RATIFIED, NOT YET IMPLEMENTED (S81)
+// # RATIFIED, NOT YET IMPLEMENTED (S81)
 // `?continue` — inside a loop, skip this turn when the value is failed/empty,
 // else bind the success value. (`KW_QUESTION_CONTINUE` exists in Syntax.rs but
 // has no parser/sema support yet.)
-fn skip_bad(lines: [String]) {
-    loop raw in lines {
-        line @= next(raw)?continue
-        print(line)
-    }
-}
+// fn skip_bad(lines: [String]) {
+//     loop raw in lines {
+//         line @= next(raw)?continue
+//         print(line)
+//     }
+// }
 
 
 // ============================================================================
@@ -304,10 +317,10 @@ struct Score {
     value: Int
 }
 
-# RATIFIED, NOT YET IMPLEMENTED (S56)
+// # RATIFIED, NOT YET IMPLEMENTED (S56)
 // User-defined derives against the serde data model (Epoch 3; S56/S26 Layer 3).
-#[derive(MyTrait)]
-struct Custom { x: Int }
+// #[derive(MyTrait)]
+// struct Custom { x: Int }
 
 
 // ============================================================================
@@ -513,14 +526,14 @@ fn tasks_demo() {
     tasks.spawn(() => square(7)).detach()
 }
 
-# RATIFIED, NOT YET IMPLEMENTED (S53)
-// `@async { }` scoped-effect block is reserved for Epoch 3 (the `tasks` library
+// # RATIFIED, NOT YET IMPLEMENTED (S53)
+// `#Async { }` scoped-effect block is reserved for Epoch 3 (the `tasks` library
 // above is the shipped surface).
-fn async_block() {
-    @async {
-        // ...
-    }
-}
+// fn async_block() {
+//     #Async {
+//         // ...
+//     }
+// }
 
 
 // ============================================================================
@@ -624,12 +637,12 @@ migration UserRecord {
     rename name -> display_name
 }
 
-# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)
+// # RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)
 // Additional migration verbs beyond `rename`: add a defaulted field, remove a
 // field, change a field's type with an inline converter. (Only `rename` is
 // evidenced shipping.)
-migration UserRecord {
-    add verified: Bool = false
-    remove legacy_id
-    change price: Int -> Usd via { (cents) => Usd(cents) }
-}
+// migration UserRecord {
+//     add verified: Bool = false
+//     remove legacy_id
+//     change price: Int -> Usd via { (cents) => Usd(cents) }
+// }
