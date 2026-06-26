@@ -365,6 +365,12 @@ pub fn run_block_with_imports(
         debugger: None,
         depth: 0,
         cur_func: "comptime block".to_string(),
+        // D-CTEFFECT1: a `comptime { }` block is build-time code — hermetic by
+        // default, so Tier-2 `#Impure` effects inside it require the normal gate
+        // (E3411 until --allow-impure is plumbed through to block evaluation).
+        allow_impure: false,
+        impure_depth: 0,
+        embed_inputs: Vec::new(),
     };
     let mut scope = globals.clone();
     interp.exec_block(stmts, &mut scope).map(|_| ())
