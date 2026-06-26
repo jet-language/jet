@@ -84,27 +84,27 @@ fn ref_field_case(src: Source) -> Case {
     let (label, body) = match src {
         Source::Param => (
             "ref_field/param",
-            "struct R { ref v: String; }\nfn make(p: String) -> R {\n    return R { v: p };\n}\n"
+            "struct R { ref v: String; }\nfn make(p: String) -> R {\n    return R.{ v: p };\n}\n"
                 .to_string(),
         ),
         Source::Local => (
             "ref_field/local",
-            "struct R { ref v: String; }\nfn make() {\n    val local: String = \"x\";\n    val r: R = R { v: local };\n}\n"
+            "struct R { ref v: String; }\nfn make() {\n    val local: String = \"x\";\n    val r: R = R.{ v: local };\n}\n"
                 .to_string(),
         ),
         Source::FieldOfParam => (
             "ref_field/field_of_param",
-            "struct Bin { v: String; }\nstruct R { ref v: String; }\nfn make(b: Bin) -> R {\n    return R { v: b.v };\n}\n"
+            "struct Bin { v: String; }\nstruct R { ref v: String; }\nfn make(b: Bin) -> R {\n    return R.{ v: b.v };\n}\n"
                 .to_string(),
         ),
         Source::IndexOfParam => (
             "ref_field/index_of_param",
-            "struct R { ref v: String; }\nfn make(xs: [String]) -> R {\n    return R { v: xs[0] };\n}\n"
+            "struct R { ref v: String; }\nfn make(xs: [String]) -> R {\n    return R.{ v: xs[0] };\n}\n"
                 .to_string(),
         ),
         Source::FreshLiteral => (
             "ref_field/fresh_literal",
-            "struct R { ref v: String; }\nfn make() {\n    val r: R = R { v: \"fresh\" };\n}\n"
+            "struct R { ref v: String; }\nfn make() {\n    val r: R = R.{ v: \"fresh\" };\n}\n"
                 .to_string(),
         ),
     };
@@ -124,7 +124,7 @@ fn generic_view_cases() -> Vec<Case> {
         },
         Case {
             label: "view_return/generic_field_of_local".to_string(),
-            src: "struct Wrap<T> { item: T; }\nfn make<T>(x: T) -> &T {\n    val w: Wrap<T> = Wrap<T> { item: x };\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
+            src: "struct Wrap<T> { item: T; }\nfn make<T>(x: T) -> &T {\n    val w: Wrap<T> = Wrap<T>.{ item: x };\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
         },
     ]
 }

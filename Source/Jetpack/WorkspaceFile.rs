@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn e0995_no_workspace_module() {
-        let src = "module dev { env.dev: Env { packages: [] } }\n";
+        let src = "module dev { env.dev: Env.{ packages: [] } }\n";
         let d = eval_err(src);
         assert_eq!(d.code, "E0995");
     }

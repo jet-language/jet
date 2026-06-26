@@ -104,7 +104,7 @@ struct Crate { data: Int }
 
 impl Crate {
     #Transition(_ -> Full) fn fill(data: Int) -> Crate {
-        return Crate { data: data }
+        return Crate.{ data: data }
     }
     #State(Stuffed) fn get(self) -> Int {
         return self.data
@@ -129,7 +129,7 @@ struct Crate { data: Int }
 
 impl Crate {
     #Transition(_ -> Stuffed) fn fill(data: Int) -> Crate {
-        return Crate { data: data }
+        return Crate.{ data: data }
     }
 }
 
@@ -160,7 +160,7 @@ state Gate { Open, Closed }
 struct Gate { w: Int }
 
 impl Gate {
-    #Transition(_ -> Closed) fn new(w: Int) -> Gate { return Gate { w: w } }
+    #Transition(_ -> Closed) fn new(w: Int) -> Gate { return Gate.{ w: w } }
     #Transition(Closed -> Open) fn open(self: ^Gate) -> Gate { return self }
     #Transition(Open -> Closed) fn close(self: ^Gate) -> Gate { return self }
 }

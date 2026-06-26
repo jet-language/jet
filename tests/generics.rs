@@ -83,7 +83,7 @@ struct Wrap<Kind> {
 }
 
 fn wrap<Kind>(x: Kind) -> Wrap<Kind> {
-    return Wrap<Kind> { val: x }
+    return Wrap<Kind>.{ val: x }
 }
 
 fn main() {
@@ -120,7 +120,7 @@ fn multi_char_matches_single_char() {
     // identical to generic_scalar_matrix but using `Elem` instead of `T`
     let src = r#"
 fn twice<Elem>(x: Elem) -> Pair<Elem> {
-    return Pair<Elem> { first: x, second: x }
+    return Pair<Elem>.{ first: x, second: x }
 }
 
 struct Pair<Elem> {

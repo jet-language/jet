@@ -3660,7 +3660,7 @@ struct Ledger {
 }
 fn main() {
     data: [Int] := [1, 2, 3]
-    ledger: Ledger := Ledger { rows: [] }
+    ledger: Ledger := Ledger.{ rows: [] }
     ledger.put_back(data)
     print(ledger.rows[0])
     print(ledger.rows[1])
