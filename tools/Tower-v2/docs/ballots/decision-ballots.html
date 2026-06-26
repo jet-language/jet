@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tower — Decision ballot (launcher)</title>
+<style>
+:root{
+  --bg:#0b0e13;--s1:#151a22;--s2:#1d2531;--line:#262f3d;--line2:#384354;
+  --ink:#eef2f8;--ink2:#aab7c8;--ink3:#6f7c8e;--accent:#74a9ff;--green:#67c97a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;max-width:720px;margin:0 auto;padding:72px 24px;-webkit-font-smoothing:antialiased}
+.wm{font:800 16px/1 ui-monospace,monospace;letter-spacing:.36em;color:var(--ink);text-transform:uppercase;padding:6px 11px 6px 14px;border:1px solid var(--line2);border-radius:6px;background:var(--s1);display:inline-block}
+h1{font:800 22px/1.2 ui-monospace,monospace;color:var(--ink);margin:20px 0 6px;letter-spacing:-.3px}
+.sub{color:var(--ink3);font:600 12px/1.6 ui-monospace,monospace;letter-spacing:.03em;margin-bottom:28px}
+p{color:var(--ink2);margin:14px 0}
+pre{background:#0f141c;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:7px;padding:14px 16px;font:13px/1.5 ui-monospace,monospace;color:#cdd6e2;overflow-x:auto}
+code{background:var(--s2);border-radius:5px;padding:1px 5px;color:#cdd6e2;font-family:ui-monospace,monospace}
+.note{font-size:12px;color:var(--ink3);margin-top:8px}
+a{color:var(--accent)}
+#status{margin-top:26px;padding:13px 15px;border-radius:7px;border:1px solid var(--line2);border-left:4px solid var(--accent);background:var(--s1);color:var(--ink2);font:600 13px/1.5 ui-monospace,monospace}
+#status.ok{border-left-color:var(--green)}
+.k{color:#ff9e7a}
+</style></head><body>
+<span class="wm">TOWER</span>
+<h1>Jet — Decision ballot</h1>
+<p class="sub">Mission control for building Jet. Decisions are full cards you tick and <b>sign &amp; file</b> — rendered straight from <code>docs/spec/decision-ballots.md</code>, one source of truth.</p>
+
+<p>Start it from the repo root (one command):</p>
+<pre><span class="k">nix</span> develop -c <span class="k">node</span> tools/Tower/Tower.mjs serve --open</pre>
+<p class="note">That serves the dashboard at <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a> and opens your browser. Tick an option, hit <b>Sign &amp; file</b> — choices are written (and merged) into <code>docs/spec/ballot-results.md</code>; then tell Claude <b>"go"</b> to ratify &amp; implement. <code>↻ improve examples</code> on any card queues a Claude review of that card's examples.</p>
+
+<div id="status">Checking whether the dashboard is already running…</div>
+
+<script>
+fetch('http://127.0.0.1:4173/api/state').then(r=>{
+  if(r.ok){location.href='http://127.0.0.1:4173/';}
+}).catch(()=>{
+  document.getElementById('status').textContent='Dashboard not running yet — run the command above, then reload this page (it auto-redirects).';
+});
+</script></body></html>

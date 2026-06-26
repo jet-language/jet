@@ -66,7 +66,6 @@
 - `Component-wise arithmetic by default` -> [Component-wise vector arithmetic](#idea-component-wise-vector-arithmetic).
 - `fn TYPE.method ()` -> [External inherent methods / `extend` blocks](#idea-external-inherent-methods-extend-blocks).
 - `$ as indicator for macros or comptime?` -> [`$` for comptime or macros](#idea-dollar-for-comptime-or-macros).
-- `Analyze vs Typescript` -> [TypeScript/Swift competitive analysis](#idea-typescript-swift-competitive-analysis).
 - `Use Jai-style build system` -> [Jai/Zig-style build system](#idea-jai-zig-style-build-system).
 - `Cross platform native raylib builtin` -> [Cross-platform raylib builtin](#idea-cross-platform-raylib-builtin).
 - `Consider how to improve using concepts from Zig build system` -> [Jai/Zig-style build system](#idea-jai-zig-style-build-system).
