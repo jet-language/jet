@@ -619,6 +619,10 @@
         {
           "t": "[scope 2026-06-25] This card now OWNS the `$name` splice impl (D-CTMARKER1=C piece 1). c162 shipped the standalone `comptime { }` block but deferred the splice here, because `$name` has no meaning without reflection values to weave — so the splice lands as part of this S56 reflection/derive build, not separately. Don't lose it.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[partial-core 2026-06-26] CORE shipped + merged (commit 7184f1c), full suite 1157 green. End-to-end WORKS: `derive Trait for T { … emit(\"\"\"…$name…\"\"\") }` + `#[Trait] struct …` → the emitted impl re-enters lexer→parser→sema (R11) → runs. Example 128_user_derive (`#[Debug]` → prints `Point`). Implemented: $name SPLICE (TokKind::Dollar, inside emit templates — this card OWNED the deferred c162 piece), `T.reflect()` handle (.name/.fields/.has_marker), `derive Trait for T {}` parse + comptime-eval + emit re-entry via the split_type_markers router, E2710 diagnostic + ui snapshot. PARTIAL (agent-flagged gaps, no owner gate): (1) derive expansion is wired in Bundle.rs only, NOT Registration.rs — so `jet compile <single-file>` won't expand user derives (jet run/bundle path does); (2) `.markers` exposes only bracket #[Skip]-style, not in-body derive/type markers; (3) local-only orphan rule not enforced; (4) `$name` as a standalone expression (outside emit templates) not parsed. Card stays ready (not 100%).",
+          "at": "2026-06-26"
         }
       ],
       "created": "2026-06-25",
