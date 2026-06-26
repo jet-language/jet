@@ -106,8 +106,7 @@
       "updated": "2026-06-26",
       "priority": "P2",
       "workOrder": null,
-      "decisions": [],
-      "stage": "done"
+      "decisions": []
     },
     {
       "id": "c56",
@@ -755,7 +754,8 @@
       "decisions": [
         "D-CTEFFECT1",
         "D-NETDEP1",
-        "D-CTFIND1"
+        "D-CTFIND1",
+        "D-CTFIND2"
       ]
     },
     {
@@ -842,7 +842,7 @@
           "at": "2026-06-26"
         },
         {
-          "t": "[partial 2026-06-26 session3] STEP 1+2 SHIPPED: (1) Driver extraction — Source/Driver/mod.rs extracts the compile pipeline composition from lib.rs; lib.rs is now a thin façade; LSP/Check.rs retargeted onto Driver::check_file (one composition path). (2) TIR seam API — Source/Codegen/mod.rs makes TIR public; TIR/mod.rs promotes all 38+ pub(crate) struct/enum types to pub. Full suite green (1162) after each step. STEP 3b PENDING: workspace-member crate promotion — dependency map shows foundation crate needed (Syntax→Diagnostics→AST, zero-dep leaf); TIR+Codegen must stay one crate (mutual Cx dependency confirmed). Step 3b coordinated with c157 (jet-net/) + c139 (jet-jit/) workspace creation.",
+          "t": "[partial 2026-06-26 session3] STEP 1+2 SHIPPED: (1) Driver extraction — Source/Driver/mod.rs extracts the compile pipeline composition from lib.rs; lib.rs is now a thin façade; LSP/Check.rs retargeted onto Driver::check_file (one composition path). (2) TIR seam API — Source/Codegen/mod.rs makes TIR public; TIR/mod.rs promotes all 38+ pub(crate) struct/enum types to pub. Full suite green (1162) after each step. STEP 3b PENDING: workspace-member crate promotion — D-COMPILERSEAMS1=B ratified 2026-06-26: jet-foundation (Syntax+Diagnostics+AST) + 6 seam crates (jet-lexer, jet-parser, jet-sema, jet-codegen [TIR internal], jet-comptime, jet-driver). Blocks on D-COMPILERSEAMS2 (crate naming) before code.",
           "at": "2026-06-26"
         }
       ],
@@ -852,7 +852,8 @@
       "workOrder": null,
       "decisions": [
         "D-COMPILERLIB1",
-        "D-COMPILERSEAMS1"
+        "D-COMPILERSEAMS1",
+        "D-COMPILERSEAMS2"
       ]
     },
     {
@@ -1242,6 +1243,14 @@
       "status": "answered",
       "answer": "Done — the card was written before several recent ratifications, so the syntax had drifted. Brought every line to current ratified syntax: (1) marker sigil @ -> # in derive-bracket form, so a user derive reads #[Wire] exactly like the built-in #[Codable] (D-ATTR1 reversed @->#; D-ATTR2 bracket form for trait-attaching markers); (2) dotless struct literal Packet{...} -> Packet.{ ... } (D-DOTCTOR2=A); (3) Bytes / b\"hi\" (neither exists) -> [U8] + byte-array literal [0x68,0x69], matching embed_bytes/sized-int examples; (4) splices made bare-identifier $name via local bindings ($fname/$tn) to respect the ratified D-CTMARKER1=C grammar (no $f.name expression-splice to invent); (5) buf: Buffer -> buf: edit Buffer (D-CAP3 capability-on-type, since the encoder mutates the buffer); sibling card D-METAREFLECT1 brought to the same sigil (#[Row]/#[Skip], has_marker(\"Skip\")). Best-in-class examples: the 'Other languages' block now shows the two canonical author-side derive systems in full — Rust proc-macro derive returning a quote! TokenStream the compiler re-parses, and Swift @attached(extension) macros returning SwiftSyntax source the compiler re-checks — and notes both emit re-checked SOURCE (never a pre-validated tree), which is precisely the recommended Option A and why errors pin at the user's tag. Added Owner Q1 flagging the one genuinely-open sub-spelling (emit-template quoting: reuse \"...\"/\"\"\"...\"\"\" with {}-interpolation off inside emit, vs a distinct code-quote). Rec stays A. Decision stays open and pickable.",
       "created": "2026-06-25T20:53:30.328Z"
+    },
+    {
+      "id": "cmquz7n8dg",
+      "decisionId": "D-HTTPLIB1",
+      "text": "What is the interplay with out idea for switft style unified protocol for both server & client to prevent drift?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-26T13:37:59.389Z"
     }
   ],
   "ingest": []

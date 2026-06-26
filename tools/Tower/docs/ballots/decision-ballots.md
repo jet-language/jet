@@ -25,231 +25,177 @@ it's time to decide it.
 
 ## Open decisions
 
+_D-COMPILERSEAMS1=B and D-CTFIND1=B submitted 2026-06-26 — pending "go" to ratify._
+
 ---
 
-### D-COMPILERSEAMS1 — Workspace crate graph for the compiler seam split (c160 step 3b)
+### D-COMPILERSEAMS2 — Compiler seam crate naming convention (c160 step 3b)
 
-**Gist:** Choose how the seven compiler seams become Cargo workspace crates.
+**Gist:** Choose the naming scheme for the seam workspace crates produced by D-COMPILERSEAMS1=B.
 
-**Story.** Tyler is porting the Jet compiler to self-host. He pulls in the `sema` crate as a library dependency for his new IR pass. He wants to import only the types he needs without pulling in the lexer or codegen — and the `cargo tree` output should make that dependency graph obvious, not a monolith.
+**Story.** Tyler clones the Jet compiler repo to start contributing. He runs `cargo tree` and sees the seam crates listed. He wants crate names that tell him immediately what each one does and match Jet's brand.
 
 **In the wild:**
-```jet
-// Tyler's self-host pass
-use jet_sema::{CheckedBundle, Type}   // wants ONLY sema + its deps, nothing else
-use jet_tir::{TFunc, TExpr}           // wants the typed IR for his IR pass
-// he must NOT have to pull in jet_codegen just to read a TExpr
+```shell
+# Tyler runs:
+cargo tree | grep jet
+# What does he see?
 ```
 
 **Other languages:**
 ```
-Rust (rustc):       rustc_lexer / rustc_parse / rustc_middle (shared types + TIR)
-                    / rustc_codegen_ssa / rustc_driver — shared types ARE in rustc_middle,
-                    not a separate foundation crate
-TypeScript (tsc):   single package; no crate split
-Swift (swiftc):     single library; seams are internal modules, not separate packages
-Roslyn (C#):        Microsoft.CodeAnalysis (shared core) + Microsoft.CodeAnalysis.CSharp
-                    — explicit foundation crate pattern
+rustc:     rustc_lexer, rustc_parse, rustc_middle, rustc_codegen_ssa, rustc_driver
+           — plain technical names, rustc_ prefix
+swiftc:    swift-parse, swift-sema, swift-driver
+           — kebab, plain technical names
+Roslyn:    Microsoft.CodeAnalysis, Microsoft.CodeAnalysis.CSharp
+           — namespaced
 ```
-
-**Background — the dependency reality (verified by orientation analysis):**
-- Syntax.rs: zero internal deps (pure leaf)
-- Diagnostics.rs: depends on Syntax only
-- AST.rs: depends on Diagnostics + Syntax
-- Lexer: depends on Diagnostics + Syntax
-- Parser: depends on AST + Diagnostics + Lexer + Syntax + Generics
-- Sema: depends on AST + Diagnostics + Generics + Loader + Publish + Syntax + Traits
-- TIR (Source/Codegen/TIR/): BOTH imports from Codegen (the `Cx` context type, `mangle`, `rust_param_type`) AND is imported by Codegen (TFunc/TExpr types used in Items.rs). Bidirectional dependency — cannot be two Cargo crates without resolving this.
-- Codegen: depends on AST + FFI + Sema::CompileMode + Syntax + TIR
-- Comptime: depends on AST + Diagnostics
-- Driver: depends on everything via composition
 
 **Tradeoffs:**
 
-| Option | Crate count | TIR+Codegen | Shared-type home | `cargo tree` |
-|--------|-------------|-------------|------------------|--------------|
-| A — Foundation + split seams | 9 (1 foundation + 7 seams + 1 bin) | Two seams — Cx moves into TIR so codegen can dep on TIR one-way | `jet-foundation` crate (Syntax+Diagnostics+AST) | Clean layered graph |
-| B — Foundation + merged codegen | 8 (1 foundation + 6 seams + 1 bin) | One crate `jet-codegen` (TIR as internal submod) | Same `jet-foundation` | Clean; TIR/codegen not separately importable |
-| C — No foundation; shared types stay in jet | 7 seams depend on the root `jet` lib | Merged; no cycle problem | `jet` (current root) holds Syntax/Diag/AST | Seams are pure consumers; root stays fat |
+| Option | Example names | Brand fit | Readability |
+|--------|---------------|-----------|-------------|
+| A — `jet-<seam>` technical | jet-foundation, jet-lexer, jet-parser, jet-sema, jet-codegen, jet-comptime, jet-driver | Consistent, matches jet-net / jet-jit pattern | Immediately obvious what each does |
+| B — Aviation theme | jet-foundation, runway (lexer), flightplan (parser), airspace (sema), payload (codegen), groundcrew (driver) | Playful, on-brand | Requires knowing the mapping; fun |
+| C — `jetc-<seam>` (compiler prefix) | jetc-lexer, jetc-sema, jetc-codegen | Clear compiler-internal signal | Slightly verbose; distinguishes from stdlib crates |
 
 **Worked examples:**
 
-- **Option A — Foundation crate + full seam split.**
-  Crate graph:
+- **Option A — `jet-<seam>` technical. (recommended)**
+  ```shell
+  jet-foundation v1.0.0
+  ├── jet-lexer v1.0.0
+  ├── jet-parser v1.0.0
+  ├── jet-sema v1.0.0
+  ├── jet-codegen v1.0.0
+  ├── jet-comptime v1.0.0
+  └── jet-driver v1.0.0
   ```
-  jet-foundation  (Syntax, Diagnostics, AST, Span, Generics)
-  jet-lexer       → jet-foundation
-  jet-parser      → jet-foundation, jet-lexer
-  jet-sema        → jet-foundation, jet-parser, jet-traits, jet-loader
-  jet-tir         → jet-foundation, jet-sema          ← Cx moved into jet-tir
-  jet-codegen     → jet-foundation, jet-sema, jet-tir  ← one-way dep
-  jet-comptime    → jet-foundation, jet-sema
-  jet-driver      → all seam crates
-  jet (bin)       → jet-driver
-  ```
-  Breaking the Cx cycle: move `struct Cx` and its `rust_param_type`/`mangle` helpers from Codegen/Context.rs into TIR/mod.rs. Codegen then depends on jet-tir for Cx, not the other way. This is a mechanical move (~200 lines).
 
-- **Option B — Foundation crate + merged codegen seam. (recommended)**
-  Crate graph:
+- **Option B — Aviation theme.**
+  ```shell
+  jet-foundation v1.0.0
+  ├── runway v1.0.0        (lexer)
+  ├── flightplan v1.0.0    (parser)
+  ├── airspace v1.0.0      (sema)
+  ├── payload v1.0.0       (codegen+TIR)
+  ├── groundcrew v1.0.0    (comptime)
+  └── tower v1.0.0         (driver)
   ```
-  jet-foundation  (Syntax, Diagnostics, AST, Span, Generics)
-  jet-lexer       → jet-foundation
-  jet-parser      → jet-foundation, jet-lexer
-  jet-sema        → jet-foundation, jet-parser, jet-traits, jet-loader
-  jet-codegen     → jet-foundation, jet-sema     ← TIR is a submod inside; no cycle
-  jet-comptime    → jet-foundation, jet-sema
-  jet-driver      → all seam crates
-  jet (bin)       → jet-driver
+
+- **Option C — `jetc-<seam>` prefix.**
+  ```shell
+  jet-foundation v1.0.0
+  ├── jetc-lexer v1.0.0
+  ├── jetc-parser v1.0.0
+  ├── jetc-sema v1.0.0
+  ├── jetc-codegen v1.0.0
+  ├── jetc-comptime v1.0.0
+  └── jetc-driver v1.0.0
   ```
-  TIR stays as `jet_codegen::TIR::*`. The self-host port imports `jet-codegen` to get TIR types. Fewer crates, no cycle surgery, same I6 machine-check benefit. LSP can still import `jet-codegen::TIR::TFunc` to inspect the typed IR.
 
-- **Option C — No foundation; shared types stay in the root jet crate.**
-  Crate graph:
-  ```
-  jet (lib)       (ALL of today's Source/ — Syntax, Diag, AST, Lexer, Parser, Sema, Codegen, Comptime, Driver, Loader, etc.)
-  jet-jit         → jet
-  jet-net         → (no dep on jet lib)
-  jet (bin)       → jet (lib), jet-jit, jet-net
-  ```
-  This is essentially the current structure with jet-net and jet-jit added as workspace members. The "seams" remain internal modules in one library crate. No cycle problems. Least churn. `cargo tree` doesn't show seam boundaries, only the external dep structure.
-
-**Recommendation:** B — foundation crate + merged jet-codegen seam. Avoids the ~200-line Cx surgery of A while still getting the crate-by-crate boundary the self-host port and I6 machine-check need. Tyler can import `jet-codegen::TIR::TFunc` cleanly.
-
-**Owner Q1:** Option A moves Cx into jet-tir (mechanical ~200-line refactor). Option B keeps TIR+codegen merged. Which seam boundary matters more to you — strict TIR/codegen separation (A) or fewer crates with less surgery (B)?
-
-**Owner Q2:** Crate names — do you prefer the `jet-<seam>` convention (jet-lexer, jet-parser, jet-sema, jet-codegen, jet-comptime, jet-driver, jet-foundation) or a different naming scheme? Aviation/launch theme alternatives: `runway` (lexer), `flightplan` (parser), `airspace` (sema), `payload` (codegen), `groundcrew` (driver), or just the plain technical names?
+**Recommendation:** A — `jet-<seam>` technical names. Matches the already-approved `jet-net` / `jet-jit` convention; zero mapping to learn; immediately tells a contributor what each crate does.
 
 ---
 
-### D-CTFIND1 — What does `find` mean in comptime Tier 1?
+### D-CTFIND2 — Glob implementation for the `find` comptime builtin (c157)
 
-**Gist:** Decide whether `find` in the Tier-1 effect list means hashing the existing U4 import-discovery directive or a new comptime glob builtin.
+**Gist:** Choose whether the `find(glob)` comptime builtin uses a minimal hand-rolled glob or an approved external `glob` crate.
 
-**Story.** Priya is building a compile-time asset pipeline. She wants the build to be byte-reproducible — if the set of `.png` files in `assets/` changes, the build must re-run and the hash in `.jet/lock` must update. She writes `comptime ASSET_LIST = find("assets/**/*.png")` expecting it to list files.
+**Story.** Priya's asset pipeline uses `find("assets/**/*.png")`. In CI, a contributor adds `assets/subdir/icon.svg`. Priya needs `**` to recurse directories correctly — not just `*` single-level matching.
 
 **In the wild:**
 ```jet
-// What Priya writes — does this work?
-comptime ASSETS @= find("assets/**/*.png")   // list all PNG paths at build time
-
-// What currently exists — U4 import discovery (different layer):
-imports: find("./modules")   // auto-discovers .jet modules in the loader
+comptime ASSETS @= find("assets/**/*.png")
+comptime CONFIGS @= find("config/*.toml")
+comptime SHADERS @= find("shaders/**/*.{vert,frag}")  // brace expansion?
 ```
 
 **Other languages:**
 ```
-Zig:        comptime — @import resolves at comptime; no glob builtin
-Rust:       build.rs glob via walkdir/glob crates; not in-language
-Jai:        #run { files := File.find("**/*.png") } — runtime code at comptime
-D:          import(file) embeds a single file; no glob
+Rust glob crate:   supports *, **, ?, [abc], {a,b} brace expansion
+Python pathlib:    glob("**/*.png") — **, * only (no brace expansion)
+Go filepath.Glob:  *, ? only — NO ** recursive glob (use WalkDir instead)
+Zig:               no stdlib glob; build.zig uses manually written walk
 ```
 
 **Tradeoffs:**
 
-| Option | What `find` means | Implementation layer | Impact on .jet/lock |
-|--------|-------------------|----------------------|---------------------|
-| A — U4 import discovery | `imports: find("./path")` directive; hash the set of discovered .jet module paths | Loader layer, already built | Hash sorted discovered paths + their tree hash into `[[comptime_inputs]]` |
-| B — New comptime glob builtin | A new `find(glob) -> [String]` comptime builtin; evaluates in the comptime interpreter | Comptime layer, new work; glob matching (std has limited glob; likely needs `glob` crate) | Hash the result list into `[[comptime_inputs]]` |
+| Option | Patterns supported | Dependency | Maintenance | I6 posture |
+|--------|-------------------|------------|-------------|------------|
+| A — Hand-rolled (*, **, ?) | `*` single-level, `**` recursive, `?` single char | None (std only) | We own it forever | Fully I6-clean |
+| B — `glob` crate (owner-gated bootstrap) | Full glob: *, **, ?, [abc], {a,b} brace expansion | `glob = "0.3"` in jet-comptime | Maintained externally; native-ize obligation | Same posture as ureq/rusqlite |
 
 **Worked examples:**
 
-- **Option A — `find` = U4 import discovery.**
+- **Option A — Hand-rolled. (recommended)**
   ```jet
-  // This is what find already does — auto-discover modules:
-  imports: find("./services")   // finds services/auth.jet, services/billing.jet, etc.
-  
-  // Tier-1 addition: when the loader runs find("./services"), it records the
-  // discovered file set hash into .jet/lock:
-  //   [[comptime_inputs]]
-  //   path = "find:./services"
-  //   hash = "sha256:abc123..."
-  //
-  // If auth.jet is added/removed, .jet/lock hash changes → --locked CI fails → rebuild.
+  comptime PNGS    @= find("assets/**/*.png")   // ✓ recursive
+  comptime CONFIGS @= find("config/*.toml")     // ✓ single-level
+  comptime README  @= find("docs/?EADME.md")    // ✓ single char
+  comptime BOTH    @= find("src/**/*.{rs,jet}")  // ✗ brace expansion not supported
   ```
-  No new syntax. No new builtin. Just hash-recording of the existing U4 find directive.
+  Covers 95% of real use cases. Brace expansion can be added natively later.
 
-- **Option B — New comptime glob builtin. (recommended)**
+- **Option B — `glob` crate.**
   ```jet
-  // New comptime builtin for general file discovery:
-  comptime ASSETS @= find("assets/**/*.png")
-  // → ["assets/logo.png", "assets/icons/star.png", ...]
-  // Hashed into .jet/lock; change the files → rebuild.
-  
-  // ALSO adds Tier-1 hash-recording to U4 imports:find("./path") (orthogonal)
-  
-  comptime SHADERS @= find("shaders/*.glsl")
-  comptime SHADER_COUNT @= SHADERS.len()  // 12
+  comptime PNGS  @= find("assets/**/*.png")        // ✓
+  comptime BOTH  @= find("src/**/*.{rs,jet}")       // ✓ brace expansion works
+  comptime RANGE @= find("chapter[0-9].md")         // ✓ character classes
   ```
-  Priya's asset pipeline works. Also useful for codegen from schemas, i18n, etc. Requires a glob implementation (std path matching is limited; `glob` crate or a minimal hand-rolled pattern matcher).
+  Full glob spec. Owner-approved bootstrap dep; native-ize obligation same as ureq.
 
-**Recommendation:** B — a real `find(glob) -> [String]` comptime builtin is the more useful Tier-1 primitive. U4 import discovery gets hash-recording as a side effect but doesn't expose `find` as a user-callable expression. Option A means `find` is not callable in `comptime` blocks — just a manifest directive — which makes the "Tier-1 effect" framing awkward.
-
-**Owner Q1:** Should `find` in Tier 1 be a comptime callable that returns a list of paths (B), or is it only the U4 import-discovery directive that gets its results hashed (A)? This determines whether Priya's `comptime ASSETS @= find("assets/**/*.png")` is valid Jet.
-
-**Owner Q2 (if B):** Is a minimal hand-rolled glob OK for v1 (supports `*`, `**`, `?`), or should we use the `glob` crate as a bootstrap dep (same posture as ureq/rusqlite — owner-gated, I6 holds, native-ize obligation)?
+**Recommendation:** A — hand-rolled `*`, `**`, `?` covers the common cases without a new dep. Brace expansion (`{a,b}`) and character classes (`[abc]`) are rarely needed at compile time; they can be added if real demand emerges. If Priya needs them today, choose B.
 
 ---
 
-### D-HTTPLIB1 — `jet.http` API surface: client + server shape
+### D-HTTPLIB1 — `jet.http` server handler model (c164)
 
-**Gist:** Decide the API shape for `jet.http` — the full HTTP client+server library that replaces Go's `net/http` as the owner-expanded mandate from D-NETDEP1.
+**Gist:** Choose the server-side API shape for `jet.http`.
 
-**Story.** Marcus is building a REST microservice in Jet. He needs to make outbound API calls (GET/POST with JSON bodies, auth headers, timeouts) and also serve HTTP endpoints — a `GET /users/:id` route that returns JSON. He wants the code to be obvious to a Go or Python developer who's never seen Jet before.
+**Story.** Marcus is building a REST microservice in Jet. He needs to serve `GET /users/{id}` and return JSON. He's coming from Go and Python and wants the code to feel immediately familiar.
 
 **In the wild:**
 ```jet
-// What Marcus wants to write — server side:
-http.serve("0.0.0.0:8080", fn(req) {
-    match req.path {
-        "/users/{id}" => respond(.{ status: 200, body: get_user(id) })
-        _             => respond(.{ status: 404 })
-    }
-})
+use jet.http as http
 
-// Client side:
-resp @= http.get("https://api.example.com/users/42")
-    .header("Authorization", "Bearer {token}")
-    .send()?
-user @= json.decode<User>(resp.body)?
+fn main() {
+    // What does this look like?
+}
 ```
 
 **Other languages:**
 ```go
-// Go net/http — function-based, mux-routed:
+// Go — function + mux:
 http.HandleFunc("/users/{id}", func(w ResponseWriter, r *Request) {
-    json.NewEncoder(w).Encode(getUser(r.PathValue("id")))
+    fmt.Fprintf(w, getUser(r.PathValue("id")))
 })
 http.ListenAndServe(":8080", nil)
-// Client:
-resp, _ := http.Get("https://api.example.com/users/42")
 ```
 ```python
-# Flask — decorator-routed:
+# Flask — decorator:
 @app.route("/users/<id>")
 def get_user(id): return jsonify(user)
-# httpx client:
-r = httpx.get("https://api.example.com/users/42")
 ```
 ```rust
-// axum + reqwest:
+// axum — typed extractors:
 Router::new().route("/users/:id", get(|Path(id): Path<String>| async { Json(user) }))
-// reqwest client: reqwest::get(url).await?.json::<User>().await?
 ```
 
 **Tradeoffs:**
 
-| Option | Server model | Client model | Routing | Learning curve |
-|--------|-------------|-------------|---------|----------------|
-| A — Function-first (Go-style) | `http.serve(addr, handler_fn)` + `http.mux()` router | `http.get(url).send()` builder | Pattern matching in handler or mux | Lowest; familiar to Go/JS devs |
-| B — Handler objects (Axum-style) | Router with typed extractors; strongly typed params | Same request builder | `Router.get("/path", handler)` | Medium; more type-safe, more Jet-idiomatic |
-| C — Unified request/response (Rack/WSGI) | Single `fn(Request) -> Response` everywhere; no magic | Same | User-level routing in the fn | Lowest floor; least opinionated |
+| Option | Handler shape | Routing | Type safety | Learning curve |
+|--------|--------------|---------|-------------|----------------|
+| A — Function-first mux | `fn(req) -> Response` + `mux.get("/path", handler)` | Explicit mux, string paths | Runtime param extraction | Lowest; Go/JS devs at home |
+| B — Typed extractors | `fn(id: Path<String>) -> Response` + `Router.get("/path", handler)` | Router with typed params | Compile-time param types | Medium; more Jet-idiomatic |
+| C — Unified fn (Rack-style) | Single `fn(Request) -> Response`; user does routing inside | User-level pattern match | Runtime only | Lowest floor; most flexible |
 
 **Worked examples:**
 
-- **Option A — Function-first, Go-style. (recommended)**
+- **Option A — Function-first mux. (recommended)**
   ```jet
   use jet.http as http
-  use jet.json as json
   
   fn main() {
       mux @= http.mux()
@@ -260,56 +206,211 @@ Router::new().route("/users/:id", get(|Path(id): Path<String>| async { Json(user
       })
       http.serve("0.0.0.0:8080", mux)?
   }
-  
-  // Client:
-  resp @= http.get("https://api.example.com/data")
-      .header("Accept", "application/json")
-      .timeout(5000)
-      .send()?
   ```
 
-- **Option B — Typed extractors, Axum-style.**
+- **Option B — Typed extractors.**
   ```jet
   use jet.http as http
   
-  fn get_user(id: Path<String>, db: State<Db>) -> Response {
+  fn get_user(id: http.Path<String>) -> http.Response {
       user @= db.get(id.value) else return http.Response.not_found()
       http.Response.json(user)
   }
   
   fn main() {
-      router @= http.Router.new()
+      http.Router.new()
           .get("/users/{id}", get_user)
-      http.serve("0.0.0.0:8080", router)?
+          .serve("0.0.0.0:8080")?
   }
   ```
 
-- **Option C — Rack/WSGI unified fn.**
+- **Option C — Unified fn.**
   ```jet
   use jet.http as http
   
   fn handler(req: http.Request) -> http.Response {
       match req.method, req.path {
-          "GET", "/users/{id}" => {
-              user @= db.get(id) else return .{ status: 404 }
-              .{ status: 200, body: json.encode(user) }
-          }
-          _ => .{ status: 404 }
+          "GET", "/users/{id}" => .{ status: 200, body: json.encode(get_user(id)) }
+          _                    => .{ status: 404 }
       }
   }
   
   fn main() { http.serve("0.0.0.0:8080", handler)? }
   ```
 
-**Recommendation:** A — function-first with a mux router. Lowest barrier for Go/Python devs Marcus is coming from; router is explicit and testable; strongly typed paths can be layered on later. The request builder client API is natural Jet (chained methods, `?` propagation).
+**Recommendation:** A — function-first mux. Lowest barrier, explicit routing, natural for Go/Python devs, composable with D-PROTO1 typed protocol generation layered on top later.
 
-**Owner Q1:** Which server model — function-first mux (A), typed extractors (B), or unified handler fn (C)?
+---
 
-**Owner Q2:** Should `jet.http` be a single module with both client and server, or two: `jet.http.client` and `jet.http.server`? Go uses one `net/http`; most modern frameworks split them.
+### D-HTTPLIB2 — `jet.http` module structure: unified vs split (c164)
 
-**Owner Q3:** What's the v1 scope? Minimum viable: (a) HTTP/1.1 only (ureq bootstrap), (b) HTTP/1.1 + HTTP/2, (c) HTTP/1.1 + HTTP/2 + WebSocket. The bootstrap crate covers (a); native implementation expands later.
+**Gist:** One module `jet.http` for both client and server, or two: `jet.http.client` + `jet.http.server`.
 
-**Owner Q4:** TLS — for the client, should HTTPS work out of the box (requires bundling a TLS stack or calling into system TLS), or is the v1 scope HTTP-only with HTTPS as a follow-on?
+**Story.** Marcus `use`s the HTTP library. He wants the import to be obvious — and not import server machinery when he's writing a CLI tool that only makes client requests.
+
+**In the wild:**
+```jet
+// Option A — unified:
+use jet.http as http
+resp @= http.get("https://api.example.com/data").send()?
+
+// Option B — split:
+use jet.http.client as http
+resp @= http.get("https://api.example.com/data").send()?
+```
+
+**Other languages:**
+```
+Go:         net/http — one package, both client (http.Get) and server (http.ListenAndServe)
+Python:     httpx (client only) / fastapi (server only) — separate libs
+Rust:       reqwest (client) + axum/actix (server) — always separate crates
+Node.js:    http built-in handles both; express/fetch separate
+```
+
+**Tradeoffs:**
+
+| Option | Import | Tree-shaking | Discoverability | Precedent |
+|--------|--------|-------------|-----------------|-----------|
+| A — Unified `jet.http` | `use jet.http as http` | Codegen elides unused half | One place to look | Go net/http |
+| B — Split `jet.http.client` / `jet.http.server` | Two separate imports | Natural separation | Must know which submodule | Rust reqwest+axum |
+
+**Worked examples:**
+
+- **Option A — Unified.**
+  ```jet
+  use jet.http as http       // get client AND server
+  // client:
+  resp @= http.get(url).send()?
+  // server:
+  http.serve("0.0.0.0:8080", mux)?
+  ```
+
+- **Option B — Split. (recommended)**
+  ```jet
+  use jet.http.client as http   // CLI tool: only client, no server pulled in
+  resp @= http.get(url).send()?
+  
+  use jet.http.server as http   // microservice: only server
+  http.serve("0.0.0.0:8080", mux)?
+  
+  // or both:
+  use jet.http.client as client
+  use jet.http.server as server
+  ```
+
+**Recommendation:** B — split submodules. A CLI tool pulling in `jet.http` shouldn't carry the server router. Go's unified net/http is a known pain point (everything bleeds into the same namespace). Jet's I8 (one canonical mechanism) is satisfied by one `jet.http` library with two named halves.
+
+---
+
+### D-HTTPLIB3 — `jet.http` v1 scope: HTTP versions + WebSocket (c164)
+
+**Gist:** Which protocol versions does the v1 `jet.http` bootstrap cover before the native implementation.
+
+**Story.** Marcus deploys his Jet microservice behind a load balancer. His ops team asks: does it support HTTP/2 for multiplexing? A separate team asks about WebSocket for their real-time feature.
+
+**In the wild:**
+```jet
+// Marcus's server — what does it speak?
+http.serve("0.0.0.0:8080", mux)?
+// HTTP/1.1 only? HTTP/2? WebSocket upgrade?
+```
+
+**Other languages:**
+```
+Go net/http:   HTTP/1.1 + HTTP/2 in stdlib; WebSocket via gorilla/websocket
+hyper (Rust):  HTTP/1.1 + HTTP/2; WebSocket via tokio-tungstenite
+Node.js http:  HTTP/1.1; http2 module separate; ws package for WebSocket
+```
+
+**Tradeoffs:**
+
+| Option | Protocols | Bootstrap crate requirement | Scope |
+|--------|-----------|----------------------------|-------|
+| A — HTTP/1.1 only | HTTP/1.1 client + server | ureq (client) + basic std::net (server) | Minimal; covers REST APIs |
+| B — HTTP/1.1 + HTTP/2 | Both versions | Needs h2 crate or hyper | Covers gRPC, browser push |
+| C — HTTP/1.1 + HTTP/2 + WebSocket | All three | Needs h2 + tungstenite | Full real-time capability |
+
+**Worked examples:**
+
+- **Option A — HTTP/1.1 only.**
+  ```jet
+  // REST API works:
+  mux.get("/users/{id}", handler)
+  http.serve("0.0.0.0:8080", mux)?  // speaks HTTP/1.1
+  
+  // WebSocket: not yet — future D-HTTPLIB-WS ballot
+  // HTTP/2: not yet — future D-HTTPLIB-H2 ballot
+  ```
+
+- **Option B — HTTP/1.1 + HTTP/2.**
+  ```jet
+  http.serve("0.0.0.0:8080", mux)?   // negotiates HTTP/1.1 or HTTP/2 via ALPN
+  // gRPC-over-HTTP/2 possible
+  ```
+
+- **Option C — HTTP/1.1 + HTTP/2 + WebSocket. (recommended)**
+  ```jet
+  http.serve("0.0.0.0:8080", mux)?
+  mux.ws("/chat", fn(conn) {
+      loop { msg @= conn.recv()? ; conn.send(msg)? }
+  })
+  ```
+
+**Recommendation:** C — all three in v1. WebSocket is table-stakes for a TypeScript replacement (every modern web app uses it); HTTP/2 is required for any gRPC story. The bootstrap crates (ureq, hyper, tungstenite) are all owner-approvable on the same posture as rusqlite — runtime-side, I6 holds, native-ize obligation.
+
+---
+
+### D-HTTPLIB4 — `jet.http` TLS: built-in vs HTTP-only v1 (c164)
+
+**Gist:** Does `jet.http` support HTTPS out of the box in v1, or is TLS a follow-on?
+
+**Story.** Marcus deploys his Jet service to production. His first `http.get("https://api.example.com")` needs to work. He doesn't want to configure TLS manually.
+
+**In the wild:**
+```jet
+// Does this work on first install, or does Marcus need extra setup?
+resp @= http.get("https://secure.example.com/data").send()?
+```
+
+**Other languages:**
+```
+Go:      TLS built-in, uses system cert store; crypto/tls in stdlib
+Python:  ssl built-in, wraps OpenSSL; httpx works with HTTPS by default
+Rust reqwest: native-tls (system) or rustls (pure Rust) feature flags
+Node.js: https built-in, uses OpenSSL
+```
+
+**Tradeoffs:**
+
+| Option | HTTPS support | Dependency | Complexity |
+|--------|--------------|------------|------------|
+| A — TLS built-in via system (native-tls) | HTTPS works out of the box on macOS/Linux/Windows | native-tls crate (links system OpenSSL/SecureTransport/SChannel) | System dep; Nix provides it; non-Nix needs OpenSSL |
+| B — TLS built-in via pure Rust (rustls) | HTTPS works out of the box, pure Rust | rustls + webpki-roots crates | No system dep; larger binary; cert bundle bundled |
+| C — HTTP-only in v1, HTTPS follow-on | Only HTTP/1.1 works; HTTPS is a separate card | None | Limits all real-world usage immediately |
+
+**Worked examples:**
+
+- **Option A — native-tls.**
+  ```jet
+  // Works on macOS (SecureTransport), Linux (OpenSSL), Windows (SChannel):
+  resp @= http.get("https://api.example.com").send()?  // ✓ HTTPS
+  // Non-Nix Linux user needs: apt install libssl-dev (clear error if missing)
+  ```
+
+- **Option B — rustls. (recommended)**
+  ```jet
+  // Works everywhere, no system dep, pure Rust:
+  resp @= http.get("https://api.example.com").send()?  // ✓ HTTPS
+  // Cert bundle embedded (webpki-roots); larger binary (~3MB) but zero system dep
+  ```
+
+- **Option C — HTTP only.**
+  ```jet
+  resp @= http.get("http://api.example.com").send()?   // ✓ HTTP
+  resp @= http.get("https://api.example.com").send()?  // ✗ E????  not yet supported
+  ```
+
+**Recommendation:** B — rustls. No system dep aligns with Jet's goal of zero-friction installs; pure Rust is consistent with the native-ize obligation. Most real-world APIs require HTTPS — shipping v1 without it would make the library unusable for Marcus's primary use case.
 
 ---
 
