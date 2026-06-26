@@ -87,6 +87,10 @@
 - **Random split:** Fast seedable PRNG vs crypto RNG. Status: `Partial/Implemented`; `core.random` and `jet.crypto` exist, API clarity may need review. Bundle-risk: implementation may exist while naming/API policy remains.
 - **Time library depth:** Dates, zones, calendar math, injectable clock. Status: `Implemented/Partial`; deterministic `Clock` exists, richer `jet.time` should be verified against expectations. Bundle-risk: several time APIs are grouped.
 - **Tiny formal core / desugaring map:** Document the kernel every surface feature lowers to. Status: `New/process`; no formal kernel doc found.
+- **Property testing with shrinking:** A parameterized `#Test fn name(p: T)` is a property test — inputs generated from param types, with automatic invisible shrinking of the failing input; a no-param `#Test` is a plain unit test (zero new syntax). Status: `Implemented` c51 (D-TEST1=B). _(src: plans/epoch-3/testing-docs-ergonomics.md)_
+- **Doctests:** Fenced `jet` code blocks in `///` doc comments run under `jet test`; expected output is a `// =>` trailing comment; mismatch fires E2901. Status: `Implemented` c51 (D-TEST4=A). Overlaps the "Generated docs from semantic graph" note that doctests exist. _(src: plans/epoch-3/testing-docs-ergonomics.md)_
+- **Test coverage:** `jet test --coverage` reports per-function coverage; finer per-line/branch granularity is the open refinement. Status: `Implemented` c51 (D-COV1). _(src: plans/epoch-3/testing-docs-ergonomics.md)_
+- **Region benchmarks (`#Bench`):** First-class `#Bench "name" { … }` blocks, sibling of `#Test`; `jet bench` discovers and runs them, reporting per-region ops/sec + ns/iter. Status: `Implemented` c51 (D-BENCH1=A). _(src: plans/epoch-3/testing-docs-ergonomics.md)_
 
 ## Level 2 - Small Standard Library, Package, And API Additions
 
@@ -138,12 +142,29 @@
 - <a id="idea-dollar-for-comptime-or-macros"></a>**`$` for comptime or macros:** Reserve a sigil for generated-code splice/comptime. Status: `Ratified/Tower c162` as `$` splice plus `comptime {}`; full macro meaning is rejected for v1 by D-METADEPTH1. Bundle-risk: splice/comptime and macro semantics are intentionally different.
 - <a id="idea-broad-gated-build-time-io"></a>**Broad gated build-time I/O:** Allow env/network/subprocess/codegen at comptime behind audit and reproducible locks. Status: `Ratified/Tower c157` as D-CTEFFECT1 tiers plus `#Impure`; implementation pending. Bundle-risk: env, network, subprocess, codegen, audit, and locks are separable.
 - <a id="idea-jai-zig-style-build-system"></a>**Jai/Zig-style build system:** Treat builds as programmable Jet rather than external scripts. Status: `Partial/Planned` via Jetpack, D-BUILDPROFILE1, D-WORKSPACE1, D-CTEFFECT1. Bundle-risk: build language, profiles, workspaces, and comptime effects are separable.
+  - Consolidation plan: "Jai power, Jet authority model" — secure capability-oriented compile-time build graph (D-BUILDENTRY1/ACTION1/TARGET1/TOOLCHAIN1/CACHE1/PROBE1/POLICY1/LOCK1, plus surface-family D-SURFACEFAMILY1). _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Compile-time build entrypoint `#Build fn build(ctx: BuildContext) -> BuildPlan ?` selected by `Build.entry` (D-BUILDENTRY1), not magic discovery; a bare file still has no build entrypoint (R9). _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - `BuildContext` capability broker: deny-by-default, exact handles for fs roots / fixed-output fetch / env allowlist / exec allowlist / injected clock+RNG / named secrets — never ambient host access. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - `BuildPlan` lowers to a typed action graph, not a source list (D-BUILDACTION1): structured argv (no shell by default), declared inputs/outputs/env/caps, content-addressed action cache + parallel scheduler with resource pools (D-BUILDCACHE1). _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - First-class target model (D-BUILDTARGET1): executable, static/shared/module/object/interface library, test, bench, doc, generated-source, asset, custom action, install/package/archive, publish, plugin/wasm, system/OS image; plus CMake-style transitive usage requirements. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Typed, locked toolchains (D-BUILDTOOLCHAIN1): host/build/target triples, sysroot/SDK/libc, code-signing identity + entitlements as declared capabilities, tool digests recorded — no PATH discovery by default. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Structured configure probes (D-BUILDPROBE1): `find_program`/`find_library`/`pkg_config`/`has_header`/`has_symbol`/`compile_check`/`run_check`, each declaring reproducibility and recorded in lock/provenance. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Enterprise `BuildPolicy` surface (D-BUILDPOLICY1) + named modes: developer-default, CI-strict (`--locked`), offline, enterprise-restricted (signed/allowlisted), repro-audit. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - `.jet/lock` grows into the unified build/provenance lock (D-BUILDLOCK1): action keys, generated-output hashes, toolchains, probes, external tools; emits SBOM + SLSA-style provenance; `jet explain-build` / `jet audit-effects` / `jet graph` report it. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Dependency build code defaults to Tier 0 + locked Tier 1 only, sandboxed with no repo-wide read; Tier 2 denied unless org/project policy grants it. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Generated source lives under `build/generated/`, hashed in `.jet/lock`, listed as target outputs, sema-checked before downstream actions; `--locked` verifies or rejects drift. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Lifecycle verbs as graph roots: `jet build/run/test/bench/doc/fmt/lint/package/install/publish/clean/graph/query/explain-build/audit-effects`. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
+  - Legacy interop as migration only (Tier-2): import `compile_commands.json`, `ctx.legacy_action(...)`, wrap a CMake package, emit Ninja as a debug/export artifact — never the execution engine. _(src: plans/epoch-4/jai-secure-metaprogramming.md)_
 - **Stable semantic-index query API:** Expose compiler/LSP facts as a public query API. Status: `New`; internal `Source/LSP/SymbolDB.rs` exists, but no stable external API/card found.
 - **Impact/blast-radius analyzer:** Show downstream effects of a change. Status: `New/tooling`; rides semantic index.
 - **Replayable/reversible codemods:** Refactors as named objects that can be shipped/undone. Status: `New/tooling`; LSP rename/fixes exist, codemod object model not found.
 - **Package build-from-source:** Jetpack realizes deps from source and ships ring packages. Status: `Tower c50`. Bundle-risk: source realization and ring package shipping may stage separately.
 - **Plugin target:** Build/load plugin packages safely. Status: `Tower c81` deciding.
+  - Distinct from the c81 plugin *package* target: this is `jet` CLI / compiler-hook extensibility. Epoch 2 ships PATH discovery (D-DX5-A) — unknown `jet <cmd>` execs `jet-<cmd>` on PATH (git-lfs model, zero ABI/registry). _(src: plans/epoch-3/plugin-api.md)_
+  - Epoch 3 formal plugin API (D-DX5-B) for deep integration: shared typed AST / sema hooks (custom lints, codegen passes), stable registration + versioning, curated registry with security review; PATH discovery stays for simple tools. Open: in-process vs out-of-process, C ABI vs WASM sandbox vs JSON-RPC, which pipeline stages expose hooks. _(src: plans/epoch-3/plugin-api.md)_
 - <a id="idea-labeled-ref-fields-original-ownership-model-relook"></a>**Labeled `ref` fields / original ownership model relook:** Revisit stored references and ownership vocabulary. Status: `Partial/Implemented`; capability sigils and `ref` hardening landed, exact old note likely stale. Bundle-risk: likely needs original-note recovery before action.
+- **C header auto-binding (`jet bind`):** Generate a `@bindgen` cache from a C header via a native std-only C-prototype parser (`Source/CBind.rs`); no external crate/libclang. Status: `Implemented` E2-M14/S59 (D-CBIND2…6). Remaining E3: compile-time auto-invoke on cache miss, and widening the bound type subset beyond function prototypes + scalars/`char*`. _(src: plans/epoch-3/c-header-bindings.md)_
+- **Expression-body functions (`fn … = expr`):** One-liner function bodies as an expression instead of a block. Status: `Deferred` D-FP2; revisit when one-liner `fn`s pile up. _(src: plans/epoch-3/README.md)_
 
 ## Level 4 - Cross-Cutting Runtime, Tooling, And Type-System Work
 
@@ -176,6 +197,7 @@
 - **Web backend JS DOM + WASM:** Emit JS DOM ops for views, keep logic/compute in WASM. Status: `New/planned-adjacent`; no web backend card found. Bundle-risk: DOM emission and WASM compute partition differ.
 - **JS/npm and Swift interop:** Let users call existing ecosystems from day one. Status: `New`; only C/Rust FFI and package plans exist. Bundle-risk: JS/npm and Swift are separate interop tracks.
 - **JIT tier:** Add Cranelift JIT, later own bytecode/native JIT. Status: `Tower c139 ready`, c140/c141 frozen. Bundle-risk: Cranelift JIT and later custom tiers differ.
+  - Long-lived JIT process as a runtime type server: hot-swap typed handlers in place for a TS/JS-class app server (D-DEV2). _(src: plans/epoch-3/README.md)_
 - **Arena allocator compiler inference:** Compiler chooses arena placement. Status: `Tower c26` far-horizon.
 - **Signed package cache:** Signed binary/source package cache. Status: `Tower c56 frozen`; checksum/signing floor partially covered by package signing decisions. Bundle-risk: binary cache, source cache, checksums, and signing differ.
 - **Publish/registry UX:** Real registry upload, semver resolver, publish flow. Status: `Tower c96`. Bundle-risk: upload, resolver, and publish UX are separable.
@@ -183,6 +205,10 @@
 ## Level 5 - Large Platform Strategy And Semantic Reversals
 
 - <a id="idea-coroutines-async-await-go-scale-networking"></a>**Coroutines / async-await / Go-scale networking:** Add a high-concurrency async runtime rather than only blocking tasks. Status: `Planned/Reopen` via Epoch 3 `async-networking.md`; current shipped model teaches against `async`/`await` and uses tasks/channels. Bundle-risk: coroutines, async syntax, runtime, and Go-scale networking are separate.
+  - Executor backed by netpoll/epoll/io_uring (implementation TBD); target 100k+ idle connections (D-NET2, S82 `@async`/`@await`). Epoch 2 ships S53 tasks+channels; Epoch 3 is the integrated runtime. _(src: plans/epoch-3/async-networking.md)_
+  - No callback-colored types in the user surface — async integrates with `Fallible` + `?`. _(src: plans/epoch-3/async-networking.md)_
+  - TLS and DB drivers stay FFI-bridged; async wraps the blocking bridges first, native async I/O later. _(src: plans/epoch-3/async-networking.md)_
+  - Open: green threads vs work-stealing pool vs hybrid; whether `@async fn` whole-function form mirrors `@transact`; migration from Epoch 2 `server.on_request(task => …)`. _(src: plans/epoch-3/async-networking.md)_
 - <a id="idea-public-by-default-or-scope-file-visibility"></a>**Public-by-default or `#scope_file` visibility:** Flip private-by-default or make a positional public/private split. Status: `Reopen`; S18 explicitly chose private-by-default plus per-item `pub`. Bundle-risk: default visibility and file-scope marker differ.
 - **Marked DSL blocks:** Local syntax islands such as `sql!{...}`. Status: `Ratified as stdlib-only future` by D-EXT1; no general third-party DSL block found.
 - **User-authored derives and reflection:** Libraries author derives using a typed reflection API. Status: `Tower c155` deciding; v1 ceiling ratified as reflection/derives only. Bundle-risk: derive authoring and reflection API differ.
