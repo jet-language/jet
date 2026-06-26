@@ -691,7 +691,6 @@ pub(crate) fn build(
         exit(ExitCodes::USER_ERROR);
     });
 
-    let small = matches!(profile, BuildProfile::Small | BuildProfile::Freestanding);
     // Cross-compiled or freestanding builds bypass the host binary cache
     // (the binary is not executable on this host, and the target triple
     // affects codegen choices that aren't captured by the source hash).
