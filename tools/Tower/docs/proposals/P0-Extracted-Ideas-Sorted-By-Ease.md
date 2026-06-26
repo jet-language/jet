@@ -34,6 +34,19 @@
         .stdout_writer = &stdout_writer,
     };
 
+- **First-class unknown/loading/pending/never:** Model loading/pending/never explicitly. Status: `Already expressible` with enums/options; no special feature needed.
+- **Switch/multi-pattern cleanup:** Use single `|` for structural pattern alternatives and reserve `||` for boolean logic. Older `switch`/`when` examples are stale after D-IF revisions.
+- **Transactional blocks:** Roll back mutations on failure. Status: `Implemented/Ratified` D-TXN1; rollback trait shape ratified as D-ROLLBACK-TRAIT.
+- **Blessed protocol hooks:** Core syntax delegates to fixed hooks like iterator/index/literal suffix. Status: `Ratified/Implemented in pieces`; D-EXT1 formalizes the policy. Bundle-risk: individual hooks can have different implementation status.
+- **Safety ladder documentation:** Beginner/working/expert tiers as an explicit model. Status: `Implemented/philosophy`; Tower c120 audits separation.
+- **Full lazy iterator adapter set:** Rich map/filter/fold/window/chunk/group_by/etc. Status: `Ratified/Implemented` D-ITER1; verify individual gaps only if needed. Bundle-risk: adapter-by-adapter coverage may differ.
+- **Observability in the box:** Structured logs, tracing, metrics. Status: `Implemented` E2-M12/D-OBS3; OTel exporter remains package-level future. Bundle-risk: exporter work should not be closed by core observability alone.
+- <a id="idea-component-wise-vector-arithmetic"></a>**Component-wise vector arithmetic:** Vector operators apply lane-wise by default. Status: `Implemented` for closed SIMD lane types; broader user vector overloading is not open. Bundle-risk: closed SIMD behavior and user-defined overloading are different decisions.
+- <a id="idea-arenas-temp-storage"></a>**Arenas/temp storage:** First-class arena and bump allocation patterns. Status: `Implemented/Ratified` core arena regions; compiler inference remains Tower c26. Bundle-risk: allocator API and compiler inference are separable.
+- <a id="idea-implicit-swappable-allocator-context"></a>**Implicit swappable allocator context:** Jai-style ambient allocator. Status: `Implemented/Ratified` as `#Context(allocator: ...)` plus explicit allocator APIs; broad policy still evolving. Bundle-risk: shipped mechanism and policy completion differ.
+- **Single-use / linear values:** Values that must be consumed exactly once. Status: `Implemented` D-LIN1 `#SingleUse`; explicit audited drop hatch remains unspecified. Bundle-risk: core feature and drop hatch are separable.
+- **Typestate:** Order-sensitive APIs, wrong-state calls are compile errors. Status: `Implemented` D-STATE1; `state {}` declaration follow-up is Tower c163. Bundle-risk: typestate semantics and declaration sugar are separable.
+- 
 ## Scratch Traceability
 
 - `Coroutines/Async/Await` -> [Coroutines as primitives](#idea-coroutines-as-primitives); also related to [Coroutines / async-await / Go-scale networking](#idea-coroutines-async-await-go-scale-networking).
@@ -60,24 +73,6 @@
 - `Cleanup old std.mem syntax (Ptr<T>)` -> Trace gap: [low-level pointer syntax cleanup](#trace-gap-low-level-pointer-syntax-cleanup).
 - `Relook what labeled ref field in struct` -> [Labeled `ref` fields / original ownership model relook](#idea-labeled-ref-fields-original-ownership-model-relook).
 - `Relook original ownership model - outdated example` -> [Labeled `ref` fields / original ownership model relook](#idea-labeled-ref-fields-original-ownership-model-relook).
-- `Relook if switch statements` -> [Switch/multi-pattern cleanup](#idea-switch-multi-pattern-cleanup).
-- `Jet fmt should not drop parenthesis` -> [Formatter preserves grouping parentheses](#idea-formatter-preserves-grouping-parentheses).
-
-## Level 0 - Already Landed, Expressible, Or Mostly Closeout
-
-- **First-class unknown/loading/pending/never:** Model loading/pending/never explicitly. Status: `Already expressible` with enums/options; no special feature needed.
-- <a id="idea-switch-multi-pattern-cleanup"></a>**Switch/multi-pattern cleanup:** Use single `|` for structural pattern alternatives and reserve `||` for boolean logic. Status: `Implemented` by D-PATO; older `switch`/`when` examples are stale after D-IF revisions.
-- **Transactional blocks:** Roll back mutations on failure. Status: `Implemented/Ratified` D-TXN1; rollback trait shape ratified as D-ROLLBACK-TRAIT.
-- **Blessed protocol hooks:** Core syntax delegates to fixed hooks like iterator/index/literal suffix. Status: `Ratified/Implemented in pieces`; D-EXT1 formalizes the policy. Bundle-risk: individual hooks can have different implementation status.
-- **Safety ladder documentation:** Beginner/working/expert tiers as an explicit model. Status: `Implemented/philosophy`; Tower c120 audits separation.
-- **Full lazy iterator adapter set:** Rich map/filter/fold/window/chunk/group_by/etc. Status: `Ratified/Implemented` D-ITER1; verify individual gaps only if needed. Bundle-risk: adapter-by-adapter coverage may differ.
-- **Safe-by-default sharp-on-request APIs:** Verified TLS, linear regex, explicit unsafe. Status: `Implemented/Ratified`; Decimal remains a separate gap. Bundle-risk: groups unrelated safety APIs.
-- **Observability in the box:** Structured logs, tracing, metrics. Status: `Implemented` E2-M12/D-OBS3; OTel exporter remains package-level future. Bundle-risk: exporter work should not be closed by core observability alone.
-- <a id="idea-component-wise-vector-arithmetic"></a>**Component-wise vector arithmetic:** Vector operators apply lane-wise by default. Status: `Implemented` for closed SIMD lane types; broader user vector overloading is not open. Bundle-risk: closed SIMD behavior and user-defined overloading are different decisions.
-- <a id="idea-arenas-temp-storage"></a>**Arenas/temp storage:** First-class arena and bump allocation patterns. Status: `Implemented/Ratified` core arena regions; compiler inference remains Tower c26. Bundle-risk: allocator API and compiler inference are separable.
-- <a id="idea-implicit-swappable-allocator-context"></a>**Implicit swappable allocator context:** Jai-style ambient allocator. Status: `Implemented/Ratified` as `#Context(allocator: ...)` plus explicit allocator APIs; broad policy still evolving. Bundle-risk: shipped mechanism and policy completion differ.
-- **Single-use / linear values:** Values that must be consumed exactly once. Status: `Implemented` D-LIN1 `#SingleUse`; explicit audited drop hatch remains unspecified. Bundle-risk: core feature and drop hatch are separable.
-- **Typestate:** Order-sensitive APIs, wrong-state calls are compile errors. Status: `Implemented` D-STATE1; `state {}` declaration follow-up is Tower c163. Bundle-risk: typestate semantics and declaration sugar are separable.
 
 ## Level 1 - Documentation, Review Checklists, Formatter, And Tiny Diagnostics
 

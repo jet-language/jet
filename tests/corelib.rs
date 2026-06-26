@@ -488,7 +488,7 @@ fn main() {
 /// exactly the right tripwire: a format change must be mirrored here.
 #[test]
 fn core_module_items_covers_known_core_modules() {
-    let src = fs::read_to_string("Source/Sema/CheckerCoreLib.rs")
+    let src = fs::read_to_string("crates/jet-sema/src/Sema/CheckerCoreLib.rs")
         .expect("Source/Sema/CheckerCoreLib.rs must exist");
 
     // Extract the `core_module_items` function body.

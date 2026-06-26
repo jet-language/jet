@@ -1,10 +1,22 @@
+[workspace]
+members = [
+    ".",
+    "crates/jet-foundation",
+    "crates/jet-lexer",
+    "crates/jet-parser",
+    "crates/jet-comptime",
+    "crates/jet-sema",
+    "crates/jet-codegen",
+    "crates/jet-driver",
+]
+resolver = "2"
+
 [package]
 name = "jet"
 version = "1.0.0"
 edition = "2021"
 
-# Invariant I6 (see CLAUDE.md): zero external dependencies in the compiler
-# until the owner approves one. std only.
+# Invariant I6 (see CLAUDE.md): zero external dependencies in the compiler.
 
 [lib]
 name = "jet"
@@ -14,8 +26,9 @@ path = "Source/lib.rs"
 name = "jet"
 path = "Source/main.rs"
 
-# Jetpack — Jet's package manager (Phase 1). Built and tested independently
-# from the `jet` binary (D-JPK1). std-only, like the rest of the compiler (I6).
 [[bin]]
 name = "jetpack"
 path = "Source/Bin/Jetpack.rs"
+
+[dependencies]
+jet-driver = { path = "crates/jet-driver" }

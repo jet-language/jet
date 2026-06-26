@@ -3,7 +3,7 @@
 //! Reads `editors/vscode/syntaxes/jet.tmLanguage.json`, extracts every word
 //! from the keyword `"match"` regex alternation groups, and asserts:
 //!   1. Every word in `Syntax::JET_KEYWORD_LIST` is covered (no silent omissions).
-//!   2. No `FOREIGN_*` word from `Source/Syntax.rs` appears in a keyword pattern
+//!   2. No `FOREIGN_*` word from `crates/jet-foundation/src/Syntax.rs` appears in a keyword pattern
 //!      (those are teaching-error-only words that must not get syntax highlighting).
 //!
 //! The test does NOT rewrite the grammar — it is a tripwire so that a keyword
@@ -85,7 +85,7 @@ fn extract_alternation_words(pattern: &str, out: &mut BTreeSet<String>) {
     }
 }
 
-/// Collect FOREIGN_* constant values from Source/Syntax.rs by scanning for
+/// Collect FOREIGN_* constant values from crates/jet-foundation/src/Syntax.rs by scanning for
 /// lines like `pub const FOREIGN_XXX: &str = "word";`.
 fn extract_foreign_words_from_syntax(syntax_text: &str) -> BTreeSet<String> {
     let mut words = BTreeSet::new();
@@ -119,7 +119,7 @@ fn grammar_covers_jet_keyword_list() {
 
     let grammar_words = extract_grammar_keyword_words(&grammar_text);
 
-    // JET_KEYWORD_LIST values — kept in sync with Source/Syntax.rs constants.
+    // JET_KEYWORD_LIST values — kept in sync with crates/jet-foundation/src/Syntax.rs constants.
     // This list must be updated whenever JET_KEYWORD_LIST changes.
     let jet_keywords: BTreeSet<&str> = jet::Syntax::JET_KEYWORD_LIST.iter().copied().collect();
 
@@ -145,7 +145,7 @@ fn grammar_excludes_foreign_words() {
     let grammar_text =
         fs::read_to_string(grammar_path).expect("editors/vscode/syntaxes/jet.tmLanguage.json");
     let syntax_text =
-        fs::read_to_string("Source/Syntax.rs").expect("Source/Syntax.rs");
+        fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("crates/jet-foundation/src/Syntax.rs");
 
     let grammar_words = extract_grammar_keyword_words(&grammar_text);
     let foreign_words = extract_foreign_words_from_syntax(&syntax_text);

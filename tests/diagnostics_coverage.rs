@@ -35,15 +35,17 @@ fn read(p: &PathBuf) -> String {
 /// Collect all [EL]NNNN codes emitted in Source/ via Diagnostic::error /
 /// Diagnostic::warn (the string literal form `"E0xxx"` / `"L0xxx"`).
 fn emitted_codes() -> BTreeSet<String> {
-    let src_dir = root().join("Source");
     let mut codes: BTreeSet<String> = BTreeSet::new();
-    walk_rs(&src_dir, &mut |content| {
-        // Match `"E0xxx"` or `"L0xxx"` — the string literal form used at
-        // Diagnostic::error / push sites and eprintln! paths in main.rs.
-        for code in extract_quoted_codes(content) {
-            codes.insert(code);
-        }
-    });
+    let mut scan_dir = |dir: PathBuf| {
+        walk_rs(&dir, &mut |content| {
+            for code in extract_quoted_codes(content) {
+                codes.insert(code);
+            }
+        });
+    };
+    // Scan both the root Source/ (Cmd*, LSP, etc.) and the seam crates.
+    scan_dir(root().join("Source"));
+    scan_dir(root().join("crates"));
     codes
 }
 
@@ -379,7 +381,7 @@ fn all_exclusions() -> BTreeSet<String> {
 /// pattern matcher, not as Jet Diagnostic codes.
 #[test]
 fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
-    let ffi_path = root().join("Source/FFI.rs");
+    let ffi_path = root().join("crates/jet-driver/src/FFI.rs");
     let ffi_content = read(&ffi_path);
 
     // The FFI.rs pattern-matcher is the only allowlisted use.
@@ -390,19 +392,20 @@ fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
         // Count occurrences in FFI.rs — should all be in looks_like_signature_mismatch
         let in_ffi = ffi_content.matches(code).count();
         // Count occurrences in all other Source/ files
-        let src_dir = root().join("Source");
         let mut other_count = 0usize;
-        walk_rs(&src_dir, &mut |content| {
-            // Skip FFI.rs itself
-            other_count += content
-                .lines()
-                .filter(|l| l.contains(code))
-                .filter(|l| {
-                    // Any line that uses Diagnostic::error with this code is a leak
-                    l.contains("Diagnostic::error") || l.contains("Diagnostic::warn")
-                })
-                .count();
-        });
+        for dir in [root().join("Source"), root().join("crates")] {
+            walk_rs(&dir, &mut |content| {
+                // Skip FFI.rs itself
+                other_count += content
+                    .lines()
+                    .filter(|l| l.contains(code))
+                    .filter(|l| {
+                        // Any line that uses Diagnostic::error with this code is a leak
+                        l.contains("Diagnostic::error") || l.contains("Diagnostic::warn")
+                    })
+                    .count();
+            });
+        }
 
         assert_eq!(
             other_count, 0,

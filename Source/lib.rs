@@ -11,171 +11,32 @@
 // Warnings are errors: keeps the build warning-clean (card c115).
 #![deny(warnings)]
 
-pub mod AST;
+// Seam crates — re-export everything so callers use `jet::AST`, `jet::Sema`, etc.
+// unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.
+pub use jet_driver::{
+    AST, CBind, CFFI, Codegen, Collections, Compile, Comptime, Diagnostics, Driver, FFI,
+    Formatter, Generics, Jetpack, Lexer, Loader, Lock, Manifest, Parser, Sema, SHA256,
+    Syntax, Traits, PhaseTiming,
+    // Top-level re-exports from Compile module:
+    bundle_uses_unsafe, Capabilities, CompileOutput,
+};
 pub mod BuildCache;
-pub mod CBind;
-pub mod CFFI;
 pub mod CLI;
-pub mod Codegen;
-pub mod Collections;
-pub mod Comptime;
 pub mod Debug;
-pub mod Diagnostics;
-pub mod Driver;
 pub mod Doctest;
 pub mod Doctor;
 pub mod ExitCodes;
 pub mod Explain;
 pub mod Fetch;
-pub mod FFI;
 pub mod FixEngine;
-pub mod Formatter;
-pub mod Generics;
 pub mod Interpreter;
 pub mod JitBackend;
-pub mod Jetpack;
-pub mod Lexer;
-pub mod Loader;
-pub mod Lock;
 pub mod LSP;
-pub mod Traits;
-pub mod Manifest;
-pub mod Parser;
-pub mod PhaseTiming;
 pub mod Publish;
 pub mod REPL;
-pub mod Sema;
-pub mod SHA256;
 pub mod Store;
-pub mod Syntax;
 
 use Diagnostics::Diagnostic;
-
-/// Result of a successful compile: generated Rust plus any lint warnings.
-#[derive(Debug)]
-pub struct CompileOutput {
-    pub rust: String,
-    pub lints: Vec<Diagnostic>,
-    /// Built FFI bridge when the program declares `extern rust` (M7).
-    pub ffi: Option<FFI::FfiLink>,
-    /// Native C-library linker args (S59 / E2-M14), ready for `rustc`.
-    pub clinks: Vec<String>,
-    /// D-TOOL5 (E2-M11): capability flags inferred from the generated code.
-    pub capabilities: Capabilities,
-    /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs seen during sema.
-    /// Each entry: relative path + sha256 of the bytes at compile time.
-    /// Written to `.jet/lock` by the build driver for reproducibility.
-    pub comptime_inputs: Vec<Lock::ComptimeInput>,
-}
-
-/// D-TOOL5 (E2-M11, ratified as option C): capability summary emitted by
-/// `jet build`. Human-readable by default; `--capabilities-json` for tooling.
-#[derive(Debug, Default)]
-pub struct Capabilities {
-    pub uses_network: bool,
-    pub uses_file_io: bool,
-    pub uses_unsafe: bool,
-    pub uses_ffi: bool,
-    pub uses_crypto: bool,
-    pub uses_concurrency: bool,
-}
-
-impl Capabilities {
-    /// c110 (P0): derive capabilities from semantic facts, not from scanning
-    /// generated Rust text. `used_core` is the set of resolved Core calls
-    /// (`module::method`, alias-resolved in sema); `has_unsafe` is whether the
-    /// program contains an `#Unsafe` gate or a `core.mem` low-level op;
-    /// `has_ffi` is whether it declares `extern rust` or links a C library.
-    ///
-    /// This is the authoritative path (D-TOOL5 / audit card c110): capability
-    /// reporting for policy, sandboxing, and package builds must rest on what
-    /// sema resolved a program to do, never on the shape of the lowered Rust.
-    pub fn from_sema(
-        used_core: &std::collections::HashSet<String>,
-        has_unsafe: bool,
-        has_ffi: bool,
-    ) -> Self {
-        let any = |prefixes: &[&str]| {
-            used_core
-                .iter()
-                .any(|k| prefixes.iter().any(|p| k.starts_with(p)))
-        };
-        Capabilities {
-            uses_network: any(&["core.net", "jet.http"]),
-            uses_file_io: any(&["core.fs", "core.io", "core.files", "core.path"]),
-            uses_unsafe: has_unsafe || any(&["core.mem"]),
-            uses_ffi: has_ffi,
-            uses_crypto: any(&["jet.crypto"]),
-            uses_concurrency: any(&["core.tasks", "core.time", "jet.time"]),
-        }
-    }
-
-    /// Legacy capability detection by scanning generated Rust. Retained only as
-    /// a cross-check for the c110 transition (see `tests/effects.rs` agreement
-    /// test); `from_sema` is the path the compiler uses.
-    pub fn from_rust(rust: &str) -> Self {
-        Capabilities {
-            uses_network: rust.contains("jet_net_") || rust.contains("jet_http_"),
-            uses_file_io: rust.contains("jet_fs_") || rust.contains("jet_io_"),
-            uses_unsafe: rust.contains("unsafe {") || rust.contains("unsafe fn"),
-            uses_ffi: rust.contains("extern \"C\"") || rust.contains("jet_ffi"),
-            uses_crypto: rust.contains("jet_crypto_"),
-            uses_concurrency: rust.contains("jet_tasks_") || rust.contains("jet_time_"),
-        }
-    }
-
-    /// Render a human-readable one-line summary (empty when no special capabilities).
-    pub fn summary(&self) -> String {
-        let mut caps = Vec::new();
-        if self.uses_network { caps.push("network"); }
-        if self.uses_file_io { caps.push("file-io"); }
-        if self.uses_crypto { caps.push("crypto"); }
-        if self.uses_concurrency { caps.push("concurrency"); }
-        if self.uses_ffi { caps.push("ffi"); }
-        if self.uses_unsafe { caps.push("unsafe"); }
-        if caps.is_empty() {
-            "capabilities: none".to_string()
-        } else {
-            format!("capabilities: {}", caps.join(", "))
-        }
-    }
-
-    /// Render machine-readable JSON for `--capabilities-json`.
-    pub fn to_json(&self) -> String {
-        format!(
-            "{{\"network\":{},\"file_io\":{},\"unsafe\":{},\"ffi\":{},\"crypto\":{},\"concurrency\":{}}}",
-            self.uses_network,
-            self.uses_file_io,
-            self.uses_unsafe,
-            self.uses_ffi,
-            self.uses_crypto,
-            self.uses_concurrency,
-        )
-    }
-}
-
-/// c110: true when the program contains an `#Unsafe fn` anywhere (top-level,
-/// method, or trait-impl method). An `#Unsafe { … }` *block* always contains a
-/// `core.mem` low-level op (that is what the gate is for), so it is detected via
-/// the resolved-Core set in `from_sema`; this catches the whole-function form.
-pub(crate) fn bundle_uses_unsafe(bundle: &AST::ProgramBundle) -> bool {
-    use AST::Item;
-    bundle.modules.iter().any(|m| {
-        m.items.iter().any(|it| match it {
-            Item::Func(f) => f.is_unsafe,
-            Item::Struct(s) => {
-                s.methods.iter().any(|x| x.is_unsafe)
-                    || s.trait_impls.iter().any(|b| b.methods.iter().any(|x| x.is_unsafe))
-            }
-            Item::Enum(e) => {
-                e.methods.iter().any(|x| x.is_unsafe)
-                    || e.trait_impls.iter().any(|b| b.methods.iter().any(|x| x.is_unsafe))
-            }
-            Item::Impl(i) => i.methods.iter().any(|x| x.is_unsafe),
-            _ => false,
-        })
-    })
-}
 
 /// Run the full front end on source text. All lex errors (then all parse
 /// errors) surface in one run — M1 error recovery.
