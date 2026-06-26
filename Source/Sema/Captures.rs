@@ -135,7 +135,7 @@ pub(crate) fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], take
         }
         Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
-        Expr::Absent(_) | Expr::ReduceMarker(_, _) | Expr::Todo { .. } => {}
+        Expr::Absent(_) | Expr::ReduceMarker(_, _) | Expr::Todo { .. } | Expr::ComptimeSplice { .. } => {}
         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken);
         }
@@ -304,7 +304,8 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Char(_, _)
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
-        | Expr::Todo { .. } => false,
+        | Expr::Todo { .. }
+        | Expr::ComptimeSplice { .. } => false,
     }
 }
 

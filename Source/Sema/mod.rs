@@ -517,6 +517,9 @@ pub(crate) struct Checker<'a> {
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,
+    /// True while inferring a comptime binding's RHS or inside a comptime
+    /// context — suppresses E2712 for `$name` comptime splice expressions.
+    in_comptime: bool,
     ret: Option<Type>,
     /// `-> view T` on this function (borrowed return).
     view_return: bool,

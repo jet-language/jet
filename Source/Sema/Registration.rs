@@ -255,8 +255,112 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::Migration(_) => {}
             // D-STATE-DECL: state-set declarations are sema-only (I3); no type to register.
             Item::StateDecl(_) => {}
-            // D-METADERIVE1=A: user-authored derive blocks are expanded in Bundle.rs.
+            // D-METADERIVE1=A: user-authored derive blocks are expanded below.
             Item::UserDerive(_) => {}
+        }
+    }
+
+    // D-METADERIVE1=A: user-derive expansion — run after registration so derive bodies
+    // can reference helper functions and TypeInfo. All items are local; no orphan possible.
+    {
+        let user_derives: Vec<(String, String, Vec<crate::AST::Stmt>)> = prog.items.iter()
+            .filter_map(|i| {
+                if let Item::UserDerive(d) = i {
+                    Some((d.trait_name.clone(), d.type_param.clone(), d.body.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !user_derives.is_empty() {
+            let struct_infos: Vec<(String, Vec<(String, crate::Diagnostics::Span)>, Vec<crate::AST::Field>)> = prog.items.iter()
+                .filter_map(|i| {
+                    if let Item::Struct(s) = i {
+                        Some((s.name.clone(), s.derives.clone(), s.fields.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let actual_funcs: HashMap<String, &crate::AST::Func> = prog.items.iter()
+                .filter_map(|i| {
+                    if let Item::Func(f) = i { Some((f.name.clone(), f)) } else { None }
+                })
+                .collect();
+
+            let mut new_items: Vec<Item> = Vec::new();
+            let project_root = std::env::current_dir().unwrap_or_default();
+
+            for (struct_name, derives, fields) in &struct_infos {
+                for (derive_name, derive_span) in derives {
+                    if let Some((_, type_param, body)) = user_derives.iter().find(|(tn, _, _)| tn == derive_name) {
+                        // Build TypeInfo CtValue for this struct.
+                        let fields_info: Vec<crate::Comptime::CtValue> = fields.iter().map(|f| {
+                            let markers: Vec<crate::Comptime::CtValue> = f.serde_markers.iter()
+                                .map(|m| crate::Comptime::CtValue::Str(m.name.clone()))
+                                .collect();
+                            crate::Comptime::CtValue::Struct {
+                                type_name: "FieldInfo".to_string(),
+                                fields: vec![
+                                    ("name".to_string(), crate::Comptime::CtValue::Str(f.name.clone())),
+                                    ("ty".to_string(), crate::Comptime::CtValue::Str(f.ty.name())),
+                                    ("markers".to_string(), crate::Comptime::CtValue::List(markers)),
+                                    ("is_pub".to_string(), crate::Comptime::CtValue::Bool(f.is_pub)),
+                                ],
+                            }
+                        }).collect();
+                        let type_info = crate::Comptime::CtValue::Struct {
+                            type_name: "TypeInfo".to_string(),
+                            fields: vec![
+                                ("name".to_string(), crate::Comptime::CtValue::Str(struct_name.clone())),
+                                ("fields".to_string(), crate::Comptime::CtValue::List(fields_info)),
+                            ],
+                        };
+
+                        match crate::Comptime::evaluate_derive_body(
+                            body,
+                            type_param,
+                            type_info,
+                            &actual_funcs,
+                            &project_root,
+                        ) {
+                            Ok(fragments) => {
+                                for fragment in fragments {
+                                    let (toks, lex_diags) = crate::Lexer::lex(&fragment);
+                                    if !lex_diags.is_empty() {
+                                        diags.extend(lex_diags);
+                                        continue;
+                                    }
+                                    match crate::Parser::parse(&toks) {
+                                        Ok(mut p) => new_items.extend(p.items.drain(..)),
+                                        Err(parse_diags) => diags.extend(parse_diags),
+                                    }
+                                }
+                            }
+                            Err(inner) => diags.push(Diagnostic::error(
+                                "E2710",
+                                format!(
+                                    "`derive {} for T` body failed while expanding `#[{}]` on `{}`",
+                                    derive_name, derive_name, struct_name
+                                ),
+                                inner.what.clone(),
+                                "fix the `derive` body so it generates valid Jet at compile time".to_string(),
+                                Some(*derive_span),
+                            )),
+                        }
+                    }
+                }
+            }
+
+            // Register new funcs so subsequent sema sees them.
+            for item in &new_items {
+                if let Item::Func(f) = item {
+                    funcs.insert(f.name.clone(), func_to_sig(f));
+                }
+            }
+            prog.items.extend(new_items);
         }
     }
 
@@ -1361,6 +1465,7 @@ pub(crate) fn check_func_body(
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
         in_pure: f.is_pure,
+        in_comptime: false,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,
         fn_name: f.name.clone(),

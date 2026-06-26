@@ -506,6 +506,10 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(addr, Prec::OrFallback);
                 self.write(")");
             }
+            // D-CTMARKER1=C: `$name` comptime splice expression.
+            Expr::ComptimeSplice { name, .. } => {
+                self.write(&format!("${}", name));
+            }
         }
     }
 

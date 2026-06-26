@@ -2211,7 +2211,16 @@ impl<'a> Checker<'a> {
             self.lambda_escapes = true;
             self.lambda_binding = Some(b.name.clone());
         }
+        // D-CTMARKER1=C: `$name` in a comptime binding RHS is valid; set
+        // `in_comptime` before `infer()` so E2712 is suppressed during type
+        // inference of the RHS (the evaluator runs after, independently).
+        if b.is_comptime {
+            self.in_comptime = true;
+        }
         let it = self.infer(&mut b.init);
+        if b.is_comptime {
+            self.in_comptime = false;
+        }
         self.lambda_escapes = saved_esc;
         self.lambda_binding = saved_bind;
         self.expected_type = saved_expected;

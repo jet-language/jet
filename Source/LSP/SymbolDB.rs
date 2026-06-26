@@ -911,7 +911,8 @@ fn collect_expr(e: &AST::Expr, mp: &str, db: &mut SymbolDB) {
         | AST::Expr::Char(_, _)
         | AST::Expr::Absent(_)
         | AST::Expr::ReduceMarker(_, _)
-        | AST::Expr::Todo { .. } => {}
+        | AST::Expr::Todo { .. }
+        | AST::Expr::ComptimeSplice { .. } => {}
     }
 }
 

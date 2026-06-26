@@ -2000,6 +2000,15 @@ pub enum Expr {
         items: Vec<Expr>,
         span: Span,
     },
+    /// D-CTMARKER1=C: `$name` — comptime splice expression. In a comptime
+    /// context (derive body, `comptime {}` block, comptime binding RHS), looks
+    /// up `name` in the comptime scope. Outside comptime context: E2712.
+    /// Inside `emit("… $name …")` strings, `$name` is handled by
+    /// `apply_dollar_splices` (string interpolation, not this AST node).
+    ComptimeSplice {
+        name: String,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -2037,7 +2046,8 @@ impl Expr {
             | Expr::If { span: s, .. }
             | Expr::CallValue { span: s, .. }
             | Expr::FanOut { span: s, .. }
-            | Expr::PtrFromAddr { span: s, .. } => *s,
+            | Expr::PtrFromAddr { span: s, .. }
+            | Expr::ComptimeSplice { span: s, .. } => *s,
             Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,
             Expr::MethodCall { method_span, .. } => *method_span,

@@ -836,3 +836,28 @@ fn fmt_dot_construction_d_dotctor1() {
     let twice_old = jet::format_source(&out_old).expect("fixed form must re-fmt");
     assert_eq!(out_old, twice_old, "fixed form must be fmt-idempotent");
 }
+
+#[test]
+fn fmt_comptime_splice_stability() {
+    // D-CTMARKER1=C: `$name` comptime splice is a first-class AST node
+    // (Expr::ComptimeSplice). The formatter must emit it as `$name` so that
+    // the round-trip is stable (previously the `$` would be silently dropped
+    // if it reached the formatter without an AST node).
+    let src = "derive Debug for T {\n    info @= T.reflect()\n    tname @= info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn main() {\n    print(\"ok\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept derive with $name in string");
+    let twice = jet::format_source(&once).expect("second fmt should succeed");
+    assert_eq!(once, twice, "derive body with $name in emit string must be fmt-idempotent");
+
+    // Standalone `$name` expression (outside emit string) round-trips as `$name`.
+    let splice_src = "derive Named for T {\n    tname @= \"test\"\n    x @= $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn main() {}\n";
+    let splice_once = jet::format_source(splice_src).expect("fmt should accept $name expression");
+    assert!(
+        splice_once.contains("$tname"),
+        "`$tname` expression must survive fmt, got:\n{splice_once}"
+    );
+    let splice_twice = jet::format_source(&splice_once).expect("$name fmt must be idempotent");
+    assert_eq!(
+        splice_once, splice_twice,
+        "`$name` expression must be fmt-idempotent"
+    );
+}

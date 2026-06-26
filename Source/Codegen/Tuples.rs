@@ -101,7 +101,8 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         | Expr::Char(_, _)
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
-        | Expr::Todo { .. } => {}
+        | Expr::Todo { .. }
+        | Expr::ComptimeSplice { .. } => {}
         Expr::Call(c) => {
             for a in &c.args {
                 collect_tuple_shapes_from_expr(&a.expr, out);

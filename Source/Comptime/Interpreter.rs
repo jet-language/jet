@@ -809,6 +809,11 @@ impl<'a> Interp<'a> {
                 }
             }
             Expr::FanOut { callee, items, span } => self.eval_fan_out(callee, items, *span, scope),
+            // D-CTMARKER1=C: `$name` outside an emit() string — look up in scope like Ident.
+            Expr::ComptimeSplice { name, span } => scope
+                .get(name)
+                .cloned()
+                .ok_or_else(|| unsupported(&format!("the name `{}`", name), *span)),
             // c97/D-STRPARSE1: `ok(expr)` — wraps a value in the success arm.
             Expr::Ok(inner, _) => {
                 let v = self.eval(inner, scope)?;

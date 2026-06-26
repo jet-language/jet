@@ -616,6 +616,20 @@ impl<'a> Checker<'a> {
             Expr::FanOut { callee, items, span } => {
                 self.infer_fan_out(callee, items, *span)
             }
+            // D-CTMARKER1=C: `$name` comptime splice. Valid only in comptime contexts;
+            // the Comptime interpreter resolves the value. In runtime code: E2712.
+            Expr::ComptimeSplice { name: _, span } => {
+                if !self.in_comptime {
+                    self.diags.push(Diagnostic::error(
+                        "E2712",
+                        "`$` splice used outside a comptime context".to_string(),
+                        "`$name` looks up a name in the comptime scope and is only valid inside a `derive` body, `comptime {}` block, or comptime binding".to_string(),
+                        "remove the `$` prefix, or move this code into a `comptime { … }` block or a `derive` body".to_string(),
+                        Some(*span),
+                    ));
+                }
+                None
+            }
         }
     }
 

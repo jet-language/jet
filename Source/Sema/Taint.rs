@@ -166,7 +166,8 @@ impl<'a> TaintCtx<'a> {
             | Expr::Absent(_)
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
-            | Expr::Lambda(_) => false,
+            | Expr::Lambda(_)
+            | Expr::ComptimeSplice { .. } => false,
         }
     }
 
@@ -274,7 +275,8 @@ impl<'a> TaintCtx<'a> {
             | Expr::Ident(..)
             | Expr::Absent(_)
             | Expr::ReduceMarker(_, _)
-            | Expr::Todo { .. } => {}
+            | Expr::Todo { .. }
+            | Expr::ComptimeSplice { .. } => {}
         }
     }
 

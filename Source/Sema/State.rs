@@ -520,7 +520,8 @@ impl<'a> StateCtx<'a> {
             | Expr::Absent(_)
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
-            | Expr::Lambda(_) => {}
+            | Expr::Lambda(_)
+            | Expr::ComptimeSplice { .. } => {}
         }
     }
 

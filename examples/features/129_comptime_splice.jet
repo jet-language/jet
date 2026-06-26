@@ -1,0 +1,23 @@
+// 129 — D-CTMARKER1=C: `$name` as a standalone comptime splice expression.
+// Inside a derive body (which runs in comptime context), `$name` looks up a
+// name from the comptime scope — identical semantics to a bare ident, but
+// exercises the Expr::ComptimeSplice interpreter path and is guarded by E2712
+// outside comptime.
+
+derive Label for T {
+    info @= T.reflect()
+    tname @= info.name
+    // $tname is Expr::ComptimeSplice; resolves to the same value as `tname`
+    lbl @= $tname
+    emit("impl $lbl {{ fn label(self) -> String {{ return \"$lbl\" }} }}")
+}
+
+#[Label]
+struct Cube {
+    side: Int
+}
+
+fn main() {
+    c @= Cube.{ side: 5 }
+    print(c.label())
+}

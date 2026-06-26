@@ -135,7 +135,8 @@ pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<Stri
         | Expr::Bool(_, _)
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
-        | Expr::Todo { .. } => {}
+        | Expr::Todo { .. }
+        | Expr::ComptimeSplice { .. } => {}
         Expr::Str(parts, _) => {
             for p in parts.iter_mut() {
                 if let StrPart::Interp(e) = p {
@@ -458,6 +459,25 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
 
                 for (struct_name, derives, fields) in &struct_infos {
                     for (derive_name, derive_span) in derives {
+                        // D-METADERIVE1=A orphan rule: a UserDerive defined and applied
+                        // in the same imported module violates the orphan rule (E2711).
+                        // Expansion is only allowed in the entry module (idx == 0).
+                        if idx > 0 && user_derives.iter().any(|(tn, _, _)| tn == derive_name) {
+                            diags.push(Diagnostic::error(
+                                "E2711",
+                                format!(
+                                    "derive orphan rule: `derive {} for T` and `{}` are both in an imported module",
+                                    derive_name, struct_name
+                                ),
+                                "user-derive expansion can only run in the entry module; both the derive block and the struct are from the same imported file".to_string(),
+                                format!(
+                                    "move both `derive {}` and `struct {}` to your entry module; derive expansion only runs there",
+                                    derive_name, struct_name
+                                ),
+                                None,
+                            ));
+                            continue;
+                        }
                         if let Some((_, type_param, body)) = user_derives.iter().find(|(tn, _, _)| tn == derive_name) {
                             // Build TypeInfo CtValue for this struct.
                             let fields_info: Vec<crate::Comptime::CtValue> = fields.iter().map(|f| {
@@ -470,6 +490,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                                         ("name".to_string(), crate::Comptime::CtValue::Str(f.name.clone())),
                                         ("ty".to_string(), crate::Comptime::CtValue::Str(f.ty.name())),
                                         ("markers".to_string(), crate::Comptime::CtValue::List(markers)),
+                                        ("is_pub".to_string(), crate::Comptime::CtValue::Bool(f.is_pub)),
                                     ],
                                 }
                             }).collect();
@@ -1492,7 +1513,8 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
         | Expr::Ident(_, _)
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
-        | Expr::Todo { .. } => {}
+        | Expr::Todo { .. }
+        | Expr::ComptimeSplice { .. } => {}
     }
 }
 
@@ -1760,6 +1782,7 @@ pub(crate) fn check_func_body_bundle(
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
         in_pure: f.is_pure,
+        in_comptime: false,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,
         fn_name: f.name.clone(),
