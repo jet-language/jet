@@ -26,7 +26,7 @@ mod Context;
 mod Imports;
 mod Items;
 mod Statement;
-mod TIR;
+pub mod TIR;
 mod Tuples;
 mod Utils;
 

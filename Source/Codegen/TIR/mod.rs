@@ -54,45 +54,45 @@ use crate::AST::{AccessConvention, BinOp, Type, UnOp};
 
 /// A lowered top-level function. `params` are already mangled to their Rust
 /// names and carry their resolved Jet `Type`; `ret` is the resolved return type.
-pub(crate) struct TFunc {
+pub struct TFunc {
     /// Jet function name (unmangled) — the emitter mangles via `cx.mangle_name`.
-    pub(crate) name: String,
+    pub name: String,
     /// `(mangled rust name, resolved jet type, convention)` per parameter. The
     /// convention is kept so the emitter reproduces the `&`/by-value Rust form
     /// without re-deciding (it mirrors `rust_param_type`).
-    pub(crate) params: Vec<(String, Type, AccessConvention)>,
+    pub params: Vec<(String, Type, AccessConvention)>,
     /// Resolved return type, or `None` for a unit-returning function.
-    pub(crate) ret: Option<Type>,
+    pub ret: Option<Type>,
     /// c109 Phase 17: the function returns `-> view T` (a borrow). Drives
     /// `rust_return_type(cx, ret, is_view)` so the signature renders `&T`, and the body's
     /// returns lowered via `lower_view_return` (`TStmt::ViewReturn`).
-    pub(crate) is_view: bool,
+    pub is_view: bool,
     /// c109 Phase 17: the rendered Rust generic clause (`<T: Clone>` / `<T, U>` / empty),
     /// resolved at lowering via `Generics::rust_type_param_list(&f.type_params, …)` exactly
     /// as `emit_func` does (with the `rust_extra_clone_bounds` every type param carries).
     /// Emitted verbatim after the function name; empty for a non-generic function.
-    pub(crate) generics: String,
-    pub(crate) is_main: bool,
+    pub generics: String,
+    pub is_main: bool,
     /// D-COV1: the 1-based Jet source line of this function's name, for the
     /// `jet_cov(line)` coverage probe. Only read in coverage mode.
-    pub(crate) line: usize,
+    pub line: usize,
     /// c109 Phase 18: an `#Unsafe fn` (S58, E2-M13/D-LL1) lowers to a Rust `unsafe fn`
     /// (the `unsafe ` keyword prefixes the signature), so the body may use gated pointer
     /// ops directly — calling it is already gated to an `#Unsafe` block in sema (E3103).
     /// I1: this is true ONLY when the source function was `#Unsafe fn`; no `unsafe` is
     /// ever emitted without that source gate. Applies to `TopLevel`/`Method`; a trait
     /// method carries its own `is_unsafe` on `TFuncKind::TraitMethod`.
-    pub(crate) is_unsafe: bool,
-    pub(crate) body: Vec<TStmt>,
+    pub is_unsafe: bool,
+    pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
     /// inside an `impl` block (indented), with the `self` receiver form per the
     /// resolved convention (or no receiver for a static method).
-    pub(crate) kind: TFuncKind,
+    pub kind: TFuncKind,
 }
 
 /// c109 Phase 7: the emission shape of a lowered function.
-pub(crate) enum TFuncKind {
+pub enum TFuncKind {
     /// A module-level free function — `pub fn name(params) { … }`.
     TopLevel,
     /// An inherent method inside `impl user_<T> { … }`. `self_conv` is the receiver
@@ -128,7 +128,7 @@ pub(crate) enum TFuncKind {
 ///  - `Bare` — emit the value as-is (an already-borrowed ident reads `name`, the deref'd
 ///    place stripped at lowering, OR a non-ident/field expr that `emit_view_return` passes
 ///    straight to `emit_expr`).
-pub(crate) enum ViewWrap {
+pub enum ViewWrap {
     Addr,
     Bare,
 }
@@ -139,7 +139,7 @@ pub(crate) enum ViewWrap {
 /// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
 /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
 /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
-pub(crate) enum TForInMethod {
+pub enum TForInMethod {
     /// `loop c in s.chars()` — char iteration: `for _jet_c in ({recv}).chars()`,
     /// binding `let <var> = _jet_c;`.
     Chars,
@@ -161,14 +161,14 @@ pub(crate) enum TForInMethod {
 ///    are in scope in the then-branch (the binding's resolved type is bound at lowering,
 ///    mirroring `add_pattern_bindings`).
 ///  - `IsNone` — an `x == null` test (`Pattern::Absent`): `if {subj}.is_none() {`.
-pub(crate) enum TIfCond {
+pub enum TIfCond {
     Plain(TExpr),
     IfLet { pat_str: String, subj: TExpr },
     IsNone { subj: TExpr },
 }
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
-pub(crate) enum TStmt {
+pub enum TStmt {
     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
     /// lowering, reproducing `emit_let` (Source/Codegen/Statement.rs) byte-for-byte:
     /// `kw` is `"let"` or `"let mut"` (the `mut` accounts for the source `mutable`
@@ -454,20 +454,20 @@ pub(crate) enum TStmt {
 /// `user_Conn::user_Active(user_id) | user_Conn::user_Reconnecting(user_id)`,
 /// `user_Http::user_Good(__jet_range_0)`); `guard` is the optional `if …` range
 /// guard. Both are computed once at lowering — emit only formats them.
-pub(crate) struct TMatchArm {
-    pub(crate) pattern: String,
-    pub(crate) guard: Option<String>,
-    pub(crate) body: Vec<TStmt>,
+pub struct TMatchArm {
+    pub pattern: String,
+    pub guard: Option<String>,
+    pub body: Vec<TStmt>,
 }
 
 /// A lowered expression: a resolved `Type` plus its kind. `ty` is **total** — it
 /// is never absent, and codegen never recomputes it.
-pub(crate) struct TExpr {
-    pub(crate) ty: Type,
-    pub(crate) kind: TExprKind,
+pub struct TExpr {
+    pub ty: Type,
+    pub kind: TExprKind,
 }
 
-pub(crate) enum TExprKind {
+pub enum TExprKind {
     /// Integer literal with its D-SG9 width (`None` = default `Int`/i64). The
     /// width is the elaborated `(signed, bits)` sema attached to the AST node.
     IntLit(i64, Option<(bool, u8)>),
@@ -921,7 +921,7 @@ pub(crate) enum TExprKind {
 /// c109 Phase 14: a resolved cross-module call form. Each variant pre-resolves the
 /// path pieces of one `emit_call`/`emit_method_call` module-call arm; emit prepends
 /// `cx.root_prefix` exactly where the AST path does (or omits it where the AST does).
-pub(crate) enum TModuleCallForm {
+pub enum TModuleCallForm {
     /// `import_mods` qualified call (`mod.fn()`) and `reexport_calls` (`pub use`) —
     /// both emit `{root}{rust_mod}::{rust_fn}(args)`. `rust_mod` is the resolved Rust
     /// module name (`user_<stem>`); `rust_fn` is the mangled function name.
@@ -935,16 +935,16 @@ pub(crate) enum TModuleCallForm {
 /// `emit_extern_call_args` wraps the value in `(…).clone()` when the arg has an
 /// `implicit_clone` flag OR its param is a non-scalar `Read` (resolved here into one
 /// total `clone` bool; the `shared_auto_clone`/Arc form is excluded from the subset).
-pub(crate) struct TExternArg {
-    pub(crate) value: TExpr,
-    pub(crate) clone: bool,
+pub struct TExternArg {
+    pub value: TExpr,
+    pub clone: bool,
 }
 
 /// c109 Phase 13: the three closure-taking core-call shapes (see
 /// `TExprKind::CoreClosureCall`). Each holds the already-rendered closure string
 /// (`spawn_closure` is the distinct `emit_spawn_lambda` form; `serve`/`guard` use the
 /// plain `emit_lambda` form) plus, for `serve`, the lowered address arg.
-pub(crate) enum TCoreClosureKind {
+pub enum TCoreClosureKind {
     /// `tasks.spawn(<lambda>)` → `{root}jet_std::JetTask::spawn(<spawn_closure>)`.
     Spawn { spawn_closure: String },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
@@ -963,7 +963,7 @@ pub(crate) enum TCoreClosureKind {
 }
 
 /// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
-pub(crate) enum TFnValueKind {
+pub enum TFnValueKind {
     /// A bare function name used as a value. `wrapper` is the already-rendered
     /// `Box::new(move |…| user_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
     /// produced at lowering so emit only echoes it.
@@ -978,7 +978,7 @@ pub(crate) enum TFnValueKind {
 /// widening-vs-narrowing branch (which `numeric_conversion` decides from the source
 /// width name) are decided ONCE at lowering — the variant encodes the chosen form so
 /// emit only formats.
-pub(crate) enum TNumericOp {
+pub enum TNumericOp {
     /// `is_nan`/`is_infinite`/`is_finite` → `({recv}).{method}()` (bool).
     Predicate(String),
     /// `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros` →
@@ -999,7 +999,7 @@ pub(crate) enum TNumericOp {
 /// receiver-type branch (Map vs list vs trait-object list) and the Fn-vs-FnMut
 /// branch (off the lambda arg's `needs_fn_mut` meta) are decided ONCE at lowering;
 /// the variant encodes the chosen form so emit only formats.
-pub(crate) enum TClosureOp {
+pub enum TClosureOp {
     /// `map` on a list — `jet_list_map((recv).clone(), f)`.
     Map,
     /// `map` on a list whose lambda is FnMut — `jet_list_map_mut((recv).clone(), f)`.
@@ -1053,17 +1053,17 @@ pub(crate) enum TClosureOp {
 /// param list; `body` the rendered closure body string (an expression body, or a
 /// `{ … }` block) — rendered at lowering from the lowered body so emit stays a pure
 /// wrapper; `is_move`/`boxed` reproduce the AST wrappers.
-pub(crate) struct TLambda {
-    pub(crate) prep: String,
-    pub(crate) params: Vec<String>,
-    pub(crate) body: String,
-    pub(crate) is_move: bool,
-    pub(crate) boxed: bool,
+pub struct TLambda {
+    pub prep: String,
+    pub params: Vec<String>,
+    pub body: String,
+    pub is_move: bool,
+    pub boxed: bool,
 }
 
 /// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`
 /// (the total sema fact). Carried onto the TIR so the emitter never re-derives it.
-pub(crate) enum TTryConvert {
+pub enum TTryConvert {
     /// Error types match — bare `jet_trace_err(x, …)?`.
     None,
     /// Source error implements `Fallible` — `.map_err(|e| e.to_error())` (D-ERR2).
@@ -1080,7 +1080,7 @@ pub(crate) enum TTryConvert {
 /// column, caret width, function name, file, and the sorted scalar-locals snapshot)
 /// are resolved at lowering into a single pre-rendered Rust string, so emit makes no
 /// decision (I3) and never reaches into `cx.src`/`cx.current_fn` for it.
-pub(crate) enum TOrFallback {
+pub enum TOrFallback {
     Value(Box<TExpr>),
     Return(Option<Box<TExpr>>),
     /// The fully-rendered `{ jet_panic_rich(…); }` statement string, resolved at
@@ -1090,13 +1090,13 @@ pub(crate) enum TOrFallback {
     Panic(String),
 }
 
-pub(crate) enum TStrPart {
+pub enum TStrPart {
     Lit(String),
     Interp(TExpr),
 }
 
 /// c109 Phase 4/16: the resolved payload shape of an enum literal.
-pub(crate) enum TEnumPayload {
+pub enum TEnumPayload {
     /// `Enum.Variant` — no payload, emits just the prefix.
     Unit,
     /// `Variant(a, b, …)` — positional payload values, emitted as `prefix(a, b)`.
@@ -1112,12 +1112,12 @@ pub(crate) enum TEnumPayload {
 /// borrowed-in-env ident gets `(…).clone()`; a recursive (`boxed_edge`) payload
 /// gets `Box::new(…)`. For a scalar payload from a non-borrowed value both are
 /// false (the Phase-4 no-op case), so emit is byte-identical.
-pub(crate) struct TEnumArg {
-    pub(crate) value: TExpr,
+pub struct TEnumArg {
+    pub value: TExpr,
     /// Wrap the value in `(…).clone()` (non-scalar payload, borrowed-in-env arg).
-    pub(crate) clone: bool,
+    pub clone: bool,
     /// Wrap (after the clone) in `Box::new(…)` — a recursive boxed edge.
-    pub(crate) boxed: bool,
+    pub boxed: bool,
 }
 
 /// c109 Phase 9: a resolved built-in collection/string method op. Each variant is
@@ -1128,7 +1128,7 @@ pub(crate) struct TEnumArg {
 /// lowering; `cx.file`/`cx.root_prefix` are read at emit (program-level, not a
 /// per-node decision). Args are emitted plainly (no clone/borrow wrappers), exactly
 /// as `emit_builtin_method`'s `arg(i)` does.
-pub(crate) enum TBuiltinOp {
+pub enum TBuiltinOp {
     /// `len` on a `String` → `jet_char_len(&(recv))` (char count, not byte len).
     LenString,
     /// `len` on a list/map → `(recv).len() as i64`.
@@ -1231,7 +1231,7 @@ pub(crate) enum TBuiltinOp {
 /// (keyed on `rty == Some(Named(<handle>))`) is decided ONCE at lowering from the
 /// total `recv_type` — emit only formats. Args are emitted plainly (raw `arg(i)`).
 /// `{root}` denotes `cx.root_prefix` (program-level, read at emit).
-pub(crate) enum THandleOp {
+pub enum THandleOp {
     /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
     FileReaderReadLine,
     /// FileWriter: `write_line(s)` → `{root}jet_std_file_writer_write_line(&mut (recv), &(a0))`.
@@ -1345,18 +1345,18 @@ pub(crate) enum THandleOp {
 /// Emission order mirrors `emit_call_args` exactly: the clone wrapper (`.clone()`
 /// or `Arc::clone(&…)`) is applied to the raw value first, then the borrow wrapper
 /// (`&(…)` for a `Read` non-scalar, `&mut (…)` for a `Mutate`).
-pub(crate) struct TCallArg {
-    pub(crate) value: TExpr,
+pub struct TCallArg {
+    pub value: TExpr,
     /// Emit `&(...)` around the value (a non-scalar passed by `Read` convention).
-    pub(crate) borrow: bool,
+    pub borrow: bool,
     /// Emit `&mut (...)` around the value (a `Mutate`-convention argument). c109
     /// Phase 6: method args may be `Mutate`; the plain-call path never sets this.
-    pub(crate) mut_borrow: bool,
+    pub mut_borrow: bool,
     /// Emit `(...).clone()` (an implicit clone — a value passed by `Move`).
-    pub(crate) clone: bool,
+    pub clone: bool,
     /// Emit `Arc::clone(&...)` (a `Shared` value auto-cloned at the call site).
     /// c109 Phase 6: method/Arc args may set this; the plain-call path does not.
-    pub(crate) arc_clone: bool,
+    pub arc_clone: bool,
     /// c109 Phase 13: the Fn-typed-parameter coercion (`emit_call_args`' fn-arg
     /// path). When `Some(<fn-type rust string>)`, the value is wrapped
     /// `Box::new(value) as <fn-type>` — unless it is ALREADY boxed (a bare fn-name
@@ -1365,20 +1365,20 @@ pub(crate) struct TCallArg {
     /// that resolved decision so emit makes none. This is mutually exclusive with the
     /// borrow/clone wrappers (a Fn param is never borrowed/cloned — `emit_call_args`
     /// skips `&(…)` for `Type::Fn`).
-    pub(crate) fn_coerce: Option<TFnCoerce>,
+    pub fn_coerce: Option<TFnCoerce>,
     /// D-FIXARR1: a `[T#N]` argument passed to a `[T]` (Vec) slot is widened by
     /// copying into a growable list. When true, emit wraps with `.to_vec()`.
-    pub(crate) widen_to_vec: bool,
+    pub widen_to_vec: bool,
 }
 
 /// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).
-pub(crate) struct TFnCoerce {
+pub struct TFnCoerce {
     /// The target fn-type, rendered as a Rust type string (`cx.rust_type(ty)`).
-    pub(crate) fn_type_rust: String,
+    pub fn_type_rust: String,
     /// Whether the value already produces a `Box::new(…)` (a bare fn-name value, or a
     /// fn-typed local ident) — so emit applies only ` as <fn-type>`, never re-boxing.
     /// Reproduces `emit_call_args`' `already_boxed` decision, resolved at lowering.
-    pub(crate) already_boxed: bool,
+    pub already_boxed: bool,
 }
 
 // ---------------------------------------------------------------------------
