@@ -825,12 +825,12 @@ E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 Full user-facing reference: **docs/reference/core-library.md**.
 
 M10 standard library modules are compiler-known namespaces backed by Rust std
-helpers in the generated prelude. Import the short `core` spelling or the
-canonical `jet.core` spelling:
+helpers in the generated prelude. Every first-party module is spelled `core.<name>`
+(owner 2026-06-26, D-CORENS1 — no `jet.*`/`std.*` library namespace):
 
 ```
 use core.fs as fs;
-use jet.core.json as json;
+use core.json as json;
 ```
 
 Implemented modules: `core.fs`, `core.io`, `core.env`, `core.process`,
@@ -1230,13 +1230,13 @@ function's set when the function reaches an operation that carries it.
 |---------|-----------|
 | `Io`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
 | `Fs`    | `core.fs.*`, `files.*` streaming handles |
-| `Net`   | `core.net.*`, `jet.http.*` |
-| `Time`  | `core.time.now`/`sleep`/`start`, `jet.time.now` |
+| `Net`   | `core.net.*`, `core.http.*` |
+| `Time`  | `core.time.now`/`sleep`/`start`, `core.time.now` |
 | `Rand`  | `core.random.*` |
 | `Env`   | `core.env.*` |
 | `Exec`  | `core.process.run`/`exit` |
-| `Db`    | `jet.db.*` |
-| `Log`   | `jet.log.*` |
+| `Db`    | `core.db.*` |
+| `Log`   | `core.log.*` |
 | `Gpu`   | (reserved; named in D-EFF3, no Core mapping yet) |
 
 A call to an `extern rust`/C foreign function, whose body the compiler can't

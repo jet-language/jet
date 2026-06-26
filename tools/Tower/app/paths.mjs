@@ -1,35 +1,21 @@
-// Tower v2 — paths + tiny shared utilities. No dependencies.
-import { readFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+// Shared paths + tiny utilities. Std-only, zero deps.
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
-export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-export const APP = resolve(dirname(fileURLToPath(import.meta.url)));
-export const UI = join(APP, "ui");
+const here = dirname(fileURLToPath(import.meta.url));
+export const ROOT = dirname(here);                 // tools/Tower
+export const REPO = dirname(dirname(ROOT));         // repo root
+export const UI = join(here, 'ui');
+export const DATA = join(ROOT, 'tower.json');
 
-export const P = {
-  sidequests: join(ROOT, "tools/Tower/docs/sidequests"),
-  proposals: join(ROOT, "tools/Tower/docs/proposals"),
-  plansDir: join(ROOT, "tools/Tower/docs/plans"),
-  ideasDir: join(ROOT, "tools/Tower/docs/ideas"),
-  ballotMd: join(ROOT, "tools/Tower/docs/ballots/decision-ballots.md"),
-  ratified: join(ROOT, "docs/spec/syntax-decisions.md"),
-  results: join(ROOT, "tools/Tower/docs/ballots/ballot-results.md"),
-  board: join(ROOT, "tools/Tower/board.json"),
-  regenQueue: join(ROOT, "tools/Tower/regen-queue.md"),
-  askQueue: join(ROOT, "tools/Tower/questions-queue.md"),
-  ingestQueue: join(ROOT, "tools/Tower/ingest-queue.md"),
-};
+export const readJSON = (p, fallback) =>
+  existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : fallback;
+export const writeJSON = (p, v) => writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
+export const readText = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
 
-export const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : "");
-export const rel = (p) => p.replace(ROOT + "/", "");
-
+// A monotonic-ish counter avoids Date.now()/Math.random() (kept deterministic-friendly).
+let seq = 0;
+export const newId = (prefix) => `${prefix}${(seq++).toString(36)}${process.hrtime.bigint().toString(36).slice(-5)}`;
+export const today = () => new Date().toISOString().slice(0, 10);
 export const now = () => new Date().toISOString();
-export const stamp = () => now().replace("T", " ").slice(0, 16);
-export const newId = () => "c" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
-
-// console color + io
-export const C = { dim: "\x1b[2m", b: "\x1b[1m", grn: "\x1b[32m", yel: "\x1b[33m", cyn: "\x1b[36m", rst: "\x1b[0m" };
-export const out = (s = "") => process.stdout.write(s + "\n");
-export const die = (s) => { process.stderr.write(s + "\n"); process.exit(1); };
-export const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);

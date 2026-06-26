@@ -1,470 +1,658 @@
-"use strict";
+// Tower — client. Vanilla JS, no framework.
 let S = null;
-const TABS = [["board", "Board", "▤"], ["decisions", "Decisions", "◈"], ["proposals", "Proposals", "✎"], ["scratch", "Scratch", "✦"]];
-const answers = {}, comments = {};
-const sec = {};                              // collapse state by key
-const filter = { q: "", type: "all" };
-let active = location.hash.slice(1) || "board";
+let VIEW = 'decisions';     // decisions lead — they're what's blocked on the owner
+let openCard = null;        // card id in the modal
+let focusIds = null;        // [decisionId] when focus mode is open
+let focusIdx = 0;
+let dispatchFilter = '';
+const pick = {};            // decisionId -> tentative option key
 
-// focus mode state
-let focusIdx = 0, focusFacet = null;
+const $ = (s, r = document) => r.querySelector(s);
+const api = async (route, payload) => {
+  const r = await fetch('/api/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
+  const j = await r.json();
+  if (j.state) { S = j.state; render(); }
+  return j.result;
+};
+const load = async () => {
+  S = await (await fetch('/api/state')).json(); render();
+  const qs = new URLSearchParams(location.search);
+  const open = qs.get('open');
+  if (open && cardById(open)) showDetail(open);
+  if (qs.get('focus')) {
+    const ids = S.decisions.filter(d => d.status !== 'ratified').map(d => d.id);
+    const at = Math.max(0, ids.indexOf(qs.get('focus')));
+    if (ids.length) enterFocus(ids, at);
+  }
+  if (qs.get('legend')) openLegend();
+};
 
-const esc = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const attr = (s) => esc(s).replace(/"/g, "&quot;");
-const key = (s) => (s || "").replace(/[^a-z0-9]+/gi, "_");
-const $ = (id) => document.getElementById(id);
-function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._); t._ = setTimeout(() => t.classList.remove("on"), 3400); }
-async function api(url, body) { const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); return r.json(); }
-async function load() { S = await (await fetch("/api/state")).json(); render(); }
-const decisions = () => S.ballot.filter((x) => x.kind === "decision");
-const stageLabel = (st) => (S.stageLabels && S.stageLabels[st]) || st.replace(/-/g, " ");
-const priorityLabel = (p) => (S.priorityLabels && S.priorityLabels[p]) || p || "P2";
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  .split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+// tiny multi-language syntax highlighter — tokenizes, then escapes each token
+const HL_KW = new Set(('fn func function def let var const val mut return yield if elif else match switch case when default for while loop do in of as is import use mod module package from pub priv private public protected internal static struct enum trait impl interface type class extends implements where async await comptime defer go chan select new self this super sizeof typeof null nil none None true false True False and or not break continue throw try catch finally with lambda then begin end macro derive emit').split(' '));
+function hl(src) {
+  const re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#\s[^\n]*)|([#@][A-Za-z_]\w*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(0[xX][0-9a-fA-F_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)|([A-Za-z_$]\w*)|(\s+)|([\s\S])/g;
+  let m, out = '';
+  while ((m = re.exec(src))) {
+    if (m[1]) out += `<span class="hl-c">${esc(m[1])}</span>`;
+    else if (m[2]) out += `<span class="hl-t">${esc(m[2])}</span>`;          // #Marker / @attr
+    else if (m[3]) out += `<span class="hl-s">${esc(m[3])}</span>`;
+    else if (m[4]) out += `<span class="hl-n">${esc(m[4])}</span>`;
+    else if (m[5]) {
+      const w = m[5], next = src[re.lastIndex];
+      if (HL_KW.has(w)) out += `<span class="hl-k">${esc(w)}</span>`;
+      else if (next === '(') out += `<span class="hl-f">${esc(w)}</span>`;
+      else if (/^[A-Z]/.test(w)) out += `<span class="hl-t">${esc(w)}</span>`;
+      else out += esc(w);
+    } else if (m[6]) out += m[6];
+    else out += esc(m[7]);
+  }
+  return out;
+}
+const codeBlock = (s) => `<pre class="code">${hl(s || '')}</pre>`;
+const phaseLabel = (id) => (S.phases.find(p => p.id === id) || {}).label || id;
+const epochOf = (id) => S.epochs.find(e => e.id === id);
+const ticket = (c) => '#' + (c.num ?? String(c.id).replace(/\D/g, ''));
+const el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstElementChild; };
+const cardById = (id) => S.cards.find(c => c.id === id);
+
+// ---- card --------------------------------------------------------------
+function card(c) {
+  const who = c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none';
+  const node = el(`
+    <button class="card p-${c.phase} who-${c.lane.who || 'none'}" data-card="${c.id}">
+      <div class="card__top">
+        <span class="card__id">${ticket(c)}</span>
+        <span class="card__sq sq-${c.priority}">${c.priority}</span>
+        <span class="card__kind">${esc(c.kind)}</span>
+        ${c.openQ ? `<span class="card__q">✎ ${c.openQ}</span>` : ''}
+      </div>
+      <h3 class="card__title">${esc(c.title)}</h3>
+      <div class="card__foot">
+        <span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span>
+      </div>
+    </button>`);
+  node.addEventListener('click', () => showDetail(c.id));
+  return node;
+}
+const grid = (cards) => { const g = el('<div class="cardgrid"></div>'); cards.forEach(c => g.appendChild(card(c))); return g; };
+
+// a group is open iff its default XOR the owner has toggled it (durable)
+const isOpen = (key, def) => { const t = (S.meta.ui.toggled || []).includes(key); return def ? !t : t; };
+
+// collapsible group; body built lazily only when open (done defaults closed)
+function group(key, meta, buildBody) {
+  const open = isOpen(key, meta.def ?? false);
+  const g = el(`<section class="group ${open ? 'group--open' : ''}">
+      <button class="group__head"><span class="group__chev">▸</span>
+        ${meta.bar ? `<span class="group__bar" style="background:${meta.bar}"></span>` : ''}
+        <span class="group__name">${esc(meta.name)}</span>
+        ${meta.blurb ? `<span class="group__blurb">${esc(meta.blurb)}</span>` : ''}
+        <span class="group__n">${meta.n}</span></button>
+      <div class="group__body"></div></section>`);
+  g.querySelector('.group__head').addEventListener('click', () => api('ui/toggle', { key }));
+  if (open) buildBody($('.group__body', g));
+  return g;
+}
+
+// collapsible board section (epoch / sidequests / frozen) with a rich header
+function trackSection(key, def, o, buildBody) {
+  const open = isOpen(key, def);
+  const sec = el(`<section class="track ${o.off ? 'track--off' : ''} ${open ? 'is-open' : ''}">
+      <button class="track__head">
+        <span class="track__chev">▸</span>
+        ${o.num ? `<span class="track__num">${esc(o.num)}</span>` : ''}
+        <span class="track__name">${esc(o.name)}</span>
+        ${o.status ? `<span class="track__status ${o.statusClass || ''}">${esc(o.status)}</span>` : ''}
+        <span class="track__count">${esc(o.count)}</span>
+      </button>
+      <div class="track__body"></div></section>`);
+  $('.track__head', sec).addEventListener('click', () => api('ui/toggle', { key }));
+  if (open) buildBody($('.track__body', sec));
+  return sec;
+}
+
+// ---- decisions (default) -----------------------------------------------
+function viewDecisions() {
+  const v = $('#view');
+  const open = S.decisions.filter(d => d.status !== 'ratified');
+  const decided = S.decisions.filter(d => d.status === 'ratified');
+  const toActivate = S.cards.filter(c => c.lane.lane === 'activate');
+  v.innerHTML = `<div class="view__head">
+      <h1 class="view__title">Decisions</h1>
+      <span class="view__sub"><b>${open.length}</b> awaiting you · recorded on the card, never out of sync</span>
+      <div class="view__actions">${open.length ? `<button class="btn btn--red" id="focus-btn">Focus mode →</button>` : ''}</div>
+    </div>`;
+
+  if (toActivate.length) {
+    const strip = el(`<div class="activate-strip"><div class="activate-strip__h">Also waiting on you — ${toActivate.length} new card${toActivate.length > 1 ? 's' : ''} to greenlight (start work)</div></div>`);
+    toActivate.sort(byPrio).forEach(c => {
+      const row = el(`<div class="activate-row">
+          <span class="activate-row__id">${ticket(c)}</span><span class="card__sq sq-${c.priority}">${c.priority}</span>
+          <span class="activate-row__t">${esc(c.title)}</span>
+          <button class="btn btn--sm" data-open>Open</button>
+          <button class="btn btn--red btn--sm" data-act>Greenlight</button></div>`);
+      $('[data-open]', row).addEventListener('click', () => showDetail(c.id));
+      $('[data-act]', row).addEventListener('click', () => api('card/activate', { id: c.id }));
+      strip.appendChild(row);
+    });
+    v.appendChild(strip);
+  }
+
+  const feed = el('<div class="decfeed"></div>');
+  if (!open.length) feed.appendChild(emptyState('✓', 'All decisions made — nothing is waiting on you.'));
+  open.forEach(d => feed.appendChild(decisionCard(d)));
+  if (decided.length) {
+    const g = group('dec-done', { name: 'Decided', blurb: 'history', n: decided.length }, (body) => {
+      decided.slice().reverse().forEach(d => body.appendChild(decisionCard(d)));
+    });
+    feed.appendChild(g);
+  }
+  v.appendChild(feed);
+  if (open.length) $('#focus-btn').addEventListener('click', () => focusAll(open[0].id));
+}
+
+// compact queue row — the rich deciding happens in focus mode
+function decisionCard(d) {
+  const c = cardById(d.cardId);
+  const decided = d.status === 'ratified';
+  const meta = `${(d.options || []).length} options · ${(d.comparisons || []).length} language comparisons${c && c.openQ ? ` · ${c.openQ} open question${c.openQ > 1 ? 's' : ''}` : ''}`;
+  const node = el(`<article class="deccard ${decided ? 'deccard--decided' : ''}">
+      <div class="deccard__head">
+        <span class="deccard__id">${esc(d.id)}</span>
+        <span class="deccard__for">card <b>${c ? ticket(c) : '—'}</b> · ${c ? esc(c.title).slice(0, 46) : 'unlinked'}</span>
+        ${decided ? `<span class="deccard__outcome">✓ ${esc(d.outcome)} · ${esc(d.ratifiedAt || '')}</span>` : d.rec ? `<span class="deccard__rec">rec ${esc(d.rec)}</span>` : ''}
+      </div>
+      <h2 class="deccard__title">${esc(d.title)}</h2>
+      ${d.gist ? `<p class="deccard__gist">${esc(d.gist)}</p>` : ''}
+      <div class="deccard__foot">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">${meta}</span>
+        ${decided ? `<button class="btn btn--ghost btn--sm" style="margin-left:auto" data-reopen>Reopen</button>`
+      : `<button class="btn btn--red btn--sm" style="margin-left:auto" data-focus>Decide →</button>`}
+      </div>
+    </article>`);
+  $('[data-focus]', node)?.addEventListener('click', () => focusAll(d.id));
+  $('[data-reopen]', node)?.addEventListener('click', () => api('clearance/reopen', { decisionId: d.id }));
+  return node;
+}
+
+// ---- focus mode (v1 layout: dots · facet tabs · options) ---------------
+let focusFacet = null, askOpen = false;
+function focusAll(startId) {
+  const ids = S.decisions.map(d => d.id);
+  let idx = ids.indexOf(startId);
+  if (idx < 0) idx = Math.max(0, ids.findIndex(id => S.decisions.find(d => d.id === id).status !== 'ratified'));
+  enterFocus(ids, idx);
+}
+function enterFocus(ids, idx) { focusIds = ids; focusIdx = idx; focusFacet = null; askOpen = false; renderFocus(); }
+function exitFocus() { focusIds = null; $('#focus').hidden = true; render(); }
+function focusGo(delta) { focusIdx = Math.max(0, Math.min(focusIds.length - 1, focusIdx + delta)); focusFacet = null; askOpen = false; renderFocus(); }
+const optName = (d, key) => { const o = (d.options || []).find(x => x.key === key); return o ? o.name : ''; };
+function availFacets(d) {
+  const f = [];
+  if (d.story) f.push(['story', 'Story']);
+  if (d.explainer) f.push(['why', 'Why it matters']);
+  if (d.inWild) f.push(['wild', 'In the wild']);
+  if ((d.comparisons || []).length) f.push(['langs', 'Other languages']);
+  return f;
+}
+function facetBody(d, fk) {
+  if (fk === 'story') return `<p>${esc(d.story)}</p>`;
+  if (fk === 'why') return `<p>${esc(d.explainer)}</p>`;
+  if (fk === 'wild') return codeBlock(d.inWild);
+  if (fk === 'langs') return (d.comparisons || []).map(c => `<div class="cmp"><div class="cmp__head"><span class="cmp__lang">${esc(c.lang)}</span><span class="cmp__note">${esc(c.note || '')}</span></div>${codeBlock(c.code || '')}</div>`).join('');
+  return '';
+}
+function renderFocus() {
+  const f = $('#focus');
+  const d = S.decisions.find(x => x.id === focusIds[focusIdx]);
+  if (!d) return exitFocus();
+  const c = cardById(d.cardId);
+  const decided = d.status === 'ratified';
+  const chosen = pick[d.id] ?? d.outcome ?? null;
+  const facets = availFacets(d);
+  if (!focusFacet || !facets.some(([fk]) => fk === focusFacet)) focusFacet = facets.length ? facets[0][0] : null;
+  const dots = focusIds.map((id, i) => {
+    const dd = S.decisions.find(x => x.id === id);
+    return `<span class="dot${i === focusIdx ? ' cur' : ''}${dd && dd.status === 'ratified' ? ' done' : ''}" data-i="${i}" title="${esc(id)}"></span>`;
+  }).join('');
+  const qs = c ? c.questions : [];
+
+  f.innerHTML = `
+    <div class="focustop">
+      <span class="focustop__ctr">Decision <b>${focusIdx + 1}</b> / ${focusIds.length}</span>
+      <div class="dots" id="f-dots">${dots}</div>
+      <div class="focus__nav">
+        <button class="btn btn--sm" id="f-prev" ${focusIdx === 0 ? 'disabled' : ''}>←</button>
+        <button class="btn btn--sm" id="f-next" ${focusIdx === focusIds.length - 1 ? 'disabled' : ''}>→</button>
+        <button class="btn btn--sm" id="f-close">Esc</button>
+      </div>
+    </div>
+    <div class="focusscroll"><div class="fdeck">
+      <div class="fdeck__head"><span class="fdeck__id">${esc(d.id)}</span>
+        <span class="fdeck__for">card ${c ? ticket(c) : '—'}${c ? ' · ' + esc(c.title) : ''}</span>
+        ${d.rec ? `<span class="fdeck__rec">rec ${esc(d.rec)}</span>` : ''}</div>
+      <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
+      ${d.gist ? `<div class="fdeck__title">${esc(d.title)}</div>` : ''}
+      ${facets.length ? `<div class="facets" id="f-facets">${facets.map(([fk, l]) => `<button class="facet${fk === focusFacet ? ' on' : ''}" data-fk="${fk}">${esc(l)}</button>`).join('')}</div><div class="facetbody" id="f-facetbody">${facetBody(d, focusFacet)}</div>` : ''}
+      <div class="optslabel">Choose one${decided ? ' · decided' : ''}</div>
+      <div class="opts" id="f-opts"></div>
+      ${d.rec ? `<div class="recline"><b>Recommendation:</b> Option ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}.</div>` : ''}
+      ${decided ? '' : `<textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>`}
+      <div class="deck-actions">
+        ${chosen && !decided ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}
+        <button class="btn btn--ghost btn--sm" id="f-ask">${askOpen ? 'Close' : '✎ Ask a question'}</button>
+      </div>
+      ${askOpen ? `<div class="askbox"><div class="askbox__h">Ask the agent — saved to the card, no decision recorded</div>
+        <textarea id="f-askt" placeholder="e.g. add a comparison to Elixir, or rework option B around streaming…"></textarea>
+        <button class="btn btn--amber btn--sm" id="f-asksend">Send to agent</button></div>` : ''}
+      ${qs.length ? `<div class="fqs">${qs.map(q => `<div class="qrow"><div class="qrow__top"><span class="qrow__by ${q.by === 'agent' ? 'agent' : ''}">${esc(q.by)}</span><span class="qrow__kind">${esc(q.kind)}</span><span class="qrow__status ${q.status}">${esc(q.status)}</span></div><div class="qrow__text">${esc(q.text)}</div>${q.answer ? `<div class="qrow__ans"><b>agent</b> ${esc(q.answer)}</div>` : ''}</div>`).join('')}</div>` : ''}
+    </div></div>
+    <div class="focusnav"><div class="focusnav__inner">
+      <span class="focusnav__kbd"><b>1–9</b> pick · <b>←/→</b> move · <b>Enter</b> record · <b>Esc</b> close</span>
+      <span class="focusnav__spacer"></span>
+      ${decided ? `<button class="btn btn--sm" id="f-reopen">Reopen decision</button>`
+      : `<button class="btn btn--red" id="f-record" ${chosen ? '' : 'disabled'}>Record decision${chosen ? ' · ' + chosen : ''}</button>`}
+    </div></div>`;
+
+  const opts = $('#f-opts', f);
+  (d.options || []).forEach((o, idx) => {
+    const node = el(`<div class="opt${chosen === o.key ? ' sel' : ''}">
+        <button class="opt__h"><span class="opt__num">${idx + 1}</span><span class="opt__name">Option ${esc(o.key)} — ${esc(o.name)}</span>
+          ${o.key === d.rec ? '<span class="opt__rec">recommended</span>' : ''}<span class="opt__check">✓ chosen</span></button>
+        ${o.detail ? `<div class="opt__detail">${esc(o.detail)}</div>` : ''}
+        ${o.code ? `<div class="opt__code">${codeBlock(o.code)}</div>` : ''}</div>`);
+    if (!decided) $('.opt__h', node).addEventListener('click', () => { if (pick[d.id] === o.key) delete pick[d.id]; else pick[d.id] = o.key; updateFocusChoice(); });
+    opts.appendChild(node);
+  });
+
+  $('#f-dots', f).querySelectorAll('.dot').forEach(dot => dot.addEventListener('click', () => { focusIdx = +dot.dataset.i; focusFacet = null; askOpen = false; renderFocus(); }));
+  // facet switch updates ONLY the tabs + the panel — no full re-render
+  $('#f-facets', f)?.querySelectorAll('.facet').forEach(b => b.addEventListener('click', () => {
+    focusFacet = b.dataset.fk;
+    $('#f-facets', f).querySelectorAll('.facet').forEach(x => x.classList.toggle('on', x.dataset.fk === focusFacet));
+    $('#f-facetbody', f).innerHTML = facetBody(d, focusFacet);
+  }));
+  $('#f-prev', f).onclick = () => focusGo(-1);
+  $('#f-next', f).onclick = () => focusGo(1);
+  $('#f-close', f).onclick = exitFocus;
+  $('#f-clear', f)?.addEventListener('click', () => { delete pick[d.id]; updateFocusChoice(); });
+  $('#f-ask', f).onclick = () => { askOpen = !askOpen; renderFocus(); };
+  $('#f-asksend', f)?.addEventListener('click', async () => {
+    const t = $('#f-askt', f).value.trim(); if (!t || !c) return; askOpen = false;
+    await api('question/add', { cardId: c.id, text: t, kind: 'question' });
+  });
+  $('#f-record', f)?.addEventListener('click', () => recordFocus(d));
+  $('#f-reopen', f)?.addEventListener('click', () => api('clearance/reopen', { decisionId: d.id }));
+  f.hidden = false;
+}
+// update just the selection state (option highlight, record/clear buttons) — no re-render
+function updateFocusChoice() {
+  const f = $('#focus'); const d = S.decisions.find(x => x.id === focusIds[focusIdx]); if (!d) return;
+  const chosen = pick[d.id] ?? null;
+  $('#f-opts', f).querySelectorAll('.opt').forEach((node, i) => node.classList.toggle('sel', (d.options[i] || {}).key === chosen));
+  const rec = $('#f-record', f);
+  if (rec) { rec.disabled = !chosen; rec.textContent = 'Record decision' + (chosen ? ' · ' + chosen : ''); }
+  const actions = $('.deck-actions', f); let clr = $('#f-clear', f);
+  if (chosen && !clr && actions) {
+    clr = el(`<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>`);
+    clr.addEventListener('click', () => { delete pick[d.id]; updateFocusChoice(); });
+    actions.prepend(clr);
+  } else if (!chosen && clr) clr.remove();
+}
+async function recordFocus(d) {
+  const chosen = pick[d.id]; if (!chosen) return;
+  const comment = $('#f-comment')?.value.trim(); delete pick[d.id];
+  await api('clearance', { decisionId: d.id, outcome: chosen, comment: comment || undefined });
+  const next = focusIds.findIndex((id, i) => i > focusIdx && S.decisions.find(x => x.id === id && x.status !== 'ratified'));
+  if (next >= 0) { focusIdx = next; focusFacet = null; askOpen = false; }
+  renderFocus();
+}
+
+// ---- dispatch (agent-ready) --------------------------------------------
+const AGENT_LANES = [
+  { lane: 'plan', name: 'Plan', blurb: 'Build a thorough plan + raise the decisions it needs' },
+  { lane: 'implement', name: 'Implement', blurb: 'Plan vetted, decisions cleared — build it' },
+  { lane: 'building', name: 'Building', blurb: 'In progress — continue' },
+  { lane: 'verify', name: 'Verify', blurb: 'Claimed done — verify 100%, then close/remove' },
+];
+function viewDispatch() {
+  const v = $('#view');
+  v.innerHTML = `<div class="view__head">
+      <h1 class="view__title">Agent</h1>
+      <span class="view__sub"><b>${S.counts.agentReady}</b> ready for an agent · point one here, or filter to an epoch or topic</span>
+    </div>
+    <div class="dispatch__filter"><input id="disp-filter" placeholder="Filter by text, epoch (e3), topic…" value="${esc(dispatchFilter)}"></div>
+    <div id="disp-groups"></div>`;
+  const input = $('#disp-filter');
+  input.addEventListener('input', () => { dispatchFilter = input.value; renderDispatchGroups($('#disp-groups')); });
+  renderDispatchGroups($('#disp-groups'));
+}
+function renderDispatchGroups(box) {
+  box.innerHTML = '';
+  const q = dispatchFilter.trim().toLowerCase();
+  const match = (c) => !q || [c.title, c.plan, c.body, 'e' + (epochOf(c.epoch)?.num), c.track, c.kind].join(' ').toLowerCase().includes(q);
+
+  const openQ = S.questions.filter(x => x.status === 'open');
+  if (openQ.length && !q) {
+    const sec = el(`<div style="margin-bottom:26px"><div class="lanehead"><span class="lanehead__name">Questions to answer</span>
+        <span class="lanehead__who lane-owner">from owner</span><span class="lanehead__blurb">update the ballot or reply on the card</span>
+        <span class="lanehead__n">${openQ.length}</span></div></div>`);
+    openQ.forEach(qq => {
+      const c = cardById(qq.cardId);
+      const row = el(`<div class="qrow"><div class="qrow__top"><span class="qrow__by">owner</span><span class="qrow__kind">${esc(qq.kind)}</span>
+          <span class="qrow__status">open</span></div>
+          <div class="qrow__text">${esc(qq.text)}</div>
+          <div class="qrow__ans"><b>card ${c ? ticket(c) : '—'}</b> · ${c ? esc(c.title).slice(0, 60) : ''} — <a href="#" data-open style="color:var(--red-bright)">open</a></div></div>`);
+      $('[data-open]', row).addEventListener('click', (e) => { e.preventDefault(); showDetail(qq.cardId); });
+      sec.appendChild(row);
+    });
+    box.appendChild(sec);
+  }
+
+  let any = false;
+  for (const L of AGENT_LANES) {
+    const cs = S.cards.filter(c => c.lane.lane === L.lane && match(c)).sort(byPrio);
+    if (!cs.length) continue;
+    any = true;
+    const sec = el(`<div style="margin-bottom:26px">
+        <div class="lanehead"><span class="lanehead__name">${L.name}</span><span class="lanehead__who lane-agent">agent</span>
+          <span class="lanehead__blurb">${esc(L.blurb)}</span><span class="lanehead__n">${cs.length}</span></div></div>`);
+    sec.appendChild(grid(cs));
+    box.appendChild(sec);
+  }
+  const blocked = S.cards.filter(c => c.lane.lane === 'blocked' && match(c)).sort(byPrio);
+  if (blocked.length) {
+    const sec = el(`<div style="margin-bottom:26px"><div class="lanehead"><span class="lanehead__name">Blocked</span>
+        <span class="lanehead__who lane-none">waiting</span><span class="lanehead__blurb">blocked by another card</span>
+        <span class="lanehead__n">${blocked.length}</span></div></div>`);
+    sec.appendChild(grid(blocked)); box.appendChild(sec); any = true;
+  }
+  if (!any) box.appendChild(emptyState('▸', q ? 'Nothing matches that filter.' : 'Nothing queued for agents right now.'));
+}
+
+const withClass = (node, cls) => { node.classList.add(cls); return node; };
+
+// ---- board (epochs are the groupings; cards are the work) --------------
+function viewBoard() {
+  const v = $('#view');
+  const tracked = S.cards.filter(c => c.phase !== 'done');
+  const onPlan = tracked.filter(c => c.track === 'epoch' && c.phase !== 'frozen').length;
+  const offPlan = tracked.filter(c => c.track === 'sidequest' && c.phase !== 'frozen').length;
+  const frozenN = tracked.filter(c => c.phase === 'frozen').length;
+  const total = onPlan + offPlan || 1;
+  v.innerHTML = `<div class="view__head"><h1 class="view__title">Board</h1>
+      <span class="view__sub">cards grouped by epoch · manage everything here</span>
+      <div class="view__actions"><button class="btn" id="legend-btn">Key</button><button class="btn btn--red" id="new-card">+ New card</button></div></div>`;
+  v.appendChild(el(`<div class="ratio">
+      <div class="ratio__cell"><div class="ratio__k">On epochs</div><div class="ratio__v on">${onPlan}</div><div class="ratio__note">active on a planned epoch</div></div>
+      <div class="ratio__cell"><div class="ratio__k">Sidequests</div><div class="ratio__v off">${offPlan}</div><div class="ratio__note">active off-plan work</div></div>
+      <div class="ratio__cell"><div class="ratio__k">Frozen</div><div class="ratio__v">${frozenN}</div><div class="ratio__note">parked, tracked</div></div>
+      <div class="ratio__cell"><div class="ratio__k">Balance</div>
+        <div class="ratio__meter"><i class="on" style="width:${onPlan / total * 100}%"></i><i class="off" style="width:${offPlan / total * 100}%"></i></div>
+        <div class="ratio__note">${Math.round(onPlan / total * 100)}% on the epoch plan</div></div></div>`));
+
+  // FROZEN — first thing, collapsed by default
+  const frozen = S.cards.filter(c => c.phase === 'frozen').sort(byPrio);
+  v.appendChild(trackSection('board-frozen', false, { name: 'Frozen', count: `${frozen.length} parked` }, (body) => {
+    body.appendChild(el(`<div class="track__goal">Parked on purpose. Agents never touch these until you greenlight one.</div>`));
+    body.appendChild(withClass(grid(frozen), 'track__cards'));
+  }));
+
+  // SIDEQUESTS — before epochs, open by default
+  const sqActive = S.cards.filter(c => c.track === 'sidequest' && c.phase !== 'done' && c.phase !== 'frozen').sort(byPhaseThenPrio);
+  const sqDone = S.cards.filter(c => c.track === 'sidequest' && c.phase === 'done');
+  v.appendChild(trackSection('board-sidequests', true, { name: 'Sidequests · off-plan work', off: true, count: `${sqActive.length} active` }, (body) => {
+    body.appendChild(el(`<div class="track__goal">Real work, not on an epoch. Keep this short to stay on the plan.</div>`));
+    if (sqActive.length) body.appendChild(withClass(grid(sqActive), 'track__cards'));
+    else body.appendChild(el(`<div class="track__empty">none active — all sidequests are frozen or done</div>`));
+    if (sqDone.length) body.appendChild(withClass(group('sqdone', { name: 'Done', blurb: 'verified', bar: 'var(--s-done)', n: sqDone.length }, (b) => b.appendChild(grid(sqDone.sort(byPrio)))), 'track__done'));
+  }));
+
+  // EPOCHS — each collapsible, open by default
+  for (const e of [...S.epochs].sort((a, b) => a.order - b.order)) {
+    if (e.status === 'arrived') continue;
+    const all = S.cards.filter(c => c.epoch === e.id && c.track === 'epoch');
+    const active = all.filter(c => c.phase !== 'done' && c.phase !== 'frozen').sort(byPhaseThenPrio);
+    const doneCards = all.filter(c => c.phase === 'done');
+    const pct = all.length ? Math.round(doneCards.length / all.length * 100) : 0;
+    v.appendChild(trackSection('epoch:' + e.id, true,
+      { num: 'Epoch ' + e.num, name: e.name, status: e.status, statusClass: e.status === 'active' ? 'active' : '', count: `${doneCards.length}/${all.length} done · ${pct}%` },
+      (body) => {
+        body.appendChild(el(`<div class="track__goal">${esc(e.goal)}</div>`));
+        body.appendChild(el(`<div class="track__prog"><div class="track__bar"><i style="width:${pct}%"></i></div><span class="track__pct">${active.length} active</span></div>`));
+        if (active.length) body.appendChild(withClass(grid(active), 'track__cards'));
+        else body.appendChild(el(`<div class="track__empty">no active cards — all done or frozen</div>`));
+        if (doneCards.length) body.appendChild(withClass(group('epdone:' + e.id, { name: 'Done', blurb: 'verified', bar: 'var(--s-done)', n: doneCards.length }, (b) => b.appendChild(grid(doneCards.sort(byPrio)))), 'track__done'));
+      }));
+  }
+
+  $('#new-card').addEventListener('click', newCard);
+  $('#legend-btn').addEventListener('click', openLegend);
+}
+
+// ---- legend / key ------------------------------------------------------
+const STAGE_HELP = [
+  ['triage', 'Triage', 'Captured — needs your go-ahead to start (owner)'],
+  ['deciding', 'Deciding', 'Blocked on a decision (owner)'],
+  ['planning', 'Planning', 'Agent builds a plan + raises decisions'],
+  ['ready', 'Ready', 'Decided + vetted — agent implements'],
+  ['building', 'Building', 'Implementation in progress'],
+  ['verify', 'Verify', 'Claimed done — verify 100%, then close'],
+  ['done', 'Done', 'Verified — hidden in collapsed groups'],
+  ['frozen', 'Frozen', 'Parked — untouched until you greenlight it'],
+];
+function openLegend() {
+  const m = $('#detail');
+  m.innerHTML = `<div class="modal__panel"><div class="modal__bar"><span class="modal__id">KEY</span>
+      <span class="card__kind" style="color:var(--text-dim)">what the colors mean</span>
+      <button class="modal__x" title="Close (Esc)">×</button></div>
+    <div class="modal__body">
+      <div class="modal__h">Left bar on a card = its stage</div>
+      <div class="legend">${STAGE_HELP.map(([id, name, desc]) => `<div class="legend__row"><span class="legend__bar" style="background:var(--s-${id})"></span><span class="legend__name">${name}</span><span class="legend__desc">${esc(desc)}</span></div>`).join('')}</div>
+      <div class="modal__h">Glowing red = it needs you</div>
+      <p class="modal__prose">A card <b style="color:var(--red-bri)">glows red</b> when the next move is yours — a decision to record or a new card to greenlight. The same red drives the “blocked on you” pill and the focus-mode dots. Green means resolved (a decided/recommended option).</p>
+      <div class="modal__h">Priority chips</div>
+      <div class="legend">
+        <div class="legend__row"><span class="card__sq sq-P0">P0</span><span class="legend__desc">Urgent — red (glows)</span></div>
+        <div class="legend__row"><span class="card__sq sq-P1">P1</span><span class="legend__desc">High — amber</span></div>
+        <div class="legend__row"><span class="card__sq sq-P2">P2</span><span class="legend__desc">Normal — muted</span></div>
+        <div class="legend__row"><span class="card__sq sq-P3">P3</span><span class="legend__desc">Low — faint</span></div>
+      </div>
+      <p class="modal__prose" style="margin-top:8px">Only P0/P1 carry colour so the urgent ones pop; P2/P3 stay quiet on purpose.</p>
+      <div class="modal__h">Action tag (bottom-right of a card)</div>
+      <p class="modal__prose"><span class="card__lane lane-owner" style="font-family:var(--mono);font-size:11px">● needs you</span> · <span class="card__lane lane-agent" style="font-family:var(--mono);font-size:11px">● an agent's</span> · <span class="card__lane lane-none" style="font-family:var(--mono);font-size:11px">● waiting/blocked</span>. It names the exact next move (e.g. “Greenlight to start”, “Ready to implement”, “2 decisions to make”).</p>
+    </div></div>`;
+  $('.modal__x', m).addEventListener('click', closeDetail);
+  m.onclick = (e) => { if (e.target === m) closeDetail(); };
+  m.hidden = false; $('#scrim').hidden = false;
+}
+
+// ---- ideas -------------------------------------------------------------
+function viewIdeas() {
+  const v = $('#view');
+  const open = S.binder.filter(b => b.status !== 'tagged');
+  v.innerHTML = `<div class="view__head"><h1 class="view__title">Ideas</h1>
+      <span class="view__sub"><b>${open.length}</b> to triage · add one as a tracked card</span></div>`;
+  const wrap = el('<div class="binder"></div>');
+  const add = el(`<div class="binder__add"><input placeholder="Capture an idea — it waits here until you add it as a card…"><button class="btn btn--red">Capture</button></div>`);
+  const fire = async () => { const i = $('input', add); const t = i.value.trim(); if (!t) return; i.value = ''; await api('binder/add', { text: t }); };
+  $('button', add).addEventListener('click', fire);
+  $('input', add).addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
+  wrap.appendChild(add);
+  const levels = [...new Set(open.map(b => b.level))].sort((a, b) => (a ?? 9) - (b ?? 9));
+  for (const lv of levels) {
+    const g = el(`<div class="binlevel"><div class="binlevel__h">${lv == null ? 'Unsorted' : 'Level ' + lv}</div></div>`);
+    open.filter(b => b.level === lv).forEach(b => {
+      const row = el(`<div class="contact"><span class="contact__dot">◦</span>
+          <div class="contact__body"><div class="contact__text">${esc(b.text)}</div>${b.note ? `<div class="contact__note">${esc(b.note)}</div>` : ''}</div>
+          <div class="contact__tags">${(b.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>
+          <button class="btn btn--red btn--sm">Add as card</button><button class="btn btn--ghost btn--sm">Dismiss</button></div>`);
+      const [addBtn, delBtn] = row.querySelectorAll('button');
+      addBtn.addEventListener('click', async () => { const c = await api('binder/promote', { id: b.id }); if (c) showDetail(c.id); });
+      delBtn.addEventListener('click', () => api('binder/delete', { id: b.id }));
+      g.appendChild(row);
+    });
+    wrap.appendChild(g);
+  }
+  if (!open.length) wrap.appendChild(emptyState('▤', 'No ideas yet — capture one above.'));
+  v.appendChild(wrap);
+}
+
+const emptyState = (g, t) => el(`<div class="empty-view"><div class="empty-view__g">${g}</div><div class="empty-view__t">${esc(t)}</div></div>`);
+
+// ---- card modal --------------------------------------------------------
+function showDetail(id) {
+  openCard = id;
+  const c = cardById(id);
+  if (!c) return closeDetail();
+  const m = $('#detail');
+  const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${o}" ${o === cur ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  const cta = c.phase === 'triage'
+    ? `<button class="btn btn--red" id="cta-activate">Greenlight — start work</button>`
+    : c.phase === 'frozen'
+    ? `<button class="btn btn--red" id="cta-activate">Unfreeze — start work</button>`
+    : c.phase === 'verify' ? `<button class="btn btn--red" id="cta-done">Mark verified — close</button>` : '';
+  m.innerHTML = `<div class="modal__panel">
+    <div class="modal__bar"><span class="modal__id">${ticket(c)}</span><span class="card__sq sq-${c.priority}">${c.priority}</span>
+      <span class="card__kind" style="color:var(--text-dim)">${esc(c.kind)} · ${phaseLabel(c.phase)} · <span class="card__lane ${c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none'}" style="border:0;background:none;padding:0">${esc(c.lane.label)}</span></span>
+      <button class="modal__x" title="Close (Esc)">×</button></div>
+    <div class="modal__body">
+      <h2 class="modal__title" contenteditable="plaintext-only" data-fld="title">${esc(c.title)}</h2>
+      ${cta ? `<div class="modal__cta">${cta}</div>` : ''}
+      <div class="fields">
+        <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${p.id}" ${p.id === c.phase ? 'selected' : ''}>${p.label}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">Track</div>${sel('track', ['epoch', 'sidequest'], c.track)}</div>
+        <div class="fld"><div class="fld__k">Epoch</div><select data-fld="epoch"><option value="" ${!c.epoch ? 'selected' : ''}>—</option>${S.epochs.map(e => `<option value="${e.id}" ${e.id === c.epoch ? 'selected' : ''}>E${e.num} ${esc(e.name)}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">Priority</div>${sel('priority', ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
+        <div class="fld"><div class="fld__k">Kind</div>${sel('kind', ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
+        <div class="fld"><div class="fld__k">Plan</div><input class="fld__v" data-fld="plan" value="${esc(c.plan || '')}" placeholder="—"></div>
+      </div>
+      <div class="modal__h">Description</div>
+      <div class="modal__prose" contenteditable="plaintext-only" data-fld="body">${md(c.body)}</div>
+      <div class="modal__h">Decisions</div><div id="modal-decisions"></div>
+      <div class="modal__h">Notes & questions for agents</div><div id="modal-q"></div>
+      <div class="modal__h">Log</div>
+      <ul class="log">${c.log.map(l => `<li><time>${esc(l.at)}</time><span>${esc(l.text)}</span></li>`).join('') || '<li><span>No entries.</span></li>'}</ul>
+      <div class="modal__danger"><button class="btn btn--danger btn--sm" id="del-card">Delete card</button></div>
+    </div></div>`;
+
+  // decisions inline
+  const dd = $('#modal-decisions', m);
+  if (!c.decisions.length) dd.appendChild(el(`<p class="modal__prose">No decision needed for this card.</p>`));
+  c.decisions.forEach(de => {
+    const box = el(`<div class="modal__decision">
+        <div class="modal__dhead"><span class="modal__did">${esc(de.id)}</span>
+          <span class="card__lane ${de.status === 'ratified' ? 'lane-agent' : 'lane-owner'}">${de.status === 'ratified' ? '✓ ' + esc(de.outcome) : 'to decide'}</span></div>
+        <div class="modal__prose" style="font-size:13px">${esc(de.title)}</div><div class="modal__opts"></div></div>`);
+    const row = $('.modal__opts', box);
+    (de.options || []).forEach(o => {
+      const b = el(`<button class="modal__opt ${de.outcome === o.key ? 'win' : ''}">${esc(o.key)} · ${esc(o.name)}</button>`);
+      b.addEventListener('click', () => api('clearance', { decisionId: de.id, outcome: o.key }));
+      row.appendChild(b);
+    });
+    dd.appendChild(box);
+  });
+
+  // notes & questions
+  const qb = $('#modal-q', m);
+  c.questions.forEach(q => {
+    const row = el(`<div class="qrow"><div class="qrow__top"><span class="qrow__by ${q.by === 'agent' ? 'agent' : ''}">${esc(q.by)}</span>
+        <span class="qrow__kind">${esc(q.kind)}</span><span class="qrow__status ${q.status}">${esc(q.status)}</span></div>
+        <div class="qrow__text">${esc(q.text)}</div>
+        ${q.answer ? `<div class="qrow__ans"><b>agent</b> ${esc(q.answer)}</div>` : ''}</div>`);
+    qb.appendChild(row);
+  });
+  const qadd = el(`<div class="qadd"><input placeholder="Leave a note or question for an agent…"><button class="btn btn--red btn--sm">Post</button></div>`);
+  const post = async () => { const i = $('input', qadd); const t = i.value.trim(); if (!t) return; i.value = ''; await api('question/add', { cardId: id, text: t, kind: 'question' }); };
+  $('button', qadd).addEventListener('click', post);
+  $('input', qadd).addEventListener('keydown', e => { if (e.key === 'Enter') post(); });
+  qb.appendChild(qadd);
+
+  m.querySelectorAll('[data-fld]').forEach(node => {
+    const k = node.dataset.fld;
+    if (node.tagName === 'SELECT' || node.tagName === 'INPUT') node.addEventListener('change', () => commit(id, k, node.value));
+    else node.addEventListener('blur', () => commit(id, k, node.innerText.trim()));
+  });
+  $('.modal__x', m).addEventListener('click', closeDetail);
+  $('#del-card', m).addEventListener('click', async () => { await api('card/delete', { id }); closeDetail(); });
+  $('#cta-activate', m)?.addEventListener('click', () => api('card/activate', { id }));
+  $('#cta-done', m)?.addEventListener('click', () => api('card/update', { id, phase: 'done', logEntry: 'Verified — closed.' }));
+  m.onclick = (e) => { if (e.target === m) closeDetail(); };
+  m.hidden = false; $('#scrim').hidden = false;
+}
+const commit = (id, k, v) => api('card/update', { id, [k]: k === 'plan' && v === '' ? null : v });
+function closeDetail() { openCard = null; $('#detail').hidden = true; $('#scrim').hidden = true; }
+async function newCard() { const c = await api('card/add', { title: 'New card', phase: 'triage', track: 'epoch', epoch: S.meta.currentEpoch }); if (c) showDetail(c.id); }
+
+// ---- sorting -----------------------------------------------------------
+const PR = { P0: 0, P1: 1, P2: 2, P3: 3 };
+const byPrio = (a, b) => PR[a.priority] - PR[b.priority] || (a.num ?? 0) - (b.num ?? 0);
+const PHO = { deciding: 0, planning: 1, ready: 2, building: 3, verify: 4, triage: 5, done: 6, frozen: 7 };
+const byPhaseThenPrio = (a, b) => (PHO[a.phase] - PHO[b.phase]) || byPrio(a, b);
+
+// ---- chrome ------------------------------------------------------------
+const VIEWS = [
+  { id: 'decisions', ico: '◆', name: 'Decisions', count: () => S.counts.decide, alert: true },
+  { id: 'dispatch', ico: '▸', name: 'Agent', count: () => S.counts.agentReady },
+  { id: 'board', ico: '▦', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
+  { id: 'ideas', ico: '▤', name: 'Ideas', count: () => S.counts.binder },
+];
+const RENDER = { decisions: viewDecisions, dispatch: viewDispatch, board: viewBoard, ideas: viewIdeas };
+
+function renderChrome() {
+  const rail = $('#scope');
+  rail.querySelectorAll('.nav').forEach(n => n.remove());
+  const foot = $('#foot');
+  VIEWS.forEach(vw => {
+    const n = vw.count();
+    const b = el(`<button class="nav" aria-current="${VIEW === vw.id}" data-view="${vw.id}">
+        <span class="nav__ico">${vw.ico}</span><span class="nav__n">${vw.name}</span>
+        <span class="nav__count ${vw.alert && n ? 'alert' : ''}">${n}</span></button>`);
+    b.addEventListener('click', () => { location.hash = vw.id; });
+    rail.insertBefore(b, foot);
+  });
+  $('#feed').innerHTML = `<b>Epoch ${epochOf(S.meta.currentEpoch)?.num ?? '—'}</b> · <b>${S.cards.length}</b> cards · <b>${S.counts.agentReady}</b> agent-ready`;
+  const fy = S.counts.forYou;
+  const pill = $('#pill');
+  pill.className = 'topbar__pill' + (fy ? '' : ' clear');
+  pill.innerHTML = fy ? `<span class="beat"></span> ${S.counts.decide} to decide · ${S.counts.activate} to activate` : '✓ nothing blocked on you';
+  pill.onclick = () => { location.hash = 'decisions'; };
+}
 
 function render() {
-  if (!TABS.some((t) => t[0] === active)) active = "board";
-  const cards = S.board.cards;
-  const counts = { board: cards.length, decisions: decisions().length, proposals: (S.proposals || []).length + (S.ideas || []).length, scratch: 0 };
-  $("tabs").innerHTML = TABS.map(([id, label, glyph]) =>
-    `<div class="tab${id === active ? " on" : ""}" onclick="go('${id}')"><span class="tg">${glyph}</span><span class="tl">${label}</span>` +
-    (counts[id] ? `<span class="n">${counts[id]}</span>` : "") + `</div>`).join("");
-  TABS.forEach(([id]) => $("v-" + id).classList.toggle("on", id === active));
-  $("bar").classList.toggle("on", active === "decisions" && !$("focusback").classList.contains("on"));
-  $("rat").textContent = S.ratified || "—";
-  $("last").textContent = S.lastSubmit || "—";
-  $("ingest-stat").style.display = S.ingestCount ? "inline" : "none";
-  $("ingestn").textContent = S.ingestCount || 0;
-  renderRibbon(cards); renderBoard(); renderDecisions(); renderProposals(); renderScratch();
-}
-function go(id) { active = id; location.hash = id; render(); window.scrollTo(0, 0); }
-
-/* ---- pipeline ribbon ---- */
-function renderRibbon(cards) {
-  $("ribbon").innerHTML = '<span class="elev-label">elevation</span><div class="elev-scale">' + S.stages.map((st, i) => {
-    const n = cards.filter((c) => c.stage === st).length;
-    const cls = st === "done" ? "done" : (n > 0 && st !== "frozen" ? "hot" : "");
-    return `<button class="seg ${cls}" title="jump to ${stageLabel(st)}" onclick="jumpStage('${st}')">` +
-      `<span class="tick"></span><span class="lvl">${String(i + 1).padStart(2, "0")}</span>` +
-      `<span class="sc">${n}</span><span class="sg">${esc(stageLabel(st))}</span></button>`;
-  }).join("") + "</div>";
-}
-function jumpStage(st) { if (active !== "board") go("board"); sec["stage_" + key(st)] = true; render(); setTimeout(() => { const el = $("sec-stage_" + key(st)); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 30); }
-
-/* ---- collapsible section shell ---- */
-function section(skey, name, countHtml, preview, inner, extraCls) {
-  const open = !!sec[skey];
-  return `<div class="sec${open ? " open" : ""}${extraCls ? " " + extraCls : ""}" id="sec-${skey}">` +
-    `<div class="sechead" onclick="toggleSec('${skey}')"><span class="caret">&#9656;</span>` +
-    `<span class="sname">${esc(name)}</span>${countHtml}<span class="preview">${preview}</span></div>` +
-    `<div class="secbody">${inner}</div></div>`;
-}
-function toggleSec(k) { sec[k] = !sec[k]; const el = $("sec-" + k); if (el) el.classList.toggle("open", sec[k]); }
-
-/* ================= BOARD ================= */
-function renderBoard() {
-  let h = '<div class="hint">File a task, idea, or bug, then move it down the pipeline. Click any <b>title, description, or note</b> to edit; use the dropdowns to change <b>type</b> or jump <b>stage</b>. Each card shows its <b>computed status</b>.</div>';
-  h += worklistPanel();
-  h += ingestPanel();
-  h += fileForm();
-  h += filterBar();
-  h += '<div id="board-stages"></div>';
-  $("v-board").innerHTML = h;
-  renderStages();
-}
-
-function worklistPanel() {
-  const wl = S.worklist || [];
-  if (!wl.length) return "";
-  const open = sec.worklist;
-  const rows = wl.map((w) =>
-    `<div class="wl"><span class="gate ${w.auto ? "auto" : "gated"}">${w.auto ? "auto" : "gated"}</span>` +
-    `<span class="ord">${w.workOrder ? "#" + esc(String(w.workOrder)) : "—"}</span>` +
-    `<span class="prio ${esc(w.priority || "P2")}">${esc(w.priority || "P2")}</span>` +
-    `<span class="wid">${esc(w.id)}</span><span class="wact">${esc(w.text)}</span>` +
-    `<span class="wttl">${esc(w.title)}</span></div>`).join("");
-  const inner = `<div class="wl-rows">${rows}</div>` +
-    `<div class="wl-note"><b>auto</b> = I proceed (build plans / draft decisions) without waiting · ` +
-    `<b style="color:var(--amber)">gated</b> = say <b style="color:var(--green)">“go”</b> and I implement.</div>`;
-  const cnt = `<span class="count">${wl.length}</span>`;
-  return `<div class="sec${open ? " open" : ""} worklist" id="sec-worklist"><div class="sechead" onclick="toggleSec('worklist')">` +
-    `<span class="caret">&#9656;</span><span class="sname">Ready for Claude</span>${cnt}` +
-    `<span class="preview">${esc(wl.slice(0, 3).map((w) => w.id).join(" · "))}${wl.length > 3 ? " +" + (wl.length - 3) : ""}</span></div>` +
-    `<div class="secbody">${inner}</div></div>`;
-}
-
-function ingestPanel() {
-  return '<div class="panel filebox"><span class="lbl">Ingest a file or notes ' +
-    '<span class="n">' + (S.ingestCount || 0) + '</span></span>' +
-    '<div class="r"><input class="grow" id="ing-src" placeholder="File path to digest, e.g. docs/notes/ideas.md (optional)">' +
-    '<button class="sm" onclick="ingest()">Hand to Claude</button></div>' +
-    '<textarea id="ing-note" placeholder="…or paste text / a note about what to look for. I read it, extract candidate ideas / features / syntax, and file them as frozen cards for you to triage."></textarea></div>';
-}
-async function ingest() {
-  const src = $("ing-src"), note = $("ing-note");
-  if (!src.value.trim() && !note.value.trim()) { toast("Add a file path or some text."); return; }
-  const j = await api("/api/ingest", { source: src.value, note: note.value });
-  if (j.ok) { src.value = ""; note.value = ""; await load(); toast("Queued for digest — I'll file candidate cards."); }
-  else toast(j.error || "Failed.");
-}
-
-function fileForm() {
-  return '<div class="panel filebox"><span class="lbl">File new work</span><div class="r">' +
-    '<input class="grow" id="add-ttl" placeholder="Task, idea, or bug…">' +
-    '<select class="sel" id="add-type"><option value="task">task</option><option value="idea">idea</option><option value="bug">bug</option></select>' +
-    '<select class="sel" id="add-stage">' + S.stages.map((s) => `<option value="${s}"${s === "frozen" ? " selected" : ""}>${esc(stageLabel(s))}</option>`).join("") + "</select>" +
-    '<select class="sel" id="add-priority">' + (S.priorities || ["P0", "P1", "P2", "P3"]).map((p) => `<option value="${p}"${p === "P2" ? " selected" : ""}>${esc(priorityLabel(p))}</option>`).join("") + "</select>" +
-    '<input class="orderin" id="add-order" type="number" min="1" placeholder="order">' +
-    '<button class="sm" onclick="addCard()">File</button></div>' +
-    '<textarea id="add-body" placeholder="Details (optional)"></textarea></div>';
-}
-async function addCard() {
-  const t = $("add-ttl"); if (!t.value.trim()) return;
-  const j = await api("/api/card/add", {
-    type: $("add-type").value,
-    title: t.value,
-    body: $("add-body").value,
-    stage: $("add-stage").value,
-    priority: $("add-priority").value,
-    workOrder: $("add-order").value,
-  });
-  if (j.ok) { t.value = ""; $("add-body").value = ""; await load(); toast("Filed."); }
-}
-
-function filterBar() {
-  const types = ["all", "task", "idea", "bug"];
-  return '<div class="filterbar"><input class="grow" id="filter-q" placeholder="Filter by name…" value="' + attr(filter.q) + '" oninput="filter.q=this.value;renderStages()">' +
-    '<select class="sel" id="filter-type" onchange="filter.type=this.value;renderStages()">' +
-    types.map((t) => `<option value="${t}"${filter.type === t ? " selected" : ""}>${t === "all" ? "all types" : t}</option>`).join("") +
-    "</select></div>";
-}
-function matchFilter(c) {
-  if (filter.type !== "all" && c.type !== filter.type) return false;
-  if (filter.q) { const q = filter.q.toLowerCase(); if (!((c.title || "").toLowerCase().includes(q) || (c.body || "").toLowerCase().includes(q))) return false; }
-  return true;
-}
-function renderStages() {
-  const cards = S.board.cards.filter(matchFilter);
-  let h = "";
-  for (const st of S.stages) {
-    const inSt = cards.filter((c) => c.stage === st);
-    const inner = inSt.length ? '<div class="grid">' + inSt.map(card).join("") + "</div>" : '<div class="empty">— empty —</div>';
-    const prev = inSt.length ? esc(inSt.slice(0, 2).map((c) => c.title).join(" · ") + (inSt.length > 2 ? " +" + (inSt.length - 2) : "")) : "";
-    h += section("stage_" + key(st), stageLabel(st), `<span class="count">${inSt.length}</span>`, prev, inner);
+  if (!S) return;
+  renderChrome();
+  (RENDER[VIEW] || viewDecisions)();
+  if (focusIds) renderFocus();
+  if (openCard) {
+    const editing = $('#detail').contains(document.activeElement);
+    if (cardById(openCard)) { if (!editing) showDetail(openCard); } else closeDetail();
   }
-  const el = $("board-stages"); if (el) el.innerHTML = h;
 }
 
-function findCard(id) { return S.board.cards.find((c) => c.id === id); }
-function decIndexById(id) { return decisions().findIndex((d) => d.id === id); }
-
-function statusChips(c) {
-  const st = c.status || {};
-  let h = `<span class="chip ${st.tone || ""}">${esc(st.label || "")}</span>`;
-  if (st.action && !st.owner) h += `<span class="chip ${st.auto ? "auto" : "gated"}">${st.auto ? "auto" : "gated"}</span>`;
-  if (st.owner && (st.blockedBy || []).length) {
-    h += '<span class="blockedby">' + st.blockedBy.map((id) => {
-      const i = decIndexById(id);
-      return i >= 0 ? `<a onclick="enterFocus(${i})" title="open this decision">${esc(id)}</a>` : `<a title="decision not drafted">${esc(id)}</a>`;
-    }).join("") + "</span>";
+document.addEventListener('keydown', (e) => {
+  if (focusIds) {
+    if (e.key === 'Escape') { e.preventDefault(); return exitFocus(); }
+    if (/INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;  // typing a comment/question
+    const d = S.decisions.find(x => x.id === focusIds[focusIdx]);
+    if (e.key === 'ArrowLeft') return focusGo(-1);
+    if (e.key === 'ArrowRight') return focusGo(1);
+    if (e.key === 'Enter') { if (d && pick[d.id]) recordFocus(d); else focusGo(1); return; }
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= 9 && d && d.status !== 'ratified' && d.options && d.options[n - 1]) { pick[d.id] = d.options[n - 1].key; updateFocusChoice(); }
+    return;
   }
-  return `<div class="statusrow">${h}</div>`;
-}
-
-function card(c) {
-  const i = S.stages.indexOf(c.stage);
-  const back = i > 0 ? S.stages[i - 1] : null, fwd = i < S.stages.length - 1 ? S.stages[i + 1] : null;
-  const planLink = c.plan ? `<a class="plan" title="open plan" onclick="openDoc('sidequest','${attr(c.plan)}')">▤ ${esc(c.plan)}</a>` : "";
-  const typeSel = `<select class="typesel" title="change type" onchange="changeType('${c.id}',this.value)">` +
-    ["task", "idea", "bug"].map((t) => `<option${c.type === t ? " selected" : ""}>${t}</option>`).join("") + "</select>";
-  const prioritySel = `<select class="priosel ${esc(c.priority || "P2")}" title="change priority" onchange="changePriority('${c.id}',this.value)">` +
-    (S.priorities || ["P0", "P1", "P2", "P3"]).map((p) => `<option value="${p}"${(c.priority || "P2") === p ? " selected" : ""}>${esc(p)}</option>`).join("") + "</select>";
-  const stageSel = `<select class="stagesel" title="jump to stage" onchange="moveCard('${c.id}',this.value)">` +
-    S.stages.map((s) => `<option value="${s}"${s === c.stage ? " selected" : ""}>${esc(stageLabel(s))}</option>`).join("") + "</select>";
-  const notes = (c.notes && c.notes.length) ? '<div class="notes">' + c.notes.map((n, idx) =>
-    `<div class="note">•&nbsp;<span class="nt" contenteditable="true" spellcheck="false" data-id="${c.id}" data-i="${idx}" data-orig="${attr(n.t)}" onblur="saveNote(this)" onkeydown="fieldKey(event,this)">${esc(n.t)}</span>` +
-    `<span class="at">${esc(n.at)}</span><span class="ndel" title="delete note" onclick="delNote('${c.id}',${idx})">✕</span></div>`).join("") + "</div>" : "";
-  return `<div class="card ${c.type}"><div class="edge"></div><div class="body">` +
-    `<div class="top"><span class="cid">${esc(c.id)}</span>${c.workOrder ? `<span class="ord">#${esc(String(c.workOrder))}</span>` : ""}${prioritySel}${typeSel}</div>` +
-    `<span class="ttl" contenteditable="true" spellcheck="false" data-id="${c.id}" data-orig="${attr(c.title)}" onblur="saveField(this,'title')" onkeydown="fieldKey(event,this)">${esc(c.title)}</span>` +
-    `<div class="bd" contenteditable="true" spellcheck="false" data-ph="${c.type === "bug" ? "Describe the defect…" : "Add a description…"}" data-id="${c.id}" data-orig="${attr(c.body || "")}" onblur="saveField(this,'body')" onkeydown="fieldKey(event,this)">${esc(c.body || "")}</div>` +
-    statusChips(c) +
-    `<div class="meta"><div class="nav">` +
-    `<button onclick="moveCard('${c.id}','${back || ""}')" ${back ? "" : "disabled"} title="${back ? stageLabel(back) : ""}">◀</button>` +
-    stageSel +
-    `<button onclick="moveCard('${c.id}','${fwd || ""}')" ${fwd ? "" : "disabled"} title="${fwd ? stageLabel(fwd) : ""}">▶</button></div>` +
-    `<input class="orderedit" type="number" min="1" placeholder="order" value="${c.workOrder || ""}" title="recommended work order" onchange="changeWorkOrder('${c.id}',this.value)">` +
-    planLink + `<span class="note-in" onclick="addNote('${c.id}')">+note</span>` +
-    `<span class="x" title="delete" onclick="delCard('${c.id}')">✕</span></div>${notes}</div></div>`;
-}
-async function moveCard(id, stage) { if (!stage) return; const c = findCard(id); if (c) c.stage = stage; await api("/api/card/update", { id, stage }); await load(); }
-async function changeType(id, type) { const c = findCard(id); if (c) c.type = type; await api("/api/card/update", { id, type }); await load(); }
-async function changePriority(id, priority) { const c = findCard(id); if (c) c.priority = priority; await api("/api/card/update", { id, priority }); await load(); }
-async function changeWorkOrder(id, workOrder) { const c = findCard(id); if (c) c.workOrder = workOrder ? Number(workOrder) : null; await api("/api/card/update", { id, workOrder }); await load(); }
-async function delCard(id) { if (confirm("Delete this card?")) { await api("/api/card/delete", { id }); await load(); toast("Deleted."); } }
-async function addNote(id) { const n = prompt("Add a note:"); if (n && n.trim()) { await api("/api/card/update", { id, note: n }); await load(); } }
-async function saveField(el, field) {
-  const id = el.dataset.id, val = el.innerText.trim(), orig = el.dataset.orig || "";
-  if (val === orig) return;
-  if (field === "title" && !val) { el.innerText = orig; return; }
-  const j = await api("/api/card/update", { id, [field]: val });
-  if (j.ok) { el.dataset.orig = val; const c = findCard(id); if (c) c[field] = val; toast("Saved."); }
-  else { el.innerText = orig; toast("Save failed."); }
-}
-async function saveNote(el) {
-  const id = el.dataset.id, i = +el.dataset.i, val = el.innerText.trim(), orig = el.dataset.orig || "";
-  if (val === orig) return;
-  const c = findCard(id); if (!c) return;
-  const notes = (c.notes || []).map((n, idx) => idx === i ? { t: val, at: n.at } : n).filter((n) => n.t);
-  const j = await api("/api/card/update", { id, notes });
-  if (j.ok) { c.notes = notes; el.dataset.orig = val; if (!val) await load(); toast("Saved."); }
-  else { el.innerText = orig; toast("Save failed."); }
-}
-async function delNote(id, i) {
-  const c = findCard(id); if (!c) return;
-  if (!confirm("Delete this note?")) return;
-  const notes = (c.notes || []).filter((_, idx) => idx !== i);
-  const j = await api("/api/card/update", { id, notes });
-  if (j.ok) { c.notes = notes; await load(); toast("Note deleted."); }
-}
-function fieldKey(e, el) {
-  if (e.key === "Enter" && !e.shiftKey && el.classList.contains("ttl")) { e.preventDefault(); el.blur(); }
-  else if (e.key === "Escape") { el.innerText = el.dataset.orig || ""; el.blur(); }
-}
-
-/* ================= DECISIONS — overview ================= */
-function renderDecisions() {
-  const dec = decisions();
-  const done = dec.filter((d) => answers[d.id]).length;
-  let h = '<div class="ballotbar"><div class="meter"><div class="mtop"><span>Decisions</span><span><b>' + done + "</b> / " + dec.length + " decided</span></div>" +
-    '<div class="track"><i style="width:' + (dec.length ? Math.round(done / dec.length * 100) : 0) + '%"></i></div></div>' +
-    (dec.length ? '<button class="bigfocus" onclick="enterFocus(' + Math.max(0, dec.findIndex((d) => !answers[d.id])) + ')">▶ Focus mode — decide one at a time</button>' : "") +
-    "</div>";
-  h += '<div class="hint">Open <b>Focus mode</b> for a clean, one-at-a-time deck (keyboard-driven), or skim the groups below and click a row to jump straight into it.</div>';
-
-  // Group the decisions. Global (ungrouped) explainer prose — the file preamble —
-  // is dropped; per-group intro prose is tucked inside its group (collapsed by
-  // default), so the page is decisions, not preamble.
-  const groups = [], byG = {};
-  for (const s of S.ballot) {
-    if (s.kind === "explainer" && !s.group) continue;                 // drop the file preamble
-    if (!["decision", "open", "explainer"].includes(s.kind)) continue;
-    const g = s.group || "Other";
-    if (!byG[g]) { byG[g] = []; groups.push(g); }
-    byG[g].push(s);
-  }
-  for (const g of groups) {
-    const items = byG[g];
-    const ids = items.filter((s) => s.kind === "decision").map((s) => s.id);
-    if (!ids.length && !items.some((s) => s.kind === "open")) continue; // skip explainer-only groups
-    const gdone = ids.filter((id) => answers[id]).length;
-    const cnt = '<span class="count' + (ids.length && gdone === ids.length ? " ok" : "") + '">' + gdone + " / " + ids.length + "</span>";
-    const inner = items.map((s) =>
-      s.kind === "decision" ? miniRow(s) :
-      s.kind === "open" ? openRow(s) :
-      '<div class="gintro">' + s.html + "</div>").join("");
-    h += section("grp_" + key(g), g.replace(/\s*—\s*board card.*/, ""), cnt, esc(ids.join("  ")), inner, "dgroup");
-  }
-  $("v-decisions").innerHTML = h;
-}
-function miniRow(s) {
-  const i = decIndexById(s.id);
-  const rec = s.rec ? (/no rec/i.test(s.rec) ? '<span class="rec no">no rec</span>' : '<span class="rec">rec ' + esc(s.rec.replace(/^rec\s+/i, "").toUpperCase()) + "</span>") : "";
-  return '<div class="drow-mini' + (answers[s.id] ? " decided" : "") + '" onclick="enterFocus(' + i + ')">' +
-    '<span class="did">' + esc(s.id) + '</span><span class="dt">' + esc(s.title) + "</span>" +
-    (answers[s.id] ? '<span class="tick">✓ ' + esc(answers[s.id]) + "</span>" : "") + rec + "</div>";
-}
-function openRow(s) {
-  return '<div class="drow-mini" onclick="ask(\'' + (s.id || "") + '\')"><span class="did">' + esc(s.id || "—") + '</span>' +
-    '<span class="dt">' + (s.html || "").replace(/<[^>]+>/g, "").slice(0, 90) + '</span><span class="rec no">open</span></div>';
-}
-
-/* ================= DECISION FOCUS MODE ================= */
-const FACETS = [["why", "Why it matters"], ["code", "In the wild"], ["trade", "Trade-offs"], ["else", "Elsewhere"], ["qa", "Q&A"]];
-function facetContent(s, fk) {
-  if (fk === "why") return [s.story, s.intro].filter(Boolean).join("\n") || '<p class="muted">No story yet — ask me to add one (↻ improve).</p>';
-  if (fk === "code") return s.inWild || '<p class="muted">No in-the-wild example yet.</p>';
-  if (fk === "trade") return s.tradeoffs || '<p class="muted">Trade-offs are folded into the story / options above.</p>';
-  if (fk === "else") return s.otherLangs || '<p class="muted">No cross-language comparison yet.</p>';
-  if (fk === "qa") return s.qa || '<p class="muted">No questions yet — ask one below.</p>';
-  return "";
-}
-function availFacets(s) {
-  return FACETS.filter(([fk]) =>
-    (fk === "why" && (s.story || s.intro)) || (fk === "code" && s.inWild) ||
-    (fk === "trade" && s.tradeoffs) || (fk === "else" && s.otherLangs) || (fk === "qa" && s.qa));
-}
-function enterFocus(i) {
-  const dec = decisions(); if (!dec.length) return;
-  focusIdx = Math.max(0, Math.min(i, dec.length - 1));
-  focusFacet = null;
-  $("focusback").classList.add("on");
-  $("bar").classList.remove("on");
-  renderDeck();
-}
-function exitFocus() { $("focusback").classList.remove("on"); render(); }
-function focusPrev() { if (focusIdx > 0) { focusIdx--; focusFacet = null; renderDeck(); } }
-function focusNext() { const dec = decisions(); if (focusIdx < dec.length - 1) { focusIdx++; focusFacet = null; renderDeck(); } else toast("Last decision — sign & file when ready."); }
-function jumpNextUndecided() {
-  const dec = decisions(); const next = dec.findIndex((d) => !answers[d.id]);
-  if (next < 0) { toast("All decided — sign & file."); return; }
-  focusIdx = next; focusFacet = null; renderDeck();
-}
-function setFacet(fk) { focusFacet = fk; renderDeck(); }
-function renderDeck() {
-  const dec = decisions(); const s = dec[focusIdx]; if (!s) return;
-  $("f-ctr").textContent = focusIdx + 1; $("f-tot").textContent = dec.length;
-  $("f-dots").innerHTML = dec.map((d, i) => `<span class="dot${i === focusIdx ? " cur" : ""}${answers[d.id] ? " done" : ""}" title="${esc(d.id)}" onclick="enterFocus(${i})"></span>`).join("");
-  $("f-prev").disabled = focusIdx === 0;
-  $("f-next").disabled = focusIdx === dec.length - 1;
-
-  const avail = availFacets(s);
-  if (!focusFacet || !avail.some(([fk]) => fk === focusFacet)) focusFacet = avail.length ? avail[0][0] : "why";
-  const rec = s.rec ? (/no rec/i.test(s.rec) ? '<span class="rec no">no rec</span>' : '<span class="rec">rec ' + esc(s.rec.replace(/^rec\s+/i, "").toUpperCase()) + "</span>") : "";
-  const bigline = s.gist || s.title;
-  const sub = s.gist ? '<div class="dttl">' + esc(s.title) + "</div>" : "";
-
-  const facetTabs = avail.length ? '<div class="facets">' + avail.map(([fk, label]) =>
-    `<span class="facet${fk === focusFacet ? " on" : ""}" onclick="setFacet('${fk}')">${label}</span>`).join("") + "</div>" : "";
-  const facetPanel = avail.length ? '<div class="facetbody">' + facetContent(s, focusFacet) + "</div>" : "";
-
-  const opts = (s.options || []).map((o, idx) =>
-    `<div class="opt" id="o-${s.id}-${o.key}" onclick="pick('${s.id}','${o.key}')">` +
-    `<div class="opt-h"><span class="radio"></span><span class="num">${idx + 1}</span>Option ${esc(o.key)} — ${esc(o.name)}` +
-    (o.recommended ? '<span class="recpill">recommended</span>' : "") + "</div>" +
-    `<div class="obody">${o.html}</div></div>`).join("");
-
-  const qs = (S.board.questions || []).filter((q) => q.decisionId === s.id);
-  const qhtml = qs.length ? '<div class="qbox">' + qs.map((q) => '<div class="q">' + esc(q.text) + '<span class="st ' + q.status + '">' + q.status + "</span>" +
-    (q.answer ? '<div class="ans">' + esc(q.answer) + "</div>" : '<div class="qa">awaiting Claude</div>') + "</div>").join("") + "</div>" : "";
-
-  $("f-deck").innerHTML =
-    `<div class="dhead"><span class="did">${esc(s.id)}</span>${rec}</div>` +
-    `<div class="gist">${esc(bigline)}</div>${sub}` +
-    facetTabs + facetPanel +
-    (opts ? '<div class="optslabel">Choose one</div><div class="opts">' + opts + "</div>" : "") +
-    (s.recommendation ? '<div class="recline"><strong>Recommendation:</strong> ' + stripP(s.recommendation) + "</div>" : "") +
-    `<textarea class="comment" placeholder="Comment (optional)" oninput="comments['${s.id}']=this.value">${esc(comments[s.id] || "")}</textarea>` +
-    '<div class="deck-actions">' +
-    (answers[s.id] ? `<button class="ghost sm" onclick="clearPick('${s.id}')">✕ Clear choice</button>` : "") +
-    `<button class="ghost sm" onclick="ask('${s.id}')">Ask a question</button>` +
-    `<button class="ghost sm" onclick="regen('${s.id}')">↻ Improve examples</button></div>` + qhtml;
-
-  if (answers[s.id]) markPick(s.id, answers[s.id]);
-  $("f-scroll").scrollTop = 0;
-}
-function stripP(h) { return (h || "").replace(/^<p>/, "").replace(/<\/p>$/, ""); }
-function markPick(id, k) {
-  const s = decisions().find((x) => x.id === id); if (!s || !s.options) return;
-  for (const o of s.options) { const el = $("o-" + id + "-" + o.key); if (el) el.classList.toggle("sel", o.key === k); }
-}
-function pick(id, k) { answers[id] = k; renderDeck(); }
-function clearPick(id) { delete answers[id]; renderDeck(); }
-
-async function ask(id) {
-  const t = prompt("What do you want to know about " + id + "?");
-  if (t && t.trim()) { const j = await api("/api/ask", { decisionId: id, text: t }); if (j.ok) { S.board.questions.push(j.q); if ($("focusback").classList.contains("on")) renderDeck(); else render(); toast("Question saved — I'll answer on this card."); } }
-}
-async function regen(id) {
-  const s = decisions().find((x) => x.id === id); const title = s ? s.title : id;
-  const j = await api("/api/regen", { id, title }); if (j.ok) toast("Queued — I'll improve this card's examples.");
-}
-async function submitBallot() {
-  const dec = decisions();
-  const results = dec.map((s) => ({ id: s.id, title: s.title, choice: answers[s.id] || "", comment: comments[s.id] || "" }));
-  for (const b of [$("submit"), $("f-submit")]) if (b) { b.disabled = true; b.textContent = "Filing…"; }
-  const j = await api("/api/submit", { results });
-  if (!j.ok) { toast("Error"); for (const b of [$("submit"), $("f-submit")]) if (b) { b.textContent = "Sign & file"; b.disabled = false; } return; }
-  toast("Filed to " + j.path + " — reloading…");
-  setTimeout(() => location.reload(), 900);
-}
-
-/* keyboard for focus mode */
-document.addEventListener("keydown", (e) => {
-  if (!$("focusback").classList.contains("on")) return;
-  const t = e.target.tagName, editing = t === "INPUT" || t === "TEXTAREA" || e.target.isContentEditable;
-  if (e.key === "Escape") { e.preventDefault(); exitFocus(); return; }
-  if (editing) return;
-  if (e.key === "ArrowRight") { e.preventDefault(); focusNext(); }
-  else if (e.key === "ArrowLeft") { e.preventDefault(); focusPrev(); }
-  else if (/^[1-9]$/.test(e.key)) {
-    const s = decisions()[focusIdx]; const o = s && s.options && s.options[+e.key - 1];
-    if (o) { e.preventDefault(); pick(s.id, o.key); }
-  } else if (e.key === "Enter") {
-    e.preventDefault(); const s = decisions()[focusIdx];
-    if (s && answers[s.id]) focusNext(); else toast("Pick an option (1–9) first.");
-  }
+  if (e.key === 'Escape') return closeDetail();
+  if (openCard || /input|textarea|select/i.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
+  const i = ['1', '2', '3', '4', '5', '6'].indexOf(e.key);
+  if (i >= 0 && VIEWS[i]) location.hash = VIEWS[i].id;
 });
+$('#scrim').addEventListener('click', closeDetail);
 
-/* ================= PROPOSALS + IDEAS ================= */
-function renderProposals() {
-  const ps = S.proposals || [], ideas = S.ideas || [];
-  let h = '<div class="hint">Feature <b>proposals</b> and parked <b>ideas</b> — exploratory thinking being shaped. Click any card to read or edit it inline.</div>';
-  h += docGrid("Proposals", "proposal", ps);
-  h += docGrid("Ideas", "idea", ideas);
-  $("v-proposals").innerHTML = h;
-}
-function docGrid(label, kind, list) {
-  const inner = list.length ? '<div class="grid">' + list.map((p) =>
-    `<div class="card task pcard" onclick="openDoc('${kind}','${attr(p.slug)}')"><div class="edge"></div><div class="body">` +
-    `<div class="top"><span class="ttl">${esc(p.title)}</span></div>` +
-    (p.status ? `<div class="bd">${esc(p.status)}</div>` : "") +
-    `<div class="meta"><span class="plan">▤ ${esc(p.slug)}.md</span></div></div></div>`).join("") + "</div>"
-    : '<div class="empty">— none —</div>';
-  return section("doc_" + key(label), label, `<span class="count">${list.length}</span>`, esc(list.slice(0, 2).map((p) => p.title).join(" · ")), inner);
-}
-
-/* ================= SCRATCH ================= */
-let scratchT = null;
-function renderScratch() {
-  const v = $("v-scratch"); if (v.dataset.init) return; v.dataset.init = "1";
-  v.innerHTML = '<div class="hint">A free scratch pad — anything goes. Autosaves to board.json as you type; persists across restarts.</div>' +
-    '<textarea id="scratch" placeholder="Notes, half-thoughts, paste anything…" oninput="scratchChanged()" onblur="saveScratch()">' + esc(S.board.scratch) + "</textarea>" +
-    '<div class="savebar"><span class="s" id="scratch-s">saved</span></div>';
-}
-function scratchChanged() { const s = $("scratch-s"); if (s) s.textContent = "editing…"; clearTimeout(scratchT); scratchT = setTimeout(saveScratch, 1500); }
-async function saveScratch() {
-  clearTimeout(scratchT); const el = $("scratch"); if (!el) return;
-  const t = el.value, s = $("scratch-s");
-  if (t === S.board.scratch) { if (s) s.textContent = "saved"; return; }
-  const j = await api("/api/scratch", { text: t });
-  if (j.ok) { S.board.scratch = t; if (s) s.textContent = "saved " + new Date().toLocaleTimeString(); }
-  else if (s) s.textContent = "save failed";
-}
-
-/* ================= DOC VIEWER / EDITOR ================= */
-let curDoc = null, curDocRaw = "";
-async function openDoc(kind, slug) {
-  if (!slug) return;
-  const j = await api("/api/doc/get", { kind, slug });
-  if (!j.ok) { toast("Could not open " + slug); return; }
-  curDoc = { kind, slug }; curDocRaw = j.raw;
-  $("doc-title").textContent = j.title || slug;
-  $("doc-path").textContent = j.path || "";
-  $("doc-view").innerHTML = j.html;
-  $("doc-edit-area").value = j.raw;
-  setDocMode(false);
-  $("docback").classList.add("on");
-  $("doc-view").scrollTop = 0;
-}
-function setDocMode(edit) {
-  $("doc-view").style.display = edit ? "none" : "block";
-  $("doc-edit-area").style.display = edit ? "block" : "none";
-  $("doc-save").style.display = edit ? "inline-block" : "none";
-  $("doc-cancel").style.display = edit ? "inline-block" : "none";
-  $("doc-edit").style.display = edit ? "none" : "inline-block";
-}
-function toggleEdit() { setDocMode(true); $("doc-edit-area").focus(); }
-function cancelEdit() { $("doc-edit-area").value = curDocRaw; setDocMode(false); }
-async function saveDoc() {
-  if (!curDoc) return;
-  const text = $("doc-edit-area").value, b = $("doc-save");
-  b.disabled = true; b.textContent = "Saving…";
-  const j = await api("/api/doc/save", { kind: curDoc.kind, slug: curDoc.slug, text });
-  b.disabled = false; b.textContent = "Save";
-  if (!j.ok) { toast("Save failed"); return; }
-  curDocRaw = text; $("doc-view").innerHTML = j.html; setDocMode(false); toast("Saved " + (j.path || ""));
-}
-function closeDoc(e) { if (e && e.target && e.target.id !== "docback") return; $("docback").classList.remove("on"); curDoc = null; }
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("docback").classList.contains("on")) closeDoc(); });
-
+const syncHash = () => { const h = location.hash.slice(1); if (RENDER[h]) VIEW = h; if (S) render(); };
+window.addEventListener('hashchange', syncHash);
+if (RENDER[location.hash.slice(1)]) VIEW = location.hash.slice(1);
 load();
-window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (h && h !== active) { active = h; render(); } });

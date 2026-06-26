@@ -1,4 +1,4 @@
-# Core library (`jet.core`)
+# Core library (`core`)
 
 The Jet Core library gives you files, terminal I/O, environment variables,
 process control, math, time, random numbers, JSON, tasks, and channels —
@@ -9,8 +9,9 @@ enough to write real command-line tools. Every fallible call returns a
 name; the compiler type-checks your calls and generates only the helpers you
 actually use (see [Using modules](#using-modules) and [Pay for what you call](#pay-for-what-you-call)).
 
-**Canonical name:** `jet.core`. The short spelling `core` is reserved and means the
-same thing.
+**Canonical name:** `core` (owner, 2026-06-26). Every first-party library — the
+built-in modules below and the ring packages — lives under the single `core.*`
+namespace. There is no `jet.*` or `std.*` library namespace.
 
 **Naming (S54):** types and error enums are PascalCase (`String`, `IOError`,
 `JSON`); functions and module segments are snake_case (`read`, `core.fs`).
@@ -53,11 +54,11 @@ Core modules use `use` — no quotes, unlike file imports.
 
 ```jet
 use core.fs as fs                    // one submodule
-use jet.core.encoding.json as json   // same module, canonical spelling
+use core.encoding.json as json       // a nested submodule
 ```
 
-Both `use core.fs` and `use jet.core.encoding.json` resolve to the same
-compiler-known module.
+`use core.fs` and `use core.encoding.json` each resolve to a
+compiler-known module under the `core` root.
 
 **Not allowed:**
 
@@ -380,7 +381,7 @@ Every draw — including `bool`/`pick`/`shuffle` — needs a `~Rng` receiver, an
 ### `core.time` — clock and delays
 
 Time in Core is **Unix milliseconds** only — no dates, time zones, or
-formatting (use `jet.time` for calendars).
+formatting (use `core.time` for calendars).
 
 ```jet
 use core.time as time
@@ -634,9 +635,9 @@ structs containing `ref` fields, no trait values, and no closure values unless
 they are handed over with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
 
-### `jet.regex` — linear-time regular expressions
+### `core.regex` — linear-time regular expressions
 
-`use jet.regex as re`. Matching is **linear-time** — the engine is a DFA/NFA
+`use core.regex as re`. Matching is **linear-time** — the engine is a DFA/NFA
 hybrid with no catastrophic backtracking, so patterns are ReDoS-safe by
 construction. Backreferences and lookaround do not exist (the safety property
 would be lost), and that is deliberate.
@@ -648,7 +649,7 @@ group as `String?` (`null` if the group did not participate or `n` is out of
 range).
 
 ```jet
-use jet.regex as re
+use core.regex as re
 
 fn main() {
     text @= "order 42 shipped"
@@ -684,9 +685,9 @@ be replaced by an in-house RE2-style engine before the end of Epoch 3.
 
 ---
 
-### `jet.reactive` — signals, derived values, effects (D-REACT1)
+### `core.reactive` — signals, derived values, effects (D-REACT1)
 
-`use jet.reactive as reactive`. Reactivity is an **opt-in library**, not core
+`use core.reactive as reactive`. Reactivity is an **opt-in library**, not core
 language semantics — ordinary bindings stay non-reactive. The library adds three
 explicit reactive values:
 
@@ -704,7 +705,7 @@ derived or effect body subscribes that derived/effect to the signal. A `.set(v)`
 re-runs every subscriber.
 
 ```jet
-use jet.reactive as reactive
+use core.reactive as reactive
 
 fn main() {
     price @= reactive.signal(100)
@@ -914,21 +915,23 @@ shift count past the type's width traps (no leaked Rust panic).
 
 ---
 
-## First-party ring (`jet.*` packages)
+## First-party ring (`core.*` packages)
 
-Core (`jet.core`) stays at the eight modules above. The first-party ring
-ships as versioned `jet.*` packages. These shipped in Epoch 2:
+The eight modules above are built into the compiler. The first-party ring
+ships as versioned packages under the same `core.*` namespace (owner,
+2026-06-26 — a ring package is a `core.<name>` library, not a `jet.*` one).
+These shipped in Epoch 2:
 
 | Package | What it unlocks |
 |---------|-----------------|
-| `jet.http` | HTTP client + server, blocking networking (plain HTTP; TLS requires `jet.tls`) |
-| `jet.regex` | grep-class tools, text validation |
-| `jet.log` | Structured logging / tracing / metrics |
-| `jet.time` | Calendar dates, time zones, formatted dates |
-| `jet.crypto` | Hash, HMAC, vetted random primitives |
-| `jet.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
-| `jet.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
-| `jet.db` | SQLite — open/exec/query_json/close via rusqlite bundled (D-DEP-DB1) |
+| `core.http` | HTTP client + server, blocking networking (plain HTTP; TLS requires `core.tls`) |
+| `core.regex` | grep-class tools, text validation |
+| `core.log` | Structured logging / tracing / metrics |
+| `core.time` | Calendar dates, time zones, formatted dates |
+| `core.crypto` | Hash, HMAC, vetted random primitives |
+| `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
+| `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
+| `core.db` | SQLite — open/exec/query_json/close via rusqlite bundled (D-DEP-DB1) |
 
 ---
 

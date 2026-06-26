@@ -35,9 +35,9 @@ permitted:
 | `core.mem` | `core.net` |
 | `core.random` | `core.tasks` |
 | `core.env` | `core.time` |
-| `core.path` | `jet.http` |
-| `jet.crypto` | `jet.log` |
-|             | `jet.time` |
+| `core.path` | `core.http` |
+| `core.crypto` | `core.log` |
+|             | `core.time` |
 
 Example:
 

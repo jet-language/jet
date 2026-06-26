@@ -1,26 +1,22 @@
 #!/usr/bin/env node
-// Tower — the command surface for building Jet. Sequences the workflow:
-//   frozen → backlog → deciding → planning → ready → building → done
-// plus a decision Focus Mode (the ballot) and a file-ingest queue. No deps.
+// Tower — air-traffic control for the Jet project.
 //
-// Usage:
-//   node tools/Tower/Tower.mjs serve [port] [--open]   # the dashboard (main UI)
-//   node tools/Tower/Tower.mjs status                  # console snapshot
-//   node tools/Tower/Tower.mjs new <slug> "Title"      # scaffold a sidequest plan
+//   node Tower.mjs serve [--open] [--port N]   start the dashboard
+//   node Tower.mjs status                       text snapshot of the board
 //
-// Owner-input state (cards/notes/scratch/answers/questions/ingest) lives in
-// tools/Tower/board.json — management state only; it references plan files by
-// slug and never copies their content. The ballot renders straight from
-// tools/Tower/docs/ballots/decision-ballots.md. Implementation lives in app/.
-import { die } from "./app/paths.mjs";
-import { serve } from "./app/server.mjs";
-import { status, scaffold } from "./app/cli.mjs";
+// Std-only, zero dependencies. Reads/writes only tools/Tower/tower.json.
+const args = process.argv.slice(2);
+const cmd = args[0] || 'serve';
+const flag = (n) => args.includes(`--${n}`);
+const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d; };
 
-const [cmd, ...rest] = process.argv.slice(2);
-switch (cmd) {
-  case undefined:
-  case "status": status(); break;
-  case "serve": serve(Number(rest.find((a) => /^\d+$/.test(a))) || 4173); break;
-  case "new": scaffold(rest[0], rest.slice(1).join(" ")); break;
-  default: die(`unknown command "${cmd}". commands: status | serve [port] [--open] | new <slug> "Title"`);
+if (cmd === 'serve') {
+  const { serve } = await import('./app/server.mjs');
+  serve(Number(opt('port', 7878)), flag('open'));
+} else if (cmd === 'status') {
+  const { status } = await import('./app/cli.mjs');
+  status();
+} else {
+  console.log('usage: Tower.mjs [serve|status]');
+  process.exit(1);
 }

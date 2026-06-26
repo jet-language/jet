@@ -90,12 +90,12 @@ match behavior, no invariant bent.
 
 Need syntax that isn't Ratified or Provisional in docs/spec/syntax-decisions.md? Develop it
 into a decision card — options, a worked per-option example, your recommendation — get it
-reviewed by another agent, and queue it in Tower's ballot
-(tools/Tower/docs/ballots/decision-ballots.md); **stop work on that feature** until the
+reviewed by another agent, and queue it as a decision in Tower (tools/Tower/tower.json) so
+it surfaces in the board's Decide lane; **stop work on that feature** until the
 owner decides. Build something else meanwhile. When the owner ratifies: update
 Source/Syntax.rs / parser, re-bless snapshots, log it in syntax-decisions.md.
 
-See the **tower-sweep** skill for the full project-management loop. The owner is
+See the **tower** skill for the full project-management loop. The owner is
 CEO/CTO; his decisions are the only allowed bottleneck — he never waits on you for a
 plan or a decision, and nothing reaches him that an agent hasn't already reviewed.
 

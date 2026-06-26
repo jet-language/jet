@@ -605,26 +605,26 @@ output is machine-parseable with `--json`.
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
-Wave-1 ring packages (`jet.csv`, `jet.toml`, `jet.yaml`, `jet.log`, `jet.json`, `jet.time`, `jet.crypto`) are compiler-known modules — no external crates in `src/` (I6). E27xx is the block for M9.
+Wave-1 ring packages (`core.csv`, `jet.toml`, `core.yaml`, `core.log`, `core.json`, `core.time`, `core.crypto`) are compiler-known modules — no external crates in `src/` (I6). E27xx is the block for M9.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2701 | `{parser}` found malformed input at row/line {n} — {detail}. | The ring library parse function encountered text it can't interpret: a missing delimiter, an unclosed quote, or an unexpected character. The row or line number points at the first offending record. | Fix the input at the location named, or validate it before parsing. |
-| E2702 | Crypto API misuse: {detail}. | A `jet.crypto` call would use a key, nonce, or algorithm in an unsafe way — for example, an IV too short or a key length the algorithm doesn't accept. Reserved for future static checks. | Follow the fix named in the error; the `jet.crypto` API is intentionally restrictive to surface misuse. |
+| E2702 | Crypto API misuse: {detail}. | A `core.crypto` call would use a key, nonce, or algorithm in an unsafe way — for example, an IV too short or a key length the algorithm doesn't accept. Reserved for future static checks. | Follow the fix named in the error; the `core.crypto` API is intentionally restrictive to surface misuse. |
 | E2710 | `` `derive {Trait} for T` body failed while expanding `#[{Trait}]` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `#[Trait]` marker on the struct that triggered expansion. | Fix the `derive {Trait} for T` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
 | E2711 | Derive orphan rule: `` `derive {Trait} for T` `` and `` `{Type}` `` are both in an imported module. | User-derive expansion can only run in the entry module (D-METADERIVE1=A). Both the `derive` block and the struct it targets must live in the entry file; expansion locked to an imported module produces an `impl` the entry module cannot override or suppress. | Move both `derive {Trait}` and `struct {Type}` to your entry module; derive expansion only runs there. |
 | E2712 | `` `$` splice used outside a comptime context ``. | `$name` looks up a name in the comptime scope (D-CTMARKER1=C) and is only valid inside a `derive` body, `comptime {}` block, or comptime binding. At runtime there is no comptime scope to look up. | Remove the `$` prefix to reference the name as a normal variable, or move the code into a `comptime { … }` block or a `derive` body. |
-| L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `jet.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
+| L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `core.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
 
 ## Networking and services diagnostics (E2-M10, D-NET1–3)
 
-`core.net` provides blocking TCP/UDP sockets; `jet.http` provides HTTP client and
+`core.net` provides blocking TCP/UDP sockets; `core.http` provides HTTP client and
 server built on top. E28xx is the block for M10.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2801 | {operation} on `{address}` failed: {detail}. | A socket bind, listen, connect, or accept call returned an OS error. The address and operation are named so you can act on the specific failure. | Check that the address is reachable and the port is not already in use. For `bind`, try a different port. For `connect`, verify the server is running. |
-| E2802 | TLS handshake with `{host}` failed: {detail}. | The TLS layer could not complete a secure handshake — the certificate may be invalid, expired, or untrusted by the system trust store. | Verify the server's certificate, ensure the system trust store is up-to-date, or use `jet.tls.insecure_skip_verify()` in a test environment only. |
+| E2802 | TLS handshake with `{host}` failed: {detail}. | The TLS layer could not complete a secure handshake — the certificate may be invalid, expired, or untrusted by the system trust store. | Verify the server's certificate, ensure the system trust store is up-to-date, or use `core.tls.insecure_skip_verify()` in a test environment only. |
 | E2803 | Request body exceeds the {limit}-byte limit. | The server's configured `max_body` cap was reached. Allowing unbounded bodies risks memory exhaustion. | Raise the `max_body` option passed to `http.serve`, or reject the request in your handler before reading the body. |
 | E2804 | Two routes both match `{METHOD} {pattern}`. | A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately. | Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one). |
 | L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `tasks.spawn(() => …)` so each connection runs in its own task. |
