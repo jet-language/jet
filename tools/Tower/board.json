@@ -92,6 +92,10 @@
         {
           "t": "[handoff 2026-06-26] STATUS: core shipped (commit a634c1a). DONE: realize() rlib compile (build_rlib_from_cargo in Source/Jetpack/Provider.rs; rlib field on StoreEntry in Store.rs) + jet.archive gzip ring (Source/Prelude/Archive.rs = flate2 FFI-bridge TEMPLATE text, I6-clean — flate2 never in jet itself). TO FINISH 100%: (1) jet.archive zip+tar — wrap the already-approved zip/tar crates (D-DEP-ARCHIVE1) the SAME emitted-bridge way as gzip: Source/Prelude/Archive.rs + Source/FFI.rs (needs_archive/ARCHIVE_CRATE_SPEC) + sema Source/Sema/CheckerCoreLib.rs sigs + codegen Source/Codegen/TIR/emit.rs arms + extend example 127_archive. (2) jet.db rusqlite ring — currently is_ring_module_staged in Source/Loader.rs; needs the shipped jet-bind C-FFI to build bundled SQLite C, then wire like archive. (3) c156 workspace member resolution (same realize/build layer — see c156). VERIFY: `nix develop -c cargo test` all green + a program that `use`s a built-from-source ring runs.",
           "at": "2026-06-26"
+        },
+        {
+          "t": "[partial 2026-06-26 session2] DONE: jet.archive zip API (zip_compress/zip_decompress via the zip crate FFI-bridge — Archive.rs + FFI.rs ZIP_CRATE_SPEC + CheckerCoreLib.rs sigs + TIR/emit.rs arms + 127_archive.jet extended); c156 load_workspace wired into cmd_build (workspace.jet detected → members built via CoreProvider realize_ref). HARD BLOCKERS (owner decision required): (1) tar_pack/tar_unpack BLOCKED — Jet tuple type [(String,[U8])] maps to Vec<JetTup_xxx> in codegen; bridge crate has no access to JetTup types (different compilation unit). Need either a builtin-prelude approach or a new codegen type-conversion mechanism. (2) jet.db BLOCKED — rusqlite uses build.rs to compile bundled SQLite C; FFI bridge only supports pure-Rust crates (build.rs not supported). Different implementation strategy required. Both need owner direction.",
+          "at": "2026-06-26"
         }
       ],
       "created": "2026-06-19T00:00:00Z",

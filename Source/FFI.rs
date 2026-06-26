@@ -98,9 +98,13 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
 /// never in the compiler's Cargo.toml (I6).
 pub const REGEX_CRATE_SPEC: (&str, &str) = ("regex", "1");
 
-/// The `flate2` crate version that backs `jet.archive` (D-DEP-ARCHIVE1).
+/// The `flate2` crate version that backs `jet.archive` gzip (D-DEP-ARCHIVE1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const ARCHIVE_CRATE_SPEC: (&str, &str) = ("flate2", "1");
+
+/// The `zip` crate version that backs `jet.archive` zip (D-DEP-ARCHIVE1).
+/// Lives only here — never in the compiler's Cargo.toml (I6).
+pub const ZIP_CRATE_SPEC: (&str, &str) = ("zip", "2");
 
 /// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
 /// used. This is the only code that touches the `regex` crate.
@@ -121,6 +125,7 @@ pub fn build_bridge(
     }
     if needs_archive {
         deps.insert(ARCHIVE_CRATE_SPEC.0.to_string(), ARCHIVE_CRATE_SPEC.1.to_string());
+        deps.insert(ZIP_CRATE_SPEC.0.to_string(), ZIP_CRATE_SPEC.1.to_string());
     }
     let key = cache_key_full(entries, &deps, needs_regex, needs_archive);
     let cache_root = cache_dir().join(format!("{:016x}", key));

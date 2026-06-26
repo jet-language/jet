@@ -485,6 +485,58 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> O
 /// `jetpack build [<ref>]` — realize without entering a shell.
 fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
+    let dir = std::env::current_dir().unwrap_or_default();
+
+    // D-WORKSPACE1=B: if workspace.jet is present, build all workspace members
+    // via the first-party core provider (no Nix required).
+    if dir.join(Syntax::WORKSPACE_FILE).exists() {
+        if let Some(result) = load_workspace(&dir) {
+            return match result {
+                Err(code) => code,
+                Ok(plan) => {
+                    let mut ok = true;
+                    for member in &plan.members {
+                        let abs = if std::path::Path::new(&member.path).is_absolute() {
+                            std::path::PathBuf::from(&member.path)
+                        } else {
+                            dir.join(&member.path)
+                        };
+                        theme.status(&format!("building workspace member: {}", member.name));
+                        // Route the member through the core provider using its
+                        // absolute local path as the upstream (source_repo handles
+                        // "path:<abs>" → PathBuf directly, no Nix needed).
+                        let table = RefSpec::SourceTable::from_decls([(
+                            member.name.clone(),
+                            format!("path:{}", abs.display()),
+                            ProviderKind::Core,
+                        )]);
+                        let raw = format!("{}:{}", member.name, member.name);
+                        let spec = match RefSpec::classify_in(&raw, &table) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                Output::ref_error(theme, &e);
+                                ok = false;
+                                continue;
+                            }
+                        };
+                        if realize_ref(theme, &roots, &parsed.flags, &table, &spec).is_none() {
+                            ok = false;
+                        }
+                    }
+                    if ok {
+                        theme.status(&format!(
+                            "built {} workspace member(s).",
+                            plan.members.len()
+                        ));
+                        0
+                    } else {
+                        1
+                    }
+                }
+            };
+        }
+    }
+
     let (refs, table) = match parsed.positional.first() {
         Some(raw) => match classify_or_report(theme, raw) {
             Ok(s) => (vec![s], cwd_table()),

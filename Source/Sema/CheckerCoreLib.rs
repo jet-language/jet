@@ -2195,6 +2195,18 @@ pub(crate) fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::List(Box::new(u8_ty()))),
         )),
+        // D-DEP-ARCHIVE1=A: zip_compress — create a single-entry zip archive.
+        // Takes (name: String, data: [U8]) → [U8].
+        ("jet.archive", "zip_compress") => Some((
+            vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        // D-DEP-ARCHIVE1=A: zip_decompress — extract first entry from a zip archive.
+        // Takes [U8] → [U8]. Returns empty list on invalid input.
+        ("jet.archive", "zip_decompress") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
         // D-ARGS1 (ratified 2026-06-22): `args.spec()` → `ArgsSpec` builder.
         // The builder methods (.flag/.option/.positional/.help/.parse) are handled
         // in `args_spec_method_return` / `parsed_args_method_return` below.
@@ -2392,8 +2404,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "jet.regex" => &[
             "is_match", "match", "find", "find_all", "replace", "replace_all", "split",
         ],
-        // D-DEP-ARCHIVE1=A: gzip compress/decompress ring package.
-        "jet.archive" => &["gzip_compress", "gzip_decompress"],
+        // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip.
+        "jet.archive" => &["gzip_compress", "gzip_decompress", "zip_compress", "zip_decompress"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         "jet.reactive" => &["signal", "derived", "effect"],
         _ => &[],

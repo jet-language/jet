@@ -33,3 +33,42 @@ pub fn jet_archive_gzip_decompress(data: &[u8]) -> Vec<u8> {
     let _ = dec.read_to_end(&mut out);
     out
 }
+
+/// Compress `data` as a zip archive with a single entry named `name`.
+/// Returns the zip bytes.
+pub fn jet_archive_zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
+    use zip::write::{FileOptions, ZipWriter};
+    use std::io::Write;
+    let mut buf = Vec::new();
+    {
+        let cursor = std::io::Cursor::new(&mut buf);
+        let mut w = ZipWriter::new(cursor);
+        let opts: FileOptions<()> = FileOptions::default();
+        let _ = w.start_file(name, opts);
+        let _ = w.write_all(data);
+        let _ = w.finish();
+    }
+    buf
+}
+
+/// Decompress the first file in a zip archive. Returns the raw bytes.
+/// Returns an empty vec on invalid input or an empty archive.
+pub fn jet_archive_zip_decompress(data: &[u8]) -> Vec<u8> {
+    use zip::ZipArchive;
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(data);
+    let mut archive = match ZipArchive::new(cursor) {
+        Ok(a) => a,
+        Err(_) => return Vec::new(),
+    };
+    if archive.len() == 0 {
+        return Vec::new();
+    }
+    let mut file = match archive.by_index(0) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    let _ = file.read_to_end(&mut out);
+    out
+}

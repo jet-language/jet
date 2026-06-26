@@ -1,6 +1,6 @@
-// D-DEP-ARCHIVE1=A: jet.archive — gzip compress / decompress.
-// Ships on the `flate2` crate (pure-Rust, no C dependency) via the hidden FFI
-// bridge. The compiler crate stays zero-dependency (I6).
+// D-DEP-ARCHIVE1=A: jet.archive — gzip + zip compress / decompress.
+// Ships on the `flate2` and `zip` crates (pure-Rust, no C dependency) via the
+// hidden FFI bridge. The compiler crate stays zero-dependency (I6).
 use jet.archive as ar
 
 fn main() {
@@ -16,4 +16,10 @@ fn main() {
     restored @= ar.gzip_decompress(compressed)
     print((restored.len() == original.len()))
     print((restored == original))
+
+    // Zip round-trip: compress into a single-entry zip archive, then extract.
+    zip_data @= ar.zip_compress("entry.txt", original)
+    print((zip_data.len() > 0))
+    zip_restored @= ar.zip_decompress(zip_data)
+    print((zip_restored == original))
 }
