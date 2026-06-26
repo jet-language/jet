@@ -1,7 +1,7 @@
-Error [E3412]: `core.net.tcp_connect()` is not available at comptime yet
+Error [E3412]: `core.net.tcp_connect()` is not available at comptime
   --> tests/ui/impure_net_stub.jet:6:29
     |
   6 |         comptime conn = net.tcp_connect("build.example.com:443")
     |                             ^^^^^^^^^^^
- Why: network access at compile time requires a fetch mechanism with content-hash pinning, which is pending an owner decision
- Fix: use `embed_file` or `embed_bytes` for local build-time data; track D-NETDEP1 in Tower for network support
+ Why: only `core.net.fetch(url, sha256:)` is supported at compile time
+ Fix: use `core.net.fetch(url, sha256: "<hash>")` for content-hash-pinned downloads

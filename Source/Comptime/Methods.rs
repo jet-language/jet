@@ -346,6 +346,36 @@ impl<'a> Interp<'a> {
         }
     }
 
+    /// D-CTEFFECT1 Tier-1 / D-NETDEP1=A: `core.net.fetch(url, sha256:)`.
+    ///
+    /// **Stub — backend pending.** D-NETDEP1=A ratified `ureq`/`minreq` as the
+    /// HTTP backend (runtime-side, in a `jet-net/` workspace member; I6 holds).
+    /// This stub preserves the correct Tier-1 routing (no `#Impure` gate) so
+    /// the architecture is in place; replace the `E3412` body below with the
+    /// real download once the workspace member is wired.
+    ///
+    /// When implemented:
+    ///   1. Validate `url` (arg 0) and `expected_sha256` (arg 1 / labelled `sha256:`).
+    ///   2. Download via the `jet-net` crate's blocking fetch.
+    ///   3. `sha256_hex(bytes)` → compare; mismatch → **E3413**.
+    ///   4. Unreachable / fetch error → **E3414**.
+    ///   5. Push `ComptimeInput { path: "url:{url}", hash: actual }` to `embed_inputs`.
+    ///   6. Return `CtValue::Str(content)` (non-UTF-8 content needs its own code).
+    fn eval_net_fetch(
+        &mut self,
+        _args: Vec<CtValue>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        Err(Diagnostic::error(
+            "E3412",
+            "`core.net.fetch()` backend not yet built".to_string(),
+            "D-NETDEP1=A ratified `ureq`/`minreq` as the HTTP backend (workspace member, \
+             runtime-side), but the `jet-net/` crate has not been wired yet".to_string(),
+            "track c157 in Tower; use `embed_file` for local build-time data meanwhile".to_string(),
+            Some(span),
+        ))
+    }
+
     pub(super) fn eval_method(
         &mut self,
         receiver: &Expr,
@@ -382,6 +412,10 @@ impl<'a> Interp<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval(&a.expr, scope)?);
+                }
+                // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.
+                if module == "core.net" && method == "fetch" {
+                    return self.eval_net_fetch(argv, span);
                 }
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate.
                 let is_tier2 = matches!(module.as_str(),
@@ -578,7 +612,9 @@ fn apply_core_call(
 
 /// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect.
 /// Only called from `eval_method` when `impure_depth > 0` and `allow_impure`.
-/// Supports: `core.fs.read`, `core.env.get`. `core.net.*` is E3412 pending ballot.
+/// Supports: `core.fs.read`, `core.env.get`.
+/// `core.net.fetch` is Tier-1 (handled before the gate in `eval_method`).
+/// Other `core.net.*` methods are E3412 (not yet implemented).
 fn apply_impure_core_call(
     module: &str,
     method: &str,
@@ -613,14 +649,13 @@ fn apply_impure_core_call(
                 Err(_) => Ok(CtValue::None(crate::AST::Type::String)),
             }
         }
-        // E3412: network calls pending owner ballot on D-NETDEP1.
+        // E3412: other core.net methods not yet implemented at comptime.
+        // (core.net.fetch is Tier-1 and handled before this gate in eval_method.)
         ("core.net", _) => Err(Diagnostic::error(
             "E3412",
-            format!("`core.net.{}()` is not available at comptime yet", method),
-            "network access at compile time requires a fetch mechanism with \
-             content-hash pinning, which is pending an owner decision".to_string(),
-            "use `embed_file` or `embed_bytes` for local build-time data; \
-             track D-NETDEP1 in Tower for network support".to_string(),
+            format!("`core.net.{}()` is not available at comptime", method),
+            "only `core.net.fetch(url, sha256:)` is supported at compile time".to_string(),
+            "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads".to_string(),
             Some(span),
         )),
         _ => Err(unsupported(

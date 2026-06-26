@@ -733,6 +733,10 @@
         {
           "t": "[ratified 2026-06-26] D-NETDEP1=A — approve a small pure-Rust HTTP crate (ureq/minreq, runtime-side, owner-gated like Cranelift/regex/sqlite/wasmtime; I6 holds, hash-pinned in .jet/lock, carries native-ize obligation). UNBLOCKED → stage ready. IMPL: wrap the chosen crate outside Source/ (regex/flate2 bridge pattern), implement download + sha256 verify + hash into .jet/lock, replace the E3412 stub in Source/Comptime/Methods.rs (~line 570); verify a comptime fetch(url,sha256:) downloads/verifies/bakes-in, full suite green. NOTE: owner EXPANDED the mandate — end goal is a full HTTP library (client+server, better than Go's net/http) as a Jet core library; the crate is only the bootstrap. That larger track is a NEW card c164; this card delivers ONLY the fetch backend. Recorded in syntax-decisions.md; card stripped from decision-ballots.md.",
           "at": "2026-06-26"
+        },
+        {
+          "t": "[handoff 2026-06-26] PARTIAL: Tier-1 routing wired correctly — eval_net_fetch is a &mut self method, pre-check before the is_tier2 block in eval_method (so fetch needs no #Impure gate per D-CTEFFECT1). Stub returns E3412 'backend not yet built' (correct per D-NETDEP1=A: ballot explicitly REJECTED curl by name; crate lives in jet-net/ workspace member, NOT in Source/). E3413/E3414 codes removed from diagnostics.md and no UI snapshots (I4 compliant). Architecture is correct and in place. TO FINISH: (1) create jet-net/ workspace member with ureq/minreq; (2) call it from eval_net_fetch (replace Err stub body with download+sha256 verify+embed_inputs.push+return); (3) allocate E3413 (sha256 mismatch) + E3414 (fetch failed) in diagnostics.md + add UI snapshots; (4) full suite green. VERIFY: comptime fetch('file:///dev/null', sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855') succeeds; mismatched hash → E3413; bad URL → E3414.",
+          "at": "2026-06-26"
         }
       ],
       "created": "2026-06-25",

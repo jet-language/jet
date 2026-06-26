@@ -3,8 +3,8 @@
 // Tier 0 — pure (always safe): deterministic Core builtins from the
 //           D-CTCORE1 whitelist. No gate required.
 //
-// Tier 1 — reproducible: embed_file / embed_bytes hash their inputs
-//           into .jet/lock so the build is content-addressable.
+// Tier 1 — reproducible: embed_file / embed_bytes / fetch() hash their inputs
+//           into .jet/lock so the build is content-addressable. No gate required.
 //
 // Tier 2 — ambient: reads the host filesystem, environment, etc.
 //           Requires BOTH a `#Impure("reason") { … }` gate AND
@@ -16,11 +16,22 @@ use core.math as math
 comptime DIGITS_OF_PI = math.floor(math.pow(10.0, 4.0) * 3.14159)
 comptime GREETING     = "hello"
 
-// Tier 1: embed_file reads the file once at compile time; its path and
-// content hash are recorded in .jet/lock. (Shown here as comment — no
-// file to embed in this self-contained example.)
+// Tier 1a: embed_file reads the file once at compile time; its path and
+// content hash are recorded in .jet/lock. (Shown as comment — no file
+// to embed in this self-contained example.)
 //
 //   comptime NOTICE = embed_file("NOTICE.txt")
+
+// Tier 1b: fetch downloads a URL once at compile time; the URL and sha256
+// pin are recorded in .jet/lock so every machine's build is byte-identical.
+// The sha256: argument is the content hash — change the URL contents and
+// the build fails with E3413 until you update the hash (hermetic by design).
+//
+//   use core.net as net
+//   comptime SCHEMA = net.fetch(
+//       "https://example.com/schema.json",
+//       sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+//   )
 
 fn main() {
     print("{GREETING}, world")
