@@ -1,0 +1,631 @@
+// syntax-surface.jet — the aspirational syntax reference.
+//
+// NON-EXECUTABLE. This file does NOT compile and is NOT golden-tested. It
+// exists so the owner can eyeball the whole ratified syntax surface in one
+// place. It is a survey, not a program.
+//
+// Two sources of truth back every line here:
+//   examples/showcase/canon.jet   — the COMPILING showcase. Anything there is
+//                                   ratified AND implemented (golden-tested).
+//   docs/spec/syntax-decisions.md — the ratified decision record; each feature
+//                                   below cites its real decision ID + rationale.
+//
+// Marking convention:
+//   // ...   ordinary explanatory comment (canon.jet house style)
+//   # RATIFIED, NOT YET IMPLEMENTED (<id>)
+//           appears immediately above any feature that is ratified in
+//           syntax-decisions.md but has no shipped evidence (not in canon.jet,
+//           no golden example, no parser/sema support). Verify before relying.
+//
+// `#` in the actual code below (e.g. `#Pure`, `#Unsafe`, `#[Serialize]`,
+// `[T#N]`) is REAL Jet syntax — an attribute/marker sigil — not a comment.
+// Only a full line beginning `# RATIFIED…` is a not-yet-implemented marker.
+
+
+// ============================================================================
+// VALUES, BINDINGS & TYPES
+// ============================================================================
+// `@=` binds immutable (D-BIND2); `:=` binds mutable; `=` reassigns a `:=`
+// binding (S17). Optional type annotation before the sigil (S4).
+
+fn values() {
+    name: String @= "Jet"          // annotated immutable (S4 + D-BIND2)
+    year @= 2026                   // inferred Int (S11/S42)
+    version @= 0.1                 // inferred Float; always prints with `.0` (S21)
+    ready: Bool @= true            // Bool (S11)
+
+    count := 0                     // mutable (D-BIND1)
+    count = count + 3              // reassign (S17)
+
+    // string interpolation — expressions inside `{ }` (S8); double braces escape
+    print("v{version} {{literal braces}} ready={ready}")
+}
+
+// Built-in scalar types (S11): Int, Float, Bool, String, Char (S41).
+// Default numerics are Int (i64) / Float (f64) (S42).
+// Sized expert/FFI menu (S42, D-SG9): I8 I16 I32 I64 U8 U16 U32 U64 F32 F64.
+fn sized() {
+    small: U8 @= 255
+    wide: I64 @= 9_000_000_000      // `_` digit separators (S67)
+    mask @= 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
+    big @= 6.022e23                 // float exponent (S67)
+    // conversions are named methods only — no `as`, no C casts (S42, D-SG9)
+    f @= small.to_float()
+    n @= f.to_int()
+}
+
+# RATIFIED, NOT YET IMPLEMENTED (D-NUMOPS1)
+// Integer arithmetic traps on overflow by default; experts opt a single op into
+// wrapping/saturating/checked, visible at the use site.
+fn overflow_surface() {
+    a @= wrapping(255 + 1)
+    b @= saturating(big_int + 1)
+    c @= checked(x + y)            // -> T?
+}
+
+
+// ============================================================================
+// FUNCTIONS & GENERICS
+// ============================================================================
+// `fn name(params) -> Ret { }` (S1/S12). Private by default; `pub` exports (S18).
+
+fn greet(who: String) -> String {
+    return "hello, {who}"
+}
+
+// Generics: angle brackets, inline bounds, no `where`, no turbofish (S45/S33).
+fn id<T>(x: T) -> T {
+    return x
+}
+
+fn largest<T: Comparable>(xs: [T]) -> T {
+    // ...
+}
+
+// Argument labels + trailing defaults; labels never reorder (S61, D-NARG1).
+fn schedule(task: String, delay: Int = 0, urgent: Bool = false) -> Bool {
+    return urgent
+}
+
+fn call_with_labels() {
+    schedule("backup", delay: 30, urgent: true)   // labels are checked docs
+    schedule("ping")                               // trailing defaults fill
+}
+
+# RATIFIED, NOT YET IMPLEMENTED (S83)
+// Multi-head functions — same name, different parameter patterns, dispatched by
+// argument shape; heads must be exhaustive (S83).
+fn area(Circle(r: Float)) -> Float { return 3.14 * r * r }
+fn area(Rect(w: Float, h: Float)) -> Float { return w * h }
+
+
+// ============================================================================
+// CONTROL FLOW
+// ============================================================================
+// One loop keyword; the header picks the mode (S19). break / continue (S23).
+
+fn control() {
+    // infinite
+    loop {
+        break
+    }
+
+    // conditional (replaces `while`)
+    n := 10
+    loop n > 0 {
+        n = n - 1
+    }
+
+    // iteration; ranges are inclusive (S22), optional `step` (S72)
+    sum := 0
+    loop i in 1..5 {
+        sum = sum + i
+    }
+    loop i in 0..10 step 2 {
+        // 0, 2, 4, 6, 8, 10
+    }
+
+    // loop head may be any iterable expression (S79)
+    loop word in "the quick brown".split(" ") {
+        print(word)
+    }
+
+    // labeled loops + labeled break/continue (D-LABEL1; labels keep `@`, D-ATTR3)
+    @outer loop row in [1, 2, 3] {
+        loop col in [1, 2, 3] {
+            break @outer
+        }
+    }
+}
+
+// `if` is the universal branching keyword (D-IF1).
+fn branch(a: Int, b: Int) -> Int {
+    // expression form — `else` required, both branches share a type (S68)
+    m @= if a > b { a } else { b }
+
+    // multi-arm dispatch; bare-value arms compare against the subject (D-IF1/D-IF2)
+    label @= if m {
+        200 -> "ok"                       // means `m == 200`
+        400 || 404 -> "client error"      // `||` joins arms; comparison distributes (S25)
+        else -> "other"                   // catch-all is `else ->`
+    }
+    return m
+}
+
+
+// ============================================================================
+// STRUCTS
+// ============================================================================
+// Construction is dot-brace `T.{ field: value }` (D-DOTCTOR1/2, S29-FLUSH).
+// Methods may live in the body or in a separate `impl` block (S27).
+
+struct Point {
+    x: Float
+    y: Float
+
+    fn dist_sq(self) -> Float {           // `self` receiver (S27)
+        return (self.x * self.x) + (self.y * self.y)
+    }
+
+    fn origin() -> Point {                // no `self` => static/constructor (D-CTOR1)
+        return Point.{x: 0.0, y: 0.0}
+    }
+    fn polar(r: Float, theta: Float) -> Point { return Point.{x: r, y: theta} }
+}
+
+// Field punning: a bare name is shorthand for `name: name` when in scope (S77).
+fn punning(name: String, x: Float, y: Float) {
+    p @= Point.{x, y}                      // ≡ Point.{x: x, y: y}
+}
+
+// Tuples are named-only (S73); destructuring reuses bracket conventions (S74).
+fn aggregates() {
+    pair @= (x: 1, y: 2)                    // named tuple
+    print("{pair.x} {pair.y}")
+    Point.{x, y} @= Point.origin()         // struct destructure (S74)
+    (x: a, y: b) @= pair                    // tuple destructure
+}
+
+
+// ============================================================================
+// ENUMS & PATTERN MATCHING
+// ============================================================================
+// Variants are `Type.Variant` (S30). Pattern tests use `==` (S31).
+
+enum Shape {
+    Circle(Float)                 // single payload: positional type
+    Rect(w: Float, h: Float)      // 2+ payloads: named fields
+    Empty
+}
+
+fn describe(s: Shape) -> String {
+    return if s {
+        Circle(r) -> "circle {r}"             // binds `r`
+        Rect(w, h) -> "rect {w}x{h}"
+        Empty -> "nothing"
+    }
+}
+
+// Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
+fn nested(r: Shape ? Error) -> Bool {
+    return if r {
+        ok(Rect(w, h)) && w > h -> true
+        else -> false
+    }
+}
+
+
+// ============================================================================
+// ERRORS, RESULT & OPTION
+// ============================================================================
+// Fallible return is `T ? E` (S34). Present/absent optionals are `T?` (S32).
+
+enum ParseError { Empty }
+
+fn parse_age(raw: String) -> Int ? ParseError {
+    if raw == "" {
+        return err(ParseError.Empty)          // err(...) constructor (S35)
+    }
+    return ok(7)                              // ok(...) constructor
+}
+
+fn use_errors(raw: String) -> Int ? ParseError {
+    n @= parse_age(raw)?                       // `?` propagates (S7)
+    fallback @= parse_age("0") ?? 0            // `??` fallback (S35/S71)
+    return ok(n * 2)
+}
+
+// Optionals: value(x) present, bare null absent (S32). `?.` chains, `??` defaults.
+fn optionals(user: User?) -> String {
+    city @= user?.address?.city               // optional chaining -> T? (S71)
+    name @= user?.display_name()              // `?.` through methods (D-SUGAR6)
+    return city ?? "unknown"
+}
+
+// Error conversion: opt-in via the `Fallible` trait; `?` applies it (S80/D-ERR-CONV).
+impl FileErr: Fallible {
+    fn to_error(self) -> Error { return Error }
+}
+
+# RATIFIED, NOT YET IMPLEMENTED (S80)
+// Rich default `Error` carrier (message + optional code + optional source) and a
+// fallible `fn main() -> Unit ?`. (The `Fallible` conversion above ships; the
+// structured carrier + fallible main are unbuilt.)
+fn load() -> Config ? {
+    return err(Error.message("bad config").code(2).with_source(io_err))
+}
+fn main() -> Unit ? {
+    cfg @= load()?
+    return ok(())
+}
+
+# RATIFIED, NOT YET IMPLEMENTED (S81)
+// `?continue` — inside a loop, skip this turn when the value is failed/empty,
+// else bind the success value. (`KW_QUESTION_CONTINUE` exists in Syntax.rs but
+// has no parser/sema support yet.)
+fn skip_bad(lines: [String]) {
+    loop raw in lines {
+        line @= next(raw)?continue
+        print(line)
+    }
+}
+
+
+// ============================================================================
+// TRAITS, GENERICS & DISPATCH
+// ============================================================================
+// Named capabilities, not Go-structural (S28). Two equivalent impl spellings.
+
+trait Shape2 {
+    fn area(self) -> Float
+}
+
+struct Square { side: Float }
+
+impl Square: Shape2 {                          // top-level impl (S28)
+    fn area(self) -> Float { return self.side * self.side }
+}
+
+// Trait name in type position => dynamic dispatch; `<T: Trait>` => monomorphize (S48).
+fn total_area(shapes: [Shape2]) -> Float {     // boxed dynamic dispatch
+    // ...
+}
+
+// Trait delegation: forward one trait to one field (S62).
+impl App: Logger using logger
+
+// Built-in derives (S55): auto Printable/Equatable; opt-in Comparable/Serialize.
+#[Comparable, Serialize]                        // multi-marker list (D-ATTR2)
+struct Score {
+    value: Int
+}
+
+# RATIFIED, NOT YET IMPLEMENTED (S56)
+// User-defined derives against the serde data model (Epoch 3; S56/S26 Layer 3).
+#[derive(MyTrait)]
+struct Custom { x: Int }
+
+
+// ============================================================================
+// COLLECTIONS & STRINGS
+// ============================================================================
+// List `[a, b, c]` (S37); map `["k": v]` (S38). Type shorthands `[T]` / `[K, V]`.
+
+fn collections() {
+    nums: [Int] := [3, 1, 2]                    // list type shorthand (S65)
+    nums.push(4)
+    nums.sort()
+
+    // empty literals infer element type from context (S78); else annotate
+    seen: [Int] := []                           // (S78 / explicit)
+
+    fruits: [String, Float] := ["limes": 4.2]   // map shorthand (S64)
+    fruits["pears"] = 9.9                        // insert (S39)
+    got @= fruits.get("limes")                  // safe access -> V? (S39)
+
+    // map entry iteration yields a named entry value (S66)
+    loop e in fruits {
+        print("{e.key}: {e.value}")
+    }
+
+    // indexing & inclusive, copying slices (S39/S40)
+    first @= nums[0]
+    head @= nums[0..1]
+
+    // lazy iterator adapters on the blessed iterator protocol (D-ITER1 / D-EXT1)
+    out @= nums.enumerate().zip(seen).take(2).map((p) => p.value)
+}
+
+// Fixed-size list type `[T#N]` — `#` introduces a pinned count (S76/D-FIXARR1).
+fn fixed() -> [Int#3] {
+    return [1, 2, 3]                            // `.len` is a compile-time const
+}
+
+fn strings() {
+    parts @= "a,b,c".split(",")
+    trimmed @= "  hi  ".trim()
+    loop c in "héllo".chars() { }              // Char iteration; no s[i] (S41)
+    block @= """
+        multi-line string
+        with {trimmed} interpolation
+        """                                     // triple-quoted (S70)
+}
+
+
+// ============================================================================
+// CLOSURES
+// ============================================================================
+// `(params) => expr` or `(params) => { ... }` (S46). `=>` lambda, `->` returns.
+
+fn closures() {
+    nums @= [3, 1, 2]
+    squares @= nums.map((n: Int) => n * n)
+    big @= squares.filter((n: Int) => n > 5)
+    total @= nums.reduce(0, (acc: Int, n: Int) => acc + n)
+
+    // escaping closures must own captures; explicit `take(name)` when needed (S47)
+    make @= take(total) () => total
+}
+
+// Function types: `fn(T1, T2) -> R` (S47). Named fns coerce to function values.
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    return f(x)
+}
+
+// Fan-out (S75): `f.[a, b, c]` == `[f(a), f(b), f(c)]`; result is `[T#N]` (S76).
+fn fanout() {
+    tripled @= triple.[1, 2, 3]
+    [t0, t1, t2] @= tripled
+}
+
+
+// ============================================================================
+// MODULES & IMPORTS
+// ============================================================================
+// `use "path"` = file; `use name` = module (S16). Core stdlib is `core.*` (S51).
+
+use "./lib"                          // file path -> namespace lib
+use "grades/scoring" as g            // file path, aliased
+use core.fs as fs                    // core submodule (S51)
+use core.encoding.json as json       // unified encoding library (D-ENC1)
+use core.tasks as tasks              // see async/tasks below
+use jet.regex as re                  // ring package (D-REGEX1)
+
+// Inline module; `pub` controls cross-file access (S18).
+module math {
+    pub fn double(n: Int) -> Int { return n * 2 }
+}
+
+// Kebab-case allowed in name positions only (package/module/system/image/env) (S84).
+module web-app { }
+
+
+// ============================================================================
+// EFFECTS  (#Pure / #(Io))
+// ============================================================================
+// Every fn carries an inferred, erased effect set; a `#(…)` list bounds it (D-EFF1).
+// Effect tags are PascalCase (D-CASING1). Effects flow through calls (D-EFF2).
+
+#Pure fn square(n: Int) -> Int {              // empty effect set (S60/#Pure)
+    return n * n
+}
+
+fn announce(label: String, n: Int) #(Io) {    // upper bound: may use Io
+    print("{label} {n}")
+}
+
+// Expert levers (D-EFF2): demand/bound a callback, or publish a pass-through.
+fn run_all(cb: #Pure fn(Int) -> Int) { }      // lever 1: param-type effect bound
+fn map_each(f: fn(Int) -> Int) #(via f) { }   // lever 2: `#(via f)` pass-through
+
+// Scoped capability: granted into a lexical scope, revoked at scope end (D-SCAP1).
+fn with_fs() {
+    #grant(Fs) { caps ->
+        // Fs effect authorized only inside this block
+    }
+}
+
+
+// ============================================================================
+// LOW-LEVEL / UNSAFE TIER  (#Unsafe, *T, p.*)
+// ============================================================================
+// `use core.mem` is the discovery gate (S58). `#Unsafe("reason")` is the audit
+// gate; the reason IS the review artifact (D-UNSAFE2). Sigils per D-CAP7/D-CAP9.
+
+use core.mem
+
+// Access-capability sigils ride the type (D-CAP7): `~T` edit, `^T` take/move,
+// `&T` share/escape, bare `T` read/infer. Call site & receivers mirror them.
+fn damage(p: ~Player, amount: Int) {           // ~ = exclusive write
+    p.hp = p.hp - amount
+}
+fn consume(item: ^Item) { }                    // ^ = ownership moved/consumed
+fn cache(tex: &Texture) { }                    // & = may escape/be retained
+struct P {
+    fn edit(~self) { }                         // receiver sigils
+    fn destroy(^self) { }
+}
+fn call_sites(player: Player, file: File) {
+    damage(~player, 10)
+    consume(^item)
+}
+
+// Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.
+#Unsafe("reads through a raw pointer; addr must be live and valid")
+fn deref_cell(cell: Int) -> Int {
+    addr @= mem.address_of(cell)               // address-of is a call, not a sigil
+    #Unsafe("addr is the address of a live Int on this frame") {
+        p @= *addr                             // raw-pointer-of
+        return p.*                             // dereference (composes as p.*.field)
+    }
+}
+
+// Visible uninitialization, gated behind `use core.mem`; write-before-read proof (D-UNINIT1).
+fn uninit() {
+    #Uninit n: Int
+    n = 7
+    print("{n}")
+}
+
+// Arena allocation: named constructor + `.alloc`, freed at scope end (D-ALLOC1/2).
+fn arena_use() {
+    arena @= mem.Arena.new(capacity: 4096)
+    node @= arena.alloc(42)
+}
+
+// Explicit expert region block (D-REGION1 opt B); the beginner tier infers the
+// region from the `arena` binding scope (opt A).
+fn explicit_region() {
+    region scratch {
+        // allocations bounded to `scratch`, may flow out under a stated bound
+    }
+}
+
+
+// ============================================================================
+// COMPTIME
+// ============================================================================
+// Value-only compile-time execution; comptime never creates/selects types (S26).
+// `comptime` is itself the (always-immutable) binding keyword (S57).
+
+comptime TABLE = build_table()                 // baked into the binary as constants
+
+fn embedding() {
+    data @= embed_file("logo.bin")             // the one I/O exception (S26)
+}
+// Curated pure-Core whitelist at comptime (D-CTCORE1); Result/Option ok (D-STRPARSE1).
+
+
+// ============================================================================
+// ASYNC / TASKS
+// ============================================================================
+// Tasks ship via `core.tasks` (S53 surface): spawn returns a Task, `.join()`
+// blocks, `.detach()` fires and forgets. No shared mutable state.
+
+fn tasks_demo() {
+    a @= tasks.spawn(() => square(5))
+    b @= tasks.spawn(() => square(6))
+    print("{a.join() + b.join()}")
+    tasks.spawn(() => square(7)).detach()
+}
+
+# RATIFIED, NOT YET IMPLEMENTED (S53)
+// `@async { }` scoped-effect block is reserved for Epoch 3 (the `tasks` library
+// above is the shipped surface).
+fn async_block() {
+    @async {
+        // ...
+    }
+}
+
+
+// ============================================================================
+// TAGS, TYPESTATE, LINEAR & TAINT  (the value-fact tier)
+// ============================================================================
+// Two qualifier kinds: `trait` (has methods, dispatches) vs `tag` (no methods,
+// erases). Beginner rule: methods -> trait, no methods -> tag (D-QUAL2).
+
+tag Reviewed                                   // marker tag, erases at runtime
+tag Internal { }
+trait Greeter { fn greet(self) -> String }
+
+// Typestate via transitioning tags (D-STATE1): require a state, or transition states.
+#State(Open) fn write_line(self, s: String) { }       // valid only when Open
+#Transition(Closed -> Open) fn open(self) -> File { }  // consume Closed, yield Open
+
+// Taint tracking (D-TAINT1): `#Tainted` value-fact spreads; `#Sanitizer fn` strips it.
+fn taint(raw: String) {
+    user @= #Tainted raw                        // marks untrusted input
+    clean @= sanitize(user)                     // strip via sanitizer
+}
+#Sanitizer fn sanitize(s: String) -> String { return s }
+
+// Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
+#SingleUse
+struct Ticket { id: Int }
+
+// Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
+#UnitFamily(currency) { usd, eur }
+fn price() -> Usd {
+    return Usd(9.99)                            // literal; `.raw()` strips the unit
+}
+
+
+// ============================================================================
+// MEMORY LAYOUT & SIMD
+// ============================================================================
+
+// Layout control (D-SOA1/D-SOA2): whole-struct columnar (struct-of-arrays).
+#layout(columnar)
+struct Particle { x: Float, y: Float, vx: Float, vy: Float }
+
+#layout(C)                                      // C-compatible repr for FFI
+struct CView { a: Int, b: Int }
+
+// Portable SIMD lane types with safe ops + scalar fallback (D-SIMD1).
+fn simd() {
+    v @= F32x4.splat(1.0)
+    w @= v + v
+}
+
+
+// ============================================================================
+// FFI
+// ============================================================================
+// Rust FFI: explicit `extern rust` blocks, each entry a Jet signature + path (S50).
+
+extern rust "base64@0.22" {
+    fn b64encode(s: String) -> String = "base64::encode"
+}
+
+// C FFI: auto-generated bindings, consumed with `use c.<lib> as alias` (S59).
+use c.raylib as rl
+fn c_ffi() {
+    rl.init_window(800, 600, "pong")
+}
+
+
+// ============================================================================
+// TESTS, DOCS & MIGRATIONS
+// ============================================================================
+// `#Test` blocks/fns (S43/D-TEST1). A parameterized `#Test fn` is a property test.
+
+#Test "reversing twice is identity" {
+    require_eq(reverse(reverse([1, 2, 3])), [1, 2, 3])
+}
+
+#Test fn addition_commutes(a: Int, b: Int) {   // property test (inputs generated)
+    require_eq(a + b, b + a)
+}
+
+/// Doc comment (S49). A fenced jet block with `// =>` runs as a doctest (D-TEST4).
+/// ```jet
+/// double(21) // => 42
+/// ```
+fn double(n: Int) -> Int { return n * 2 }
+
+// Bug stops: panic / require (S36). Typed holes: #Todo (D-CASING1).
+fn invariants(n: Int) {
+    require(n > 0, "n must be positive")
+    panic("unreachable")
+}
+
+// Published schema + migration block; `rename` ships (D-MIGRATE1).
+#PublishedSchema
+struct UserRecord {
+    display_name: String
+    age: Int
+}
+migration UserRecord {
+    rename name -> display_name
+}
+
+# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)
+// Additional migration verbs beyond `rename`: add a defaulted field, remove a
+// field, change a field's type with an inline converter. (Only `rename` is
+// evidenced shipping.)
+migration UserRecord {
+    add verified: Bool = false
+    remove legacy_id
+    change price: Int -> Usd via { (cents) => Usd(cents) }
+}

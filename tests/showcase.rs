@@ -50,6 +50,14 @@ fn showcase_tools_golden() {
 
     let expected_dir = root.join("examples/showcase/expected");
     let cases = [
+        // Showcase 0 — syntax canon (the compiling "what works today" surface)
+        ShowcaseCase {
+            name: "canon",
+            tool: "examples/showcase/canon.jet",
+            args: &[],
+            exit_code: None,
+            stderr_contains: None,
+        },
         // Showcase 1 — CLI tool (jetgrep)
         ShowcaseCase {
             name: "jetgrep",

@@ -1,0 +1,185 @@
+// canon.jet — the compiling syntax showcase.
+//
+// Every line here is RATIFIED and IMPLEMENTED Jet syntax that compiles and
+// runs through `jet`. This file is golden-tested (tests/showcase.rs): if it
+// stops compiling or its output drifts, the suite goes red. Treat it as the
+// canonical "what works today" reference.
+//
+// Aspirational / ratified-but-unimplemented syntax lives in
+//   docs/reference/syntax-surface.jet  (non-executable).
+// Decision IDs + rationale live in docs/spec/syntax-decisions.md.
+
+// --- variables & types ---------------------------------------------------
+// `@=` binds (type inferred); `name: T @=` annotates; `:=` binds mutable.
+
+fn show_values() {
+    name: String @= "Jet"
+    year @= 2026
+    version @= 0.1
+    ready: Bool @= true
+    print("values: {name} {year} {version} {ready}")
+
+    count := 0
+    count = count + 3
+    print("mutable: {count}")
+}
+
+// --- functions & generics ------------------------------------------------
+
+fn greet(who: String) -> String {
+    return "hello, {who}"
+}
+
+fn id<T>(x: T) -> T {
+    return x
+}
+
+fn triple(n: Int) -> Int {
+    return n * 3
+}
+
+// --- structs: fields + methods + construction ----------------------------
+// Construction uses dot-brace `T.{ field: value }` (D-DOTCTOR1/2).
+
+struct Point {
+    x: Float
+    y: Float
+
+    fn dist_sq(self) -> Float {
+        return (self.x * self.x) + (self.y * self.y)
+    }
+
+    fn origin() -> Point {
+        return Point.{x: 0.0, y: 0.0}
+    }
+}
+
+// --- enums & pattern matching --------------------------------------------
+// `if subject == { arm -> body }`; `||` joins arms; `else ->` is default.
+
+enum Light {
+    Red
+    Yellow
+    Green
+}
+
+fn next(light: Light) -> Light {
+    if light == {
+        Red -> { return Light.Yellow }
+        Yellow -> { return Light.Green }
+        Green -> { return Light.Red }
+    }
+}
+
+fn day_kind(day: String) -> String {
+    if day == {
+        "sat" || "sun" -> { return "weekend" }
+        else -> { return "weekday" }
+    }
+}
+
+// --- errors: `T ? E`, ok/err, `?` propagate, `??` fallback ---------------
+
+enum ParseError {
+    Empty
+}
+
+fn parse_age(raw: String) -> Int ? ParseError {
+    if raw == "" {
+        return err(ParseError.Empty)
+    }
+    return ok(7)
+}
+
+fn double_age(raw: String) -> Int ? ParseError {
+    n @= parse_age(raw)?
+    return ok(n * 2)
+}
+
+// --- traits & impl -------------------------------------------------------
+
+trait Shape {
+    fn area(self) -> Float
+}
+
+struct Square {
+    side: Float
+}
+
+impl Square: Shape {
+    fn area(self) -> Float {
+        return self.side * self.side
+    }
+}
+
+// --- inline module -------------------------------------------------------
+
+module math {
+    pub fn double(n: Int) -> Int {
+        return n * 2
+    }
+}
+
+// --- main: exercise each feature with deterministic output ---------------
+
+fn main() {
+    show_values()
+
+    print(greet("world"))
+    same @= id(99)
+    print("id: {same}")
+
+    p @= Point.{x: 3.0, y: 4.0}
+    print("dist_sq: {p.dist_sq()}")
+    o @= Point.origin()
+    print("origin: {o.x} {o.y}")
+
+    print("next: {next(Light.Red) == Light.Yellow}")
+    kind @= day_kind("sun")
+    print("day: {kind}")
+
+    // errors
+    if double_age("42") == {
+        ok(n) -> { print("ok: {n}") }
+        err(e) -> { print("err") }
+    }
+    fallback @= parse_age("") ?? 0
+    print("fallback: {fallback}")
+
+    // collections + closures
+    nums: [Int] := [3, 1, 2]
+    nums.push(4)
+    nums.sort()
+    squares @= nums.map((n: Int) => n * n)
+    big @= squares.filter((n: Int) => n > 5)
+    total @= nums.reduce(0, (acc: Int, n: Int) => acc + n)
+    print("nums: {nums[0]} {nums[1]} total {total} big {big.len()}")
+
+    // tuple
+    pair @= (x: 1, y: 2)
+    print("tuple: {pair.x} {pair.y}")
+
+    // trait dispatch
+    sq @= Square.{side: 5.0}
+    print("area: {sq.area()}")
+
+    // module
+    print("module: {math.double(21)}")
+
+    // fan-out (S75): f.[a, b, c] == [f(a), f(b), f(c)]
+    tripled @= triple.[1, 2, 3]
+    [t0, t1, t2] @= tripled
+    print("fanout: {t0} {t1} {t2}")
+
+    // strings
+    parts @= "a,b,c".split(",")
+    trimmed @= "  hi  ".trim()
+    print("split: {parts.len()} trimmed {trimmed}")
+
+    // control flow
+    sum := 0
+    loop i in 1..5 {
+        sum = sum + i
+    }
+    print("loop_sum: {sum}")
+}
