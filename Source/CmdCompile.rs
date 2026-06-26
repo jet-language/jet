@@ -7,7 +7,53 @@ use std::process::{exit, Command};
 
 use jet::ExitCodes;
 
-use crate::{report_problems, usage, BuildProfile, OutputMode};
+use crate::{report_problems, usage, BuildProfile, OptimizeLevel, OutputMode};
+
+/// D-BUILDPROFILE1: resolve `--profile=<name>` (or `--release` → `"release"`)
+/// to a `BuildProfile`. Blessed names `release`/`debug` have built-in defaults.
+/// Any other name must be declared in the enclosing `pkg.jet`'s `build {}` block;
+/// if not found, emit E1219 and exit.
+fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> BuildProfile {
+    match name {
+        n if n == jet::Syntax::BUILD_PROFILE_RELEASE => BuildProfile::Release,
+        n if n == jet::Syntax::BUILD_PROFILE_DEBUG => BuildProfile::Debug,
+        _ => {
+            // Walk up from the source file to find pkg.jet, then parse build {}.
+            let src_path = std::path::Path::new(source_file);
+            let search_from = src_path.parent().unwrap_or(std::path::Path::new("."));
+            let defined = if let Some(root) = jet::Loader::find_manifest_root(search_from) {
+                let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+                if let Ok(raw) = fs::read_to_string(&pack_path) {
+                    match jet::Jetpack::PackageManifest::parse(&raw) {
+                        Ok(mf) => {
+                            // Search for the name among the declared profiles.
+                            for pd in &mf.build_profiles {
+                                if pd.name == name {
+                                    let opt = OptimizeLevel::from(pd.optimize);
+                                    return BuildProfile::Named(opt);
+                                }
+                            }
+                            mf.build_profiles.iter().map(|p| p.name.clone()).collect()
+                        }
+                        Err(_) => Vec::new(),
+                    }
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+            // Unknown profile — emit E1219.
+            let diag = jet::Manifest::e1219(name, &defined);
+            if mode.json {
+                eprint!("{}", jet::render_all_json("<cli>", "", &[diag]));
+            } else {
+                eprint!("{}", jet::render_all_colored("<cli>", "", &[diag], mode.color_stderr()));
+            }
+            std::process::exit(jet::ExitCodes::USER_ERROR);
+        }
+    }
+}
 
 pub(crate) fn run_compile_cmd(
     cmd: &str,
@@ -20,13 +66,19 @@ pub(crate) fn run_compile_cmd(
     verbose: bool,
     capabilities_json: bool,
     sbom: bool,
+    named_profile: Option<&str>,
     program_args: &[&String],
     mode: OutputMode,
 ) {
+    // D-BUILDPROFILE1: profile selection. Precedence: --freestanding > --small >
+    // --release/--profile=<name> > default. Named profiles are resolved against
+    // pkg.jet's `build {}` block; unknown names emit E1219 and exit.
     let profile = if freestanding {
         BuildProfile::Freestanding
     } else if small {
         BuildProfile::Small
+    } else if let Some(name) = named_profile {
+        resolve_named_profile(name, file, mode)
     } else {
         BuildProfile::Default
     };
@@ -644,8 +696,18 @@ pub(crate) fn build(
     // (the binary is not executable on this host, and the target triple
     // affects codegen choices that aren't captured by the source hash).
     let use_cache = ffi.is_none() && clinks.is_empty() && cross_target.is_none();
+    // D-BUILDPROFILE1: cache key incorporates the profile tag so different
+    // profiles never share a cached binary.
+    let profile_tag = match profile {
+        BuildProfile::Default => "default",
+        BuildProfile::Release => "release",
+        BuildProfile::Debug => "debug",
+        BuildProfile::Named(opt) => opt.cache_tag(),
+        BuildProfile::Small => "small",
+        BuildProfile::Freestanding => "freestanding",
+    };
     let cache_key = if use_cache {
-        Some(jet::BuildCache::cache_key(rust_code, small))
+        Some(jet::BuildCache::cache_key(rust_code, profile_tag))
     } else {
         None
     };
@@ -683,6 +745,29 @@ pub(crate) fn build(
         BuildProfile::Default => {
             cmd.arg("-O").arg("-C").arg("strip=symbols");
             // FFI rlibs come from a separate cargo build without LTO bitcode.
+            if ffi.is_none() {
+                cmd.arg("-C").arg("lto=thin");
+            }
+        }
+        // D-BUILDPROFILE1: `--release` / `--profile=release` — full opt-level=3.
+        BuildProfile::Release => {
+            cmd.arg("-C").arg("opt-level=3").arg("-C").arg("strip=symbols");
+            if ffi.is_none() {
+                cmd.arg("-C").arg("lto=thin");
+            }
+        }
+        // D-BUILDPROFILE1: `--profile=debug` — no optimization.
+        BuildProfile::Debug => {
+            // opt-level=0 is rustc's default; no flag needed. Keep symbols.
+        }
+        // D-BUILDPROFILE1: user-defined profile with an explicit optimize level.
+        BuildProfile::Named(opt) => {
+            match opt {
+                OptimizeLevel::None => { /* opt-level=0 is the default */ }
+                OptimizeLevel::Basic => { cmd.arg("-O"); }
+                OptimizeLevel::Full => { cmd.arg("-C").arg("opt-level=3"); }
+            }
+            cmd.arg("-C").arg("strip=symbols");
             if ffi.is_none() {
                 cmd.arg("-C").arg("lto=thin");
             }

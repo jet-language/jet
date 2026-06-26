@@ -1440,6 +1440,33 @@ pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_F32, TYPE_F64,
 ];
 
+/// D-BUILDPROFILE1 (ratified 2026-06-25): the `build { }` block in `pkg.jet`
+/// where named build profiles are defined. A profile is a `Build.{ optimize: … }`
+/// value; blessed names `release`/`debug` carry built-in defaults; all others
+/// must be declared here. Active profile is chosen by `--release` (sugar for
+/// `--profile=release`) or `--profile=<name>` — never by ambient environment.
+pub const MANIFEST_BLOCK_BUILD: &str = "build"; // D-BUILDPROFILE1
+
+/// D-BUILDPROFILE1: the constructor type for a build profile value inside
+/// `pkg.jet`'s `build { }` block — written as `Build.{ optimize: … }`.
+pub const BUILD_CTOR: &str = "Build"; // D-BUILDPROFILE1
+
+/// D-BUILDPROFILE1: the field inside a `Build.{ … }` profile value that sets
+/// the optimization level.
+pub const BUILD_FIELD_OPTIMIZE: &str = "optimize"; // D-BUILDPROFILE1
+
+/// D-BUILDPROFILE1: blessed profile names — `release` and `debug` carry
+/// built-in defaults and need no explicit declaration in `build { }`.
+pub const BUILD_PROFILE_RELEASE: &str = "release"; // D-BUILDPROFILE1
+pub const BUILD_PROFILE_DEBUG: &str = "debug"; // D-BUILDPROFILE1
+
+/// D-BUILDPROFILE1: `optimize:` levels for `Build.{ optimize: … }`:
+/// `none` (no optimization, fastest compile), `basic` (opt-level=2, the
+/// driver default), `full` (opt-level=3, maximum throughput).
+pub const BUILD_OPTIMIZE_NONE: &str = "none"; // D-BUILDPROFILE1
+pub const BUILD_OPTIMIZE_BASIC: &str = "basic"; // D-BUILDPROFILE1
+pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
+
 /// Canonical list of impure builtins (write stdout/stderr or read stdin).
 ///
 /// Used by Sema/Purity and Comptime/Purity to detect I/O calls inside

@@ -110,6 +110,9 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--coverage", help: "with test: report per-function / per-line coverage (D-COV1)" },
     FlagSpec { long: "--rust", help: "with emit: print the generated Rust source (D-TOOL3)" },
     FlagSpec { long: "-u", help: "short form of --update-snapshots" },
+    // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
+    FlagSpec { long: "--release", help: "with build/run: use the release profile (D-BUILDPROFILE1)" },
+    FlagSpec { long: "--profile", help: "with build/run: named build profile --profile=<name> (D-BUILDPROFILE1)" },
 ];
 
 /// Is `name` a built-in command?

@@ -1,0 +1,18 @@
+// D-BUILDPROFILE1: a package with named build profiles declared in `build {}`.
+// Blessed names `release` and `debug` have built-in defaults; any name here
+// overrides those defaults or defines a new custom profile.
+payload: {
+    name: "build_profiles_example",
+    version: "0.1.0",
+    edition: "2026",
+}
+
+// build: { } declares named profiles. The active profile is chosen at the
+// command line with --release (sugar for --profile=release) or --profile=<name>.
+// No ambient-environment fallback: same flag + same source => identical binary.
+build: {
+    release: Build.{ optimize: full },
+    debug: Build.{ optimize: none },
+    fast: Build.{ optimize: full },
+    balanced: Build.{ optimize: basic },
+}

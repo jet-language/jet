@@ -365,6 +365,9 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
             e1216(&file, &format!("package `{name}`: {detail}"))
         }
         ManifestError::ReservedSection(section) => e1209(&file, section),
+        ManifestError::BadBuildProfile { name, reason } => {
+            e1206(&file, &format!("build profile `{name}`: {reason}"))
+        }
     }
 }
 
@@ -475,6 +478,29 @@ pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnosti
         ),
         format!("`module {name}` was found in multiple files: {list}; each package name must map to exactly one module"),
         format!("rename one of the conflicting `module {name}` declarations so each package has a unique name"),
+        None,
+    )
+}
+
+/// D-BUILDPROFILE1: emit E1219 when the user passes `--profile=<name>` but
+/// `name` is not a blessed default (`release`/`debug`) or defined in `pkg.jet`'s
+/// `build { }` block. `defined` is the sorted list of profiles the user did define.
+pub fn e1219(name: &str, defined: &[String]) -> Diagnostic {
+    let note = if defined.is_empty() {
+        "no profiles are defined in the `build { }` block of `pkg.jet`".to_string()
+    } else {
+        format!("defined profiles: {}", defined.join(", "))
+    };
+    Diagnostic::error(
+        "E1219",
+        format!("unknown build profile `{name}`"),
+        note,
+        format!(
+            "use `--release` for `--profile={}`, `--profile={}` for a debug build, or add `{name}: Build.{{ optimize: full }}` to the `build {{ }}` block in `{}`",
+            Syntax::BUILD_PROFILE_RELEASE,
+            Syntax::BUILD_PROFILE_DEBUG,
+            Syntax::PAYLOAD_FILE,
+        ),
         None,
     )
 }

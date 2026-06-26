@@ -78,6 +78,9 @@ const FLAG_HELP: &[(&str, &str)] = &[
     ("locked", "with `fetch`: verify the lock only, no network"),
     ("pkg", "with `bind`: the C library link key"),
     ("out", "with `bind`: the output cache path"),
+    // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
+    ("release", "with `build`/`run`: use the release profile (D-BUILDPROFILE1)"),
+    ("profile", "with `build`/`run`: named build profile --profile=<name> (D-BUILDPROFILE1)"),
 ];
 
 /// Human description for a flag (global or per-command), for man/completions.
@@ -96,8 +99,8 @@ pub fn flag_help(name: &str) -> &'static str {
 /// is generated from it (see `command_names`).
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "check", summary: "look for problems, build nothing", flags: &["json"], arg: Arg::File },
-    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json", "capabilities-json"], arg: Arg::File },
-    CommandSpec { name: "run", summary: "build, then run (or run a project)", flags: &["small", "emit-rust", "json"], arg: Arg::File },
+    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json", "capabilities-json", "release", "profile"], arg: Arg::File },
+    CommandSpec { name: "run", summary: "build, then run (or run a project)", flags: &["small", "emit-rust", "json", "release", "profile"], arg: Arg::File },
     CommandSpec { name: "test", summary: "compile and run top-level test blocks", flags: &["json", "update-snapshots", "u", "coverage"], arg: Arg::Path },
     CommandSpec { name: "emit", summary: "emit the generated Rust source (D-TOOL3)", flags: &["rust"], arg: Arg::File },
     CommandSpec { name: "bench", summary: "benchmark a Jet program (D-TOOL5)", flags: &["json"], arg: Arg::File },

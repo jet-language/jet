@@ -370,6 +370,7 @@ before continuing.
 | E1216 | jet   | a `targets:` block has an unknown field, or `api:` is not `stable`/`explicit` (D-TGT3/D-CAP4) |
 | E1217 | jet   | a dependency in `pkg.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
+| E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
@@ -596,6 +597,7 @@ output is machine-parseable with `--json`.
 | E2604 | Integrity check failed for `{package}` `{version}` — expected `{expected}`, got `{actual}`. | A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. | Re-run `jet fetch` after removing the corrupt store entry (`jet gc --force`). If the problem persists, the upstream source may have been altered; audit the change before proceeding. |
 | E1217 | `{dep}` is in `pkg.jet` but has no locked revision. | A `--locked` build (and `jet publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
+| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release` and `debug` have built-in defaults. Any other name must be declared in your `pkg.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `pkg.jet`. |
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 

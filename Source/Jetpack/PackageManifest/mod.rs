@@ -41,11 +41,54 @@ mod ParseBlocks;
 pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
 pub use Edit::{add_dep, remove_dep};
+pub use ParseBlocks::parse_build;
 
 use super::RefSpec::{RefError, Source};
 use crate::Syntax;
 use Helpers::block_body;
 use ParseBlocks::{parse_deps, parse_package, parse_packages};
+
+/// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
+/// `Build.{ optimize: … }` inside `pkg.jet`'s `build { }` block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildOptimize {
+    /// `optimize: none` — no optimization flags; fastest compile, slowest binary.
+    /// Maps to rustc opt-level=0 (debug builds).
+    None,
+    /// `optimize: basic` — `-C opt-level=2`; the driver default when no profile is set.
+    Basic,
+    /// `optimize: full` — `-C opt-level=3`; maximum throughput (release builds).
+    Full,
+}
+
+impl BuildOptimize {
+    /// The `optimize:` value string this level maps to (from `Syntax::BUILD_OPTIMIZE_*`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BuildOptimize::None => Syntax::BUILD_OPTIMIZE_NONE,
+            BuildOptimize::Basic => Syntax::BUILD_OPTIMIZE_BASIC,
+            BuildOptimize::Full => Syntax::BUILD_OPTIMIZE_FULL,
+        }
+    }
+
+    /// Cache-key tag string — unique per level so cache entries never collide.
+    pub fn cache_tag(self) -> &'static str {
+        match self {
+            BuildOptimize::None => "opt:none",
+            BuildOptimize::Basic => "opt:basic",
+            BuildOptimize::Full => "opt:full",
+        }
+    }
+}
+
+/// D-BUILDPROFILE1: one named build profile declared in `pkg.jet`'s `build { }` block.
+/// Written as `name: Build.{ optimize: <level> }`. Blessed names `release`/`debug`
+/// have built-in defaults; user-defined names extend that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildProfileDef {
+    pub name: String,
+    pub optimize: BuildOptimize,
+}
 
 /// Payload identity (the `payload: { … }` block, U10 — was `package:`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -157,6 +200,9 @@ pub struct PackManifest {
     pub deps: Vec<Dep>,
     /// Packages this payload declares (the `packages: { name: kind }` block, U10).
     pub packages: Vec<PackageEntry>,
+    /// D-BUILDPROFILE1: named build profiles from the `build { }` block, in
+    /// declaration order. Empty when no `build: { … }` block is present.
+    pub build_profiles: Vec<BuildProfileDef>,
 }
 
 /// Why a `pkg.jet` package manifest could not be parsed. These are internal
@@ -189,6 +235,9 @@ pub enum ManifestError {
     /// A reserved top-level key (`dev_deps`/`patch`/`workspace`) was used
     /// non-empty (carries forward jet.toml's reserved-section guard, S52/E1209).
     ReservedSection(&'static str),
+    /// D-BUILDPROFILE1: a `build { }` profile entry is malformed — missing the
+    /// `Build.{ optimize: … }` value shape or has an unknown optimize level.
+    BadBuildProfile { name: String, reason: &'static str },
 }
 
 /// Top-level keys reserved for a future Jet feature; using them non-empty
@@ -225,7 +274,7 @@ impl PackManifest {
     }
 }
 
-/// Parse a `pkg.jet` package manifest from its text (U1/U10).
+/// Parse a `pkg.jet` package manifest from its text (U1/U10/D-BUILDPROFILE1).
 pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
     let text = Helpers::strip_line_comments(text);
 
@@ -244,6 +293,12 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         None => Vec::new(),
     };
 
+    // D-BUILDPROFILE1: parse named build profiles from `build: { … }`.
+    let build_profiles = match block_body(&text, Syntax::MANIFEST_BLOCK_BUILD, '{', '}') {
+        Some(body) => parse_build(&body)?,
+        None => Vec::new(),
+    };
+
     for &section in RESERVED_SECTIONS {
         if let Some(body) = block_body(&text, section, '{', '}') {
             if !body.trim().is_empty() {
@@ -256,6 +311,7 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         package,
         deps,
         packages,
+        build_profiles,
     })
 }
 

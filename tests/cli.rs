@@ -574,3 +574,60 @@ fn unknown_flag_before_separator_is_e2102_with_passthrough_hint() {
     assert!(stderr.contains("E2102"), "should cite E2102:\n{stderr}");
     assert!(stderr.contains("--"), "Fix should mention `--` separator:\n{stderr}");
 }
+
+// ── D-BUILDPROFILE1: --release / --profile=<name> ─────────────────────────────
+
+#[test]
+fn profile_unknown_name_emits_e1219() {
+    // D-BUILDPROFILE1: `--profile=<unknown>` with no pkg.jet defining that name
+    // must emit E1219 and exit 1 (user error).
+    let p = std::env::temp_dir().join("jet_cli_profile_test.jet");
+    fs::write(&p, "fn main() { print(\"ok\") }\n").unwrap();
+    let out = Command::new(jet())
+        .args([
+            "build",
+            p.to_str().unwrap(),
+            "--profile=staging",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "unknown --profile should exit 1 (user error)"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E1219"),
+        "unknown profile should cite E1219:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("staging"),
+        "E1219 should name the unknown profile:\n{stderr}"
+    );
+}
+
+#[test]
+fn profile_release_flag_is_accepted() {
+    // `--release` is valid (blessed profile) and must not emit E1219.
+    let p = std::env::temp_dir().join("jet_cli_release_test.jet");
+    fs::write(&p, "fn main() { print(\"ok\") }\n").unwrap();
+    // We can't guarantee rustc is in PATH for the binary build, but `jet check`
+    // doesn't accept --release yet, so test that `jet build --release` at least
+    // doesn't emit E1219. We check that the exit code is NOT 1-with-E1219.
+    let out = Command::new(jet())
+        .args([
+            "build",
+            p.to_str().unwrap(),
+            "--release",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("E1219"),
+        "--release must not emit E1219 (it's a blessed profile):\n{stderr}"
+    );
+}

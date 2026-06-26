@@ -76,10 +76,50 @@ fn parse_color(raw: &[String]) -> ColorChoice {
     choice
 }
 
+/// D-BUILDPROFILE1 (ratified 2026-06-25): the optimization level carried by a
+/// named build profile. Three levels mapping directly to rustc opt-level values.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OptimizeLevel {
+    /// `optimize: none` — rustc opt-level=0; fast compile, no optimization.
+    None,
+    /// `optimize: basic` — rustc `-O` (opt-level=2); the driver default.
+    Basic,
+    /// `optimize: full` — rustc `-C opt-level=3`; maximum throughput.
+    Full,
+}
+
+impl OptimizeLevel {
+    /// Cache-key tag unique per level so different profiles don't share entries.
+    pub(crate) fn cache_tag(self) -> &'static str {
+        match self {
+            OptimizeLevel::None => "opt:none",
+            OptimizeLevel::Basic => "opt:basic",
+            OptimizeLevel::Full => "opt:full",
+        }
+    }
+}
+
+/// Convert from the manifest `BuildOptimize` enum to the driver `OptimizeLevel`.
+impl From<jet::Jetpack::PackageManifest::BuildOptimize> for OptimizeLevel {
+    fn from(v: jet::Jetpack::PackageManifest::BuildOptimize) -> Self {
+        match v {
+            jet::Jetpack::PackageManifest::BuildOptimize::None => OptimizeLevel::None,
+            jet::Jetpack::PackageManifest::BuildOptimize::Basic => OptimizeLevel::Basic,
+            jet::Jetpack::PackageManifest::BuildOptimize::Full => OptimizeLevel::Full,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum BuildProfile {
-    /// Default: speed-oriented (`-O`, thin LTO).
+    /// Default: speed-oriented (`-O`, thin LTO). No `--profile` flag.
     Default,
+    /// D-BUILDPROFILE1: `--release` / `--profile=release`. Full optimization.
+    Release,
+    /// D-BUILDPROFILE1: `--profile=debug`. No optimization.
+    Debug,
+    /// D-BUILDPROFILE1: user-defined profile with an explicit optimize level.
+    Named(OptimizeLevel),
     /// S15: size-oriented (`opt-level=z`, fat LTO, `panic=abort`).
     Small,
     /// E2-M15: freestanding / embedded — no OS, only core APIs; `panic=abort`.
@@ -315,6 +355,19 @@ fn main() {
     let cross_target: Option<String> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    // D-BUILDPROFILE1: `--release` is sugar for `--profile=release`.
+    // `--profile=<name>` selects a named profile. Resolved against pkg.jet
+    // in run_compile_cmd; only the name is collected here.
+    let release_flag = jet_argv.iter().any(|a| a == "--release");
+    let profile_flag: Option<String> = jet_argv
+        .iter()
+        .find_map(|a| a.strip_prefix("--profile=").map(str::to_string));
+    // Effective profile name: --release wins over --profile when both given.
+    let named_profile: Option<String> = if release_flag {
+        Some(jet::Syntax::BUILD_PROFILE_RELEASE.to_string())
+    } else {
+        profile_flag
+    };
     let mode = OutputMode {
         json,
         color: parse_color(jet_argv),
@@ -646,6 +699,7 @@ fn main() {
                                     verbose,
                                     capabilities_json,
                                     sbom,
+                                    named_profile.as_deref(),
                                     &program_args,
                                     mode,
                                 );
@@ -723,7 +777,7 @@ fn main() {
             } else {
                 target.to_string()
             };
-            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, allow_impure, cross_target.as_deref(), verbose, capabilities_json, sbom, &program_args, mode);
+            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, allow_impure, cross_target.as_deref(), verbose, capabilities_json, sbom, named_profile.as_deref(), &program_args, mode);
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Incremental build cache (M14).
 //!
 //! Layout: `~/.cache/jet/build/<sha256-of-source+flags>/bin`
-//! Key = SHA-256 of generated Rust source + build profile (`default` / `small`).
+//! Key = SHA-256 of generated Rust source + build profile tag string.
 
 use crate::SHA256::sha256_hex;
 use std::fs;
@@ -19,13 +19,15 @@ pub fn cache_dir() -> PathBuf {
     PathBuf::from(home).join(".cache").join("jet").join("build")
 }
 
-/// Content hash for a generated Rust source + profile flag.
-pub fn cache_key(source: &str, small: bool) -> String {
-    let profile = if small { "small" } else { "default" };
-    let mut data = Vec::with_capacity(source.len() + profile.len() + 1);
+/// Content hash for a generated Rust source + profile tag (e.g. `"default"`,
+/// `"small"`, `"release"`, `"debug"`, `"opt:full"` for named profiles).
+/// D-BUILDPROFILE1: different profiles produce different binaries and must
+/// not share cache entries.
+pub fn cache_key(source: &str, profile_tag: &str) -> String {
+    let mut data = Vec::with_capacity(source.len() + profile_tag.len() + 1);
     data.extend_from_slice(source.as_bytes());
     data.push(0);
-    data.extend_from_slice(profile.as_bytes());
+    data.extend_from_slice(profile_tag.as_bytes());
     sha256_hex(&data)
 }
 
@@ -64,16 +66,21 @@ mod tests {
 
     #[test]
     fn cache_key_changes_with_profile() {
-        let a = cache_key("fn main() {}", false);
-        let b = cache_key("fn main() {}", true);
+        let a = cache_key("fn main() {}", "default");
+        let b = cache_key("fn main() {}", "small");
+        let c = cache_key("fn main() {}", "release");
+        let d = cache_key("fn main() {}", "debug");
         assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_ne!(c, d);
         assert_eq!(a.len(), 64);
     }
 
     #[test]
     fn cache_key_is_stable() {
-        let k1 = cache_key("fn main() {}", false);
-        let k2 = cache_key("fn main() {}", false);
+        let k1 = cache_key("fn main() {}", "default");
+        let k2 = cache_key("fn main() {}", "default");
         assert_eq!(k1, k2);
     }
 }

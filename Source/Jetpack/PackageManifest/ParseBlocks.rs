@@ -1,8 +1,8 @@
 //! Block-body parsers for the `pkg.jet` manifest: `payload:`, `deps:`,
-//! `packages:`.
+//! `packages:`, `build:`.
 
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
-use super::{ApiMode, Dep, DepSource, ManifestError, PackageEntry, PackageMeta, Target};
+use super::{ApiMode, BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry, PackageMeta, Target};
 use crate::Jetpack::RefSpec;
 use crate::Syntax;
 
@@ -261,6 +261,66 @@ fn parse_package_entry_block(
     // No `targets:` field — kind is inferred at realize time (D-ILE1). Other
     // fields (version/bin) are accepted and ignored for now.
     Ok((Vec::new(), ApiMode::Inferred))
+}
+
+/// D-BUILDPROFILE1: parse the `build: { … }` body. Each entry is either:
+///   `name: Build.{ optimize: <level> }`  (full dot-ctor form)
+///   `name: { optimize: <level> }`        (shorthand — Build type is inferred)
+/// Both forms extract the `optimize:` field. Unknown fields inside `Build.{ … }`
+/// are tolerated for forward-compat (future `targets:` field etc.).
+pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
+    let mut profiles = Vec::new();
+    for (name, value) in key_value_entries(body) {
+        let value = value.trim();
+        // Strip optional `Build.` prefix (D-BUILDPROFILE1: `Build.{ … }` form).
+        let inner_block = if let Some(rest) = value.strip_prefix(Syntax::BUILD_CTOR) {
+            // `Build.{ … }` or `Build{ … }` (dot optional in the manifest surface).
+            let rest = rest.trim_start_matches('.').trim();
+            rest.strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .map(|s| s.trim())
+        } else if let Some(s) = value.strip_prefix('{') {
+            // bare `{ … }` (Build type inferred from context in pkg.jet).
+            s.strip_suffix('}').map(|s| s.trim())
+        } else {
+            return Err(ManifestError::BadBuildProfile {
+                name: name.clone(),
+                reason: "expected `Build.{ optimize: none|basic|full }` or `{ optimize: none|basic|full }`",
+            });
+        };
+        let inner = inner_block.unwrap_or("");
+        let mut optimize_val: Option<String> = None;
+        for (key, val) in key_value_entries(inner) {
+            if key == Syntax::BUILD_FIELD_OPTIMIZE {
+                optimize_val = Some(unquote(&val));
+            }
+            // Other fields (e.g. future `targets:`) are tolerated and ignored
+            // so forward-compat is maintained.
+        }
+        let optimize = match optimize_val.as_deref() {
+            Some(s) if s == Syntax::BUILD_OPTIMIZE_NONE => BuildOptimize::None,
+            Some(s) if s == Syntax::BUILD_OPTIMIZE_BASIC => BuildOptimize::Basic,
+            Some(s) if s == Syntax::BUILD_OPTIMIZE_FULL => BuildOptimize::Full,
+            Some(other) => {
+                return Err(ManifestError::BadBuildProfile {
+                    name: name.clone(),
+                    reason: if other.is_empty() {
+                        "missing `optimize:` field in `Build.{ … }` value"
+                    } else {
+                        "unknown optimize level — use `none`, `basic`, or `full`"
+                    },
+                });
+            }
+            None => {
+                return Err(ManifestError::BadBuildProfile {
+                    name: name.clone(),
+                    reason: "missing `optimize:` field in `Build.{ … }` value",
+                });
+            }
+        };
+        profiles.push(BuildProfileDef { name, optimize });
+    }
+    Ok(profiles)
 }
 
 /// Parse a `[ library, executable { entry: "…" }, … ]` target list. The package's
