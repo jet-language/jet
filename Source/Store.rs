@@ -40,20 +40,50 @@ pub fn store_path(name: &str, version: &str, fingerprint: &str) -> PathBuf {
 
 /// Ensure a path dep's source is available in the store.
 /// For path deps the store entry is the canonical source copy.
-/// Returns the store path (creates it if missing).
+/// Returns `(store_path, content_hash)` — hash of the installed tree (D-CASTORE1=A).
 pub fn ensure_path_dep(
     name: &str,
     version: &str,
     fingerprint: &str,
     source_dir: &Path,
-) -> Result<PathBuf, Diagnostic> {
+) -> Result<(PathBuf, String), Diagnostic> {
     let dest = store_path(name, version, fingerprint);
     if dest.is_dir() {
-        return Ok(dest);
+        let hash = tree_hash(&dest);
+        return Ok((dest, hash));
     }
     fs::create_dir_all(&dest).map_err(|e| io_error("creating store entry", &dest, e))?;
     copy_jet_tree(source_dir, &dest).map_err(|e| io_error("copying to store", &dest, e))?;
-    Ok(dest)
+    let hash = tree_hash(&dest);
+    Ok((dest, hash))
+}
+
+/// D-CASTORE1=A: verify a store entry's content hash against the recorded lock value.
+/// Returns E1204 on mismatch (tampered store) or if entry is missing.
+pub fn verify_content_hash(pkg_name: &str, store_entry: &Path, expected_content_hash: &str) -> Result<(), Diagnostic> {
+    if !store_entry.is_dir() {
+        return Err(Diagnostic::error(
+            "E1204",
+            format!("the store entry for `{}` is missing", pkg_name),
+            "a package source tree must be present in the store".to_string(),
+            "run `jet fetch` to re-download the package".to_string(),
+            None,
+        ));
+    }
+    if expected_content_hash.is_empty() {
+        return Ok(());
+    }
+    let actual = tree_hash(store_entry);
+    if actual != expected_content_hash {
+        return Err(Diagnostic::error(
+            "E1204",
+            format!("the store entry for `{}` has been modified", pkg_name),
+            format!("expected content hash `{}` but got `{}`", expected_content_hash, actual),
+            "delete the store entry and run `jet fetch` to re-install".to_string(),
+            None,
+        ));
+    }
+    Ok(())
 }
 
 /// Ensure a git dep is stored.
@@ -63,7 +93,7 @@ pub fn ensure_git_dep(
     version: &str,
     fingerprint: &str,
     git_dir: &Path,
-) -> Result<PathBuf, Diagnostic> {
+) -> Result<(PathBuf, String), Diagnostic> {
     ensure_path_dep(name, version, fingerprint, git_dir)
 }
 

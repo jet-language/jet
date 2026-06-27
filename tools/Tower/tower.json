@@ -3823,7 +3823,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e5",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-CASTORE1=A: extend build-cache hashing to cover package identity. Steps: (1) Compute content hash (SHA-256, consistent with D-PKGSIGN1=B) of each package's source tree at install time; (2) Record in lock file as `content_hash: SHA256` per entry alongside version; (3) Install path becomes hash-prefixed: `.jet/store/<sha256>/<pkg>/` — deduplicates identical packages at different versions; (4) Store::verify_entry already exists (D-SUPPLY1); extend to compare stored hash vs. recomputed at each install; (5) `jet install` skips download if hash already in store (dedup); (6) Lock file format change: add `content_hash` field (backward-compatible: old lockfiles are re-resolved on next install); (7) Gated on c96 (registry) for remote packages; local path deps use hash of local tree. No new user-facing syntax. Tests in tests/ui/.",
       "blockedBy": [],
@@ -3839,6 +3839,10 @@
         {
           "at": "2026-06-26",
           "text": "Plan written. Extension of existing store/lock infrastructure. Advancing to ready."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented. LockedPackage.content_hash: Option<String> added to Lock.rs schema (backward-compatible: old lockfiles parse as None). Lock writer emits content-hash field. ensure_path_dep/ensure_git_dep return (PathBuf, String) — content hash computed by tree_hash() at install time. New verify_content_hash() function (E1204 on tamper). 3 new tests: content_hash_recorded_at_install, content_hash_mismatch_after_tamper, lock_file_content_hash_roundtrip. All 60 pkg tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",

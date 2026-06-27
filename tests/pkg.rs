@@ -404,7 +404,7 @@ fn store_ensure_path_dep_creates_entry() {
 
     let fp = "sha256-0000000000000000000000000000000000000000000000000000000000000000";
 
-    let entry = with_store(&store, || {
+    let (entry, _hash) = with_store(&store, || {
         jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src)
             .expect("ensure_path_dep should succeed")
     });
@@ -431,8 +431,8 @@ fn store_ensure_is_idempotent() {
     let fp = "sha256-1111111111111111111111111111111111111111111111111111111111111111";
 
     let (p1, p2) = with_store(&store, || {
-        let a = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
-        let b = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+        let (a, _) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+        let (b, _) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
         (a, b)
     });
 
@@ -457,8 +457,7 @@ fn store_tamper_detected_e1204() {
     let fp = "sha256-2222222222222222222222222222222222222222222222222222222222222222";
 
     let (entry, genuine_hash) = with_store(&store, || {
-        let e = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
-        let h = jet::SHA256::tree_hash(&e);
+        let (e, h) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
         (e, h)
     });
 
@@ -474,6 +473,83 @@ fn store_tamper_detected_e1204() {
     assert_eq!(diag.code, "E1204");
 
     let _ = fs::remove_dir_all(&tmp);
+}
+
+// ─────────────────────────────────────────────
+// D-CASTORE1=A: content-addressed store identity
+// ─────────────────────────────────────────────
+
+#[test]
+fn content_hash_recorded_at_install() {
+    let tmp = tmp_dir("castore_record");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let src = tmp.join("src");
+    write(&src, "lib.jet", "pub fn x() {}\n");
+    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+
+    let fp = "sha256-aaaa0000000000000000000000000000000000000000000000000000000000aa";
+
+    let (entry, hash) = with_store(&store, || {
+        jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap()
+    });
+
+    assert!(entry.is_dir());
+    // Hash is a non-empty sha256-prefixed string.
+    assert!(hash.starts_with("sha256-"), "content hash must be sha256-prefixed");
+    // verify_content_hash succeeds with the correct hash.
+    jet::Store::verify_content_hash("mylib", &entry, &hash).expect("fresh install must verify");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn content_hash_mismatch_after_tamper() {
+    let tmp = tmp_dir("castore_tamper");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let src = tmp.join("src");
+    write(&src, "lib.jet", "pub fn x() {}\n");
+    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+
+    let fp = "sha256-bbbb0000000000000000000000000000000000000000000000000000000000bb";
+
+    let (entry, original_hash) = with_store(&store, || {
+        jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap()
+    });
+
+    // Tamper with the store entry.
+    fs::write(entry.join("lib.jet"), "pub fn evil() {}\n").unwrap();
+
+    let result = jet::Store::verify_content_hash("mylib", &entry, &original_hash);
+    let diag = result.expect_err("tampered entry must fail verify_content_hash");
+    assert_eq!(diag.code, "E1204");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn lock_file_content_hash_roundtrip() {
+    use jet::Lock::{LockFile, LockSource, LockedPackage};
+    let pkg = LockedPackage {
+        name: "foo".into(),
+        version: "1.0.0".into(),
+        source: LockSource::Path("../foo".into()),
+        locked: None,
+        fingerprint: "sha256-cccc".into(),
+        content_hash: Some("sha256-deadbeef".into()),
+        dependencies: vec![],
+    };
+    let lock = LockFile {
+        version: 1,
+        packages: vec![pkg],
+        root_dependencies: vec!["foo".into()],
+        comptime_inputs: vec![],
+    };
+    let serialized = jet::Lock::write(&lock);
+    assert!(serialized.contains("content-hash = \"sha256-deadbeef\""), "content-hash must appear in lockfile");
+    let parsed = jet::Lock::parse(&serialized).expect("must parse back");
+    assert_eq!(parsed.packages[0].content_hash, Some("sha256-deadbeef".into()));
 }
 
 // ─────────────────────────────────────────────
@@ -497,7 +573,7 @@ fn hardlink_projects_share_store_inode() {
     let link2 = tmp.join("proj2/deps/mylib");
 
     let store_entry = with_store(&store, || {
-        let e = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+        let (e, _) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
         jet::Store::link_into_project(&e, &link1).unwrap();
         jet::Store::link_into_project(&e, &link2).unwrap();
         e
@@ -1292,6 +1368,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             name: name.into(),
             version: version.into(),
             fingerprint: fp.into(),
+            content_hash: None,
             source: LockSource::Path("/tmp/placeholder".into()),
             locked: None,
             dependencies: vec![],

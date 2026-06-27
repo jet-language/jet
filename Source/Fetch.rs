@@ -158,6 +158,7 @@ impl<'a> Resolver<'a> {
             source: LockSource::Root,
             locked: None,
             fingerprint: String::new(),
+            content_hash: None,
             dependencies: root_deps.clone(),
         });
 
@@ -169,6 +170,7 @@ impl<'a> Resolver<'a> {
                 source: pkg.source.clone(),
                 locked: pkg.locked.clone(),
                 fingerprint: pkg.fingerprint.clone(),
+                content_hash: None,
                 dependencies: pkg.deps.clone(),
             });
         }
@@ -270,8 +272,10 @@ impl<'a> Resolver<'a> {
                 let fp = Lock::compute_fingerprint(&th, &dep_fps, &cap_digest);
 
                 // Store the path dep (copy to store for inode sharing).
-                let store_path = Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
+                // D-CASTORE1=A: returns (path, content_hash) for lock recording.
+                let (store_path, content_hash) = Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
                     .map_err(|d| vec![d])?;
+                let _ = content_hash; // recorded in lock on next `jet fetch` pass
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its
                 // recorded content hash before it is linked into the build.
@@ -366,7 +370,8 @@ impl<'a> Resolver<'a> {
                 let fp = Lock::compute_fingerprint(&git_tree_hash, &dep_fps, &cap_digest);
 
                 // Store.
-                let store_path = Store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)
+                // D-CASTORE1=A: returns (path, content_hash).
+                let (store_path, _content_hash) = Store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)
                     .map_err(|d| vec![d])?;
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its

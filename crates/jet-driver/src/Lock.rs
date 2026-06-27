@@ -30,6 +30,9 @@ pub struct LockedPackage {
     pub locked: Option<LockedRevision>,
     /// Plan fingerprint = sha256 of (source_tree_hash + sorted dep fingerprints).
     pub fingerprint: String,
+    /// D-CASTORE1=A: SHA-256 of the installed source tree. Recorded at install time;
+    /// verified on each install to detect silent tampering. `None` for old lockfiles.
+    pub content_hash: Option<String>,
     /// Direct dependency names.
     pub dependencies: Vec<String>,
 }
@@ -93,6 +96,11 @@ pub fn write(lock: &LockFile) -> String {
         }
 
         out.push_str(&format!("fingerprint = \"{}\"\n", pkg.fingerprint));
+
+        // D-CASTORE1=A: content hash of installed source tree.
+        if let Some(ref ch) = pkg.content_hash {
+            out.push_str(&format!("content-hash = \"{}\"\n", ch));
+        }
 
         if !pkg.dependencies.is_empty() {
             let deps: Vec<String> = pkg
@@ -219,6 +227,8 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "name" => pkg.name = Some(val.trim_matches('"').to_string()),
                 "version" => pkg.version = Some(val.trim_matches('"').to_string()),
                 "fingerprint" => pkg.fingerprint = Some(val.trim_matches('"').to_string()),
+                // D-CASTORE1=A: content hash is optional (old lockfiles omit it).
+                "content-hash" => pkg.content_hash = Some(val.trim_matches('"').to_string()),
                 "source" => pkg.source_raw = Some(val.to_string()),
                 "locked" => pkg.locked_raw = Some(val.to_string()),
                 "dependencies" => pkg.deps = parse_string_array(val),
@@ -276,6 +286,7 @@ struct PartialPkg {
     source_raw: Option<String>,
     locked_raw: Option<String>,
     fingerprint: Option<String>,
+    content_hash: Option<String>,
     deps: Vec<String>,
 }
 
@@ -292,6 +303,7 @@ impl PartialPkg {
             source,
             locked,
             fingerprint,
+            content_hash: self.content_hash,
             dependencies: self.deps,
         })
     }

@@ -300,6 +300,7 @@ mod tests {
             name: name.into(),
             version: version.into(),
             fingerprint: fp.into(),
+            content_hash: None,
             source: LockSource::Path("/tmp/placeholder".into()),
             locked: None,
             dependencies: vec![],
