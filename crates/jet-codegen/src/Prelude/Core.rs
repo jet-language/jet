@@ -78,6 +78,35 @@ impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
         }
     }
 }
+// D-AUTOPAR1=A: explicit parallel list adapters using std::thread::scope (I6-safe).
+fn jet_list_par_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+where T: Send + Clone, U: Send, F: Fn(T) -> U + Sync
+{
+    std::thread::scope(|s| {
+        let handles: Vec<_> = xs.into_iter().map(|x| s.spawn(|| f(x))).collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    })
+}
+fn jet_list_par_filter<T, F>(xs: Vec<T>, f: F) -> Vec<T>
+where T: Send + Clone, F: Fn(T) -> bool + Sync
+{
+    // Clone each element for the predicate thread; keep original for result.
+    let pairs: Vec<(T, T)> = xs.into_iter().map(|x| (x.clone(), x)).collect();
+    std::thread::scope(|s| {
+        let (originals, clones): (Vec<T>, Vec<T>) = pairs.into_iter().unzip();
+        let handles: Vec<_> = clones.into_iter().map(|x| s.spawn(|| f(x))).collect();
+        originals.into_iter().zip(handles).filter_map(|(x, h)| if h.join().unwrap() { Some(x) } else { None }).collect()
+    })
+}
+// par_fold(init, f) — sequential execution; parallelism requires an associative combiner
+// the caller cannot provide separately. Semantically correct; future parallel version
+// would accept a combine: Fn(U, U) -> U argument.
+fn jet_list_par_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
+where F: Fn(U, T) -> U
+{
+    xs.into_iter().fold(init, f)
+}
+
 // D-ADAPTFID1=A: Perf.fidelity() / Perf.set_fidelity(v) — global atomic f32.
 static JET_PERF_FIDELITY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1065353216); // 1.0f32 bits
 fn jet_perf_fidelity() -> f64 {

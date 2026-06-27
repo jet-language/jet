@@ -553,6 +553,18 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
+                    // D-AUTOPAR1=A: par_map → [V]; refine V from closure's return type.
+                    if Collections::is_closure_method(method) && i == 0 && method == "par_map" {
+                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                            refined_ret = Some(Type::List(Box::new((**r).clone())));
+                        }
+                    }
+                    // D-AUTOPAR1=A: par_fold → acc; refine from closure's return type.
+                    if Collections::is_closure_method(method) && i == 1 && method == "par_fold" {
+                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                            refined_ret = Some((**r).clone());
+                        }
+                    }
                     if method == "reduce" && i == 1 {
                         if let Type::Fn {
                             ret: Some(ref r), ..

@@ -1389,6 +1389,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::FilterMap => {
                     format!("jet_list_filter_map(({}).clone(), {})", recv, a(0))
                 }
+                // D-AUTOPAR1=A: parallel adapters.
+                TClosureOp::ParMap => format!("jet_list_par_map(({}).clone(), {})", recv, a(0)),
+                TClosureOp::ParFilter => format!("jet_list_par_filter(({}).clone(), {})", recv, a(0)),
+                TClosureOp::ParFold => format!("jet_list_par_fold(({}).clone(), {}, {})", recv, a(0), a(1)),
                 TClosureOp::Scan => {
                     format!("jet_list_scan(({}).clone(), {}, {})", recv, a(0), a(1))
                 }

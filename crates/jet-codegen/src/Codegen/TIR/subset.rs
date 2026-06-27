@@ -3006,14 +3006,14 @@ pub(crate) fn closure_method_in_subset(
         return false;
     }
     match method {
-        "reduce" | "scan" | "fold" => {
+        "reduce" | "scan" | "fold" | "par_fold" => {
             // (seed, lambda). The seed is any in-subset value; the lambda must be a
             // literal in-subset closure.
             args.len() == 2
                 && expr_in_subset(&args[0].expr, cx, locals)
                 && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
         }
-        // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 closure adapters.
+        // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 + D-AUTOPAR1 closure adapters.
         _ => {
             args.len() == 1
                 && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))

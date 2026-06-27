@@ -49,6 +49,8 @@ pub fn is_closure_method(method: &str) -> bool {
         | "position" | "min_by" | "max_by" | "fold" | "group_by"
         // D-FAILCOMP1: failure-aware adapters
         | "filter_map"
+        // D-AUTOPAR1=A: explicit parallel adapters
+        | "par_map" | "par_filter" | "par_fold"
     )
 }
 
@@ -299,6 +301,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             key: Box::new(Type::String), // placeholder; sema refines
             value: Box::new(Type::List(Box::new(inner.clone()))),
         })),
+        // D-AUTOPAR1=A: parallel adapters. Return types mirror their sequential equivalents;
+        // sema refines V/acc from closure body (ret: None open return).
+        ("par_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),    // sema refines V
+        ("par_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("par_fold", 2) => Some(Some(Type::Int)),                          // sema refines acc
         _ => None,
     }
 }
@@ -571,6 +578,25 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None,
                 effect_bound: None,
             }]),
+            // D-AUTOPAR1=A: parallel adapters — same closure shapes as sequential equivalents.
+            "par_map" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: None, // sema refines V from closure body
+                effect_bound: None,
+            }]),
+            "par_filter" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: Some(Box::new(Type::Bool)),
+                effect_bound: None,
+            }]),
+            "par_fold" => Some(vec![
+                Type::Int, // init — sema refines acc type
+                Type::Fn {
+                    params: vec![Type::Int, (**inner).clone()],
+                    ret: Some(Box::new(Type::Int)), // sema refines
+                    effect_bound: None,
+                },
+            ]),
             // D-ITER1: non-closure adapters.
             "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
             "zip" => Some(vec![Type::List(Box::new((**inner).clone()))]),

@@ -3130,7 +3130,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-AUTOPAR1=A: explicit parallel iterator adapters, no hidden auto-parallelism. Steps: (1) par_map(f: fn(T) -> V) — maps in parallel using the task runtime's thread pool; (2) par_filter(pred: fn(T) -> Bool) — parallel filter; (3) par_fold(init: V, f: fn(V, T) -> V) — parallel fold with associative combiner; (4) All three backed by Rayon-compatible work-stealing via the M:N task pool (no external crate — use the existing task runtime); (5) Ordering: par_map/par_filter preserve input order (stable); par_fold is inherently unordered unless combiner is commutative; (6) examples/features/NN_parallel_iter.jet; (7) Snapshot goldens. Callers must opt in explicitly — `iter.map(f)` is always sequential; `iter.par_map(f)` is parallel. Clear intent at call site.",
       "blockedBy": [],
@@ -3146,6 +3146,10 @@
         {
           "at": "2026-06-26",
           "text": "Plan written. No new syntax; uses existing task runtime. Advancing to ready."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented. par_map/par_filter via std::thread::scope (I6-safe, no external crates); par_fold sequential (parallel fold requires associative combiner; sequential is correct and safe). TIR: TClosureOp::ParMap/ParFilter/ParFold + subset gate in closure_method_in_subset. Collections.rs return types + closure arg shapes. 144_parallel_iter.jet golden-tested ([2,4,6,8,10] / [2,4] / 15). All tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",

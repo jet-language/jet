@@ -1048,6 +1048,13 @@ pub enum TClosureOp {
     // D-FAILCOMP1: failure-aware adapters.
     /// `filter_map(f)` — `jet_list_filter_map((recv).clone(), f)`.
     FilterMap,
+    // D-AUTOPAR1=A: explicit parallel adapters.
+    /// `par_map(f)` — `jet_list_par_map((recv).clone(), f)`.
+    ParMap,
+    /// `par_filter(f)` — `jet_list_par_filter((recv).clone(), f)`.
+    ParFilter,
+    /// `par_fold(init, f)` — `jet_list_par_fold((recv).clone(), init, f)`.
+    ParFold,
 }
 
 /// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
