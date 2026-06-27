@@ -43,7 +43,7 @@ fn main() {
 
 #[test]
 fn e3301_http_in_freestanding() {
-    let src = r#"use jet.http as http
+    let src = r#"use core.http as http
 
 fn main() {
     _ @= http.get("http://example.com")

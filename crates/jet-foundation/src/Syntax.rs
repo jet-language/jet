@@ -346,6 +346,8 @@ pub const TYPE_KEY: &str = "Key";
 pub const REACTIVE_MODULE: &str = "jet.reactive";
 pub const TYPE_SIGNAL: &str = "Signal";
 pub const TYPE_DERIVED: &str = "Derived";
+/// D-HONESTNUM1=A: the science measurement type name.
+pub const TYPE_MEASUREMENT: &str = "Measurement";
 
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
@@ -1549,25 +1551,36 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.encoding.base64",
     // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
     "core.uuid",
-    // E2-M9: first-party ring packages.
-    "jet.log",
-    "jet.time",
-    "jet.crypto",
+    // D-CORENS1: ring packages now spelled `core.*` (canonical user-facing name).
+    // Internal dispatch uses `jet.*` keys via normalize_core_module.
+    "core.log",
+    "core.crypto",
     // D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
-    "jet.http",
+    "core.http",
     // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.
-    "jet.regex",
+    "core.regex",
     // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
-    "jet.archive",
+    "core.archive",
     // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
-    "jet.db",
+    "core.db",
     // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
     // derived values, and effects. Pure std runtime (no external crate).
-    "jet.reactive",
+    "core.reactive",
+    // D-HONESTNUM1=A (ratified 2026-06-26): Measurement<T> — value ± uncertainty
+    // with standard uncertainty propagation. Pure float arithmetic; no external crates.
+    "core.science.measurement",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {
-    KNOWN_CORE_MODULES.contains(&name)
+    if KNOWN_CORE_MODULES.contains(&name) {
+        return true;
+    }
+    // D-CORENS1: internal dispatch key `jet.<ring>` (from normalize_core_module)
+    // is valid even though only `core.<ring>` is in KNOWN_CORE_MODULES.
+    if let Some(ring) = name.strip_prefix("jet.") {
+        return is_ring_module(ring);
+    }
+    false
 }
 
 pub fn core_modules_list() -> String {
@@ -1576,12 +1589,14 @@ pub fn core_modules_list() -> String {
 
 /// Normalize a module import name to a canonical core-module path, or `None`
 /// if the import is not a core/ring module.
+///
+/// D-CORENS1: `core.<ring>` is the canonical user-facing spelling. These are
+/// normalized to the internal `jet.<ring>` key so that sema dispatch (which
+/// uses `jet.*` arm keys throughout CheckerCoreLib.rs) does not need to change.
+/// The old `jet.<ring>` spelling fires E0341 in Bundle.rs (before normalize).
 pub fn normalize_core_module(name: &str) -> Option<String> {
     if name == CORE_SHORT {
         return Some(CORE_SHORT.to_string());
-    }
-    if let Some(rest) = name.strip_prefix("core.") {
-        return Some(format!("core.{rest}"));
     }
     if name == CORE_CANONICAL {
         return Some(CORE_SHORT.to_string());
@@ -1589,7 +1604,15 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
     if let Some(rest) = name.strip_prefix("jet.core.") {
         return Some(format!("core.{rest}"));
     }
-    // E2-M9: first-party ring packages — `jet.http`, `jet.db`, etc.
+    // `core.<ring>` → internal `jet.<ring>` key (sema dispatch uses jet.* names).
+    if let Some(ring) = name.strip_prefix("core.") {
+        if is_ring_module(ring) {
+            return Some(format!("jet.{ring}"));
+        }
+        return Some(format!("core.{ring}"));
+    }
+    // Legacy `jet.<ring>` — still normalized to `jet.<ring>` internal key.
+    // E0341 fires in Bundle.rs before this is called (on the raw import name).
     if let Some(ring) = name.strip_prefix("jet.") {
         if is_ring_module(ring) {
             return Some(format!("jet.{ring}"));
@@ -1602,7 +1625,7 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
 pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
-        "log" | "time" | "crypto" | "http" | "regex" | "reactive" | "archive" | "db"
+        "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "db"
     )
 }
 

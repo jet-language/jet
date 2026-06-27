@@ -194,7 +194,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     // deterministic value constructor, so (like `time.clock`) it carries no effect.
     if matches!(
         (module, method),
-        ("core.time", "clock" | "ms" | "secs") | ("core.random", "rng")
+        ("core.time" | "jet.time", "clock" | "ms" | "secs") | ("core.random", "rng")
     ) {
         return None;
     }

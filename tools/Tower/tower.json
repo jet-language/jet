@@ -3978,7 +3978,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "blockedBy": [],
       "plan": "Migrate the implementation to the single `core.*` first-party namespace (D-CORENS1). The ring libs that examples use today (jet.http, jet.crypto, jet.db, jet.regex, jet.csv, jet.log, jet.archive, jet.reactive) are golden-tested, so this needs code + re-bless, not just text edits.\nSteps: (1) module resolver — make `core.<name>` resolve for the ring packages (find the known-module list / package-root handling; `jet_std` Rust crate name is internal and UNCHANGED); (2) decide the transition for the old spelling: a teaching error (E-code) mapping `use jet.http` / `use jet.core` -> \"first-party libraries are `core.*`: use `core.http`\" (S14-style), with a tests/ui snapshot, then retire `jet.*`/`jet.core` acceptance; (3) migrate the ~14 examples that import `jet.<lib>` (examples/features/56,57,76 http; 55 crypto; 74 regex; 51 csv; 54,79 log; 117 reactive; 127 archive; 128 db; capstone/logbook; showcase/http_service) to `core.<lib>`; (4) re-bless any goldens whose output prints the module name (examples/features/expected/128_db.out had `jet.db`); (5) full `cargo test` green. Source/Syntax.rs + any KNOWN_*_MODULES const updated. Verify no `jet.<lib>` / `jet.core` remains in examples/ or Source/ user-facing strings.",
@@ -3986,10 +3986,14 @@
         {
           "at": "2026-06-26",
           "text": "Raised from owner D-CORENS1 directive. Docs/canon/Tower already migrated to core.*; this tracks the resolver + examples + goldens code migration. Advanced to ready with a plan."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented: KNOWN_CORE_MODULES updated to core.* for ring packages; normalize_core_module maps core.<ring>→jet.<ring> internal key; E0341 teaching error with tests/ui snapshot; all ring examples + tests migrated to core.*; Effects.rs/Purity.rs jet.time key coverage fixed; Path prelude detection added; D-PATHFS1 prelude + example 138_path.jet golden; D-HONESTNUM1 example 139_measurement.jet golden; all tests green."
         }
       ],
       "created": "2026-06-26T00:00:00.000Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     }
   ],
   "decisions": [

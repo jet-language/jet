@@ -72,7 +72,7 @@ fn match_groups_find_replace_split() {
         return;
     }
     let src = r##"
-use jet.regex as re
+use core.regex as re
 
 fn main() {
     text @= "2024-06-21 build ok"
@@ -139,7 +139,7 @@ fn bad_pattern_is_a_recoverable_error_not_a_crash() {
     // branch at the boundary (linear-time crate, no panic), which `??` turns into
     // our own message — never a rustc/runtime crash (I2).
     let src = r##"
-use jet.regex as re
+use core.regex as re
 
 fn main() {
     if re.is_match("(unclosed", "abc") == {

@@ -199,6 +199,8 @@ before continuing.
 | E0321 | parse | teaching: `impl Type: Trait` old colon separator → `impl Type.Trait` (D-IMPLDOT1) |
 | E0322 | parse | assignment `=` in `if` condition — did you mean `==`? (D-ASSIGNCOND1) |
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
+| E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
+| E0341 | sema  | teaching: `use jet.<ring>` old ring namespace — use `use core.<ring>` (D-CORENS1) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |

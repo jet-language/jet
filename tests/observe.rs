@@ -45,7 +45,7 @@ fn structured_log_json_fields() {
     if !have_rustc { return; }
 
     let src = r#"
-use jet.log as log
+use core.log as log
 fn main() {
     log.set_level("debug")
     log.info("hello world")
@@ -87,7 +87,7 @@ fn structured_log_level_filter() {
 
     // Default level is "info" — debug messages are suppressed.
     let src = r#"
-use jet.log as log
+use core.log as log
 fn main() {
     log.info("visible")
     log.debug("hidden")
@@ -105,7 +105,7 @@ fn structured_log_trace_id() {
     if !have_rustc { return; }
 
     let src = r#"
-use jet.log as log
+use core.log as log
 fn main() {
     log.set_trace_id("req-abc-123")
     log.info("with trace")
@@ -125,7 +125,7 @@ fn structured_log_json_escape() {
 
     // Special characters in the message must be JSON-escaped.
     let src = r#"
-use jet.log as log
+use core.log as log
 fn main() {
     log.info("say \"hello\"")
 }

@@ -662,6 +662,19 @@ impl<'a> Checker<'a> {
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        // D-PATHFS1 / E0340: `read_dir` is not a Jet API — teach the typed path path.
+        if method == "read_dir" {
+            self.infer(receiver); // still type-check the receiver
+            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            self.diags.push(Diagnostic::error(
+                "E0340",
+                "`read_dir` is not a method in Jet".to_string(),
+                "Jet uses typed paths; raw-string directory helpers are not exposed".to_string(),
+                "write `Path.from(path).walk()` to list a directory recursively".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
         if method == "clone" {
             self.borrow_ctx = true;
             return self.infer(receiver);
@@ -837,6 +850,20 @@ impl<'a> Checker<'a> {
                     _ => Type::Int,
                 };
                 return Some(Type::Apply { name: "Deque".to_string(), args: vec![elem_ty] });
+            }
+            // D-PATHFS1: `Path.from(str)` — typed path constructor.
+            if type_name == "Path" && method == "from" && !self.registry.contains("Path") {
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`Path.from` takes one string argument, got {}", args.len()),
+                        "`Path.from` constructs a typed path from a string".to_string(),
+                        "write `Path.from(some_string)`".to_string(),
+                        Some(span),
+                    ));
+                }
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Named("Path".to_string()));
             }
             // D-SIMD2 / D-LINALG1: a STATIC method on a built-in math type —
             // `F32x4.splat(x)` / `Vec3.from_array([…])`. The arg is elaborated
@@ -1016,6 +1043,16 @@ impl<'a> Checker<'a> {
                 return ret;
             }
         }
+        // D-PATHFS1: method calls on `Path` typed handle.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == "Path" {
+                if let Some(ret) = path_method_return(handle_ty, method, args.len(), span, &mut self.diags) {
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    *recv_type_out = Some("Path".to_string());
+                    return ret;
+                }
+            }
+        }
         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
         // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
         if let Type::Named(handle_ty) = &recv_ty {
@@ -1115,6 +1152,40 @@ impl<'a> Checker<'a> {
                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                     *recv_type_out = Some(handle_ty);
                     return result;
+                }
+            }
+        }
+        // D-HONESTNUM1=A: methods on `Measurement<Float>` (value ± uncertainty).
+        // `.add/sub/mul/div(m)` → Measurement<Float>; `.value()/.uncertainty()` → Float.
+        // Operator overloading is NOT extended here — I8 closed-family rule.
+        if let Type::Apply { name, .. } = &recv_ty {
+            if name == crate::Syntax::TYPE_MEASUREMENT {
+                let meas_ty = recv_ty.clone();
+                let ret = match (method, args.len()) {
+                    ("add" | "sub" | "mul" | "div", 1) => {
+                        let arg_ty = self.infer(&mut args[0].expr);
+                        if let Some(got) = &arg_ty {
+                            if got != &meas_ty {
+                                self.diags.push(Diagnostic::error(
+                                    "E0128",
+                                    format!(
+                                        "`.{}()` expects a `Measurement<Float>`, got `{}`",
+                                        method, got.name()
+                                    ),
+                                    "Measurement arithmetic requires both operands to have the same type".to_string(),
+                                    "wrap the value with `M.from(value, uncertainty)` first".to_string(),
+                                    Some(args[0].expr.span()),
+                                ));
+                            }
+                        }
+                        Some(meas_ty.clone())
+                    }
+                    ("value" | "uncertainty", 0) => Some(Type::Float),
+                    _ => None,
+                };
+                if let Some(r) = ret {
+                    *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
+                    return Some(r);
                 }
             }
         }

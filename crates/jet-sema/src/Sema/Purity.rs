@@ -81,8 +81,7 @@ pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
 pub(crate) fn is_nondeterministic_core(module: &str, method: &str) -> bool {
     matches!(
         (module, method),
-        ("core.time", "now" | "sleep" | "start")
-            | ("jet.time", "now")
+        ("core.time" | "jet.time", "now" | "sleep" | "start")
             | ("core.random", "int" | "float" | "pick" | "shuffle" | "seed")
     )
 }

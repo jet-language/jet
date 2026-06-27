@@ -592,6 +592,61 @@ mod jet_std {
         fn jet_show(&self) -> String { "Closed".to_string() }
     }
 
+    // D-HONESTNUM1=A: Measurement<T> — a value paired with its standard uncertainty.
+    // Arithmetic propagates uncertainty using the standard quadrature rules.
+    // Only `JetMeasurement<f64>` (Float) is exposed to Jet programs.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct JetMeasurement<T: Copy> {
+        value: T,
+        uncertainty: T,
+    }
+
+    impl JetMeasurement<f64> {
+        pub fn new(value: f64, uncertainty: f64) -> Self {
+            JetMeasurement { value, uncertainty }
+        }
+        pub fn value(&self) -> f64 { self.value }
+        pub fn uncertainty(&self) -> f64 { self.uncertainty }
+        // Addition / subtraction: σ_z = sqrt(σ_a² + σ_b²)
+        pub fn add(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
+            JetMeasurement {
+                value: self.value + other.value,
+                uncertainty: (self.uncertainty * self.uncertainty
+                    + other.uncertainty * other.uncertainty).sqrt(),
+            }
+        }
+        pub fn sub(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
+            JetMeasurement {
+                value: self.value - other.value,
+                uncertainty: (self.uncertainty * self.uncertainty
+                    + other.uncertainty * other.uncertainty).sqrt(),
+            }
+        }
+        // Multiplication: σ_z = sqrt((b·σ_a)² + (a·σ_b)²)
+        pub fn mul(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
+            JetMeasurement {
+                value: self.value * other.value,
+                uncertainty: ((other.value * self.uncertainty).powi(2)
+                    + (self.value * other.uncertainty).powi(2)).sqrt(),
+            }
+        }
+        // Division: σ_z = sqrt((σ_a/b)² + (a·σ_b/b²)²)
+        pub fn div(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
+            JetMeasurement {
+                value: self.value / other.value,
+                uncertainty: ((self.uncertainty / other.value).powi(2)
+                    + (self.value * other.uncertainty / (other.value * other.value)).powi(2))
+                .sqrt(),
+            }
+        }
+    }
+
+    impl super::JetShow for JetMeasurement<f64> {
+        fn jet_show(&self) -> String {
+            format!("{:?} \u{00b1} {:?}", self.value, self.uncertainty)
+        }
+    }
+
     pub fn io_error(path: &str, e: std::io::Error) -> IoError {
         match e.kind() {
             std::io::ErrorKind::NotFound => IoError::NotFound { path: path.to_string() },
@@ -2158,6 +2213,71 @@ struct JetFileWriter {
     inner: std::io::BufWriter<std::fs::File>,
     path: String,
 }
+
+// ── Typed Path API (D-PATHFS1) ────────────────────────────────────────────────
+#[derive(Clone, Debug)]
+struct JetPath {
+    inner: std::path::PathBuf,
+}
+impl JetShow for JetPath {
+    fn jet_show(&self) -> String { self.inner.to_string_lossy().to_string() }
+}
+fn jet_path_from(s: &String) -> JetPath {
+    JetPath { inner: std::path::PathBuf::from(s) }
+}
+fn jet_path_join(p: &JetPath, other: &String) -> JetPath {
+    JetPath { inner: p.inner.join(other.as_str()) }
+}
+fn jet_path_parent(p: &JetPath) -> Option<JetPath> {
+    p.inner.parent().map(|par| JetPath { inner: par.to_path_buf() })
+}
+fn jet_path_extension(p: &JetPath) -> Option<String> {
+    p.inner.extension().map(|e| e.to_string_lossy().to_string())
+}
+fn jet_path_stem(p: &JetPath) -> Option<String> {
+    p.inner.file_stem().map(|s| s.to_string_lossy().to_string())
+}
+fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::IoError> {
+    let path_s = p.inner.to_string_lossy();
+    let dir = p.inner.parent().ok_or_else(|| {
+        jet_std::io_error(&path_s, std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent directory"))
+    })?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(".jet_tmp_{}", nanos));
+    std::fs::write(&tmp, content).map_err(|e| jet_std::io_error(tmp.to_string_lossy().as_ref(), e))?;
+    std::fs::rename(&tmp, &p.inner).map_err(|e| jet_std::io_error(&path_s, e))
+}
+fn jet_path_walk(p: &JetPath) -> Vec<JetPath> {
+    let mut result = Vec::new();
+    let mut stack = vec![p.inner.clone()];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(dir) = stack.pop() {
+        let canonical = match std::fs::canonicalize(&dir) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !visited.insert(canonical) {
+            continue; // symlink loop — skip
+        }
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        for entry in rd {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            result.push(JetPath { inner: path.clone() });
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    result
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IoError> {
     let f = std::fs::File::open(path).map_err(|e| jet_std::io_error(path, e))?;

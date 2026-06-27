@@ -449,7 +449,7 @@ fn main() {
 #[test]
 fn transact_irreversible_net_is_e0746() {
     let src = r#"
-use jet.http as http
+use core.http as http
 fn main() {
     #Transact(tx) {
         r @= http.get("http://x") ?? "";

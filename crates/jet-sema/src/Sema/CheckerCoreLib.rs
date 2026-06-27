@@ -1066,6 +1066,20 @@ impl<'a> Checker<'a> {
                 }
                 return None; // effect returns nothing
             }
+            // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
+            ("core.science.measurement", "from") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity("from", 2, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("from", 0, &Type::Float, &mut args[0]);
+                self.expect_core_arg("from", 1, &Type::Float, &mut args[1]);
+                return Some(Type::Apply {
+                    name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                    args: vec![Type::Float],
+                });
+            }
             _ => {}
         }
 
@@ -1315,6 +1329,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
         // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
         | "Signal" | "Derived"
+        // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
+        | "Measurement"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1723,6 +1739,30 @@ pub fn net_method_return(
         // D-REGEX1: a regex `Match`. `group(0)` is the whole match; `group(n)` is
         // capture group n, `none` if the group did not participate.
         ("Match", "group") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        _ => None,
+    }
+}
+
+/// D-PATHFS1: return type for `Path` instance method calls.
+pub fn path_method_return(
+    type_name: &str,
+    method: &str,
+    _n_args: usize,
+    _span: Span,
+    _diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    if type_name != "Path" {
+        return None;
+    }
+    let path = || Type::Named("Path".to_string());
+    match method {
+        "join"         => Some(Some(path())),
+        "parent"       => Some(Some(Type::Option(Box::new(path())))),
+        "extension"    => Some(Some(Type::Option(Box::new(Type::String)))),
+        "stem"         => Some(Some(Type::Option(Box::new(Type::String)))),
+        "to_string"    => Some(Some(Type::String)),
+        "write_atomic" => Some(Some(result_ty(unit_ty(), Type::String))),
+        "walk"         => Some(Some(Type::List(Box::new(path())))),
         _ => None,
     }
 }
@@ -2470,31 +2510,34 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
         "core.term" => &["read_key"],
         "core" => &[],
-        // E2-M9: ring packages.
-        "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id", "setup"],
+        // D-CORENS1: ring packages — `core.*` is the canonical user-facing name;
+        // `jet.*` is the legacy / internal dispatch key. Both spellings are accepted.
+        "core.log" | "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id", "setup"],
         "jet.time" => &["now", "format"],
-        "jet.crypto" => &["sha256", "sha256_bytes"],
+        "core.crypto" | "jet.crypto" => &["sha256", "sha256_bytes"],
         // E2-M10: networking modules.
         "core.net" => &[
             "tcp_listen", "tcp_accept", "tcp_connect",
             "tcp_read", "tcp_write", "tcp_local_addr", "tcp_peer_addr", "set_timeout",
             "tcp_reply",
         ],
-        "jet.http" => &["get", "post", "serve"],
+        "core.http" | "jet.http" => &["get", "post", "serve"],
         // D-REGEX1: linear-time regex ring package.
-        "jet.regex" => &[
+        "core.regex" | "jet.regex" => &[
             "is_match", "match", "find", "find_all", "replace", "replace_all", "split",
         ],
         // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip + tar.
-        "jet.archive" => &[
+        "core.archive" | "jet.archive" => &[
             "gzip_compress", "gzip_decompress",
             "zip_compress", "zip_decompress",
             "tar_add", "tar_get", "tar_names_json",
         ],
         // D-DEP-DB1: SQLite ring package.
-        "jet.db" => &["open", "open_memory", "close", "exec", "query_json"],
+        "core.db" | "jet.db" => &["open", "open_memory", "close", "exec", "query_json"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
-        "jet.reactive" => &["signal", "derived", "effect"],
+        "core.reactive" | "jet.reactive" => &["signal", "derived", "effect"],
+        // D-HONESTNUM1=A: Measurement<T> constructor.
+        "core.science.measurement" => &["from"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

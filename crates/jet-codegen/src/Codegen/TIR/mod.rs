@@ -1361,6 +1361,10 @@ pub enum THandleOp {
     ReactiveGet,
     /// D-REACT1=B: `Signal.set(v)` → `(recv).set(<arg0>)` (writes + notifies).
     ReactiveSet,
+    /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
+    /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
+    /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
+    MeasurementMethod { method: String },
     /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
     DataTreeField,
     /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.
@@ -1380,6 +1384,22 @@ pub enum THandleOp {
     JsonText,
     JsonBool,
     JsonFloat,
+    /// D-PATHFS1: `Path.from(str)` constructor → `{root}jet_path_from(&(recv))`.
+    PathFrom,
+    /// D-PATHFS1: `path.join(other)` → `{root}jet_path_join(&(recv), &(a0))` → `JetPath`.
+    PathJoin,
+    /// D-PATHFS1: `path.parent()` → `{root}jet_path_parent(&(recv))` → `Option<JetPath>`.
+    PathParent,
+    /// D-PATHFS1: `path.extension()` → `{root}jet_path_extension(&(recv))` → `Option<String>`.
+    PathExtension,
+    /// D-PATHFS1: `path.stem()` → `{root}jet_path_stem(&(recv))` → `Option<String>`.
+    PathStem,
+    /// D-PATHFS1: `path.to_string()` → `(recv).jet_show()` → `String`.
+    PathToString,
+    /// D-PATHFS1: `path.write_atomic(bytes)` → `{root}jet_path_write_atomic(&(recv), &(a0))` → `Result<(), IoError>`.
+    PathWriteAtomic,
+    /// D-PATHFS1: `path.walk()` → `{root}jet_path_walk(&(recv))` → `Vec<JetPath>`.
+    PathWalk,
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so

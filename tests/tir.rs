@@ -1193,7 +1193,7 @@ fn core_math_path_crypto_calls() {
     let src = "\
 use core.math as math
 use core.path as path
-use jet.crypto as crypto
+use core.crypto as crypto
 fn calc(a: Float) -> Float {
     r @= math.sqrt(a)
     f @= math.floor(r)
@@ -2639,7 +2639,7 @@ fn http_request_response_accessors() {
     // helpers are in scope) and yields an HttpRequest without networking; a
     // single-line request keeps the lexer happy (Jet has no `\r` escape).
     let src = "\
-use jet.http as http
+use core.http as http
 fn handle(req: HttpRequest) -> HttpResponse {
     m @= req.method()
     p @= req.path()
@@ -3047,7 +3047,7 @@ fn main() {
 #[test]
 fn regex_match_group() {
     let src = "\
-use jet.regex as re
+use core.regex as re
 fn main() {
     text @= \"order 42 shipped\"
     m @= re.match(\"(\\\\d+) shipped\", text) ?? panic(\"bad pattern\")
@@ -3238,7 +3238,7 @@ fn http_router_dispatch() {
         return;
     }
     let src = "\
-use jet.http as http
+use core.http as http
 fn handle_root(req: HttpRequest) -> HttpResponse {
     return HttpResponse.{status: \"200 OK\", body: \"welcome\", headers: [:]}
 }
@@ -4637,7 +4637,7 @@ fn reactive_signal_derived_effect() {
         return;
     }
     let src = "\
-use jet.reactive as reactive
+use core.reactive as reactive
 fn main() {
     n := reactive.signal(1)
     doubled := reactive.derived(() => (n.get() * 2))
@@ -4664,7 +4664,7 @@ fn reactive_string_signal() {
         return;
     }
     let src = "\
-use jet.reactive as reactive
+use core.reactive as reactive
 fn main() {
     name := reactive.signal(\"world\")
     greeting := reactive.derived(() => \"hello, {name.get()}\")

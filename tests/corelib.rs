@@ -497,18 +497,21 @@ fn core_module_items_covers_known_core_modules() {
         .expect("core_module_items function not found in CheckerCoreLib.rs");
     // Find the closing `}` at top-level indent (just after the last arm).
     let fn_body = &src[fn_start..];
-    // Collect all string literal match arm heads: lines matching `"<module>" =>`
-    let mut items_keys: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    // Collect ALL string literals from match arm heads (handles `"a" | "b" => &[` form too).
+    let mut items_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for line in fn_body.lines() {
         let trimmed = line.trim();
-        // A match arm head looks like: `"core.fs" => &[` or `"core" => &[],`
-        if trimmed.starts_with('"') {
-            if let Some(end) = trimmed[1..].find('"') {
-                let key = &trimmed[1..1 + end];
-                // Stop at lines that are array entries, not match arms.
-                let after = trimmed[1 + end + 1..].trim_start();
-                if after.starts_with("=>") {
-                    items_keys.insert(key);
+        // A match arm head: `"core.fs" => &[` or `"core.log" | "jet.log" => &[`
+        if trimmed.starts_with('"') && trimmed.contains("=>") {
+            let arm_head = trimmed.split("=>").next().unwrap_or("");
+            let mut rest = arm_head;
+            while let Some(start) = rest.find('"') {
+                rest = &rest[start + 1..];
+                if let Some(end) = rest.find('"') {
+                    items_keys.insert(rest[..end].to_string());
+                    rest = &rest[end + 1..];
+                } else {
+                    break;
                 }
             }
         }
@@ -518,11 +521,19 @@ fn core_module_items_covers_known_core_modules() {
         }
     }
 
-    let known: std::collections::BTreeSet<&str> =
-        jet::Loader::KNOWN_CORE_MODULES.iter().copied().collect();
+    // D-CORENS1: ring packages have two spellings: `core.*` (user-facing, in KNOWN_CORE_MODULES)
+    // and `jet.*` (internal dispatch key). The arms cover both via `|` alternation. Build an
+    // expanded `known` that accepts either spelling for ring modules so the check is stable.
+    let ring_names = ["log", "time", "crypto", "http", "regex", "reactive", "archive", "db"];
+    let known_raw = jet::Loader::KNOWN_CORE_MODULES;
+    let mut known: std::collections::BTreeSet<String> = known_raw.iter().map(|s| s.to_string()).collect();
+    for ring in &ring_names {
+        known.insert(format!("core.{ring}"));
+        known.insert(format!("jet.{ring}"));
+    }
 
-    let missing_from_items: Vec<&&str> = known.iter().filter(|m| !items_keys.contains(*m)).collect();
-    let extra_in_items: Vec<&&str> = items_keys.iter().filter(|m| !known.contains(*m)).collect();
+    let missing_from_items: Vec<&String> = known.iter().filter(|m| !items_keys.contains(*m)).collect();
+    let extra_in_items: Vec<&String> = items_keys.iter().filter(|m| !known.contains(*m)).collect();
 
     assert!(
         missing_from_items.is_empty(),

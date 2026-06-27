@@ -3752,6 +3752,25 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-HONESTNUM1=A: a `Measurement<Float>` method (gate shape d6).
+    if recv_type.as_deref() == Some("Measurement")
+        && is_measurement_method_name(method, args.len())
+    {
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match method {
+            "value" | "uncertainty" => Type::Float,
+            _ => recv_t.ty.clone(),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::MeasurementMethod { method: method.to_string() },
+                args: targs,
+            },
+        };
+    }
     // c109 Phase 21: a Task/Channel/Sender concurrency method (gate shape d3). The gate
     // proved `recv_type == None` + a disjoint concurrency name+arity. Resolve the op +
     // result type HERE (totality). The result type comes from `Collections::
@@ -3951,6 +3970,22 @@ pub(crate) fn lower_method_call(
         let Expr::Ident(type_name, _) = receiver else {
             unreachable!("gate proved static receiver is a type-name ident");
         };
+        // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
+        // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
+        // `Path` itself (a type-name ident) has no value.
+        if type_name == "Path" && method == "from" && args.len() == 1
+            && !cx.type_names.contains("Path")
+        {
+            let str_arg = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::Named("Path".to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(str_arg),
+                    op: THandleOp::PathFrom,
+                    args: vec![],
+                },
+            };
+        }
         // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
         // Lower the list arg as the recv of a SetFrom BuiltinMethod.
         if type_name == "Set" && method == "from" && args.len() == 1 {

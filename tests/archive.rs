@@ -77,7 +77,7 @@ fn gzip_compress_decompress_round_trip() {
         return;
     }
     let src = r#"
-use jet.archive as ar
+use core.archive as ar
 
 fn main() {
     original: [U8] @= [72, 101, 108, 108, 111]
@@ -99,7 +99,7 @@ fn gzip_compress_reduces_repetitive_data() {
     }
     // Highly repetitive data compresses to less than its original length.
     let src = r#"
-use jet.archive as ar
+use core.archive as ar
 
 fn main() {
     data: [U8] @= [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

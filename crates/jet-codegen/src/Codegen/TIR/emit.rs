@@ -1540,6 +1540,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-REACT1=B: reactive Signal/Derived reads and writes.
                 THandleOp::ReactiveGet => format!("({}).get()", recv),
                 THandleOp::ReactiveSet => format!("({}).set({})", recv, a(0)),
+                // D-HONESTNUM1=A: Measurement<Float> arithmetic + accessors.
+                THandleOp::MeasurementMethod { method } => {
+                    if args.is_empty() {
+                        format!("({}).{}()", recv, method)
+                    } else {
+                        format!("({}).{}({})", recv, method, a(0))
+                    }
+                }
                 // c109 Phase 25: HttpRouter route registration, byte-for-byte the
                 // `emit_builtin_method` router arm (Source/Codegen/Expression.rs ~L937).
                 // `recv` is `&mut`-borrowed; the path is plain (args[0]); the handler is
@@ -1578,6 +1586,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::JsonText  => format!("({}).text()", recv),
                 THandleOp::JsonBool  => format!("({}).bool()", recv),
                 THandleOp::JsonFloat => format!("({}).float()", recv),
+                // D-PATHFS1: Path object methods.
+                THandleOp::PathFrom        => format!("{}jet_path_from(&({}))", root, recv),
+                THandleOp::PathJoin        => format!("{}jet_path_join(&({}), &({}))", root, recv, a(0)),
+                THandleOp::PathParent      => format!("{}jet_path_parent(&({}))", root, recv),
+                THandleOp::PathExtension   => format!("{}jet_path_extension(&({}))", root, recv),
+                THandleOp::PathStem        => format!("{}jet_path_stem(&({}))", root, recv),
+                THandleOp::PathToString    => format!("({}).jet_show()", recv),
+                THandleOp::PathWriteAtomic => format!("{}jet_path_write_atomic(&({}), &({}))", root, recv, a(0)),
+                THandleOp::PathWalk        => format!("{}jet_path_walk(&({}))", root, recv),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -1747,6 +1764,10 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
         ("jet.reactive", "signal") => {
             format!("{}jet_std::JetSignal::new({})", cx.root_prefix, arg(0))
+        }
+        // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
+        ("core.science.measurement", "from") => {
+            format!("{}jet_std::JetMeasurement::new({}, {})", cx.root_prefix, arg(0), arg(1))
         }
         ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
         ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),

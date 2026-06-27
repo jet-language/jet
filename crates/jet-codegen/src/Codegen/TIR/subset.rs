@@ -2522,6 +2522,14 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
+                    // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
+                    // Like `Set.from`, admitted before `static_method_call_in_subset`
+                    // blocks `from` (an intercepted name). Path is not a user type.
+                    ("Path", "from", 1) if !cx.type_names.contains("Path") => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
                     _ => {}
                 }
             }
@@ -2578,6 +2586,16 @@ pub(crate) fn method_call_in_subset(
     // `Signal.get()`/`Derived.get()` → `(recv).get()`; `Signal.set(v)` → `(recv).set(v)`.
     if matches!(recv_type.as_deref(), Some("Signal") | Some("Derived"))
         && is_reactive_method_name(method, args.len())
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
+    // Shape (d6) [D-HONESTNUM1=A]: a `Measurement<Float>` method.
+    // Sema sets `recv_type == Some("Measurement")`.
+    if recv_type.as_deref() == Some("Measurement")
+        && is_measurement_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -3059,6 +3077,16 @@ pub(crate) fn is_reactive_method_name(method: &str, nargs: usize) -> bool {
     matches!((method, nargs), ("get", 0) | ("set", 1))
 }
 
+/// D-HONESTNUM1=A: is `(method, nargs)` a `Measurement<Float>` method?
+/// `.add/sub/mul/div(m)` (1 arg), `.value()/.uncertainty()` (0 args).
+/// Always keyed with `recv_type == Some("Measurement")`.
+pub(crate) fn is_measurement_method_name(method: &str, nargs: usize) -> bool {
+    matches!(
+        (method, nargs),
+        ("add" | "sub" | "mul" | "div", 1) | ("value" | "uncertainty", 0)
+    )
+}
+
 /// c109 Phase 12: resolve a numeric method (`is_nan`/`count_ones`/`to_i32`/…) into a
 /// total `TNumericOp`, reproducing `emit_builtin_method`'s numeric arms +
 /// `numeric_conversion`/`conv_rust_target` (Source/Codegen/Expression.rs) EXACTLY.
@@ -3258,6 +3286,11 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.io" && method == "input" {
         return true;
     }
+    // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `JetMeasurement<f64>`. NOT in
+    // `core_fixed_sig` — the return type is `Measurement<Float>` (generic Apply).
+    if module == "core.science.measurement" && method == "from" {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
@@ -3447,6 +3480,14 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "text", 0) => THandleOp::JsonText,
         ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "bool", 0) => THandleOp::JsonBool,
         ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "float", 0) => THandleOp::JsonFloat,
+        // D-PATHFS1: typed Path instance methods.
+        ("Path", "join", 1) => THandleOp::PathJoin,
+        ("Path", "parent", 0) => THandleOp::PathParent,
+        ("Path", "extension", 0) => THandleOp::PathExtension,
+        ("Path", "stem", 0) => THandleOp::PathStem,
+        ("Path", "to_string", 0) => THandleOp::PathToString,
+        ("Path", "write_atomic", 1) => THandleOp::PathWriteAtomic,
+        ("Path", "walk", 0) => THandleOp::PathWalk,
         // D-SIMD2 / D-LINALG1 math methods are handled by a dedicated gate + lowering
         // block (user-type-aware via `cx.type_names`), NOT here — `handle_method_op`
         // has no `cx`, and a user struct may share a math name.
@@ -3464,7 +3505,8 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();
     let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
-        .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink));
+        .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink))
+        .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink));
     match ret {
         Some(Some(t)) => t,
         _ => unit_type(),
@@ -3509,6 +3551,13 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             return Type::Result {
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+            }
+        }
+        // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
+        ("core.science.measurement", "from") => {
+            return Type::Apply {
+                name: Syntax::TYPE_MEASUREMENT.to_string(),
+                args: vec![Type::Float],
             }
         }
         _ => {}

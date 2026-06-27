@@ -713,6 +713,19 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     ));
                     continue;
                 }
+                // D-CORENS1 / E0341: old `jet.<ring>` spelling → teach the new `core.<ring>`.
+                if let Some(ring) = name.strip_prefix("jet.") {
+                    if crate::Syntax::is_ring_module(ring) {
+                        diags.push(Diagnostic::error(
+                            "E0341",
+                            format!("`use jet.{ring}` is the old first-party library spelling"),
+                            "first-party libraries moved to the `core.*` namespace (D-CORENS1)".to_string(),
+                            format!("write `use core.{ring}` instead"),
+                            Some(imp.span),
+                        ));
+                        continue;
+                    }
+                }
             }
             if let Some(module) = imp.core_module_path() {
                 if !crate::Syntax::is_known_core_module(&module) {
@@ -1335,6 +1348,10 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
             if let Expr::Ident(n, _) = receiver.as_ref() {
                 if is_math_type(n) {
                     used.insert("core.math::__mathtypes__".to_string());
+                }
+                // D-PATHFS1: `Path.from(...)` or any Path static call triggers path prelude.
+                if n == "Path" {
+                    used.insert("core.path::__pathapi__".to_string());
                 }
             }
         }

@@ -149,6 +149,8 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
         "StdinHandle" => Some("JetStdinReader"),
         "StdinLines" => Some("()"),
+        // D-PATHFS1: typed path handle.
+        "Path" => Some("JetPath"),
         _ => None,
     }
 }
@@ -343,6 +345,14 @@ impl Cx {
             Type::Apply { name, args } if name == Syntax::TYPE_DERIVED && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetDerived<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            // D-HONESTNUM1=A: Measurement<T> → jet_std::JetMeasurement<T>.
+            Type::Apply { name, args } if name == Syntax::TYPE_MEASUREMENT && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetMeasurement<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
