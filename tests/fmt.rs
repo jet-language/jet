@@ -838,6 +838,72 @@ fn fmt_dot_construction_d_dotctor1() {
 }
 
 #[test]
+fn fmt_enum_dot_pattern_stability() {
+    // D-ENUMDOT1 (ratified 2026-06-26): a leading `.` before a variant name in pattern position
+    // is accepted and canonical. The formatter always emits `.` before a Pattern::Variant name,
+    // so `.Circle(r)` round-trips unchanged and bare `Circle(r)` is canonicalized to `.Circle(r)`.
+
+    // Dot form round-trips unchanged (stability).
+    let dot_src = "\
+enum Shape {
+    Circle(Float)
+    Square(Float)
+    Empty
+}
+
+fn describe(s: Shape) -> String {
+    if s == {
+        .Circle(r) -> { return \"circle:{r}\" }
+        .Square(side) -> { return \"square:{side}\" }
+        .Empty -> { return \"empty\" }
+    }
+    return \"?\"
+}
+
+fn main() {
+    print(describe(Shape.Circle(2.0)))
+    print(describe(Shape.Empty))
+}
+";
+    assert_fmt_keeps(
+        dot_src,
+        &[".Circle(r)", ".Square(side)", ".Empty"],
+        "dot-variant patterns in if-dispatch arms",
+    );
+
+    // Bare payload form is canonicalized to dot form by fmt.
+    let bare_src = "\
+enum Shape {
+    Circle(Float)
+    Square(Float)
+}
+
+fn area(s: Shape) -> Float {
+    if s == {
+        Circle(r) -> { return r * r }
+        Square(side) -> { return side * side }
+    }
+    return 0.0
+}
+
+fn main() {
+    print(area(Shape.Circle(3.0)))
+}
+";
+    let out = jet::format_source(bare_src).expect("fmt should accept bare variant patterns");
+    assert!(
+        out.contains(".Circle(r)"),
+        "bare payload variant in if-dispatch arm must gain leading dot, got:\n{out}"
+    );
+    assert!(
+        out.contains(".Square(side)"),
+        "bare payload variant `Square(side)` must gain leading dot, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("second fmt of dot-form must succeed");
+    assert_eq!(out, twice, "dot-form variant patterns must be fmt-idempotent");
+}
+
+#[test]
 fn fmt_comptime_splice_stability() {
     // D-CTMARKER1=C: `$name` comptime splice is a first-class AST node
     // (Expr::ComptimeSplice). The formatter must emit it as `$name` so that

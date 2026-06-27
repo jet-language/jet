@@ -571,6 +571,8 @@ impl<'a> Fmt<'a> {
             Pattern::Variant {
                 variant, bindings, ..
             } => {
+                // D-ENUMDOT1: leading dot is canonical for variant patterns.
+                self.write(".");
                 self.write(variant);
                 if !bindings.is_empty() {
                     self.write("(");

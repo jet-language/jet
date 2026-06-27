@@ -12,14 +12,14 @@ enum Conn {
 fn describe_conn(c: Conn) -> String {
     if c == {
         // D-PATO: or-pattern — Active and Reconnecting share the same body.
-        Active(id) | Reconnecting(id) -> {
+        .Active(id) | .Reconnecting(id) -> {
             return "live:{id}"
         }
         // D-PATW: wildcard slot — Idle's payload doesn't matter here.
-        Idle(_) -> {
+        .Idle(_) -> {
             return "idle"
         }
-        Closed -> {
+        .Closed -> {
             return "closed"
         }
     }
@@ -34,12 +34,12 @@ enum Http {
 fn classify(r: Http) -> String {
     if r == {
         // D-PATR: range pattern in payload slot.
-        Good(200..299) -> { return "success" }
-        Good(300..399) -> { return "redirect" }
-        Good(400..499) -> { return "client error" }
-        Good(500..599) -> { return "server error" }
-        Good(_) -> { return "other" }
-        Fail(_) -> { return "network error" }
+        .Good(200..299) -> { return "success" }
+        .Good(300..399) -> { return "redirect" }
+        .Good(400..499) -> { return "client error" }
+        .Good(500..599) -> { return "server error" }
+        .Good(_) -> { return "other" }
+        .Fail(_) -> { return "network error" }
     }
     return "unknown"
 }

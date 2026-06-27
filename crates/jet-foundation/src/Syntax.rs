@@ -484,6 +484,14 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
 // `||` remains value-or / boolean-or; `|=` is bitwise-or-assign.
 
+// D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
+// position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —
+// `if subject == { .Variant(b) -> … }`, `if x == .Variant(b)`, switch arms. The dot reads as
+// "a member of the inferred enum" and resolves S31's bare-name-vs-variable ambiguity without
+// requiring a qualified `Enum.Variant` spelling. Bare form still accepted; dot form is canonical
+// (the formatter always emits `.` before a Pattern::Variant name). No new keyword or sigil —
+// reuses OP_DOT (S21). Value-position dot (`.Red` where type is known) is D-ENUMDOT2 (open).
+
 // D-RANGE2 (c25, ratified): porting-hazard teaching errors for constructs Jet does NOT use.
 // E0318: `..=` (Rust inclusive range) — Jet's `..` is already inclusive; `0..=9` → teach `0..9`.
 // E0319: `step` in an arm head — `step` is a loop modifier (S22/S72), not an arm construct.
