@@ -2401,6 +2401,9 @@ pub fn core_fixed_sig(
             vec![],
             Some(Type::Named(crate::Syntax::TYPE_KEY.to_string())),
         )),
+        // D-ADAPTFID1=A: adaptive fidelity signal.
+        ("core.perf", "fidelity") => Some((vec![], Some(float))),
+        ("core.perf", "set_fidelity") => Some((vec![(read, float)], Some(unit))),
         _ => None,
     }
 }
@@ -2607,6 +2610,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.science.measurement" => &["from"],
         // D-PENDING1=B: Loadable<T,E> constructors.
         "core.async.loadable" => &["idle", "loading", "loaded", "failed"],
+        // D-ADAPTFID1=A: adaptive fidelity signal.
+        "core.perf" => &["fidelity", "set_fidelity"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

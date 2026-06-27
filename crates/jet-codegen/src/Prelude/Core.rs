@@ -78,6 +78,16 @@ impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
         }
     }
 }
+// D-ADAPTFID1=A: Perf.fidelity() / Perf.set_fidelity(v) — global atomic f32.
+static JET_PERF_FIDELITY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1065353216); // 1.0f32 bits
+fn jet_perf_fidelity() -> f64 {
+    let bits = JET_PERF_FIDELITY.load(std::sync::atomic::Ordering::Relaxed);
+    f32::from_bits(bits) as f64
+}
+fn jet_perf_set_fidelity(v: f64) {
+    let bits = (v as f32).to_bits();
+    JET_PERF_FIDELITY.store(bits, std::sync::atomic::Ordering::Relaxed);
+}
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("panic: {}", msg);
     eprintln!("  --> {}:{}", file, line);

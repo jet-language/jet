@@ -2096,6 +2096,9 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
         ("core.term", "read_key") => format!("{}()", helper("jet_term_read_key")),
+        // D-ADAPTFID1=A: adaptive fidelity signal — global atomic f32.
+        ("core.perf", "fidelity") => format!("jet_perf_fidelity()"),
+        ("core.perf", "set_fidelity") => format!("jet_perf_set_fidelity({})", arg(0)),
         _ => "/* unknown std call */".to_string(),
     }
 }

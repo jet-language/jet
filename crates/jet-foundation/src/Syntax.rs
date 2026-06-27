@@ -1572,6 +1572,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-PENDING1=B (ratified 2026-06-26): Loadable<T, E> — async UI state machine
     // (Idle / Loading / Loaded(T) / Failed(E)). Pure stdlib enum; no external crates.
     "core.async.loadable",
+    // D-ADAPTFID1=A (ratified 2026-06-26): Perf.fidelity() / Perf.set_fidelity() —
+    // adaptive quality/perf knob backed by a global atomic f32.
+    "core.perf",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

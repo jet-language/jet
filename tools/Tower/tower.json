@@ -3761,7 +3761,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-ADAPTFID1=A: stdlib fidelity signal as Perf.fidelity() -> f32 (0.0 = lowest quality, 1.0 = full quality). Steps: (1) Add Perf module to core — Perf.fidelity() reads an atomic f32 maintained by the runtime (starts at 1.0); (2) Runtime updates it based on frame time: if last frame took >20ms, fidelity drops toward 0.0; if consistently fast, it rises toward 1.0 (exponential moving average); (3) Perf.set_fidelity(v: f32) for testing/manual override; (4) No hooks into the rendering pipeline — app code reads and adapts (e.g., `if Perf.fidelity() < 0.5 { use_low_res_shader() }`); (5) No new syntax. (6) examples/features/NN_fidelity.jet; (7) Snapshot golden.",
       "blockedBy": [],
@@ -3777,6 +3777,10 @@
         {
           "at": "2026-06-26",
           "text": "Plan written. Pure library, no syntax. Advancing to ready."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented. jet_perf_fidelity/set_fidelity backed by AtomicU32 (1.0f32 bits default). core.perf module registered in KNOWN_CORE_MODULES + CheckerCoreLib + emit_tir_core_call + TIR subset gate. 142_fidelity.jet golden-tested. All tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
