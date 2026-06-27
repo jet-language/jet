@@ -598,7 +598,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                                         field_type_name, trait_name
                                     ),
                                     format!(
-                                        "`impl {}: {} using {}` forwards `{}` methods to the `{}` field, but `{}` doesn't implement `{}`",
+                                        "`impl {}.{} using {}` forwards `{}` methods to the `{}` field, but `{}` doesn't implement `{}`",
                                         i.type_name, trait_name, field_name,
                                         trait_name, field_name,
                                         field_type_name, trait_name
@@ -615,7 +615,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                                 "E2401",
                                 format!("`{}` has no field `{}`", i.type_name, field_name),
                                 format!(
-                                    "`impl {}: {} using {}` needs `{}` to have a field named `{}`",
+                                    "`impl {}.{} using {}` needs `{}` to have a field named `{}`",
                                     i.type_name, trait_name, field_name, i.type_name, field_name
                                 ),
                                 format!(

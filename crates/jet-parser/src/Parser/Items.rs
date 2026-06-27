@@ -1698,7 +1698,27 @@ impl<'a> Parser<'a> {
     /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
     pub(super) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
         self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
-        let (type_name, type_span) = self.parse_type_path("after `impl`")?;
+        // D-IMPLDOT1=A: `impl Type.Trait` — the LAST `.Ident` segment belongs to
+        // the trait, not the type path. Parse path segments greedily, but stop
+        // consuming dots when the NEXT `.Ident` is NOT followed by another `.`
+        // (meaning that dot is the trait separator, not a path component).
+        let (type_name, type_span) = {
+            let (first, span) = self.expect_ident("after `impl`")?;
+            let mut name = first;
+            // Consume `.Ident` segments only when they're followed by ANOTHER `.`
+            // (path continuation), leaving the final `.Ident` for the trait check.
+            loop {
+                if !matches!(self.peek().kind, TokKind::Dot) { break; }
+                if !matches!(self.peek2().kind, TokKind::Ident(_)) { break; }
+                // peek3() is the token after the candidate ident — if it's `.`,
+                // this is a path component; otherwise it's the trait separator.
+                if !matches!(self.peek3().kind, TokKind::Dot) { break; }
+                self.bump(); // `.`
+                let (part, _) = self.expect_ident("in type path after `impl`")?;
+                name = format!("{name}.{part}");
+            }
+            (name, span)
+        };
         // Detect `impl Source -> Target { body }` — D-ERR-CONV.
         if matches!(self.peek().kind, TokKind::Arrow) {
             let _arrow = self.bump(); // consume `->`
@@ -1730,14 +1750,29 @@ impl<'a> Parser<'a> {
             }));
         }
         // Normal `impl` path — re-enter parsing without re-consuming `impl` or type name.
-        let (trait_name, trait_span) = if matches!(self.peek().kind, TokKind::Colon) {
+        // D-IMPLDOT1=A: trait separator is `.` (`impl Type.Trait`).
+        // Old `:` form emits a teaching error pointing at the dot form.
+        let (trait_name, trait_span) = if matches!(self.peek().kind, TokKind::Dot) {
             self.bump();
+            let (t, ts) = self.expect_ident("after `.` in `impl Type.Trait`")?;
+            (Some(t), Some(ts))
+        } else if matches!(self.peek().kind, TokKind::Colon) {
+            // Teaching error: old `impl Type: Trait` form.
+            let colon_span = self.peek().span;
+            self.diags.push(Diagnostic::error(
+                "E0321",
+                format!("trait separator is now `.`, not `:`"),
+                "the impl separator reads \"Type's Trait\", matching the dot accessor".to_string(),
+                format!("write `impl {}.Trait {{ … }}`", type_name),
+                Some(colon_span),
+            ));
+            self.bump(); // consume old `:`
             let (t, ts) = self.expect_ident("after `:` in `impl Type: Trait`")?;
             (Some(t), Some(ts))
         } else {
             (None, None)
         };
-        // S62: `impl Type: Trait using field_name;` — delegation form.
+        // S62: `impl Type.Trait using field_name;` — delegation form.
         if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
             if kw == "using" && trait_name.is_some() {
                 self.bump(); // consume `using`

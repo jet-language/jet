@@ -7,7 +7,10 @@
       "toggled": [
         "epoch:e4",
         "epoch:e5",
-        "board-sidequests"
+        "board-sidequests",
+        "epoch:e3",
+        "epoch:e6",
+        "board-frozen"
       ]
     }
   },
@@ -31,27 +34,28 @@
       "name": "Product Pillars",
       "status": "active",
       "order": 3,
-      "goal": "The pillars that make Jet a daily driver: long-lived JIT app server, Go-class async, plugin ABI, user derives + reflection, source-built packages, testing & docs ergonomics.",
+      "goal": "Every major language, runtime, library and tooling feature that makes Jet a daily-driver TypeScript/Swift replacement: JIT dev loop + Go-scale async, structured concurrency + coroutines, user derives + typed reflection, full HTTP client/server, stdlib breadth, language ergonomics, IDE-grade semantic tooling, and the reactive UI stack. Excludes Jai metaprogramming (E4), the package/OS layer (E5), and CI/docs (E6).",
       "exitCriteria": [
-        "JIT runtime / hot-swap type server",
-        "@async runtime, 100k+ connections",
-        "Formal jet plugin ABI",
-        "User-defined derives + typed reflection",
-        "jetpack builds deps from source",
-        "Property testing, doctests, coverage"
+        "JIT dev loop + @async runtime (100k+ conns)",
+        "Structured concurrency + coroutines",
+        "User derives + typed reflection",
+        "Full HTTP client + server",
+        "Stdlib breadth + language ergonomics",
+        "Semantic-index API + IDE tooling",
+        "Reactive UI stack"
       ]
     },
     {
       "id": "e4",
       "num": 4,
-      "name": "Cross-cutting Power",
+      "name": "Metaprogramming",
       "status": "planned",
       "order": 4,
-      "goal": "Type-system and runtime reach: coroutines, structured concurrency, effect ceilings, semantic-index query API.",
+      "goal": "Jai-style compile-time metaprogramming, built on E3’s reflection/derive foundation: the build message loop, user macros, procedural macros (generated AST injection), reader macros / grammar mutation, and blessed DSL syntax islands. Programs that write programs.",
       "exitCriteria": [
-        "Structured concurrency",
-        "Stable semantic-index API",
-        "Effect ceilings"
+        "Full Jai message-loop metaprogramming",
+        "Procedural macros",
+        "Reader macros / blessed DSL islands"
       ]
     },
     {
@@ -60,11 +64,25 @@
       "name": "jetpack & jetos",
       "status": "planned",
       "order": 5,
-      "goal": "The ecosystem layer: jetpack package manager parity, then jetos — a declarative machine built on jetpack.",
+      "goal": "The package-manager and OS layer (jetos is built on jetpack, so the whole ecosystem track lives here): jetpack environments replacing nix-shell, package build-from-source, registry + publish, content-addressed store, monorepo workspaces, package signing, programmable builds, then jetos — a declarative machine with an installable ISO.",
       "exitCriteria": [
         "jetpack run replaces nix-shell",
-        "Registry + publish",
+        "Package build-from-source + registry/publish",
+        "Content-addressed store + signing",
         "jetos Phase 2 ISO"
+      ]
+    },
+    {
+      "id": "e6",
+      "num": 6,
+      "name": "CI & Documentation",
+      "status": "planned",
+      "order": 6,
+      "goal": "Release hygiene, CI pipelines, and full adoption + reference documentation — done once the language and libraries are firmly set, so docs and pipelines harden against a stable surface rather than a moving one.",
+      "exitCriteria": [
+        "CI & release workflows enforced",
+        "Adoption + reference documentation",
+        "Generated API docs (jetdoc)"
       ]
     }
   ],
@@ -76,7 +94,7 @@
       "body": "Compiler infers arena placement.",
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "triage",
       "priority": "P2",
       "plan": "arena-allocator-inference",
@@ -97,10 +115,14 @@
         {
           "at": "2026-06-26",
           "text": "[handoff 2026-06-26] STATUS: untouched, FAR-HORIZON, low priority. Goal: the compiler INFERS arena placement automatically (no user annotation), an escape-analysis on top of the shipped region/arena machinery (D-REGION1/D-ALLOC). No new syntax decision needed (it is an inference analysis, not surface), but it is large/research-grade. Plan: arena-allocator-inference. VERIFY: programs that benefit get arena allocation inferred + measured against the heap baseline. Owner flagged far-horizon — almost certainly NOT this milestone; finish the feature + partial cards first."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-26T16:42:07.901Z"
+      "updated": "2026-06-26"
     },
     {
       "id": "c27",
@@ -108,20 +130,28 @@
       "title": "jetos with nameable generations (far horizon)",
       "body": "Named OS generations.",
       "kind": "idea",
-      "track": "sidequest",
-      "epoch": null,
-      "phase": "frozen",
+      "track": "epoch",
+      "epoch": "e6",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-27",
+          "text": "Activated into epoch e6 track"
+        },
+        {
           "at": "2026-06-19 13:16",
           "text": "Likely Post Epoch 3"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T13:16:20.180Z"
+      "updated": "2026-06-27"
     },
     {
       "id": "c56",
@@ -129,13 +159,17 @@
       "title": "Signed binary/source package cache",
       "body": "E2 loose end. Live git-registry upload validates locally + explains the push path; signed binary/source cache was design-only (M8, out of scope per plan).",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
-      "phase": "frozen",
+      "track": "epoch",
+      "epoch": "e5",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Activated into epoch e5 track"
+        },
         {
           "at": "2026-06-19",
           "text": "Epoch 2 wrap → revisit when promoted"
@@ -143,10 +177,14 @@
         {
           "at": "2026-06-19 13:16",
           "text": "Likely Post Epoch 3"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T13:16:09.501Z"
+      "updated": "2026-06-27"
     },
     {
       "id": "c57",
@@ -154,13 +192,17 @@
       "title": "Real aarch64/QEMU freestanding CI run",
       "body": "E2 loose end. E3303 done; D-CROSS3 makes the local QEMU harness the minimum. A real aarch64/QEMU CI run + E3303-via-allocator-config stay doc-only/deferred.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
-      "phase": "frozen",
+      "track": "epoch",
+      "epoch": "e6",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Activated into epoch e6 track"
+        },
         {
           "at": "2026-06-19",
           "text": "Epoch 2 wrap → deferred"
@@ -168,10 +210,14 @@
         {
           "at": "2026-06-19 13:17",
           "text": "Likely Post Epoch 3"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e6. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T13:17:10.410Z"
+      "updated": "2026-06-27"
     },
     {
       "id": "c81",
@@ -180,7 +226,7 @@
       "body": "Build the plugin target backend + loader (reserved by D-TGT2). Until then `plugin` is a reserved manifest keyword that errors with no-backend.",
       "kind": "task",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "frozen",
       "priority": "P2",
       "plan": "plugin-target",
@@ -209,10 +255,14 @@
         {
           "at": "2026-06-26",
           "text": "[handoff 2026-06-26] STATUS: untouched; decisions READY — D-PLUGIN1=B (target:plugin = sandboxed WASM, safe-by-default, NO #Unsafe gate) + D-DEP-WASM1=A (wasmtime + Component Model approved). TO BUILD the plugin backend + loader: (1) compile target:plugin to a sandboxed wasm32 module — `plugin` is in TARGET_RESERVED (Source/Syntax.rs); make it real by mirroring how c80 turned `benchmark` real (Source/Jetpack/PackageManifest/{mod,ParseBlocks}.rs). (2) embed wasmtime RUNTIME-SIDE (I6: never in Source/; wrap it like the regex/sqlite/flate2 bridge pattern, in a ring/prelude). (3) host PluginHost.discover/load + call across the Component Model typed interface (.wit, deny-by-default caps), safe by default. Follow-on cards once built: versioning/ABI handshake (reuse D-CAP4 api:stable?) + export-surface (#Plugin marker vs manifest entry:+pub). Plan: plugin-target. VERIFY: a host program loads + calls a target:plugin .wasm and runs."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-26T15:47:30.041Z"
+      "updated": "2026-06-26"
     },
     {
       "id": "c96",
@@ -220,13 +270,17 @@
       "title": "M12.2 registry + jet publish UX",
       "body": "jet publish command shape + semver/version-immutability + resolver default. Rides c50/c56 infra. Saoirse, Amara.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
-      "phase": "frozen",
+      "track": "epoch",
+      "epoch": "e5",
+      "phase": "planning",
       "priority": "P2",
       "plan": "publish-registry-ux",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Activated into epoch e5 track"
+        },
         {
           "at": "2026-06-21",
           "text": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/publish-registry-ux"
@@ -246,10 +300,14 @@
         {
           "at": "2026-06-26",
           "text": "[handoff 2026-06-26] STATUS: local surface shipped (commit 5622ee2). DONE: jet publish dirty-tree refusal (E2605, --force overrides) + test-gate; jet yank <ver> marker (E2606); resolver select_highest_compatible (Source/Publish/Resolve.rs, E2602). TO FINISH 100%: ONLY the registry network UPLOAD (publish push + yank broadcast) — BLOCKED on board card c56 (FROZEN; no registry service exists). Stubs print 'registry upload pending c56' in Source/CmdSupply.rs run_publish/run_yank. When c56 thaws: wire the upload there. No other local work. VERIFY: full suite green (1162 today)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-26T15:48:42.064Z"
+      "updated": "2026-06-27"
     },
     {
       "id": "c113",
@@ -257,13 +315,17 @@
       "title": "Harden release and CI hygiene for v1 credibility",
       "body": "Audit finding: release/build hygiene does not yet match v1 seriousness. Align package versions, add actual CI/release workflows, make warnings fail, and make the default test path reliable in the documented environment. Evidence: Cargo.toml says 1.0.0 while flake.nix packages 0.1.0; docs/reference/versioning.md references .github/workflows/release.yml but no workflow exists; cargo check emits warnings; cargo test failed here because cc was missing outside the Nix shell.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
-      "phase": "frozen",
+      "track": "epoch",
+      "epoch": "e6",
+      "phase": "planning",
       "priority": "P2",
       "plan": "release-ci-hygiene",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Activated into epoch e6 track"
+        },
         {
           "at": "2026-06-22",
           "text": "Filed from serious-language credibility audit. Release hygiene should be a blocker before any external launch."
@@ -275,10 +337,14 @@
         {
           "at": "2026-06-24",
           "text": "CORRECTION (owner): CI must NOT be enabled until post-Epoch-3 (no Epoch-3 work has actually started). Removed .github/workflows/ci.yml. The flake.nix version sync (0.1.0->1.0.0) + truthfulness version-match check stay. FROZEN until post-Epoch-3."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e6. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-24"
+      "updated": "2026-06-27"
     },
     {
       "id": "c120",
@@ -287,7 +353,7 @@
       "body": "Audit docs, examples, diagnostics, and CLI flows so beginner paths stay magic and safe by default while expert controls are explicit, discoverable, and precise. Expert topics include layout, allocation, ABI, raw memory, threading, freestanding, and unsafe gates.",
       "kind": "task",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "frozen",
       "priority": "P1",
       "plan": "beginner-expert-mode-audit",
@@ -296,10 +362,14 @@
         {
           "at": "2026-06-22",
           "text": "Recommended before broad adoption docs and domain showcases, so the two-facet identity is consistent everywhere."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-24T10:11:10.464Z",
+      "updated": "2026-06-26",
       "workOrder": 7
     },
     {
@@ -309,7 +379,7 @@
       "body": "Build polished end-to-end showcase slices before adding more isolated features: CLI, server, low-level/freestanding, web, and game. Each slice should prove real workflows: docs, tests, packaging, diagnostics, performance, and deployment.",
       "kind": "task",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "frozen",
       "priority": "P2",
       "plan": "flagship-vertical-slices",
@@ -322,10 +392,14 @@
         {
           "at": "2026-06-24",
           "text": "jetgrep + freestanding slices ship; 3 remaining gated on c77, serde, D-TERM1."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-24T13:55:29.159Z",
+      "updated": "2026-06-26",
       "workOrder": 10
     },
     {
@@ -335,7 +409,7 @@
       "body": "Planned successor to the Cranelift tier-1: a Jet-owned register/stack bytecode VM (bytecode design + compiler from TIR + VM loop), roughly 5-20x over the tree-walking tier-0 interpreter with ZERO runtime dependencies, removing the Cranelift exception. Not native speed. FROZEN: pursue after Cranelift tier-1 is proven. Owner: plan to move to our own bytecode VM.",
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "frozen",
       "priority": "P3",
       "plan": null,
@@ -344,10 +418,14 @@
         {
           "at": "2026-06-24",
           "text": "[sweep] From D-JITDEP1 (2026-06-24): approve Cranelift tier-1 now; own bytecode VM then own native JIT are the planned progression, frozen so they are not lost."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-24",
-      "updated": "2026-06-24"
+      "updated": "2026-06-26"
     },
     {
       "id": "c141",
@@ -356,7 +434,7 @@
       "body": "Eventual Jet-owned native codegen backend (instruction selection, register allocation, x64 + aarch64, calling conventions, relocations, W^X executable memory, JIT hardening) replacing Cranelift AND the bytecode VM. Multi-year effort with miscompilation + security surface; justified only as the long-horizon master-of-all goal since production is AOT. FROZEN: post-v1 / far-horizon. Owner: then eventually our own native jit.",
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "frozen",
       "priority": "P2",
       "plan": null,
@@ -365,10 +443,14 @@
         {
           "at": "2026-06-24",
           "text": "[sweep] From D-JITDEP1 (2026-06-24): approve Cranelift tier-1 now; own bytecode VM then own native JIT are the planned progression, frozen so they are not lost."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-24",
-      "updated": "2026-06-24"
+      "updated": "2026-06-26"
     },
     {
       "id": "c144",
@@ -377,7 +459,7 @@
       "body": "D-DBG3 step 2 (the in-session command surface shipped in c52 over the interpreter). Remaining: a native backend that steps the FULL feature set the interpreter declines (E2203: FFI, tasks, #Unsafe, native std), the D-DBG2 --raw-frames expert view, and editor DAP wiring (VS Code/Zed). The ratified command vocabulary (step/next/continue/finish/break/print/locals/backtrace) is fixed and reused; only the native backend + protocol transport remain.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "frozen",
       "priority": "P2",
       "plan": "dap-debugger",
@@ -394,10 +476,14 @@
         {
           "at": "2026-06-26",
           "text": "[handoff 2026-06-26] STATUS: untouched; step-1 (the interactive (jet) command surface over the interpreter, D-DBG3) shipped in c52. No open decision (lldb is a runtime TOOL dep, not an I6 compiler crate; the interpreter is the no-lldb fallback — baked, not balloted). TO BUILD step-2: a native DAP/lldb backend that steps the FULL feature set the interpreter declines (E2203: FFI, tasks, #Unsafe, native std) + the D-DBG2 --raw-frames expert view + editor DAP wiring. Plan: dap-debugger. VERIFY: stepping a program that uses FFI/tasks (which the interpreter refuses with E2203) through the native backend."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-26T15:48:58.917Z"
+      "updated": "2026-06-26"
     },
     {
       "id": "c146",
@@ -406,7 +492,7 @@
       "body": "D-PKGSIGN1 tier A (opt-in Ed25519 author signing): native Ed25519/SHA-512 ring primitives (I6, only SHA-256 today), Sign.rs, LockedPackage.signature, jet keygen + jet key backup, publish auto-keygen on first publish, fetch-time signature verify, require_signed enforcement (per-registry, OFF by default). Every surface needs the registry-publish key-distribution handshake (TOFU pinning via the index) that c96 owns — build once c96 (publish/registry) lands. The checksum floor (tier B, E1204) + vendor/audit/SBOM already shipped in c122.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e5",
       "phase": "frozen",
       "priority": "P2",
       "plan": "package-ecosystem-trust",
@@ -417,10 +503,14 @@
         {
           "at": "2026-06-25",
           "text": "[sweep] Split from c122 — buildable trust surface done; signing tier blocks on the c96 registry build (not a decision; D-PKGSIGN1 is ratified)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-25T11:36:40.629Z"
+      "updated": "2026-06-26"
     },
     {
       "id": "c147",
@@ -429,7 +519,7 @@
       "body": "D-SERDE11 ratified A = no manual generic-bound override for now, but RESERVE the attribute. Owner: do not lose the idea of shipping it. The feature: an attribute (cf. Rust serde `#[serde(bound = \"...\")]`) letting a user override the auto-derived Encode/Decode bounds on a generic #[Codable] type when the inferred bounds are wrong/too strict. Implement when a real case needs it; until then the auto bound propagation (D-SERDE9) covers the common path.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e4",
       "phase": "frozen",
       "priority": "P3",
       "plan": null,
@@ -438,10 +528,14 @@
         {
           "at": "2026-06-25",
           "text": "[sweep] Created per D-SERDE11=A owner comment (do not lose the shipping-bound idea). Reserved; build on evidence."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e4. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-25"
+      "updated": "2026-06-26"
     },
     {
       "id": "c154",
@@ -450,7 +544,7 @@
       "body": "Deferred top rung of the D-METADEPTH1 ladder (owner answered A = reflection/derives only for v1; full Jai parked here per owner: 'Ensure full jai is tracked as a frozen card for later consideration'). Option C: user/build code receives every decl after typecheck and may inspect, rewrite, and inject AST + define macros. Requires reversing the no-macros non-goal and bending I3/I8, so it is explicitly post-self-host and off the v1 table. Devil's-advocate analysis (full-jai vs A across beginner/student/power-user/enterprise) lives on the D-METADEPTH1 ballot card Owner Q5 and in syntax-decisions.md.",
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e4",
       "phase": "frozen",
       "priority": "P3",
       "plan": null,
@@ -459,10 +553,14 @@
         {
           "at": "2026-06-25",
           "text": "[ratified 2026-06-25] Created per owner comment on D-METADEPTH1=A ('Ensure full jai is tracked as a frozen card for later consideration'). The A-rung (reflection/derives) is c155; B-rung (rejection-lint) is a future vote. Frozen — post-self-host."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e4. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-25"
+      "updated": "2026-06-26"
     },
     {
       "id": "c153",
@@ -470,20 +568,28 @@
       "title": "Full YAML 1.2: explicit tags + advanced features (post-c152)",
       "body": "Deferred tail of D-ENC-YAML1 (owner answered A = core + anchors/aliases + documents for c152; full 1.2 parked here). Extend the std-only YAML parser built in c152 to the rest of YAML 1.2: explicit/custom tags (!!str, !MyType), and any remaining 1.2-core corners not needed for serialized config. Frozen until the core YAML adapter (c152) ships and a real need for tags appears. Plan: sidequests/serde-model.md (COMPLETION section, YAML scope).",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
-      "phase": "frozen",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "planning",
       "priority": "P3",
       "plan": "serde-model",
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-27",
+          "text": "Activated into epoch e3 track"
+        },
+        {
           "at": "2026-06-25",
           "text": "[handoff 2026-06-25] Created per owner ballot comment on D-ENC-YAML1 ('Add C, full yaml 1.2 as a card in the frozen section to be worked later'). Depends on c152 (core YAML adapter). Frozen."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-25T00:00:00Z",
-      "updated": "2026-06-25"
+      "updated": "2026-06-27"
     },
     {
       "id": "c164",
@@ -669,8 +775,8 @@
       "body": "[D-IFC1] D-TAINT1 Option B: full information-flow control — security-label lattice, principals, declassify. Owner explicitly DEFERRED to post-Epoch-3 on 2026-06-21 when ratifying D-TAINT1 Option A (#tainted + sanitizers). Generalizes taint; the compliance/legal-sink dimension is a policy question tied to the manifest capability model. Preserve, do not decide.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
-      "phase": "frozen",
+      "epoch": null,
+      "phase": "deciding",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -678,6 +784,14 @@
         {
           "at": "2026-06-26",
           "text": "Preserved from v1 deferred ballot (D-IFC1); not decidable until post-v1 proof/solver/policy layer exists"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] pulled from e3 into the research→ballot pipeline. Owner: research this proof-layer item and author a decision ballot so he can decide whether to pursue; if it yields a foundational feature it lands in E3. Epoch unset until the ballot is decided."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[research→ballot 2026-06-26] researched and converted to decision ballot D-IFC1 (rec A). Moved frozen → deciding. Foundational subset option could land in E3 if owner pursues; otherwise stays research."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
@@ -690,8 +804,8 @@
       "body": "[D-REFINE1] Compiler-proved value refinements so PositiveInt is always > 0 without scattered require() checks. Needs a proof/SMT layer that is post-v1; the I8 simplicity ratchet requires a concrete milestone slot + owner sign-off before any work. Preserve, do not decide.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
-      "phase": "frozen",
+      "epoch": null,
+      "phase": "deciding",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -699,6 +813,14 @@
         {
           "at": "2026-06-26",
           "text": "Preserved from v1 deferred ballot (D-REFINE1); not decidable until post-v1 proof/solver/policy layer exists"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] pulled from e3 into the research→ballot pipeline. Owner: research this proof-layer item and author a decision ballot so he can decide whether to pursue; if it yields a foundational feature it lands in E3. Epoch unset until the ballot is decided."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[research→ballot 2026-06-26] researched and converted to decision ballot D-REFINE1 (rec B). Moved frozen → deciding. Foundational subset option could land in E3 if owner pursues; otherwise stays research."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
@@ -711,8 +833,8 @@
       "body": "[D-BUDGET1] Express resource budgets (e.g. a 16ms CPU bound) as types and warn when a called function is known to exceed them. Needs comptime cost-bound inference, not in the v1 roadmap; no prior-art consensus on ergonomics without macros (I8 / no macros). Preserve, do not decide.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
-      "phase": "frozen",
+      "epoch": null,
+      "phase": "deciding",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -720,6 +842,14 @@
         {
           "at": "2026-06-26",
           "text": "Preserved from v1 deferred ballot (D-BUDGET1); not decidable until post-v1 proof/solver/policy layer exists"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] pulled from e3 into the research→ballot pipeline. Owner: research this proof-layer item and author a decision ballot so he can decide whether to pursue; if it yields a foundational feature it lands in E3. Epoch unset until the ballot is decided."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[research→ballot 2026-06-26] researched and converted to decision ballot D-BUDGET1 (rec B). Moved frozen → deciding. Foundational subset option could land in E3 if owner pursues; otherwise stays research."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
@@ -732,8 +862,8 @@
       "body": "[D-VERIFY1] Attach a machine-checked proof to a function (e.g. constant_time_eq is input-independent) and refuse to ship if the proof fails. Needs a proof-carrying-code / SMT integration layer that is explicitly post-v1; I8 bars it without a concrete roadmap slot + owner sign-off. Preserve, do not decide.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
-      "phase": "frozen",
+      "epoch": null,
+      "phase": "deciding",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -741,6 +871,14 @@
         {
           "at": "2026-06-26",
           "text": "Preserved from v1 deferred ballot (D-VERIFY1); not decidable until post-v1 proof/solver/policy layer exists"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] pulled from e3 into the research→ballot pipeline. Owner: research this proof-layer item and author a decision ballot so he can decide whether to pursue; if it yields a foundational feature it lands in E3. Epoch unset until the ballot is decided."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[research→ballot 2026-06-26] researched and converted to decision ballot D-VERIFY1 (rec B). Moved frozen → deciding. Foundational subset option could land in E3 if owner pursues; otherwise stays research."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
@@ -753,8 +891,8 @@
       "body": "[D-REVERSE1] Write a forward constraint (width = parent.width - padding*2) and have Jet solve for an input given a target output. Needs a reversibility annotation + a solver/SMT backend; no prior-art consensus on ergonomics without macros or dependent types. Preserve, do not decide.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
-      "phase": "frozen",
+      "epoch": null,
+      "phase": "deciding",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -762,6 +900,14 @@
         {
           "at": "2026-06-26",
           "text": "Preserved from v1 deferred ballot (D-REVERSE1); not decidable until post-v1 proof/solver/policy layer exists"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] pulled from e3 into the research→ballot pipeline. Owner: research this proof-layer item and author a decision ballot so he can decide whether to pursue; if it yields a foundational feature it lands in E3. Epoch unset until the ballot is decided."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[research→ballot 2026-06-26] researched and converted to decision ballot D-REVERSE1 (rec B). Moved frozen → deciding. Foundational subset option could land in E3 if owner pursues; otherwise stays research."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
@@ -850,7 +996,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Leading dot on enum-variant patterns in match arms (D-ENUMDOT1=A): `.Circle(r)`, `.Empty`. Amends S30/S31; also resolves S31's bare-name-vs-variable ambiguity.\nSteps: (1) parser pattern grammar — accept a leading `.` before a variant pattern, resolved against the subject's inferred enum; (2) drop S31's \"qualify a unit variant to disambiguate\" requirement where the dot is present; (3) Syntax.rs; (4) re-bless ui + migrate every enum match arm in canon/examples; (5) fmt round-trip test.\nNOTE: value-position dot (`c@ Color = .Red`) is a SEPARATE owner decision — tracked as a new card + ballot D-ENUMDOT2; do not implement value-position here.",
       "blockedBy": [],
@@ -862,6 +1008,10 @@
         {
           "at": "2026-06-26",
           "text": "Surfaced from owner mark(s) [Enum Switch] in syntax-surface.jet; HAVE/WANT ballot, owner ratifies"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Implemented D-ENUMDOT1=A: leading dot on enum variant patterns in match/switch/if arms. Parser try_pattern_rhs + switch_after_kw accept .Variant(x)/.Variant. Formatter always emits dot prefix. Migrated 11 example files, re-blessed 7 UI snapshots. Fmt round-trip test added. All tests pass."
         }
       ],
       "created": "2026-06-26T20:41:24.822Z",
@@ -875,7 +1025,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Impl/forwarding trait separator `:` becomes `.` (D-IMPLDOT1=A): `impl FileErr.Fallible`, `impl App.Logger using logger`. Reopens S28, amends S62, retires the reserved `~~` direction.\nSteps: (1) parser impl-head + forwarding grammar — `.` between type and trait; (2) Syntax.rs; (3) keep `:` as type-annotation/bound punctuation everywhere else (unchanged); (4) re-bless ui + migrate every `impl Type: Trait` and `impl Trait using field` in canon/examples (repo-wide); (5) fmt round-trip test.",
       "blockedBy": [],
@@ -887,6 +1037,10 @@
         {
           "at": "2026-06-26",
           "text": "Surfaced from owner mark(s) [Trait Implementation Syntax, Trait Forwarding] in syntax-surface.jet; HAVE/WANT ballot, owner ratifies"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Implemented D-IMPLDOT1=A: parser impl-head uses lookahead-aware type parsing (not greedy `parse_type_path`); formatter emits `.`; E0321 teaching error for old `:` form; repo-wide migration of all `impl Type: Trait` → `impl Type.Trait`; fmt round-trip test added; UI snapshot for E0321; orphan_impl snapshot updated; all tests green."
         }
       ],
       "created": "2026-06-26T20:41:24.822Z",
@@ -957,7 +1111,7 @@
       "body": "Scratch note (Ideas.md): Verse-style concurrency/async task types — `race`, `sync`/wait-all, `rush`, etc. as first-class structured-concurrency combinators. Ref Verse book ch.14. Relates to structured-concurrency/nursery and try-both-race-winner cards; decide as a family.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e3",
       "phase": "planning",
       "priority": "P2",
       "plan": "Structured concurrency combinators (D-CONCCOMB1=A): ship race (first wins, losers cancelled), all (wait all, fail-fast on first error), any (first Ok, waits rest) as first-class core combinators over tasks.\nGATED: the task/channel primitives (S53, direction A) are deferred/post-v1 and the memory-capability model review is a prerequisite (S53 2026-06-19 caveat); D-NURSERY1 (structured concurrency) is still open. Semantics are locked by this decision; the BUILD waits on the primitives. blockedBy the concurrency-primitives card. Plan when unblocked: define the three combinators alongside the task primitives; examples + goldens; ensure race cancellation composes with the cancellation model.",
@@ -972,6 +1126,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L19). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e4 → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.902Z",
@@ -1143,7 +1301,7 @@
       "body": "Ideas.md: a written API review rubric for safe, obvious stdlib APIs. Principles mostly practiced but not a standalone checklist.",
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1152,6 +1310,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L76). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1164,7 +1326,7 @@
       "body": "Ideas.md: `jet fmt` should not erase parentheses an author wrote for clarity. New if it still happens; no current card.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -1173,6 +1335,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L77). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1185,7 +1351,7 @@
       "body": "Ideas.md: keep compact one-line bodies when the author wrote them. Ratified D-FMT1 — card tracks implementation/verification.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "triage",
       "priority": "P3",
       "plan": null,
@@ -1194,6 +1360,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L78). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1206,7 +1376,7 @@
       "body": "Ideas.md: ban or teach `if x = 5`. Likely already grammar-rejected; no dedicated card. Decision: confirm grammar rejection + add a teaching diagnostic.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P3",
       "plan": "Assignment-in-condition diagnostic (D-ASSIGNCOND1=A): confirm/add grammar rejection of `=` in condition position, then a dedicated teaching diagnostic — code + what/why/fix (\"looks like assignment in a condition; did you mean `==`?\") with a did-you-mean fix.\nSteps: (1) confirm the grammar rejects `if x = 5` (add the guard if not); (2) the diagnostic via the did-you-mean infra; (3) I4: code in diagnostics.md + tests/ui snapshot; (4) example. No new syntax.",
@@ -1219,6 +1389,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L79). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1231,7 +1405,7 @@
       "body": "Ideas.md: warn on plausible bugs — float `==`, always-true/false conditions, duplicate match/if branches. New; no card. Bundle-risk: several lint families grouped.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
       "plan": "Semantic-smell lints (D-SMELLLINT1=A): float `==` (default-on) and duplicate match/if branch (default-on); constant-condition (opt-in, legitimate in comptime-adjacent code). Split-shipping allowed (float + dup first).\nSteps: per lint — sema pass over the AST; W-code + message + fix suggestion; I4 tests/ui snapshot; example triggering it. Three codes, three snapshots. No new syntax.",
@@ -1244,6 +1418,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L80). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1256,7 +1434,7 @@
       "body": "Ideas.md: warn on easily-confused names in the same scope. did-you-mean exists; same-scope confusables do not appear carded.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P3",
       "plan": "Confusable-identifier lint (D-CONFUSE1=A): homoglyph confusables (`l`/`1`/`I`, `O`/`0`) default-on (almost never intentional in one scope); plural/singular near-names (`user`/`users`) opt-in (frequently legitimate). Two sub-lints, two codes.\nSteps: (1) fire at declaration time when a new identifier is shadow-similar to one already in scope (reuse the did-you-mean similarity metric); (2) two W-codes + two ui snapshots; (3) examples. No new syntax.",
@@ -1269,6 +1447,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L81). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1281,7 +1463,7 @@
       "body": "Ideas.md: detect 3-of-4 copied blocks updated inconsistently (drift). New/tooling; no card.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1290,6 +1472,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L82). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1302,7 +1488,7 @@
       "body": "Ideas.md: separate user-facing display from debug representation. Formatting/interpolation exist; explicit split not carded. New/minor.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": "Display vs Debug split (D-DISPLAYDBG1=A): two blessed protocol hooks — Debug auto-derives for any struct/enum (like Rust derive(Debug)); Display requires an explicit impl (no default). Two distinct jobs (I8-safe).\nGATED on the interpolation spelling that selects Debug — ballot D-DISPLAYDBG2 (`{x:?}` vs `{x.debug}` vs `{x!}`). Once ratified:\nSteps: (1) Display + Debug hooks in the blessed-protocol-hooks system; (2) auto-derive Debug; (3) interpolation: default `{}` = Display, the ratified spelling = Debug; (4) examples + goldens + fmt round-trip for the new interpolation selector.",
@@ -1315,6 +1501,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L83). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1327,7 +1517,7 @@
       "body": "Ideas.md: fast seedable PRNG vs crypto RNG. `core.random` and `core.crypto` exist; API clarity/naming may need review. Partial/Implemented.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1336,6 +1526,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L84). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1348,7 +1542,7 @@
       "body": "Ideas.md: dates, time zones, calendar math, injectable clock. Deterministic `Clock` exists; richer `core.time` should be verified/expanded. Implemented/Partial. Bundle-risk: several time APIs grouped.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
       "plan": "core.time depth (D-TIMEDEPTH1=A): add Date, DateTime, Duration, Zone (IANA-backed) to Core. The injectable Clock already handles determinism; civil-time layers on top.\nSteps: (1) Date/DateTime (year/month/day, parse/format), Duration arithmetic, calendar math (next-billing-date style) in the stdlib; (2) Zone via IANA tz database — source from host tzdata under the native-deps-nixpkgs interim pattern (Nix: pkgs.tzdata; non-Nix: bundled fallback + a clear error if absent); (3) examples + goldens incl. a zone-aware case; (4) keep the API unified (don't fragment civil-time from instants). Core module, not a package (source-compat boundary).",
@@ -1361,6 +1555,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L85). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1373,7 +1571,7 @@
       "body": "Ideas.md: document the kernel every surface feature lowers to. New/process; no formal kernel doc.",
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e6",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1382,6 +1580,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L86). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e6. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1394,7 +1596,7 @@
       "body": "Ideas.md: add Set and Deque/ring buffer to core collections. New; no card. Bundle-risk: Set, Deque, ring buffer can ship independently.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
       "plan": "Collections breadth (D-COLLBREADTH1=A): add `Set<T: Hash + Eq>` (hash-backed, unordered) and `Deque<T>` (ring-buffer backing — NOT a separate ring-buffer type, I8) to core.collections. `OrderedSet<T: Ord>` is a follow-on.\nSteps: (1) Set over the existing Map Hash/Eq story (no new mechanism); (2) Deque ring buffer with push/pop both ends; (3) examples (dedup via Set, BFS/sliding-window via Deque) + goldens. One Set type only (I8).",
@@ -1407,6 +1609,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L90). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1419,7 +1625,7 @@
       "body": "Ideas.md: UUID v4/v7, base64, hex. base64 appears only in FFI examples, not Core API. New/std. Bundle-risk: UUID and encodings independent.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
       "plan": "UUID + encodings (D-UUIDENC1=A): ship `core.encoding` (hex, base64 encode/decode — pure algorithms, no deps) and `core.uuid` (v4 via system CSPRNG with an injectable interface for tests; v7 via the injectable Clock) in Core.\nSteps: (1) hex + base64 codecs + round-trip goldens; (2) UUID v4 (CSPRNG from /dev/urandom or OS equivalent, injectable like Clock) + v7 (Clock-based); (3) examples (generate v7, store as base64) + goldens. Pure library; no new language mechanism.",
@@ -1432,6 +1638,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L91). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1444,7 +1654,7 @@
       "body": "Ideas.md: exact base-10 Decimal plus a lint against using float for money. New; no card. Bundle-risk: numeric type and lint are separate.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "planning",
       "priority": "P2",
       "plan": "Decimal money + float-money lint (D-DECIMAL1=A): ship `Decimal` (arbitrary-precision base-10) in core.numeric AND a default-on lint E-FLOATMONEY firing when a variable/field named price/cost/amount/total/fee/balance/tax holds a float (suppressible with an allow-marker for intentional uses).\nThe Decimal TYPE needs a bigint backing — gated on the BigInt decision (card #65, open): blockedBy #65. The LINT is independent and can ship first.\nSteps: (1) [now] E-FLOATMONEY sema lint + I4 code/what/why/fix + ui snapshot + example; (2) [after #65] Decimal arbitrary-precision base-10 (prefer pure-Rust bigint backing per I6) + arithmetic + examples + goldens. One Decimal type only (I8).",
@@ -1459,6 +1669,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L92). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1471,7 +1685,7 @@
       "body": "Ideas.md: safer filesystem API than raw strings (Path type, atomic write, directory traversal). path/list_dir exist; full surface needs verification. Partial. Bundle-risk: path type, atomic write, traversal separate.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
       "plan": "Typed Path API (D-PATHFS1=A): ship `core.fs.Path` as a Core type superseding raw-string paths. `Path.from(str)` entry; pure methods `join()`/`parent()`/`extension()`/`stem()`; `write_atomic()` (sibling temp + rename); `walk()` lazy iterator with symlink-loop cycle detection.\nSteps: (1) Path type + methods; (2) write_atomic + walk; (3) raw-string path helpers (path/list_dir) become teaching errors pointing to Path — I4 code + ui snapshot; (4) examples + goldens (join, atomic write, walk). One way to work with paths (I8).",
@@ -1484,6 +1698,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L93). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1517,7 +1735,7 @@
       "body": "Ideas.md: first-party native graphics (raylib) package, cross-platform. Examples exist; built-in package not found. New.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1526,6 +1744,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L95). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1538,7 +1760,7 @@
       "body": "Ideas.md: copy-in-and-own UI components rather than a locked theme/framework (shadcn-style). New; no UI card.",
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "planning",
       "priority": "P3",
       "plan": "Ownable UI components (D-OWNCOMP1=B): jetpack copies component source into the user's tree (shadcn model) — user owns it immediately, no version lock; patches don't auto-propagate (re-run add / diff manually). Fits I8 (one distribution path) and the ownership ethos.\nGATED: this is downstream of the reactive-ui-stack direction (D-REACTUI1, still open) — the distribution model is meaningless until the components' target stack is known. blockedBy the reactive-ui card. Plan when unblocked: a `jetpack add <component>` that copies source + records provenance; accessible defaults ship in the owned source.",
@@ -1553,6 +1775,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L96). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1611,7 +1837,7 @@
       "body": "Ideas.md: high-level seal/sign envelope hiding nonce/IV footguns. Crypto primitives exist; envelope API not found. New.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": "Misuse-resistant crypto envelope (D-CRYPTOENV1=A): `crypto.seal`/`crypto.open` (AEAD) + `crypto.sign`/`crypto.verify` (signatures) as the canonical API hiding nonce/IV/mode (libsodium model); raw AES/ChaCha/RSA behind an explicit expert import (I1).\nGATED two ways: (a) the crypto primitive backend is an I6 dep — ballot D-DEP-CRYPTO1 (RustCrypto vs ring vs libsodium); (b) the envelope's CSPRNG must come from the ratified random API — card #52 (Random API) is still open: blockedBy #52. Steps once cleared: seal/open + sign/verify over the chosen backend; raw primitives gated behind expert import; examples + goldens.",
@@ -1626,6 +1852,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L99). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1638,7 +1868,7 @@
       "body": "Ideas.md: BigInt type. No built-in arbitrary-precision integer found. New/std.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1647,6 +1877,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L100). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1659,7 +1893,7 @@
       "body": "Ideas.md: human-visible Unicode grapheme clusters + normalization. Strings are Unicode-aware but grapheme API not found. New/std. Bundle-risk: grapheme iteration vs normalization can ship separately.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1668,6 +1902,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L101). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1680,7 +1918,7 @@
       "body": "Ideas.md: zip/tar/gzip/zstd/brotli support. `core.archive` planned/built-from-source (Tower c50 track); broader codecs not all verified. Partial. Bundle-risk: archive containers vs compression codecs are independent.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1689,6 +1927,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L103). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1701,7 +1943,7 @@
       "body": "Ideas.md: numeric values track precision/error bounds (±). Overlaps uncertainty tags but not carded. New/library.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P3",
       "plan": "Honest numbers (D-HONESTNUM1=A): ship `Measurement<T>` (value ± uncertainty) as a first-party PACKAGE (core.science.measurement), NOT Core — scientific niche, keeps Core small (I8). Pure library, no language change.\nSteps: (1) Measurement<T> type with ± propagation through +/-/*// (standard error-propagation rules); (2) examples (9.8 ± 0.1 arithmetic) + goldens; (3) ships as a package, opt-in import.",
@@ -1714,6 +1956,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L104). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1726,7 +1972,7 @@
       "body": "Ideas.md: a library-provided garbage collector for long-running processes. New; no card.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": "Opt-in GC library (D-OPTGC1=A): a `gc` stdlib module with a `Gc<T>` traced handle for cyclic heap data. Ownership stays the default; `Gc<T>` is a deliberate expert import; all Jet outside @unsafe stays sound (library type, not a language primitive).\nGATED on the backing implementation — ballot D-DEP-GC1 (hand-rolled pure-Rust mark-sweep vs an external GC crate vs defer); the external-crate path is an I6 owner gate. Steps once cleared: Gc<T> handle + traced collector (root set + tracing) per the chosen backend; examples (cyclic graph) + goldens. Does not touch sema/codegen rules or the default allocation path.",
@@ -1739,6 +1985,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L105). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1751,7 +2001,7 @@
       "body": "Ideas.md: vectors, matrices, decompositions, FFT later. Ratified/partly implemented (D-MATHLIB1, D-SIMD1/2). This card tracks completing the math package. Bundle-risk: vectors, matrices, decompositions, FFT are distinct.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "triage",
       "priority": "P2",
       "plan": null,
@@ -1760,6 +2010,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L106). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1772,7 +2026,7 @@
       "body": "Ideas.md: hybrid X25519+ML-KEM behind a safe API. New/far-horizon; sequence after the safe crypto envelope. Bundle-risk: algorithm choice should follow the envelope API.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1781,6 +2035,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L107). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1948,7 +2206,7 @@
       "body": "Ideas.md: a dependency maturity lattice via tags. New; likely rides tag/effect machinery.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -1957,6 +2215,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L119). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1990,7 +2252,7 @@
       "body": "Ideas.md: user customizes snapshot/restore or registers undo hooks. Ratified/Partial (D-ROLLBACK-TRAIT); associated-types completion gates full trait dispatch. Bundle-risk: snapshot/restore traits vs undo hooks.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "triage",
       "priority": "P3",
       "plan": null,
@@ -1999,6 +2261,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L121). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2011,7 +2277,7 @@
       "body": "Ideas.md: vector types with x/y/z/w-style access and swizzling. SIMD/linalg vectors implemented/ratified; named swizzles deferred/not found. This card tracks the swizzle syntax. Bundle-risk: vector type support vs swizzle syntax.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2020,6 +2286,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L122). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2053,7 +2323,7 @@
       "body": "Ideas.md: make the REPL execute Core calls inline. Was Tower c133 (ready plan). Accepted work.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "triage",
       "priority": "P2",
       "plan": null,
@@ -2062,6 +2332,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L124). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2074,7 +2348,7 @@
       "body": "Ideas.md: hash normalized definitions/build inputs for incremental work. Partially implemented via BuildCache.rs/SHA256.rs; the normalization contract still matters. Bundle-risk: cache implementation vs normalization contract.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e5",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2083,6 +2357,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L125). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2095,7 +2373,7 @@
       "body": "Ideas.md: jetdoc-style generated docs from the compiler graph. Doctests/docs exist; semantic doc generator not found. Partial.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": "e3",
+      "epoch": "e6",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2104,6 +2382,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L126). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e3 → e6. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2116,7 +2398,7 @@
       "body": "Ideas.md: stitched views of a type across files and impls. LSP foundations exist; no dedicated card. New/tooling.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2125,6 +2407,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L127). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2137,7 +2423,7 @@
       "body": "Ideas.md: show scattered methods near the type body in the editor. New/tooling; likely rides the semantic index.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2146,6 +2432,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L128). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2158,7 +2448,7 @@
       "body": "Ideas.md: split the compiler into documented lexer/parser/sema/TIR/codegen APIs. Ratified (was Tower c160). Largely landed — Source/ is a Cargo workspace with 7 seam crates. This card tracks documenting/finishing the seam APIs (a public query API is a separate card). Bundle-risk: each seam can have different readiness.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "triage",
       "priority": "P2",
       "plan": null,
@@ -2167,6 +2457,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L130). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2200,7 +2494,7 @@
       "body": "Ideas.md: instantiate a module with a type or value parameter. Generic types/functions exist; module generics not found. New.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2209,6 +2503,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L132). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2305,7 +2603,7 @@
       "body": "Ideas.md: expose compiler/LSP facts as a public query API. Internal Source/LSP/SymbolDB.rs exists; no stable external API/card. New. (Epoch 4 exit criterion.)",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P1",
       "plan": null,
@@ -2314,6 +2612,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L138). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e4 → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2326,7 +2628,7 @@
       "body": "Ideas.md: show downstream effects of a change. New/tooling; rides the semantic index.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2335,6 +2637,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L139). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2347,7 +2653,7 @@
       "body": "Ideas.md: refactors as named objects that can be shipped/undone. LSP rename/fixes exist; codemod object model not found. New/tooling.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2356,6 +2662,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L140). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2368,7 +2678,7 @@
       "body": "Ideas.md: Jetpack realizes deps from source and ships ring packages. Was Tower c50. Accepted Jetpack work (an e3 exit criterion: jetpack builds deps from source). Bundle-risk: source realization vs ring package shipping may stage separately.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e5",
       "phase": "triage",
       "priority": "P1",
       "plan": null,
@@ -2377,6 +2687,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L141). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e3 → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2389,7 +2703,7 @@
       "body": "Ideas.md: revisit stored references and ownership vocabulary. Partial/Implemented — capability sigils and `ref` hardening landed; the original note is likely stale and needs recovery before action. Bundle-risk: needs original-note recovery first.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2398,6 +2712,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L143). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2410,7 +2728,7 @@
       "body": "Ideas.md: suspend/resume execution without full async function coloring. New/Reopen — the async plan uses @async/await, not generic coroutines.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2419,6 +2737,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L147). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e4 → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2431,7 +2753,7 @@
       "body": "Ideas.md: lexical task scope that cannot exit until children finish; cancellation/deadline context. Tasks exist; nursery scope not found. New/Planned-adjacent. Bundle-risk: nursery, cancellation, deadlines can be separate. (Epoch 4 exit criterion.)",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P1",
       "plan": null,
@@ -2440,6 +2762,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L148). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e4 → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2452,7 +2778,7 @@
       "body": "Ideas.md: run alternatives and keep the successful/winning one. Transaction covers rollback, not general racing. New/Planned-adjacent. Bundle-risk: success-race vs first-done-race differ.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2461,6 +2787,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L149). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e4 → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2515,7 +2845,7 @@
       "body": "Ideas.md: bounds checked by default, prove in-range to elide. Safe indexing exists; proof-based unchecked tier not found. Partial. Bundle-risk: runtime checks vs proof escape.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2524,6 +2854,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L153). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2641,7 +2975,7 @@
       "body": "Ideas.md: deadlines flow downhill through calls. Smart Context could carry this; no deadline-specific card. Partial/New. Bundle-risk: context carrier vs deadline semantics.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2650,6 +2984,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L161). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] e4 → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2746,7 +3084,7 @@
       "body": "Ideas.md: a general database/sql-style interface, parameterized queries only. SQLite/db work exists (c50/core.db); generic driver interface not found. Partial. Bundle-risk: interface, parameter policy, drivers separable.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2755,6 +3093,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L166). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2767,7 +3109,7 @@
       "body": "Ideas.md: same code from server to microcontroller via ring layering. Freestanding/no-std direction exists; full ring layering not designed. Partial/Planned. Bundle-risk: library split vs platform story.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -2776,6 +3118,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L168). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2788,7 +3134,7 @@
       "body": "Ideas.md: caller-supplied buffers/allocators for fixed-memory use. Ratified/Partial — allocator/arena work exists; the broad std API convention is not complete. This card tracks the std convention. Bundle-risk: allocator mechanism vs std convention.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "triage",
       "priority": "P3",
       "plan": null,
@@ -2797,6 +3143,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L169). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2809,7 +3159,7 @@
       "body": "Ideas.md: a style layer with compile-time property/unit checking. Rides units and the UI track. New.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2818,6 +3168,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L170). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2830,7 +3184,7 @@
       "body": "Ideas.md: components ship ARIA/focus/keyboard behavior; a11y diagnostics gate releases. New; no card. Bundle-risk: component behavior vs diagnostics gate.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2839,6 +3193,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L171). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2851,7 +3209,7 @@
       "body": "Ideas.md: FFI to native widgets first, own renderer later. C FFI exists; native UI strategy not carded. New. Bundle-risk: widget FFI vs own renderer are separate phases.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2860,6 +3218,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L172). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2872,7 +3234,7 @@
       "body": "Ideas.md: emit JS DOM ops for views, keep logic/compute in WASM. No web backend card. New/planned-adjacent. Bundle-risk: DOM emission vs WASM compute partition.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2881,6 +3243,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L173). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2893,7 +3259,7 @@
       "body": "Ideas.md: call existing JS/npm and Swift ecosystems from day one. Only C/Rust FFI and package plans exist. New. Bundle-risk: JS/npm vs Swift are separate interop tracks.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -2902,6 +3268,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L174). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2977,7 +3347,7 @@
       "body": "Ideas.md: local syntax islands such as `sql!{...}`. Ratified as a stdlib-only future by D-EXT1; no general third-party DSL block. This card tracks the blessed stdlib-only DSL-block mechanism.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e4",
       "phase": "triage",
       "priority": "P3",
       "plan": null,
@@ -2986,6 +3356,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L184). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e4. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3061,7 +3435,7 @@
       "body": "Ideas.md: values update dependents like a spreadsheet. Reopen — D-REACT1 chose library/tooling, not core evaluation semantics. Keystone for the reactive-ui stack.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -3070,6 +3444,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L191). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3082,7 +3460,7 @@
       "body": "Ideas.md: web/native/embedded/TUI as backend traits. Research says decide early; no card. New. Bundle-risk: every target has different constraints.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -3091,6 +3469,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L194). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3103,7 +3485,7 @@
       "body": "Ideas.md: reactivity → view model → typed styles → headless/styled kit → motion/app kit. New/Reopen — depends on whether core reactivity is reconsidered. Bundle-risk: full-stack roadmap combines several layers.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P2",
       "plan": null,
@@ -3112,6 +3494,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L195). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3124,7 +3510,7 @@
       "body": "Ideas.md: animation is derived state, not a separate runtime. New/Reopen — downstream of the reactivity call.",
       "kind": "feature",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -3133,6 +3519,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L196). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3229,7 +3619,7 @@
       "body": "Ideas.md: user code rewrites arbitrary code or injects typed AST. Reopen — D-METADEPTH1 and D-CTCODEGEN1 reject this for v1.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e4",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -3238,6 +3628,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L204). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e4. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3250,7 +3644,7 @@
       "body": "Ideas.md: libraries add sigils, keywords, or grammar. Rejected/Reopen — D-EXT1 treats Tier 4 (grammar mutation) as a global footgun.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e4",
       "phase": "deciding",
       "priority": "P3",
       "plan": null,
@@ -3259,6 +3653,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L205). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "[epoch restructure 2026-06-26] - → e4. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -6766,6 +7164,246 @@
         }
       ],
       "comparisons": [],
+      "rec": "A",
+      "status": "open"
+    },
+    {
+      "id": "D-REFINE1",
+      "cardId": "c73xs2f",
+      "title": "Should Jet pursue refinement types (e.g. PositiveInt proved > 0), and if so as a construction-time subset or a full SMT-backed prover?",
+      "gist": "We're deciding whether Jet should let you attach a predicate to a type — PositiveInt = Int where it > 0 — so the value is known good everywhere it flows, instead of re-checking with scattered require() calls. The real fork is how much proving the compiler does: nothing (decline), a pragmatic subset proved at construction plus flow-narrowing (no theorem prover), or a full SMT-solver-backed prover. The central cost of the full version is that an SMT solver is a large external dependency, which collides head-on with I6 (zero external crates in the compiler).",
+      "explainer": "A refinement type is a base type plus a predicate the compiler tracks as part of the type: once a value has type PositiveInt, no callee needs to re-validate it. The win is real — it removes a class of beginner footguns (forgot to check) and a class of expert boilerplate (re-checking the same invariant at every layer). The danger is duplicating I8: Jet already has require()/T ? E/? for runtime validation, so refinement types must extend that path, not fork it — construction must funnel through one fallible smart-constructor that returns PositiveInt ? Error, reusing require under the hood. The deep divide is foundational-vs-research. A subset that only proves predicates at the construction boundary (literal-checked, or returned as T ? E) and then narrows them flow-sensitively (after if x > 0, x is PositiveInt in that branch) needs no solver — it's a few sema rules over existing machinery and could land in Epoch 3. The full version — proving that arbitrary arithmetic preserves a predicate, e.g. that a+b stays in-range — needs a decision procedure, i.e. an SMT solver (Z3-class). That is the I6 problem: it's tens of thousands of lines of external C++/Rust we cannot vendor under our zero-external-crate rule, it makes errors come from a solver (risking I2: rustc/solver must never speak to users), and solver timeouts make compile times nondeterministic. So the honest framing is: the cheap, safe, beginner-friendly slice (B) is mostly independent of the expensive research slice (C), and we can ship the former without ever committing to the latter.",
+      "story": "I'm writing a billing function and I type fn charge(cents: PositiveInt). A caller passes a value computed from user input. The compiler stops me at the call site: it can't prove the value is positive, and it points me at the one constructor — PositiveInt.new(n) returns PositiveInt ? String — so I write let amt = PositiveInt.new(raw)? once at the boundary. From there it flows through three layers of my code untouched, and nobody re-checks it. When I later guard with if amt > 0 the compiler already knew; when I forgot a guard last week, require() would have blown up at runtime — now it's a compile error with a fix-it pointing at the constructor.",
+      "inWild": "// TODAY: re-check the invariant at every layer; nothing ties the checks together\nfn charge(cents: Int) -> Receipt ? String {\n  require(cents > 0, \"charge: cents must be positive\");\n  meter(cents)        // meter ALSO re-checks, because the type forgot\n}\nfn meter(cents: Int) {\n  require(cents > 0, \"meter: cents must be positive\"); // duplicated invariant (I8 smell)\n}\n\n// PROPOSED (subset, option B): the type carries the proof; check once at the edge\nrefine PositiveInt = Int where it > 0;   // one definition; .new is the only door in\n\nfn charge(cents: PositiveInt) -> Receipt ? String {\n  meter(cents)        // no re-check: the type already guarantees > 0\n}\nfn meter(cents: PositiveInt) { /* always positive, by construction */ }\n\nlet amt = PositiveInt.new(raw)?;   // single boundary check, reuses require/T ? E path\ncharge(amt);",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline — keep refinement types out of scope",
+          "detail": "Do not add refinement types at all. Keep validation on the existing require()/T ? E/? path: callers validate at boundaries and pass plain Int. Honest rationale: this is the smallest surface, fully I6/I8-clean, and beginners already get safe-by-default behavior because forgetting a require() fails loudly at runtime (exit 70) rather than silently corrupting. The cost is the duplicated-invariant smell — the same predicate gets re-checked at multiple layers, and the type system can't prove a value stays good as it flows. Recommended only if we judge the subset's ongoing sema/formatter/diagnostic maintenance not worth the boilerplate it removes. Not recommended: it leaves a real beginner footgun (a forgotten check is a runtime crash, not a compile error) that B fixes cheaply.",
+          "code": "// Status quo: no refine; invariant lives in prose + repeated require()\nfn charge(cents: Int) -> Receipt ? String {\n  require(cents > 0, \"cents must be positive\");\n  meter(cents)\n}\nfn meter(cents: Int) {\n  require(cents > 0, \"cents must be positive\"); // must repeat, or trust the caller\n}\n// Forgetting the second require compiles fine and crashes at runtime:\n//   error: cents must be positive  (exit 70)"
+        },
+        {
+          "key": "B",
+          "name": "Pragmatic subset — construction-checked predicate types + flow narrowing, NO solver",
+          "detail": "RECOMMENDED. Add `refine T = Base where <predicate>;`. The predicate is checked at exactly one place — the generated `.new` smart constructor returns `T ? Error`, lowering to the existing require()/T ? E machinery (no new error path → I8 respected). Once you hold a `T`, every callee trusts it; passing a bare `Base` where `T` is expected is a compile error pointing at `.new`. Add flow-sensitive narrowing: inside `if x > 0 { … }` a plain Int narrows to PositiveInt for that branch, and literal arguments (`charge(5)`) are checked at compile time. Crucially NO general theorem proving: the compiler does NOT try to prove `a + b` stays positive — arithmetic on refined values widens back to the base type, and you re-establish the refinement through `.new` at the next boundary. This is a handful of sema rules over machinery Jet already has; realistically lands in Epoch 3. Gives beginners a compile-time guarantee (forgot-the-check becomes a type error) and experts a way to encode invariants once, without an SMT dependency. The deliberate limitation (arithmetic widens) is the honest seam that keeps us out of solver territory.",
+          "code": "refine PositiveInt = Int where it > 0;\nrefine NonEmpty[T] = [T] where it.len() > 0;\n\n// One door in; reuses T ? E + ? :\nlet n = PositiveInt.new(raw)?;      // raw: Int ; checked once here\n\n// Flow narrowing — no solver needed:\nfn f(x: Int) {\n  if x > 0 {\n    charge(x);   // OK: x narrowed to PositiveInt in this branch\n  } else {\n    charge(x);   // error: x is Int here, not proven > 0\n  }\n}\n\n// Arithmetic WIDENS (the honest non-solver seam):\nlet a = PositiveInt.new(3)?;\nlet b = PositiveInt.new(4)?;\nlet s = a + b;          // s : Int  (compiler does NOT prove 7 > 0)\nlet t = PositiveInt.new(s)?;   // re-establish at the boundary\n\n// Bad call, caught at compile time:\n//   error[E07xx]: expected `PositiveInt`, found `Int`\n//     |  charge(raw)\n//     |         ^^^ this value isn't proven `> 0`\n//   fix: construct it once at the boundary — `PositiveInt.new(raw)?`"
+        },
+        {
+          "key": "C",
+          "name": "Full SMT-backed refinement types (post-Epoch research)",
+          "detail": "Liquid-Haskell/F*/Dafny-class: the compiler proves that operations PRESERVE predicates — that `a + b` is positive, that an index stays in bounds, that a returned value satisfies its refinement for all inputs — by discharging verification conditions to an SMT solver. This is the strongest guarantee (eliminates whole classes of runtime checks and is genuinely magic). It is also the expensive, risky path and is NOT recommended for now. Central cost is I6: an SMT solver (Z3-class) is tens of thousands of lines of external C++/Rust we cannot vendor under zero-external-crate; writing our own decision procedure is a multi-year research project of its own. Secondary costs: solver output must never reach users (I2) so we'd need to translate every failed proof into a Jet diagnostic; solver timeouts make compile times nondeterministic (anti-beginner); and the annotation burden (writing predicates the solver can discharge) is an expert-only skill that conflicts with beginner-magic defaults. Reasonable as a FUTURE research track layered on top of B's surface syntax — B's `refine` definitions become the predicates C would later prove — but committing now means owning the I6 carve-out and the solver-error translation problem. Treat as research, gated behind its own decision when/if a pure-Jet decision procedure exists.",
+          "code": "refine PositiveInt = Int where it > 0;\n\n// What C buys over B: arithmetic preservation is PROVEN, no re-check:\nfn add(a: PositiveInt, b: PositiveInt) -> PositiveInt {\n  a + b        // C: solver proves (a>0 && b>0) => a+b>0 — compiles, no .new\n}              // B: this is an error; a+b is Int, must round-trip through .new\n\n// Bounds proven away — no runtime check emitted:\nfn first(xs: NonEmpty[Int]) -> Int { xs[0] }   // C proves 0 < xs.len()\n\n// The I6 cost, made concrete:\n//   $ jet build\n//   internal: refinement prover requires an SMT backend (Z3-class)\n//   -> violates I6 (zero external crates in Source/); needs owner carve-out\n//   -> or a pure-Jet decision procedure (multi-year research item)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Liquid Haskell",
+          "note": "Bolts refinement types onto GHC and discharges proof obligations to an external SMT solver (Z3). Predicates are written in special comments; the solver proves arithmetic/measure facts. Exactly the model option C describes — and exactly the external-solver dependency I6 forbids us from vendoring.",
+          "code": "{-@ type Pos = {v:Int | v > 0} @-}\n{-@ add :: Pos -> Pos -> Pos @-}\nadd a b = a + b   -- accepted: Z3 proves a>0 && b>0 => a+b>0"
+        },
+        {
+          "lang": "Ada / SPARK (predicate subtypes)",
+          "note": "subtype PositiveInt is Integer with Dynamic_Predicate => PositiveInt > 0. Plain Ada checks the predicate at construction/assignment AT RUNTIME (raises Constraint_Error) — this is essentially option B's construction-time model. SPARK then adds an optional separate prover pass to discharge them statically (option C). The Ada/SPARK split is the clean precedent for shipping B first and treating C as a layered, optional research tier.",
+          "code": "subtype Pos is Integer with Dynamic_Predicate => Pos > 0;\nX : Pos := Read_Input;  -- runtime predicate check here (B-style)\n-- SPARK prover pass can later discharge it statically (C-style)"
+        },
+        {
+          "lang": "TypeScript (branded types)",
+          "note": "No real refinements; simulates them with a phantom 'brand' and a user-written guard that asserts the brand. The type only means anything because one constructor is the sole place that mints it. This is a no-solver pattern very close to option B's smart-constructor discipline — proof its construction-time core is viable without any prover.",
+          "code": "type Pos = number & { __brand: 'Pos' };\nfunction toPos(n: number): Pos {\n  if (n <= 0) throw new Error('not positive');\n  return n as Pos;            // the only door in\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "Has no refinement types at all; the idiom is exactly Jet's status quo — a newtype wrapping a fallible constructor (NonZeroU32::new returns Option). The ecosystem reaching for newtype+constructor (and never getting compiler-proved arithmetic) shows option A is a coherent, shippable resting point, and that B is the natural, low-cost step beyond it.",
+          "code": "// std: NonZeroU32::new(n) -> Option<NonZeroU32>\nlet x = NonZeroU32::new(raw).ok_or(\"not positive\")?;\n// no proof that x*2 stays non-zero — must reconstruct (Rust never got C)"
+        }
+      ],
+      "rec": "B",
+      "status": "open"
+    },
+    {
+      "id": "D-VERIFY1",
+      "cardId": "c93y9sk",
+      "title": "Should Jet pursue machine-checked formal verification, and if so as a bounded foundational checker, a full proof-carrying-code engine, or not at all?",
+      "gist": "A request to attach machine-checked proofs to functions (e.g. prove constant_time_eq is input-independent) and refuse to ship if the proof fails. Real proof engines (SMT solvers, theorem provers) are enormous external dependencies that collide head-on with I6 (zero external crates in the compiler). The question is whether any verification story belongs in Jet, and if so, the narrowest honest form.",
+      "explainer": "Formal verification spans a huge cost gradient. At the cheap end, bounded/exhaustive checking and property-tests-as-contracts give real machine-checked guarantees for small finite domains with zero new dependencies — we already own the test runner and comptime evaluator. At the expensive end, a true proof of a universally-quantified property over an infinite domain needs an SMT solver (Z3 is ~500k lines of C++) or a proof assistant (Lean/Coq), each a massive external dependency that violates I6 in the one place I6 is strictest: the compiler itself. The honest tradeoff: anything that proves 'for all inputs' either ships a solver in the default path (no), gates one behind an opt-in expert wall that is never reached by beginners and never required to build (maybe, Epoch 3+), or stays research (post-Epoch). It matters because verification is the master-of-ALL pitch for crypto/safety-critical code, but a second checking mechanism risks I8 (we already have #Test) and a solver in the build risks I2/I6. The pragmatic subset must be a deepening of #Test, not a rival to it.",
+      "story": "I'm writing a constant-time comparison for a password check. I write the function, mark it #Verify(constant_time), and `jet build` either proves the timing is input-independent and ships, or refuses with a diagnostic pointing at the branch that leaks. I never install a solver, never learn Dafny, and a teammate who's never heard of formal methods can read the marker and know exactly what's guaranteed. The day my logic stops being checkable by the bounded checker, Jet tells me plainly instead of silently downgrading to 'probably fine'.",
+      "inWild": "// Today: you write a test and hope your cases cover it\n#Test(\"eq is symmetric\") {\n  require_eq(ct_eq(a, b), ct_eq(b, a))  // only the inputs you wrote\n}\n\n// Proposed (Option B — bounded foundational checker):\n#Verify(forall x: U8, y: U8 => ct_eq(x, y) == ct_eq(y, x))\nfn ct_eq(a: U8, b: U8) -> Bool ? VerifyError { ... }\n// `jet build` exhaustively checks all 256x256 cases at compile time.\n// Domain too large to enumerate -> randomized + boundary sampling,\n// and a diagnostic tells you it's checked-not-proven. Zero new deps.\n\n// Proposed (Option C — full proof-carrying code, post-Epoch):\n#Prove(constant_time)  // universal over an infinite domain\nfn ct_eq(a: Bytes, b: Bytes) -> Bool ? VerifyError { ... }\n// requires an SMT/proof backend behind #Unsafe-grade expert opt-in.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline — testing + property testing + the #Unsafe audit story is the sanctioned path",
+          "detail": "Jet does not pursue machine-checked proofs. The existing mechanisms cover the real need: #Test blocks for examples, property-style #Test with generated inputs for invariants, and #Unsafe(\"reason\") audited regions for code that needs expert-grade scrutiny. Verification of 'for all inputs' is declined as out of scope: it cannot be done honestly without an external solver (I6 violation in the compiler) and risks a second checking mechanism (I8). A function like constant_time_eq is handled by an audited #Unsafe region plus property tests, with the audit reason documenting the human-reviewed timing argument. This keeps the default surface tiny, the build dependency-free, and the beginner story unchanged. Cost: Jet can never *prove* a property; crypto/safety-critical users who want machine-checked guarantees reach for SPARK/Dafny/F* and FFI the result in.",
+          "code": "// The sanctioned path today, no new feature:\n#Unsafe(\"constant-time: no data-dependent branch or memory access;\\n         reviewed against the timing model in docs/security/ct.md\")\nfn ct_eq(a: Bytes, b: Bytes) -> Bool {\n  var diff: U8 = 0\n  for i in 0..a.len { diff |= a[i] ^ b[i] }   // branch-free\n  diff == 0\n}\n\n#Test(\"ct_eq agrees with naive eq on random inputs\") {\n  for _ in 0..10_000 {\n    let (a, b) = (random_bytes(), random_bytes())\n    require_eq(ct_eq(a, b), naive_eq(a, b))\n  }\n}\n// Guarantee: human-audited + heavily tested. NOT machine-proven."
+        },
+        {
+          "key": "B",
+          "name": "Bounded foundational checker — #Verify as an exhaustive/randomized contract, deepening #Test (Epoch 3)",
+          "detail": "Ship #Verify(<predicate>) as a compile-time contract evaluated by Jet's OWN comptime engine and test runner — never an external solver, never in the default beginner path, and an opt-in marker on the functions that want it. Semantics: for a forall over a small finite domain (e.g. U8 x U8), the checker enumerates EXHAUSTIVELY at build time and the property is genuinely machine-checked for that domain. For domains too large to enumerate, it falls back to randomized + boundary sampling and the diagnostic states plainly 'checked by sampling, not proven' so the guarantee is never oversold. #Verify is one mechanism with #Test (I8 held): #Test = 'these concrete cases pass'; #Verify = 'this quantified predicate holds over its (bounded) domain' — a strict generalization run by the same engine, not a rival. A failed #Verify is a build error (T ? VerifyError surfaces the witness). Zero new compiler dependencies (I6 held). Honest ceiling: it cannot prove anything over an infinite domain — that's explicitly Option C's job and #Verify says so when it samples.",
+          "code": "// Exhaustive: 256x256 enumerated at compile time -> truly proven for U8.\n#Verify(forall x: U8, y: U8 => ct_eq8(x, y) == ct_eq8(y, x))\nfn ct_eq8(a: U8, b: U8) -> Bool { (a ^ b) == 0 }\n\n// Large domain: checker samples and SAYS SO in the diagnostic.\n#Verify(forall a: Bytes, b: Bytes where a.len == b.len =>\n          ct_eq(a, b) == naive_eq(a, b))\nfn ct_eq(a: Bytes, b: Bytes) -> Bool ? VerifyError { ... }\n\n// On failure at `jet build`:\n//   error[E0710]: #Verify predicate failed\n//     witness: x = 0x01, y = 0x80  -> ct_eq8 returned false, expected true\n//     fix: the predicate or the function disagree; one is wrong.\n//   note: Bytes domain is unbounded -> checked by 50k samples + boundaries,\n//         not exhaustively proven. For a universal proof see #Prove (D-VERIFY-later)."
+        },
+        {
+          "key": "C",
+          "name": "Full proof-carrying code — #Prove backed by an external SMT/proof engine behind an expert opt-in (post-Epoch research)",
+          "detail": "The literal ask: machine-checked proofs of universally-quantified properties over infinite domains (true constant-time, no-overflow-ever, functional correctness vs a spec). This requires a real proof backend — an SMT solver (Z3) or a proof assistant (Lean/Coq/Why3) — which is an enormous external dependency. It is admitted ONLY behind an #Unsafe-grade expert gate that (1) is never on the default build path, (2) is never required to compile any program, (3) is opt-in per-project and per-function via #Prove, and (4) is wired as an FFI/bridge backend (per the FFI-bridge stdlib pattern) so the solver is invoked as an external tool, never linked into the Source/ compiler — keeping I6 intact for the compiler proper while being honest that the *verification step* depends on an outside prover the user must install. Jet's front end still owns the diagnostic (I2): a failed/timed-out proof is a Jet error, never solver output leaked to the user. This is post-Epoch research: the verification-condition generator, the spec language, trust in the bridge, and solver-output translation are each large. Cost: highest complexity, real external dependency for the prove step, and the spec language is a second surface to design carefully so it doesn't fork the type system.",
+          "code": "// Opt-in per project (env.jet declares the prover backend, user-installed):\n//   verify.backend = z3        // external tool, invoked via FFI bridge\n\n#Prove(constant_time)   // universal: no data-dependent timing, any length\n#Prove(forall a, b: Bytes => ct_eq(a, b) == naive_eq(a, b))\nfn ct_eq(a: Bytes, b: Bytes) -> Bool ? VerifyError {\n  var diff: U8 = 0\n  for i in 0..a.len { diff |= a[i] ^ b[i] }\n  diff == 0\n}\n\n// `jet build` (only when verify is opted in):\n//   verified: ct_eq is constant-time over all inputs (z3, 0.8s)\n// On failure Jet — not z3 — speaks:\n//   error[E0712]: proof obligation unmet for #Prove(constant_time)\n//     the loop bound `a.len` is data-dependent; timing leaks length.\n//     fix: compare against a fixed-width buffer, or weaken the claim.\n//   note: requires the `z3` backend (jetpack add --verify z3); never\n//         on the default path — programs without #Prove build solver-free."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Dafny",
+          "note": "Verification-aware language: you write requires/ensures specs and Dafny discharges them via Z3 at compile time; verification is mandatory and the solver is core, not opt-in. Jet can't adopt this default-on model — it would put an SMT solver in every build (I6/beginner-path violation). Closest to Option C but without the expert gate.",
+          "code": "method CtEq(a: array<byte>, b: array<byte>) returns (r: bool)\n  requires a.Length == b.Length\n  ensures r == (forall i :: 0 <= i < a.Length ==> a[i] == b[i])\n{ ... }  // Z3 proves the ensures or the build fails"
+        },
+        {
+          "lang": "SPARK (Ada)",
+          "note": "Subset of Ada with contracts proved by an external prover (GNATprove/Why3); proof is opt-in per unit and layered (stone->gold->platinum). This is the closest precedent for Jet's Option C: a safe language where formal proof is an explicit, gated tier over normal compilation rather than the default — exactly the 'never in the default path' shape.",
+          "code": "function Ct_Eq (A, B : Byte_Array) return Boolean\n  with Post => Ct_Eq'Result = (for all I in A'Range => A(I) = B(I));\n-- proved only when you run `gnatprove`, not on a normal build"
+        },
+        {
+          "lang": "Rust (Kani / Prusti / Creusot)",
+          "note": "Bolt-on verifiers, none in rustc itself: Kani is a bounded model checker (finite unrolling — directly the Option B flavor), Prusti/Creusot are deductive SMT-backed (Option C flavor). All are separate opt-in tools you install and invoke, never part of `cargo build`. Validates that the foundational/bounded subset and the heavy prover can be cleanly separated, and that the prover lives outside the core toolchain.",
+          "code": "#[kani::proof]\nfn check_ct_eq() {                       // bounded model checking\n  let a: [u8; 4] = kani::any();\n  let b: [u8; 4] = kani::any();\n  assert_eq!(ct_eq(&a,&b), naive_eq(&a,&b));\n}  // run: `cargo kani`, not `cargo build`"
+        },
+        {
+          "lang": "F* / Lean",
+          "note": "Full dependently-typed proof assistants: maximal power (functional-correctness proofs, used for HACL* verified crypto), maximal cost — proofs are part of the source and the checker IS the compiler. This is beyond even Option C; cited to mark the far end of the gradient and why Jet would never embed a proof assistant in Source/ (it would BE an external proof kernel, the sharpest I6 collision).",
+          "code": "let ct_eq (a b: bytes) : Pure bool\n  (requires length a == length b)\n  (ensures fun r -> r <==> equal a b) = ...\n(* the F* typechecker discharges this; the proof ships with the code *)"
+        }
+      ],
+      "rec": "B",
+      "status": "open"
+    },
+    {
+      "id": "D-BUDGET1",
+      "cardId": "c83xwnq",
+      "title": "Should Jet express resource/time budgets as types and statically warn when a called function exceeds them — and if so, in what form?",
+      "gist": "A render-frame loop wants a 16ms CPU budget that the compiler can enforce. But sound static timing/cost inference (WCET) is research-grade and undecidable in general — you cannot prove a wall-clock bound from source. The honest split: decline it as a type, ship a foundational #Budget that is really an effect/capability ceiling (forbid known-expensive effects in a hot region), or commit to full RAML-style cost inference as a post-Epoch research track.",
+      "explainer": "Real timing budgets are a runtime property of a specific machine, inputs, and cache state; proving a 16ms bound at compile time is the worst-case-execution-time (WCET) problem, which is undecidable in general and, where tractable, requires whole-program loop-bound annotations and a hardware cost model (Ada/SPARK + aiT, RAML's amortized analysis). None of that is an Epoch-3 feature, and none of it composes with I8 without inventing a parallel mechanism. The pragmatic insight: most frame-budget blowups in practice come from doing forbidden *kinds* of work in a hot path — heap allocation, IO, syscalls, unbounded loops. Jet already has the exact machinery to forbid effect categories in a region (#(…) bounds, #Caps(…) ceilings, E0740/E0741). A #Budget region is therefore not a timing proof at all — it is an effect ceiling with a cost-oriented name that bans Alloc/Io/Net and flags unbounded loops, giving real, sound guarantees (no allocation in the render path) without claiming a millisecond it cannot honor. Full cost inference (option C) stays an honest research item; the runtime deadline path (option A's pointer to D-DEADLINE1) is the sanctioned way to get actual wall-clock enforcement today.",
+      "story": "I'm writing render_frame for a 60fps game and I keep blowing my 16ms budget because some helper deep in the call graph quietly allocates and hits the filesystem to lazy-load a texture. I want the compiler to tell me — at the call site, before I ship — that this hot path is doing something it must never do, instead of finding it in a profiler at 11fps.",
+      "inWild": "// Today: nothing stops a hidden alloc/IO in the hot path\nfn render_frame(s: Scene) {\n    for e in s.entities {\n        draw(e)          // draw() lazy-loads a texture from disk + allocs a Vec — discovered only in a profiler\n    }\n}\n\n// Proposed (foundational #Budget = cost-oriented effect ceiling):\nfn render_frame(s: Scene) #Budget(frame) {\n    for e in s.entities {        // bounded by s.entities — ok\n        draw(e)                  // E0746: draw transitively uses Alloc + Io, forbidden in a #Budget(frame) region\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline budgets-as-types — sanction the runtime path (D-DEADLINE1)",
+          "detail": "Do not add any budget type or marker. A wall-clock budget is a runtime fact, so enforce it at runtime: the existing latency/deadline-propagation card (D-DEADLINE1) carries a deadline on #Context and cancels work past it, and ordinary profiling catches regressions. The compiler makes no timing claim it cannot prove. Honest about undecidability; smallest surface; risks leaving the 'no alloc in the hot path' guarantee that game/audio devs actually want unserved.",
+          "code": "// No new language surface. Wall-clock budget = runtime deadline (D-DEADLINE1):\nnursery.spawn(deadline: 16ms) {\n    render_frame(scene)      // cancelled if the frame overruns at runtime\n}\n\n// Regressions caught by profiling, not types:\n//   $ jet bench render_frame   ->  p99 = 14.2ms (budget 16ms) OK"
+        },
+        {
+          "key": "B",
+          "name": "Foundational #Budget marker — a cost-oriented effect ceiling (Epoch 3)",
+          "detail": "Ship #Budget(name) as a region/function marker that is a thin policy layer over the existing effect ceiling (#Caps / #(…)). A budget profile names forbidden effects (default: Alloc, Io, Net, Fs) and requires every loop in the region to have a statically known bound. Reuses E0741's machinery; new diagnostics E0746 (forbidden effect in budget) and E0747 (unbounded loop in budget). It is NOT a timing proof — it proves the region does no expensive *kind* of work and has no unbounded iteration, which is the sound, decidable core devs can rely on. Composes with effect ceilings under I8 (one mechanism: effect bounds), not a parallel system. Names the limit honestly: a budget is a no-alloc/no-IO/bounded-loop contract, not 16ms.",
+          "code": "// A budget profile is declared once (cost-oriented alias over effects):\nbudget frame {\n    forbid: (Alloc, Io, Net, Fs),   // reuses the effect vocabulary\n    loops:  bounded,                // every loop must have a known bound\n}\n\nfn render_frame(s: Scene) #Budget(frame) {\n    let buf = scratch.reuse()       // ok: no Alloc\n    for e in s.entities {           // ok: bound = s.entities.len()\n        draw_cached(e, buf)         // ok: its effect set ⊆ allowed\n    }\n    draw(e)                         // E0746: `draw` transitively uses Alloc, Io — forbidden by #Budget(frame)\n    while ready() { step() }         // E0747: unbounded loop in a #Budget region; give it a bound or hoist it out\n}"
+        },
+        {
+          "key": "C",
+          "name": "Full static cost-bound inference (RAML-style, post-Epoch research)",
+          "detail": "Commit to real comptime cost inference: a #Budget(16ms) (or abstract cost units) that the compiler discharges by inferring an amortized worst-case cost bound for each function and proving the called set fits. This is automatic amortized resource analysis (RAML) plus a hardware/instruction cost model — research-grade, requires loop-bound annotations or a termination/ranking analysis, an LP solver in comptime, and is undecidable in general (only sound on an annotated, restricted fragment). Highest value if it lands, but it cannot ship in Epoch 3, would pull a solver into the I6-clean compiler, and risks promising millisecond bounds the model can't honor across machines. Keep as a flagged research track that option B's effect ceiling forward-composes into.",
+          "code": "// Aspirational: compiler infers a cost bound and checks the budget.\nfn blur(img: Image) -> Image\n    @cost(bound: \"c1*w*h + c2\")        // owner/analysis-supplied closed-form bound\n{ /* ... */ }\n\nfn render_frame(s: Scene) #Budget(16ms, model: x86_64_v3) {\n    blur(s.fb)    // checker: inferred 9.1ms ≤ 16ms — ok\n    bloom(s.fb)   // E0748: inferred worst-case 11ms pushes the path to 20.1ms > 16ms budget\n}\n// Requires RAML-style amortized analysis + a cost model + an in-comptime solver (no external crate, I6)."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Ada/Ravenscar + SPARK/aiT (real-time)",
+          "note": "The hard-real-time world separates the two halves Jet must not conflate: the *language* (Ravenscar profile) statically forbids dynamic constructs in critical tasks — no unbounded allocation, no unbounded loops, restricted tasking — which is exactly option B's effect/capability ceiling. The actual *16ms timing proof* is done by a separate external WCET tool (aiT) over the binary with a CPU model, never by the type system. This is the prior-art case for declining timing-as-a-type while shipping the restriction profile.",
+          "code": "-- Ravenscar restricts the language for the hot path (≈ option B):\npragma Profile (Ravenscar);   -- no dynamic alloc, bounded tasking\n-- The 16ms bound is proven OUTSIDE the type system, by aiT WCET analysis on the binary."
+        },
+        {
+          "lang": "EVM gas metering / Koka effects",
+          "note": "Two contrasting points. EVM proves cost only by *running* with a runtime gas counter that aborts when exhausted — dynamic, not static — mirroring option A's runtime-deadline path; even there the static bound is undecidable so it's metered live. Koka shows the decidable, sound thing you CAN infer: it infers *effect rows* (which effects a function has), not costs — confirming that effect membership is tractable and composable while cost magnitude is not. Jet's #Budget(B) leans on the Koka-style effect inference it already has, and leaves the EVM-style magnitude question to runtime.",
+          "code": "// EVM: runtime gas, not a type — aborts when the counter hits 0 (≈ option A):\n//   require(gasleft() > 21000);   // dynamic check, undecidable statically\n// Koka: infers the effect ROW, never a cost (≈ option B's sound core):\nfun render(): <alloc,io> ()   // effects inferred & checked; cost is NOT"
+        }
+      ],
+      "rec": "B",
+      "status": "open"
+    },
+    {
+      "id": "D-REVERSE1",
+      "cardId": "ca3ynsl",
+      "title": "Should Jet support reversible/constraint-solved values — write `width = parent.width - padding*2` and let the compiler solve for `padding` given a target `width` — and if so, as a general language feature or only as a scoped UI-layout library?",
+      "gist": "A forward expression is normally a one-way function: you give inputs, you get an output. Reversible computation flips that — you state a relationship once and the system solves for whichever side is unknown, like spreadsheet goal-seek or a layout engine resolving sizes from constraints. The question is whether Jet adopts this as a general semantic capability, ships a narrow linear-constraint solver scoped to UI layout, or declines it and keeps plain functions + the reactive stack as the only paths.",
+      "explainer": "General reversibility is a deep semantic change: an `=` would stop meaning 'bind this computed value' and start meaning 'assert this relationship, solve for the hole', which collides head-on with I8 (one canonical meaning) and forces a constraint solver into the language core. Any real solver (Z3-class SMT, or even a robust Cassowary linear solver) is a substantial dependency — in the compiler that violates I6, and even as stdlib it is heavy. The honest split: the *foundational, shippable* slice is a bounded LINEAR (Cassowary-style) solver delivered as a library scoped to UI layout, where the problem is well-posed, the math is tractable, and it slots into the reactive-UI stack already queued for Epoch 3 (D-REACTUI1) — this is a layout engine, not a language primitive, and `=` keeps its meaning everywhere. The *general* version (solve arbitrary forward constraints over arbitrary types) is open-ended research with no bounded solver and unclear semantics; it belongs post-Epoch if ever. Declining is defensible: plain functions already invert by hand, and reactive `derived` already propagates layout forward.",
+      "story": "I'm building a settings panel. I write `panel = VStack.{ padding: 16 }` and a row inside it, and I want the row to fill the panel minus the padding. Today I compute that by hand: `row.width@ = panel.width.get() - 32`, and if the panel resizes I re-derive it. What I *want* is to state the relationship once — `row.width == panel.width - panel.padding*2` — pin the row's minimum, and let the layout pass solve the rest, the way Auto Layout does, so I never hand-thread which value drives which.",
+      "inWild": "// today — forward only, manual inversion, manual re-derive on resize\nrow.width@ = panel.width.get() - panel.padding*2\nif panel.width.get() < row.minWidth { /* I handle overflow myself */ }\n\n// proposed (Option B, layout-scoped solver as a library)\nuse core.layout as layout\nlayout.solve.{\n  row.width == panel.width - panel.padding*2,   // forward constraint, solver picks the unknown\n  row.width >= 120,                              // bound\n  panel.width == 600 @priority(.weak),          // suggestion, yields if it conflicts\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline — plain functions + reactive derived are the sanctioned paths",
+          "detail": "Do not add reversibility or a solver as a language feature. Inverting a relationship stays an explicit, user-written function; layout that must react to inputs uses `core.reactive` (`derived`) to propagate forward. Keeps I6 (no solver dependency anywhere in the compiler), keeps I8 (`=` means one thing — bind a computed value), and keeps the surface small. Cost: layout authors hand-thread direction and hand-write any inverse; there is no goal-seek.",
+          "code": "// One forward relationship, written explicitly. To go 'backward', write the inverse yourself.\nfn innerWidth(parentW Int, padding Int) Int = parentW - padding*2\nfn paddingFor(parentW Int, targetInner Int) Int = (parentW - targetInner) / 2  // hand-inverted\n\n// Reactive layout stays forward-only:\nrowWidth@ = reactive.derived(() => panel.width.get() - panel.padding.get()*2)"
+        },
+        {
+          "key": "B",
+          "name": "Foundational subset — bounded LINEAR constraint solver, library-scoped to UI layout (Epoch 3)",
+          "detail": "Ship `core.layout`: a Cassowary-style incremental solver for LINEAR equalities/inequalities over numeric layout values, with weak/medium/strong/required priorities and `@suggest` edits — exactly the Auto Layout model. It is a library, not a language primitive: `=` keeps its meaning; the solver only runs inside an explicit `layout.solve.{ … }` region over declared layout values, and it ties into the reactive-UI stack (D-REACTUI1). Bounded math means a tractable, std-only implementation is realistic (no SMT). Scope is deliberately narrow — linear, numeric, layout — so it does not become a general reversibility back door (I8 honored: the one canonical job is 'resolve a layout').",
+          "code": "use core.layout as layout\n\nview SettingsPanel {\n  panel@ Box = Box.{ padding: 16 }\n  row@   Box = Box.{}\n\n  layout.solve.{\n    // forward constraint; solver finds the consistent assignment\n    row.width    == panel.width - panel.padding*2,\n    row.height   >= 44,\n    panel.width  == window.width @priority(.strong),\n    panel.width  == 600          @priority(.weak),   // preferred, yields under pressure\n  }\n}\n// resize window → solver re-resolves row.width incrementally; no manual inversion."
+        },
+        {
+          "key": "C",
+          "name": "Full general reversible computation / constraint solving (post-Epoch research)",
+          "detail": "A first-class `@reversible` annotation turns a forward expression into a relation the compiler can solve in either direction over arbitrary types — goal-seek for the whole language. Requires a general solver (SMT/Z3-class), which is a hard I6 violation in the compiler and a heavy stdlib dependency, plus a deep semantic shift: `=` inside a reversible region asserts a relationship with a hole rather than binding a value (I8 tension — two meanings for one symbol). No bounded solver, undecidable in general, error/diagnostic story unsolved (rustc must never see it — I2). Powerful, but open-ended research with no clear Epoch-3 landing.",
+          "code": "@reversible fn rel(parentW Int, padding Int, width Int) {\n  width == parentW - padding*2     // a RELATION, not an assignment\n}\n\n// solve for whichever field is left as a hole:\np = rel.solve.{ parentW: 600, width: 568 }   // => p.padding == 16\nq = rel.solve.{ parentW: 600, padding: 16 }  // => q.width == 568\n// general types, non-linear, multi-hole → needs an SMT solver in the toolchain"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cassowary / Apple Auto Layout",
+          "note": "The proven model for Option B: an incremental LINEAR solver with required + weak/medium/strong priorities and editable 'suggested' values. Scoped to layout, fast, well-understood, std-implementable. This is the sweet spot Jet's layout library would target.",
+          "code": "// Apple Auto Layout (the prior art B mirrors)\nrow.widthAnchor.constraint(equalTo: panel.widthAnchor, constant: -32).isActive = true\nrow.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true\n// priorities: constraint.priority = .defaultLow  (≈ @priority(.weak))"
+        },
+        {
+          "lang": "Janus / MiniZinc (general reversibility & constraint solving)",
+          "note": "The Option C end of the space. Janus programs run backward by construction (every statement reversible); MiniZinc/Z3 solve arbitrary constraints via a heavy external solver. Both show the cost: a solver dependency and a programming model where statements are relations, not assignments — exactly the I6 + I8 + semantic-depth problems C inherits.",
+          "code": "% MiniZinc: declare the relation, let the solver fill any hole\nvar 0..1000: padding;\nvar 0..1000: width;\nconstraint width = 600 - padding*2;\nconstraint width = 568;\nsolve satisfy;   % => padding = 16   (general solver, not a layout engine)"
+        }
+      ],
+      "rec": "B",
+      "status": "open"
+    },
+    {
+      "id": "D-IFC1",
+      "cardId": "c63xl5c",
+      "title": "Should Jet go beyond its shipped #Tainted value tags to a label-based information-flow system, and if so, the pragmatic #Pii/#Secret subset or full principal-lattice IFC?",
+      "gist": "Jet already ships D-TAINT1: a #Tainted value-fact that spreads through dataflow, is stripped only by a #Sanitizer fn, and is E0721 if it reaches a Db/Exec/Net sink. The question is whether to grow that one bit into richer security labels. Options: keep tags as-is plus a manual declassify (A), add a small fixed set of built-in labels (#Pii/#Secret) with one audited declassify(\"reason\") escape that reuses the same spread machinery (B), or build full lattice IFC with principals and declassification (C — the post-Epoch-3 deferred research version).",
+      "explainer": "Full information-flow control (Jif/FlowCAML/LIO) has 20+ years of research and near-zero mainstream adoption for one reason: the annotation burden. Every variable, field, method argument, return, and exception carries a label, and once data is read the 'current label' can only rise (LIO) or constraints multiply (Jif) — a beginner pays in ceremony before writing a line of logic, which directly fights Jet's #1 priority (beginner experience). Jet's shipped #Tainted is the cheap 80% win: one bit, inferred forward, invisible until a sink complains. Option B keeps that ergonomic shape but names a few more bits (#Pii, #Secret) that beginners actually recognize from compliance language, and swaps the leaky-by-contract #Sanitizer for an explicit, audited declassify(\"reason\") gate so deliberate releases are greppable for an auditor — all reusing the same intraprocedural dataflow in Taint.rs, so it extends the mechanism (I8) rather than duplicating it. Option C is a different altitude: a real lattice with user-declared principals (alice ⊑ bob) and per-channel policies — research-grade power, but it imports the annotation tax Jet was designed to avoid, would need its own checker, and the owner already deferred it. The honest read: B is the foundational subset worth Epoch 3; C stays a deferred research card; A is the do-nothing baseline that's defensible since tags already cover injection.",
+      "story": "I'm a beginner shipping a signup form. I write `user.email` into a log line for debugging. I never thought about it — emails are PII. With B, the moment that `#Pii`-marked email flows into a `Log` sink, the compiler stops me: 'a #Pii value reaches Log without declassify'. I didn't ask for a security review; I got one for free, in plain words, before the leak ever shipped. To actually log it I'd write `declassify(\"redacted for support diagnostics\") user.email` — and now there's an audited, greppable record of exactly why I let it out.",
+      "inWild": "// TODAY (shipped D-TAINT1): one bit, stripped by a contract fn\nfn handle(raw: String) {\n    user @= #Tainted raw            // untrusted input\n    db.run(user)                    // E0721: tainted reaches Db sink\n    clean @= scrub(user)            // #Sanitizer fn — trusted by contract\n    db.run(clean)                   // ok\n}\n\n// PROPOSED (Option B): named labels + audited declassify escape\nfn handle(email: #Pii String) {\n    log.info(email)                 // E0722: #Pii reaches Log without declassify\n    masked @= declassify(\"support diagnostics\") email\n    log.info(masked)                // ok — and the reason is greppable\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline — keep #Tainted tags + a manual declassify, build no lattice",
+          "detail": "Ship nothing new beyond the already-ratified D-TAINT1 surface; optionally bless one helper. The single #Tainted bit + #Sanitizer fn + E0721 sink check already stops the classic injection bug, which is the 80% case. Adding more labels risks annotation creep with thin payoff, and the owner already deferred IFC. This is the safe, I8-clean baseline: one value-fact mechanism, no second taxonomy. Downside: PII/secret leaks into logs and analytics — the GDPR-shaped 80% case for *confidentiality* (vs injection) — stay invisible, and 'declassify' as a bare function reads no differently from any sanitizer, so deliberate releases aren't distinguished from accidental ones.",
+          "code": "// No new syntax. Existing surface only:\nfn save(raw: String) {\n    u @= #Tainted raw\n    db.run(scrub(u))     // #Sanitizer fn strips taint; reaches Db ok\n}\n// 'declassify' would just be an ordinary fn the user writes;\n// no built-in #Pii/#Secret labels, no lattice."
+        },
+        {
+          "key": "B",
+          "name": "Pragmatic subset — fixed built-in labels (#Pii, #Secret) + one audited declassify(\"reason\") escape",
+          "detail": "Enrich the existing tag system (not a new one): add a small, closed set of confidentiality value-facts — #Pii and #Secret — that spread through the SAME intraprocedural forward dataflow as #Tainted (Taint.rs). Each is checked against its relevant sinks: #Pii reaching a Log/Net/Db sink without release is a diagnostic; #Secret likewise. The blessed release is a single built-in `declassify(\"reason\") expr` gate that requires a string reason and is greppable/auditable (it replaces the leaky #Sanitizer-by-contract pattern for confidentiality with an explicit, recorded escape — mirroring LIO's declassify and Jet's #audit(\"…\") gate ethos). Still one bit per label, still inferred, still erased in codegen (I3). No principals, no user-declared lattice — the set is closed like the effect vocabulary (D-EFF4). This is the foundational, beginner-legible slice of IFC: beginners recognize 'PII' and 'secret', the burden is near-zero because labels are inferred and only complain at sinks, and a future C can be built on this without rework.",
+          "code": "tag #Pii      // built-in confidentiality value-facts (closed set)\ntag #Secret\n\nstruct User {\n    email: #Pii String,        // type-position marker (D-QUAL4, prefix)\n    token: #Secret String,\n}\n\nfn audit(u: User) {\n    log.info(u.email)          // E0722: #Pii reaches Log without declassify\n    m @= declassify(\"GDPR-lawful support diagnostics\") u.email\n    log.info(m)                // ok — reason recorded for auditors\n    net.post(u.token)          // E0723: #Secret reaches Net without declassify\n}"
+        },
+        {
+          "key": "C",
+          "name": "Full lattice IFC — user-declared principals + declassification (the deferred research version)",
+          "detail": "The complete D-TAINT1 Option B: a security-label lattice with user-declared principals and an ordering (alice ⊑ team ⊑ public), confidentiality AND integrity components per label (DCLabel-style ⟨secrecy, integrity⟩), labeled channels/sinks, and a principled declassify/endorse that moves a value down the lattice only with authority. This is Jif/FlowCAML/LIO-grade power: it can express 'Alice's data may flow to Bob but not the public log' as a checked type. It needs its own label-inference checker and a label algebra in sema. Honest cost: this is exactly the annotation-burden regime that has kept IFC out of every mainstream language — every field, arg, return, and exception acquires a label, which crushes beginner ergonomics (Jet priority #1). The owner already deferred this post-Epoch-3. Listing it so the lattice is on record as the far end of the design space, not as an Epoch-3 candidate.",
+          "code": "principal alice, bob, public\nlattice { alice <= public, bob <= public }   // declared ordering\n\nfn route(msg: String @ {alice -> bob}) {     // labeled type\n    log.public(msg)            // ERROR: {alice->bob} not <= public\n    out @= declassify(msg, from: alice, by: alice.authority)\n    log.public(out)            // ok only with alice's authority\n}\n// per-field, per-arg, per-return labels everywhere — the burden Jet avoids."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jif (Java + IFC)",
+          "note": "The canonical full-lattice system (Option C's lineage). Labels on every return, argument, and exception, plus begin/end method labels; leans hard on automatic label inference precisely because writing them by hand is impractical — concedes the annotation burden is the adoption wall. Decades old, essentially unused outside research. This is the cautionary tale for C.",
+          "code": "int{Alice->Bob} computeSecret{Alice->}(int{Alice->} x) {\n    return x * 2;   // every label written explicitly\n}\n// declassify is a primitive needing the caller's authority:\nint{public} y = declassify(secret, {Alice->Bob} to {public});"
+        },
+        {
+          "lang": "LIO (Haskell)",
+          "note": "Dynamic IFC: a monotone 'current label' rises as secret data is observed and can never fall, so any later public output is blocked until an explicit, authority-bearing declassify lowers it. Validates Option B's core move — making declassify the single, deliberate, audited escape — while showing why the monotone-raise discipline (C-style) is too restrictive for everyday code without escapes everywhere.",
+          "code": "do  secret <- unlabel hiSecretData   -- current label rises\n    -- putStrLn here would be rejected: label too high\n    pub <- declassify (mask secret)   -- explicit, authorized release\n    putStrLn pub                      -- now allowed"
+        }
+      ],
       "rec": "A",
       "status": "open"
     }

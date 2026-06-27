@@ -367,7 +367,7 @@ impl Circle {
 - Enum `if subject { … }` arms must be exhaustive; missing cases are a compile error.
 - **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as
-  `impl Type: Trait { … }` (qualify foreign types: `impl other.Point: Shape`).
+  `impl Type.Trait { … }` (qualify foreign types: `impl other.Point.Shape`).
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
@@ -454,7 +454,7 @@ the error side in a function return — **`T ?`** — means **`T ? Error`**.
 Build outcomes with **`ok(v)`** and **`err(e)`**; test them with
 **`== ok(n)`** / **`== err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion supports two forms:
-- **`Fallible`** trait (D-ERR2): `impl MyFail: Fallible { fn to_error(self) -> Error { … } }` — converts any typed error to the universal `Error`. Prelude types implement `Fallible` by default.
+- **`Fallible`** trait (D-ERR2): `impl MyFail.Fallible { fn to_error(self) -> Error { … } }` — converts any typed error to the universal `Error`. Prelude types implement `Fallible` by default.
 - **Declared typed conversion** (D-ERR-CONV): `impl Source -> Target { return Target.Variant(self) }` — converts a `Source` error into a typed `Target` error; `?` applies it automatically. Declared once per (Source, Target) pair; rejected unless declared (orphan rule S28 applies). `E2404` fires when `?` would need an undeclared conversion; `E2405` fires on duplicate declarations; `E2406` fires on orphan-rule violations.
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
@@ -1343,7 +1343,7 @@ empty set) or `fn render(self) #(Gpu)`. The bound is two things at once:
 trait Shape {
     #Pure fn area(self) -> Int;   // every impl must be pure
 }
-impl Square: Shape {
+impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }   // OK — pure
 }
 ```

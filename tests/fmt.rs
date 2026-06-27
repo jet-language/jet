@@ -929,6 +929,28 @@ fn fmt_comptime_splice_stability() {
 }
 
 #[test]
+fn fmt_impl_dot_trait_stability() {
+    // D-IMPLDOT1=A: `impl Type.Trait { … }` round-trips unchanged.
+    let src = "\
+trait Greet {
+    fn hello(self) -> String;
+}
+
+struct Foo {}
+
+impl Foo.Greet {
+    fn hello(self) -> String {
+        return \"hi\"
+    }
+}
+";
+    assert_fmt_keeps(src, &["impl Foo.Greet"], "impl dot trait");
+    let once = jet::format_source(src).expect("fmt should accept impl Type.Trait");
+    let twice = jet::format_source(&once).expect("second fmt of impl Type.Trait must succeed");
+    assert_eq!(once, twice, "impl Type.Trait must be fmt-idempotent");
+}
+
+#[test]
 fn fmt_test_paren_name_stability() {
     // D-TESTPAREN1=A: `#Test("name") { … }` must survive fmt unchanged.
     let src = "\

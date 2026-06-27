@@ -389,13 +389,13 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                                     field_type_name, trait_name
                                 ),
                                 format!(
-                                    "`impl {}: {} using {}` forwards `{}` methods to the `{}` field, but `{}` doesn't implement `{}`",
+                                    "`impl {}.{} using {}` forwards `{}` methods to the `{}` field, but `{}` doesn't implement `{}`",
                                     i.type_name, trait_name, field_name,
                                     trait_name, field_name,
                                     field_type_name, trait_name
                                 ),
                                 format!(
-                                    "implement `impl {}: {}` on the field's type, or choose a different field",
+                                    "implement `impl {}.{}` on the field's type, or choose a different field",
                                     field_type_name, trait_name
                                 ),
                                 Some(i.type_span),
@@ -406,7 +406,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             "E2401",
                             format!("`{}` has no field `{}`", i.type_name, field_name),
                             format!(
-                                "`impl {}: {} using {}` needs `{}` to have a field named `{}`",
+                                "`impl {}.{} using {}` needs `{}` to have a field named `{}`",
                                 i.type_name, trait_name, field_name, i.type_name, field_name
                             ),
                             format!("add `{}: Type` to `struct {}`", field_name, i.type_name),

@@ -57,7 +57,7 @@ struct CounterSnap {
     value: Int
     ops: Int
 }
-impl Counter: Rollback {
+impl Counter.Rollback {
     type Snapshot = CounterSnap
     fn snapshot(self) -> CounterSnap {
         return CounterSnap.{ value: self.value, ops: self.ops }
@@ -102,7 +102,7 @@ struct CounterSnap {
     value: Int
     ops: Int
 }
-impl Counter: Rollback {
+impl Counter.Rollback {
     type Snapshot = CounterSnap
     fn snapshot(self) -> CounterSnap {
         return CounterSnap.{ value: self.value, ops: self.ops }
@@ -142,7 +142,7 @@ struct Counter {
     value: Int
 }
 struct CounterSnap { value: Int }
-impl Counter: Rollback {
+impl Counter.Rollback {
     type Snapshot = CounterSnap
     fn snapshot(self) -> CounterSnap {
         return CounterSnap.{ value: self.value }

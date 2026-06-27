@@ -17,7 +17,7 @@ fn effect_annotations_are_erased() {
     let annotated = r#"
 trait Shape { #Pure fn area(self) -> Int; }
 struct Square { side: Int }
-impl Square: Shape { fn area(self) -> Int { return self.side * self.side; } }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
 #Pure fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) #(Io) { print(p); }
 fn run(n: Int) #(Io) { load("{sq(n)}"); }
@@ -26,7 +26,7 @@ fn main() { s @= Square.{ side: 3 }; print("{s.area()}"); run(2); }
     let plain = r#"
 trait Shape { fn area(self) -> Int; }
 struct Square { side: Int }
-impl Square: Shape { fn area(self) -> Int { return self.side * self.side; } }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
 fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) { print(p); }
 fn run(n: Int) { load("{sq(n)}"); }
@@ -147,7 +147,7 @@ fn trait_impl_exceeding_bound_is_e0742() {
 use core.fs as fs
 trait Hasher { #Pure fn hash(self) -> Int; }
 struct Doc { path: String }
-impl Doc: Hasher {
+impl Doc.Hasher {
     fn hash(self) -> Int { body @= fs.read(self.path) ?? ""; return body.len(); }
 }
 fn main() { d @= Doc.{ path: "x" }; print(d.hash()); }
@@ -161,7 +161,7 @@ fn trait_impl_within_bound_ok() {
     let src = r#"
 trait Shape { #Pure fn area(self) -> Int; }
 struct Square { side: Int }
-impl Square: Shape {
+impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }
 }
 fn main() { s @= Square.{ side: 5 }; print("{s.area()}"); }

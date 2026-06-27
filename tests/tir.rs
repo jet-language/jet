@@ -673,7 +673,7 @@ trait Named {
 struct Dog {
     sound: String
 }
-impl Dog: Named {
+impl Dog.Named {
     fn label(self) -> String {
         return \"dog\"
     }
@@ -1453,7 +1453,7 @@ fn main() {
 }
 
 /// c109 Phase 12: TRAIT-IMPL method bodies. A covered struct implementing a trait
-/// (both the inline `impl Trait {}` and the `impl T: Trait` forms) routes its
+/// (both the inline `impl Trait {}` and the `impl T.Trait` forms) routes its
 /// trait-method bodies through the TIR via the `emit_trait_method` hook — bare name,
 /// no `pub`, `&self`. rustc accepting + the right output prove byte parity.
 #[test]
@@ -1480,7 +1480,7 @@ struct Circle {
 struct Square {
     side: Float
 }
-impl Square: Shape {
+impl Square.Shape {
     fn area(self) -> Float {
         return (self.side * self.side)
     }
@@ -1952,7 +1952,7 @@ fn main() {
     assert_eq!(stdout, "B\nA\nA+\nF\n");
 }
 
-/// c109 Phase 15: a DELEGATION trait method (`impl T: Trait using field`). The
+/// c109 Phase 15: a DELEGATION trait method (`impl T.Trait using field`). The
 /// forwarding method routes through the TIR's `Delegation` kind — `(self).<field>.<m>(…)`
 /// with the bare trait method name.
 #[test]
@@ -1967,7 +1967,7 @@ trait Speaker {
 struct Voice {
     prefix: String
 }
-impl Voice: Speaker {
+impl Voice.Speaker {
     fn say(self, msg: String) -> String {
         p @= self.prefix
         return \"{p}: {msg}\"
@@ -1976,7 +1976,7 @@ impl Voice: Speaker {
 struct Megaphone {
     inner: Voice
 }
-impl Megaphone: Speaker using inner
+impl Megaphone.Speaker using inner
 fn main() {
     v := Voice.{ prefix: \"HEY\" }
     m := Megaphone.{ inner: v }
@@ -3560,7 +3560,7 @@ struct Circle {
 struct Square {
     side: Float
 }
-impl Square: Shape {
+impl Square.Shape {
     fn area(self) -> Float {
         return (self.side * self.side)
     }
@@ -3608,7 +3608,7 @@ fn main() {
 }
 
 /// c109 (view-trait fix): a `view`-returning TRAIT method `fn label(self) -> &String`
-/// implemented in an `impl Dog: Named` block. This was a latent I2 hole on BOTH paths:
+/// implemented in an `impl Dog.Named` block. This was a latent I2 hole on BOTH paths:
 /// `emit_trait_def` rendered the trait DECLARATION's return as `-> String` (ignoring
 /// `is_view_return`) while the impl emitted `-> &String`, so rustc rejected the generated
 /// Rust with E0053 ("incompatible type for trait"). The fix threads `is_view_return` into
@@ -3627,7 +3627,7 @@ trait Named {
 struct Dog {
     name: String
 }
-impl Dog: Named {
+impl Dog.Named {
     fn label(self) -> &String {
         return self.name
     }
@@ -3743,7 +3743,7 @@ trait Bumpable {
 struct Counter {
     n: Int
 }
-impl Counter: Bumpable {
+impl Counter.Bumpable {
     fn bump(~self) {
         self.n = self.n + 1
     }
@@ -4451,7 +4451,7 @@ fn main() {
     assert_eq!(stdout, "43\n-1\n3\na\nb\nc\n60\n");
 }
 
-// --- D-SOA1 / D-SOA2A-D: `#layout(columnar)` struct-of-arrays --------------
+// --- D-SOA1 / D-SOA2A-D: `#Layout(columnar)` struct-of-arrays --------------
 
 /// Compile a program to Rust (front end only) for source-level assertions.
 fn compile_rust(name: &str, src: &str) -> String {
@@ -4471,7 +4471,7 @@ fn compile_rust(name: &str, src: &str) -> String {
 }
 
 const COLUMNAR_PROG: &str = "\
-#layout(columnar)
+#Layout(columnar)
 struct P {
     x: Float
     mass: Float
@@ -4535,7 +4535,7 @@ fn columnar_serialization_is_transparent() {
     let src = "\
 use core.encoding.json as json
 #[Codable]
-#layout(columnar)
+#Layout(columnar)
 struct Pt { a: Int, b: Int }
 #[Codable]
 struct PlainPt { a: Int, b: Int }

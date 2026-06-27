@@ -587,10 +587,10 @@ impl<'a> Fmt<'a> {
         self.write("impl ");
         self.write(&i.type_name);
         if let Some(tr) = &i.trait_name {
-            self.write(": ");
+            self.write(".");
             self.write(tr);
         }
-        // S62: `impl Type: Trait using field` — delegation, no method body.
+        // D-IMPLDOT1=A / S62: `impl Type.Trait using field` — delegation, no method body.
         if let Some(field) = &i.delegation_field {
             self.write(" using ");
             self.write(field);

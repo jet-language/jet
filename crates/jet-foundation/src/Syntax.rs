@@ -576,6 +576,9 @@ pub const FOREIGN_SOME_LOWER: &str = "some";
 pub const FOREIGN_CLASS: &str = "class";
 
 /// S28 (ratified M9): trait declaration keyword.
+/// D-IMPLDOT1=A (ratified 2026-06-26): the trait separator in top-level impl blocks
+/// is `.` — `impl Type.Trait { … }` / `impl Type.Trait using field`. The old `:`
+/// separator emits E0320 (teaching error). Amends S28/S62; retires `~~` (S83).
 pub const KW_TRAIT: &str = "trait";
 
 /// D-QUAL2 (ratified 2026-06-21): tag declaration keyword — a marker qualifier
