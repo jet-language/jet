@@ -1064,6 +1064,12 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // D-PENDING1=B: method calls on `Loadable<T,E>` handle.
+        if let Some(ret) = loadable_method_return(&recv_ty, method, args.len()) {
+            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            *recv_type_out = Some("Loadable".to_string());
+            return ret;
+        }
         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
         // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
         if let Type::Named(handle_ty) = &recv_ty {

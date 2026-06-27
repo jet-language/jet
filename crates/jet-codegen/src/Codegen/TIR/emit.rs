@@ -1552,6 +1552,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
+                // D-PENDING1=B: Loadable<T,E> methods.
+                THandleOp::LoadableMethod { method } => {
+                    if args.is_empty() {
+                        format!("({}).{}()", recv, method)
+                    } else {
+                        format!("({}).{}({})", recv, method, a(0))
+                    }
+                }
                 // c109 Phase 25: HttpRouter route registration, byte-for-byte the
                 // `emit_builtin_method` router arm (Source/Codegen/Expression.rs ~L937).
                 // `recv` is `&mut`-borrowed; the path is plain (args[0]); the handler is
@@ -1772,6 +1780,16 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
         ("core.science.measurement", "from") => {
             format!("{}jet_std::JetMeasurement::new({}, {})", cx.root_prefix, arg(0), arg(1))
+        }
+        // D-PENDING1=B: Loadable<T,E> constructors.
+        // idle/loading/loaded/failed need concrete type params for E: Clone bound satisfaction.
+        ("core.async.loadable", "idle") => format!("JetLoadable::<(), ()>::Idle"),
+        ("core.async.loadable", "loading") => format!("JetLoadable::<(), ()>::Loading"),
+        ("core.async.loadable", "loaded") => {
+            format!("JetLoadable::<_, ()>::Loaded({})", arg(0))
+        }
+        ("core.async.loadable", "failed") => {
+            format!("JetLoadable::<(), _>::Failed({})", arg(0))
         }
         ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
         ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),

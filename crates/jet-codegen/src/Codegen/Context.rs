@@ -263,6 +263,8 @@ impl Cx {
             }
             Type::Named(name) if name == "Unit" => "()".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
+            // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
+            Type::Named(name) if name == "Unknown" => "_".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`,
             // `String.to_int`) erases to a plain message — never user-constructed.
             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
@@ -355,6 +357,14 @@ impl Cx {
                     "{}jet_std::JetMeasurement<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
+                )
+            }
+            // D-PENDING1=B: Loadable<T,E> → JetLoadable<T,E>.
+            Type::Apply { name, args } if name == "Loadable" && args.len() == 2 => {
+                format!(
+                    "JetLoadable<{}, {}>",
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
                 )
             }
             // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Deque<T> → VecDeque<T>.

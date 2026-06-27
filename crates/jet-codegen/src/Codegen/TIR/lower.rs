@@ -3771,6 +3771,37 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-PENDING1=B: a `Loadable<T,E>` method (gate shape d7).
+    if recv_type.as_deref() == Some("Loadable")
+        && is_loadable_method_name(method, args.len())
+    {
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match method {
+            "is_loading" | "is_loaded" | "is_failed" | "is_idle" => Type::Bool,
+            // .loaded() → Option<T> (extract T from Loadable<T,E>)
+            "loaded" => match &recv_t.ty {
+                Type::Apply { args: targs, .. } if !targs.is_empty() => {
+                    Type::Option(Box::new(targs[0].clone()))
+                }
+                _ => Type::Option(Box::new(Type::Named("Unknown".to_string()))),
+            },
+            // .or_else(default) → T
+            "or_else" => match &recv_t.ty {
+                Type::Apply { args: targs, .. } if !targs.is_empty() => targs[0].clone(),
+                _ => Type::Named("Unknown".to_string()),
+            },
+            _ => recv_t.ty.clone(),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::LoadableMethod { method: method.to_string() },
+                args: targs,
+            },
+        };
+    }
     // c109 Phase 21: a Task/Channel/Sender concurrency method (gate shape d3). The gate
     // proved `recv_type == None` + a disjoint concurrency name+arity. Resolve the op +
     // result type HERE (totality). The result type comes from `Collections::

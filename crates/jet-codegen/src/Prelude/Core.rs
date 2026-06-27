@@ -53,6 +53,31 @@ impl<T: JetShow, E: JetShow> JetShow for Result<T, E> {
         }
     }
 }
+// D-PENDING1=B: async UI state machine — Idle/Loading/Loaded(T)/Failed(E).
+#[derive(Clone, Debug)]
+enum JetLoadable<T: Clone, E: Clone> { Idle, Loading, Loaded(T), Failed(E) }
+impl<T: Clone, E: Clone> JetLoadable<T, E> {
+    fn is_idle(&self) -> bool { matches!(self, JetLoadable::Idle) }
+    fn is_loading(&self) -> bool { matches!(self, JetLoadable::Loading) }
+    fn is_loaded(&self) -> bool { matches!(self, JetLoadable::Loaded(_)) }
+    fn is_failed(&self) -> bool { matches!(self, JetLoadable::Failed(_)) }
+    fn loaded(&self) -> Option<T> {
+        if let JetLoadable::Loaded(v) = self { Some(v.clone()) } else { None }
+    }
+    fn or_else(&self, default: T) -> T {
+        if let JetLoadable::Loaded(v) = self { v.clone() } else { default }
+    }
+}
+impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
+    fn jet_show(&self) -> String {
+        match self {
+            JetLoadable::Idle => "Idle".to_string(),
+            JetLoadable::Loading => "Loading".to_string(),
+            JetLoadable::Loaded(v) => format!("Loaded({})", v.jet_show()),
+            JetLoadable::Failed(e) => format!("Failed({})", e.jet_show()),
+        }
+    }
+}
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("panic: {}", msg);
     eprintln!("  --> {}:{}", file, line);

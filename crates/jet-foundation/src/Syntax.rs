@@ -1569,6 +1569,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-HONESTNUM1=A (ratified 2026-06-26): Measurement<T> — value ± uncertainty
     // with standard uncertainty propagation. Pure float arithmetic; no external crates.
     "core.science.measurement",
+    // D-PENDING1=B (ratified 2026-06-26): Loadable<T, E> — async UI state machine
+    // (Idle / Loading / Loaded(T) / Failed(E)). Pure stdlib enum; no external crates.
+    "core.async.loadable",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

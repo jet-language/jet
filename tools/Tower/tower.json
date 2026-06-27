@@ -1232,7 +1232,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "core.async.Loadable<T, E> (D-PENDING1=B): stdlib enum with variants Idle / Loading / Loaded(T) / Failed(E). Steps: (1) Add to crates/jet-sema/src/Sema/CheckerCoreLib.rs as a checked builtin type under core.async; (2) Emit as a Rust enum in CoreLib.rs; (3) Add convenience methods: .is_loading(), .loaded() -> T?, .or_else(default: T) -> T; (4) Test with example examples/features/NN_loadable.jet showing all four variants; (5) Snapshot golden. No new syntax — this is a library type. The async UI pattern: start Idle, move to Loading on request start, Loaded(T) on success, Failed(E) on error.",
       "blockedBy": [],
@@ -1248,6 +1248,10 @@
         {
           "at": "2026-06-26",
           "text": "Plan written. core.async.Loadable<T,E> is a pure library addition — no new syntax. All decisions ratified. Advancing to ready."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented: JetLoadable<T,E> enum in Core.rs prelude (Idle/Loading/Loaded(T)/Failed(E)) + is_idle/is_loading/is_loaded/is_failed/loaded()/or_else() methods. TIR: THandleOp::LoadableMethod. Static constructors via core.async.loadable module in CheckerCoreLib. Example 141_loadable.jet golden-tested. All tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",

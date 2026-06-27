@@ -2602,6 +2602,16 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    // Shape (d7) [D-PENDING1=B]: a `Loadable<T,E>` method.
+    // Sema sets `recv_type == Some("Loadable")`.
+    if recv_type.as_deref() == Some("Loadable")
+        && is_loadable_method_name(method, args.len())
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
     // carries `recv_type == None` and an in-subset *value* receiver. The Fn-vs-FnMut
@@ -3089,6 +3099,18 @@ pub(crate) fn is_measurement_method_name(method: &str, nargs: usize) -> bool {
     )
 }
 
+/// D-PENDING1=B: is `(method, nargs)` a `Loadable<T,E>` method?
+/// `.is_loading()/.is_loaded()/.is_failed()/.is_idle()/.loaded()` (0 args),
+/// `.or_else(default)` (1 arg).
+/// Always keyed with `recv_type == Some("Loadable")`.
+pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
+    matches!(
+        (method, nargs),
+        ("is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded", 0)
+        | ("or_else", 1)
+    )
+}
+
 /// c109 Phase 12: resolve a numeric method (`is_nan`/`count_ones`/`to_i32`/…) into a
 /// total `TNumericOp`, reproducing `emit_builtin_method`'s numeric arms +
 /// `numeric_conversion`/`conv_rust_target` (Source/Codegen/Expression.rs) EXACTLY.
@@ -3291,6 +3313,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `JetMeasurement<f64>`. NOT in
     // `core_fixed_sig` — the return type is `Measurement<Float>` (generic Apply).
     if module == "core.science.measurement" && method == "from" {
+        return true;
+    }
+    // D-PENDING1=B: `L.idle/loading/loaded/failed` → `JetLoadable`. NOT in `core_fixed_sig`.
+    if module == "core.async.loadable"
+        && matches!(method, "idle" | "loading" | "loaded" | "failed")
+    {
         return true;
     }
     crate::Sema::core_fixed_sig(module, method).is_some()
@@ -3560,6 +3588,26 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             return Type::Apply {
                 name: Syntax::TYPE_MEASUREMENT.to_string(),
                 args: vec![Type::Float],
+            }
+        }
+        // D-PENDING1=B: Loadable constructors — type carries T from the loaded(val) arg.
+        ("core.async.loadable", "idle") | ("core.async.loadable", "loading") => {
+            return Type::Apply {
+                name: "Loadable".to_string(),
+                args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+            }
+        }
+        ("core.async.loadable", "loaded") => {
+            // Type is Loadable<T, Unknown> — T comes from the arg; Unknown for E.
+            return Type::Apply {
+                name: "Loadable".to_string(),
+                args: vec![Type::Int, Type::Named("Unknown".to_string())], // sema refines T
+            }
+        }
+        ("core.async.loadable", "failed") => {
+            return Type::Apply {
+                name: "Loadable".to_string(),
+                args: vec![Type::Named("Unknown".to_string()), Type::String], // sema refines E
             }
         }
         _ => {}

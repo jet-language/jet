@@ -1066,6 +1066,45 @@ impl<'a> Checker<'a> {
                 }
                 return None; // effect returns nothing
             }
+            // D-PENDING1=B: Loadable<T,E> constructors — idle/loading/loaded/failed.
+            ("core.async.loadable", "idle") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Apply {
+                    name: "Loadable".to_string(),
+                    args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+                });
+            }
+            ("core.async.loadable", "loading") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Apply {
+                    name: "Loadable".to_string(),
+                    args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+                });
+            }
+            ("core.async.loadable", "loaded") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("loaded", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                let val_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Named("Unknown".to_string()));
+                return Some(Type::Apply {
+                    name: "Loadable".to_string(),
+                    args: vec![val_ty, Type::Named("Unknown".to_string())],
+                });
+            }
+            ("core.async.loadable", "failed") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("failed", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                let err_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Named("Unknown".to_string()));
+                return Some(Type::Apply {
+                    name: "Loadable".to_string(),
+                    args: vec![Type::Named("Unknown".to_string()), err_ty],
+                });
+            }
             // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
             ("core.science.measurement", "from") => {
                 if args.len() != 2 {
@@ -1331,6 +1370,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Signal" | "Derived"
         // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
         | "Measurement"
+        // D-PENDING1=B: async UI state machine.
+        | "Loadable"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1744,6 +1785,32 @@ pub fn net_method_return(
 }
 
 /// D-PATHFS1: return type for `Path` instance method calls.
+/// D-PENDING1=B: instance methods on `Loadable<T, E>`.
+/// Returns `Some(Some(T))` for a valid method, `None` if not a Loadable method.
+pub fn loadable_method_return(
+    type_apply: &Type,
+    method: &str,
+    _n_args: usize,
+) -> Option<Option<Type>> {
+    let (val_ty, _err_ty) = match type_apply {
+        Type::Apply { name, args } if name == "Loadable" && args.len() == 2 => {
+            (args[0].clone(), args[1].clone())
+        }
+        _ => return None,
+    };
+    match method {
+        "is_loading" => Some(Some(Type::Bool)),
+        "is_loaded"  => Some(Some(Type::Bool)),
+        "is_failed"  => Some(Some(Type::Bool)),
+        "is_idle"    => Some(Some(Type::Bool)),
+        // loaded() → T? — returns the value if in Loaded state, null otherwise.
+        "loaded" => Some(Some(Type::Option(Box::new(val_ty)))),
+        // or_else(default: T) → T
+        "or_else" => Some(Some(val_ty)),
+        _ => None,
+    }
+}
+
 pub fn path_method_return(
     type_name: &str,
     method: &str,
@@ -2538,6 +2605,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.reactive" | "jet.reactive" => &["signal", "derived", "effect"],
         // D-HONESTNUM1=A: Measurement<T> constructor.
         "core.science.measurement" => &["from"],
+        // D-PENDING1=B: Loadable<T,E> constructors.
+        "core.async.loadable" => &["idle", "loading", "loaded", "failed"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

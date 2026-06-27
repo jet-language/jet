@@ -1371,6 +1371,11 @@ pub enum THandleOp {
     /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
     /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
     MeasurementMethod { method: String },
+    /// D-PENDING1=B: `Loadable<T,E>` predicate / accessor methods.
+    /// `.is_loading()/.is_loaded()/.is_failed()/.is_idle()` → `(recv).<method>()`.
+    /// `.loaded()` → `(recv).loaded()` → `Option<T>`.
+    /// `.or_else(default)` → `(recv).or_else(a0)` → `T`.
+    LoadableMethod { method: String },
     /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
     DataTreeField,
     /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.
