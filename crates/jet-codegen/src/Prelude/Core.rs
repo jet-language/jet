@@ -45,6 +45,14 @@ impl<T: JetShow> JetShow for Option<T> {
         }
     }
 }
+impl<T: JetShow, E: JetShow> JetShow for Result<T, E> {
+    fn jet_show(&self) -> String {
+        match self {
+            Ok(v) => format!("ok({})", v.jet_show()),
+            Err(e) => format!("err({})", e.jet_show()),
+        }
+    }
+}
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("panic: {}", msg);
     eprintln!("  --> {}:{}", file, line);
@@ -270,6 +278,12 @@ fn jet_list_skip_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -
 }
 fn jet_list_flat_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> Vec<U> {
     xs.into_iter().flat_map(f).collect()
+}
+fn jet_list_filter_map<T, U, E, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> Result<U, E> {
+    xs.into_iter().filter_map(|x| f(x).ok()).collect()
+}
+fn jet_list_try_collect<T: Clone, E: Clone>(xs: Vec<Result<T, E>>) -> Result<Vec<T>, E> {
+    xs.into_iter().collect()
 }
 fn jet_list_scan<T, U: Clone, F>(xs: Vec<T>, init: U, f: F) -> Vec<U>
 where F: Fn(U, T) -> U {

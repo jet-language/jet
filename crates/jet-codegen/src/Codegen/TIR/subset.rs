@@ -3051,6 +3051,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("push_front", 1) | ("push_back", 1)
         | ("pop_front", 0) | ("pop_back", 0)
         | ("peek_front", 0) | ("peek_back", 0)
+        // D-FAILCOMP1: failure-aware list adapter.
+        | ("try_collect", 0)
     )
     // NOTE: `is_empty` (now Bool-typed in `Collections::*_method_return` after the
     // c109 fix; lowered to `TBuiltinOp::IsEmpty`) is covered above. `join()` (no

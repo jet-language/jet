@@ -948,6 +948,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::DequePopBack => format!("({}).pop_back()", recv),
                 TBuiltinOp::DequePeekFront => format!("({}).front().cloned()", recv),
                 TBuiltinOp::DequePeekBack => format!("({}).back().cloned()", recv),
+                TBuiltinOp::TryCollect => format!("jet_list_try_collect(({}).clone())", recv),
                 // D-ITER1: non-closure lazy adapters.
                 TBuiltinOp::Take => format!("jet_list_take(({}).clone(), {})", recv, a(0)),
                 TBuiltinOp::Skip => format!("jet_list_skip(({}).clone(), {})", recv, a(0)),
@@ -1384,6 +1385,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TClosureOp::FlatMap => {
                     format!("jet_list_flat_map(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::FilterMap => {
+                    format!("jet_list_filter_map(({}).clone(), {})", recv, a(0))
                 }
                 TClosureOp::Scan => {
                     format!("jet_list_scan(({}).clone(), {}, {})", recv, a(0), a(1))

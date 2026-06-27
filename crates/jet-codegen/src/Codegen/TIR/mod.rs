@@ -1045,6 +1045,9 @@ pub enum TClosureOp {
     GroupBy,
     /// `partition(f)` — inline emit; struct name embedded. `TupleStruct` is `JetTup_<hash>`.
     Partition { tuple_struct: String },
+    // D-FAILCOMP1: failure-aware adapters.
+    /// `filter_map(f)` — `jet_list_filter_map((recv).clone(), f)`.
+    FilterMap,
 }
 
 /// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
@@ -1248,6 +1251,9 @@ pub enum TBuiltinOp {
     DequePeekFront,
     /// `deque.peek_back()` → `(recv).back().cloned()` (returns `Option<T>`).
     DequePeekBack,
+    // D-FAILCOMP1: failure-aware list adapters.
+    /// `try_collect()` on `[Result<T,E>]` → `jet_list_try_collect((recv).clone())`.
+    TryCollect,
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of

@@ -545,6 +545,14 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
+                    // D-FAILCOMP1: filter_map(f: T->V?E) → [V]; refine from closure's ok type.
+                    if Collections::is_closure_method(method) && i == 0 && method == "filter_map" {
+                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                            if let Type::Result { ok, .. } = r.as_ref() {
+                                refined_ret = Some(Type::List(Box::new(*ok.clone())));
+                            }
+                        }
+                    }
                     if method == "reduce" && i == 1 {
                         if let Type::Fn {
                             ret: Some(ref r), ..
@@ -553,7 +561,10 @@ impl<'a> Checker<'a> {
                             refined_ret = Some((**r).clone());
                         }
                     }
-                    if !fn_types_compatible(et, &gt) && gt != *et {
+                    // Skip E0108 for closure methods with ret: None (open return type).
+                    let open_ret = matches!(et, Type::Fn { ret: None, .. })
+                        && matches!(gt, Type::Fn { .. });
+                    if !open_ret && !fn_types_compatible(et, &gt) && gt != *et {
                         self.diags.push(Diagnostic::error(
                             "E0108",
                             format!(

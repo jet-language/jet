@@ -4560,6 +4560,8 @@ pub(crate) fn resolve_builtin_op(
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::Zip { tuple_struct: ts }
         }
+        // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.
+        ("try_collect", 0) => TBuiltinOp::TryCollect,
         // D-COLLBREADTH1=A: Set<T> instance methods.
         ("add", 1) => TBuiltinOp::SetInsert,
         ("to_list", 0) => TBuiltinOp::SetToList,
@@ -4634,6 +4636,7 @@ pub(crate) fn resolve_closure_op(
         "take_while" => TClosureOp::TakeWhile,
         "skip_while" => TClosureOp::SkipWhile,
         "flat_map" => TClosureOp::FlatMap,
+        "filter_map" => TClosureOp::FilterMap,
         "scan" => TClosureOp::Scan,
         "fold" => TClosureOp::Fold,
         "position" => TClosureOp::Position,

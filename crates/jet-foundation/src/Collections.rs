@@ -47,6 +47,8 @@ pub fn is_closure_method(method: &str) -> bool {
         // D-ITER1: lazy adapter set
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by"
+        // D-FAILCOMP1: failure-aware adapters
+        | "filter_map"
     )
 }
 
@@ -272,6 +274,18 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("take_while" | "skip_while", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         // D-ITER1: flat_map(f: T->[U]) → [U]; placeholder; sema refines.
         ("flat_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
+        // D-FAILCOMP1: filter_map(f: T -> V?E) → [V]; keeps ok, drops err; sema refines V.
+        ("filter_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
+        // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.
+        ("try_collect", 0) => {
+            match inner {
+                Type::Result { ok, err } => Some(Some(Type::Result {
+                    ok: Box::new(Type::List(ok.clone())),
+                    err: err.clone(),
+                })),
+                _ => Some(Some(Type::Int)), // guard: only valid on [Result<T,E>]
+            }
+        }
         // D-ITER1: scan(seed, f: (acc,T)->acc) → [acc]; placeholder; sema refines.
         ("scan", 2) => Some(Some(Type::List(Box::new(Type::Int)))),
         // D-ITER1: position(f) → Int?
@@ -508,7 +522,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "join" => Some(vec![Type::String]),
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
-                ret: Some(Box::new(Type::Int)), // sema refines via expected_type
+                ret: None, // sema refines V from closure's actual return
                 effect_bound: None,
             }]),
             "filter" | "find" | "any" | "all"
@@ -548,6 +562,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "flat_map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::List(Box::new(Type::Int)))), // sema refines
+                effect_bound: None,
+            }]),
+            // D-FAILCOMP1: filter_map(f: T -> V?E) → [V]; keeps ok, drops err.
+            // ret: None so any Result return is accepted; sema refines V via calls.rs.
+            "filter_map" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: None,
                 effect_bound: None,
             }]),
             // D-ITER1: non-closure adapters.

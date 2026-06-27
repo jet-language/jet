@@ -1740,7 +1740,7 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Typed Path API (D-PATHFS1=A): ship `core.fs.Path` as a Core type superseding raw-string paths. `Path.from(str)` entry; pure methods `join()`/`parent()`/`extension()`/`stem()`; `write_atomic()` (sibling temp + rename); `walk()` lazy iterator with symlink-loop cycle detection.\nSteps: (1) Path type + methods; (2) write_atomic + walk; (3) raw-string path helpers (path/list_dir) become teaching errors pointing to Path — I4 code + ui snapshot; (4) examples + goldens (join, atomic write, walk). One way to work with paths (I8).",
       "blockedBy": [],
@@ -1756,10 +1756,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented: TIR ops PathFrom/PathJoin/PathParent/PathExtension/PathStem/PathToString/PathWriteAtomic/PathWalk in TIR/mod.rs + emit.rs; CoreLib.rs helpers jet_path_from/join/parent/extension/stem/write_atomic/walk; sema path_method_return in CheckerCoreLib.rs; prelude sentinel core.path::__pathapi__; example 138_path.jet + golden 138_path.out. All tests green."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "cnivjo1",
@@ -1998,7 +2002,7 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Honest numbers (D-HONESTNUM1=A): ship `Measurement<T>` (value ± uncertainty) as a first-party PACKAGE (core.science.measurement), NOT Core — scientific niche, keeps Core small (I8). Pure library, no language change.\nSteps: (1) Measurement<T> type with ± propagation through +/-/*// (standard error-propagation rules); (2) examples (9.8 ± 0.1 arithmetic) + goldens; (3) ships as a package, opt-in import.",
       "blockedBy": [],
@@ -2014,10 +2018,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented: Measurement<T> sema dispatch in CheckerCoreLib.rs (core.science.measurement.from); MeasurementMethod TIR op for instance methods; Measurement value arithmetic via operator overloading; example 139_measurement.jet + golden 139_measurement.out. All tests green."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "cxiw9hb",
@@ -2964,7 +2972,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-FAILCOMP1=A: add filter_map and try_collect as standard iterator adapters (no new comprehension syntax). Steps: (1) filter_map(f: fn(T) -> V?) in the iterator adapter chain — applies f, keeps Some results, discards None; (2) try_collect<E>() -> [T] ? E — collects an iterator of T?E into Ok([T]) on full success or the first Err; (3) Wired in CoreLib.rs iterator machinery; (4) Examples showing both usages with fallible transforms; (5) Snapshot goldens. Both adapters are callable on any iterator, consistent with the existing map/filter/reduce chain. No new surface syntax — these are method calls.",
       "blockedBy": [],
@@ -2980,6 +2988,10 @@
         {
           "at": "2026-06-26",
           "text": "Plan written. Pure library additions, no syntax. All decisions ratified. Advancing to ready."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented: filter_map(f: T->V?E)→[V] (keeps ok, drops err) + try_collect()→T?E. TIR: TClosureOp::FilterMap + TBuiltinOp::TryCollect. JetShow<Result> added to prelude. open_ret gate prevents E0108 for open-return closures. try_collect added to is_covered_builtin_name. Example 140_filter_map.jet golden-tested. All tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
