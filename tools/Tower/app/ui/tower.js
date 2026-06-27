@@ -10,7 +10,8 @@ const pick = {};            // decisionId -> tentative option key
 const $ = (s, r = document) => r.querySelector(s);
 const api = async (route, payload) => {
   const r = await fetch('/api/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
-  const j = await r.json();
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `request failed: ${route}`);
   if (j.state) { S = j.state; render(); }
   return j.result;
 };
@@ -181,9 +182,10 @@ function decisionCard(d) {
 // ---- focus mode (v1 layout: dots · facet tabs · options) ---------------
 let focusFacet = null, askOpen = false;
 function focusAll(startId) {
-  const ids = S.decisions.map(d => d.id);
+  const ids = S.decisions.filter(d => d.status !== 'ratified').map(d => d.id);
   let idx = ids.indexOf(startId);
-  if (idx < 0) idx = Math.max(0, ids.findIndex(id => S.decisions.find(d => d.id === id).status !== 'ratified'));
+  if (idx < 0) idx = 0;
+  if (!ids.length) return;
   enterFocus(ids, idx);
 }
 function enterFocus(ids, idx) { focusIds = ids; focusIdx = idx; focusFacet = null; askOpen = false; renderFocus(); }
@@ -207,16 +209,21 @@ function facetBody(d, fk) {
 }
 function renderFocus() {
   const f = $('#focus');
+  focusIds = focusIds.filter(id => {
+    const x = S.decisions.find(d => d.id === id);
+    return x && x.status !== 'ratified';
+  });
+  if (!focusIds.length) return exitFocus();
+  focusIdx = Math.max(0, Math.min(focusIdx, focusIds.length - 1));
   const d = S.decisions.find(x => x.id === focusIds[focusIdx]);
   if (!d) return exitFocus();
   const c = cardById(d.cardId);
-  const decided = d.status === 'ratified';
   const chosen = pick[d.id] ?? d.outcome ?? null;
+  const pickedIds = focusIds.filter(id => pick[id]);
   const facets = availFacets(d);
   if (!focusFacet || !facets.some(([fk]) => fk === focusFacet)) focusFacet = facets.length ? facets[0][0] : null;
   const dots = focusIds.map((id, i) => {
-    const dd = S.decisions.find(x => x.id === id);
-    return `<span class="dot${i === focusIdx ? ' cur' : ''}${dd && dd.status === 'ratified' ? ' done' : ''}" data-i="${i}" title="${esc(id)}"></span>`;
+    return `<span class="dot${i === focusIdx ? ' cur' : ''}${pick[id] ? ' picked' : ''}" data-i="${i}" title="${esc(id)}"></span>`;
   }).join('');
   const qs = c ? c.questions : [];
 
@@ -237,12 +244,12 @@ function renderFocus() {
       <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
       ${d.gist ? `<div class="fdeck__title">${esc(d.title)}</div>` : ''}
       ${facets.length ? `<div class="facets" id="f-facets">${facets.map(([fk, l]) => `<button class="facet${fk === focusFacet ? ' on' : ''}" data-fk="${fk}">${esc(l)}</button>`).join('')}</div><div class="facetbody" id="f-facetbody">${facetBody(d, focusFacet)}</div>` : ''}
-      <div class="optslabel">Choose one${decided ? ' · decided' : ''}</div>
+      <div class="optslabel">Choose one</div>
       <div class="opts" id="f-opts"></div>
       ${d.rec ? `<div class="recline"><b>Recommendation:</b> Option ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}.</div>` : ''}
-      ${decided ? '' : `<textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>`}
+      <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
       <div class="deck-actions">
-        ${chosen && !decided ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}
+        ${chosen ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}
         <button class="btn btn--ghost btn--sm" id="f-ask">${askOpen ? 'Close' : '✎ Ask a question'}</button>
       </div>
       ${askOpen ? `<div class="askbox"><div class="askbox__h">Ask the agent — saved to the card, no decision recorded</div>
@@ -251,10 +258,9 @@ function renderFocus() {
       ${qs.length ? `<div class="fqs">${qs.map(q => `<div class="qrow"><div class="qrow__top"><span class="qrow__by ${q.by === 'agent' ? 'agent' : ''}">${esc(q.by)}</span><span class="qrow__kind">${esc(q.kind)}</span><span class="qrow__status ${q.status}">${esc(q.status)}</span></div><div class="qrow__text">${esc(q.text)}</div>${q.answer ? `<div class="qrow__ans"><b>agent</b> ${esc(q.answer)}</div>` : ''}</div>`).join('')}</div>` : ''}
     </div></div>
     <div class="focusnav"><div class="focusnav__inner">
-      <span class="focusnav__kbd"><b>1–9</b> pick · <b>←/→</b> move · <b>Enter</b> record · <b>Esc</b> close</span>
+      <span class="focusnav__kbd"><b>1–9</b> pick · <b>←/→</b> move · <b>Enter</b> record selected · <b>Esc</b> close</span>
       <span class="focusnav__spacer"></span>
-      ${decided ? `<button class="btn btn--sm" id="f-reopen">Reopen decision</button>`
-      : `<button class="btn btn--red" id="f-record" ${chosen ? '' : 'disabled'}>Record decision${chosen ? ' · ' + chosen : ''}</button>`}
+      <button class="btn btn--red" id="f-record" ${pickedIds.length ? '' : 'disabled'}>${recordLabel(pickedIds)}</button>
     </div></div>`;
 
   const opts = $('#f-opts', f);
@@ -264,7 +270,7 @@ function renderFocus() {
           ${o.key === d.rec ? '<span class="opt__rec">recommended</span>' : ''}<span class="opt__check">✓ chosen</span></button>
         ${o.detail ? `<div class="opt__detail">${esc(o.detail)}</div>` : ''}
         ${o.code ? `<div class="opt__code">${codeBlock(o.code)}</div>` : ''}</div>`);
-    if (!decided) $('.opt__h', node).addEventListener('click', () => { if (pick[d.id] === o.key) delete pick[d.id]; else pick[d.id] = o.key; updateFocusChoice(); });
+    $('.opt__h', node).addEventListener('click', () => { if (pick[d.id] === o.key) delete pick[d.id]; else pick[d.id] = o.key; updateFocusChoice(); });
     opts.appendChild(node);
   });
 
@@ -284,17 +290,23 @@ function renderFocus() {
     const t = $('#f-askt', f).value.trim(); if (!t || !c) return; askOpen = false;
     await api('question/add', { cardId: c.id, text: t, kind: 'question' });
   });
-  $('#f-record', f)?.addEventListener('click', () => recordFocus(d));
-  $('#f-reopen', f)?.addEventListener('click', () => api('clearance/reopen', { decisionId: d.id }));
+  $('#f-record', f)?.addEventListener('click', recordFocusBatch);
   f.hidden = false;
+}
+function recordLabel(ids) {
+  if (!ids.length) return 'Record decisions';
+  if (ids.length === 1) return 'Record decision · ' + ids[0] + ' = ' + pick[ids[0]];
+  return 'Record decisions · ' + ids.length;
 }
 // update just the selection state (option highlight, record/clear buttons) — no re-render
 function updateFocusChoice() {
   const f = $('#focus'); const d = S.decisions.find(x => x.id === focusIds[focusIdx]); if (!d) return;
   const chosen = pick[d.id] ?? null;
+  const pickedIds = focusIds.filter(id => pick[id]);
   $('#f-opts', f).querySelectorAll('.opt').forEach((node, i) => node.classList.toggle('sel', (d.options[i] || {}).key === chosen));
+  $('#f-dots', f).querySelectorAll('.dot').forEach((dot, i) => dot.classList.toggle('picked', !!pick[focusIds[i]]));
   const rec = $('#f-record', f);
-  if (rec) { rec.disabled = !chosen; rec.textContent = 'Record decision' + (chosen ? ' · ' + chosen : ''); }
+  if (rec) { rec.disabled = !pickedIds.length; rec.textContent = recordLabel(pickedIds); }
   const actions = $('.deck-actions', f); let clr = $('#f-clear', f);
   if (chosen && !clr && actions) {
     clr = el(`<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>`);
@@ -302,14 +314,29 @@ function updateFocusChoice() {
     actions.prepend(clr);
   } else if (!chosen && clr) clr.remove();
 }
-async function recordFocus(d) {
-  const chosen = pick[d.id]; if (!chosen) return;
-  const comment = $('#f-comment')?.value.trim(); delete pick[d.id];
-  await api('clearance', { decisionId: d.id, outcome: chosen, comment: comment || undefined });
-  // Drop ratified decisions from the focus set so they vanish from the dot bar immediately
-  const prevIdx = focusIds.indexOf(d.id);
+async function recordFocusBatch() {
+  const pickedIds = focusIds.filter(id => pick[id]);
+  if (!pickedIds.length) return;
+  const currentId = focusIds[focusIdx];
+  const currentComment = $('#f-comment')?.value.trim();
+  const decisions = pickedIds.map(id => ({
+    decisionId: id,
+    outcome: pick[id],
+    comment: id === currentId && currentComment ? currentComment : undefined,
+  }));
+  try {
+    await api('clearance/batch', { decisions });
+  } catch {
+    // A running Tower server may predate the batch endpoint while serving the
+    // updated JS from disk. Fall back to the long-standing single-decision route.
+    for (const decision of decisions) await api('clearance', decision);
+  }
+  pickedIds.forEach(id => delete pick[id]);
+  // Drop ratified decisions from the focus set so they vanish from the dot bar immediately.
+  // Keep the cursor near the current decision instead of jumping back to the first dot.
+  const prevIdx = focusIds.indexOf(currentId);
   focusIds = focusIds.filter(id => { const x = S.decisions.find(x => x.id === id); return x && x.status !== 'ratified'; });
-  focusIdx = Math.min(Math.max(0, prevIdx), focusIds.length - 1);
+  focusIdx = Math.max(0, Math.min(prevIdx < 0 ? focusIdx : prevIdx, focusIds.length - 1));
   focusFacet = null; askOpen = false;
   if (focusIds.length === 0) { exitFocus(); return; }
   renderFocus();
@@ -644,7 +671,7 @@ document.addEventListener('keydown', (e) => {
     const d = S.decisions.find(x => x.id === focusIds[focusIdx]);
     if (e.key === 'ArrowLeft') return focusGo(-1);
     if (e.key === 'ArrowRight') return focusGo(1);
-    if (e.key === 'Enter') { if (d && pick[d.id]) recordFocus(d); else focusGo(1); return; }
+    if (e.key === 'Enter') { if (focusIds.some(id => pick[id])) recordFocusBatch(); else focusGo(1); return; }
     const n = parseInt(e.key, 10);
     if (n >= 1 && n <= 9 && d && d.status !== 'ratified' && d.options && d.options[n - 1]) { pick[d.id] = d.options[n - 1].key; updateFocusChoice(); }
     return;

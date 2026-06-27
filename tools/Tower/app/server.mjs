@@ -32,6 +32,7 @@ const routes = {
   'card/delete':    withSave((s, p) => { db.deleteCard(s, p.id); return { ok: true }; }),
   'card/activate':  withSave((s, p) => db.activate(s, p.id, p)),
   'clearance':      withSave((s, p) => db.clear(s, p.decisionId, p.outcome, p.comment)),
+  'clearance/batch': withSave((s, p) => (p.decisions || []).map(d => db.clear(s, d.decisionId, d.outcome, d.comment))),
   'clearance/reopen': withSave((s, p) => db.reopenDecision(s, p.decisionId)),
   'decision/add':   withSave((s, p) => db.addDecision(s, p)),
   'question/add':   withSave((s, p) => db.addQuestion(s, p)),

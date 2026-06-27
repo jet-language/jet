@@ -73,6 +73,9 @@ export function laneOf(card, decisions, cards) {
   if (card.phase === 'triage') return { lane: 'activate', who: 'owner', label: 'Greenlight to start' };
   const blockers = (card.blockedBy || []).filter(id => { const b = cards.find(c => c.id === id); return b && b.phase !== 'done'; });
   if (blockers.length) return { lane: 'blocked', who: null, label: `Blocked by ${blockers.join(', ')}`, blockers };
+  if (card.phase === 'deciding') return card.plan
+    ? { lane: 'implement', who: 'agent', label: 'Ready to implement' }
+    : { lane: 'plan', who: 'agent', label: 'Build a plan + raise decisions' };
   if (card.phase === 'planning') return { lane: 'plan', who: 'agent', label: card.plan ? 'Vet the plan + raise decisions' : 'Build a plan + raise decisions' };
   if (card.phase === 'ready')    return { lane: 'implement', who: 'agent', label: 'Ready to implement' };
   if (card.phase === 'building') return { lane: 'building', who: 'agent', label: 'Continue building' };
@@ -163,6 +166,7 @@ export function clear(s, decisionId, outcome, comment) {
   d.status = 'ratified'; d.outcome = outcome;
   if (comment != null) d.comment = comment;
   d.ratifiedAt = today();
+  advanceClearedCard(s, d.cardId);
   return d;
 }
 export function reopenDecision(s, decisionId) {
@@ -177,6 +181,16 @@ export function addDecision(s, p) {
     detail: p.detail || '', options: p.options || [], comparisons: p.comparisons || [], rec: p.rec || null, status: 'open' };
   s.decisions.push(d);
   return d;
+}
+
+function advanceClearedCard(s, cardId) {
+  const c = s.cards.find(x => x.id === cardId);
+  if (!c || c.phase !== 'deciding') return;
+  const stillOpen = s.decisions.some(d => d.cardId === cardId && d.status !== 'ratified');
+  if (stillOpen) return;
+  c.phase = c.plan ? 'ready' : 'planning';
+  c.updated = today();
+  c.log.unshift({ at: today(), text: 'All decisions ratified; advanced out of deciding.' });
 }
 
 // Owner leaves a note/question on a card; an agent answers it.

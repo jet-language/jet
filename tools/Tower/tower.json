@@ -2568,18 +2568,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e5",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Reconciled stale decision state: D-WORKSPACE1 is ratified in syntax-decisions.md; advanced to planning."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L131). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c1jixkit",
@@ -3615,18 +3619,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Reconciled stale decision state: D-METADERIVE1 is ratified in syntax-decisions.md; advanced to planning."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L187). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c2oizyqs",
@@ -5112,7 +5120,10 @@
         }
       ],
       "rec": "B",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "B",
+      "comment": "Reconciled 2026-06-27: canonical D-WORKSPACE1 in docs/spec/syntax-decisions.md is B — fully computable workspace.jet. This Tower card's option labels predate the owner-modified ratification; follow D-WORKSPACE1/D-WORKSPACE2 in syntax-decisions.md.",
+      "ratifiedAt": "2026-06-25"
     },
     {
       "id": "D-GENMOD1",
@@ -5433,27 +5444,27 @@
       "cardId": "c1uiy53e",
       "title": "Adopt structured concurrency (nursery scope + cancellation + deadlines) as the canonical task-spawn model?",
       "gist": "Tasks exist in Jet but there is no lexical scope that guarantees all child tasks finish (or are cancelled) before the scope exits. Structured concurrency — a nursery or task group — provides that guarantee, preventing task leaks by construction. Cancellation propagation and deadline contexts are closely related. This is listed as an E4 exit criterion.",
-      "explainer": "Unstructured `spawn` makes it easy to leak tasks: a function returns, its caller doesn't know tasks are still running, and errors from those tasks are silently dropped. A nursery scope closes that gap at the language level — you cannot exit the nursery until all children are done or cancelled. This pairs with D-COROUTINE1 (the async substrate) and D-RACEWIN1 (race combinators are a nursery operation). Cancellation and deadlines can be separate cards but are most useful alongside the nursery; the ballot here is for the nursery as the primary mechanism. I1 is relevant: unstructured spawn (the footgun) should not be the default — beginners should reach for the nursery first. The nursery model is proven in Trio (Python) and structured concurrency literature.",
+      "explainer": "Unstructured task spawning makes it easy to leak work: a function returns, its caller doesn't know tasks are still running, and errors from those tasks are silently dropped. A nursery scope closes that gap at the language level: you cannot exit the nursery until all children are done or cancelled. D-ASYNCRT1=A is already ratified: Jet uses an M:N green-thread scheduler with no function coloring and no `async`/`await` surface. The nursery sits on top of that scheduler as the canonical task-spawn scope. D-COROUTINE1 should stay internal substrate, and D-RACEWIN1 / D-CONCCOMB1 should be nursery combinators. Cancellation and deadlines can be separate cards but are most useful alongside the nursery; the ballot here is for the nursery as the primary mechanism. I1 is relevant: unstructured detached tasks are the footgun and should not be the default. Beginners should reach for the nursery first. The nursery model is proven in Trio, Kotlin coroutine scopes, and Swift task groups.",
       "story": "I'm making three API calls in parallel. If any one fails, I want the others cancelled immediately. If they all succeed, I collect the results. Today I'd have to manually track tasks and handle cancellation — I want the scope to do that for me.",
-      "inWild": "async fn fetch_all(urls: [str]) -> [[str]] ? NetErr {\n    nursery {\n        let results = urls.map(|u| spawn fetch(u));\n        await all(results)\n    } // all tasks joined or cancelled on exit\n}",
+      "inWild": "fn fetch_all(urls: [String]) -> [String] ? NetErr {\n    nursery n {\n        handles @= urls.map(fn(u) { n.task { fetch(u) } })\n        n.all(handles)?\n    } // all tasks joined or cancelled on exit\n}",
       "detail": "",
       "options": [
         {
           "key": "A",
           "name": "Nursery scope as the canonical spawn model",
-          "detail": "Define `nursery { }` as the only blessed way to spawn tasks. Unstructured `spawn` remains available for expert use but is not the default and produces a lint warning. Cancellation propagates automatically when the nursery exits with an error. Deadline context is a follow-on (separate ballot). This is the E4 exit criterion.",
-          "code": "async fn parallel_fetch(urls: [str]) -> [str] ? NetErr {\n    nursery {\n        let handles = urls.map(|u| spawn fetch(u));\n        await all(handles)?\n    }\n    // scope exit: all tasks joined; errors cancel siblings\n}"
+          "detail": "Define `nursery { }` as the blessed task-spawn scope over the M:N scheduler from D-ASYNCRT1=A. Work created inside the nursery must finish or be cancelled before the scope exits. Detached task spawn remains an expert escape hatch and should produce a lint outside explicit expert context. Cancellation propagates automatically when the nursery exits with an error. Deadline context is a follow-on (separate ballot). This is the E4 exit criterion.",
+          "code": "fn parallel_fetch(urls: [String]) -> [String] ? NetErr {\n    nursery n {\n        handles @= urls.map(fn(u) { n.task { fetch(u) } })\n        n.all(handles)?\n    }\n    // scope exit: all tasks joined; errors cancel siblings\n}"
         },
         {
           "key": "B",
           "name": "Unstructured spawn + manual join",
           "detail": "Keep unstructured `spawn` as the primary model; programmers join tasks manually. Familiar to Go/thread-pool users; makes task leaks easy to write and hard to detect. Not recommended as the default — violates the beginner-safe principle.",
-          "code": "let h1 = spawn fetch(url1);\nlet h2 = spawn fetch(url2);\n// programmer must join both;\n// if h1 errors, h2 keeps running — leak"
+          "code": "h1 @= task { fetch(url1) }\nh2 @= task { fetch(url2) }\n// programmer must join both;\n// if h1 errors, h2 keeps running — leak"
         },
         {
           "key": "C",
           "name": "Defer",
-          "detail": "Accept the E4 exit criterion slip. Appropriate only if the async substrate (D-COROUTINE1) is not yet settled, since the nursery's cancellation model depends on how tasks are implemented.",
+          "detail": "Accept the E4 exit criterion slip. D-ASYNCRT1=A already settles the task runtime direction, so deferral is only appropriate if Jet does not want nursery scopes as the default spawn model.",
           "code": "// no nursery; E4 criterion missed;\n// task-leak hazard remains"
         }
       ],
@@ -5467,6 +5478,11 @@
           "lang": "Kotlin / kotlinx.coroutines",
           "note": "`coroutineScope { }` and `supervisorScope { }` provide structured concurrency. `launch` inside the scope is the idiomatic pattern; cancellation propagates automatically.",
           "code": "coroutineScope {\n    val a = async { fetch(url1) }\n    val b = async { fetch(url2) }\n    listOf(a.await(), b.await())\n}"
+        },
+        {
+          "lang": "Swift",
+          "note": "`withTaskGroup` and `withThrowingTaskGroup` give typed structured task groups. Good mainstream reference for a scoped task API with result collection.",
+          "code": "try await withThrowingTaskGroup(of: String.self) { group in\n    for url in urls { group.addTask { try await fetch(url) } }\n    for try await value in group { results.append(value) }\n}"
         }
       ],
       "rec": "A",
@@ -6647,7 +6663,10 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "comment": "Reconciled 2026-06-27 from docs/spec/syntax-decisions.md and decision-ballots.md: derive Trait for T + Jet source-fragment re-entry via $ splice.",
+      "ratifiedAt": "2026-06-25"
     },
     {
       "id": "D-REACTCORE1",
@@ -8550,6 +8569,17 @@
       "answer": "Best-in-class survey — what each gets right and where Jet can exceed it: (1) elm-css: best for correctness — every property is a typed function, units are types (px, rem, em), unknown properties are compile errors. Excellent model but verbose. (2) Vanilla Extract / Stylex: TypeScript typed styles, zero-runtime. Stylex adds namespace isolation. Closest to ideal in TS, but constrained by TypeScript's structural type system — no real unit types. (3) SwiftUI style modifiers: semantic tokens (`.font(.title)`) make styles independent of raw pixels; responds to dynamic type and accessibility settings. Best for semantic/responsive design. (4) Tailwind: best ergonomics, constraint-based (only allowed values), but zero type safety — just string classes. (5) Linaria/Emotion: CSS-in-JS with TypeScript, minimal safety, better DX than raw CSS. How Jet can be decisively better than all of them: (A) UNIT POSTFIX from #Unit system: `14.px`, `1.5.rem`, `16.ms`, `100.pct` — more ergonomic than elm-css's `px 14`, safer than CSS strings. Every length is a typed value. (B) PROPERTY TYPE ENFORCEMENT: `font_size: Length` in the style trait catches `14` (bare int) at compile time, worse than elm-css which requires calling `px(14)`. Jet catches it without ceremony. (C) THEME TOKENS AS ENUM TYPES: `Color.Primary`, `Spacing.SM` — symbols, not CSS-variable strings. Autocomplete + compile-time checking. (D) RESPONSIVE AS PATTERN MATCH: `#Responsive { .mobile → style_a, .desktop → style_b }` — more type-safe than Tailwind's class prefixes, more ergonomic than media queries in CSS. (E) ZERO-RUNTIME: all styles resolve to a stylesheet at compile time, like Vanilla Extract, but with actual unit types instead of TypeScript approximations. (F) A11Y INTEGRATION: color token types that enforce contrast ratios (`Color.Fg` must contrast on `Color.Bg`), flagged at compile time. No other system does this. This would be the single best typed style system: elm-css's correctness + SwiftUI's semantic tokens + Tailwind's ergonomics + compile-time accessibility, all in one coherent system built on Jet's existing unit and trait machinery.",
       "created": "2026-06-27T02:15:09.831Z",
       "answeredAt": "2026-06-26"
+    },
+    {
+      "id": "q0la8yz",
+      "cardId": "c1uiy53e",
+      "by": "owner",
+      "kind": "question",
+      "text": "How do other languages handle this? What is the community favorite way to handle this? What do people NOT like? We want to provide the best experience. Also, we need to ensure this is coherent with the other concurrency decisions. Please cross reference and make updates as needed",
+      "status": "answered",
+      "answer": "Answered + ballot updated. Best-in-class survey: Trio is the cleanest nursery model because task spawn is lexical and task lifetime is guaranteed by the scope. Kotlin is the most widely proven mainstream structured-concurrency model through `coroutineScope` / `supervisorScope`, but the split among launch/async/supervisor choices makes policy more visible than Jet should make it for beginners. Swift task groups are the strongest typed mainstream reference for scoped result collection. Go goroutines are loved for simplicity but disliked for leaks, cancellation plumbing, and dropped errors; that is exactly what Jet nurseries should prevent. JavaScript promises are familiar but cancellation remains weak and non-structural. Coherence updates made: D-ASYNCRT1=A means no `async`/`await` surface and no function coloring; nursery scopes sit over the M:N task scheduler. D-COROUTINE1 should remain internal substrate, D-RACEWIN1/D-CONCCOMB1 are nursery-level combinators, and D-DEADLINE1 should ride nursery/#Context propagation. Recommendation remains A: canonical `nursery n { n.task { ... }; n.all/race/any(...) }`; detached spawn is an expert escape/lint, not the default.",
+      "created": "2026-06-27T13:36:53.679Z",
+      "answeredAt": "2026-06-27"
     }
   ]
 }
