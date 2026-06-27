@@ -2612,6 +2612,15 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
+    if is_sketch_type(recv_type.as_deref())
+        && is_sketch_method_name(recv_type.as_deref(), method)
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
     // carries `recv_type == None` and an in-subset *value* receiver. The Fn-vs-FnMut
@@ -3111,6 +3120,22 @@ pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
     )
 }
 
+/// D-APPROX1=A: is this a sketch receiver type?
+pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
+    matches!(recv_type, Some("HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"))
+}
+
+/// D-APPROX1=A: is `method` a valid method for this sketch type?
+pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bool {
+    match recv_type {
+        Some("HyperLogLog") => matches!(method, "add" | "count"),
+        Some("TDigest") => matches!(method, "add" | "quantile"),
+        Some("CountMinSketch") => matches!(method, "add" | "count"),
+        Some("ReservoirSampler") => matches!(method, "add" | "sample"),
+        _ => false,
+    }
+}
+
 /// c109 Phase 12: resolve a numeric method (`is_nan`/`count_ones`/`to_i32`/…) into a
 /// total `TNumericOp`, reproducing `emit_builtin_method`'s numeric arms +
 /// `numeric_conversion`/`conv_rust_target` (Source/Codegen/Expression.rs) EXACTLY.
@@ -3318,6 +3343,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // D-PENDING1=B: `L.idle/loading/loaded/failed` → `JetLoadable`. NOT in `core_fixed_sig`.
     if module == "core.async.loadable"
         && matches!(method, "idle" | "loading" | "loaded" | "failed")
+    {
+        return true;
+    }
+    // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.
+    if matches!(module, "core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir")
+        && method == "new"
     {
         return true;
     }
@@ -3610,6 +3641,11 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 args: vec![Type::Named("Unknown".to_string()), Type::String], // sema refines E
             }
         }
+        // D-APPROX1=A: sketch constructors → opaque named types.
+        ("core.sketch.hll", "new") => return Type::Named("HyperLogLog".to_string()),
+        ("core.sketch.tdigest", "new") => return Type::Named("TDigest".to_string()),
+        ("core.sketch.cms", "new") => return Type::Named("CountMinSketch".to_string()),
+        ("core.sketch.reservoir", "new") => return Type::Named("ReservoirSampler".to_string()),
         _ => {}
     }
     crate::Sema::core_fixed_sig(module, method)

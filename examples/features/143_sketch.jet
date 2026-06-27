@@ -1,0 +1,43 @@
+// D-APPROX1=A: core.sketch — approximate data structures.
+use core.sketch.hll as HLL
+use core.sketch.tdigest as TD
+use core.sketch.cms as CMS
+use core.sketch.reservoir as RS
+
+fn main() {
+    // HyperLogLog: cardinality estimator.
+    // 3 distinct items + 1 duplicate → count ≈ 3.
+    hll @= HLL.new()
+    hll.add("apple")
+    hll.add("banana")
+    hll.add("cherry")
+    hll.add("apple")
+    print(hll.count())
+
+    // TDigest: quantile estimator.
+    // p50 of [1.0, 2.0, 3.0, 4.0, 5.0] → 3.0.
+    td @= TD.new()
+    td.add(1.0)
+    td.add(2.0)
+    td.add(3.0)
+    td.add(4.0)
+    td.add(5.0)
+    print(td.quantile(0.5))
+
+    // CountMinSketch: frequency estimator.
+    // "hello" added 3 times → count ≥ 3.
+    cms @= CMS.new()
+    cms.add("hello")
+    cms.add("world")
+    cms.add("hello")
+    cms.add("hello")
+    print(cms.count("hello"))
+
+    // ReservoirSampler: uniform sample.
+    // Capacity 3, exactly 3 items → all kept.
+    rs @= RS.new(3)
+    rs.add("x")
+    rs.add("y")
+    rs.add("z")
+    print(rs.sample().len())
+}

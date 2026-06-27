@@ -1560,6 +1560,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
+                // D-APPROX1=A: sketch method call. `add` args may be string borrows;
+                // `count`/`quantile` pass by value; `sample` returns Vec<String>.
+                THandleOp::SketchMethod { sketch, method } => {
+                    match method.as_str() {
+                        "add" if sketch == "TDigest" => format!("({}).add({})", recv, a(0)),
+                        "add" if sketch == "ReservoirSampler" => format!("({}).add(({}).clone())", recv, a(0)),
+                        "add" => format!("({}).add(&({}))", recv, a(0)),
+                        // HLL.count() and CMS.count(key) — different arities.
+                        "count" if args.is_empty() => format!("({}).count()", recv),
+                        "count" => format!("({}).count(&({}))", recv, a(0)),
+                        _ => {
+                            if args.is_empty() {
+                                format!("({}).{}()", recv, method)
+                            } else {
+                                format!("({}).{}({})", recv, method, a(0))
+                            }
+                        }
+                    }
+                }
                 // c109 Phase 25: HttpRouter route registration, byte-for-byte the
                 // `emit_builtin_method` router arm (Source/Codegen/Expression.rs ~L937).
                 // `recv` is `&mut`-borrowed; the path is plain (args[0]); the handler is
@@ -2099,6 +2118,11 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // D-ADAPTFID1=A: adaptive fidelity signal — global atomic f32.
         ("core.perf", "fidelity") => format!("jet_perf_fidelity()"),
         ("core.perf", "set_fidelity") => format!("jet_perf_set_fidelity({})", arg(0)),
+        // D-APPROX1=A: sketch constructors.
+        ("core.sketch.hll", "new") => format!("JetHyperLogLog::new()"),
+        ("core.sketch.tdigest", "new") => format!("JetTDigest::new()"),
+        ("core.sketch.cms", "new") => format!("JetCountMinSketch::new()"),
+        ("core.sketch.reservoir", "new") => format!("JetReservoirSampler::new({})", arg(0)),
         _ => "/* unknown std call */".to_string(),
     }
 }

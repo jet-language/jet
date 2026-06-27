@@ -88,6 +88,177 @@ fn jet_perf_set_fidelity(v: f64) {
     let bits = (v as f32).to_bits();
     JET_PERF_FIDELITY.store(bits, std::sync::atomic::Ordering::Relaxed);
 }
+
+// ── D-APPROX1=A: core.sketch — approximate data structures ────────────────────
+// FNV-1a: deterministic, I6-safe, no external crates.
+fn fnv1a(data: &[u8]) -> u64 {
+    let mut hash: u64 = 14695981039346656037;
+    for &b in data { hash ^= b as u64; hash = hash.wrapping_mul(1099511628211); }
+    hash
+}
+// Second independent hash (FNV with a different offset) for multi-hash sketches.
+fn fnv1a_h2(data: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325u64.wrapping_add(0xdeadbeef);
+    for &b in data { hash ^= b as u64; hash = hash.wrapping_mul(1099511628211); }
+    hash
+}
+
+// HyperLogLog — cardinality estimator (±2% error at 256 registers).
+#[derive(Clone)]
+struct JetHyperLogLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+impl JetHyperLogLog {
+    fn new() -> Self {
+        JetHyperLogLog(std::sync::Arc::new(std::sync::Mutex::new(vec![0u8; 256])))
+    }
+    fn add(&self, item: &str) {
+        let h = fnv1a(item.as_bytes());
+        let reg = (h & 0xFF) as usize;          // bottom 8 bits → register index
+        let rest = h >> 8;                       // remaining 56 bits
+        let lz = if rest == 0 { 57u8 } else { rest.leading_zeros() as u8 + 1 };
+        let mut regs = self.0.lock().unwrap();
+        if lz > regs[reg] { regs[reg] = lz; }
+    }
+    fn count(&self) -> i64 {
+        let regs = self.0.lock().unwrap();
+        let m = regs.len() as f64;
+        // LinearCounting for small cardinalities.
+        let zeros = regs.iter().filter(|&&v| v == 0).count();
+        if zeros > 0 {
+            let estimate = m * (m / zeros as f64).ln();
+            return estimate.round() as i64;
+        }
+        // Normal HLL estimate with bias correction constant α_256.
+        let sum: f64 = regs.iter().map(|&v| 2f64.powi(-(v as i32))).sum();
+        let alpha = 0.7213 / (1.0 + 1.079 / m);
+        (alpha * m * m / sum).round() as i64
+    }
+}
+impl JetShow for JetHyperLogLog {
+    fn jet_show(&self) -> String { format!("HyperLogLog(count={})", self.count()) }
+}
+
+// TDigest — quantile estimator (~±0.5% error). Centroid merging sketch.
+#[derive(Clone)]
+struct JetTDigest(std::sync::Arc<std::sync::Mutex<Vec<(f64, f64)>>>); // (mean, weight)
+impl JetTDigest {
+    const DELTA: f64 = 100.0; // compression factor (higher = more accurate, more memory)
+    fn new() -> Self {
+        JetTDigest(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
+    }
+    fn add(&self, v: f64) {
+        let mut cs = self.0.lock().unwrap();
+        // Insert as singleton then merge nearby centroids.
+        let idx = cs.partition_point(|&(m, _)| m < v);
+        cs.insert(idx, (v, 1.0));
+        let total: f64 = cs.iter().map(|(_, w)| w).sum();
+        let mut merged: Vec<(f64, f64)> = Vec::with_capacity(cs.len());
+        let mut cum = 0.0f64;
+        for &(mean, weight) in cs.iter() {
+            if merged.is_empty() { merged.push((mean, weight)); cum += weight; continue; }
+            let last = merged.last_mut().unwrap();
+            let q = cum / total;
+            let limit = 4.0 * total * q * (1.0 - q) / Self::DELTA;
+            if last.1 + weight <= limit.max(1.0) {
+                let new_w = last.1 + weight;
+                last.0 = (last.0 * last.1 + mean * weight) / new_w;
+                last.1 = new_w;
+            } else {
+                merged.push((mean, weight)); cum += weight;
+            }
+        }
+        *cs = merged;
+    }
+    fn quantile(&self, q: f64) -> f64 {
+        let cs = self.0.lock().unwrap();
+        if cs.is_empty() { return 0.0; }
+        let total: f64 = cs.iter().map(|(_, w)| w).sum();
+        let target = q * total;
+        let mut cum = 0.0f64;
+        for &(mean, weight) in cs.iter() {
+            cum += weight;
+            if cum >= target { return mean; }
+        }
+        cs.last().unwrap().0
+    }
+}
+impl JetShow for JetTDigest {
+    fn jet_show(&self) -> String { "TDigest".to_string() }
+}
+
+// CountMinSketch — frequency estimator. 4 rows × 256 cols; FNV + offset.
+const CMS_COLS: usize = 256;
+#[derive(Clone)]
+struct JetCountMinSketch(std::sync::Arc<std::sync::Mutex<[[u32; CMS_COLS]; 4]>>);
+impl JetCountMinSketch {
+    fn new() -> Self {
+        JetCountMinSketch(std::sync::Arc::new(std::sync::Mutex::new([[0u32; CMS_COLS]; 4])))
+    }
+    fn add(&self, key: &str) {
+        let bytes = key.as_bytes();
+        let h1 = fnv1a(bytes);
+        let h2 = fnv1a_h2(bytes);
+        let mut tbl = self.0.lock().unwrap();
+        for row in 0..4usize {
+            let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
+            tbl[row][col] = tbl[row][col].saturating_add(1);
+        }
+    }
+    fn count(&self, key: &str) -> i64 {
+        let bytes = key.as_bytes();
+        let h1 = fnv1a(bytes);
+        let h2 = fnv1a_h2(bytes);
+        let tbl = self.0.lock().unwrap();
+        (0..4usize).map(|row| {
+            let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
+            tbl[row][col]
+        }).min().unwrap() as i64
+    }
+}
+impl JetShow for JetCountMinSketch {
+    fn jet_show(&self) -> String { "CountMinSketch".to_string() }
+}
+
+// ReservoirSampler — uniform random sample. Seeded xorshift64 PRNG (I6-safe).
+#[derive(Clone)]
+struct JetReservoirSampler(std::sync::Arc<std::sync::Mutex<JetReservoirInner>>);
+struct JetReservoirInner { capacity: usize, reservoir: Vec<String>, count: u64, rng: u64 }
+impl Clone for JetReservoirInner {
+    fn clone(&self) -> Self {
+        JetReservoirInner {
+            capacity: self.capacity, reservoir: self.reservoir.clone(),
+            count: self.count, rng: self.rng,
+        }
+    }
+}
+impl JetReservoirSampler {
+    fn new(capacity: i64) -> Self {
+        let cap = (capacity.max(1)) as usize;
+        JetReservoirSampler(std::sync::Arc::new(std::sync::Mutex::new(JetReservoirInner {
+            capacity: cap, reservoir: Vec::with_capacity(cap), count: 0, rng: 0xdeadbeef_cafebabe,
+        })))
+    }
+    fn add(&self, item: String) {
+        let mut inner = self.0.lock().unwrap();
+        inner.count += 1;
+        if inner.reservoir.len() < inner.capacity {
+            inner.reservoir.push(item);
+        } else {
+            // xorshift64
+            let mut x = inner.rng;
+            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+            inner.rng = x;
+            let j = (x % inner.count) as usize;
+            if j < inner.capacity { inner.reservoir[j] = item; }
+        }
+    }
+    fn sample(&self) -> Vec<String> {
+        self.0.lock().unwrap().reservoir.clone()
+    }
+}
+impl JetShow for JetReservoirSampler {
+    fn jet_show(&self) -> String { format!("ReservoirSampler(n={})", self.0.lock().unwrap().count) }
+}
+
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("panic: {}", msg);
     eprintln!("  --> {}:{}", file, line);

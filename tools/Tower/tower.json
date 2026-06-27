@@ -3097,7 +3097,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-APPROX1=A: library-only approximate data structures under core.sketch. Steps: (1) core.sketch.HyperLogLog<T> — cardinality estimator (±2% error at 1.5KB), add() and count() -> UInt; (2) core.sketch.TDigest — quantile estimator (±0.5%), add(value: Float) and quantile(q: Float) -> Float; (3) core.sketch.ReservoirSampler<T, N> — uniform random sample of N items from a stream; (4) core.sketch.CountMinSketch — frequency estimator, add(key) and count(key) -> UInt; (5) Each backed by I6-safe Rust impl using no external crates; (6) examples/features/NN_sketch.jet demonstrating each; (7) Snapshot goldens. No new language surface.",
       "blockedBy": [],
@@ -3113,10 +3113,14 @@
         {
           "at": "2026-06-26",
           "text": "Plan written. All library, no syntax decisions needed. Advancing to ready."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented. Four Rust structs in Core.rs prelude: JetHyperLogLog (FNV-1a hash + LinearCounting small correction), JetTDigest (centroid merging), JetCountMinSketch (4×256 with two FNV variants), JetReservoirSampler (seeded xorshift64). All backed by Arc<Mutex<_>> for &self methods. Sema: is_core_type_name, sketch_method_return, sketch_type_name in CheckerCoreLib. TIR: THandleOp::SketchMethod + shape d8 in subset + lower + emit. Context.rs type mappings. 143_sketch.jet golden-tested (3/3.0/3/3 deterministic). UI snapshot reblessed. All tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c26iyv00",

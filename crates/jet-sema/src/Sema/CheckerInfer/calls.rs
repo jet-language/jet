@@ -1070,6 +1070,12 @@ impl<'a> Checker<'a> {
             *recv_type_out = Some("Loadable".to_string());
             return ret;
         }
+        // D-APPROX1=A: method calls on sketch data structures.
+        if let Some(ret) = sketch_method_return(&recv_ty, method, args) {
+            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            *recv_type_out = Some(sketch_type_name(&recv_ty).unwrap_or("Sketch").to_string());
+            return ret;
+        }
         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
         // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
         if let Type::Named(handle_ty) = &recv_ty {

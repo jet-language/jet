@@ -1105,6 +1105,28 @@ impl<'a> Checker<'a> {
                     args: vec![Type::Named("Unknown".to_string()), err_ty],
                 });
             }
+            // D-APPROX1=A: sketch constructors.
+            ("core.sketch.hll", "new") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Named("HyperLogLog".to_string()));
+            }
+            ("core.sketch.tdigest", "new") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Named("TDigest".to_string()));
+            }
+            ("core.sketch.cms", "new") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Named("CountMinSketch".to_string()));
+            }
+            ("core.sketch.reservoir", "new") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("new", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
+                return Some(Type::Named("ReservoirSampler".to_string()));
+            }
             // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
             ("core.science.measurement", "from") => {
                 if args.len() != 2 {
@@ -1372,6 +1394,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Measurement"
         // D-PENDING1=B: async UI state machine.
         | "Loadable"
+        // D-APPROX1=A: approximate sketch data structures.
+        | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1807,6 +1831,40 @@ pub fn loadable_method_return(
         "loaded" => Some(Some(Type::Option(Box::new(val_ty)))),
         // or_else(default: T) → T
         "or_else" => Some(Some(val_ty)),
+        _ => None,
+    }
+}
+
+/// D-APPROX1=A: return the type name string for a sketch receiver type.
+pub fn sketch_type_name(ty: &Type) -> Option<&'static str> {
+    match ty {
+        Type::Named(n) => match n.as_str() {
+            "HyperLogLog" => Some("HyperLogLog"),
+            "TDigest" => Some("TDigest"),
+            "CountMinSketch" => Some("CountMinSketch"),
+            "ReservoirSampler" => Some("ReservoirSampler"),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// D-APPROX1=A: method return types for sketch data structures.
+pub fn sketch_method_return(
+    ty: &Type,
+    method: &str,
+    _args: &[crate::AST::CallArg],
+) -> Option<Option<Type>> {
+    let name = sketch_type_name(ty)?;
+    match (name, method) {
+        ("HyperLogLog", "add") => Some(None),   // void
+        ("HyperLogLog", "count") => Some(Some(Type::Int)),
+        ("TDigest", "add") => Some(None),
+        ("TDigest", "quantile") => Some(Some(Type::Float)),
+        ("CountMinSketch", "add") => Some(None),
+        ("CountMinSketch", "count") => Some(Some(Type::Int)),
+        ("ReservoirSampler", "add") => Some(None),
+        ("ReservoirSampler", "sample") => Some(Some(Type::List(Box::new(Type::String)))),
         _ => None,
     }
 }
@@ -2612,6 +2670,11 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.async.loadable" => &["idle", "loading", "loaded", "failed"],
         // D-ADAPTFID1=A: adaptive fidelity signal.
         "core.perf" => &["fidelity", "set_fidelity"],
+        // D-APPROX1=A: approximate sketch data structures.
+        "core.sketch.hll" => &["new"],
+        "core.sketch.tdigest" => &["new"],
+        "core.sketch.cms" => &["new"],
+        "core.sketch.reservoir" => &["new"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

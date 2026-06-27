@@ -1575,6 +1575,11 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-ADAPTFID1=A (ratified 2026-06-26): Perf.fidelity() / Perf.set_fidelity() —
     // adaptive quality/perf knob backed by a global atomic f32.
     "core.perf",
+    // D-APPROX1=A (ratified 2026-06-26): approximate data structures under core.sketch.
+    "core.sketch.hll",
+    "core.sketch.tdigest",
+    "core.sketch.reservoir",
+    "core.sketch.cms",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

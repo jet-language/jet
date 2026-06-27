@@ -1376,6 +1376,8 @@ pub enum THandleOp {
     /// `.loaded()` → `(recv).loaded()` → `Option<T>`.
     /// `.or_else(default)` → `(recv).or_else(a0)` → `T`.
     LoadableMethod { method: String },
+    /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).
+    SketchMethod { sketch: String, method: String },
     /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
     DataTreeField,
     /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.

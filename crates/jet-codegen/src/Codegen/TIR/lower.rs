@@ -3802,6 +3802,27 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-APPROX1=A: a sketch method (gate shape d8).
+    if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
+        let sketch = recv_type.as_deref().unwrap_or("").to_string();
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match (sketch.as_str(), method) {
+            ("HyperLogLog", "add") | ("TDigest", "add") | ("CountMinSketch", "add") | ("ReservoirSampler", "add") => unit_type(),
+            ("HyperLogLog", "count") | ("CountMinSketch", "count") => Type::Int,
+            ("TDigest", "quantile") => Type::Float,
+            ("ReservoirSampler", "sample") => Type::List(Box::new(Type::String)),
+            _ => unit_type(),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::SketchMethod { sketch, method: method.to_string() },
+                args: targs,
+            },
+        };
+    }
     // c109 Phase 21: a Task/Channel/Sender concurrency method (gate shape d3). The gate
     // proved `recv_type == None` + a disjoint concurrency name+arity. Resolve the op +
     // result type HERE (totality). The result type comes from `Collections::
