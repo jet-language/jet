@@ -228,7 +228,7 @@ fn main() {
     assert_eq!(stdout, "15\n0\n2\n4\n6\n8\n10\n");
 }
 
-/// Labeled loops: a `continue @outer` and a `break @outer` driving a nested
+/// Labeled loops: a `continue outer@` and a `break outer@` driving a nested
 /// range loop. The `'jet_<name>:` labels are resolved at lowering.
 #[test]
 fn labeled_break_and_continue() {
@@ -237,14 +237,14 @@ fn labeled_break_and_continue() {
     }
     let src = "\
 fn main() {
-    @outer loop i in 1..3 {
+    outer@ loop i in 1..3 {
         loop j in 1..3 {
             if (j == 2) {
-                continue @outer
+                continue outer@
             }
             print(\"{i}-{j}\")
             if (i == 2) {
-                break @outer
+                break outer@
             }
         }
     }
@@ -253,8 +253,8 @@ fn main() {
 ";
     let (code, stdout) = build_and_run("tir_labeled", src);
     assert_eq!(code, 0);
-    // i=1: j=1 prints 1-1, i!=2 so j=2 -> continue @outer.
-    // i=2: j=1 prints 2-1, i==2 -> break @outer.
+    // i=1: j=1 prints 1-1, i!=2 so j=2 -> continue outer@.
+    // i=2: j=1 prints 2-1, i==2 -> break outer@.
     assert_eq!(stdout, "1-1\n2-1\ndone\n");
 }
 

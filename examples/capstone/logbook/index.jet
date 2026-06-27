@@ -33,11 +33,11 @@ fn build_backlinks(notes: [String, Note]) -> [String, [String]] {
     loop name, n in notes {
         loop target in n.links {
             if bl.contains_key(target) {
-                existing: [String] := bl.get(target) ?? []
+                existing: [String] = bl.get(target) ?? []
                 existing.push(name.clone())
                 bl.insert(target, existing)
             } else {
-                new_list: [String] @= [name.clone()]
+                new_list@ [String] = [name.clone()]
                 bl.insert(target, new_list)
             }
         }
@@ -46,31 +46,31 @@ fn build_backlinks(notes: [String, Note]) -> [String, [String]] {
 }
 pub fn build(dir: String) -> Index ? String {
     entries @= fs.list_dir(dir) ?? return err("cannot read directory: {dir}")
-    md_files: [String] := []
+    md_files: [String] = []
     loop entry in entries {
         if !entry.is_dir && entry.name.ends_with(".md") {
             md_files.push(entry.path)
         }
     }
     md_files.sort()
-    results: [ParsedResult] := []
+    results: [ParsedResult] = []
     loop full in md_files {
         text @= fs.read(full) ?? ""
         if note.parse(full, text) == {
             ok(n) -> {
-                no_err: String? @= null
+                no_err@ String? = null
                 results.push(ParsedResult.{file_path: full, note: value(n), error_msg: no_err})
             }
             err(e) -> {
                 msg @= parse_error_msg(e)
-                no_note: Note? @= null
+                no_note@ Note? = null
                 results.push(ParsedResult.{file_path: full, note: no_note, error_msg: value(msg)})
             }
 
         }
     }
-    notes: [String, Note] := [:]
-    errors: [String] := []
+    notes: [String, Note] = [:]
+    errors: [String] = []
     loop r in results {
         maybe_note @= r.note
         if maybe_note == {
@@ -105,7 +105,7 @@ pub fn dead_links(idx: Index) -> [String] {
     return idx.errors.filter((e) => e.starts_with("dead link:"))
 }
 pub fn note_names(idx: Index) -> [String] {
-    names: [String] := idx.notes.keys()
+    names: [String] = idx.notes.keys()
     names.sort()
     return names
 }

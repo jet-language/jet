@@ -259,15 +259,15 @@ column-major. Operators `+`/`-` are element-wise, `*` is element-wise on vectors
 
 ```jet
 fn main() {
-    a: Vec3 @= Vec3(1.0, 2.0, 3.0)
-    b: Vec3 @= Vec3(4.0, 5.0, 6.0)
-    sum: Vec3 @= a + b
+    a@ Vec3=  Vec3(1.0, 2.0, 3.0)
+    b@ Vec3=  Vec3(4.0, 5.0, 6.0)
+    sum@ Vec3=  a + b
     print(a.dot(b))                 // 32.0
     print(a.cross(b).to_array())    // [-3.0, 6.0, -3.0]
     print(Vec3(0.0, 3.0, 4.0).length())   // 5.0
 
-    scale: Mat3 @= Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-    out: Vec3 @= scale * Vec3(1.0, 2.0, 3.0)
+    scale@ Mat3=  Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    out@ Vec3=  scale * Vec3(1.0, 2.0, 3.0)
     print(out.to_array())           // [2.0, 4.0, 6.0]
 }
 ```
@@ -297,9 +297,9 @@ portable-SIMD backend can replace it later behind the same surface.
 
 ```jet
 fn main() {
-    v: F32x4 @= F32x4(1.0, 2.0, 3.0, 4.0)
-    w: F32x4 @= F32x4(10.0, 20.0, 30.0, 40.0)
-    s: F32x4 @= v + w
+    v@ F32x4=  F32x4(1.0, 2.0, 3.0, 4.0)
+    w@ F32x4=  F32x4(10.0, 20.0, 30.0, 40.0)
+    s@ F32x4=  v + w
     print(s.to_array())             // [11.0, 22.0, 33.0, 44.0]
     print(v[2])                     // 3.0
     print(v.sum())                  // 10.0
@@ -530,7 +530,7 @@ order is preserved.
 **Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? DecodeError` for
 json/toml/yaml, and `[T] ? DecodeError` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
-expected type (`cfg: Config @= json.decode(text)`). Bare `json.decode(text)` with no
+expected type (`cfg@ Config=  json.decode(text)`). Bare `json.decode(text)` with no
 target stays the lenient dynamic `JSON` (above). `DecodeError` carries a field `path`
 and a `reason`; compose it with `??`.
 
@@ -611,7 +611,7 @@ Channels carry one type:
 use core.tasks as tasks
 
 fn main() {
-    ch: Channel<Int> @= tasks.channel()
+    ch@ Channel<Int>=  tasks.channel()
     sender @= ch.sender()
     task @= tasks.spawn(take(sender) () => {
         sender.send(42)
@@ -828,7 +828,7 @@ error (**E1003**).
 
 ```jet
 fn main() {
-    b: U8 @= 255
+    b@ U8=  255
     print(b.to_int())                       // 255 as Int
     n @= 42.to_u8() ?? return              // checked conversion
     bytes @= "hi".bytes()                  // [U8]
@@ -856,8 +856,8 @@ silently wrapping. Opt a single op out at the use site:
 
 ```jet
 fn main() {
-    hi: U8 @= 200
-    lo: U8 @= 100
+    hi@ U8=  200
+    lo@ U8=  100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
     print(saturating(hi + lo))          // 255  — clamps to the type's range
     print(checked(hi + lo) ?? 0)        // 0    — checked(…) -> T?, null on overflow

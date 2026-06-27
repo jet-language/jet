@@ -33,14 +33,14 @@ comptime PAGE_FOOTER = "</body></html>"
 fn render_inline(s: String) -> String {
     // Pass 1: resolve [[wikilinks]].
     link_parts @= s.split("[[")
-    after_links: String := link_parts[0]
-    i: Int := 1
+    after_links: String = link_parts[0]
+    i: Int = 1
     loop i < link_parts.len() {
         seg @= link_parts[i]
         if seg.contains("]]") {
             halves @= seg.split("]]")
             target @= halves[0]
-            rest: String := ""
+            rest: String = ""
             if halves.len() > 1 {
                 rest = halves[1]
             }
@@ -53,8 +53,8 @@ fn render_inline(s: String) -> String {
     }
     // Pass 2: resolve #tags (words starting with "#").
     words @= after_links.split(" ")
-    out: String := ""
-    w: Int := 0
+    out: String = ""
+    w: Int = 0
     loop w < words.len() {
         word @= words[w]
         sep @= if w == 0 {
@@ -94,7 +94,7 @@ fn render_line(line: String) -> String {
 }
 // note_to_html renders a full page for a single note, including backlinks.
 pub fn note_to_html(n: Note, backlinks: [String]) -> String {
-    type_label: String := ""
+    type_label: String = ""
     note_kind @= n.note_type
     if note_kind == {
         .User -> {
@@ -111,11 +111,11 @@ pub fn note_to_html(n: Note, backlinks: [String]) -> String {
         }
 
     }
-    body_html: String := ""
+    body_html: String = ""
     loop line in n.body.split("\n") {
         body_html = "{body_html}{render_line(line)}\n"
     }
-    backlink_html: String := ""
+    backlink_html: String = ""
     if backlinks.len() > 0 {
         backlink_html = "<div class=\"backlinks\"><strong>Backlinks</strong><ul>"
         loop name in backlinks {
@@ -134,7 +134,7 @@ pub fn note_to_html(n: Note, backlinks: [String]) -> String {
 }
 // list_to_html renders the index page listing all note names.
 pub fn list_to_html(names: [String]) -> String {
-    items: String := ""
+    items: String = ""
     loop name in names {
         items = "{items}<li><a href=\"/note/{name}\">{name}</a></li>\n"
     }
@@ -149,7 +149,7 @@ pub fn list_to_html(names: [String]) -> String {
 }
 // search_to_html renders a search results page.
 pub fn search_to_html(query: String, hits: [String]) -> String {
-    items: String := ""
+    items: String = ""
     if hits.len() == 0 {
         items = "<p>No notes match <em>{query}</em>.</p>"
     } else {

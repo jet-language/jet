@@ -18,7 +18,7 @@ struct Record {
 // Parse "key=value" lines into an owned record. Parsing builds the record once;
 // after that, reads should be free.
 fn parse(text: String) -> Record {
-    fields: [Field] := []
+    fields: [Field] = []
     loop line in text.split("\n") {
         trimmed @= line.trim()
         if trimmed.len() == 0 {
@@ -53,7 +53,7 @@ fn name_copy(field: Field) -> String {
 }
 
 fn main() {
-    rec: Record @= parse("host=localhost\nport=8080\nmode=fast")
+    rec@ Record = parse("host=localhost\nport=8080\nmode=fast")
     // Read every field name with the zero-copy view accessor — no clones.
     // A `&` result is read in place (here, printed) rather than stored.
     print("zero-copy field names (borrowed, no copies):")

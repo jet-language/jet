@@ -753,10 +753,27 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwBreak => {
                 let span = self.bump().span;
-                // D-LABEL1: optional `@name` targets an enclosing labeled loop.
+                // D-LOOPLABEL2=A: `break name@` — label is ident with suffix `@`.
+                // Old prefix form `break @name` emits a teaching error.
+                if let TokKind::Ident(_) = &self.peek().kind {
+                    if matches!(self.peek2().kind, TokKind::At) {
+                        let (name, _) = self.expect_ident("for the loop label")?;
+                        self.bump(); // `@`
+                        self.finish_stmt()?;
+                        return Ok(Stmt::BreakLabel(name, span));
+                    }
+                }
                 if matches!(self.peek().kind, TokKind::At) {
-                    self.bump(); // `@`
-                    let (name, _) = self.expect_ident("after `break @` for the loop label")?;
+                    let at_span = self.peek().span;
+                    self.bump();
+                    let (name, name_span) = self.expect_ident("after `@` for the loop label")?;
+                    self.diags.push(Diagnostic::error(
+                        "E0988",
+                        "loop label is a suffix, not a prefix".to_string(),
+                        "the label `@` moved to the suffix position (D-LOOPLABEL2)".to_string(),
+                        format!("write `break {}@`", name),
+                        Some(Span::new(at_span.start, name_span.end)),
+                    ));
                     self.finish_stmt()?;
                     return Ok(Stmt::BreakLabel(name, span));
                 }
@@ -765,9 +782,26 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwContinue => {
                 let span = self.bump().span;
+                // D-LOOPLABEL2=A: `continue name@` suffix form.
+                if let TokKind::Ident(_) = &self.peek().kind {
+                    if matches!(self.peek2().kind, TokKind::At) {
+                        let (name, _) = self.expect_ident("for the loop label")?;
+                        self.bump(); // `@`
+                        self.finish_stmt()?;
+                        return Ok(Stmt::ContinueLabel(name, span));
+                    }
+                }
                 if matches!(self.peek().kind, TokKind::At) {
-                    self.bump(); // `@`
-                    let (name, _) = self.expect_ident("after `continue @` for the loop label")?;
+                    let at_span = self.peek().span;
+                    self.bump();
+                    let (name, name_span) = self.expect_ident("after `@` for the loop label")?;
+                    self.diags.push(Diagnostic::error(
+                        "E0988",
+                        "loop label is a suffix, not a prefix".to_string(),
+                        "the label `@` moved to the suffix position (D-LOOPLABEL2)".to_string(),
+                        format!("write `continue {}@`", name),
+                        Some(Span::new(at_span.start, name_span.end)),
+                    ));
                     self.finish_stmt()?;
                     return Ok(Stmt::ContinueLabel(name, span));
                 }
@@ -775,6 +809,15 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Continue(span))
             }
             TokKind::KwLoop => self.loop_stmt(None),
+            // D-LOOPLABEL2=A: `name@ loop { }` — suffix loop-label declaration.
+            TokKind::Ident(_)
+                if matches!(self.peek2().kind, TokKind::At)
+                    && matches!(self.peek3().kind, TokKind::KwLoop | TokKind::KwFor) =>
+            {
+                let (label, lspan) = self.expect_ident("for the loop label")?;
+                self.bump(); // `@`
+                self.loop_stmt(Some((label, lspan)))
+            }
             // D-BIND1: a sigil binding `name (: type)? (:: | :=) expr` — no
             // leading keyword. Detected before the general Ident statement path.
             _ if self.looks_like_sigil_binding() => {
@@ -829,26 +872,29 @@ impl<'a> Parser<'a> {
                 self.at_unsafe_stmt()
             }
             TokKind::At => {
-                // D-LABEL1: `@name loop … { }` is a loop label. `@` in stmt position
-                // is ONLY for labels now (D-ATTR3 = B); attributes use `#`.
+                // D-LOOPLABEL2=A: `@name loop { }` is the OLD prefix form — emit E0988
+                // teaching error pointing at the new `name@ loop { }` suffix form.
                 if let TokKind::Ident(_) = &self.peek2().kind {
-                    if matches!(self.peek3().kind, TokKind::KwLoop) {
-                        self.bump(); // `@`
-                        let (label, lspan) =
-                            self.expect_ident("for the loop label after `@`")?;
-                        return self.loop_stmt(Some((label, lspan)));
-                    }
-                    // `@name` not followed by `loop` — mis-placed label (E0988).
                     let at_span = self.peek().span;
                     self.bump(); // `@`
-                    let (_, name_span) = self.expect_ident("for the loop label after `@`")?;
+                    let (label, lspan) = self.expect_ident("for the loop label after `@`")?;
+                    if matches!(self.peek().kind, TokKind::KwLoop) {
+                        self.diags.push(Diagnostic::error(
+                            "E0988",
+                            "loop label is a suffix, not a prefix".to_string(),
+                            "the label `@` moved to the suffix position (D-LOOPLABEL2)".to_string(),
+                            format!("write `{}@ loop {{ … }}`", label),
+                            Some(Span::new(at_span.start, lspan.end)),
+                        ));
+                        return self.loop_stmt(Some((label, lspan)));
+                    }
+                    // `@name` not followed by `loop` — mis-placed label.
                     return Err(Diagnostic::error(
                         "E0988",
-                        "a `@name` loop label must be followed by `loop`".to_string(),
-                        "the `@name` label sigil attaches only to a `loop` (D-LABEL1)"
-                            .to_string(),
-                        "write `@name loop { … }`, or remove the label".to_string(),
-                        Some(Span::new(at_span.start, name_span.end)),
+                        "a loop label must be followed by `loop`".to_string(),
+                        "write `name@ loop { … }` (D-LOOPLABEL2)".to_string(),
+                        format!("write `{}@ loop {{ … }}`, or remove the label", label),
+                        Some(Span::new(at_span.start, lspan.end)),
                     ));
                 }
                 // `@` not followed by an ident — teaching error for old attribute spelling.
@@ -1801,6 +1847,26 @@ impl<'a> Parser<'a> {
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
+        // D-BINDEXPLICIT1=A: `name@ Type = expr` — explicit immutable; `@` is suffix on name.
+        if matches!(self.peek().kind, TokKind::At) {
+            self.bump(); // `@`
+            let (ty, ty_span) = self.type_()?;
+            self.expect(TokKind::Eq, "after the type in `name@ Type = expr`")?;
+            let init = self.expr()?;
+            return Ok(Binding {
+                mutable: false,
+                name,
+                name_span,
+                pattern: None,
+                ty: Some(ty),
+                ty_span: Some(ty_span),
+                init,
+                is_comptime: false,
+                ct: None,
+                uninit: false,
+                arena_view: false,
+            });
+        }
         let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
             self.bump();
             let (t, s) = self.type_()?;
@@ -1808,6 +1874,26 @@ impl<'a> Parser<'a> {
         } else {
             (None, None)
         };
+        // D-BINDEXPLICIT1=A: `name: Type = expr` — explicit mutable; bare `=` is the sigil.
+        // Old form `name: Type := expr` / `name: Type @= expr` still accepted here with
+        // E0989 teaching error redirecting to the canonical forms.
+        if ty.is_some() && matches!(self.peek().kind, TokKind::Eq) {
+            self.bump(); // `=`
+            let init = self.expr()?;
+            return Ok(Binding {
+                mutable: true,
+                name,
+                name_span,
+                pattern: None,
+                ty,
+                ty_span,
+                init,
+                is_comptime: false,
+                ct: None,
+                uninit: false,
+                arena_view: false,
+            });
+        }
         let mutable = self.expect_bind_sigil()?;
         let init = self.expr()?;
         Ok(Binding {
@@ -1899,6 +1985,7 @@ impl<'a> Parser<'a> {
     /// D-BIND2: true when the tokens at the cursor begin a sigil binding —
     /// `name @=`, `name :=`, `name : type @=`, or a destructuring pattern target
     /// (`[ … ] @=`, `Ident { … } @=`). Also accepts retired `::` (for E0991 recovery).
+    /// D-BINDEXPLICIT1=A: also `name@ Type = expr` (immutable) and `name: Type = expr`.
     /// Used by the statement dispatcher to tell a binding apart from an
     /// expression/assignment that also starts with a name.
     fn looks_like_sigil_binding(&self) -> bool {
@@ -1909,9 +1996,14 @@ impl<'a> Parser<'a> {
             {
                 true
             }
-            // `name : type :: e` — typed binding. A bare `:` only ever opens a
-            // type annotation here, so any `name :` at statement start is a
-            // binding (a map index uses `[`, not `:`).
+            // D-BINDEXPLICIT1=A: `name@ Type = expr` — immutable explicit-type binding.
+            // Any `Ident @` that wasn't caught by the `name@ loop` loop-label check
+            // above is an explicit immutable binding. The type may be complex ([T],
+            // T?, (T, U), etc.) so we don't peek further — just `Ident At`.
+            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::At) => true,
+            // `name : type :: e` / `name : type := e` / `name: Type = e` — typed binding.
+            // A bare `:` only ever opens a type annotation here, so any `name :` at
+            // statement start is a binding (a map index uses `[`, not `:`).
             TokKind::Ident(_) | TokKind::KwSelf
                 if matches!(self.peek2().kind, TokKind::Colon) =>
             {

@@ -139,7 +139,7 @@ expr     = precedence climbing over:
   types (E0112). A function with a return type must return on every path
   (E0114). Unknown names are E0102/E0107 with did-you-mean suggestions.
 - **Named args and defaults (S61, D-NARG1):** parameters may carry a
-  default value (`fn f(x: Int = 0)`); call sites may use a label to
+  default value (`fn f(x: Int =  0)`); call sites may use a label to
   document intent (`f(x: 1)`). Labels must match the parameter name at
   that position — they never reorder arguments. Trailing defaults fill
   when omitted. Both rules apply equally to free functions **and methods**
@@ -226,7 +226,7 @@ Method receivers carry the sigil on `self`; plain `self` is read:
 ```jet
 impl Player {
     fn show(self) -> Int { return self.hp }      // read receiver
-    fn heal(~self, amount: Int) { self.hp = self.hp + amount }  // edit receiver
+    fn heal(~self, amount: Int) { self.hp =  self.hp + amount }  // edit receiver
 }
 ```
 
@@ -279,7 +279,7 @@ Inference also applies when a param calls a `~self` method on itself:
 
 ```jet
 struct Player { hp: Int }
-impl Player { fn damage(~self, n: Int) { self.hp = self.hp - n } }
+impl Player { fn damage(~self, n: Int) { self.hp =  self.hp - n } }
 
 fn hurt(p: Player) { p.damage(5) }    // p is bare; body calls ~self → infers ~Player
 fn main() { x := Player { hp: 100 }; hurt(~x); print(x.hp) }
@@ -404,7 +404,7 @@ impl Circle {
   migration UserRecord {
       rename name -> display_name              // D-MIGRATE1: field renamed (same type)
       remove legacy_id                         // D-MIGRATE2D: field deleted
-      add verified: Bool = false               // D-MIGRATE2A: new field + default for old data
+      add verified: Bool =  false               // D-MIGRATE2A: new field + default for old data
       change price: Int -> Usd via { (c) => Usd(c) }   // D-MIGRATE2E: type change + converter
   }
   ```
@@ -414,7 +414,7 @@ impl Circle {
     `via { … }`, else an `impl Old -> New` in scope (the D-ERR-CONV surface), else
     E0910 asking for one. The `via` body is single- or multi-line and reuses the
     `->` arrow and lambda grammar.
-  - `add f: T = default` supplies the value old records (written before the field
+  - `add f: T =  default` supplies the value old records (written before the field
     existed) are read with. A field is only "added" if absent from the snapshot.
   - There is **no `reorder` verb** (D-MIGRATE2F): reordering is never a breaking
     change and needs no op (writing `reorder` teaches E0911).
@@ -587,7 +587,7 @@ overlay. (Full spec follows in this section.)
 | Overlay | `@extern module c.<lib> { … }` — empty `{ }` = no overrides |
 | Call site | `use "header.h" as alias` or `use c.<lib> as alias` (one per lib per file) |
 
-Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) =
+Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
 "InitWindow";` (the string is the C linker symbol). On any C `use`, the compiler
 loads the bindgen cache at `.jet/bindings/c/<lib>.jet` (when present), merges the
 user overlay over it (**effective module = bindgen ∪ overlay; overlay wins**;
@@ -912,7 +912,7 @@ own distinct type. Rules:
 - A bare integer literal is `Int` by default, but **adopts the width of the
   slot it lands in** — a binding/parameter/return annotation or sized
   arithmetic — and is range-checked at compile time. A literal that doesn't fit
-  the width is **E1003** (e.g. `b: I8 @= 200`). `-128` fits `I8` because the
+  the width is **E1003** (e.g. `b@ I8=  200`). `-128` fits `I8` because the
   negation is folded before the check; negating an unsigned type is **E0109**.
 - Widths never mix implicitly: arithmetic, comparison, and assignment require
   the same width on both sides (**E0109**/**E0112**/**E0108**), with no silent
@@ -1201,7 +1201,7 @@ type_fixed_list = "[" type "#" int_literal "]" ;
 ```
 
 ```jet
-result: [Int#3] @= double.[1, 2, 3];
+result@ [Int#3]=  double.[1, 2, 3];
 [a, b, c] @= result;   // OK — 3 names for 3 elements
 ```
 

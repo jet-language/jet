@@ -9,7 +9,7 @@ fn handle(req: HttpRequest) -> HttpResponse {
     return HttpResponse.{status: "200 OK", body: greeting, headers: [:]}
 }
 fn main() {
-    ch: Channel<String> @= tasks.channel()
+     ch@ Channel<String>  = tasks.channel()
     sender @= ch.sender()
     tasks.spawn(take(sender) () => {
         listener @= net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")

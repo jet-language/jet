@@ -46,18 +46,18 @@
 
 //<<< Owner Bindings: Incorrect explicit binding syntax.
 // HAVE:
-nameImmut: String @= "Jet" // Immutable binding with explicit type annotation.
-nameMut: String := "Jet" // Mutable binding with explicit type annotation.
+name Immut@ String  = "Jet" // Immutable binding with explicit type annotation.
+name Mut: String  = "Jet" // Mutable binding with explicit type annotation.
 // WANT:
-nameImmut@ String = "Jet" // Immutable binding with explicit type annotation.
-nameMut: String = "Jet" // Mutable binding with explicit type annotation.
+nameImmut@ String  = "Jet" // Immutable binding with explicit type annotation.
+nameMut: String  = "Jet" // Mutable binding with explicit type annotation.
 //>>> tracked: #29 D-BINDEXPLICIT1
 
 fn values() {
-    name: String @= "Jet"          // annotated immutable (S4 + D-BIND2)
+     name@ String  = "Jet"          // annotated immutable (S4 + D-BIND2)
     year @= 2026                   // inferred Int (S11/S42)
     version @= 0.1                 // inferred Float; always prints with `.0` (S21)
-    ready: Bool @= true            // Bool (S11)
+     ready@ Bool  = true            // Bool (S11)
 
     count := 0                     // mutable (D-BIND1)
     count = count + 3              // reassign (S17)
@@ -70,8 +70,8 @@ fn values() {
 // Default numerics are Int (i64) / Float (f64) (S42).
 // Sized expert/FFI menu (S42, D-SG9): I8 I16 I32 I64 U8 U16 U32 U64 F32 F64.
 fn sized() {
-    small: U8 @= 255
-    wide: I64 @= 9_000_000_000      // `_` digit separators (S67)
+     small@ U8  = 255
+     wide@ I64  = 9_000_000_000      // `_` digit separators (S67)
     mask @= 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
     big @= 6.022e23                 // float exponent (S67)
     // conversions are named methods only — no `as`, no C casts (S42, D-SG9)
@@ -108,7 +108,7 @@ fn largest<T: Comparable>(xs: [T]) -> T {
 }
 
 // Argument labels + trailing defaults; labels never reorder (S61, D-NARG1).
-fn schedule(task: String, delay: Int = 0, urgent: Bool = false) -> Bool {
+fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) -> Bool {
     return urgent
 }
 
@@ -384,14 +384,14 @@ struct Score {
 // List `[a, b, c]` (S37); map `["k": v]` (S38). Type shorthands `[T]` / `[K, V]`.
 
 fn collections() {
-    nums: [Int] := [3, 1, 2]                    // list type shorthand (S65)
+     nums: [Int]  = [3, 1, 2]                    // list type shorthand (S65)
     nums.push(4)
     nums.sort()
 
     // empty literals infer element type from context (S78); else annotate
-    seen: [Int] := []                           // (S78 / explicit)
+     seen: [Int]  = []                           // (S78 / explicit)
 
-    fruits: [String, Float] := ["limes": 4.2]   // map shorthand (S64)
+     fruits: [String, Float]  = ["limes": 4.2]   // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
     got @= fruits.get("limes")                  // safe access -> V? (S39)
 
@@ -517,7 +517,7 @@ use core.mem
 
 // Access-capability sigils ride the type (D-CAP7): `~T` edit, `^T` take/move,
 // `&T` share/escape, bare `T` read/infer. Call site & receivers mirror them.
-fn damage(p: ~Player, amount: Int) {           // ~ = exclusive write
+fn damage(p: ~Player, amount: Int) {           // ~  = exclusive write
     p.hp = p.hp - amount
 }
 fn consume(item: ^Item) { }                    // ^ = ownership moved/consumed
@@ -662,7 +662,7 @@ fn simd() {
 // Rust FFI: explicit `extern rust` blocks, each entry a Jet signature + path (S50).
 
 extern rust "base64@0.22" {
-    fn b64encode(s: String) -> String = "base64::encode"
+    fn b64encode(s: String) -> String  = "base64::encode"
 }
 
 // C FFI: auto-generated bindings, consumed with `use c.<lib> as alias` (S59).
@@ -719,7 +719,7 @@ migration UserRecord {
 // field, change a field's type with an inline converter. (Only `rename` is
 // evidenced shipping.)
 // migration UserRecord {
-//     add verified: Bool = false
+//     add verified: Bool =  false
 //     remove legacy_id
 //     change price: Int -> Usd via { (cents) => Usd(cents) }
 // }

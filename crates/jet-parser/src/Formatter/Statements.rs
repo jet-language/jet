@@ -51,10 +51,9 @@ impl<'a> Fmt<'a> {
             }
             Stmt::If(i) => self.fmt_if(i),
             Stmt::While { cond, body, label, .. } => {
-                // S19: the canonical loop keyword is `loop` (a parsed `loop cond`
-                // becomes a `While` node). D-LABEL1: print the `@name` label.
+                // S19: canonical loop keyword is `loop`. D-LOOPLABEL2=A: `name@ loop`.
                 if let Some((_n, _)) = label {
-                    self.write(&format!("@{} ", _n));
+                    self.write(&format!("{}@ ", _n));
                 }
                 self.write("loop ");
                 self.fmt_cond(cond);
@@ -70,7 +69,7 @@ impl<'a> Fmt<'a> {
                 ..
             } => {
                 if let Some((_n, _)) = label {
-                    self.write(&format!("@{} ", _n));
+                    self.write(&format!("{}@ ", _n));
                 }
                 self.write("loop ");
                 self.write(var);
@@ -129,11 +128,11 @@ impl<'a> Fmt<'a> {
             }
             Stmt::Break(_) => self.write("break"),
             Stmt::Continue(_) => self.write("continue"),
-            Stmt::BreakLabel(name, _) => self.write(&format!("break @{}", name)),
-            Stmt::ContinueLabel(name, _) => self.write(&format!("continue @{}", name)),
+            Stmt::BreakLabel(name, _) => self.write(&format!("break {}@", name)),
+            Stmt::ContinueLabel(name, _) => self.write(&format!("continue {}@", name)),
             Stmt::Loop { body: inner, label, .. } => {
                 if let Some((_n, _)) = label {
-                    self.write(&format!("@{} ", _n));
+                    self.write(&format!("{}@ ", _n));
                 }
                 self.write("loop {");
                 self.fmt_body(inner);
@@ -445,19 +444,35 @@ impl<'a> Fmt<'a> {
         if let Some(pat) = &b.pattern {
             // S74: a destructuring target stands in for the name.
             self.fmt_bind_pattern(pat);
-        } else {
-            self.write(&b.name);
-            if let Some(ty) = &b.ty {
+            self.write(" ");
+            self.write(if b.mutable {
+                Syntax::SIGIL_BIND_MUT
+            } else {
+                Syntax::SIGIL_BIND_IMMUT
+            });
+        } else if let Some(ty) = &b.ty {
+            // D-BINDEXPLICIT1=A: explicit-type form.
+            // Immutable: `name@ Type = expr`. Mutable: `name: Type = expr`.
+            if b.mutable {
+                self.write(&b.name);
                 self.write(": ");
                 self.fmt_type(ty);
+                self.write(" =");
+            } else {
+                self.write(&b.name);
+                self.write("@ ");
+                self.fmt_type(ty);
+                self.write(" =");
             }
-        }
-        self.write(" ");
-        self.write(if b.mutable {
-            Syntax::SIGIL_BIND_MUT
         } else {
-            Syntax::SIGIL_BIND_IMMUT
-        });
+            self.write(&b.name);
+            self.write(" ");
+            self.write(if b.mutable {
+                Syntax::SIGIL_BIND_MUT
+            } else {
+                Syntax::SIGIL_BIND_IMMUT
+            });
+        }
         self.write(" ");
         self.fmt_expr(&b.init, Prec::OrFallback);
     }

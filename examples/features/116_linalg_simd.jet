@@ -7,31 +7,31 @@
 fn main() {
     // Linear algebra: construct vectors positionally; +/-/element-wise * are
     // overloaded on the closed math family.
-    a: Vec3 @= Vec3(1.0, 2.0, 3.0)
-    b: Vec3 @= Vec3(4.0, 5.0, 6.0)
-    sum: Vec3 @= a + b
+    a@ Vec3 = Vec3(1.0, 2.0, 3.0)
+    b@ Vec3 = Vec3(4.0, 5.0, 6.0)
+    sum@ Vec3 = a + b
     print(sum.to_array())          // [5.0, 7.0, 9.0]
 
     // Named products: dot, cross, length, normalize.
     print(a.dot(b))                // 1*4 + 2*5 + 3*6 = 32.0
-    crossed: Vec3 @= a.cross(b)
+    crossed@ Vec3 = a.cross(b)
     print(crossed.to_array())      // [-3.0, 6.0, -3.0]
     print(Vec3(0.0, 3.0, 4.0).length())                // 5.0
     print(Vec3(0.0, 3.0, 4.0).normalize().to_array())  // [0.0, 0.6, 0.8]
 
     // Matrices are column-major; m * v transforms a vector, m.matmul(n) mul's.
     // A 3x3 scale-by-2 matrix (diagonal).
-    scale: Mat3 @= Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-    scaled: Vec3 @= scale * Vec3(1.0, 2.0, 3.0)
+    scale@ Mat3 = Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    scaled@ Vec3 = scale * Vec3(1.0, 2.0, 3.0)
     print(scaled.to_array())                  // [2.0, 4.0, 6.0]
     print(scale.matmul(scale).to_array())     // diag(4,4,4) flat
 
     // SIMD lanes: four F32 lanes; element-wise operators run across all lanes.
-    v: F32x4 @= F32x4(1.0, 2.0, 3.0, 4.0)
-    w: F32x4 @= F32x4(10.0, 20.0, 30.0, 40.0)
-    added: F32x4 @= v + w
+    v@ F32x4 = F32x4(1.0, 2.0, 3.0, 4.0)
+    w@ F32x4 = F32x4(10.0, 20.0, 30.0, 40.0)
+    added@ F32x4 = v + w
     print(added.to_array())        // [11.0, 22.0, 33.0, 44.0]
-    scaled_v: F32x4 @= v * w
+    scaled_v@ F32x4 = v * w
     print(scaled_v.to_array())     // [10.0, 40.0, 90.0, 160.0]
 
     // Splat one scalar across every lane.
@@ -44,8 +44,8 @@ fn main() {
     print(v.reduce(#Mul))          // 24.0
 
     // F64x2: two double-precision lanes; the [F64#2] array bridge.
-    d: F64x2 @= F64x2.from_array([1.5, 2.5])
-    doubled: F64x2 @= d + d
+    d@ F64x2 = F64x2.from_array([1.5, 2.5])
+    doubled@ F64x2 = d + d
     print(doubled.to_array())      // [3.0, 5.0]
     print(d.sum())                 // 4.0
 }

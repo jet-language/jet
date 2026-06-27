@@ -96,23 +96,23 @@ pub(crate) fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LABEL1 (E0987): `break @name` / `continue @name` names a loop label that is
+/// D-LOOPLABEL2 (E0987): `break name@` / `continue name@` names a loop label that is
 /// not in scope. The fix lists the labels that *are* reachable here.
 pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) -> Diagnostic {
     let fix = if in_scope.is_empty() {
-        "label an enclosing loop with `@name loop { … }` first".to_string()
+        "label an enclosing loop with `name@ loop { … }` first".to_string()
     } else {
         let labels = in_scope
             .iter()
-            .map(|l| format!("`@{l}`"))
+            .map(|l| format!("`{l}@`"))
             .collect::<Vec<_>>()
             .join(", ");
         format!("use a label in scope: {labels}")
     };
     Diagnostic::error(
         "E0987",
-        format!("no loop labeled `@{name}` is in scope"),
-        "a labeled `break`/`continue` must name an enclosing `@name loop` (D-LABEL1)".to_string(),
+        format!("no loop labeled `{name}@` is in scope"),
+        "a labeled `break`/`continue` must name an enclosing `name@ loop` (D-LOOPLABEL2)".to_string(),
         fix,
         Some(span),
     )

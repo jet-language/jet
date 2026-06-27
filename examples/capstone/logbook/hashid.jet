@@ -9,9 +9,9 @@ use core.mem
 // `bytes` is a valid, in-bounds slice for the duration of the call.
 #Unsafe("caller must ensure `bytes` is a valid, in-bounds slice")
 fn fnv1a(bytes: [U8]) -> Int {
-    offset_basis: Int @= 2166136261
-    prime: Int @= 16777619
-    hash: Int := offset_basis
+    offset_basis@ Int = 2166136261
+    prime@ Int = 16777619
+    hash: Int = offset_basis
     loop b in bytes {
         hash = (hash ^ (b.to_int() * prime))
     }
@@ -21,7 +21,7 @@ fn fnv1a(bytes: [U8]) -> Int {
 // This is the public surface; callers never touch #Unsafe directly.
 pub fn content_key(body: String) -> Int {
     bytes @= body.bytes()
-    result: Int := 0
+    result: Int = 0
     #Unsafe("fnv1a reads bytes in bounds") {
         result = fnv1a(bytes)
     }

@@ -965,3 +965,41 @@ fn main() {}
     let twice = jet::format_source(&once).expect("second fmt of #Test(\"name\") must succeed");
     assert_eq!(once, twice, "#Test(\"name\") must be fmt-idempotent");
 }
+
+#[test]
+fn fmt_explicit_binding_d_bindexplicit1_stability() {
+    // D-BINDEXPLICIT1=A: `name@ Type = val` (immutable) and `name: Type = val`
+    // (mutable) must survive fmt unchanged.
+    let src = "\
+fn main() {
+    x@ Int = 42
+    s: String = \"hi\"
+    print(\"{x} {s}\")
+}
+";
+    assert_fmt_keeps(src, &["x@ Int = 42", "s: String = \"hi\""], "explicit binding");
+    let once = jet::format_source(src).expect("fmt should accept explicit-type bindings");
+    let twice = jet::format_source(&once).expect("second fmt of explicit bindings must succeed");
+    assert_eq!(once, twice, "explicit-type binding fmt must be idempotent");
+}
+
+#[test]
+fn fmt_loop_label_d_looplabel2_stability() {
+    // D-LOOPLABEL2=A: `outer@ loop { break outer@ }` must survive fmt unchanged.
+    let src = "\
+fn main() {
+    outer@ loop i in [1, 2] {
+        loop j in [1, 2] {
+            if i == j {
+                break outer@
+            }
+        }
+    }
+    print(\"done\")
+}
+";
+    assert_fmt_keeps(src, &["outer@ loop", "break outer@"], "loop label suffix");
+    let once = jet::format_source(src).expect("fmt should accept suffix loop labels");
+    let twice = jet::format_source(&once).expect("second fmt of loop labels must succeed");
+    assert_eq!(once, twice, "loop label fmt must be idempotent");
+}

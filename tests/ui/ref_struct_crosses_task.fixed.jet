@@ -1,12 +1,15 @@
 use core.tasks
+
 struct Owned {
     name: String
 }
+
 fn make() -> Owned {
     return Owned.{name: "hi"}
 }
+
 fn main() {
     t @= tasks.spawn(() => make())
-    result: Owned @= t.join()
+    result@ Owned  = t.join()
     print(result.name)
 }

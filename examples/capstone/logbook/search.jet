@@ -77,7 +77,7 @@ fn note_score(n: Note, q: Query) -> Int {
             return 1
         }
         .Text(s) -> {
-            score: Int := 0
+            score: Int = 0
             if n.name.contains(s) {
                 score = (score + 3)
             }
@@ -100,7 +100,7 @@ fn note_score(n: Note, q: Query) -> Int {
 }
 pub fn find(idx: Index, raw_query: String) -> [String] {
     q @= parse_query(raw_query)
-    hits: [Hit] := []
+    hits: [Hit] = []
     loop name, n in idx.notes {
         if note_matches(n, q.clone()) {
             score @= note_score(n, q.clone())
@@ -108,14 +108,14 @@ pub fn find(idx: Index, raw_query: String) -> [String] {
         }
     }
     ranked @= rank(hits)
-    names: [String] := []
+    names: [String] = []
     loop h in ranked {
         names.push(h.name)
     }
     return names
 }
 pub fn count_matching(idx: Index, q: Query) -> Int {
-    count: Int := 0
+    count: Int = 0
     loop name, n in idx.notes {
         if note_matches(n, q.clone()) {
             count = (count + 1)

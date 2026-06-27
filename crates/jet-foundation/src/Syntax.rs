@@ -26,6 +26,9 @@ pub const KW_PUB: &str = "pub";
 /// S2 / D-BIND2 (ratified): immutable binding sigil `name @= expr`
 /// (D-BIND2 = A; replaces `::` from D-BIND1). `@=` is unambiguous in the
 /// lexer because `@` + identifier is always a label or host selector.
+/// D-BINDEXPLICIT1=A (ratified 2026-06-26): explicit-type form is `name@ Type = expr`
+/// (immutable) / `name: Type = expr` (mutable). The `@` marker hugs the name suffix;
+/// bare `=` is the explicit binding sigil in those positions. Inferred `@=`/`:=` unchanged.
 pub const SIGIL_BIND_IMMUT: &str = "@=";
 
 /// S2 / D-BIND2: the retired immutable-binding sigil `::` (D-BIND1 era).
@@ -34,6 +37,7 @@ pub const SIGIL_BIND_IMMUT_RETIRED: &str = "::";
 
 /// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`
 /// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
+/// D-BINDEXPLICIT1=A: explicit-type mutable form is `name: Type = expr`; see SIGIL_BIND_IMMUT.
 pub const SIGIL_BIND_MUT: &str = ":=";
 
 /// S2 / D-BIND1: the retired binding keywords, recognized only for the E0985
@@ -536,11 +540,10 @@ pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `#extern module`, not 
 /// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
 /// only to emit the E0055 teaching error.
 pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
-// D-LABEL1: a loop label is `@name` immediately before `loop`
-// (`@outer loop { … }`); `break @name` / `continue @name` target it.
+// D-LOOPLABEL2=A (ratified 2026-06-26): loop label `@` is a SUFFIX on the name.
+// `outer@ loop { … }` / `break outer@` / `continue outer@`. Reverses D-LABEL1
+// (which had `@outer loop`). Old prefix form emits E0988 teaching error.
 // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
-// No disambiguation by following keyword needed — `#` is always an attribute,
-// `@` in prefix position before `loop` is always a label.
 /// S59: cache directory segment under `.jet/` for generated C bindings.
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 

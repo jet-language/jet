@@ -142,8 +142,8 @@ before continuing.
 | E0113 | sema  | `return` value mismatch (wrong/missing/unexpected) |
 | E0114 | sema  | a path reaches the end without `return`   |
 | E0115 | sema  | `break`/`continue` outside a loop         |
-| E0987 | sema  | `break @name`/`continue @name` names a loop label not in scope (D-LABEL1) |
-| E0988 | parse | a `@name` loop label is not followed by `loop` (D-LABEL1) |
+| E0987 | sema  | `break name@`/`continue name@` names a loop label not in scope (D-LOOPLABEL2) |
+| E0988 | parse | teaching: old prefix `@name loop` / `break @name` → suffix `name@ loop` / `break name@` (D-LOOPLABEL2) |
 | E0989 | sema  | `comptime if` condition is not a comptime expression (D-WHEN1) |
 | E0990 | parse | `@` used as attribute prefix; teaching error — use `#` (D-ATTR1) |
 | E0116 | sema  | valueless call used as a value            |

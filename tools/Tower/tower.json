@@ -9,8 +9,7 @@
         "epoch:e5",
         "board-sidequests",
         "epoch:e3",
-        "epoch:e6",
-        "board-frozen"
+        "epoch:e6"
       ]
     }
   },
@@ -131,7 +130,7 @@
       "body": "Named OS generations.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e6",
+      "epoch": "e5",
       "phase": "planning",
       "priority": "P2",
       "plan": null,
@@ -921,11 +920,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implement explicit-typed binding marker-on-name (D-BINDEXPLICIT1=A). Immutable `name@ Type = val`, mutable `name: Type = val`; `=` binds when a mutability marker precedes the name, else stays reassignment (S17). Inferred `@=`/`:=` forms UNCHANGED.\nSteps: (1) parser binding grammar — accept `@`/`:` before a bare type then `=`; (2) Source/Syntax.rs decision id + spelling; (3) sema bind-vs-reassign resolution keyed on the name marker; amends S4, reopens D-BIND2's `=`-only rule; (4) codegen maps to Rust `let`/`let mut` (unchanged); (5) re-bless tests/ui; (6) migrate canon.jet + EVERY explicit-typed binding in examples/ (repo-wide, owner marked only first instance); (7) jet fmt emission + a fmt round-trip STABILITY test (new syntax → formatter must round-trip). Pairs with c30 (same marker-suffixes-the-name direction) — implement together for one consistent rule.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-26",
+          "text": "Implemented D-BINDEXPLICIT1=A: parser sigil_binding() handles `name@ Type = val` (immutable) and `name: Type = val` (mutable); formatter emits new form; fmt_explicit_binding_d_bindexplicit1_stability() test added; migrated all explicit-typed bindings in examples/ and docs/; re-blessed all UI snapshots; all tests green."
+        },
         {
           "at": "2026-06-26",
           "text": "Decisions cleared (D-BINDEXPLICIT1=A). Advanced to ready; plan written. Implement with c30 as a consistent marker-suffix pass."
@@ -946,11 +949,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Loop-label sigil becomes a suffix (D-LOOPLABEL2=A): `outer@ loop { break outer@ }` at declaration AND at break/continue. Reverses D-ATTR3, amends D-LABEL1.\nSteps: (1) parser label-position rule (suffix at decl + jump targets); (2) Syntax.rs; (3) codegen still maps to Rust `'name:` labels (unchanged); (4) re-bless ui; (5) migrate D-LABEL1 worked examples + every labeled loop in canon.jet/examples (repo-wide); (6) fmt emission + round-trip stability test. Implement alongside c29 (shared marker-suffix direction).",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-26",
+          "text": "Implemented D-LOOPLABEL2=A: parser handles `name@ loop` suffix declaration and `break name@`/`continue name@`; E0988 teaching error for old `@name loop`/`break @name` prefix form; E0987 message updated to suffix syntax; formatter emits new form; fmt_loop_label_d_looplabel2_stability() test added; migrated all labeled loops in examples/; re-blessed all UI snapshots; all tests green."
+        },
         {
           "at": "2026-06-26",
           "text": "Decisions cleared (D-LOOPLABEL2=A). Advanced to ready; plan written. Pairs with c29."
@@ -1167,7 +1174,7 @@
       "body": "Ideas.md (scratch L21 + Level-3): allow comptime code to read env vars, hit network, run subprocesses, codegen at build time — behind a sandbox + auditable `.jet/build-io.lock` of every accessed path + cache-invalidation on change. Ratified as D-CTEFFECT1 tiers + `#Impure` (was Tower c157); implementation pending. Counterweight: S26 \"no ambient I/O at comptime\"; supply-chain surface. Bundle-risk: env/network/subprocess/codegen/audit/locks are separable.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e4",
       "phase": "triage",
       "priority": "P2",
       "plan": null,
@@ -1179,7 +1186,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c3iqzja",
@@ -3855,7 +3862,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "B",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-STDRUBRIC1",
@@ -3981,7 +3990,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-RANDSPLIT1",
@@ -6070,7 +6081,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-JSWIFTFFI1",
@@ -6114,7 +6127,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-ASYNCRT1",
@@ -6207,7 +6222,10 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "C",
+      "comment": "We will keep private by default, per item pub, BUT allow public/private scope markers. I want a new decision open to compare syntax options for the marker though",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-USERDERIVE1",
@@ -6251,7 +6269,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-METAREFLECT1",
@@ -6295,7 +6315,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-METADERIVE1",
@@ -7850,6 +7872,36 @@
       "status": "open",
       "answer": "",
       "created": "2026-06-26T13:37:59.389Z"
+    },
+    {
+      "id": "q0wd1i0",
+      "cardId": "c3iqzja",
+      "by": "owner",
+      "kind": "question",
+      "text": "What is the community sentiment, preferences, and tradeoffs?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-27T01:11:51.780Z"
+    },
+    {
+      "id": "q1zyi42",
+      "cardId": "c9itmoz",
+      "by": "owner",
+      "kind": "question",
+      "text": "How often would this cause issue overriding the user's explicit choice to add parens for option C? How difficult is it to implement a precedence table?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-27T01:15:37.325Z"
+    },
+    {
+      "id": "q2ox7y9",
+      "cardId": "c2iizmyx",
+      "by": "owner",
+      "kind": "question",
+      "text": "What is the best of both worlds approach here? We are trying to provide best in class service & support for any use case, not just some.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-27T01:24:45.553Z"
     }
   ]
 }

@@ -52,8 +52,8 @@ fn cmd_find(dir: String, query: String) {
 }
 fn cmd_links(dir: String, name: String) {
     idx @= index.build(dir) ?? panic("cannot build index")
-    notes_map: [String, Note] @= idx.notes
-    maybe_note: Note? @= notes_map.get(name)
+    notes_map@ [String, Note] = idx.notes
+    maybe_note@ Note? = notes_map.get(name)
     if maybe_note == {
         value(n) -> {
             print("forward links:")
@@ -68,7 +68,7 @@ fn cmd_links(dir: String, name: String) {
 
     }
     bls_map: [String, [String]] @= idx.backlinks
-    bls: [String] @= bls_map.get(name) ?? []
+    bls@ [String] = bls_map.get(name) ?? []
     print("backlinks:")
     loop link in bls {
         print("  <- {link}")
@@ -87,7 +87,7 @@ fn cmd_graph(dir: String, as_json: Bool) {
     }
 }
 fn cmd_serve(dir: String, config_path: String?) {
-    cp: String @= config_path.clone() ?? "logbook.toml"
+    cp@ String = config_path.clone() ?? "logbook.toml"
     cfg @= config.load(cp)
     log.set_level(cfg.level)
     pid @= ffi.pid()
@@ -136,7 +136,7 @@ fn main() {
             cmd_graph(args[2], as_json)
         }
         "serve" -> {
-            config_path: String? @= null
+            config_path@ String? = null
             if (args.len() >= 4) && (args[3] == "config") {
                 cmd_serve(args[2], value(args[4]))
             } else {

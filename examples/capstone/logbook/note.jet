@@ -39,9 +39,9 @@ fn parse_note_type(path: String, s: String) -> NoteType ? ParseError {
 }
 // extract_links scans body for [[target]] patterns, returns deduped list preserving order.
 fn extract_links(body: String) -> [String] {
-    links: [String] := []
+    links: [String] = []
     parts @= body.split("[[")
-    i: Int := 1
+    i: Int = 1
     loop i < parts.len() {
         seg @= parts[i]
         if seg.contains("]]") {
@@ -59,7 +59,7 @@ fn extract_links(body: String) -> [String] {
 }
 // extract_tags scans body for #tag patterns, returns sorted deduped list.
 fn extract_tags(body: String) -> [String] {
-    tags: [String] := []
+    tags: [String] = []
     loop line in body.split("\n") {
         loop word in line.split(" ") {
             if word.starts_with("#") && (word.len() > 1) {
@@ -82,9 +82,9 @@ pub fn parse(path: String, text: String) -> Note ? ParseError {
     }
     frontmatter @= sections[1]
     body @= sections[2].trim()
-    name: String := ""
-    description: String := ""
-    type_str: String := ""
+    name: String = ""
+    description: String = ""
+    type_str: String = ""
     loop line in frontmatter.split("\n") {
         t @= line.trim()
         if t.starts_with("name:") {
