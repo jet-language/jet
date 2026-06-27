@@ -1,0 +1,21 @@
+// D-SELIMPORT1=A: `use mod.{a, b as c}` and `use mod.item as alias`.
+// Items are brought into scope directly; aliases resolve name conflicts.
+module math {
+    pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+        if x < lo { return lo }
+        if x > hi { return hi }
+        return x
+    }
+    pub fn abs(x: Int) -> Int {
+        if x < 0 { return -x }
+        return x
+    }
+}
+
+// Grouped: `abs` imported under the local name `absolute`.
+use math.{clamp, abs as absolute}
+
+fn main() {
+    print(clamp(15, 0, 10))
+    print(absolute(-7))
+}

@@ -1,10 +1,26 @@
-Error [E2912]: `reactive.derived` must compute and return a value
-  --> tests/ui/reactive_derived_returns_nothing.jet:4:27
+Error [E1001]: there is no core module `core.reactive`
+  --> tests/ui/reactive_derived_returns_nothing.jet:1:5
+    |
+  1 | use jet.reactive as reactive
+    |     ^^^
+ Why: `core` is compiler-known in M10, and only the frozen core modules exist
+ Fix: import one of: core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.tasks, core.mem, core.mem.alloc, core.files, core.path, core.net, core.scope, core.args, core.term, core.encoding, core.encoding.json, core.encoding.csv, core.encoding.toml, core.encoding.yaml, jet.log, jet.time, jet.crypto, jet.http, jet.regex, jet.archive, jet.db, jet.reactive
+
+Error [E0107]: nothing named `reactive` exists here
+  --> tests/ui/reactive_derived_returns_nothing.jet:3:14
+    |
+  3 |     count := reactive.signal(0)
+    |              ^^^^^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `reactive @= ...`
+
+Error [E0107]: nothing named `reactive` exists here
+  --> tests/ui/reactive_derived_returns_nothing.jet:4:10
     |
   4 |     d := reactive.derived(() => {
-    |                           ^^^^^^^
- Why: a derived value is recomputed from its signals; its lambda has to return the value
- Fix: return a value from the body, or use `reactive.effect(() => { … })` for a side effect
+    |          ^^^^^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `reactive @= ...`
 
 Error [E0311]: `get` isn't a method on this value
   --> tests/ui/reactive_derived_returns_nothing.jet:7:13

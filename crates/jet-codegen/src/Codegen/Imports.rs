@@ -158,10 +158,11 @@ pub(crate) fn reexport_call_map(
                 .find_map(|i2| resolve_target(bundle, target_idx, i2));
             if let Some(real_idx) = real_idx {
                 let real_mod = format!("user_{}", bundle.modules[real_idx].alias);
-                for item in items {
+                for (orig, alias_opt) in items {
+                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
                     map.insert(
-                        (alias.clone(), item.clone()),
-                        (real_mod.clone(), item.clone()),
+                        (alias.clone(), local.to_string()),
+                        (real_mod.clone(), orig.clone()),
                     );
                 }
             }
@@ -183,10 +184,11 @@ pub(crate) fn core_import_map(bundle: &ProgramBundle, module_idx: usize) -> Hash
         // `import core.item as item` would.
         if let ImportKind::Unqualified { module_alias, items, .. } = &imp.kind {
             if module_alias == "core" || module_alias == "jet" {
-                for item in items {
-                    let full = format!("core.{}", item);
+                for (orig, alias_opt) in items {
+                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let full = format!("core.{}", orig);
                     if crate::Syntax::is_known_core_module(&full) {
-                        map.insert(item.clone(), full);
+                        map.insert(local.to_string(), full);
                     }
                 }
             }
@@ -229,9 +231,10 @@ pub(crate) fn unqualified_import_maps(
         }
         if code_mod_aliases.contains(module_alias.as_str()) {
             // Inline code module.
-            for item in items {
-                let key = format!("{}__{}", module_alias, item);
-                inline_map.insert(item.clone(), key);
+            for (orig, alias_opt) in items {
+                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                let key = format!("{}__{}", module_alias, orig);
+                inline_map.insert(local.to_string(), key);
             }
         } else if let Some(target) = module
             .imports
@@ -243,8 +246,9 @@ pub(crate) fn unqualified_import_maps(
             // File module: resolve the file-import whose alias matches, then point
             // each unqualified item at that Rust module.
             let rust_mod = format!("user_{}", bundle.modules[target].alias);
-            for item in items {
-                file_map.insert(item.clone(), (rust_mod.clone(), item.clone()));
+            for (orig, alias_opt) in items {
+                let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                file_map.insert(local.to_string(), (rust_mod.clone(), orig.clone()));
             }
         }
     }

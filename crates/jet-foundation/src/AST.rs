@@ -444,11 +444,13 @@ pub enum ImportKind {
     File(String, Span),
     /// Bare module name — searched from the project root.
     Module(String, Span),
-    /// D-MOD3/4: `use alias.Item` / `use alias.{A, B}` / `pub use alias.Item`
+    /// D-MOD3/4: `use alias.Item` / `use alias.{A, B as C}` / `pub use alias.Item`
+    /// D-SELIMPORT1=A: each item may carry an `as alias` — `(original, alias_if_any)`.
     Unqualified {
         module_alias: String,
         module_alias_span: Span,
-        items: Vec<String>,
+        /// `(original_name, local_alias)` — alias is the local binding name.
+        items: Vec<(String, Option<String>)>,
         items_span: Span,
         span: Span,
     },

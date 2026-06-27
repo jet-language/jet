@@ -754,12 +754,13 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             let st = &mut states[idx];
             if st.code_modules.contains_key(module_alias.as_str()) {
                 // Inline module: items are mangled as `{alias}__{item}`.
-                for item in items {
-                    let mangled = format!("{}__{}", module_alias, item);
+                for (orig, alias_opt) in items {
+                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let mangled = format!("{}__{}", module_alias, orig);
                     if !st.funcs.contains_key(&mangled) {
                         diags.push(Diagnostic::error(
                             "E0611",
-                            format!("`{}` is not defined in module `{}`", item, module_alias),
+                            format!("`{}` is not defined in module `{}`", orig, module_alias),
                             "check the module body for the item you're importing".to_string(),
                             "make sure the name is spelled correctly".to_string(),
                             Some(*module_alias_span),
@@ -767,15 +768,15 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     } else if !st.func_pub.get(&mangled).copied().unwrap_or(false) {
                         diags.push(Diagnostic::error(
                             "E0609",
-                            format!("`{}` is private in module `{}`", item, module_alias),
+                            format!("`{}` is private in module `{}`", orig, module_alias),
                             "only `pub` items can be brought into scope with `use`".to_string(),
-                            format!("add `pub` before `fn {}` in module `{}`", item, module_alias),
+                            format!("add `pub` before `fn {}` in module `{}`", orig, module_alias),
                             Some(*module_alias_span),
                         ));
                     } else {
-                        st.unqualified.insert(item.clone(), mangled.clone());
+                        st.unqualified.insert(local.to_string(), mangled.clone());
                         if imp.is_pub {
-                            st.reexports.insert(item.clone(), (mangled, idx));
+                            st.reexports.insert(local.to_string(), (mangled, idx));
                         }
                     }
                 }
@@ -783,8 +784,9 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 // Std namespace prefix: `use core.mem` → bind each item as a Core import.
                 // Each item `x` becomes `core.x` in the known-modules table.
                 let st = &mut states[idx];
-                for item in items {
-                    let full = format!("core.{}", item);
+                for (orig, alias_opt) in items {
+                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let full = format!("core.{}", orig);
                     if !crate::Syntax::is_known_core_module(&full) {
                         diags.push(Diagnostic::error(
                             "E1001",
@@ -793,29 +795,30 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                             format!("import one of: {}", crate::Syntax::core_modules_list()),
                             Some(*module_alias_span),
                         ));
-                    } else if st.core_imports.contains_key(item) {
+                    } else if st.core_imports.contains_key(local) {
                         diags.push(Diagnostic::error(
                             "E0105",
-                            format!("the import name `{}` is used twice", item),
+                            format!("the import name `{}` is used twice", local),
                             "each import needs a unique namespace name in this file".to_string(),
                             format!("rename one with `{} alias`", Syntax::KW_AS),
                             Some(imp.alias_span),
                         ));
                     } else {
-                        st.core_imports.insert(item.clone(), full);
+                        st.core_imports.insert(local.to_string(), full);
                     }
                 }
             } else if st.imports.contains_key(module_alias.as_str()) {
                 // File module: look up items in the target module's state.
                 let target_idx = st.imports[module_alias.as_str()];
                 let is_reexport = imp.is_pub;
-                for item in items {
-                    let is_pub = states[target_idx].func_pub.get(item).copied().unwrap_or(false);
-                    let exists = states[target_idx].funcs.contains_key(item);
+                for (orig, alias_opt) in items {
+                    let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let is_pub = states[target_idx].func_pub.get(orig.as_str()).copied().unwrap_or(false);
+                    let exists = states[target_idx].funcs.contains_key(orig.as_str());
                     if !exists {
                         diags.push(Diagnostic::error(
                             "E0611",
-                            format!("`{}` is not defined in module `{}`", item, module_alias),
+                            format!("`{}` is not defined in module `{}`", orig, module_alias),
                             "check the module for the item you're importing".to_string(),
                             "make sure the name is spelled correctly".to_string(),
                             Some(*module_alias_span),
@@ -823,15 +826,15 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     } else if !is_pub {
                         diags.push(Diagnostic::error(
                             "E0609",
-                            format!("`{}` is private in module `{}`", item, module_alias),
+                            format!("`{}` is private in module `{}`", orig, module_alias),
                             "only `pub` items can be brought into scope with `use`".to_string(),
-                            format!("add `pub` before `fn {}` in the imported file", item),
+                            format!("add `pub` before `fn {}` in the imported file", orig),
                             Some(*module_alias_span),
                         ));
                     } else {
-                        states[idx].unqualified_file.insert(item.clone(), (item.clone(), target_idx));
+                        states[idx].unqualified_file.insert(local.to_string(), (orig.clone(), target_idx));
                         if is_reexport {
-                            states[idx].reexports.insert(item.clone(), (item.clone(), target_idx));
+                            states[idx].reexports.insert(local.to_string(), (orig.clone(), target_idx));
                         }
                     }
                 }

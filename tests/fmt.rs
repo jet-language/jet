@@ -1005,6 +1005,31 @@ fn main() {
 }
 
 #[test]
+fn fmt_selective_import_d_selimport1_stability() {
+    // D-SELIMPORT1=A: `use mod.{a, b as c}` must survive fmt unchanged.
+    let src = "\
+module math {
+    pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+        if x < lo { return lo }
+        if x > hi { return hi }
+        return x
+    }
+}
+
+use math.{clamp, clamp as c2}
+
+fn main() {
+    print(clamp(15, 0, 10))
+    print(c2(5, 0, 3))
+}
+";
+    assert_fmt_keeps(src, &["use math.{clamp, clamp as c2}"], "selective import with alias");
+    let once = jet::format_source(src).expect("fmt should accept selective imports");
+    let twice = jet::format_source(&once).expect("second fmt of selective imports must succeed");
+    assert_eq!(once, twice, "selective import fmt must be idempotent");
+}
+
+#[test]
 fn fmt_value_tag_type_d_qual4_stability() {
     // D-QUAL4=A: `#Marker T` in type position must survive fmt unchanged.
     let src = "\

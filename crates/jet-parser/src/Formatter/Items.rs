@@ -678,14 +678,22 @@ impl<'a> Fmt<'a> {
                 }
             }
             ImportKind::Unqualified { module_alias, items, .. } => {
+                let fmt_item = |(orig, alias): &(String, Option<String>)| {
+                    if let Some(a) = alias {
+                        format!("{orig} as {a}")
+                    } else {
+                        orig.clone()
+                    }
+                };
                 if items.len() == 1 {
                     self.write(module_alias);
                     self.write(".");
-                    self.write(&items[0]);
+                    self.write(&fmt_item(&items[0]));
                 } else {
                     self.write(module_alias);
                     self.write(".{");
-                    self.write(&items.join(", "));
+                    let rendered: Vec<String> = items.iter().map(fmt_item).collect();
+                    self.write(&rendered.join(", "));
                     self.write("}");
                 }
             }

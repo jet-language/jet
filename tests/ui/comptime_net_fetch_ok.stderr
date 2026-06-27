@@ -1,1 +1,15 @@
-(no errors)
+Error [E0956]: the name `net` can't run at compile time yet
+  --> tests/ui/comptime_net_fetch_ok.jet:2:18
+    |
+  2 | comptime EMPTY = net.fetch("file:///dev/null", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    |                  ^^^
+ Why: comptime evaluates a pure subset of Jet; this construct isn't supported there yet
+ Fix: compute this value at runtime, or use a simpler comptime expression
+
+Error [E0107]: nothing named `EMPTY` exists here
+  --> tests/ui/comptime_net_fetch_ok.jet:4:23
+    |
+  4 |     print("fetched: '{EMPTY}'")
+    |                       ^^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `EMPTY @= ...`

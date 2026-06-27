@@ -41,16 +41,27 @@ impl<'a> Parser<'a> {
                     let after_dot = &self.peek2().kind;
                     match after_dot {
                         TokKind::LBrace => {
-                            // use alias.{A, B, ...}
+                            // use alias.{A, B as C, ...}
                             self.bump(); // consume `.`
                             let lbrace_span = self.bump().span; // consume `{`
-                            let mut items = Vec::new();
+                            let mut items: Vec<(String, Option<String>)> = Vec::new();
                             loop {
                                 if matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                                     break;
                                 }
                                 let (item, _) = self.expect_ident("inside `use alias.{…}`")?;
-                                items.push(item);
+                                // D-SELIMPORT1=A: optional `as alias` after each item.
+                                let alias = if matches!(
+                                    &self.peek().kind,
+                                    TokKind::Ident(n) if n == Syntax::KW_AS
+                                ) {
+                                    self.bump(); // consume `as`
+                                    let (a, _) = self.expect_ident("after `as` in import list")?;
+                                    Some(a)
+                                } else {
+                                    None
+                                };
+                                items.push((item, alias));
                                 if matches!(self.peek().kind, TokKind::Comma) {
                                     self.bump();
                                 } else {
@@ -89,11 +100,11 @@ impl<'a> Parser<'a> {
                             ));
                         }
                         TokKind::Ident(_) => {
-                            // Check if token after the item ident is `;` (no `as`).
-                            // peek3() is now 2 positions past current (dot + ident).
+                            // Check if token after the item ident is `;` (no `as`, no more dots).
+                            // peek3() is 2 positions past current (dot + ident).
                             let after_item = &self.peek3().kind;
                             if matches!(after_item, TokKind::Semi | TokKind::Eof) {
-                                // use alias.item ; — Unqualified single
+                                // use alias.item ; — Unqualified single (no alias for single form)
                                 self.bump(); // consume `.`
                                 let (item, item_span) =
                                     self.expect_ident("after `.` in a `use` import")?;
@@ -104,7 +115,7 @@ impl<'a> Parser<'a> {
                                     kind: crate::AST::ImportKind::Unqualified {
                                         module_alias: first,
                                         module_alias_span: first_span,
-                                        items: vec![item.clone()],
+                                        items: vec![(item.clone(), None)],
                                         items_span,
                                         span: Span::new(start.start, end),
                                     },

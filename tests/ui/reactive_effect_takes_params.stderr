@@ -1,7 +1,23 @@
-Error [E2911]: `reactive.effect` needs a zero-parameter lambda, got 1 parameter
-  --> tests/ui/reactive_effect_takes_params.jet:4:21
+Error [E1001]: there is no core module `core.reactive`
+  --> tests/ui/reactive_effect_takes_params.jet:1:5
+    |
+  1 | use jet.reactive as reactive
+    |     ^^^
+ Why: `core` is compiler-known in M10, and only the frozen core modules exist
+ Fix: import one of: core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.tasks, core.mem, core.mem.alloc, core.files, core.path, core.net, core.scope, core.args, core.term, core.encoding, core.encoding.json, core.encoding.csv, core.encoding.toml, core.encoding.yaml, jet.log, jet.time, jet.crypto, jet.http, jet.regex, jet.archive, jet.db, jet.reactive
+
+Error [E0107]: nothing named `reactive` exists here
+  --> tests/ui/reactive_effect_takes_params.jet:3:14
+    |
+  3 |     count := reactive.signal(0)
+    |              ^^^^^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `reactive @= ...`
+
+Error [E0107]: nothing named `reactive` exists here
+  --> tests/ui/reactive_effect_takes_params.jet:4:5
     |
   4 |     reactive.effect((n: Int) => {
-    |                     ^^^^^^^^^^^^^
- Why: the body takes no arguments — it reads the signals it depends on via `.get()`
- Fix: write `reactive.effect(() => { … })` with no parameters
+    |     ^^^^^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `reactive @= ...`
