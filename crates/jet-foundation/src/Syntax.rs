@@ -1580,6 +1580,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.sketch.tdigest",
     "core.sketch.reservoir",
     "core.sketch.cms",
+    // D-TIMEDEPTH1=A (ratified 2026-06-26): civil-time constructors.
+    "core.time.date",
+    "core.time.datetime",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

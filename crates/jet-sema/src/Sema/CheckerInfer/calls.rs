@@ -1088,6 +1088,15 @@ impl<'a> Checker<'a> {
             *recv_type_out = Some(sketch_type_name(&recv_ty).unwrap_or("Sketch").to_string());
             return ret;
         }
+        // D-TIMEDEPTH1=A: method calls on Date/DateTime.
+        if let Some(ret) = civil_time_method_return(&recv_ty, method, args) {
+            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            *recv_type_out = Some(match &recv_ty {
+                Type::Named(n) => n.clone(),
+                _ => "Date".to_string(),
+            });
+            return ret;
+        }
         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
         // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
         if let Type::Named(handle_ty) = &recv_ty {

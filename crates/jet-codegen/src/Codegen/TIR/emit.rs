@@ -1564,6 +1564,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
+                // D-TIMEDEPTH1=A: civil-time method call.
+                THandleOp::CivilTimeMethod { kind: _, method } => {
+                    match method.as_str() {
+                        "add_days" => format!("({}).add_days({})", recv, a(0)),
+                        "add_months" => format!("({}).add_months({})", recv, a(0)),
+                        "diff_days" => format!("({}).diff_days(&({}))", recv, a(0)),
+                        "to_string" => format!("({}).to_string_fmt()", recv),
+                        _ => {
+                            if args.is_empty() {
+                                format!("({}).{}()", recv, method)
+                            } else {
+                                format!("({}).{}({})", recv, method, a(0))
+                            }
+                        }
+                    }
+                }
                 // D-APPROX1=A: sketch method call. `add` args may be string borrows;
                 // `count`/`quantile` pass by value; `sample` returns Vec<String>.
                 THandleOp::SketchMethod { sketch, method } => {
@@ -2127,6 +2143,12 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         ("core.sketch.tdigest", "new") => format!("JetTDigest::new()"),
         ("core.sketch.cms", "new") => format!("JetCountMinSketch::new()"),
         ("core.sketch.reservoir", "new") => format!("JetReservoirSampler::new({})", arg(0)),
+        // D-TIMEDEPTH1=A: civil-time constructors.
+        ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
+        ("core.time.date", "today") => format!("JetDate::today_utc()"),
+        ("core.time.date", "parse") => format!("JetDate::parse(&({})).map_err(|e| e)", arg(0)),
+        ("core.time.datetime", "from_timestamp") => format!("JetDateTime::from_timestamp({})", arg(0)),
+        ("core.time.datetime", "now") => format!("JetDateTime::now()"),
         _ => "/* unknown std call */".to_string(),
     }
 }

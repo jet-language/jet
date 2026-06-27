@@ -1105,6 +1105,47 @@ impl<'a> Checker<'a> {
                     args: vec![Type::Named("Unknown".to_string()), err_ty],
                 });
             }
+            // D-TIMEDEPTH1=A: civil-time constructors.
+            ("core.time.date", "new") => {
+                if args.len() != 3 {
+                    self.diags.push(wrong_core_arity("new", 3, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
+                self.expect_core_arg("new", 1, &Type::Int, &mut args[1]);
+                self.expect_core_arg("new", 2, &Type::Int, &mut args[2]);
+                return Some(Type::Named("Date".to_string()));
+            }
+            ("core.time.date", "today") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Named("Date".to_string()));
+            }
+            ("core.time.date", "parse") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("parse", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
+                return Some(Type::Result {
+                    ok: Box::new(Type::Named("Date".to_string())),
+                    err: Box::new(Type::String),
+                });
+            }
+            ("core.time.datetime", "from_timestamp") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("from_timestamp", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("from_timestamp", 0, &Type::Int, &mut args[0]);
+                return Some(Type::Named("DateTime".to_string()));
+            }
+            ("core.time.datetime", "now") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Named("DateTime".to_string()));
+            }
             // D-APPROX1=A: sketch constructors.
             ("core.sketch.hll", "new") => {
                 for a in args.iter_mut() { self.infer(&mut a.expr); }
@@ -1396,6 +1437,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Loadable"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
+        // D-TIMEDEPTH1=A: civil-time types.
+        | "Date" | "DateTime"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1831,6 +1874,26 @@ pub fn loadable_method_return(
         "loaded" => Some(Some(Type::Option(Box::new(val_ty)))),
         // or_else(default: T) → T
         "or_else" => Some(Some(val_ty)),
+        _ => None,
+    }
+}
+
+/// D-TIMEDEPTH1=A: method return types for Date/DateTime.
+pub fn civil_time_method_return(ty: &Type, method: &str, args: &[crate::AST::CallArg]) -> Option<Option<Type>> {
+    let _ = args;
+    match ty {
+        Type::Named(n) if n == "Date" => match method {
+            "year" | "month" | "day" | "diff_days" | "weekday" | "day_of_year" => Some(Some(Type::Int)),
+            "add_days" | "add_months" => Some(Some(Type::Named("Date".to_string()))),
+            "to_string" => Some(Some(Type::String)),
+            _ => None,
+        },
+        Type::Named(n) if n == "DateTime" => match method {
+            "hour" | "minute" | "second" | "to_timestamp" => Some(Some(Type::Int)),
+            "date" => Some(Some(Type::Named("Date".to_string()))),
+            "to_string" => Some(Some(Type::String)),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -2675,6 +2738,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.sketch.tdigest" => &["new"],
         "core.sketch.cms" => &["new"],
         "core.sketch.reservoir" => &["new"],
+        // D-TIMEDEPTH1=A: civil-time constructors.
+        "core.time.date" => &["new", "today", "parse"],
+        "core.time.datetime" => &["from_timestamp", "now"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

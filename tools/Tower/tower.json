@@ -1593,7 +1593,7 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "core.time depth (D-TIMEDEPTH1=A): add Date, DateTime, Duration, Zone (IANA-backed) to Core. The injectable Clock already handles determinism; civil-time layers on top.\nSteps: (1) Date/DateTime (year/month/day, parse/format), Duration arithmetic, calendar math (next-billing-date style) in the stdlib; (2) Zone via IANA tz database — source from host tzdata under the native-deps-nixpkgs interim pattern (Nix: pkgs.tzdata; non-Nix: bundled fallback + a clear error if absent); (3) examples + goldens incl. a zone-aware case; (4) keep the API unified (don't fragment civil-time from instants). Core module, not a package (source-compat boundary).",
       "blockedBy": [],
@@ -1609,10 +1609,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Implemented. JetDate (proleptic Gregorian, I6-safe): core.time.date.new/today/parse + year/month/day/add_days/add_months/diff_days/weekday/day_of_year/to_string. JetDateTime: core.time.datetime.from_timestamp/now + date/hour/minute/second/to_timestamp/to_string. Type mappings Date→JetDate, DateTime→JetDateTime. Full TIR pipe. Examples 145_dates + 146_datetime with goldens. All golden tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "ciiv9p0",

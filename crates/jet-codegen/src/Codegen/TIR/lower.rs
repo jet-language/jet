@@ -3802,6 +3802,32 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-TIMEDEPTH1=A: a civil-time method (gate shape d9).
+    if matches!(recv_type.as_deref(), Some("Date" | "DateTime"))
+        && is_civil_time_method_name(recv_type.as_deref(), method)
+    {
+        let kind = recv_type.as_deref().unwrap_or("Date").to_string();
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match (kind.as_str(), method) {
+            ("Date", "year") | ("Date", "month") | ("Date", "day")
+            | ("Date", "diff_days") | ("Date", "weekday") | ("Date", "day_of_year") => Type::Int,
+            ("Date", "add_days") | ("Date", "add_months") => Type::Named("Date".to_string()),
+            ("Date", "to_string") => Type::String,
+            ("DateTime", "hour") | ("DateTime", "minute") | ("DateTime", "second") | ("DateTime", "to_timestamp") => Type::Int,
+            ("DateTime", "date") => Type::Named("Date".to_string()),
+            ("DateTime", "to_string") => Type::String,
+            _ => unit_type(),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::CivilTimeMethod { kind, method: method.to_string() },
+                args: targs,
+            },
+        };
+    }
     // D-APPROX1=A: a sketch method (gate shape d8).
     if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
         let sketch = recv_type.as_deref().unwrap_or("").to_string();

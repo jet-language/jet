@@ -78,6 +78,111 @@ impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
         }
     }
 }
+// D-TIMEDEPTH1=A: civil-time types (Date, DateTime) and calendar math.
+// Pure Rust, no external crates (I6). Proleptic Gregorian calendar.
+#[derive(Clone, Debug, PartialEq)]
+struct JetDate { year: i64, month: i64, day: i64 }
+impl JetDate {
+    fn is_leap(y: i64) -> bool { (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 }
+    fn days_in_month(y: i64, m: i64) -> i64 {
+        match m {
+            1|3|5|7|8|10|12 => 31,
+            4|6|9|11 => 30,
+            2 => if Self::is_leap(y) { 29 } else { 28 },
+            _ => 30,
+        }
+    }
+    fn new(y: i64, m: i64, d: i64) -> Self { JetDate { year: y, month: m, day: d } }
+    // Days since 0001-01-01 (proleptic Gregorian).
+    fn to_day_number(&self) -> i64 {
+        let y = self.year - 1;
+        365 * y + y / 4 - y / 100 + y / 400
+            + [0i64,31,59,90,120,151,181,212,243,273,304,334][(self.month - 1) as usize]
+            + if self.month > 2 && Self::is_leap(self.year) { 1 } else { 0 }
+            + self.day - 1
+    }
+    fn from_day_number(mut n: i64) -> Self {
+        let mut y = n / 365 + 1;
+        loop {
+            let start = JetDate::new(y, 1, 1).to_day_number();
+            let next = JetDate::new(y + 1, 1, 1).to_day_number();
+            if n >= start && n < next { break; }
+            if n < start { y -= 1; } else { y += 1; }
+        }
+        n -= JetDate::new(y, 1, 1).to_day_number();
+        let mut m = 1i64;
+        while m < 12 && n >= Self::days_in_month(y, m) { n -= Self::days_in_month(y, m); m += 1; }
+        JetDate::new(y, m, n + 1)
+    }
+    fn parse(s: &str) -> Result<JetDate, String> {
+        let parts: Vec<&str> = s.splitn(3, '-').collect();
+        if parts.len() != 3 { return Err(format!("invalid date: {}", s)); }
+        let y = parts[0].parse::<i64>().map_err(|_| format!("bad year: {}", parts[0]))?;
+        let m = parts[1].parse::<i64>().map_err(|_| format!("bad month: {}", parts[1]))?;
+        let d = parts[2].parse::<i64>().map_err(|_| format!("bad day: {}", parts[2]))?;
+        if m < 1 || m > 12 || d < 1 || d > Self::days_in_month(y, m) {
+            return Err(format!("date out of range: {}", s));
+        }
+        Ok(JetDate::new(y, m, d))
+    }
+    fn year(&self) -> i64 { self.year }
+    fn month(&self) -> i64 { self.month }
+    fn day(&self) -> i64 { self.day }
+    fn add_days(&self, n: i64) -> JetDate { Self::from_day_number(self.to_day_number() + n) }
+    fn add_months(&self, n: i64) -> JetDate {
+        let total = self.month - 1 + n;
+        let y = self.year + total / 12;
+        let m = total % 12 + 1;
+        let d = self.day.min(Self::days_in_month(y, m));
+        JetDate::new(y, m, d)
+    }
+    fn diff_days(&self, other: &JetDate) -> i64 { self.to_day_number() - other.to_day_number() }
+    fn weekday(&self) -> i64 {
+        // 0=Mon, 6=Sun (ISO).
+        (self.to_day_number() + 6) % 7
+    }
+    fn day_of_year(&self) -> i64 { self.to_day_number() - JetDate::new(self.year, 1, 1).to_day_number() + 1 }
+    fn to_string_fmt(&self) -> String { format!("{:04}-{:02}-{:02}", self.year, self.month, self.day) }
+    fn today_utc() -> JetDate {
+        // Seconds since Unix epoch ÷ 86400 days.
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+        let days_since_1970 = secs / 86400;
+        let epoch = JetDate::new(1970, 1, 1).to_day_number();
+        JetDate::from_day_number(epoch + days_since_1970)
+    }
+}
+impl JetShow for JetDate {
+    fn jet_show(&self) -> String { self.to_string_fmt() }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetDateTime { secs: i64 } // seconds since Unix epoch (UTC)
+impl JetDateTime {
+    fn from_timestamp(secs: i64) -> Self { JetDateTime { secs } }
+    fn now() -> Self {
+        let s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+        JetDateTime { secs: s }
+    }
+    fn date(&self) -> JetDate {
+        let days = self.secs.div_euclid(86400);
+        let epoch = JetDate::new(1970, 1, 1).to_day_number();
+        JetDate::from_day_number(epoch + days)
+    }
+    fn hour(&self) -> i64 { self.secs.div_euclid(3600) % 24 }
+    fn minute(&self) -> i64 { self.secs.div_euclid(60) % 60 }
+    fn second(&self) -> i64 { self.secs.rem_euclid(60) }
+    fn to_timestamp(&self) -> i64 { self.secs }
+    fn to_string_fmt(&self) -> String {
+        let d = self.date();
+        format!("{} {:02}:{:02}:{:02} UTC", d.to_string_fmt(), self.hour(), self.minute(), self.second())
+    }
+}
+impl JetShow for JetDateTime {
+    fn jet_show(&self) -> String { self.to_string_fmt() }
+}
+
 // D-AUTOPAR1=A: explicit parallel list adapters using std::thread::scope (I6-safe).
 fn jet_list_par_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
 where T: Send + Clone, U: Send, F: Fn(T) -> U + Sync

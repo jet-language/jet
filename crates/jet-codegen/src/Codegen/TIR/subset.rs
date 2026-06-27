@@ -2621,6 +2621,15 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    // Shape (d9) [D-TIMEDEPTH1=A]: a civil-time method (Date/DateTime).
+    if matches!(recv_type.as_deref(), Some("Date" | "DateTime"))
+        && is_civil_time_method_name(recv_type.as_deref(), method)
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
     // carries `recv_type == None` and an in-subset *value* receiver. The Fn-vs-FnMut
@@ -3120,6 +3129,15 @@ pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
     )
 }
 
+/// D-TIMEDEPTH1=A: is `method` valid for this civil-time type?
+pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool {
+    match recv_type {
+        Some("Date") => matches!(method, "year" | "month" | "day" | "add_days" | "add_months" | "diff_days" | "weekday" | "day_of_year" | "to_string"),
+        Some("DateTime") => matches!(method, "hour" | "minute" | "second" | "to_timestamp" | "date" | "to_string"),
+        _ => false,
+    }
+}
+
 /// D-APPROX1=A: is this a sketch receiver type?
 pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
     matches!(recv_type, Some("HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"))
@@ -3349,6 +3367,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.
     if matches!(module, "core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir")
         && method == "new"
+    {
+        return true;
+    }
+    // D-TIMEDEPTH1=A: civil-time constructors. NOT in `core_fixed_sig`.
+    if matches!(module, "core.time.date" | "core.time.datetime")
+        && matches!(method, "new" | "today" | "parse" | "from_timestamp" | "now")
     {
         return true;
     }
@@ -3646,6 +3670,13 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.sketch.tdigest", "new") => return Type::Named("TDigest".to_string()),
         ("core.sketch.cms", "new") => return Type::Named("CountMinSketch".to_string()),
         ("core.sketch.reservoir", "new") => return Type::Named("ReservoirSampler".to_string()),
+        // D-TIMEDEPTH1=A: civil-time constructors.
+        ("core.time.date", "new") | ("core.time.date", "today") => return Type::Named("Date".to_string()),
+        ("core.time.date", "parse") => return Type::Result {
+            ok: Box::new(Type::Named("Date".to_string())),
+            err: Box::new(Type::String),
+        },
+        ("core.time.datetime", "from_timestamp") | ("core.time.datetime", "now") => return Type::Named("DateTime".to_string()),
         _ => {}
     }
     crate::Sema::core_fixed_sig(module, method)

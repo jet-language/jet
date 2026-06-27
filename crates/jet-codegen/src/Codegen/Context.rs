@@ -270,6 +270,9 @@ impl Cx {
             Type::Named(name) if name == "TDigest" => "JetTDigest".to_string(),
             Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
             Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
+            // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
+            Type::Named(name) if name == "Date" => "JetDate".to_string(),
+            Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`,
             // `String.to_int`) erases to a plain message — never user-constructed.
             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
