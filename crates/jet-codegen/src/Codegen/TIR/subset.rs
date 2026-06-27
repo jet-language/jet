@@ -250,6 +250,10 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 /// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Traits, generics,
 /// recursive (boxed) types are still out.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
+    // D-QUAL4=A: tagged types are transparent — strip the marker and check the inner type.
+    if let Type::Tagged { inner, .. } = ty {
+        return is_subset_param_ty(inner, cx);
+    }
     // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (prelude, not user-registry).
     // It is always cloneable and has scalar/Char payloads only — fully covered.
     if matches!(ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
@@ -954,6 +958,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         Type::Map { key, value } => {
             field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
         }
+        Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),
         _ => false,
     }
 }

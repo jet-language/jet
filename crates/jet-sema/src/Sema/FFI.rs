@@ -108,6 +108,7 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         | Type::Fn { .. }
         | Type::Tuple(_)
         | Type::FixedList { .. } => false,
+        Type::Tagged { inner, .. } => is_c_abi_type(inner, registry),
     }
 }
 
@@ -269,6 +270,7 @@ pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Named(name) => ffi_named_type_ok(name, registry),
         Type::Apply { .. } | Type::TraitObject(_) | Type::Fn { .. } | Type::Tuple(_) => false,
         Type::FixedList { elem, .. } => is_ffi_type(elem, registry),
+        Type::Tagged { inner, .. } => is_ffi_type(inner, registry),
     }
 }
 

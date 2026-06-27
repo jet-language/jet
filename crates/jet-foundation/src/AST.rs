@@ -112,6 +112,10 @@ pub enum Type {
     /// D-SG9/S42: 32-bit float. The default 64-bit float is spelled `Float`
     /// (and `F64`) and lives in `Type::Float`; only `F32` is a `Float32`.
     Float32,
+    /// D-QUAL4=A: value-tag type qualifier — `#Marker T` in signature/binding
+    /// position. Transparent to type identity (the tag is a flow annotation only,
+    /// not a structural difference); sema treats it as `inner` for all purposes.
+    Tagged { marker: String, inner: Box<Type> },
 }
 
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
@@ -146,6 +150,9 @@ impl PartialEq for Type {
                 e1 == e2 && l1 == l2
             }
             (IntN { signed: s1, bits: b1 }, IntN { signed: s2, bits: b2 }) => s1 == s2 && b1 == b2,
+            // D-QUAL4: tagged types are transparent — identity is on the inner type.
+            (Tagged { inner: a, .. }, Tagged { inner: b, .. }) => a == b,
+            (Tagged { inner, .. }, other) | (other, Tagged { inner, .. }) => inner.as_ref() == other,
             _ => false,
         }
     }
@@ -255,6 +262,7 @@ impl Type {
                 )
             }
             Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
+            Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.show()),
         }
     }
 
@@ -303,6 +311,7 @@ impl Type {
             Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::Float32 => "F32".to_string(),
+            Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
         }
     }
 
@@ -317,20 +326,29 @@ impl Type {
     }
 
     pub fn is_scalar(&self) -> bool {
-        matches!(
-            self,
-            Type::Int | Type::Float | Type::Bool | Type::IntN { .. } | Type::Float32
-        )
+        match self {
+            Type::Tagged { inner, .. } => inner.is_scalar(),
+            _ => matches!(
+                self,
+                Type::Int | Type::Float | Type::Bool | Type::IntN { .. } | Type::Float32
+            ),
+        }
     }
 
     /// D-SG9: any integer type — the default `Int` or an explicit fixed width.
     pub fn is_integer(&self) -> bool {
-        matches!(self, Type::Int | Type::IntN { .. })
+        match self {
+            Type::Tagged { inner, .. } => inner.is_integer(),
+            _ => matches!(self, Type::Int | Type::IntN { .. }),
+        }
     }
 
     /// D-SG9/D-FLOATW1: any float type — the default `Float` or `F32`.
     pub fn is_float(&self) -> bool {
-        matches!(self, Type::Float | Type::Float32)
+        match self {
+            Type::Tagged { inner, .. } => inner.is_float(),
+            _ => matches!(self, Type::Float | Type::Float32),
+        }
     }
 
     /// D-SG9: any numeric type (integer or float).

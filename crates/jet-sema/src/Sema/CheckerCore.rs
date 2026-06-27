@@ -67,6 +67,36 @@ impl<'a> Checker<'a> {
         if self.lookup(name).is_some() || self.consts.contains_key(name) {
             self.diags.push(already_defined(name, name_span));
         }
+        // D-CONFUSE1=A (L0503): homoglyph confusable pairs in one scope.
+        // `l`/`I`/`1` and `O`/`0` are virtually identical in most fonts.
+        if name.len() == 1 {
+            let confusable_group: Option<&[char]> = if "l1I".contains(name) {
+                Some(&['l', '1', 'I'])
+            } else if "O0".contains(name) {
+                Some(&['O', '0'])
+            } else {
+                None
+            };
+            if let Some(group) = confusable_group {
+                for scope in self.scopes.iter() {
+                    for existing in scope.keys() {
+                        if existing.len() == 1
+                            && existing != name
+                            && group.contains(&existing.chars().next().unwrap_or(' '))
+                        {
+                            self.diags.push(Diagnostic::lint(
+                                "L0503",
+                                format!("`{name}` and `{existing}` are visually confusable in this scope"),
+                                "single-character names like `l`, `1`, `I`, `O`, and `0` look identical in many fonts — readers may misread the code".to_string(),
+                                format!("rename `{name}` (or `{existing}`) to a longer, unambiguous name"),
+                                Some(name_span),
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         self.moved.remove(name);
         self.scopes
             .last_mut()

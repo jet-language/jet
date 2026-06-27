@@ -1003,3 +1003,22 @@ fn main() {
     let twice = jet::format_source(&once).expect("second fmt of loop labels must succeed");
     assert_eq!(once, twice, "loop label fmt must be idempotent");
 }
+
+#[test]
+fn fmt_value_tag_type_d_qual4_stability() {
+    // D-QUAL4=A: `#Marker T` in type position must survive fmt unchanged.
+    let src = "\
+fn process(input: #Tainted String) -> String {
+    return \"{input}-clean\"
+}
+
+fn main() {
+    result @= process(\"hello\")
+    print(result)
+}
+";
+    assert_fmt_keeps(src, &["#Tainted String"], "value-tag type qualifier");
+    let once = jet::format_source(src).expect("fmt should accept value-tag types");
+    let twice = jet::format_source(&once).expect("second fmt of value-tag types must succeed");
+    assert_eq!(once, twice, "value-tag type fmt must be idempotent");
+}

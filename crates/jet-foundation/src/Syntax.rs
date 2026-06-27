@@ -544,6 +544,10 @@ pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
 // `outer@ loop { … }` / `break outer@` / `continue outer@`. Reverses D-LABEL1
 // (which had `@outer loop`). Old prefix form emits E0988 teaching error.
 // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
+// D-QUAL4=A (ratified 2026-06-26): `#Marker T` is a value-tag qualifier in type
+// position. Transparent to type identity (the underlying type is still `T`).
+// Documented intent only; does not affect codegen or runtime behaviour.
+// Parser: `TokKind::Hash` followed by PascalCase ident → `Type::Tagged { marker, inner }`.
 /// S59: cache directory segment under `.jet/` for generated C bindings.
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 
@@ -602,6 +606,9 @@ pub const KW_COMPTIME: &str = "comptime";
 /// S28: foreign trait spellings for teaching error E0022.
 pub const FOREIGN_INTERFACE: &str = "interface";
 pub const FOREIGN_TRAIT: &str = "trait";
+/// D-NAMESPACE1=A: `namespace { }` is declined; in-file grouping uses `module name { }`.
+/// Recognized to emit teaching error E0323 (S14-style).
+pub const FOREIGN_NAMESPACE: &str = "namespace";
 
 /// S48 (M9): foreign dynamic-dispatch spellings for teaching error E0036.
 pub const FOREIGN_DYN: &str = "dyn";

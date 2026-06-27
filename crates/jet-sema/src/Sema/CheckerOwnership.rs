@@ -466,6 +466,7 @@ impl<'a> Checker<'a> {
                 self.sendability_problem_inner(t, true, seen)
             }),
             Type::FixedList { elem, .. } => self.sendability_problem_inner(elem, true, seen),
+            Type::Tagged { inner, .. } => self.sendability_problem_inner(inner, closure_taken, seen),
         }
     }
 

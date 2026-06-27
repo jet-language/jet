@@ -162,6 +162,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => {}
         Type::Tuple(fields) => fields.iter().for_each(|(_, t)| collect_free(t, out)),
         Type::FixedList { elem, .. } => collect_free(elem, out),
+        Type::Tagged { inner, .. } => collect_free(inner, out),
     }
 }
 

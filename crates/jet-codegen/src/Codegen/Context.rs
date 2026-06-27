@@ -373,6 +373,8 @@ impl Cx {
             // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].
             // All size/bounds checks live in sema (I3). The Rust type is [E; N].
             Type::FixedList { elem, len } => format!("[{}; {}]", self.rust_type(elem), len),
+            // D-QUAL4=A: tagged types are transparent to codegen.
+            Type::Tagged { inner, .. } => self.rust_type(inner),
         }
     }
 
@@ -816,6 +818,7 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSe
             .all(|(_, t)| field_type_cloneable(t, types, param_names)),
         Type::TraitObject(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_cloneable(elem, types, param_names),
+        Type::Tagged { inner, .. } => field_type_cloneable(inner, types, param_names),
     }
 }
 
@@ -868,6 +871,7 @@ pub(crate) fn field_type_comparable(
             .all(|(_, t)| field_type_comparable(t, types, param_names)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_comparable(elem, types, param_names),
+        Type::Tagged { inner, .. } => field_type_comparable(inner, types, param_names),
     }
 }
 

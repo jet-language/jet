@@ -201,6 +201,7 @@ pub(crate) fn is_cloneable(
             .all(|(_, t)| is_cloneable(t, registry, structs)),
         Type::TraitObject(_) => false,
         Type::FixedList { elem, .. } => is_cloneable(elem, registry, structs),
+        Type::Tagged { inner, .. } => is_cloneable(inner, registry, structs),
     }
 }
 
@@ -379,6 +380,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_printable(elem, registry),
+        Type::Tagged { inner, .. } => is_printable(inner, registry),
     }
 }
 
@@ -399,6 +401,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
             .all(|(_, t)| types_comparable(t, registry)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => types_comparable(elem, registry),
+        Type::Tagged { inner, .. } => types_comparable(inner, registry),
     }
 }
 

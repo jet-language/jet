@@ -361,6 +361,16 @@ impl<'a> Parser<'a> {
                 let bound = self.parse_fn_type_effect_bound()?;
                 self.fn_type(Some(bound))?
             }
+            // D-QUAL4=A: `#Marker Type` — a value-tag prefix on a type. The marker
+            // must be a PascalCase ident (not `Pure`/`(` which are fn-effect bounds).
+            TokKind::Hash
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())) =>
+            {
+                self.bump(); // `#`
+                let (marker, _) = self.expect_ident("after `#` in type-tag position")?;
+                let (inner, _) = self.type_()?;
+                Type::Tagged { marker, inner: Box::new(inner) }
+            }
             TokKind::LBracket => {
                 self.bump();
                 let first = self.type_generic_arg("list/map type")?;

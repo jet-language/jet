@@ -483,6 +483,19 @@ impl<'a> Parser<'a> {
                     self.sync_top();
                     continue;
                 }
+                // D-NAMESPACE1=A: `namespace` is not a Jet keyword — E0323 teaching error.
+                TokKind::Ident(name) if name == Syntax::FOREIGN_NAMESPACE => {
+                    let t = self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0323",
+                        "in-file grouping uses `module name { }`, not `namespace`".to_string(),
+                        "Jet has one spelling for in-file grouping: a named `module` block".to_string(),
+                        "write `module mygroup { fn foo() { … } }` instead".to_string(),
+                        Some(t.span),
+                    ));
+                    self.sync_top();
+                    continue;
+                }
                 TokKind::Ident(name)
                     if name == Syntax::FOREIGN_DEF || name == Syntax::FOREIGN_FUNC =>
                 {

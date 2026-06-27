@@ -161,6 +161,13 @@ impl<'a> Fmt<'a> {
                 self.write(&format!("#{}", len));
                 self.write("]");
             }
+            // D-QUAL4=A: `#Marker Type` — prefix value-tag.
+            Type::Tagged { marker, inner } => {
+                self.write("#");
+                self.write(marker);
+                self.write(" ");
+                self.fmt_type(inner);
+            }
         }
     }
 
