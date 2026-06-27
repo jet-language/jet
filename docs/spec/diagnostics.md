@@ -197,6 +197,7 @@ before continuing.
 | E0319 | parse | C25/D-RANGE2: `step` in an arm head — `step` is a loop modifier, not an arm construct |
 | E0320 | parse | teaching: `Type { … }` dotless construction → `Type.{ … }` (D-DOTCTOR1) |
 | E0321 | parse | teaching: `impl Type: Trait` old colon separator → `impl Type.Trait` (D-IMPLDOT1) |
+| E0322 | parse | assignment `=` in `if` condition — did you mean `==`? (D-ASSIGNCOND1) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -216,6 +217,7 @@ before continuing.
 | E0505 | sema  | wrong index/key type or bad slice target  |
 | E0507 | sema  | collection changed while `for` reads it   |
 | L0501 | sema  | slice copy inside a loop (lint)           |
+| L0502 | sema  | float `==`/`!=` comparison is unreliable (D-SMELLLINT1) |
 | E0601 | sema  | `#Test` block in wrong position / none found |
 | E0602 | jet   | `use` path escapes the project (`..` or outside entry tree) |
 | E0603 | jet   | `use` target file / module not found |

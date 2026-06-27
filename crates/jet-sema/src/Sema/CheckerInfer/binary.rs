@@ -299,6 +299,16 @@ impl<'a> Checker<'a> {
                         }
                         return None;
                     }
+                    // D-SMELLLINT1 / L0502: float `==` is almost always a bug.
+                    if matches!(lt, Type::Float | Type::Float32) {
+                        self.diags.push(Diagnostic::lint(
+                            "L0502",
+                            format!("comparing floats with `{}` is unreliable", op.spell()),
+                            "floating-point arithmetic is inexact; two values computed differently may not be bit-identical even when mathematically equal".to_string(),
+                            "compare within a tolerance: `(a - b).abs() < 1e-9`".to_string(),
+                            Some(span),
+                        ));
+                    }
                     Some(Type::Bool)
                 } else {
                     self.op_mismatch(op, &lt, &rt, span);

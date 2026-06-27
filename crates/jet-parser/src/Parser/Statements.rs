@@ -1051,6 +1051,17 @@ impl<'a> Parser<'a> {
         self.diags.truncate(probe_diags);
 
         let cond = self.expr_no_struct_lit()?;
+        // D-ASSIGNCOND1 / E0322: `if x = 5` — bare `=` is assignment, not equality.
+        if matches!(self.peek().kind, TokKind::Eq) {
+            let eq_span = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0322",
+                "assignment `=` cannot appear in an `if` condition".to_string(),
+                "`=` binds a name; use `==` to compare two values".to_string(),
+                "replace `=` with `==` to compare, or move the assignment before the `if`".to_string(),
+                Some(eq_span),
+            ));
+        }
         self.expect(TokKind::LBrace, "to open the `if` body")?;
 
         // D-IF3 / E0992: an old implicit-dispatch body (first item is `head ->`)
