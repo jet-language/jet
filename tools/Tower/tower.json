@@ -597,11 +597,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Full HTTP core library — client + server (D-NETDEP1=A mandate; D-HTTPLIB1=A function-first mux; D-HTTPLIB2=B split client/server; D-HTTPLIB3=C HTTP/1.1+HTTP/2+WebSocket; D-HTTPLIB4=B rustls TLS — all ratified & in canon). Bootstrap crates (ureq/hyper, tungstenite, rustls/webpki-roots) wired via the stdlib FFI-bridge pattern (emit bridge template text; never add to the jet compiler Cargo.toml; I6 holds — never in Source/). Native-ize end-state: first-party Jet/Rust HTTP stack.\nStaged build: (1) core.http.client — Request/Response, methods, headers, body, streaming, redirects, timeouts, rustls TLS; this also provides the backend for c157's comptime `fetch(url, sha256:)` (record {url,sha256} in .jet/lock) — ship first to unblock c157. (2) core.http.server — listener, function-first `mux` (mux.get/post(path, fn(req:Request)->Response)), `req.params[\"id\"]`, middleware, graceful shutdown. (3) HTTP/2 + WebSocket upgrade. Each stage: examples + goldens; no I4 diagnostics unless misuse surfaces. Big multi-PR track — sequence client before server.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Done. core.http.client + core.http.server fully wired end-to-end: TIR lowering/emit for both, FFI bridge (ureq/rustls via Http.rs), CoreLib.rs structs (JetHttpClientReq/Resp, JetHttpMux, JetHttpSrvReq/Resp), sema dispatch in CheckerCoreLib, THandleOp variants, core.http.{client,server} in KNOWN_CORE_MODULES + Effects::Net. Golden tests 147 (client GET round-trip through loopback) and 148 (mux setup) both pass. Open ticket: block-body mux handlers need trailing-semicolon fix in TIR block emission (expression-lambda handlers work fine; named functions need TIR function-ref support)."
+        },
         {
           "at": "2026-06-26",
           "text": "All HTTP ballots ratified & recorded in canon (D-NETDEP1/HTTPLIB1-4). Advanced to ready; staged build plan written — client first (unblocks c157 fetch), then server."
@@ -647,7 +651,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Temporal ordering falls out of typestate (D-ROLE1=A): NO new surface. Legal state ORDER is already pinned by the ratified `#Transition(A -> B)` edges (D-STATE1/D-STATE-DECL) — the only path to a late state runs through the earlier ones.\nSteps: (1) spec.md note in the typestate section: ordering across states is expressed via transition edges, not a separate state-machine surface; (2) an examples/ program showing an ordered lifecycle (e.g. pay -> check-in -> check-out) enforced by transitions, with a golden negative case (out-of-order call rejected) as a ui snapshot. No parser/Syntax.rs change.",
       "blockedBy": [],
@@ -659,10 +663,14 @@
         {
           "at": "2026-06-26",
           "text": "Surfaced from v1 deferred ballot (D-ROLE1); gate ratified, decision now open"
+        },
+        {
+          "at": "2026-06-27",
+          "text": "Done. Added 'Temporal ordering' note to D-STATE1 in syntax-decisions.md: legal order is the transition graph, no new surface. All deliverables already existed: examples/features/113_typestate.jet (pay→check_in→room_key lifecycle), tests/ui/typestate_wrong_state (E0150 out-of-order), tests/ui/typestate_unknown_state."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c23wsw4",

@@ -1564,6 +1564,51 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
+                // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client method call.
+                // "body"/"header" dispatch by arity: 0-arg=response accessor, 1-arg=request builder.
+                THandleOp::HttpClientMethod { kind, method } => {
+                    let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    if kind == "HttpClientReq" {
+                        match method.as_str() {
+                            "header" => format!("{}jet_http_client_request_header({}, &({}), &({}))", root, recv, a(0), a(1)),
+                            "body" => format!("{}jet_http_client_request_body({}, &({}))", root, recv, a(0)),
+                            "timeout" => format!("{}jet_http_client_request_timeout({}, {})", root, recv, a(0)),
+                            "send" => {
+                                // call bridge with req fields; assemble JetHttpClientResp
+                                format!(
+                                    "{{ let _r = &({}); {}::jet_http_client_send_impl(&_r.method, &_r.url, &_r.headers, _r.body.as_deref(), _r.timeout_ms).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}}) }}",
+                                    recv, ffi
+                                )
+                            }
+                            _ => format!("({}).{}()", recv, method),
+                        }
+                    } else {
+                        match method.as_str() {
+                            "status" => format!("{}jet_http_client_response_status(&({}))", root, recv),
+                            "body" => format!("{}jet_http_client_response_body(&({}))", root, recv),
+                            "header" => format!("{}jet_http_client_response_header(&({}), &({}))", root, recv, a(0)),
+                            _ => format!("({}).{}()", recv, method),
+                        }
+                    }
+                }
+                // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server method call.
+                THandleOp::HttpServerMethod { kind, method } => {
+                    match (kind.as_str(), method.as_str()) {
+                        ("HttpMux", "get" | "post" | "put" | "delete" | "patch") => {
+                            format!("{{ {}jet_http_mux_add(&({}), \"{}\", &({}), {}) }}", root, recv, method.to_uppercase(), a(0), a(1))
+                        }
+                        ("HttpSrvReq", "method") => format!("{}jet_http_srv_req_method(&({}))", root, recv),
+                        ("HttpSrvReq", "path") => format!("{}jet_http_srv_req_path(&({}))", root, recv),
+                        ("HttpSrvReq", "body") => format!("{}jet_http_srv_req_body(&({}))", root, recv),
+                        ("HttpSrvReq", "param") => format!("{}jet_http_srv_req_param(&({}), &({}))", root, recv, a(0)),
+                        ("HttpSrvReq", "header") => format!("{}jet_http_srv_req_header(&({}), &({}))", root, recv, a(0)),
+                        ("HttpSrvResp", "header") => format!("{}jet_http_srv_response_header({}, &({}), &({}))", root, recv, a(0), a(1)),
+                        _ => {
+                            if args.is_empty() { format!("({}).{}()", recv, method) }
+                            else { format!("({}).{}({})", recv, method, a(0)) }
+                        }
+                    }
+                }
                 // D-TIMEDEPTH1=A: civil-time method call.
                 THandleOp::CivilTimeMethod { kind: _, method } => {
                     match method.as_str() {
@@ -2143,6 +2188,21 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         ("core.sketch.tdigest", "new") => format!("JetTDigest::new()"),
         ("core.sketch.cms", "new") => format!("JetCountMinSketch::new()"),
         ("core.sketch.reservoir", "new") => format!("JetReservoirSampler::new({})", arg(0)),
+        // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client constructors.
+        // Bridge returns (i64, String, Vec<String>); CoreLib assembles JetHttpClientResp.
+        ("core.http.client", "get") => format!(
+            "{}(&({})).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}})",
+            regex_fn("jet_http_client_get_impl"), arg(0)
+        ),
+        ("core.http.client", "post") => format!(
+            "{}(&({}), &({})).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}})",
+            regex_fn("jet_http_client_post_impl"), arg(0), arg(1)
+        ),
+        ("core.http.client", "request") => format!("jet_http_client_request_new(&({}), &({}))", arg(0), arg(1)),
+        // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
+        ("core.http.server", "mux") => format!("jet_http_mux_new()"),
+        ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {})", arg(0), arg(1)),
+        ("core.http.server", "response") => format!("jet_http_srv_response({}, &({}))", arg(0), arg(1)),
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
         ("core.time.date", "today") => format!("JetDate::today_utc()"),

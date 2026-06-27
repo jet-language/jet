@@ -200,7 +200,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     }
     Some(match module {
         "core.fs" | "core.files" => Effect::Fs,
-        "core.net" | "jet.http" => Effect::Net,
+        "core.net" | "jet.http" | "core.http" | "core.http.client" | "core.http.server" => Effect::Net,
         "core.time" | "jet.time" => Effect::Time,
         "core.random" => Effect::Rand,
         "core.env" => Effect::Env,

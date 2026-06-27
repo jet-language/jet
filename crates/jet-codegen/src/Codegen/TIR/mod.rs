@@ -1387,6 +1387,10 @@ pub enum THandleOp {
     SketchMethod { sketch: String, method: String },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).
     CivilTimeMethod { kind: String, method: String },
+    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP client type (HttpClientReq/HttpClientResp).
+    HttpClientMethod { kind: String, method: String },
+    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP server type (HttpMux/HttpSrvReq/HttpSrvResp).
+    HttpServerMethod { kind: String, method: String },
     /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
     DataTreeField,
     /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.

@@ -273,6 +273,12 @@ impl Cx {
             // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
             Type::Named(name) if name == "Date" => "JetDate".to_string(),
             Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
+            // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
+            Type::Named(name) if name == "HttpClientReq" => "JetHttpClientReq".to_string(),
+            Type::Named(name) if name == "HttpClientResp" => "JetHttpClientResp".to_string(),
+            Type::Named(name) if name == "HttpMux" => "JetHttpMux".to_string(),
+            Type::Named(name) if name == "HttpSrvReq" => "JetHttpSrvReq".to_string(),
+            Type::Named(name) if name == "HttpSrvResp" => "JetHttpSrvResp".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`,
             // `String.to_int`) erases to a plain message — never user-constructed.
             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.

@@ -3802,6 +3802,39 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-NETDEP1=A / D-HTTPLIB1=A: an HTTP type method (gate shape d10).
+    if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
+        let kind = recv_type.as_deref().unwrap_or("HttpClientReq").to_string();
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match (kind.as_str(), method) {
+            ("HttpClientReq", "header") | ("HttpClientReq", "body") | ("HttpClientReq", "timeout") => Type::Named("HttpClientReq".to_string()),
+            ("HttpClientReq", "send") => Type::Result {
+                ok: Box::new(Type::Named("HttpClientResp".to_string())),
+                err: Box::new(Type::String),
+            },
+            ("HttpClientResp", "status") => Type::Int,
+            ("HttpClientResp", "body") | ("HttpClientResp", "header") => Type::String,
+            ("HttpMux", _) => unit_type(),
+            ("HttpSrvReq", "method") | ("HttpSrvReq", "path") | ("HttpSrvReq", "body") => Type::String,
+            ("HttpSrvReq", "param") | ("HttpSrvReq", "header") => Type::Option(Box::new(Type::String)),
+            ("HttpSrvResp", "header") => Type::Named("HttpSrvResp".to_string()),
+            _ => unit_type(),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        let op = if kind.starts_with("HttpServer") || kind == "HttpMux" || kind == "HttpSrvReq" || kind == "HttpSrvResp" {
+            THandleOp::HttpServerMethod { kind, method: method.to_string() }
+        } else {
+            THandleOp::HttpClientMethod { kind, method: method.to_string() }
+        };
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op,
+                args: targs,
+            },
+        };
+    }
     // D-TIMEDEPTH1=A: a civil-time method (gate shape d9).
     if matches!(recv_type.as_deref(), Some("Date" | "DateTime"))
         && is_civil_time_method_name(recv_type.as_deref(), method)

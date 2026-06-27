@@ -87,11 +87,16 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         .used_core
         .iter()
         .any(|u| u == "jet.db" || u.starts_with("jet.db::"));
-    if entries.is_empty() && !needs_regex && !needs_archive && !needs_db {
+    // D-NETDEP1=A / D-HTTPLIB4=B: ureq + rustls for core.http.client TLS support.
+    let needs_http_client = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "core.http.client" || u.starts_with("core.http.client::"));
+    if entries.is_empty() && !needs_regex && !needs_archive && !needs_db && !needs_http_client {
         return Ok(None);
     }
 
-    build_bridge(&entries, needs_regex, needs_archive, needs_db).map(Some)
+    build_bridge(&entries, needs_regex, needs_archive, needs_db, needs_http_client).map(Some)
 }
 
 /// The `regex` crate version that backs `jet.regex` (D-REGEX1). Lives only here,
@@ -114,12 +119,20 @@ pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
+/// The `ureq` crate version that backs `core.http.client` (D-NETDEP1=A, D-HTTPLIB4=B).
+/// rustls is pulled in automatically via `ureq`'s `tls` feature flag.
+/// Lives only here — never in the compiler's Cargo.toml (I6).
+pub const HTTP_CLIENT_CRATE_SPEC: (&str, &str) = ("ureq", "2");
+
+/// Hand-written HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
+const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
+
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
-const FEATURED_DEPS: &[(&str, &str)] = &[(
-    "rusqlite",
-    "{ version = \"0.31\", features = [\"bundled\"] }",
-)];
+const FEATURED_DEPS: &[(&str, &str)] = &[
+    ("rusqlite", "{ version = \"0.31\", features = [\"bundled\"] }"),
+    ("ureq", "{ version = \"2\", features = [\"tls\"] }"),
+];
 
 /// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
 /// used. This is the only code that touches the `regex` crate.
@@ -138,6 +151,7 @@ pub fn build_bridge(
     needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
+    needs_http_client: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
@@ -151,7 +165,10 @@ pub fn build_bridge(
     if needs_db {
         deps.insert(DB_CRATE_SPEC.0.to_string(), DB_CRATE_SPEC.1.to_string());
     }
-    let key = cache_key_full(entries, &deps, needs_regex, needs_archive, needs_db);
+    if needs_http_client {
+        deps.insert(HTTP_CLIENT_CRATE_SPEC.0.to_string(), HTTP_CLIENT_CRATE_SPEC.1.to_string());
+    }
+    let key = cache_key_full(entries, &deps, needs_regex, needs_archive, needs_db, needs_http_client);
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
 
@@ -177,7 +194,7 @@ pub fn build_bridge(
     let lib_rs = src_dir.join("lib.rs");
     fs::write(&manifest, emit_cargo_toml(&crate_name, &deps))
         .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
-    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex, needs_archive, needs_db))
+    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex, needs_archive, needs_db, needs_http_client))
         .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
     let target_dir = cache_root.join("target");
@@ -284,6 +301,7 @@ fn cache_key_full(
     needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
+    needs_http_client: bool,
 ) -> u64 {
     let mut h = DefaultHasher::new();
     // Only perturb the key when a ring module is actually needed, so programs
@@ -297,6 +315,9 @@ fn cache_key_full(
     }
     if needs_db {
         needs_db.hash(&mut h);
+    }
+    if needs_http_client {
+        needs_http_client.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -397,6 +418,7 @@ fn emit_wrapper_lib(
     needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
+    needs_http_client: bool,
 ) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
@@ -415,6 +437,11 @@ fn emit_wrapper_lib(
     if needs_db {
         // D-DEP-DB1: the database runtime is the only place `rusqlite` is touched.
         out.push_str(DB_RUNTIME);
+        out.push('\n');
+    }
+    if needs_http_client {
+        // D-NETDEP1=A: the HTTP client runtime is the only place `ureq` is touched.
+        out.push_str(HTTP_CLIENT_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();

@@ -2621,6 +2621,11 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    // Shape (d10) [D-NETDEP1=A / D-HTTPLIB1=A]: an HTTP type method call.
+    if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
+        return expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (d9) [D-TIMEDEPTH1=A]: a civil-time method (Date/DateTime).
     if matches!(recv_type.as_deref(), Some("Date" | "DateTime"))
         && is_civil_time_method_name(recv_type.as_deref(), method)
@@ -3129,6 +3134,23 @@ pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
     )
 }
 
+/// D-NETDEP1=A / D-HTTPLIB1=A: is this an HTTP type?
+pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
+    matches!(recv_type, Some("HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp"))
+}
+
+/// D-NETDEP1=A / D-HTTPLIB1=A: is `method` valid for this HTTP type?
+pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool {
+    match recv_type {
+        Some("HttpClientReq") => matches!(method, "header" | "body" | "timeout" | "send"),
+        Some("HttpClientResp") => matches!(method, "status" | "body" | "header"),
+        Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch"),
+        Some("HttpSrvReq") => matches!(method, "method" | "path" | "body" | "param" | "header"),
+        Some("HttpSrvResp") => matches!(method, "header"),
+        _ => false,
+    }
+}
+
 /// D-TIMEDEPTH1=A: is `method` valid for this civil-time type?
 pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
@@ -3373,6 +3395,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // D-TIMEDEPTH1=A: civil-time constructors. NOT in `core_fixed_sig`.
     if matches!(module, "core.time.date" | "core.time.datetime")
         && matches!(method, "new" | "today" | "parse" | "from_timestamp" | "now")
+    {
+        return true;
+    }
+    // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
+    if matches!(module, "core.http.client" | "core.http.server")
+        && matches!(method, "get" | "post" | "request" | "mux" | "serve" | "response")
     {
         return true;
     }
@@ -3677,6 +3705,18 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             err: Box::new(Type::String),
         },
         ("core.time.datetime", "from_timestamp") | ("core.time.datetime", "now") => return Type::Named("DateTime".to_string()),
+        // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
+        ("core.http.client", "get") | ("core.http.client", "post") => return Type::Result {
+            ok: Box::new(Type::Named("HttpClientResp".to_string())),
+            err: Box::new(Type::String),
+        },
+        ("core.http.client", "request") => return Type::Named("HttpClientReq".to_string()),
+        ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
+        ("core.http.server", "serve") => return Type::Result {
+            ok: Box::new(Type::Tuple(vec![])),
+            err: Box::new(Type::String),
+        },
+        ("core.http.server", "response") => return Type::Named("HttpSrvResp".to_string()),
         _ => {}
     }
     crate::Sema::core_fixed_sig(module, method)

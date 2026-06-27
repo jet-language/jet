@@ -1105,6 +1105,70 @@ impl<'a> Checker<'a> {
                     args: vec![Type::Named("Unknown".to_string()), err_ty],
                 });
             }
+            // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
+            ("core.http.client", "get") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("get", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("get", 0, &Type::String, &mut args[0]);
+                return Some(Type::Result {
+                    ok: Box::new(Type::Named("HttpClientResp".to_string())),
+                    err: Box::new(Type::String),
+                });
+            }
+            ("core.http.client", "post") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity("post", 2, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("post", 0, &Type::String, &mut args[0]);
+                self.expect_core_arg("post", 1, &Type::String, &mut args[1]);
+                return Some(Type::Result {
+                    ok: Box::new(Type::Named("HttpClientResp".to_string())),
+                    err: Box::new(Type::String),
+                });
+            }
+            ("core.http.client", "request") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity("request", 2, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("request", 0, &Type::String, &mut args[0]);
+                self.expect_core_arg("request", 1, &Type::String, &mut args[1]);
+                return Some(Type::Named("HttpClientReq".to_string()));
+            }
+            ("core.http.server", "mux") => {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                return Some(Type::Named("HttpMux".to_string()));
+            }
+            ("core.http.server", "serve") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity("serve", 2, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
+                // second arg is a Mux — just infer it
+                self.infer(&mut args[1].expr);
+                return Some(Type::Result {
+                    ok: Box::new(unit_ty()),
+                    err: Box::new(Type::String),
+                });
+            }
+            ("core.http.server", "response") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity("response", 2, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("response", 0, &Type::Int, &mut args[0]);
+                self.expect_core_arg("response", 1, &Type::String, &mut args[1]);
+                return Some(Type::Named("HttpSrvResp".to_string()));
+            }
             // D-TIMEDEPTH1=A: civil-time constructors.
             ("core.time.date", "new") => {
                 if args.len() != 3 {
@@ -1439,6 +1503,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
         | "Date" | "DateTime"
+        // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
+        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1874,6 +1940,44 @@ pub fn loadable_method_return(
         "loaded" => Some(Some(Type::Option(Box::new(val_ty)))),
         // or_else(default: T) → T
         "or_else" => Some(Some(val_ty)),
+        _ => None,
+    }
+}
+
+/// D-NETDEP1=A / D-HTTPLIB1=A: method return types for HTTP types.
+pub fn http_type_method_return(ty: &Type, method: &str, _args: &[crate::AST::CallArg]) -> Option<Option<Type>> {
+    let mk = |n: &str| Some(Some(Type::Named(n.to_string())));
+    let mk_str = || Some(Some(Type::String));
+    let mk_int = || Some(Some(Type::Int));
+    let mk_opt_str = || Some(Some(Type::Option(Box::new(Type::String))));
+    match ty {
+        Type::Named(n) if n == "HttpClientReq" => match method {
+            "header" | "body" | "timeout" => mk("HttpClientReq"),
+            "send" => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("HttpClientResp".to_string())),
+                err: Box::new(Type::String),
+            })),
+            _ => None,
+        },
+        Type::Named(n) if n == "HttpClientResp" => match method {
+            "status" => mk_int(),
+            "body" => mk_str(),
+            "header" => mk_opt_str(),
+            _ => None,
+        },
+        Type::Named(n) if n == "HttpMux" => match method {
+            "get" | "post" | "put" | "delete" | "patch" => Some(None),
+            _ => None,
+        },
+        Type::Named(n) if n == "HttpSrvReq" => match method {
+            "method" | "path" | "body" => mk_str(),
+            "param" | "header" => mk_opt_str(),
+            _ => None,
+        },
+        Type::Named(n) if n == "HttpSrvResp" => match method {
+            "header" => mk("HttpSrvResp"),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -2741,6 +2845,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-TIMEDEPTH1=A: civil-time constructors.
         "core.time.date" => &["new", "today", "parse"],
         "core.time.datetime" => &["from_timestamp", "now"],
+        // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
+        "core.http.client" => &["get", "post", "request"],
+        "core.http.server" => &["mux", "serve", "response"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

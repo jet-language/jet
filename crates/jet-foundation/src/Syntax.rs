@@ -1583,6 +1583,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-TIMEDEPTH1=A (ratified 2026-06-26): civil-time constructors.
     "core.time.date",
     "core.time.datetime",
+    // D-NETDEP1=A / D-HTTPLIB2=B (ratified 2026-06-26): full HTTP library.
+    "core.http.client",
+    "core.http.server",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

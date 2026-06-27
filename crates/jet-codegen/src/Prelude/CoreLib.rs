@@ -3889,6 +3889,218 @@ fn jet_http_request_param(req: &JetHttpRequest, name: &String) -> Option<String>
     req.params.get(name.as_str()).cloned()
 }
 
+// ── D-HTTPLIB2=B / D-HTTPLIB4=B: core.http.client — request builder ─────────
+// JetHttpClientReq and JetHttpClientResp live here (in the generated program's
+// crate) so they're accessible without cross-crate type imports. The ureq
+// bridge functions use only primitive types (i64, String, Vec<String>) and are
+// called through wrappers here. This is the I6-safe pattern.
+
+#[derive(Clone)]
+struct JetHttpClientReq {
+    method: String,
+    url: String,
+    headers: Vec<String>, // alternating key, value pairs
+    body: Option<String>,
+    timeout_ms: Option<i64>,
+}
+
+#[derive(Clone)]
+struct JetHttpClientResp {
+    status: i64,
+    body: String,
+    headers: Vec<String>, // alternating key, value pairs
+}
+
+fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpClientReq {
+    JetHttpClientReq { method: method.clone(), url: url.clone(), headers: Vec::new(), body: None, timeout_ms: None }
+}
+
+fn jet_http_client_request_header(mut req: JetHttpClientReq, name: &String, value: &String) -> JetHttpClientReq {
+    req.headers.push(name.clone());
+    req.headers.push(value.clone());
+    req
+}
+
+fn jet_http_client_request_body(mut req: JetHttpClientReq, body: &String) -> JetHttpClientReq {
+    req.body = Some(body.clone());
+    req
+}
+
+fn jet_http_client_request_timeout(mut req: JetHttpClientReq, ms: i64) -> JetHttpClientReq {
+    req.timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_response_status(resp: &JetHttpClientResp) -> i64 { resp.status }
+fn jet_http_client_response_body(resp: &JetHttpClientResp) -> String { resp.body.clone() }
+fn jet_http_client_response_header(resp: &JetHttpClientResp, name: &String) -> Option<String> {
+    let name_lc = name.to_lowercase();
+    let mut i = 0;
+    while i + 1 < resp.headers.len() {
+        if resp.headers[i].to_lowercase() == name_lc { return Some(resp.headers[i+1].clone()); }
+        i += 2;
+    }
+    None
+}
+
+
+// ── D-HTTPLIB1=A / D-HTTPLIB2=B: core.http.server — function-first mux ───────
+// Pure std, no external crates (I6). HTTP/1.1 blocking server with path-param
+// extraction and a typed mux surface. HTTP/2 and WebSocket require the bridge
+// crate and are tracked as follow-up work.
+
+#[derive(Clone)]
+struct JetHttpSrvResp {
+    status: i64,
+    body: String,
+    headers: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+struct JetHttpSrvReq {
+    method: String,
+    path: String,
+    params: std::collections::BTreeMap<String, String>,
+    body: String,
+    headers: std::collections::BTreeMap<String, String>,
+}
+
+type JetHttpMuxHandlerFn = std::sync::Arc<dyn Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync>;
+
+struct JetHttpMuxRoute {
+    method: String,
+    pattern: String,
+    handler: JetHttpMuxHandlerFn,
+}
+
+#[derive(Clone)]
+struct JetHttpMux(std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>);
+
+impl JetHttpMux {
+    fn new() -> Self { JetHttpMux(std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))) }
+    fn add<F>(&self, method: &str, pattern: &str, f: F)
+    where F: Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync + 'static
+    {
+        self.0.lock().unwrap().push(JetHttpMuxRoute {
+            method: method.to_uppercase(),
+            pattern: pattern.to_string(),
+            handler: std::sync::Arc::new(f) as JetHttpMuxHandlerFn,
+        });
+    }
+}
+
+fn jet_http_mux_new() -> JetHttpMux { JetHttpMux::new() }
+
+fn jet_http_mux_add<F>(mux: &JetHttpMux, method: &str, pattern: &str, f: F)
+where F: Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync + 'static
+{ mux.add(method, pattern, f); }
+
+fn jet_http_srv_response(status: i64, body: &String) -> JetHttpSrvResp {
+    JetHttpSrvResp { status, body: body.clone(), headers: std::collections::BTreeMap::new() }
+}
+
+fn jet_http_srv_response_header(mut resp: JetHttpSrvResp, name: &String, value: &String) -> JetHttpSrvResp {
+    resp.headers.insert(name.clone(), value.clone());
+    resp
+}
+
+fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind(addr.as_str())
+        .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
+    let mux = std::sync::Arc::new(mux);
+    loop {
+        let (mut stream, _peer) = match listener.accept() {
+            Ok(x) => x,
+            Err(e) => { eprintln!("http accept failed: {}", e); continue; }
+        };
+        let m = mux.clone();
+        std::thread::spawn(move || {
+            let mut buf = vec![0u8; 65536];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let raw = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let req = jet_http_srv_parse(&raw);
+            let resp = jet_http_mux_dispatch(&m, req);
+            let text = jet_http_srv_format(&resp);
+            let _ = stream.write_all(text.as_bytes());
+        });
+    }
+}
+
+fn jet_http_srv_parse(raw: &str) -> JetHttpSrvReq {
+    let sep = raw.find("\r\n\r\n").unwrap_or(raw.len());
+    let header_part = &raw[..sep];
+    let body = if sep + 4 <= raw.len() { raw[sep + 4..].to_string() } else { String::new() };
+    let mut lines = header_part.lines();
+    let req_line = lines.next().unwrap_or("GET / HTTP/1.1");
+    let mut parts = req_line.splitn(3, ' ');
+    let method = parts.next().unwrap_or("GET").to_string();
+    let path = parts.next().unwrap_or("/").to_string();
+    let mut headers = std::collections::BTreeMap::new();
+    for line in lines {
+        if let Some((k, v)) = line.split_once(": ") {
+            headers.insert(k.to_lowercase(), v.to_string());
+        }
+    }
+    JetHttpSrvReq { method, path, params: std::collections::BTreeMap::new(), body, headers }
+}
+
+fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
+    let routes = mux.0.lock().unwrap();
+    for route in routes.iter() {
+        if route.method != req.method { continue; }
+        if let Some(params) = jet_http_match_path(&route.pattern, &req.path) {
+            let mut r2 = req.clone();
+            r2.params = params;
+            return (route.handler)(r2);
+        }
+    }
+    JetHttpSrvResp {
+        status: 404,
+        body: "404 Not Found".to_string(),
+        headers: std::collections::BTreeMap::new(),
+    }
+}
+
+fn jet_http_match_path(pattern: &str, path: &str) -> Option<std::collections::BTreeMap<String, String>> {
+    let p_segs: Vec<&str> = pattern.split('/').collect();
+    let r_segs: Vec<&str> = path.split('?').next().unwrap_or(path).split('/').collect();
+    if p_segs.len() != r_segs.len() { return None; }
+    let mut params = std::collections::BTreeMap::new();
+    for (p, r) in p_segs.iter().zip(r_segs.iter()) {
+        if let Some(key) = p.strip_prefix(':') {
+            params.insert(key.to_string(), r.to_string());
+        } else if *p != *r {
+            return None;
+        }
+    }
+    Some(params)
+}
+
+fn jet_http_srv_format(resp: &JetHttpSrvResp) -> String {
+    let reason = match resp.status {
+        200 => "OK", 201 => "Created", 204 => "No Content",
+        301 => "Moved Permanently", 302 => "Found",
+        400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden",
+        404 => "Not Found", 405 => "Method Not Allowed",
+        500 => "Internal Server Error", _ => "OK",
+    };
+    let mut out = format!("HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        resp.status, reason, resp.body.len());
+    for (k, v) in &resp.headers {
+        out.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    out.push_str("\r\n");
+    out.push_str(&resp.body);
+    out
+}
+
+fn jet_http_srv_req_method(req: &JetHttpSrvReq) -> String { req.method.clone() }
+fn jet_http_srv_req_path(req: &JetHttpSrvReq) -> String { req.path.clone() }
+fn jet_http_srv_req_param(req: &JetHttpSrvReq, name: &String) -> Option<String> { req.params.get(name).cloned() }
+fn jet_http_srv_req_body(req: &JetHttpSrvReq) -> String { req.body.clone() }
+fn jet_http_srv_req_header(req: &JetHttpSrvReq, name: &String) -> Option<String> { req.headers.get(&name.to_lowercase()).cloned() }
+
 // ── D-ARGS1: declarative CLI arg parsing (ratified 2026-06-22) ───────────────
 // The builder accumulates a spec; `jet_args_parse` runs it against an argv
 // list, producing `ParsedArgs` or an error string (never exits — the caller

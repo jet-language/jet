@@ -2090,7 +2090,10 @@ transition call, threaded through `:=` rebindings; a require/transition call on 
 wrong state is **E0150** (naming both states + the transition that reaches the required one).
 Markers are **erased in codegen** (I3 — generated Rust is identical to the untagged version;
 golden-verified). `tests/ui/typestate_wrong_state`, `examples/features/113_typestate.jet`,
-`tests/typestate.rs`. **Deferred forks (queued for owner confirmation, implemented as the
+`tests/typestate.rs`. **Temporal ordering:** legal state order is expressed by the transition
+graph itself — a value can only reach a late state by passing through every `#Transition` edge
+on the path. No separate ordering surface exists or is needed; the graph enforces it (Card #19,
+resolved 2026-06-27). **Deferred forks (queued for owner confirmation, implemented as the
 defaults):** the exact marker spellings — **D-STATE-REQ** (`#State(S)` vs `#Requires(S)`),
 **D-STATE-TRANS** (`#Transition(A -> B)` arrow glyph), **D-STATE-DECL** (whether an explicit
 `states { … }` grouping is wanted for exhaustiveness) — and the upstream **D-QUAL4** (plain
