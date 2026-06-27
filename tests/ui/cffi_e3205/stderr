@@ -1,7 +1,7 @@
-Error [E0610]: no module named `c` in scope
-  --> tests/ui/cffi_e3205/main.jet:1:5
+Error [E3205]: overlay `add` disagrees with the generated binding
+  --> tests/ui/cffi_e3205/main.jet:4:8
     |
-  1 | use c.demo as d;
-    |     ^
- Why: the alias must refer to a module imported earlier in this file
- Fix: add `import … as c`  before this `use`
+  4 |     fn add(a: Int) -> Int = "demo_add";
+    |        ^^^
+ Why: user `#extern module c.demo` may override bindgen symbols, but the signature must stay compatible when replacing
+ Fix: match the generated signature, or rename your overlay function

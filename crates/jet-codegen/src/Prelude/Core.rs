@@ -24,6 +24,19 @@ impl<T: JetShow, const N: usize> JetShow for [T; N] { fn jet_show(&self) -> Stri
     format!("[{}]", parts.join(", "))
 } }
 impl JetShow for char { fn jet_show(&self) -> String { self.to_string() } }
+// D-COLLBREADTH1=A: Set<T> (HashSet) shows lexicographically sorted like a list;
+// Deque<T> shows in order like a list. Sort by string rep for determinism.
+impl<T: JetShow> JetShow for std::collections::HashSet<T> {
+    fn jet_show(&self) -> String {
+        let mut parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+        parts.sort();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetShow> JetShow for std::collections::VecDeque<T> { fn jet_show(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+    format!("[{}]", parts.join(", "))
+} }
 impl<T: JetShow> JetShow for Option<T> {
     fn jet_show(&self) -> String {
         match self {

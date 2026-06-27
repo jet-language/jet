@@ -1,10 +1,10 @@
-Error [E0956]: the name `fs` can't run at compile time yet
-  --> tests/ui/comptime_io_rejected.jet:4:17
+Error [E3410]: `core.fs.read()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  --> tests/ui/comptime_io_rejected.jet:4:20
     |
   4 | comptime DATA = fs.read("config.txt")
-    |                 ^^
- Why: comptime evaluates a pure subset of Jet; this construct isn't supported there yet
- Fix: compute this value at runtime, or use a simpler comptime expression
+    |                    ^^^^
+ Why: ambient I/O (filesystem, environment, process) is not allowed in pure comptime evaluation
+ Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--allow-impure` to the build
 
 Error [E0107]: nothing named `DATA` exists here
   --> tests/ui/comptime_io_rejected.jet:7:11

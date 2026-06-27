@@ -168,7 +168,11 @@ impl<'a> Checker<'a> {
             }
             Type::Apply { name, args } => {
                 let is_core_generic =
-                    matches!(name.as_str(), "Task" | "Channel" | "Sender" | "Ptr");
+                    matches!(name.as_str(), "Task" | "Channel" | "Sender" | "Ptr"
+                        // D-COLLBREADTH1=A: Set<T> and Deque<T>.
+                        | "Set" | "Deque"
+                        // D-REACT1=B: reactive handle types.
+                        | "Signal" | "Derived");
                 if !is_core_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
                         "E0119",

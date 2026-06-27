@@ -1,0 +1,27 @@
+// D-UUIDENC1=A: hex and base64 encode/decode
+
+use core.encoding.hex as hex
+use core.encoding.base64 as b64
+
+fn main() {
+    original@ [U8] = [72, 101, 108, 108, 111]  // ASCII "Hello"
+
+    // hex round-trip
+    h @= hex.encode(original)
+    print(h)
+    back @= hex.decode(h) ?? panic("bad hex")
+    print(back.len() == 5)
+
+    // base64 round-trip
+    b @= b64.encode(original)
+    print(b)
+    back2 @= b64.decode(b) ?? panic("bad base64")
+    print(back2.len() == 5)
+
+    // decode failure path: bad hex returns err
+    result @= hex.decode("xyz!")
+    if result == {
+        ok(_) -> { print(false) }
+        err(_) -> { print(true) }
+    }
+}

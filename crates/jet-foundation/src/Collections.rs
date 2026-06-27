@@ -6,7 +6,13 @@ use crate::AST::Type;
 use crate::Syntax;
 
 /// Built-in type names that users cannot redefine (E0106).
-pub const RESERVED_TYPES: &[&str] = &[Syntax::TYPE_LIST, Syntax::TYPE_MAP, Syntax::TYPE_CHAR];
+pub const RESERVED_TYPES: &[&str] = &[
+    Syntax::TYPE_LIST,
+    Syntax::TYPE_MAP,
+    Syntax::TYPE_CHAR,
+    "Set",
+    "Deque",
+];
 
 pub fn is_reserved_type(name: &str) -> bool {
     RESERVED_TYPES.contains(&name)
@@ -17,6 +23,19 @@ pub fn is_map_key_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Int | Type::Bool | Type::String | Type::Char | Type::Named(_)
+    )
+}
+
+/// Whether `ty` may be used as a `Set` element — requires `Hash + Eq` (E0506).
+pub fn is_hashable_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::Named(_)
+            | Type::IntN { .. }
     )
 }
 
@@ -69,6 +88,13 @@ pub fn builtin_method_return(
         }
         Type::Apply { name, args } if name == crate::Syntax::TYPE_DERIVED => {
             derived_method_return(args, method, arg_count)
+        }
+        // D-COLLBREADTH1=A: Set<T> and Deque<T>.
+        Type::Apply { name, args } if name == "Set" => {
+            set_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        Type::Apply { name, args } if name == "Deque" => {
+            deque_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
             builtin_static_return(recv_ty, method, arg_count)
@@ -413,6 +439,36 @@ fn derived_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Op
     }
 }
 
+/// D-COLLBREADTH1=A: `Set<T>` methods (hash-backed unordered set).
+fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    let set_of_elem = || Type::Apply {
+        name: "Set".to_string(),
+        args: vec![elem.clone()],
+    };
+    match (method, nargs) {
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("add" | "remove" | "clear", _) => Some(None),
+        ("contains", 1) => Some(Some(Type::Bool)),
+        ("union", 1) => Some(Some(set_of_elem())),
+        ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
+        _ => None,
+    }
+}
+
+/// D-COLLBREADTH1=A: `Deque<T>` methods (ring-buffer double-ended queue).
+fn deque_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("push_front" | "push_back" | "clear", _) => Some(None),
+        ("pop_front" | "pop_back" | "peek_front" | "peek_back", 0) => {
+            Some(Some(Type::Option(Box::new(elem.clone()))))
+        }
+        _ => None,
+    }
+}
+
 /// Whether a built-in method mutates its receiver (needs `var` binding).
 pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
     match recv_ty {
@@ -421,6 +477,14 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             "push" | "pop" | "insert" | "remove" | "reverse" | "sort" | "sort_by" | "clear"
         ),
         Type::Map { .. } => matches!(method, "insert" | "remove" | "clear"),
+        // D-COLLBREADTH1=A: Set mutating methods.
+        Type::Apply { name, .. } if name == "Set" => {
+            matches!(method, "add" | "remove" | "clear")
+        }
+        // D-COLLBREADTH1=A: Deque mutating methods.
+        Type::Apply { name, .. } if name == "Deque" => {
+            matches!(method, "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
+        }
         // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
         // `rng` draw advances the PRNG stream — these need an edit-access (`~`)
         // receiver. `clock.now()` / `duration.millis()` are pure reads (no `~`).
@@ -525,6 +589,26 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Apply { name, .. } if name == crate::Syntax::TYPE_DERIVED => Some(vec![]),
+        // D-COLLBREADTH1=A: Set<T> arg types.
+        Type::Apply { name, args } if name == "Set" => {
+            let elem = args.first().cloned().unwrap_or(Type::Int);
+            match method {
+                "add" | "contains" | "remove" => Some(vec![elem]),
+                "union" => Some(vec![Type::Apply {
+                    name: "Set".to_string(),
+                    args: vec![elem],
+                }]),
+                _ => Some(vec![]),
+            }
+        }
+        // D-COLLBREADTH1=A: Deque<T> arg types.
+        Type::Apply { name, args } if name == "Deque" => {
+            let elem = args.first().cloned().unwrap_or(Type::Int);
+            match method {
+                "push_front" | "push_back" => Some(vec![elem]),
+                _ => Some(vec![]),
+            }
+        }
         // D-DET1/D-DET-CAPAPI: injected capability method args. `pick`/`shuffle` are
         // generic ([T]) and handled element-aware in the checker dispatch — they are
         // NOT routed here.

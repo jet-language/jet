@@ -2506,6 +2506,27 @@ pub(crate) fn method_call_in_subset(
                 a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
             });
     }
+    // Shape (d-coll-ctor) [D-COLLBREADTH1=A]: a collection static constructor —
+    // `Set.from([...])` or `Deque.new()`. The receiver is a bare type-name ident
+    // (`"Set"` / `"Deque"`), NOT a local. Sema types the call and leaves
+    // `recv_type == None`. The method is `"from"` (for Set) or `"new"` (for Deque).
+    // Both are `is_intercepted_method_name` names, so they never reach the static
+    // user-type shape (line ~2843). This shape claims them BEFORE that check. Every arg
+    // must be in-subset (for `Set.from`, the list literal is always in-subset).
+    if recv_type.is_none() {
+        if let Expr::Ident(type_name, _) = receiver {
+            if !locals.contains(type_name.as_str()) {
+                match (type_name.as_str(), method, args.len()) {
+                    ("Set", "from", 1) | ("Deque", "new", 0) => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
     // Shape (d2) [c109 Phase 19]: `Stopwatch.elapsed_millis()`. The AST
     // `emit_builtin_method` dispatches `elapsed_millis` on the method NAME alone (it
     // fires before any `rty` test, Expression.rs ~L1023), and sema types it via
@@ -2905,6 +2926,12 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "alloc" | "reset" | "free" | "accept" | "local_addr" | "read" | "write"
         | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
         | "status" | "group"
+        // D-COLLBREADTH1=A: Set<T> and Deque<T> methods.
+        | "add" | "union" | "to_list"
+        | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back"
+        // `from` is the static constructor for Set — admitted here so the static-call
+        // shape below can claim it before `is_intercepted_method_name` blocks it.
+        | "from"
     )
 }
 
@@ -3000,6 +3027,12 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("take", 1) | ("skip", 1) | ("step_by", 1)
         | ("dedup", 0) | ("chunks", 1) | ("windows", 1)
         | ("enumerate", 0) | ("zip", 1)
+        // D-COLLBREADTH1=A: Set<T> instance methods.
+        | ("add", 1) | ("union", 1) | ("to_list", 0)
+        // D-COLLBREADTH1=A: Deque<T> instance methods.
+        | ("push_front", 1) | ("push_back", 1)
+        | ("pop_front", 0) | ("pop_back", 0)
+        | ("peek_front", 0) | ("peek_back", 0)
     )
     // NOTE: `is_empty` (now Bool-typed in `Collections::*_method_return` after the
     // c109 fix; lowered to `TBuiltinOp::IsEmpty`) is covered above. `join()` (no
@@ -3400,6 +3433,20 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("HttpResponse", "status", 0) => THandleOp::HttpRespField("status"),
         ("HttpResponse", "body", 0) => THandleOp::HttpRespField("body"),
         ("HttpResponse", "header", 1) => THandleOp::HttpRespHeader,
+        // D-SERDE-ACCESS=B: DataTree accessor methods.
+        ("DataTree", "field", 1) => THandleOp::DataTreeField,
+        ("DataTree", "at", 1) => THandleOp::DataTreeAt,
+        ("DataTree", "int", 0) => THandleOp::DataTreeInt,
+        ("DataTree", "text", 0) => THandleOp::DataTreeText,
+        ("DataTree", "bool", 0) => THandleOp::DataTreeBool,
+        ("DataTree", "float", 0) => THandleOp::DataTreeFloat,
+        // D-SERDE-ACCESS=B: same accessors on Json/Data (the dynamic parse result).
+        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "field", 1) => THandleOp::JsonField,
+        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "at", 1) => THandleOp::JsonAt,
+        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "int", 0) => THandleOp::JsonInt,
+        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "text", 0) => THandleOp::JsonText,
+        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "bool", 0) => THandleOp::JsonBool,
+        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "float", 0) => THandleOp::JsonFloat,
         // D-SIMD2 / D-LINALG1 math methods are handled by a dedicated gate + lowering
         // block (user-type-aware via `cx.type_names`), NOT here — `handle_method_op`
         // has no `cx`, and a user struct may share a math name.

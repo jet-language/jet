@@ -1,7 +1,7 @@
-Error [E0610]: no module named `c` in scope
-  --> tests/ui/cffi_e3204_two_use_forms.jet:1:5
+Error [E3204]: two different `use` forms refer to the same C library `demo`
+  --> tests/ui/cffi_e3204_two_use_forms.jet:2:1
     |
-  1 | use c.demo as d
-    |     ^
- Why: the alias must refer to a module imported earlier in this file
- Fix: add `import … as c`  before this `use`
+  2 | use "demo.h" as d2
+    | ^^^^^^^^^^^^^^^^^^
+ Why: Jet allows one bring-in per C lib per file — either `use "demo.h" as alias` or `use c.demo as alias`, not both
+ Fix: remove one line; keep the form that matches your workflow

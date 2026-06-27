@@ -306,8 +306,12 @@ async function recordFocus(d) {
   const chosen = pick[d.id]; if (!chosen) return;
   const comment = $('#f-comment')?.value.trim(); delete pick[d.id];
   await api('clearance', { decisionId: d.id, outcome: chosen, comment: comment || undefined });
-  const next = focusIds.findIndex((id, i) => i > focusIdx && S.decisions.find(x => x.id === id && x.status !== 'ratified'));
-  if (next >= 0) { focusIdx = next; focusFacet = null; askOpen = false; }
+  // Drop ratified decisions from the focus set so they vanish from the dot bar immediately
+  const prevIdx = focusIds.indexOf(d.id);
+  focusIds = focusIds.filter(id => { const x = S.decisions.find(x => x.id === id); return x && x.status !== 'ratified'; });
+  focusIdx = Math.min(Math.max(0, prevIdx), focusIds.length - 1);
+  focusFacet = null; askOpen = false;
+  if (focusIds.length === 0) { exitFocus(); return; }
   renderFocus();
 }
 

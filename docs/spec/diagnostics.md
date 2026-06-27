@@ -216,6 +216,7 @@ before continuing.
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
 | E0504 | sema  | mixed-type list/map literal               |
 | E0505 | sema  | wrong index/key type or bad slice target  |
+| E0506 | sema  | `Set<T>` element type is not hashable (D-COLLBREADTH1) |
 | E0507 | sema  | collection changed while `for` reads it   |
 | L0501 | sema  | slice copy inside a loop (lint)           |
 | L0502 | sema  | float `==`/`!=` comparison is unreliable (D-SMELLLINT1) |

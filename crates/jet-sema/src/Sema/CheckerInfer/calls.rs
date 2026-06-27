@@ -808,6 +808,36 @@ impl<'a> Checker<'a> {
                     return self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                 }
             }
+            // D-COLLBREADTH1=A: `Set.from([...])` → `Set<T>`.
+            // T is inferred from the list argument's element type.
+            if type_name == "Set" && method == "from" && args.len() == 1 {
+                let arg_ty = self.infer(&mut args[0].expr);
+                let elem_ty = match arg_ty {
+                    Some(Type::List(inner)) => *inner,
+                    _ => Type::Int,
+                };
+                if !Collections::is_hashable_type(&elem_ty) {
+                    self.diags.push(Diagnostic::error(
+                        "E0506",
+                        format!("`Set<{}>` is not valid — `{}` is not hashable", elem_ty.name(), elem_ty.name()),
+                        "Set elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
+                        format!("change the element type to a hashable type, or use a `[{}]` list instead", elem_ty.name()),
+                        Some(span),
+                    ));
+                }
+                return Some(Type::Apply { name: "Set".to_string(), args: vec![elem_ty] });
+            }
+            // D-COLLBREADTH1=A: `Deque.new()` → `Deque<T>`.
+            // T is inferred from the type annotation's expected type.
+            if type_name == "Deque" && method == "new" && args.is_empty() {
+                let elem_ty = match &self.expected_type {
+                    Some(Type::Apply { name, args, .. }) if name == "Deque" && !args.is_empty() => {
+                        args[0].clone()
+                    }
+                    _ => Type::Int,
+                };
+                return Some(Type::Apply { name: "Deque".to_string(), args: vec![elem_ty] });
+            }
             // D-SIMD2 / D-LINALG1: a STATIC method on a built-in math type —
             // `F32x4.splat(x)` / `Vec3.from_array([…])`. The arg is elaborated
             // against the method's expected type (so a literal becomes the
@@ -1202,6 +1232,32 @@ impl<'a> Checker<'a> {
                         self.infer(&mut a.expr);
                     }
                     return None;
+                }
+            }
+        }
+        // D-SERDE-ACCESS=B: accessor methods on Data/Json/DataTree.
+        if let Type::Named(ref tn) = recv_ty {
+            if is_json_type_name(tn) {
+                if let Some(ret) = datatree_method_return(method, args.len()) {
+                    let json_ret = match ret {
+                        Type::Result { ok, err } => Type::Result {
+                            ok: if matches!(*ok, Type::Named(ref n) if n == "DataTree") {
+                                Box::new(json_ty())
+                            } else { ok },
+                            err,
+                        },
+                        other => other,
+                    };
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    *recv_type_out = Some(tn.clone());
+                    return Some(json_ret);
+                }
+            }
+            if tn == "DataTree" {
+                if let Some(ret) = datatree_method_return(method, args.len()) {
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    *recv_type_out = Some("DataTree".to_string());
+                    return Some(ret);
                 }
             }
         }

@@ -2258,6 +2258,32 @@ pub fn core_fixed_sig(
             ],
             Some(Type::String),
         )),
+        // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
+        // returns `[Byte] ? String` (invalid input → Err).
+        ("core.encoding.hex", "encode") => Some((
+            vec![(read, list_u8.clone())],
+            Some(Type::String),
+        )),
+        ("core.encoding.hex", "decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.base64", "encode") => Some((
+            vec![(read, list_u8.clone())],
+            Some(Type::String),
+        )),
+        ("core.encoding.base64", "decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        // D-UUIDENC1=A: UUID v4 (system CSPRNG) and v7 (injectable Clock).
+        // `v4()` reads /dev/urandom; `v7(clock)` extracts the timestamp from the
+        // injected Clock so tests can produce a deterministic UUID.
+        ("core.uuid", "v4") => Some((vec![], Some(Type::String))),
+        ("core.uuid", "v7") => Some((
+            vec![(read, Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))],
+            Some(Type::String),
+        )),
         // D-ARGS1 (ratified 2026-06-22): `args.spec()` → `ArgsSpec` builder.
         // The builder methods (.flag/.option/.positional/.help/.parse) are handled
         // in `args_spec_method_return` / `parsed_args_method_return` below.
@@ -2426,6 +2452,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.csv" => &["parse", "decode", "to_string"],
         "core.encoding.toml" => &["parse", "decode", "to_string"],
         "core.encoding.yaml" => &["parse", "decode", "to_string"],
+        // D-UUIDENC1=A: hex/base64 codecs and UUID generator.
+        "core.encoding.hex" => &["encode", "decode"],
+        "core.encoding.base64" => &["encode", "decode"],
+        "core.uuid" => &["v4", "v7"],
         "core.mem" => &["Ptr", "from_addr", "volatile_read", "address_of",
                         "Arena", "Bump", "Pool", "Fixed"],
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
@@ -2865,3 +2895,39 @@ pub(crate) fn int_range_error(signed: bool, bits: u8, span: Span) -> Diagnostic 
     )
 }
 
+/// D-SERDE-ACCESS=B: accessor methods on `DataTree`.
+/// `.field(name)` → `DataTree ? String`
+/// `.at(i)` → `DataTree ? String`
+/// `.int()` → `Int ? String`
+/// `.text()` → `String ? String`
+/// `.bool()` → `Bool ? String`
+/// `.float()` → `Float ? String`
+pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
+    match (method, n_args) {
+        ("field", 1) => Some(Type::Result {
+            ok: Box::new(Type::Named("DataTree".to_string())),
+            err: Box::new(Type::String),
+        }),
+        ("at", 1) => Some(Type::Result {
+            ok: Box::new(Type::Named("DataTree".to_string())),
+            err: Box::new(Type::String),
+        }),
+        ("int", 0) => Some(Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::String),
+        }),
+        ("text", 0) => Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::String),
+        }),
+        ("bool", 0) => Some(Type::Result {
+            ok: Box::new(Type::Bool),
+            err: Box::new(Type::String),
+        }),
+        ("float", 0) => Some(Type::Result {
+            ok: Box::new(Type::Float),
+            err: Box::new(Type::String),
+        }),
+        _ => None,
+    }
+}

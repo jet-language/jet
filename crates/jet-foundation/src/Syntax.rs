@@ -1544,6 +1544,11 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.encoding.csv",
     "core.encoding.toml",
     "core.encoding.yaml",
+    // D-UUIDENC1=A (ratified 2026-06-26): hex and base64 codecs (pure, no deps).
+    "core.encoding.hex",
+    "core.encoding.base64",
+    // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
+    "core.uuid",
     // E2-M9: first-party ring packages.
     "jet.log",
     "jet.time",

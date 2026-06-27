@@ -1224,6 +1224,30 @@ pub enum TBuiltinOp {
     Enumerate { tuple_struct: String },
     /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
     Zip { tuple_struct: String },
+    // D-COLLBREADTH1=A: Set<T> operations.
+    /// `Set.from([...])` — recv is the list: `(recv).into_iter().collect::<std::collections::HashSet<_>>()`.
+    SetFrom,
+    /// `set.add(v)` → `(recv).insert(a0)` (HashSet::insert; bool result discarded).
+    SetInsert,
+    /// `set.remove(v)` → `(recv).remove(&a0)` (bool result discarded).
+    SetRemove,
+    /// `set.to_list()` → `(recv).iter().cloned().collect::<Vec<_>>()`.
+    SetToList,
+    /// `set.union(other)` → `(recv).union(&(a0)).cloned().collect::<std::collections::HashSet<_>>()`.
+    SetUnion,
+    // D-COLLBREADTH1=A: Deque<T> operations.
+    /// `deque.push_front(v)` → `(recv).push_front(a0)`.
+    DequePushFront,
+    /// `deque.push_back(v)` → `(recv).push_back(a0)`.
+    DequePushBack,
+    /// `deque.pop_front()` → `(recv).pop_front()` (returns `Option<T>`).
+    DequePopFront,
+    /// `deque.pop_back()` → `(recv).pop_back()` (returns `Option<T>`).
+    DequePopBack,
+    /// `deque.peek_front()` → `(recv).front().cloned()` (returns `Option<T>`).
+    DequePeekFront,
+    /// `deque.peek_back()` → `(recv).back().cloned()` (returns `Option<T>`).
+    DequePeekBack,
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
@@ -1337,6 +1361,25 @@ pub enum THandleOp {
     ReactiveGet,
     /// D-REACT1=B: `Signal.set(v)` → `(recv).set(<arg0>)` (writes + notifies).
     ReactiveSet,
+    /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
+    DataTreeField,
+    /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.
+    DataTreeAt,
+    /// D-SERDE-ACCESS=B: `DataTree.int()` → `(recv).int()`.
+    DataTreeInt,
+    /// D-SERDE-ACCESS=B: `DataTree.text()` → `(recv).text()`.
+    DataTreeText,
+    /// D-SERDE-ACCESS=B: `DataTree.bool()` → `(recv).bool()`.
+    DataTreeBool,
+    /// D-SERDE-ACCESS=B: `DataTree.float()` → `(recv).float()`.
+    DataTreeFloat,
+    /// D-SERDE-ACCESS=B: same accessors on `Json`/`Data`.
+    JsonField,
+    JsonAt,
+    JsonInt,
+    JsonText,
+    JsonBool,
+    JsonFloat,
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so

@@ -3951,6 +3951,41 @@ pub(crate) fn lower_method_call(
         let Expr::Ident(type_name, _) = receiver else {
             unreachable!("gate proved static receiver is a type-name ident");
         };
+        // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
+        // Lower the list arg as the recv of a SetFrom BuiltinMethod.
+        if type_name == "Set" && method == "from" && args.len() == 1 {
+            let list_arg = lower_expr(&args[0].expr, cx, env);
+            let elem_ty = match &list_arg.ty {
+                Type::List(inner) => *inner.clone(),
+                _ => Type::Int,
+            };
+            return TExpr {
+                ty: Type::Apply { name: "Set".to_string(), args: vec![elem_ty] },
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(list_arg),
+                    op: TBuiltinOp::SetFrom,
+                    args: vec![],
+                },
+            };
+        }
+        // D-COLLBREADTH1=A: `Deque.new()` → empty VecDeque with elem type from sema.
+        // The element type comes from `resolved_ret` (sema filled it from the annotation).
+        if type_name == "Deque" && method == "new" && args.is_empty() {
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
+                _ => Type::Int,
+            };
+            let elem_rust = cx.rust_type(&elem_ty);
+            let deque_ty = Type::Apply { name: "Deque".to_string(), args: vec![elem_ty] };
+            return TExpr {
+                ty: deque_ty,
+                kind: TExprKind::StaticCall {
+                    type_prefix: format!("std::collections::VecDeque::<{}>", elem_rust),
+                    method_rust: "new".to_string(),
+                    args: vec![],
+                },
+            };
+        }
         // D-SIMD2 / D-LINALG1: a static method on a built-in math type → the prelude
         // free function `{root}jet_math_<T>_<method>(args)`.
         if crate::Sema::is_math_type(type_name) && !cx.type_names.contains(type_name) {
@@ -4379,6 +4414,7 @@ pub(crate) fn resolve_builtin_op(
     let rty = tir_recv_jet_ty(receiver, env);
     let is_string = matches!(rty, Some(Type::String));
     let is_map = matches!(rty, Some(Type::Map { .. }));
+    let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
     Some(match (method, args.len()) {
         ("len", 0) => {
             if is_string {
@@ -4398,7 +4434,9 @@ pub(crate) fn resolve_builtin_op(
             }
         }
         ("remove", 1) => {
-            if is_map {
+            if is_set {
+                TBuiltinOp::SetRemove
+            } else if is_map {
                 TBuiltinOp::RemoveMap
             } else {
                 // The list form embeds the *method-span* line for its bounds panic,
@@ -4487,6 +4525,17 @@ pub(crate) fn resolve_builtin_op(
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::Zip { tuple_struct: ts }
         }
+        // D-COLLBREADTH1=A: Set<T> instance methods.
+        ("add", 1) => TBuiltinOp::SetInsert,
+        ("to_list", 0) => TBuiltinOp::SetToList,
+        ("union", 1) => TBuiltinOp::SetUnion,
+        // D-COLLBREADTH1=A: Deque<T> instance methods.
+        ("push_front", 1) => TBuiltinOp::DequePushFront,
+        ("push_back", 1) => TBuiltinOp::DequePushBack,
+        ("pop_front", 0) => TBuiltinOp::DequePopFront,
+        ("pop_back", 0) => TBuiltinOp::DequePopBack,
+        ("peek_front", 0) => TBuiltinOp::DequePeekFront,
+        ("peek_back", 0) => TBuiltinOp::DequePeekBack,
         _ => return None,
     })
 }

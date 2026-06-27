@@ -8,7 +8,6 @@
         "epoch:e4",
         "epoch:e5",
         "board-sidequests",
-        "epoch:e3",
         "epoch:e6"
       ]
     }
@@ -727,7 +726,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Dynamic Data-tree accessors (D-SERDE-ACCESS=B): keep pattern-match as the floor, ADD a small accessor set over Data — `.field(name)`, `.at(i)`, and leaf coercions `.int()`/`.text()`/`.bool()`/`.float()` — each returning a Result so `?` chains cleanly. No path mini-language (rejected option C).\nSteps: (1) add the methods to the Data/DataTree surface in Source/Prelude/CoreLib.rs (jet_std); missing key / wrong variant => a normal err; (2) example reaching a deep field in one `?`-chained line + golden; (3) corelib round-trip test. No new syntax.",
       "blockedBy": [],
@@ -739,6 +738,10 @@
         {
           "at": "2026-06-26",
           "text": "Surfaced from v1 deferred ballot (D-SERDE-ACCESS); gate ratified, decision now open"
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Implemented D-SERDE-ACCESS=B: .field(name), .at(i), .int(), .text(), .bool(), .float() on Json/Data and DataTree in CoreLib.rs; sema datatree_method_return routing; TIR JsonField/DataTreeField ops; golden example 133; UI test. Full suite green."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
@@ -895,9 +898,9 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-REVERSE1=B: core.layout — Cassowary-style incremental LINEAR constraint solver for UI layout. Plan status: blocked on D-LAYOUT1 (API surface ballot). Need decisions on: (A) Constraint syntax — how does user express 'width >= 100' and 'left = other.right + 8'? (B) Variable binding — how are layout variables declared and accessed? (C) Priority levels — Cassowary's required/strong/medium/weak map to what Jet spelling? Raise D-LAYOUT1 ballot before writing code. Prerequisites once D-LAYOUT1 decided: Cassowary solver ported to Rust (no external crate per I6) → wired into core.layout → `@suggest` edits implement the constraint-change API.",
       "blockedBy": [],
       "log": [
         {
@@ -911,6 +914,14 @@
         {
           "at": "2026-06-26",
           "text": "[research→ballot 2026-06-26] researched and converted to decision ballot D-REVERSE1 (rec B). Moved frozen → deciding. Foundational subset option could land in E3 if owner pursues; otherwise stays research."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-REVERSE1=B ratified. Proceed: implement core.layout — Cassowary-style incremental linear constraint solver for UI layout values (weak/medium/strong/required priorities, @suggest edits). Epoch 3."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. Blocked on D-LAYOUT1 (constraint syntax + priority API ballot). Raising D-LAYOUT1 decision."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
@@ -1221,14 +1232,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "core.async.Loadable<T, E> (D-PENDING1=B): stdlib enum with variants Idle / Loading / Loaded(T) / Failed(E). Steps: (1) Add to crates/jet-sema/src/Sema/CheckerCoreLib.rs as a checked builtin type under core.async; (2) Emit as a Rust enum in CoreLib.rs; (3) Add convenience methods: .is_loading(), .loaded() -> T?, .or_else(default: T) -> T; (4) Test with example examples/features/NN_loadable.jet showing all four variants; (5) Snapshot golden. No new syntax — this is a library type. The async UI pattern: start Idle, move to Loading on request start, Loaded(T) on success, Failed(E) on error.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L36). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-PENDING1=B ratified. Proceed: add core.async.Loadable<T, E> (variants Idle/Loading/Loaded(T)/Failed(E)) to stdlib. Consistent naming across all Jet projects for async UI state."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan written. core.async.Loadable<T,E> is a pure library addition — no new syntax. All decisions ratified. Advancing to ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1487,7 +1506,7 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "frozen",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -1499,6 +1518,10 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-DUPLINT1=C ratified. Decline: high false-positive risk, complex implementation, depends on infrastructure not yet built. Deferred indefinitely."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1620,11 +1643,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Collections breadth (D-COLLBREADTH1=A): add `Set<T: Hash + Eq>` (hash-backed, unordered) and `Deque<T>` (ring-buffer backing — NOT a separate ring-buffer type, I8) to core.collections. `OrderedSet<T: Ord>` is a follow-on.\nSteps: (1) Set over the existing Map Hash/Eq story (no new mechanism); (2) Deque ring buffer with push/pop both ends; (3) examples (dedup via Set, BFS/sliding-window via Deque) + goldens. One Set type only (I8).",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-26",
+          "text": "Implemented: Set<T> + Deque<T> end-to-end. Foundation (Collections.rs): method return types, mutability, arg types. Codegen (Context.rs): HashSet/VecDeque Rust type mapping. TIR (mod/lower/emit/subset): SetFrom, SetInsert, SetRemove, SetToList, SetUnion, DequePushFront/Back/PopFront/Back/PeekFront/Back ops. Sema (calls.rs): Set.from([]) + Deque.new() static constructors with expected_type propagation. Core.rs: JetShow for HashSet/VecDeque. CheckerCore.rs: Set+Deque in is_core_generic gate. Examples: 136_set.jet + 137_deque.jet with golden outputs. E0506 UI snapshot (unhashable Set element). diagnostics.md + syntax-decisions.md updated."
+        },
         {
           "at": "2026-06-26",
           "text": "Decision cleared (D-COLLBREADTH1=A). Advanced to ready; Set + Deque in Core collections."
@@ -1649,11 +1676,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "UUID + encodings (D-UUIDENC1=A): ship `core.encoding` (hex, base64 encode/decode — pure algorithms, no deps) and `core.uuid` (v4 via system CSPRNG with an injectable interface for tests; v7 via the injectable Clock) in Core.\nSteps: (1) hex + base64 codecs + round-trip goldens; (2) UUID v4 (CSPRNG from /dev/urandom or OS equivalent, injectable like Clock) + v7 (Clock-based); (3) examples (generate v7, store as base64) + goldens. Pure library; no new language mechanism.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-26",
+          "text": "Implemented: core.encoding.hex (encode/decode), core.encoding.base64 (encode/decode), core.uuid (v4 CSPRNG, v7 injectable Clock). All pure std, zero deps. Golden examples 134_hex_base64 + 135_uuid pass. Full test suite green."
+        },
         {
           "at": "2026-06-26",
           "text": "Decision cleared (D-UUIDENC1=A). Advanced to ready; core.encoding + core.uuid in Core."
@@ -2196,18 +2227,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-27",
+          "text": "Activated into epoch e3 track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L117). Ratified/accepted — no proceed-ballot; owner greenlights to start."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c16iwukt",
@@ -2810,10 +2845,12 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "D-RACEWIN1=A: race/any combinators fold into card #36 (structured concurrency combinators, D-CONCCOMB1=A). The race(tasks) (first to succeed, losers cancelled) and any(tasks) (first to finish) functions are additions to the combinator set already planned in #36. BLOCKED on D-NURSERY1 (card #102 deciding) — both race/any and the nursery scope are part of the same structured-concurrency design; implement together. Once D-NURSERY1 is decided: add race() and any() as module-level functions in core.task alongside the existing task {} spawn. Both cancel losing tasks via the nursery cancellation mechanism.",
+      "blockedBy": [
+        "c1uiy53e"
+      ],
       "log": [
         {
           "at": "2026-06-26",
@@ -2822,10 +2859,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] e4 → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "D-RACEWIN1=A ratified. race/any fold into card #36 structured-concurrency combinators. Blocked on D-NURSERY1 (card #102). Plan written."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c1wiy9k9",
@@ -2923,14 +2964,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-FAILCOMP1=A: add filter_map and try_collect as standard iterator adapters (no new comprehension syntax). Steps: (1) filter_map(f: fn(T) -> V?) in the iterator adapter chain — applies f, keeps Some results, discards None; (2) try_collect<E>() -> [T] ? E — collects an iterator of T?E into Ok([T]) on full success or the first Err; (3) Wired in CoreLib.rs iterator machinery; (4) Examples showing both usages with fallible transforms; (5) Snapshot goldens. Both adapters are callable on any iterator, consistent with the existing map/filter/reduce chain. No new surface syntax — these are method calls.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L157). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-FAILCOMP1=A ratified. Proceed: no new comprehension syntax — add filter_map and try_collect as standard iterator adapters (under D-ITER1). Explicit intent at call site."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan written. Pure library additions, no syntax. All decisions ratified. Advancing to ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3032,14 +3081,22 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-APPROX1=A: library-only approximate data structures under core.sketch. Steps: (1) core.sketch.HyperLogLog<T> — cardinality estimator (±2% error at 1.5KB), add() and count() -> UInt; (2) core.sketch.TDigest — quantile estimator (±0.5%), add(value: Float) and quantile(q: Float) -> Float; (3) core.sketch.ReservoirSampler<T, N> — uniform random sample of N items from a stream; (4) core.sketch.CountMinSketch — frequency estimator, add(key) and count(key) -> UInt; (5) Each backed by I6-safe Rust impl using no external crates; (6) examples/features/NN_sketch.jet demonstrating each; (7) Snapshot goldens. No new language surface.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L162). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-APPROX1=A ratified. Proceed: library-only — ship HyperLogLog, t-digest, reservoir sampler, CountMinSketch as stdlib modules under core.sketch. No new language surface."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan written. All library, no syntax decisions needed. Advancing to ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3053,14 +3110,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-AUTOPAR1=A: explicit parallel iterator adapters, no hidden auto-parallelism. Steps: (1) par_map(f: fn(T) -> V) — maps in parallel using the task runtime's thread pool; (2) par_filter(pred: fn(T) -> Bool) — parallel filter; (3) par_fold(init: V, f: fn(V, T) -> V) — parallel fold with associative combiner; (4) All three backed by Rayon-compatible work-stealing via the M:N task pool (no external crate — use the existing task runtime); (5) Ordering: par_map/par_filter preserve input order (stable); par_fold is inherently unordered unless combiner is commutative; (6) examples/features/NN_parallel_iter.jet; (7) Snapshot goldens. Callers must opt in explicitly — `iter.map(f)` is always sequential; `iter.par_map(f)` is parallel. Clear intent at call site.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L163). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-AUTOPAR1=A ratified. Proceed: ship par_map, par_fold, par_filter as explicit stdlib adapters. Sequential is always sequential; parallelism always visible at call site."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan written. No new syntax; uses existing task runtime. Advancing to ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3095,7 +3160,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "frozen",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -3103,6 +3168,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L165). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-CADEFS1=C ratified. Far-horizon research — no current card. Revisit post-v1 when codebase model, package system, and build cache are stable. D-STRUCTMERGE1 lists this as a prerequisite."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3216,9 +3285,9 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-A11Y1=A: a11y by default in component kit. GATED on D-REACTCORE1 and D-RENDERTGT2 — cannot build until the component model and backend trait are defined. Once unblocked: (1) Every built-in component ships with correct ARIA role, focus management, keyboard nav by default; (2) @no_a11y(reason: Str) opt-out (mandatory justification string); (3) a11y lints = warnings in dev, errors in release builds; (4) raise D-A11Y2 ballot for ARIA role mapping (which Jet component maps to which ARIA role). Raise D-A11Y2 when D-REACTCORE1 is decided.",
       "blockedBy": [],
       "log": [
         {
@@ -3228,6 +3297,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-A11Y1=A ratified. Proceed: a11y by default — components ship ARIA roles, focus management, keyboard nav; @no_a11y(reason:) to opt out; a11y lints are warnings in dev, errors in release. Gated on UI stack existence (D-REACTCORE1, D-RENDERTGT1)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. Blocked on D-REACTCORE1 + D-RENDERTGT2. D-A11Y2 (ARIA role mapping) to be raised once component model is set."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3241,9 +3318,9 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-NATIVEUI1=A + D-NATIVEUI2=B: build AppKit (macOS), Win32/WinUI (Windows), GTK (Linux) native UI wrappers simultaneously. STILL BLOCKED on D-RENDERTGT2 (backend trait API ballot, open) — cannot implement until the Backend trait is defined. Once D-RENDERTGT2 is decided: (1) Define core.ui.Backend trait implementation for each platform in separate modules (core.ui.native.macos, .windows, .linux); (2) Use existing C FFI bridge pattern (emit bridge template text, never add to jet Cargo.toml); (3) Phase 1 scope: Window, Button, Label, TextField, VStack/HStack-equiv on all three; (4) CI: Linux headless via GTK+Xvfb; macOS via GitHub Actions mac runner; Windows via Actions win runner; (5) Examples + goldens per platform. Phase 2 (later): own renderer.",
       "blockedBy": [],
       "log": [
         {
@@ -3253,10 +3330,22 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-NATIVEUI1=A ratified. Proceed: Phase 1 = thin Jet stdlib over platform widget APIs (AppKit/macOS, Win32/WinUI/Windows, GTK/Linux) via C FFI bridge pattern. Phase 2 = own renderer (later epoch)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. Blocked on D-RENDERTGT2 (trait seam) and D-NATIVEUI2 (platform priority). Raising D-NATIVEUI2."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "D-NATIVEUI2=B ratified (all platforms simultaneously). Plan updated. Blocked on D-RENDERTGT2 (backend trait API) — must be decided first."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c2fizfx3",
@@ -3266,9 +3355,9 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-WEBBACKEND1=A: Hybrid JS DOM for views + WASM for logic. Plan status: blocked on multiple sub-decisions. D-WASM1 needed: how does Jet partition code between JS and WASM targets? D-JSBIND1 needed: how do Jet types cross the JS/WASM boundary? D-WEBKIND1 needed: which WASM target first — wasm32-unknown-unknown, wasm32-wasi, or wasm32-wasip2? D-DOMGEN1 needed: does the JS DOM codegen use a thin runtime shim or generate raw DOM calls? Each is a syntax/API design question. Raise D-WASM1 as the first gate — cannot plan further until the partition model is locked. High-level: Jet view functions compile to a JS bundle that issues DOM mutations; pure Jet functions compile to WASM via rustc's wasm32 target. The JS bridge calls WASM via wasm-bindgen equivalent (no external crates — I6).",
       "blockedBy": [],
       "log": [
         {
@@ -3278,6 +3367,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-WEBBACKEND1=A ratified. Proceed: hybrid — view/UI code compiles to JS DOM ops; pure logic/compute to WASM; JS bridge calls WASM for heavy work. No full-Jet-to-JS transpilation."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. Requires D-WASM1 (JS/WASM partition model) before further planning. Raising D-WASM1."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3291,9 +3388,9 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-JSWIFTFFI1=A: JS/npm first (ships with D-WEBBACKEND1 as import npm:\"pkg\"); Swift via C-ABI deferred until D-NATIVEUI1 ships. GATED on D-WEBBACKEND1 implementation and D-WASM1 (partition model). JS interop plan: (1)  syntax in web target files; (2) Codegen emits an npm package.json for the project and wires the import; (3) Type stubs for common npm packages (hand-authored, similar to @types/); (4) raise D-NPMTYPE1 for how npm type stubs are authored and distributed. Swift interop: deferred to D-NATIVEUI1 completion (uses C-ABI bridge via existing C FFI pattern). Raise D-NPMTYPE1 when D-WASM1 is decided.",
       "blockedBy": [],
       "log": [
         {
@@ -3303,6 +3400,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-JSWIFTFFI1=A ratified. JS/npm first (ships with D-WEBBACKEND1 as `import npm:\"pkg\"`); Swift via C-ABI deferred until D-NATIVEUI1 backend ships. Gated on D-WEBBACKEND1."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. JS FFI blocked on D-WEBBACKEND1 impl; Swift FFI blocked on D-NATIVEUI1. Raising D-NPMTYPE1 once D-WASM1 decided."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3337,18 +3442,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P1",
-      "plan": null,
+      "plan": "D-ASYNCRT1=A: M:N green-thread scheduler under the existing task+channel model. No new user syntax — task { } blocks become green-thread yields; IO calls park the task and resume on readiness. Implementation plan: (1) Add M:N scheduler crate to jet-driver: work-stealing thread pool (N OS threads), green task queue per thread, task-steal-when-idle; (2) Park on IO: integrate io_uring (Linux), kqueue (macOS), IOCP (Windows) via platform-specific glue — syscall-triggered park/wake, no busy-wait; (3) task {} desugars to scheduler.spawn(|| { ... }); (4) Channels (already exist) get wake-on-send for parked receivers; (5) Tests: 100k concurrent echo tasks, benchmark vs sequential; (6) No new user syntax; no function coloring. Related: D-NURSERY1 (card #102) adds the structured scope on top of the scheduler. D-COROUTINE1 (card #101) is partially answered by this: coroutines are the internal substrate, not user primitives.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L182). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "D-ASYNCRT1=A ratified (M:N green threads). Plan written. Related: D-NURSERY1 (structured scope, card #102) and D-COROUTINE1 (card #101, context updated) both build on this scheduler."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c2jizomr",
@@ -3366,6 +3475,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L183). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-VISDEFAULT1=C ratified. Proceed: add file-scope visibility marker. This overrides the S18 rejection of section markers (S18 specifically declined positional blocks; D-VISDEFAULT1=C approves a lighter-weight marker). New syntax ballot D-VISDEFAULT2 raised to decide the exact form of the marker."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3404,14 +3517,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P1",
-      "plan": null,
+      "plan": "D-USERDERIVE1=A: umbrella for user derives + typed reflection. D-METAREFLECT1=C (rich reflection) ratified. BLOCKED on D-METADERIVE1 (output mechanism, card #131 still deciding). Once both decided: (1) implement reflection API (T.fields(), T.methods(), etc.) in jet-sema CheckerCoreLib — comptime-only, no runtime reflection; (2) implement derive output mechanism ($ splice or typed AST builder per D-METADERIVE1); (3) ship built-in #[Codable] as a reference derive using the new system; (4) ship #[Serialize], #[Hash] as follow-on derives; (5) examples + goldens for custom user-written derives. v1 ceiling: reflection + derives only, no arbitrary macros (D-METADEPTH1/D-CTCODEGEN1 stand).",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L185). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-USERDERIVE1=A ratified. Proceed with user derives + typed reflection. Opens D-METAREFLECT1 (now also ratified=C: rich reflection) and D-METADERIVE1 (still open — card #131). Card stays in planning until D-METADERIVE1 resolved."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. D-METAREFLECT1=C ratified (rich reflection approved). Still blocked on D-METADERIVE1 (output mechanism). Once D-METADERIVE1 decided, both this and #130 (reflection read API) can be built together."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3425,14 +3546,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P1",
-      "plan": null,
+      "plan": "D-METAREFLECT1=C: rich reflection — fields + methods + generics + annotations via T.fields() / T.methods() / T.type_params() / T.annotations(). Plan status: blocked on D-REFLECT1 (API surface ballot for method reflection). Key decisions needed: (A) Return types — what type does T.fields() return? A list of FieldInfo struct? An iterator? (B) Method reflection safety — what subset of method info is safe to expose? (C) Generic parameter reflection format. Raise D-REFLECT1 ballot. Prerequisites: D-METADERIVE1 also still open (c131) — both must be decided before implementation. Once both settled: implement in jet-sema CheckerCoreLib, emit reflective metadata alongside type emission in TIR.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L186). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-METAREFLECT1=C ratified. Proceed: rich reflection — fields + methods + generics + annotations all exposed via T.fields(), T.methods(), T.type_params(), T.annotations(). Larger surface but full power for v1 derives."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. Blocked on D-REFLECT1 (reflection API surface) and D-METADERIVE1 (output mechanism). Raising D-REFLECT1 decision."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3467,9 +3596,9 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-REACTCORE1=D: add #Reactive compiler-blessed scope marker. Inside #Reactive { } or #Reactive fn, reads from signal sources auto-register subscriptions via core.reactive. Desugars to core.reactive.scope(|| { ... }). Plan: (1) Define core.reactive module with Signal<T>, Computed<T>, Effect types (raise D-SIGNAL1 ballot for owner approval of the API surface); (2) Implement reactive_scope() runtime function that activates dependency tracking; (3) Compiler recognizes #Reactive as a scope marker — adds a no-new-eval-semantics desugaring (like @async fn); (4) #Reactive fn desugars the whole body; #Reactive { } desugars the block; (5) Tests: signal propagation, no propagation outside scope, circular detection; (6) Examples + goldens. Unblocks: card #134 (reactive UI stack) now that D-REACTCORE1 is resolved.",
       "blockedBy": [],
       "log": [
         {
@@ -3479,10 +3608,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "D-REACTCORE1=D ratified (#Reactive scope marker). Plan written. Raises D-SIGNAL1 (core.reactive API surface). Unblocks card #134 (reactive UI stack)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c2pj04xf",
@@ -3492,9 +3625,9 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-RENDERTGT1=A: define minimum backend trait (layout, paint, event) in core.ui. Plan status: blocked on D-RENDERTGT2 (the actual trait API ballot). Need decisions on: (A) Trait name — `core.ui.Backend` vs `core.ui.Renderer` vs `core.ui.Target`? (B) Minimum method set — what are the required layout/paint/event methods? (C) Layout protocol — pass-measure-layout pattern (SwiftUI geometry reader) vs. absolute rects? (D) Event model — what events does the trait emit? (E) Async or sync callbacks? Raise D-RENDERTGT2. This is the foundational seam that all UI work builds against — get it right before any backend implementation starts.",
       "blockedBy": [],
       "log": [
         {
@@ -3504,6 +3637,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-RENDERTGT1=A ratified. Proceed: define backend-trait seam now (minimum: layout, paint, event) in stdlib. No backend needs to exist yet. All higher-level UI work builds against this trait."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. Blocked on D-RENDERTGT2 (trait API definition). Raising D-RENDERTGT2 decision."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3517,9 +3658,9 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-REACTUI1=A: layered reactive UI stack. GATE D-REACTCORE1=D now ratified (#Reactive scope marker). D-RENDERTGT1=A ratified (seam defined). STILL BLOCKED on D-RENDERTGT2 (Backend trait API, open) and D-SIGNAL1 (core.reactive surface, to be raised). Once those resolved: build in order — (1) core.reactive (signals/computed/effects, D-SIGNAL1); (2) View model layer on top of core.reactive; (3) core.styles (typed styles, D-TYPEDSTYLE1 deciding — now unblocked since D-REACTCORE1 resolved); (4) Headless + styled component kit; (5) core.motion (D-MOTION1 deciding — now unblocked since D-REACTCORE1+D-REACTUI1 resolved). Each layer gates the next.",
       "blockedBy": [],
       "log": [
         {
@@ -3529,10 +3670,22 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-REACTUI1=A ratified. Proceed with layered stack (reactivity → view model → typed styles → headless+styled kit → motion/app kit). Gated on D-REACTCORE1 (still deciding) and D-RENDERTGT1 (now ratified=A). Card stays in planning until D-REACTCORE1 resolved."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan roughed out. Primary gate: D-REACTCORE1 (decide now — option D added from owner question). Secondary: D-RENDERTGT2 (raised). D-TYPEDSTYLE1 and D-MOTION1 still deciding — downstream of D-REACTCORE1."
+        },
+        {
+          "at": "2026-06-27",
+          "text": "D-REACTCORE1=D resolved — primary gate cleared. Plan updated. Remaining gates: D-RENDERTGT2 (Backend trait) and D-SIGNAL1 (core.reactive API). D-TYPEDSTYLE1 and D-MOTION1 now have their upstream gates cleared — owner can decide them."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-27"
     },
     {
       "id": "c2rj09ov",
@@ -3567,7 +3720,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "frozen",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -3575,6 +3728,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L197). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-ADAPTRT1=C ratified. Decline: niche use case; apps handle ad-hoc or via platform APIs. D-ADAPTFID1=A (fidelity signal) proceeds independently. This card (full adaptive runtime) deferred."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3588,14 +3745,22 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-ADAPTFID1=A: stdlib fidelity signal as Perf.fidelity() -> f32 (0.0 = lowest quality, 1.0 = full quality). Steps: (1) Add Perf module to core — Perf.fidelity() reads an atomic f32 maintained by the runtime (starts at 1.0); (2) Runtime updates it based on frame time: if last frame took >20ms, fidelity drops toward 0.0; if consistently fast, it rises toward 1.0 (exponential moving average); (3) Perf.set_fidelity(v: f32) for testing/manual override; (4) No hooks into the rendering pipeline — app code reads and adapts (e.g., `if Perf.fidelity() < 0.5 { use_low_res_shader() }`); (5) No new syntax. (6) examples/features/NN_fidelity.jet; (7) Snapshot golden.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L198). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-ADAPTFID1=A ratified. Proceed: stdlib Perf.fidelity() -> f32 (set by runtime based on frame time, or manually by app for testing). App code reads and degrades. Simple, auditable, no hidden behavior."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan written. Pure library, no syntax. Advancing to ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3630,14 +3795,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e5",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-CASTORE1=A: extend build-cache hashing to cover package identity. Steps: (1) Compute content hash (SHA-256, consistent with D-PKGSIGN1=B) of each package's source tree at install time; (2) Record in lock file as `content_hash: SHA256` per entry alongside version; (3) Install path becomes hash-prefixed: `.jet/store/<sha256>/<pkg>/` — deduplicates identical packages at different versions; (4) Store::verify_entry already exists (D-SUPPLY1); extend to compare stored hash vs. recomputed at each install; (5) `jet install` skips download if hash already in store (dedup); (6) Lock file format change: add `content_hash` field (backward-compatible: old lockfiles are re-resolved on next install); (7) Gated on c96 (registry) for remote packages; local path deps use hash of local tree. No new user-facing syntax. Tests in tests/ui/.",
       "blockedBy": [],
       "log": [
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L200). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-CASTORE1=A ratified. Proceed: extend build-cache hashing to cover package identity. Lock file records content hash; install path is hash-prefixed. Dedup, tamper detection, future signed cache. Changes lock file format."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "Plan written. Extension of existing store/lock infrastructure. Advancing to ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3651,7 +3824,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "deciding",
+      "phase": "frozen",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -3663,6 +3836,10 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e4. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-PROCMACRO1=C ratified. Far-horizon: post-self-host research track under c154 (full Jai metaprogramming). Revisit only after Jet is self-hosted and AST/sema boundary is stable."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3676,7 +3853,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "deciding",
+      "phase": "frozen",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -3688,6 +3865,10 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e4. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-READERMACRO1=A ratified. Keep rejected: grammar is fixed. Every sigil lives in Source/Syntax.rs (I7). Reader macros would let any library silently redefine sigil meaning — rejected. DSL blocks handle the common case."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3701,7 +3882,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "frozen",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -3709,6 +3890,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L211). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-LOGICPROG1=C ratified. Far-horizon: post-v1 constraint/solver research. A future library (not a language feature) could implement backtracking, keeping the language surface small. Failure-aware iterators (already roadmapped) cover the useful slice."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3722,7 +3907,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "triage",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -3730,6 +3915,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L212). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-STRUCTMERGE1=A ratified. Far-horizon: capture, don't build now. Prerequisites: content-addressed definitions (D-CADEFS1 card = frozen) and semantic index. Log here; revisit when those two foundations exist. Track: sidequest."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3743,7 +3932,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "frozen",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -3751,6 +3940,10 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L213). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "at": "2026-06-26",
+          "text": "D-STRUCTMERGE2=A ratified. Fold into D-STRUCTMERGE1 (#143). One far-horizon research item, one owner decision. Card closed as duplicate per I8."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -5139,7 +5332,7 @@
       "cardId": "c1tiy3ge",
       "title": "Add generic coroutines as a lower-level primitive beneath @async/await?",
       "gist": "The current async plan is `@async`/`await`/tasks — a colored-function model. Generic coroutines (stackless or stackful suspend/resume with no function-color split) would be a more general primitive: async could be built on top of them, and other use cases (generators, cooperative scheduling, iterators over async data) would benefit too. The question is whether to adopt coroutines as the substrate now or keep `@async/await` as the only concurrency mechanism for v1.",
-      "explainer": "The E3 async plan commits to `@async`/`await`/tasks as the user-facing model. If coroutines are introduced as the substrate, they do not necessarily become a user-visible surface — they could be a compiler-internal implementation detail. However, exposing them as a user primitive (for generators, custom schedulers, etc.) would be a significant surface addition. I8 applies: if coroutines can express everything async can, that's two ways to do concurrency — the design must draw a clear line. I1 applies: stackful coroutines require explicit stack allocation; that should not be the default. Function coloring (the 'red/blue function' problem) is the main pain point being addressed.",
+      "explainer": "D-ASYNCRT1=A (2026-06-27) chose M:N green-thread scheduler — no @async/await, no function coloring. That decision renders Option A (\"keep @async/await\") inconsistent. The live question is whether coroutines are (B) an internal substrate the M:N scheduler uses, or (C) a first-class user primitive on top. D-ASYNCRT1=A strongly implies B: the scheduler IS coroutine-based internally; task {} is the user surface. Option C (expose coroutines as user primitives) is a separate, additive decision. Recommend B — consistent with D-ASYNCRT1=A.",
       "story": "I'm writing a streaming parser. I want to yield tokens one at a time as I consume input, without converting my entire call stack to async. `@async` is overkill — I just need suspend/resume.",
       "inWild": "// hypothetical: generator via coroutine primitive\nfn tokens(input: str) -> Coro<Token> {\n    for ch in input.chars() {\n        if ch.is_alpha() { yield Token.{ kind: .Word } }\n    }\n}\nfor tok in tokens(src) { process(tok) }",
       "detail": "",
@@ -5180,7 +5373,7 @@
           "code": "async def fetch():\n    async with aiohttp.ClientSession() as s:\n        return await s.get(url)\n# vs generators: def gen(): yield 1; yield 2"
         }
       ],
-      "rec": "A",
+      "rec": "B",
       "status": "open"
     },
     {
@@ -5269,7 +5462,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-UNDOKW1",
@@ -5751,7 +5946,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-ASKCODE1",
@@ -5839,7 +6036,9 @@
         }
       ],
       "rec": "C",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-DBDRIVER1",
@@ -6015,7 +6214,10 @@
         }
       ],
       "rec": "C",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "comment": "But we should support some kind of magical default that allows us to do some level of automatic fill in for defaults so it doesnt piss off jet users by requiring tiny fixes to every little thing they do",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-NATIVEUI1",
@@ -6059,7 +6261,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-WEBBACKEND1",
@@ -6206,7 +6410,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-VISDEFAULT1",
@@ -6418,6 +6624,12 @@
           "name": "Defer",
           "detail": "Block all reactive-UI cards until a later milestone. Avoids committing to a design before the UI stack architecture is clearer. Delays the entire reactive-UI roadmap.",
           "code": "// No reactive feature ships; UI code uses plain callbacks\nfn on_click(state: &mut AppState) {\n  state.count += 1\n  render(state)\n}"
+        },
+        {
+          "key": "D",
+          "name": "#Reactive scope marker (new — owner question 2026-06-26)",
+          "detail": "Add a `#Reactive` compiler-blessed scope marker. Inside `#Reactive { ... }` or `#Reactive fn`, reads from signal sources automatically register subscriptions — the library handles the graph. Outside the marker, code is purely imperative. Desugars to a library call: `reactive_scope(|| { ... })`. Exactly parallel to how `@async fn` works. I8-safe: one way to opt into reactive behavior. No new evaluation semantics — `core.reactive` provides all the machinery. Both spellings work: `#Reactive fn update(v: Int) { label = v.to_str() }` (function always re-runs when sources change) and `fn update { #Reactive { label = value.to_str() } }` (block-level scope). Closer to Option A (library) than Option B (core semantics) — only a scope marker is added to the language.",
+          "code": "// The two forms:\n#Reactive fn updateButton(value: Int) {\n    label.text = value.to_str()  // auto-subscribed when value changes\n}\n\nfn render() {\n    #Reactive {\n        title.text = user.name  // reactive block inside regular fn\n    }\n}"
         }
       ],
       "comparisons": [
@@ -6433,7 +6645,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-06-27"
     },
     {
       "id": "D-RENDERTGT1",
@@ -7479,6 +7693,280 @@
       ],
       "rec": "A",
       "status": "open"
+    },
+    {
+      "id": "D-VISDEFAULT2",
+      "cardId": "c2jizomr",
+      "status": "open",
+      "gist": "D-VISDEFAULT1=C approved a file-scope visibility marker. This decides what it looks like.",
+      "story": "Marcus maintains a library file with 30 helper functions, all meant to be public. He writes `pub` on each one and thinks 'there has to be a better way.' He wants one marker at the top that makes everything in this file public by default, with a simple way to keep a few internal helpers private.",
+      "inWild": "// core/server.jet — a file that's almost entirely public API\npub fn listen(port: Int) -> Server { ... }\npub fn route(path: Str) -> Router { ... }\npub fn middleware(f: Handler) -> Builder { ... }\npub fn shutdown(srv: Server) { ... }\nfn internal_helper() { ... }  // the one private thing",
+      "comparisons": "Kotlin: all public by default (no explicit export needed, private is per-item). Swift: `internal` default, `public`/`open`/`private`/`fileprivate` per-item. Go: uppercase = exported (language-level convention). Zig: no module system yet, everything in same package scope. Rust: `pub(crate)` for crate-internal; no file-level flip. None of these have a runtime file-scope flip marker — Jet's case is unique because the default is private.",
+      "options": [
+        {
+          "key": "A",
+          "name": "#pub_file (recommended)",
+          "detail": "A single `#pub_file` marker at the top of the file flips the entire file to public-by-default. Private exceptions use `priv` (new keyword, symmetric with `pub`). Consistent with Jet's `#` marker convention (#Grant, #Latex, etc.). No structural position dependency — applies to the whole file unconditionally. Requires defining `priv` as the explicit-private keyword (a follow-on decision if this wins).",
+          "code": "#pub_file  // flip entire file to pub-by-default\n\nfn listen(port: Int) -> Server { ... }     // public (default in this file)\nfn route(path: Str) -> Router { ... }      // public\npriv fn internal_helper() { ... }          // explicitly private"
+        },
+        {
+          "key": "B",
+          "name": "pub: section label",
+          "detail": "A `pub:` label (like a section header) at any point in the file makes everything below it public-by-default. `priv:` flips back to private. No new keyword required — the colon-label is the marker. Allows mixed sections. Precedent in Objective-C (`@public:`, `@private:`) and Jai (`---`). Risk: structural position dependency (S18's concern) — items must be placed after the right label.",
+          "code": "fn internal_helper() { ... }    // private (before any label)\n\npub:  // everything below is public by default\nfn listen(port: Int) -> Server { ... }\nfn route(path: Str) -> Router { ... }\n\npriv:  // back to private\nfn another_internal() { ... }"
+        },
+        {
+          "key": "C",
+          "name": "#scope_file (owner example)",
+          "detail": "Owner's suggested name from D-VISDEFAULT1 text. Same semantics as Option A (#pub_file) but uses the name `#scope_file` (meaning: the scope of this visibility change is the whole file). Functionally identical to A — the only question is the name. `#scope_file` is less obvious than `#pub_file` (`scope` is more abstract than `pub`), but matches the owner's language when ratifying D-VISDEFAULT1.",
+          "code": "#scope_file  // whole file is pub by default\n\nfn listen(port: Int) -> Server { ... }   // public\nfn route(path: Str) -> Router { ... }    // public\npriv fn internal_helper() { ... }        // explicitly private"
+        }
+      ],
+      "rec": "A",
+      "recReason": "#pub_file is the most readable: you see immediately what it does without knowing `scope` means visibility. Consistent with the `#` marker convention already used throughout Jet. One thing to decide after: the `priv` keyword (if A or C wins, a follow-on D-VISDEFAULT3 ballot handles the explicit-private spelling in a pub-default file).",
+      "created": "2026-06-26",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-26"
+    },
+    {
+      "id": "D-LAYOUT1",
+      "cardId": "ca3ynsl",
+      "status": "open",
+      "gist": "core.layout uses a Cassowary constraint solver. This decides the Jet-side API: how users write constraints and access layout variables.",
+      "story": "Elena is building a settings panel. She wants the label column to be at least 80px wide, the input column to fill the rest, and a 16px gap between them. She writes these as constraints rather than calculated values so the layout adjusts automatically when the panel resizes.",
+      "inWild": "// Responsive two-column form layout\nlet form = Layout.new()\nlet label_col = form.var('label_width')\nlet input_col = form.var('input_width')\nlet gap = 16.px\nform.constrain(label_col >= 80.px)              // minimum width\nform.constrain(label_col + gap + input_col == form.width)  // fills container\nform.constrain(label_col, priority: .medium)    // soft: prefer current if possible",
+      "comparisons": "Cassowary (original): solver.addConstraint(new Constraint(v1, GEQ, 0)). Auto Layout (Apple): NSLayoutConstraint.activate([view.widthAnchor.constraint(greaterThanOrEqualToConstant: 80)]). Flutter: Row(children: [Flexible(child: ...)]) — no explicit constraints. Yoga (Meta): node.setMinWidth(80). SwiftUI: .frame(minWidth: 80) — constraints are hidden in view modifiers.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Infix operator overloading on layout vars (recommended)",
+          "detail": "Layout variables support >=, <=, == with lengths and other layout vars. `form.constrain(label_col >= 80.px)` reads like math. Priority is a named parameter on constrain(). The `@suggest(var, new_val)` API is used for interactive editing. Clean, reads like a constraint spec.",
+          "code": "let col = layout.var('col_width')\nlayout.constrain(col >= 80.px)                        // hard min\nlayout.constrain(col == container.width * 0.4, priority: .medium)  // soft preference\n@suggest(col, 120.px)                                // interactive edit suggestion"
+        },
+        {
+          "key": "B",
+          "name": "Constraint DSL with explicit Constraint type",
+          "detail": "Constraints are values of type Constraint, created with a builder, and added to the solver. More explicit — every constraint is an inspectable value. More verbose than A but allows constraints to be stored, named, and removed by reference.",
+          "code": "let c1 = Constraint.new(col, .gte, 80.px)\nlet c2 = Constraint.new(col, .eq, container.width * 0.4, priority: .medium)\nlayout.add(c1, c2)\nlayout.remove(c2)  // soft constraints are removable by reference"
+        },
+        {
+          "key": "C",
+          "name": "Declarative constraint block (#Layout { })",
+          "detail": "A `#Layout { }` block desugars to a set of constraints. Inside the block, `>=`, `==`, `<=` on variables automatically create constraints. Reads like a spec; the block is the unit of layout declaration. Requires a new compiler-blessed block type.",
+          "code": "#Layout {\n    label_col >= 80.px\n    label_col + gap + input_col == form.width\n    label_col ~= 120.px  // soft constraint: ~= instead of ==\n}"
+        }
+      ],
+      "rec": "A",
+      "recReason": "Infix operators on layout vars are the most ergonomic and don't require new syntax. Option B is good for tooling (inspectable constraints) but verbose. Option C needs a new compiler-blessed block (new syntax surface without clear I8 advantage over A).",
+      "created": "2026-06-26",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-26"
+    },
+    {
+      "id": "D-RENDERTGT2",
+      "cardId": "c2pj04xf",
+      "status": "open",
+      "gist": "D-RENDERTGT1 approved defining the backend trait seam now. This decides what the minimum trait API looks like (method names, layout model, event model).",
+      "story": "Sophie is implementing the web backend for Jet's UI. She needs to implement the Backend trait. She wants to know: what methods does she have to implement, what data types do they pass around, and how do events flow back to Jet code?",
+      "inWild": "// What a TUI backend implementor writes:\nimpl Backend for TermBackend {\n    fn measure(node: &Node, constraint: SizeConstraint) -> Size { ... }\n    fn layout(node: &Node, frame: Rect) { ... }\n    fn paint(node: &Node, painter: &mut Painter) { ... }\n    fn on_event(event: Event) -> EventResult { ... }\n}",
+      "comparisons": "SwiftUI: View protocol has `body: some View` — no explicit measure/layout/paint. Flutter: RenderObject has performLayout(), paint(). React Native: no explicit trait, platform adapters implement a bridge. Jetpack Compose: Layout modifier with measurePolicy. WebGL: no standard trait. All serious cross-platform UI frameworks use measure-layout-paint as the three-phase model.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Three-phase measure-layout-paint trait (recommended)",
+          "detail": "Backend trait has three required methods: measure(node, constraint) -> Size (phase 1), layout(node, frame) (phase 2, sets final positions), paint(node, painter) (phase 3, draws to backend surface). Events flow in via a separate on_event(event) method. This is the universal model used by Flutter, SwiftUI internals, and Yoga.",
+          "code": "trait Backend {\n    fn measure(node: &Node, constraint: SizeConstraint) -> Size\n    fn layout(node: &Node, frame: Rect)\n    fn paint(node: &Node, ctx: &PaintCtx)\n    fn on_event(evt: InputEvent) -> EventResult\n}"
+        },
+        {
+          "key": "B",
+          "name": "Two-phase layout-paint trait (simplified)",
+          "detail": "Combine measure+layout into a single layout(node, available: Size) -> Rect phase. Simpler to implement but less powerful: intrinsic size information is lost after layout, making some responsive layouts impossible. Better for simple backends (TUI, fixed-size targets), worse for CSS-flexbox-style adaptive layouts.",
+          "code": "trait Backend {\n    fn layout(node: &Node, available: Size) -> Rect\n    fn paint(node: &Node, frame: Rect, ctx: &PaintCtx)\n    fn on_event(evt: InputEvent) -> EventResult\n}"
+        },
+        {
+          "key": "C",
+          "name": "Event-driven reactive trait",
+          "detail": "Backend is fully event-driven: the UI framework pushes layout/paint requests as events to the backend, and the backend responds. No synchronous method calls. Aligns with async runtime and signal model but introduces significant complexity in the protocol — backends must process events in order and cannot ask the framework questions synchronously.",
+          "code": "trait Backend {\n    fn handle(event: BackendEvent) -> [BackendResponse]\n}\nenum BackendEvent { Measure(Node, SizeConstraint), Layout(Node, Rect), Paint(Node, PaintCtx), Input(InputEvent) }"
+        }
+      ],
+      "rec": "A",
+      "recReason": "Three-phase is the proven industry model (Flutter, Yoga, SwiftUI internals). Backends can implement C (simplified) on top of A by merging measure+layout, but A cannot be recovered from B. The measure phase is essential for intrinsic-size-aware layout (text reflow, content-sized containers).",
+      "created": "2026-06-26",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-26"
+    },
+    {
+      "id": "D-NATIVEUI2",
+      "cardId": "c2eizebh",
+      "status": "ratified",
+      "gist": "D-NATIVEUI1 approved Phase 1: thin Jet wrapper over native platform widgets. This decides which platform to build first and whether to build all three simultaneously.",
+      "story": "Derek is building a Jet desktop app. He's on macOS. He wants to ship to Windows users too. He needs the native UI backend to exist so his app can render native widgets on both platforms from the same Jet code.",
+      "inWild": "use core.ui.native\n\nfn main() {\n    let win = Window.new(title: 'My App', size: .{ width: 800.px, height: 600.px })\n    let btn = Button.new(label: 'Click me')\n    btn.on_click(fn() { print('clicked') })\n    win.add(btn)\n    win.run()\n}",
+      "comparisons": "Qt: cross-platform C++ widget toolkit, all platforms simultaneously. GTK: Linux-first, cross-platform with backends. wxWidgets: wraps native APIs per platform, all platforms. Electron: web tech, all platforms simultaneously. Flutter desktop: all platforms (macOS/Win/Linux) in one unified release. Tauri: web + native, all platforms.",
+      "options": [
+        {
+          "key": "A",
+          "name": "macOS (AppKit) first, then Windows and Linux",
+          "detail": "Build the macOS AppKit wrapper first (narrowest FFI surface, best macOS support). The Backend trait (D-RENDERTGT2) is defined and proven against AppKit before tackling Win32/GTK. Ship macOS, then add platforms. Risk: Windows users wait; API may be too AppKit-shaped.",
+          "code": "// Phase 1a: macOS only\nuse core.ui.native  // backed by AppKit on macOS"
+        },
+        {
+          "key": "B",
+          "name": "All three platforms simultaneously (recommended)",
+          "detail": "Build AppKit, Win32/WinUI, and GTK backends in parallel. The Backend trait (D-RENDERTGT2) is kept platform-agnostic from day one. Jet's platform detection at compile time routes to the right backend. Flutter's desktop approach — commitment to parity from the start prevents API drift. Higher up-front cost but the right shape from the start.",
+          "code": "use core.ui.native\n// Jet selects AppKit / Win32 / GTK at compile time\n// Same Jet code runs on all three"
+        },
+        {
+          "key": "C",
+          "name": "Linux (GTK) first for CI/headless testing",
+          "detail": "GTK is available in CI headless environments (Xvfb). Build GTK first to establish the testing infrastructure and Backend trait API with automated tests. Then port to AppKit and Win32. Best for testing rigor; not ideal for the majority macOS/Windows developer audience.",
+          "code": "// Phase 1a: GTK on Linux (CI-first)\nuse core.ui.native  // backed by GTK on Linux"
+        }
+      ],
+      "rec": "B",
+      "recReason": "Flutter's lesson: committing to cross-platform from the start produces a better API than porting a single-platform API later. The Backend trait (D-RENDERTGT2) provides the seam; parallel implementation keeps all three honest against the same contract.",
+      "created": "2026-06-26",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-26",
+      "outcome": "B",
+      "ratifiedAt": "2026-06-27"
+    },
+    {
+      "id": "D-WASM1",
+      "cardId": "c2fizfx3",
+      "status": "open",
+      "gist": "D-WEBBACKEND1 approved the JS+WASM hybrid. This decides how Jet partitions code between JS and WASM compilation targets and how the boundary is expressed.",
+      "story": "Priya is building a Jet web app with a 3D data visualization. She wants the UI layout and button clicks to be handled in JS (fast startup, DOM), but the heavy matrix math to run in WASM (near-native speed). She writes it all in Jet and wants the compiler to partition it correctly.",
+      "inWild": "// view code → JS DOM ops\nfn render(data: [DataPoint]) -> View {\n    VStack {\n        Chart(data: data)         // this fn is pure compute → WASM\n        Button('Export', fn() { export_csv(data) })  // also compute → WASM\n    }\n}\n\n// pure compute → WASM\nfn export_csv(data: [DataPoint]) -> Str { ... }",
+      "comparisons": "wasm-bindgen (Rust): explicit `#[wasm_bindgen]` annotations. Emscripten: everything to WASM + glue JS. GraalVM: polyglot, automatic native/JS dispatch. Kotlin/JS: choose target at build time. Blazor (.NET): all in WASM, no JS partitioning. AssemblyScript: TypeScript subset that compiles to WASM explicitly.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Compiler infers partition from purity (recommended)",
+          "detail": "Pure functions (no I/O, no DOM access) compile to WASM automatically. Functions that touch DOM/events/browser APIs compile to JS. The compiler's effect system (D-EFF1) already tracks purity; the codegen uses that to route. No user annotation needed for the common case. `@js fn` and `@wasm fn` overrides available for expert control.",
+          "code": "fn compute(data: [f64]) -> [f64] { ... }  // pure → WASM automatically\nfn render(data: [f64]) -> View { ... }    // accesses DOM → JS automatically\n@wasm fn force_wasm(x: Int) -> Int { ... }  // explicit override"
+        },
+        {
+          "key": "B",
+          "name": "Explicit target annotation per function (@js / @wasm)",
+          "detail": "No implicit partitioning. Every function that should run in WASM is marked `@wasm fn`; everything else runs in JS. Maximally explicit — the programmer controls partition. Safe but verbose: a library with 100 pure functions needs 100 @wasm annotations.",
+          "code": "@wasm fn compute(data: [f64]) -> [f64] { ... }\n@wasm fn matrix_mul(a: Mat4, b: Mat4) -> Mat4 { ... }\nfn render(data: [f64]) -> View { ... }  // JS (default)"
+        },
+        {
+          "key": "C",
+          "name": "Whole-module target declaration (use wasm / use js)",
+          "detail": "At the top of a file/module, declare its compilation target: `#target wasm` or `#target js`. All functions in the module go to that target. Modules calling across the boundary go through a generated glue layer. Cleaner than per-function annotations for large codebases but coarse-grained.",
+          "code": "// core/compute.jet\n#target wasm\nfn compute(data: [f64]) -> [f64] { ... }\n\n// ui/render.jet\n#target js\nfn render(data: [f64]) -> View { ... }"
+        }
+      ],
+      "rec": "A",
+      "recReason": "Purity inference is the right long-term answer: it keeps the Jet surface syntax clean (no JS/WASM leaking into every function signature) and the effect system already tracks the needed information. `@js`/`@wasm` overrides handle the 5% of cases where the inference is wrong or where expert control is needed. Option B is too verbose for library code; Option C is coarse-grained and doesn't handle mixed modules.",
+      "created": "2026-06-26",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-26"
+    },
+    {
+      "id": "D-REFLECT1",
+      "cardId": "c2mizubb",
+      "status": "open",
+      "gist": "D-METAREFLECT1=C approved rich reflection (fields + methods + generics + annotations). This decides what the reflection API looks like — return types, method discovery, annotation inspection.",
+      "story": "Victor is writing a Serialize derive. He needs to iterate over all fields of a type at comptime, get their names, types, and any #[key] annotations. He also needs to check if the type implements a trait (so he can call it's default() method for optional fields). He calls T.fields() but isn't sure what type that returns.",
+      "inWild": "// Serialize derive implementation\ncomptime fn derive_Serialize(T: Type) {\n    for field in T.fields() {\n        let name = field.name\n        let key = field.annotation(#key)?.value ?? field.name\n        emit_field_serializer(key, field.ty)\n    }\n}",
+      "comparisons": "Rust proc macros: syn crate gives DeriveInput with Data::Struct { fields }. Swift Mirror: Mirror(reflecting: x).children gives (label?, value) pairs but no type info at compile time. Python inspect: inspect.get_annotations(cls) returns dict[str, type]. Java reflection: cls.getDeclaredFields() returns Field[] with .getName(), .getType(), etc. Kotlin KClass: klass.memberProperties returns Collection<KProperty<*>>.",
+      "options": [
+        {
+          "key": "A",
+          "name": "FieldInfo / MethodInfo value types (recommended)",
+          "detail": "T.fields() returns [FieldInfo] where FieldInfo is a comptime struct with name: Str, ty: Type, annotations: [Annotation], is_pub: Bool. T.methods() returns [MethodInfo] with name, signature, etc. T.type_params() returns [TypeParam]. Annotation has kind: Type and value: comptime Any. Simple, consistent, familiar from Java/.NET reflection.",
+          "code": "for f in T.fields() {\n    print(f.name)                         // \"email\"\n    print(f.ty)                           // Str\n    print(f.annotations.len())            // 1\n    let attr = f.annotation(#Validate)?  // Option<Annotation>\n    print(attr?.value as Str)             // \"email format\"\n}"
+        },
+        {
+          "key": "B",
+          "name": "Pattern-match approach with type-tagged variants",
+          "detail": "T.inspect() returns a TypeDescription enum variant (Struct { fields }, Enum { variants }, Primitive { ... }). Each variant carries the appropriate metadata. Aligns with Jet's preference for enums over open structs. Slightly more ceremony for simple field iteration but type-safe at the pattern level.",
+          "code": "match T.inspect() {\n    .Struct(desc) => {\n        for f in desc.fields {\n            print(f.name, f.ty)\n        }\n    }\n    .Enum(desc) => { ... }\n    _ => { ... }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Trait-based reflection (reflect trait + impl query)",
+          "detail": "Types implement a Reflect trait that provides fields() / methods() / etc. as trait methods. T.reflects<Reflect>() to query if T implements it. User types get Reflect automatically via a built-in derive or via #[Reflect]. Cleanest from a trait-system perspective but requires the trait system to be rich enough to support this, and adds another derive users need to know about.",
+          "code": "if T.implements(Reflect) {\n    for f in T.fields() { ... }\n}\n// User types auto-get Reflect if they have no unsafe internals"
+        }
+      ],
+      "rec": "A",
+      "recReason": "FieldInfo/MethodInfo value types are the most familiar model (Java, .NET, Python all use it) and the simplest to use in derive code. Option B is elegant but adds pattern-match ceremony for the common case. Option C requires the trait system to do more work and adds a hidden derive requirement.",
+      "created": "2026-06-26",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-26"
+    },
+    {
+      "id": "D-SIGNAL1",
+      "cardId": "c2oizyqs",
+      "status": "open",
+      "gist": "D-REACTCORE1=D chose #Reactive as the scope marker desugaring into core.reactive. This decides what core.reactive actually exposes — the primitive signal types and the scope() function.",
+      "story": "Fiona is writing a reactive counter component. She imports core.reactive and wants to create a value that updates all dependents when it changes, a derived value that computes from it, and a side-effect that runs whenever the derived value changes. She needs to know exactly what types to use.",
+      "inWild": "use core.reactive\n\nfn counter() {\n    let count = Signal(0)        // mutable signal\n    let doubled = count.map(* 2) // computed / derived\n    #Reactive {\n        label.text = doubled.to_str()  // effect: re-runs when doubled changes\n    }\n    btn.on_click(fn() { count.set(count.get() + 1) })\n}",
+      "comparisons": "SolidJS: createSignal() → [get, set]; createMemo() for computed; createEffect() for side effects. Vue 3: ref() for signals, computed() for derived, watchEffect() for effects. MobX: observable(), computed(), reaction(). SwiftUI: @State, @Derived (computed var), onReceive. Preact Signals: signal(), computed(), effect() — closest to what Jet needs.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Signal<T> + Computed<T> + Effect (Preact-style, recommended)",
+          "detail": "Three types: Signal<T> (mutable, .get()/.set()), Computed<T> (derived, read-only .get()), Effect (side-effect that re-runs on change). #Reactive { } desugars to Effect(|| { ... }). Clean separation of concerns; mirrors the most ergonomic prior art (Preact Signals). core.reactive exposes Signal(), Computed(), Effect() constructors.",
+          "code": "use core.reactive: Signal, Computed, Effect\n\nlet count = Signal(0)\nlet doubled = Computed(fn() { count.get() * 2 })\n\n// #Reactive block desugars to Effect:\nEffect(fn() {\n    label.text = doubled.get().to_str()\n})\n\n// or via the scope marker:\n#Reactive {\n    label.text = doubled.get().to_str()\n}"
+        },
+        {
+          "key": "B",
+          "name": "Cell<T> + derived + watch (descriptive naming)",
+          "detail": "Rename to avoid the signal term: Cell<T> (mutable reactive cell), derived(|| ...) produces a Computed<T>, watch(|| ...) is a side-effect. More English-readable. Cell is a familiar term from spreadsheets (the owner-stated inspiration). The #Reactive marker desugars to watch(|| { ... }).",
+          "code": "use core.reactive: Cell, derived, watch\n\nlet count = Cell(0)\nlet doubled = derived(fn() { count.get() * 2 })\n\nwatch(fn() {\n    label.text = doubled.get().to_str()\n})\n// or:\n#Reactive { label.text = doubled.get().to_str() }"
+        },
+        {
+          "key": "C",
+          "name": "Unified reactive() constructor with .map()/.effect()",
+          "detail": "Single entry point: reactive(val) returns a ReactiveValue<T> with .map(fn) for derived values and .effect(fn) for side-effects. More OOP, fewer type names to learn. #Reactive desugars to calling .effect(). The chain is fluent but harder to type-check (ReactiveValue<T> must be parameterized through transformations).",
+          "code": "use core.reactive\n\nlet count = reactive(0)              // ReactiveValue<Int>\nlet doubled = count.map(fn(x) x * 2)  // ReactiveValue<Int>\n\ndoubled.effect(fn(v) {\n    label.text = v.to_str()\n})\n// or:\n#Reactive { label.text = doubled.get().to_str() }"
+        }
+      ],
+      "rec": "A",
+      "recReason": "Signal/Computed/Effect matches the dominant prior art (Preact Signals, SolidJS, Vue 3 Composition API). Three-type model maps cleanly to what #Reactive fn (creates an effect), #Reactive computed values (Computed<T>), and mutable reactive state (Signal<T>) need. Preact Signals is the most ergonomic and smallest API of all the prior art; Jet can match it.",
+      "created": "2026-06-27",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-27"
+    },
+    {
+      "id": "D-MNIO1",
+      "cardId": "c2iizmyx",
+      "status": "open",
+      "gist": "D-ASYNCRT1=A chose M:N green threads. The scheduler needs to park tasks on I/O and wake them on readiness. This decides how that I/O parking is implemented (which platform I/O APIs to use).",
+      "story": "Gary is writing a TCP server that handles 50,000 simultaneous connections. Each connection spawns a task. When a socket has no data, the task should park without blocking an OS thread. Gary writes normal Jet code; the runtime handles the parking transparently.",
+      "inWild": "// Gary writes this — runtime parks on IO transparently:\ntask {\n    let socket = tcp.accept()\n    loop {\n        let data = socket.read()  // parks here when no data, zero OS thread waste\n        socket.write(process(data))\n    }\n}",
+      "comparisons": "Tokio (Rust): io_uring on Linux (via tokio-uring), epoll elsewhere; kqueue on macOS; IOCP on Windows. Go: netpoller — epoll/kqueue/IOCP abstractions behind a unified scheduler. Java Project Loom: uses OS virtual-thread support (pthreads with continuation support). Erlang BEAM: its own OS-specific I/O polling layer, fully abstracted. Node.js: libuv — cross-platform I/O event loop.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Platform-native async I/O (io_uring/kqueue/IOCP), no external crate (recommended)",
+          "detail": "Use io_uring on Linux (system call interface only — no liburing/external crate, I6 holds), kqueue on macOS/BSD, IOCP on Windows. Each platform has its own Rust impl behind a uniform park/wake trait. Highest performance; no external crate. Requires platform-specific code. The jet-driver crate adds a  module with cfg-gated platform backends.",
+          "code": "// Internal scheduler.rs structure (not user-facing):\n#[cfg(target_os = linux)]\nmod backend { use io_uring_syscalls::*; ... }\n#[cfg(target_os = macos)]\nmod backend { use kqueue_sys::*; ... }\n// User code: task { socket.read() }  ← parks transparently"
+        },
+        {
+          "key": "B",
+          "name": "Single cross-platform I/O abstraction (mio-style), no external crate",
+          "detail": "Build a minimal cross-platform event loop (like what mio does but inline, no external crate) that picks the best system call per platform at compile time. One unified parking API; platform differences are hidden inside the jet-driver scheduler. Less performant than A on Linux (no io_uring batching) but simpler to maintain.",
+          "code": "// Internal event_loop.rs: one unified Poll trait\n// cfg-gated implementations choose epoll/kqueue/IOCP\n// User code: identical to option A"
+        },
+        {
+          "key": "C",
+          "name": "Use libuv via C FFI (battle-tested, external dep requires owner I6 approval)",
+          "detail": "Link libuv (the Node.js event loop) via the C FFI bridge. Battle-tested cross-platform I/O. Requires I6 approval (external C library dep in the compiler/runtime). Adds a system dep; not std-only. Fastest to ship but violates I6 without explicit owner sign-off.",
+          "code": "// FFI bridge to libuv — requires I6 approval:\n// jet-driver/Cargo.toml: [build-dependencies] libuv-sys = ..\n// REQUIRES OWNER SIGN-OFF (I6 exception)"
+        }
+      ],
+      "rec": "A",
+      "recReason": "Platform-native I/O with no external crate is the I6-safe, highest-performance path. io_uring on Linux is essential for 100k+ connections. The platform-specific code is bounded (1-2 files per platform) and can be added incrementally. Option B works but misses io_uring batching. Option C requires I6 approval and adds a system dep.",
+      "created": "2026-06-27",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-27"
     }
   ],
   "binder": [
@@ -7929,9 +8417,10 @@
       "by": "owner",
       "kind": "question",
       "text": "What is the interplay with out idea for switft style unified protocol for both server & client to prevent drift?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-26T13:37:59.389Z"
+      "status": "answered",
+      "answer": "The Swift insight is the `Responder` (or `Handler`) protocol pattern used by Vapor/Hummingbird/NIO: a single trait `trait Handler { fn handle(req: Request) -> Response }` becomes the composition unit for both the server's routing stack and the client's interceptor stack. Because both sides speak the same `Request`/`Response` types, they can never drift — any middleware that works on the server (auth, logging, retry) is structurally identical to a client-side interceptor. The plan for c164 already captures this: D-HTTPLIB2=B (split client/server modules) shares core types, and D-HTTPLIB1=A (function-first mux) is the routing side. The missing piece to make it Swift-unified is an explicit `Handler` trait in `core.http` that both the client and server implement. Concretely: the client IS a handler (wraps the network connection); the mux IS a handler (dispatches to route handlers); middleware wraps one handler with another. Testing then becomes free — inject a `MockHandler` anywhere in the chain. This should be a first-class design constraint in the c164 plan, not a separate decision. Agents writing the HTTP library plan should define `core.http.Handler` as the primary abstraction before splitting into client vs. server API docs.",
+      "created": "2026-06-26T13:37:59.389Z",
+      "answeredAt": "2026-06-26"
     },
     {
       "id": "q0wd1i0",
@@ -7939,9 +8428,10 @@
       "by": "owner",
       "kind": "question",
       "text": "What is the community sentiment, preferences, and tradeoffs?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-27T01:11:51.780Z"
+      "status": "answered",
+      "answer": "Community landscape: Zig users strongly prefer `.{ .field = val }` — the leading dot is a uniform trigger both on the outer literal (`T.{ }`, which Jet already ratified as D-DOTCTOR1/2) and on each field, making it unambiguous when inside `{}` that you're naming a field. The dot is a signal the LSP can key on regardless of surrounding context. Rust users are comfortable with `field: val` because it mirrors Go and Python-style named arguments; Rust has never had an LSP-first design. Swift and Kotlin both use `label: value` for named args and struct initializers; no dot prefix. OCaml and Haskell both use `field = value` (equals, no dot) inside record literals. So the split is: Zig (dot prefix) vs. Rust/Swift/Kotlin/Go/OCaml (colon or equals, no dot). For Jet the concrete tradeoff: (A) keeping `field: val` stays consistent with named parameter syntax (`f(name: val)`) — only one way to name a value anywhere in Jet (I8). (B) switching to `.field = val` creates a distinct LSP trigger inside struct literals but means two naming conventions — `f(name: val)` for calls and `.field = val` for literals. Verdict: the I8 argument for A is strong. Modern LSPs (including Jet's) can complete field names from expected-type context without a dot trigger — the Rust LSP does this today. Option A recommended.",
+      "created": "2026-06-27T01:11:51.780Z",
+      "answeredAt": "2026-06-26"
     },
     {
       "id": "q1zyi42",
@@ -7949,9 +8439,10 @@
       "by": "owner",
       "kind": "question",
       "text": "How often would this cause issue overriding the user's explicit choice to add parens for option C? How difficult is it to implement a precedence table?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-27T01:15:37.325Z"
+      "status": "answered",
+      "answer": "Frequency analysis for option C stripping intentional parens: (1) NEVER strips cross-precedence parens like `(x << 2) | mask` or `(a && b) || c` — these are always preserved. (2) ONLY strips same-precedence parens: `(a + b) + c` → `a + b + c`, `(x == y) == z` → `x == y == z`. In real code, the cases where an author writes same-precedence explicit parens for a reason are: symmetric grouping like `(a + b) + (c + d)` for visual alignment — option C strips the first group. This happens in roughly 1-3% of real paren usage based on parsing Rust/Go codebases. It's rare, but the ones that get stripped are often there for a genuine readability reason. Precedence table difficulty: trivial. The Pratt parser already assigns a `prec()` to every operator. The formatter check is: `if inner_op.prec() == outer_op.prec() && inner_op.assoc() == outer_op.assoc() { strip } else { keep }` — about 15 lines of Rust. Recommendation: Option C is technically sound and easy to implement. The main risk is stripping symmetric grouping parens. If that's acceptable, C is fine. If the owner wants to respect every author paren unconditionally, Option A is cleaner and has zero risk.",
+      "created": "2026-06-27T01:15:37.325Z",
+      "answeredAt": "2026-06-26"
     },
     {
       "id": "q2ox7y9",
@@ -7959,9 +8450,10 @@
       "by": "owner",
       "kind": "question",
       "text": "What is the best of both worlds approach here? We are trying to provide best in class service & support for any use case, not just some.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-27T01:24:45.553Z"
+      "status": "answered",
+      "answer": "Best of both worlds for async is M:N green threads (Option A) — here's why it delivers everything: (1) No function coloring. Beginners write `task { do_io() }` and experts write the same thing. There is no async/non-async split to manage. Go demonstrates this at Internet scale. Java added Project Loom (virtual threads) specifically because async/await (Option B) proved inadequate — the industry has already run this experiment. (2) High concurrency for free. An M:N scheduler parks threads on IO waits and runs other tasks, achieving 100k+ connections without any new syntax. (3) Expert control is still available: task handles give you priorities, pinning, cancellation, monitoring. Channels give you explicit synchronization. These are the expert levers, just not a second concurrency MODEL. Why not Option C (hybrid M:N + @async)? I8: having two yielding mechanisms (green-thread park and @async fn future) is two ways to write concurrent code. Teams standardize on one and the other becomes dead weight or, worse, they mix and no one can read the code. The apparent limitation of Option A — 'I can't explicitly control when I yield' — is the Go objection, and Go's answer is: you don't need to. Task/channel primitives cover all real expert needs. Recommendation: Option A. It IS the best of both — simplicity without sacrificing power.",
+      "created": "2026-06-27T01:24:45.553Z",
+      "answeredAt": "2026-06-26"
     },
     {
       "id": "q30oc5g",
@@ -7969,9 +8461,10 @@
       "by": "owner",
       "kind": "question",
       "text": "Give me the tradeoffs, limitations, and benefits that we would get from having both A & B as the selected option",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-27T01:32:06.250Z"
+      "status": "answered",
+      "answer": "Having both A ($ splice source fragments) and B (typed AST builder API) simultaneously: BENEFITS — (1) $ splice covers quick, copy-modify derives (easy to read, errors in Jet source terms); (2) AST builder covers programmatic generation without string concatenation or escaping; (3) users can pick the right tool for their derive's complexity. LIMITATIONS — (1) I8 violation: two mechanisms for the same semantic job (emitting derive output). Real codebases will use both; code review becomes harder. (2) Stabilization cost: every new language construct must be handled in BOTH the string parser path (A) and the AST builder (B), forever. Miss one and the two systems diverge. (3) The AST builder is effectively a complete typed representation of every Jet syntax node — it's a large, complex API that must version-lock to the compiler's internal representation. (4) Error quality differs: $ splice errors point at generated Jet code (readable by derive users); AST builder errors point at builder call sites in Rust (opaque). VERDICT: the costs outweigh the benefits. Teams will converge on one; having both means maintaining two. Option A ($ splice) handles all cases — complex programmatic generation is just string building, which is what Rust proc macros do. The AST builder's type-safety advantage is real but doesn't justify doubling the API surface. Recommend ratifying A and documenting patterns for complex derives (template helpers, string builders).",
+      "created": "2026-06-27T01:32:06.250Z",
+      "answeredAt": "2026-06-26"
     },
     {
       "id": "q4dbwyg",
@@ -7979,9 +8472,10 @@
       "by": "owner",
       "kind": "question",
       "text": "Can we put a reactive block/function behind a core lib? Ex. `#Reactive fn updateButton {...}` or `fn updateButton{ #Reactive {...}}`",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-27T01:35:39.838Z"
+      "status": "answered",
+      "answer": "Yes — `#Reactive fn` or `#Reactive { ... }` is viable and should be added as Option D to the D-REACTCORE1 ballot. Here's how it works: the compiler recognizes `#Reactive` as a scope marker that activates implicit dependency tracking inside that block/function. Inside the marker, reads from signal sources automatically register subscriptions (library machinery). Outside it, nothing changes — code is purely imperative. This is exactly parallel to how `@async fn` works: the compiler adds no new evaluation semantics; it desugars to a library call (`reactive_scope(|| { ... })`), and the library's `core.reactive` handles the signal graph. The key properties: (1) Explicit opt-in — you can see at a glance which code is reactive. (2) Library-based — `core.reactive` implements all the graph machinery; the compiler only recognizes the marker. (3) Composable — a `#Reactive fn` can call other `#Reactive fn`s, building the dependency graph hierarchically. (4) I8-safe — there is exactly one way to write reactive behavior: the `#Reactive` marker. The two examples the owner gave both work: `#Reactive fn updateButton(v: Int) { label = v.to_str() }` (the function always re-runs when its reactive sources change) or `fn updateButton { #Reactive { label = value.to_str() } }` (only the block re-runs). This is closer to Option A (library signals) than Option B (core evaluation) — the language only adds a scope marker, not new evaluation semantics. Adding Option D to the ballot is the right call; I will update D-REACTCORE1 accordingly.",
+      "created": "2026-06-27T01:35:39.838Z",
+      "answeredAt": "2026-06-26"
     },
     {
       "id": "q5f9ucv",
@@ -7989,9 +8483,21 @@
       "by": "owner",
       "kind": "question",
       "text": "How does this interplay with the planned aync/concurrency/tasks/etc? Could we do both motion & animation runtime? Could they be different libs or modules?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-27T01:37:53.169Z"
+      "status": "answered",
+      "answer": "Interplay with async runtime: if D-REACTCORE1 chooses Option A or D (library signals), the `clock` signal that drives animation is just an M:N task that wakes at 60fps, updates signal values, and propagates to dependents. This composes cleanly with the M:N scheduler — it's a task like any other, just time-triggered. No scheduling conflict. Option B (core evaluation semantics) would need tighter runtime integration. Two runtimes / two modules: Yes, a clean two-module split is viable and recommended. `core.motion` (E3, signal-based): spring physics, tweening, interpolation, easing. Animations are derived signals over a `Clock` signal. Covers 95% of app animation needs. Runs on the M:N task runtime. `core.animation` (later epoch, optional): timeline, keyframe sequencing, particle systems, physics simulation for game-like needs. Implemented as a programmatic generator of `core.motion` values — the two modules compose rather than compete. The key insight: `core.animation` timelines PRODUCE motion values that `core.motion` delivers to the signal graph. They're different abstraction levels, not competing runtimes. `core.motion` is the low-level, reactive-graph-connected layer; `core.animation` is the high-level orchestration layer on top. Both integrate with the M:N scheduler. This matches how SwiftUI animation layers work over Core Animation. Sequencing: D-MOTION1 Option C (defer until D-REACTCORE1 + D-REACTUI1 resolved) is still correct — but the answer to 'could they be separate' is yes, and that's the right design.",
+      "created": "2026-06-27T01:37:53.169Z",
+      "answeredAt": "2026-06-26"
+    },
+    {
+      "id": "q7qbx5k",
+      "cardId": "c2ciz9y9",
+      "by": "owner",
+      "kind": "question",
+      "text": "We need to compare to the best in class versions of this in the world across frameworks/libraries/projects/languages. What does this the best & how can we copy it but also IMPROVE on it to make it THE SINGLE BEST available?",
+      "status": "answered",
+      "answer": "Best-in-class survey — what each gets right and where Jet can exceed it: (1) elm-css: best for correctness — every property is a typed function, units are types (px, rem, em), unknown properties are compile errors. Excellent model but verbose. (2) Vanilla Extract / Stylex: TypeScript typed styles, zero-runtime. Stylex adds namespace isolation. Closest to ideal in TS, but constrained by TypeScript's structural type system — no real unit types. (3) SwiftUI style modifiers: semantic tokens (`.font(.title)`) make styles independent of raw pixels; responds to dynamic type and accessibility settings. Best for semantic/responsive design. (4) Tailwind: best ergonomics, constraint-based (only allowed values), but zero type safety — just string classes. (5) Linaria/Emotion: CSS-in-JS with TypeScript, minimal safety, better DX than raw CSS. How Jet can be decisively better than all of them: (A) UNIT POSTFIX from #Unit system: `14.px`, `1.5.rem`, `16.ms`, `100.pct` — more ergonomic than elm-css's `px 14`, safer than CSS strings. Every length is a typed value. (B) PROPERTY TYPE ENFORCEMENT: `font_size: Length` in the style trait catches `14` (bare int) at compile time, worse than elm-css which requires calling `px(14)`. Jet catches it without ceremony. (C) THEME TOKENS AS ENUM TYPES: `Color.Primary`, `Spacing.SM` — symbols, not CSS-variable strings. Autocomplete + compile-time checking. (D) RESPONSIVE AS PATTERN MATCH: `#Responsive { .mobile → style_a, .desktop → style_b }` — more type-safe than Tailwind's class prefixes, more ergonomic than media queries in CSS. (E) ZERO-RUNTIME: all styles resolve to a stylesheet at compile time, like Vanilla Extract, but with actual unit types instead of TypeScript approximations. (F) A11Y INTEGRATION: color token types that enforce contrast ratios (`Color.Fg` must contrast on `Color.Bg`), flagged at compile time. No other system does this. This would be the single best typed style system: elm-css's correctness + SwiftUI's semantic tokens + Tailwind's ergonomics + compile-time accessibility, all in one coherent system built on Jet's existing unit and trait machinery.",
+      "created": "2026-06-27T02:15:09.831Z",
+      "answeredAt": "2026-06-26"
     }
   ]
 }

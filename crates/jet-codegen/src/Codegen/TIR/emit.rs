@@ -928,6 +928,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::MatchGroup => {
                     format!("({}).get(({}) as usize).cloned().flatten()", recv, a(0))
                 }
+                // D-COLLBREADTH1=A: Set<T> operations.
+                TBuiltinOp::SetFrom => {
+                    format!("({}).into_iter().collect::<std::collections::HashSet<_>>()", recv)
+                }
+                TBuiltinOp::SetInsert => format!("({}).insert({})", recv, a(0)),
+                TBuiltinOp::SetRemove => format!("{{({}).remove(&{});}}", recv, a(0)),
+                TBuiltinOp::SetToList => {
+                    format!("({}).iter().cloned().collect::<Vec<_>>()", recv)
+                }
+                TBuiltinOp::SetUnion => format!(
+                    "({}).union(&({})).cloned().collect::<std::collections::HashSet<_>>()",
+                    recv, a(0)
+                ),
+                // D-COLLBREADTH1=A: Deque<T> operations.
+                TBuiltinOp::DequePushFront => format!("({}).push_front({})", recv, a(0)),
+                TBuiltinOp::DequePushBack => format!("({}).push_back({})", recv, a(0)),
+                TBuiltinOp::DequePopFront => format!("({}).pop_front()", recv),
+                TBuiltinOp::DequePopBack => format!("({}).pop_back()", recv),
+                TBuiltinOp::DequePeekFront => format!("({}).front().cloned()", recv),
+                TBuiltinOp::DequePeekBack => format!("({}).back().cloned()", recv),
                 // D-ITER1: non-closure lazy adapters.
                 TBuiltinOp::Take => format!("jet_list_take(({}).clone(), {})", recv, a(0)),
                 TBuiltinOp::Skip => format!("jet_list_skip(({}).clone(), {})", recv, a(0)),
@@ -1544,6 +1564,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     call.push(')');
                     call
                 }
+                // D-SERDE-ACCESS=B: DataTree accessor methods.
+                THandleOp::DataTreeField => format!("({}).field(&({}))", recv, a(0)),
+                THandleOp::DataTreeAt    => format!("({}).at({})", recv, a(0)),
+                THandleOp::DataTreeInt   => format!("({}).int()", recv),
+                THandleOp::DataTreeText  => format!("({}).text()", recv),
+                THandleOp::DataTreeBool  => format!("({}).bool()", recv),
+                THandleOp::DataTreeFloat => format!("({}).float()", recv),
+                // D-SERDE-ACCESS=B: same accessors on Json/Data.
+                THandleOp::JsonField => format!("({}).field(&({}))", recv, a(0)),
+                THandleOp::JsonAt    => format!("({}).at({})", recv, a(0)),
+                THandleOp::JsonInt   => format!("({}).int()", recv),
+                THandleOp::JsonText  => format!("({}).text()", recv),
+                THandleOp::JsonBool  => format!("({}).bool()", recv),
+                THandleOp::JsonFloat => format!("({}).float()", recv),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -1870,6 +1904,14 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
                 format!("{}(&({}))", helper("jet_enc_yaml_to_string"), arg(0))
             }
         }
+        // D-UUIDENC1=A: hex and base64 encode/decode.
+        ("core.encoding.hex", "encode") => format!("{}(&({}))", helper("jet_std_hex_encode"), arg(0)),
+        ("core.encoding.hex", "decode") => format!("{}(&({}))", helper("jet_std_hex_decode"), arg(0)),
+        ("core.encoding.base64", "encode") => format!("{}(&({}))", helper("jet_std_b64_encode"), arg(0)),
+        ("core.encoding.base64", "decode") => format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0)),
+        // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
+        ("core.uuid", "v4") => format!("{}()", helper("jet_std_uuid_v4")),
+        ("core.uuid", "v7") => format!("{}(&({}))", helper("jet_std_uuid_v7"), arg(0)),
         // E2-M7: streaming file handles (D-IO2).
         ("core.files", "open") => format!("{}(&({}))", helper("jet_std_files_open"), arg(0)),
         ("core.files", "create") => format!("{}(&({}))", helper("jet_std_files_create"), arg(0)),

@@ -103,6 +103,59 @@ mod jet_std {
         fn jet_show(&self) -> String { render_json(self, false, 0) }
     }
 
+    // D-SERDE-ACCESS=B: accessor methods on Json (= Data).
+    impl Json {
+        pub fn field(&self, name: &str) -> Result<Json, String> {
+            match self {
+                Json::Object(map) => map
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| format!("field `{}` not found", name)),
+                _ => Err(format!("expected object, got {}", render_json(self, false, 0))),
+            }
+        }
+        pub fn at(&self, i: i64) -> Result<Json, String> {
+            match self {
+                Json::Array(items) => {
+                    let idx = if i < 0 {
+                        items.len().wrapping_sub((-i) as usize)
+                    } else {
+                        i as usize
+                    };
+                    items.get(idx).cloned().ok_or_else(|| format!("index {} out of bounds (len {})", i, items.len()))
+                }
+                _ => Err(format!("expected array, got {}", render_json(self, false, 0))),
+            }
+        }
+        pub fn int(&self) -> Result<i64, String> {
+            match self {
+                Json::Number(f) => {
+                    let n = *f as i64;
+                    if (n as f64 - f).abs() < 0.5 { Ok(n) } else { Err(format!("{} is not an integer", f)) }
+                }
+                _ => Err(format!("expected number, got {}", render_json(self, false, 0))),
+            }
+        }
+        pub fn text(&self) -> Result<String, String> {
+            match self {
+                Json::Text(s) => Ok(s.clone()),
+                _ => Err(format!("expected text, got {}", render_json(self, false, 0))),
+            }
+        }
+        pub fn bool(&self) -> Result<bool, String> {
+            match self {
+                Json::Boolean(b) => Ok(*b),
+                _ => Err(format!("expected bool, got {}", render_json(self, false, 0))),
+            }
+        }
+        pub fn float(&self) -> Result<f64, String> {
+            match self {
+                Json::Number(f) => Ok(*f),
+                _ => Err(format!("expected number, got {}", render_json(self, false, 0))),
+            }
+        }
+    }
+
     // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
     // The one tree every format adapter speaks. The built-in `#[Codable]` derive
     // (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
@@ -148,6 +201,59 @@ mod jet_std {
     impl super::JetShow for DataTree {
         fn jet_show(&self) -> String { render_datatree_json(self, false, 0) }
     }
+
+    // D-SERDE-ACCESS=B: dynamic accessor methods on DataTree.
+    impl DataTree {
+        pub fn field(&self, name: &str) -> Result<DataTree, String> {
+            match self {
+                DataTree::Object(pairs) => pairs
+                    .iter()
+                    .find(|(k, _)| k == name)
+                    .map(|(_, v)| v.clone())
+                    .ok_or_else(|| format!("field `{}` not found", name)),
+                _ => Err(format!("expected object, got {}", render_datatree_json(self, false, 0))),
+            }
+        }
+        pub fn at(&self, i: i64) -> Result<DataTree, String> {
+            match self {
+                DataTree::Array(items) => {
+                    let idx = if i < 0 {
+                        items.len().wrapping_sub((-i) as usize)
+                    } else {
+                        i as usize
+                    };
+                    items.get(idx).cloned().ok_or_else(|| format!("index {} out of bounds (len {})", i, items.len()))
+                }
+                _ => Err(format!("expected array, got {}", render_datatree_json(self, false, 0))),
+            }
+        }
+        pub fn int(&self) -> Result<i64, String> {
+            match self {
+                DataTree::Int(n) => Ok(*n),
+                _ => Err(format!("expected int, got {}", render_datatree_json(self, false, 0))),
+            }
+        }
+        pub fn text(&self) -> Result<String, String> {
+            match self {
+                DataTree::Text(s) => Ok(s.clone()),
+                _ => Err(format!("expected text, got {}", render_datatree_json(self, false, 0))),
+            }
+        }
+        pub fn bool(&self) -> Result<bool, String> {
+            match self {
+                DataTree::Bool(b) => Ok(*b),
+                _ => Err(format!("expected bool, got {}", render_datatree_json(self, false, 0))),
+            }
+        }
+        pub fn float(&self) -> Result<f64, String> {
+            match self {
+                DataTree::Float(f) => Ok(*f),
+                DataTree::Int(n) => Ok(*n as f64),
+                _ => Err(format!("expected float, got {}", render_datatree_json(self, false, 0))),
+            }
+        }
+    }
+
     impl super::JetShow for DecodeError {
         fn jet_show(&self) -> String {
             if self.path.is_empty() {
@@ -3157,6 +3263,135 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
         out[i*4..i*4+4].copy_from_slice(&s.to_be_bytes());
     }
     out
+}
+
+// ── D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 / core.uuid ───────
+// Pure std implementations; zero external crates (I6); memory-safe (I1).
+
+fn jet_std_hex_encode(bytes: &Vec<u8>) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn jet_std_hex_decode(text: &String) -> Result<Vec<u8>, String> {
+    let s = text.trim();
+    if s.len() % 2 != 0 {
+        return Err(format!("hex string has odd length ({})", s.len()));
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for i in (0..s.len()).step_by(2) {
+        match u8::from_str_radix(&s[i..i + 2], 16) {
+            Ok(b) => out.push(b),
+            Err(_) => return Err(format!("invalid hex at offset {}: {:?}", i, &s[i..i + 2])),
+        }
+    }
+    Ok(out)
+}
+
+const JET_B64_CHARS: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn jet_std_b64_encode(bytes: &Vec<u8>) -> String {
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(JET_B64_CHARS[(n >> 18) as usize] as char);
+        out.push(JET_B64_CHARS[((n >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 { JET_B64_CHARS[((n >> 6) & 0x3f) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { JET_B64_CHARS[(n & 0x3f) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn jet_b64_val(b: u8) -> Result<u8, String> {
+    match b {
+        b'A'..=b'Z' => Ok(b - b'A'),
+        b'a'..=b'z' => Ok(b - b'a' + 26),
+        b'0'..=b'9' => Ok(b - b'0' + 52),
+        b'+' => Ok(62),
+        b'/' => Ok(63),
+        _ => Err(format!("invalid base64 character: {:?}", b as char)),
+    }
+}
+
+fn jet_std_b64_decode(text: &String) -> Result<Vec<u8>, String> {
+    let input: Vec<u8> = text.bytes().filter(|&b| !b.is_ascii_whitespace()).collect();
+    if input.len() % 4 != 0 {
+        return Err(format!("base64 length must be a multiple of 4 (got {})", input.len()));
+    }
+    let mut out = Vec::with_capacity(input.len() / 4 * 3);
+    for chunk in input.chunks(4) {
+        let a = jet_b64_val(chunk[0])?;
+        let b = jet_b64_val(chunk[1])?;
+        out.push(((a << 2) | (b >> 4)) as u8);
+        if chunk[2] != b'=' {
+            let c = jet_b64_val(chunk[2])?;
+            out.push(((b << 4) | (c >> 2)) as u8);
+            if chunk[3] != b'=' {
+                let d = jet_b64_val(chunk[3])?;
+                out.push(((c << 6) | d) as u8);
+            }
+        }
+    }
+    Ok(out)
+}
+
+// UUID helpers — pure std, zero deps. CSPRNG via /dev/urandom (POSIX); the
+// fallback SplitMix64 engages only when /dev/urandom is unavailable.
+fn jet_uuid_fill_random(out: &mut [u8]) {
+    use std::io::Read;
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(out).is_ok() {
+            return;
+        }
+    }
+    // Fallback: SplitMix64 seeded from wall-clock nanoseconds.
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u64;
+    let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
+    for b in out.iter_mut() {
+        state = state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = (state ^ (state >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        *b = (z ^ (z >> 31)) as u8;
+    }
+}
+
+fn jet_uuid_format(b: &[u8; 16]) -> String {
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-\
+         {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+    )
+}
+
+fn jet_std_uuid_v4() -> String {
+    let mut bytes = [0u8; 16];
+    jet_uuid_fill_random(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
+    jet_uuid_format(&bytes)
+}
+
+fn jet_std_uuid_v7(clock: &jet_std::Clock) -> String {
+    let ts_ms = clock.now as u64;
+    let mut bytes = [0u8; 16];
+    // 48-bit timestamp in the high bytes
+    bytes[0] = (ts_ms >> 40) as u8;
+    bytes[1] = (ts_ms >> 32) as u8;
+    bytes[2] = (ts_ms >> 24) as u8;
+    bytes[3] = (ts_ms >> 16) as u8;
+    bytes[4] = (ts_ms >> 8) as u8;
+    bytes[5] = ts_ms as u8;
+    jet_uuid_fill_random(&mut bytes[6..]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x70; // version 7
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
+    jet_uuid_format(&bytes)
 }
 
 // ── E2-M10: networking (core.net + jet.http) ─────────────────────────────────
