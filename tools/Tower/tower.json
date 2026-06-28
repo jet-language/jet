@@ -206,11 +206,15 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e6",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "aarch64-qemu-ci",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Fixed CC/CXX env var leak: added `unset CC CXX` before host `cargo build` in tools/ci/aarch64-qemu-freestanding.sh. First full golden run had failed because CC=aarch64-unknown-linux-gnu-gcc leaked into the host build; clean rerun passed. Pending real remote CI to close."
+        },
         {
           "at": "2026-06-28",
           "text": "Plan aarch64-qemu-ci recorded; no syntax or owner decision needed. Advanced to ready."
@@ -871,6 +875,14 @@
       "log": [
         {
           "at": "2026-06-28",
+          "text": "D-IFC1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-IFC1 after mistaken ratification; added visible owner-Q answer, adversarial pass, and Epoch 6 defer option."
+        },
+        {
+          "at": "2026-06-28",
           "text": "Answered IFC design question and revised D-IFC1 to `#Tainted(.Kind)` label system with audited declassify."
         },
         {
@@ -902,6 +914,14 @@
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "D-REFINE1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-REFINE1 after mistaken ratification; added visible B-vs-C answer, adversarial pass, and Epoch 6 defer option."
+        },
         {
           "at": "2026-06-28",
           "text": "Answered B-vs-C refinement tradeoff question; no ballot change needed beyond existing B-now/C-research framing."
@@ -970,6 +990,14 @@
       "log": [
         {
           "at": "2026-06-28",
+          "text": "D-VERIFY1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-VERIFY1 after mistaken ratification; added visible B-vs-C answer, adversarial pass, and Epoch 6 defer option."
+        },
+        {
+          "at": "2026-06-28",
           "text": "Answered B-vs-C formal verification tradeoff question; B remains bounded now, C remains expert prover tier."
         },
         {
@@ -1001,6 +1029,14 @@
       "plan": "D-REVERSE1=B: core.layout — Cassowary-style incremental LINEAR constraint solver for UI layout. Plan status: blocked on D-LAYOUT1 (API surface ballot). Need decisions on: (A) Constraint syntax — how does user express 'width >= 100' and 'left = other.right + 8'? (B) Variable binding — how are layout variables declared and accessed? (C) Priority levels — Cassowary's required/strong/medium/weak map to what Jet spelling? Raise D-LAYOUT1 ballot before writing code. Prerequisites once D-LAYOUT1 decided: Cassowary solver ported to Rust (no external crate per I6) → wired into core.layout → `@suggest` edits implement the constraint-change API.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "D-LAYOUT1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-LAYOUT1 after mistaken ratification; added visible owner-Q answer, adversarial pass, and Epoch 6 defer option."
+        },
         {
           "at": "2026-06-28",
           "text": "Answered layout solver question and revised D-LAYOUT1 to typed first-class constraint values with expert handles."
@@ -1095,11 +1131,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Richer match-arm patterns (D-MATCHARM1=A): single `|` alternates values, `||`/`&&` are boolean combinators, parens group, a bare boolean tests the subject implicitly. Reopens S25, amends D-IF1/D-IF2.\nGATED on the precedence/grouping sub-question — ballot D-MATCHARM2 (does `|` bind tighter than `||`/`&&`; are parens load-bearing). Once ratified:\nSteps: (1) parser arm-head grammar with the ratified precedence; (2) retire S25's `||`-distribution machinery; (3) confirm the two `&&` meanings (combinator vs D-PAT guard) unify; (4) Syntax.rs; (5) re-bless ui + migrate every `||`-joined arm in canon/examples; (6) fmt round-trip test.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implemented D-MATCHARM1=A + D-MATCHARM2=B end-to-end. Parser: custom arm-head grammar (parse_arm_value_cond / parse_arm_and_cond / parse_arm_alternates_cond / parse_arm_atom_cond) with arm_head_term flag suppressing expr_bitor's | consumption. E0328 teaching error fires when | alternates mix with && without parens. E0993 retired. Formatter: is_all_subject_alts + is_subject_alt_leaf + fmt_arm_alternates emit `|` syntax for Or-trees of subject-equalities. 07_switch.jet migrated to | syntax. tests/ui/matcharm_mixing_needs_parens snapshot added. tests/ui/dispatch_predicate_arm updated to (no errors). diagnostics.md: E0328 added, E0993 noted retired. syntax-decisions.md: D-MATCHARM1+MATCHARM2 row marked Implemented 2026-06-28. Full suite green (one pre-existing other-agent failure: enum_dot_value_needs_context expects E0308 not yet implemented)."
+        },
         {
           "at": "2026-06-27",
           "text": "Planning only: raise/ratify D-MATCHARM2 precedence/grouping before parser work; direction D-MATCHARM1=A is closed."
@@ -1118,7 +1158,7 @@
         }
       ],
       "created": "2026-06-26T20:41:24.822Z",
-      "updated": "2026-06-27"
+      "updated": "2026-06-28"
     },
     {
       "id": "c3olzqo",
@@ -1254,6 +1294,14 @@
       "log": [
         {
           "at": "2026-06-28",
+          "text": "D-CONCSELECT1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-CONCSELECT1 after mistaken ratification; added visible syntax answer, adversarial pass, and Epoch 6 defer option."
+        },
+        {
+          "at": "2026-06-28",
           "text": "Answered structured select syntax question and revised D-CONCSELECT1 to fluent scoped select."
         },
         {
@@ -1289,6 +1337,18 @@
       "plan": "Explicit discard of a fallible result (D-IGNORERET1=B): add a visible, MANDATORY discard sigil that suppresses the `#MustUse` error for one call, emitting a lint (not an error) pointing at what was dropped. Preserves I1 — the footgun is opt-in and visible; silent Jai-style ignore (option C) rejected.\nGATED on the sigil spelling — ballot D-IGNORERET2 (`!_` vs `!discard` vs `_ = expr`). Once ratified:\nSteps: (1) parser accepts the discard sigil at a call site; (2) sema downgrades #MustUse error -> lint when present, naming the dropped type; (3) W-code + ui snapshot; (4) example. Narrowly about fallible-result discard (multi-return is a separate question).",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "D-IGNORERET2: added Epoch 6 defer option per owner instruction."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "D-IGNORERET2: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-IGNORERET2 after mistaken ratification; kept six options and made owner-Q answer/adversarial pass visible."
+        },
         {
           "at": "2026-06-28",
           "text": "Answered syntax request and expanded D-IGNORERET2 to six discard spellings; recommendation updated to audited `.ignore(\"reason\")`."
@@ -1481,6 +1541,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-STDRUBRIC1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L76). Full design ballot attached — owner decides proceed/direction."
         },
@@ -1490,7 +1554,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c9itmoz",
@@ -1500,11 +1564,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-FMTPARENS1=A: update formatter to preserve author-written grouping parentheses. Steps: add formatter tests for redundant-but-authorial parens across arithmetic/logical/call/member contexts; adjust paren-stripping logic to keep existing grouping; document in fmt/spec notes; run fmt + ui/golden tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implemented D-FMTPARENS1=A end-to-end. Added Expr::Paren(Box<Expr>, Span) to AST (jet-foundation). Parser parse_paren_primary now returns Paren node instead of stripping parens. Formatter emits Paren by writing '(' inner ')' preserving author intent. Added look-through Paren arms across all exhaustive Expr matches in sema (CheckerInfer/expr.rs, Captures.rs, Effects.rs, State.rs, Taint.rs, Bundle.rs), codegen (Tuples.rs, TIR/subset.rs, TIR/lower.rs), comptime (Purity.rs, Interpreter.rs), and LSP (SymbolDB.rs). Fixed expr_collect_captures wildcard-fallthrough bug that dropped Paren node captures (causing reactive example move errors). Updated fmt test: fmt_if_expression_and_strips_redundant_condition_parens → fmt_if_expression_preserves_condition_parens. All fmt/golden/hardening/diagnostics_coverage tests green. Only pre-existing other-agent failure remains (enum_dot_value_needs_context E0308 not yet implemented)."
+        },
         {
           "at": "2026-06-28",
           "text": "D-FMTPARENS1=A recorded and implementation plan attached. Advanced to ready."
@@ -1697,6 +1765,18 @@
       "log": [
         {
           "at": "2026-06-28",
+          "text": "D-DISPLAYDBG2: added Epoch 6 defer option per owner instruction."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "D-DISPLAYDBG2: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-DISPLAYDBG2 after mistaken ratification; kept six selector options and made owner-Q answer/adversarial pass visible."
+        },
+        {
+          "at": "2026-06-28",
           "text": "Answered display/debug selector request and expanded D-DISPLAYDBG2 to non-member feature selector spellings; recommendation updated to `{value#debug}`."
         },
         {
@@ -1807,6 +1887,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-FORMALCORE1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L86). Full design ballot attached — owner decides proceed/direction."
         },
@@ -1816,7 +1900,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "cjivbgr",
@@ -1962,12 +2046,16 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-TTLVAL1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L94). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "coivmgi",
@@ -2737,6 +2825,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-JETDOC1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L126). Full design ballot attached — owner decides proceed/direction."
         },
@@ -2746,7 +2838,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c1fixd1e",
@@ -2897,6 +2989,10 @@
       "plan": "Plan: tools/Tower/docs/sidequests/generic-modules.md. D-GENMOD1=A approves generic modules. D-GENMOD2 is now open for the exact type-parameter/value-parameter/instantiation spelling; do not implement parser/Syntax.rs until that owner-facing surface is ratified.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "D-GENMOD2 rewritten per owner instruction: `<T>` generic canon restored, adversarial pass added, and Epoch 6 defer option added."
+        },
         {
           "at": "2026-06-27",
           "text": "[cleanup] No open decision remains on this card; moved from deciding to planning so Tower lanes match computed state."
@@ -3151,6 +3247,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-REFRELOOK1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L143). Full design ballot attached — owner decides proceed/direction."
         },
@@ -3160,7 +3260,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c1tiy3ge",
@@ -3175,6 +3275,14 @@
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "D-COROUTINE1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-COROUTINE1 after mistaken ratification; added visible concurrency answer, adversarial pass, and Epoch 6 defer option."
+        },
         {
           "at": "2026-06-28",
           "text": "Answered owner control question and revised D-COROUTINE1: tasks remain canonical, expert coroutine-grade control moves to task handles/scheduler APIs."
@@ -3318,12 +3426,16 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-SELFVER1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L151). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c1yiye1e",
@@ -3436,12 +3548,16 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-HOLE1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L158). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c22iynbx",
@@ -3457,12 +3573,16 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-PROVENANCE1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L159). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c23iyowz",
@@ -3478,12 +3598,16 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-TIMETRAVEL1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L160). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c24iyrqk",
@@ -3601,12 +3725,16 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-ASKCODE1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L164). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c28iz2c4",
@@ -3680,6 +3808,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-28",
+          "text": "D-RINGLAYER1: added Epoch 6 defer option per owner instruction."
+        },
+        {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L168). Full design ballot attached — owner decides proceed/direction."
         },
@@ -3689,7 +3821,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c2biz8jl",
@@ -3842,6 +3974,14 @@
       "plan": "D-WEBBACKEND1=A: Hybrid JS DOM for views + WASM for logic. Plan status: blocked on multiple sub-decisions. D-WASM1 needed: how does Jet partition code between JS and WASM targets? D-JSBIND1 needed: how do Jet types cross the JS/WASM boundary? D-WEBKIND1 needed: which WASM target first — wasm32-unknown-unknown, wasm32-wasi, or wasm32-wasip2? D-DOMGEN1 needed: does the JS DOM codegen use a thin runtime shim or generate raw DOM calls? Each is a syntax/API design question. Raise D-WASM1 as the first gate — cannot plan further until the partition model is locked. High-level: Jet view functions compile to a JS bundle that issues DOM mutations; pure Jet functions compile to WASM via rustc's wasm32 target. The JS bridge calls WASM via wasm-bindgen equivalent (no external crates — I6).",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "D-WASM1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-WASM1 after mistaken ratification; added visible expert-control answer, adversarial pass, and Epoch 6 defer option."
+        },
         {
           "at": "2026-06-28",
           "text": "Answered web backend audit/control question and revised D-WASM1 to inferred partition plus expert markers and partition reports."
@@ -4238,6 +4378,14 @@
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "D-MOTION1: copied owner questions and answers into the ballot Owner Q&A facet."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Reopened D-MOTION1 after mistaken ratification; added visible motion/animation answer, adversarial pass, and Epoch 6 defer option."
+        },
         {
           "at": "2026-06-28",
           "text": "Answered motion/animation question and revised D-MOTION1 around layered core.motion + core.animation, informed by Manim scene/object/animation model."
@@ -4667,7 +4815,7 @@
       "explainer": "The checklist would live in docs/ (not the spec) and be referenced in PR review. It codifies things we already believe — like 'make misuse a type error', 'never accept raw strings where a path object works', 'CSPRNG and PRNG must not share a namespace' — so reviewers have a checklist rather than relying on institutional memory. It has no syntax impact and no I8 risk. It does require someone to author and maintain it; the risk is it becomes stale or ceremonial. This is a process/docs decision, not a language feature.",
       "story": "I keep catching the same API shape mistakes in review — raw strings instead of typed path objects, functions that are easy to call wrong. I want a short checklist I can point to instead of re-litigating the same principles every time.",
       "inWild": "// Without the rubric, a naive API ships like this:\nfn hash_password(password: str) -> str { … }  // raw strings, no type safety\n\n// The rubric would catch: use typed wrappers, return a typed hash, force the caller to be explicit.\nfn hash_password(password: SecretStr) -> PasswordHash { … }",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -4680,6 +4828,12 @@
           "name": "Leave principles implicit",
           "detail": "Keep relying on reviewer knowledge and existing docs. No new doc to maintain. Risk: inconsistent API surface as the stdlib grows and new contributors join.",
           "code": "// Status quo: reviewer catches it or doesn't.\n// core.fs.read_file(\"./data.txt\")  — raw string slips through in a time-pressured review"
+        },
+        {
+          "key": "D",
+          "name": "Defer stdlib rubric to Epoch 6",
+          "detail": "Do not codify a written checklist now. Keep reviewer judgment and revisit a formal stdlib API-law doc in Epoch 6 after more Core APIs exist.",
+          "code": "// Keep stdlib API review by human judgment for now.\n// Epoch 6 revisit: add docs/reference/stdlib-api-laws.md and require it in reviews."
         }
       ],
       "comparisons": [
@@ -4867,7 +5021,7 @@
       "explainer": "A desugaring map disciplines I8 directly: if a new feature proposal would introduce a second mechanism that lowers to the same kernel form as an existing one, the doc makes that visible immediately. It also anchors the compiler-seams work (the 7-crate workspace under crates/) by giving each crate a clear contract for what it receives and emits. The doc is a living spec artifact, not a one-shot writeup — it must be updated whenever a surface feature is added or changed. Cost: author time per feature; benefit: prevents silent I8 violations and aids new contributors reading the compiler.",
       "story": "I'm reading the sema crate trying to understand what `for x in xs { }` desugars to. There's no doc — I have to grep through four files and guess whether the lowering is canonical or accidental. A one-page map would have answered this in ten seconds.",
       "inWild": "-- surface:\nfor x in xs {\n  print(x)\n}\n\n-- desugaring map entry (doc, not Jet code):\n-- for-in => Iterator.next() loop\n-- xs.iter() -> Iterator<T>\n-- loop { match iter.next() { Some(x) => body, None => break } }",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -4880,6 +5034,12 @@
           "name": "Skip the doc",
           "detail": "Rely on code comments and grep to understand lowerings. Simpler now; becomes expensive as the surface grows. Leaves I8 enforcement purely implicit. Not recommended for a language that bills itself as having 'one canonical way to mean it'.",
           "code": "-- current state: no single place to check\n-- grep for_in Source/sema/*.rs  -- may return 6 files, no canonical answer"
+        },
+        {
+          "key": "D",
+          "name": "Defer desugaring map to Epoch 6",
+          "detail": "Do not create a desugaring map now. Revisit in Epoch 6 when surface features are more stable and the doc is less likely to churn.",
+          "code": "// Keep architecture.md as the current lowering reference.\n// Epoch 6 revisit: add docs/spec/desugaring.md once feature set stabilizes."
         }
       ],
       "comparisons": [
@@ -4913,7 +5073,7 @@
       "explainer": "A TtlCache<K,V> and an ExpiringSecret<T> are pure library types — they wrap a value with a deadline derived from the injectable Clock (already exists) and return an error or zeroize on access past expiry. No language change is required. The alternative (a type-system-level 'expires' dimension that makes staleness a compile-time property) would require tracked effects and is on the roadmap as a larger research item. Coupling these two concerns delays the useful library types for a feature that may be years away. I1: ExpiringSecret should zeroize memory on drop and on expiry by default — the safe path is automatic. I8: if we ship TtlCache now, no second cache type later.",
       "story": "I cache a JWT public key. It has a 1-hour validity. Right now nothing stops me from using a cached key past its expiry — I have to remember to check the timestamp myself. An ExpiringSecret type would refuse access after the deadline and force me to handle the 'stale' case.",
       "inWild": "import core.security.{ExpiringSecret}\nimport core.cache.{TtlCache}\n\nlet jwt_key = ExpiringSecret.new(public_key_bytes, ttl: Duration.hours(1), clock)\n\n-- later:\nmatch jwt_key.get() {\n  Ok(key) => verify_jwt(token, key),\n  Err(Expired) => return Err(Error.unauthorized(\"key rotated\"))\n}\n\nlet cache: TtlCache<str, UserProfile> = TtlCache.new(ttl: Duration.minutes(5), clock)",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -4932,6 +5092,12 @@
           "name": "Defer entirely",
           "detail": "Ship nothing now. Developers track TTL manually with timestamps and conditional checks. No footgun prevention, no memory zeroization. Appropriate only if Jet targets workloads where caching and secrets are irrelevant.",
           "code": "-- current manual pattern:\nlet fetched_at = Clock.now()\nlet key = fetch_key()\n\n// later — easy to forget this check:\nif Clock.now().seconds_since(fetched_at) > 3600 {\n  key = fetch_key()\n}"
+        },
+        {
+          "key": "D",
+          "name": "Defer TTL/secret expiry types to Epoch 6",
+          "detail": "Ship no TTL cache or expiring-secret type now. Revisit in Epoch 6 alongside freshness/tracked-uncertainty evidence.",
+          "code": "// Manual TTL checks for now.\nif clock.now() > expires_at { refresh() }\n// Epoch 6 revisit: TtlCache / ExpiringSecret / freshness tracking."
         }
       ],
       "comparisons": [
@@ -5599,7 +5765,7 @@
       "explainer": "A semantic-graph doc generator reads the sema index (types, signatures, trait impls, doc comments) and emits HTML/Markdown API docs with tested examples. It is an E3 testing/docs ergonomics exit criterion. It depends on stable compiler seams (the `jet-sema` seam crate and the semantic index API card). Doctests close the loop: example code in `/// ` blocks is extracted and run as tests. Without this, doc quality decays because examples are untested. This card does not cover the LSP or IDE dossier views (those are D-DOSSIER1).",
       "story": "I publish a Jet library. I want `jet doc` to generate browsable API docs from my doc comments the same way `cargo doc` does — and I want any `/// ` example to fail CI if it stops compiling, not just silently rot.",
       "inWild": "/// Adds two integers.\n/// ```\n/// assert add(1, 2) == 3\n/// ```\npub fn add(a: Int, b: Int) -> Int { a + b }\n\n// $ jet doc → emits docs/api/index.html\n// $ jet test --doctests → runs the embedded example",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -5618,6 +5784,12 @@
           "name": "Defer until semantic-index API is stable",
           "detail": "Explicitly defer jetdoc — don't ship in E3. Block it on semantic-index API ratification. This avoids building jetdoc twice if the index API changes, but delays the docs ergonomics exit criterion.",
           "code": "// placeholder: jet doc --help\n// Error: jetdoc not available until semantic index is stable (E4)"
+        },
+        {
+          "key": "D",
+          "name": "Defer jetdoc to Epoch 6",
+          "detail": "Do not build jetdoc in E3. Revisit in Epoch 6 after semantic-index APIs, doctest expectations, and docs shape are stable.",
+          "code": "// Hand-written docs for now.\n// Epoch 6 revisit: jet doc + doctests from semantic index."
         }
       ],
       "comparisons": [
@@ -5849,52 +6021,64 @@
       "id": "D-GENMOD2",
       "cardId": "c1jixkit",
       "title": "What exact syntax distinguishes generic-module type parameters, value parameters, and instantiation?",
-      "gist": "D-GENMOD1 approved generic modules, but the exact spelling for type params, value params, and module instantiation still needs one owner choice.",
-      "explainer": "Generic modules touch the user-facing module surface and name resolution. The compiler must know whether a parameter is a type parameter or a compile-time value parameter without guessing from later use. The syntax should reuse Jet's existing generic/function shapes where possible, keep beginner reading clear, and leave one obvious instantiation form.",
+      "gist": "Choose generic-module spelling using Jet’s existing `<T>` type-generic canon, value parameters, and one instantiation form.",
+      "explainer": "Owner instruction integrated: Jet generics use `<T>`, so generic modules must not invent `[]` for type parameters. Adversarial pass: mixing type and value parameters can become C++-template soup or force users to guess whether an argument is a type or value. Patch: keep type parameters in `<...>`, keep compile-time value parameters in `(...)`, and require instantiation to mirror declaration. If that still feels too large for E3, choose the Epoch 6 defer option and keep ordinary generic structs/functions as the only generic surface for now.",
       "story": "Priya is writing a fixed-size LRU cache package. The key type controls hashing/equality, while the capacity is a compile-time value. She wants one generic module that exports `Cache`, `put`, and `get`, then instantiates `StringCache32` once for the rest of the package.",
-      "inWild": "module Lru[K: Hash](capacity: Int) {\n    pub struct Cache[V] { ... }\n    pub fn put(c: ~Cache[V], key: K, value: V) { ... }\n}\n\nmodule StringCache32 = Lru[String](32)",
-      "detail": "",
+      "inWild": "module Lru<K: Hash>(capacity: Int) {\n    pub struct Cache<V> { ... }\n    pub fn put(c: ~Cache<V>, key: K, value: V) { ... }\n}\n\nmodule StringCache32 = Lru<String>(32)",
+      "detail": "Owner Q: Address GENMOD2; integrate the instruction that Jet generics use `<T>`, provide better options, and include an option to defer to Epoch 6.\nAgent answer: Corrected. The previous `[]` type-parameter option was wrong for Jet because `[]` already reads as list/indexing while `<T>` is the ratified generic form. Updated options now center `<T>` for type parameters, separate compile-time value parameters with `(...)`, and add an Epoch 6 defer option. Adversarial pass: the danger is C++-style mixed template complexity; the patch is mirrored declaration/application and no guessing from later use.",
       "options": [
         {
           "key": "A",
-          "name": "Type brackets, value parens (Recommended)",
-          "detail": "Use existing generic brackets for type parameters and function-style parens for compile-time value parameters. Instantiation mirrors declaration: `Module[Type](value)`. A type-only module writes `module Sorted[T: Ord] { ... }`; a value-only module writes `module Ring(capacity: Int) { ... }`.",
-          "code": "module Lru[K: Hash](capacity: Int) {\n    pub struct Cache[V] { ... }\n}\n\nmodule StringCache32 = Lru[String](32)"
+          "name": "Type params in `<...>`, value params in `(...)` (recommended)",
+          "detail": "Use Jet’s existing generic brackets for type parameters and function-style parens for compile-time value parameters. Instantiation mirrors declaration: `Module<Type>(value)`. This is the clearest split and keeps `<T>` canon intact.",
+          "code": "module Lru<K: Hash>(capacity: Int) {\n    pub struct Cache<V> { ... }\n}\n\nmodule StringCache32 = Lru<String>(32)"
         },
         {
           "key": "B",
-          "name": "One paren list with `type`",
-          "detail": "Keep D-GENMOD1's paren shape and mark type parameters explicitly with a new `type` word. Value parameters are ordinary annotated names. Instantiation uses one paren list too. This is visually compact but adds a new contextual word.",
-          "code": "module Lru(type K: Hash, capacity: Int) {\n    pub struct Cache[V] { ... }\n}\n\nmodule StringCache32 = Lru(String, 32)"
+          "name": "One `<...>` list with `const` value params",
+          "detail": "Put both type and value parameters in `<...>`, marking values with `const`. Compact and familiar to C++/Rust const-generic users, but risks template-style visual density and makes value arguments live in the type-generic slot.",
+          "code": "module Lru<K: Hash, const capacity: Int> {\n    pub struct Cache<V> { ... }\n}\n\nmodule StringCache32 = Lru<String, 32>"
         },
         {
           "key": "C",
-          "name": "One paren list with `comptime`",
-          "detail": "Keep type parameters bare in the paren list and mark value parameters as compile-time values with `comptime`. This connects to the broader comptime surface but makes module parameters use a different type-generic spelling than structs/functions.",
-          "code": "module Lru(K: Hash, comptime capacity: Int) {\n    pub struct Cache[V] { ... }\n}\n\nmodule StringCache32 = Lru(String, 32)"
+          "name": "One paren list with explicit `type` params",
+          "detail": "Use one function-like parameter list and mark type parameters with `type`. Beginner-readable, but adds a contextual word and makes modules differ from generic structs/functions.",
+          "code": "module Lru(type K: Hash, capacity: Int) {\n    pub struct Cache<V> { ... }\n}\n\nmodule StringCache32 = Lru(type: String, capacity: 32)"
+        },
+        {
+          "key": "D",
+          "name": "Defer generic modules to Epoch 6",
+          "detail": "Do not add a generic-module surface now. Keep generic structs/functions and ordinary modules; revisit module functors/const module params in Epoch 6 after package/workspace and comptime surfaces are stable.",
+          "code": "module LruString32 {\n    pub struct Cache<V> { ... }\n}\n\n// Epoch 6 revisit:\n// module Lru<K: Hash>(capacity: Int) { ... }"
         }
       ],
       "comparisons": [
         {
-          "lang": "OCaml",
-          "note": "Functor parameters are module-shaped and applied with parentheses. Powerful, but the type/value distinction is carried by module signatures rather than a small beginner-visible syntax.",
-          "code": "module IntMap = Map.Make(Int)"
+          "lang": "Rust",
+          "note": "Rust uses `<T>` for type parameters and also has const generics in `<...>`. Good precedent for Option B, but Jet should avoid forcing values into type syntax unless needed.",
+          "code": "struct Ring<T, const N: usize> { ... }"
         },
         {
           "lang": "C++",
-          "note": "Templates mix type and value parameters in angle brackets. This is compact, but values in `<...>` would collide with Jet's current type-generic expectation.",
+          "note": "C++ templates mix type and value parameters in angle brackets. Powerful, but visually dense and a known complexity sink.",
           "code": "template<typename K, int N> struct Lru { ... };"
         },
         {
+          "lang": "OCaml",
+          "note": "OCaml functors are module-level generics, but parameters are module-shaped. Powerful, less beginner-direct than Jet’s desired package surface.",
+          "code": "module IntMap = Map.Make(Int)"
+        },
+        {
           "lang": "Zig",
-          "note": "Comptime values are ordinary parameters marked by type/value position. Jet needs a clearer surface because modules are user-facing package structure, not just functions.",
+          "note": "Zig uses comptime parameters in function-like declarations; clear for values, but Jet already has `<T>` for type generics.",
           "code": "fn Lru(comptime K: type, comptime capacity: usize) type { ... }"
         }
       ],
       "rec": "A",
       "status": "open",
       "group": "language",
-      "createdAt": "2026-06-28"
+      "createdAt": "2026-06-28",
+      "recommendation": "Recommendation: A. It reuses Jet `<T>` generics, keeps value params visibly value-like, and mirrors declaration/application. Choose D if generic modules should wait until Epoch 6 after workspace/comptime/package surfaces settle."
     },
     {
       "id": "D-VARIADIC1",
@@ -6111,7 +6295,7 @@
       "explainer": "This card is primarily a triage action, not a design decision. The risk of acting without recovering the note is either (a) reopening a topic that is already resolved — wasted design work — or (b) ignoring a real gap because it looks resolved on the surface. The ownership vocabulary touches I1 (safe by default); any change here must not make unsafe aliasing the default. The C FFI capability was previously reverted over exactly this concern (owner-design-kill-criteria). If recovery shows the gap is closed, close the card. If a real gap exists, a follow-on ballot handles it.",
       "story": "I wrote a note months ago about stored refs and ownership. I don't remember if I was tracking a bug, a missing feature, or an open design question. Before the team spends time on it, I need to know what I actually meant.",
       "inWild": "// current state after capability sigils + ref hardening\nfn store(r: ref Person) -> StoredRef<Person> {\n    // ownership rules enforced at sema\n    StoredRef.{ inner: r }\n}\n// is this the full story, or did the original note\n// point at something this doesn't cover?",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -6130,6 +6314,12 @@
           "name": "Close as done",
           "detail": "Declare capability sigils + ref hardening sufficient and close the card without recovering the note. Risk: a real gap gets silently dropped.",
           "code": "// closes the card — acceptable only if\n// we have high confidence the note is stale"
+        },
+        {
+          "key": "D",
+          "name": "Defer stored-ref vocabulary relook to Epoch 6",
+          "detail": "Do no ownership-vocabulary work now. Revisit stored refs in Epoch 6 after expert-tier reference/pointer examples show real pain.",
+          "code": "// No ownership-vocabulary change now.\n// Epoch 6 revisit stored refs after more expert-tier examples exist."
         }
       ],
       "comparisons": [
@@ -6155,10 +6345,10 @@
       "cardId": "c1tiy3ge",
       "title": "Should coroutines stay an internal runtime substrate or become a user-facing primitive?",
       "gist": "Expose coroutine-grade control without splitting the user concurrency model: tasks stay the public primitive, and expert continuation control is added as a scoped task-handle API, not as a second coroutine language.",
-      "explainer": "The owner question is correct: if option B means \"experts cannot suspend/resume, inspect, debug, or tune the runtime\", it is too weak. Revised B does not remove that power; it moves it behind the existing task/nursery model. Jet should keep one public concurrency unit (task in a task scope) and expose expert controls on task handles, scheduler contexts, debug traces, cancellation tokens, parking hooks, and runtime policies. What A uniquely gives is stackless generator-style source syntax: user code manually yields/resumes arbitrary frames. That is expressive, but it duplicates task cancellation, task handles, channels, select, and nursery lifetime. The merged vision is: coroutine machinery exists, is auditable, and is controllable by experts, but user-written coroutines are not a second semantic object unless a later generator feature proves a non-overlapping job.",
+      "explainer": "Owner questions answered: D-COROUTINE1 sits under the structured-concurrency stack. The coherent model is ordinary code -> `task`/channels -> nursery/taskgroup owns lifetime -> `race`/`all`/`any`/select are scoped combinators -> deadlines/cancellation flow through context -> the M:N scheduler parks tasks on I/O/timers. A gives direct source-level suspend/resume; B gives expert power through the canonical task object. Adversarial pass: B can look like less control. Patch: B explicitly includes task handles, scheduler contexts, pause/resume/cancel, priority/pinning where supported, tracing, replay hooks, and debugger visibility. What B withholds is arbitrary resumable frames outside task scope.",
       "story": "I am writing a server. I want blocking-looking socket reads to scale to 100k idle connections, but I do not want every helper in my program to become async-colored or every beginner to learn a coroutine primitive.",
       "inWild": "fn handle(conn: net.Conn) -> () ? NetError {\n    loop {\n        msg @= conn.read_text()?   // parks the Jet task; function is not colored\n        conn.write_text(route(msg))?\n    }\n}",
-      "detail": "",
+      "detail": "Owner Q: What is the relationship to all the other concurrency decisions/plans? I don’t know how this fits in with things like tasks, race/nursery/etc\nAgent answer: Reconciled in tools/Tower/docs/plans/epoch-3/concurrency-vision.md. The coherent model is: ordinary Jet code -> task { }/channels -> nursery scopes own task lifetime -> all/race/any are nursery combinators -> deadlines/cancellation flow through nursery context -> M:N scheduler parks tasks on I/O/timers -> platform readiness backend wakes tasks. D-ASYNCRT1=A already rejects async/await function coloring. D-COROUTINE1 should decide whether coroutines stay internal substrate (rec B); D-NURSERY1 chooses the user-facing structured-concurrency scope; D-RACEWIN1/D-CONCCOMB1 fold into that scope; D-DEADLINE1 rides context/nursery propagation; D-MNIO1 is runtime plumbing only.\n\nOwner Q: What are all the tradeoffs between A & B? We need experts to have full control -> is there anything that cannot be accomplished with option B that could be accomplished with option A? If we are limiting the expert features or control, that is not acceptable. It is our job to make it easy & merge the visions so they arent disparate\nAgent answer: A gives direct user-written suspend/resume and generator syntax. Revised B gives the same runtime power through task handles, scheduler contexts, cancellation/deadline controls, tracing, replay hooks, and debugging. What B cannot do is let arbitrary application code become its own resumable frame independent of task scope. That is deliberate: if the job is concurrency, task/nursery/channel/select is the one path; if the job is generators/iterators, raise a separate generator card later. Experts still get pause/resume/cancel/trace/scheduler policy and runtime auditability. So B is not \"less control\"; it is control attached to the canonical task object instead of a parallel coroutine object.",
       "options": [
         {
           "key": "A",
@@ -6180,9 +6370,9 @@
         },
         {
           "key": "D",
-          "name": "Defer all coroutine substrate choices",
-          "detail": "Leaves the M:N scheduler underspecified and delays D-ASYNCRT1 implementation. Not useful now that the runtime direction is ratified.",
-          "code": "// no decision; scheduler architecture remains open"
+          "name": "Defer coroutine substrate choices to Epoch 6",
+          "detail": "Do not expose coroutine controls or commit the internal coroutine substrate now. Ship only task/channel/nursery semantics; revisit explicit coroutine/generator control in Epoch 6 if real programs need it.",
+          "code": "taskgroup g {\n    g.spawn { serve(conn) }\n}\n\n// Epoch 6 revisit:\n// co @= coroutine serve(conn)\n// co.resume()"
         }
       ],
       "comparisons": [
@@ -6206,7 +6396,7 @@
       "status": "open",
       "group": "runtime",
       "bestCurrent": "Go hides scheduler suspension behind blocking-looking code; Kotlin shows coroutine substrate power but at the cost of visible suspend coloring.",
-      "recommendation": "Choose B revised: one user concurrency model, with expert-grade task-handle/scheduler controls. Nothing safety-critical or performance-critical is lost; only a second source-level coroutine abstraction is withheld."
+      "recommendation": "Recommendation: B if expert control should ship through the task model; D if coroutine substrate exposure should wait until Epoch 6. Devil’s advocate against B: generators may still need a separate story. Patch: treat generators as their own future card, not as concurrency."
     },
     {
       "id": "D-NURSERY1",
@@ -6369,7 +6559,7 @@
       "explainer": "Schema versioning covers the \"what shape did this type have at version N\" problem for serialized/published data. Per-value history means each runtime value carries provenance of which version it started as and every conversion step it passed through. This is a much heavier runtime model — it affects allocation, copy semantics, and GC pressure for all values, not just schema-registered ones. It also overlaps the time-travel-history card (D-TIMETRAVEL1) and the ask-why card (D-PROVENANCE1). Adding it risks building three overlapping provenance/history mechanisms (I8 concern). The schema migration system is the ratified canonical path for versioned data shapes.",
       "story": "I want to know whether the User object I'm holding was originally a v1 or v2 schema shape and whether it went through the auto-migration — without logging that manually every time.",
       "inWild": "// Status quo: schema-level migration\n#[Schema(version: 2)]\nstruct User.{\n    name: String,\n    email: String,   // added in v2\n}\n\n// Migration declared once, not per-value\nmigrate User v1 -> v2: fn(old) -> User.{ name: old.name, email: \"\" }",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -6388,6 +6578,12 @@
           "name": "Defer — wait on time-travel and ask-why outcomes",
           "detail": "Per-value history is a strict subset of what time-travel debugging (D-TIMETRAVEL1) and provenance tracking (D-PROVENANCE1) would provide. Decide those cards first; if one ships, this card collapses into it.",
           "code": "// No new surface; revisit after D-TIMETRAVEL1 / D-PROVENANCE1"
+        },
+        {
+          "key": "D",
+          "name": "Defer self-versioning values to Epoch 6",
+          "detail": "Do not attach version/conversion history to arbitrary values now. Revisit in Epoch 6 if migration/provenance workloads demand it.",
+          "code": "// Plain values carry no version history.\n// Epoch 6 revisit: value-level migration/version provenance if real workloads need it."
         }
       ],
       "comparisons": [
@@ -6575,7 +6771,7 @@
       "explainer": "Option<T> and Result<T,E> make failure explicit: the caller must unwrap or propagate with `?`. A universal hole that flows through arithmetic and function calls is a different model — it defers failure to wherever the hole is eventually consumed. This is exactly what SQL NULL does, and the propagation behavior is the source of the most common class of SQL bugs. It also competes directly with Option<T> (I8). The main argument for it is ergonomics in data-pipeline code where many values may be absent; the counter-argument is that it hides which expression produced the hole.",
       "story": "I'm computing a derived column across a dataframe where some source cells are absent — I want the absence to flow through math without wrapping every step in `if let`.",
       "inWild": "// Today, explicit:\nlet result: Float? = match (a, b) {\n    (Some(x), Some(y)) => Some(x / y),\n    _ => None,\n}\n\n// Hole proposal: implicit propagation\nlet result = a / b   // if a or b is Hole, result is Hole",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -6594,6 +6790,12 @@
           "name": "Defer — revisit when dataframe/table stdlib is designed",
           "detail": "The strongest use case is dataframe/table operations. Design the table stdlib first; if column-absent semantics require a hole type, the design will surface it naturally.",
           "code": "// no action now; revisit with table/dataframe stdlib design"
+        },
+        {
+          "key": "D",
+          "name": "Defer typed holes to Epoch 6",
+          "detail": "Do not add universal typed holes now. Revisit in Epoch 6 if data/exploratory workflows need propagating missingness beyond `T?` / `T ? E`.",
+          "code": "// Fail fast with T? / T ? E instead of propagating holes.\n// Epoch 6 revisit: typed holes for exploratory/data workflows."
         }
       ],
       "comparisons": [
@@ -6627,7 +6829,7 @@
       "explainer": "Provenance tracking means every value carries a graph of its origin: which function, which input values, which source location. At runtime this is expensive (extra allocation and pointer-chasing on every operation) unless it is debug-only or opt-in. The feature overlaps taint tracking (which tracks data flow for security purposes), the record-and-replay card (D-REPLAY1, which records full program execution), and the time-travel-history card (D-TIMETRAVEL1). Building a standalone provenance system risks a third overlapping mechanism for the same \"where did this value come from\" question (I8). Taint tracking tied to security already answers a subset; record-and-replay answers the rest for debugging.",
       "story": "I got a NaN in my physics sim. I want to point at the NaN and ask \"which input caused this\" rather than adding print statements everywhere.",
       "inWild": "// Today: manual trace\nlet force = mass * accel   // if NaN, no record of why\nprintln(\"force={force}\")   // only shows the NaN, not its origin",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -6646,6 +6848,12 @@
           "name": "Tie provenance to taint tracking",
           "detail": "Extend taint's data-flow graph to record computation edges, not just trust labels. Provenance becomes a query on the taint graph. Requires taint to ship first and expands its scope significantly.",
           "code": "// hypothetical, taint-extended\nlet force = mass * accel\nforce.taint.origin()   // [mass: input line 5, accel: sensor.read() line 8]"
+        },
+        {
+          "key": "D",
+          "name": "Defer value provenance to Epoch 6",
+          "detail": "Do not add runtime provenance graphs now. Revisit in Epoch 6 after taint, replay, semantic index, and debugger foundations exist.",
+          "code": "// Use taint/replay/debug metadata for narrow provenance now.\n// Epoch 6 revisit: runtime value provenance graphs."
         }
       ],
       "comparisons": [
@@ -6679,7 +6887,7 @@
       "explainer": "Per-variable history is what time-travel debuggers provide: step backward through execution and inspect what a variable held at each point. The record-and-replay card (D-REPLAY1) covers this by recording the full execution trace deterministically and letting a debugger replay it. Building a separate value-history capture mechanism alongside record-and-replay would be a second mechanism for the same job (I8). The ask-why card (D-PROVENANCE1) also overlaps. The right call is to decide D-REPLAY1; if deterministic replay ships, time-travel debugging is a UI feature of the debugger, not a language-level mechanism.",
       "story": "My loop variable changed to an unexpected value at iteration 47 of 1000 — I want to rewind and see what it was at iteration 46 without adding a Vec to capture it manually.",
       "inWild": "// Today: manual capture\nlet mut history: [Int] = []\nfor i in 0..1000 {\n    history.push(counter)\n    update(counter)\n}\n// inspect history[46] post-hoc",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -6698,6 +6906,12 @@
           "name": "Defer",
           "detail": "Gate on the debugger card (c144) and D-REPLAY1. No action until the debugger architecture is decided.",
           "code": "// no action; revisit after debugger card (c144) and D-REPLAY1"
+        },
+        {
+          "key": "D",
+          "name": "Defer variable history to Epoch 6",
+          "detail": "Do not build standalone per-variable history now. Revisit in Epoch 6 after replay/debugger infrastructure matures.",
+          "code": "// Use debugger/replay hooks now.\n// Epoch 6 revisit: standalone per-variable history store."
         }
       ],
       "comparisons": [
@@ -6877,7 +7091,7 @@
       "explainer": "This feature depends entirely on the semantic-index API existing and exposing the right dataflow/effects information. Without that foundation it cannot be built. If the semantic index is designed well, a query layer is a natural extension — it becomes the primary way to drive impact-analysis, refactoring tools, and the LSP. The crux here is not whether this is a good idea (it is) but whether to plan it now or wait until the semantic-index API is stable. Sequencing risk: if we design the query DSL before the index API is settled, the query layer will need to be reworked. The safe path is to ratify the semantic-index API first, then return here.",
       "story": "I refactored a shared Account struct and I want to know every path through the codebase where the balance field could go negative — not just 'who reads it' but 'who can write a negative value to it'.",
       "inWild": "// Hypothetical query (depends on semantic-index API)\njet query 'mutations(Account.balance) where value < 0'\n// Output:\n// src/billing.jet:142  withdrawal() — unchecked subtraction\n// src/refunds.jet:87   apply_refund() — no floor check",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -6896,6 +7110,12 @@
           "name": "Skip — leave to external tooling",
           "detail": "Expose the semantic index as a stable API and let external tools (scripts, plugins) build query engines on top. Jet does not own a query DSL. Saves scope but sacrifices a flagship differentiator.",
           "code": "// External tool using the index API\nimport jet_index\njet_index.query(codebase, fn(node) {\n  node.kind == .write && node.field == \"balance\" && node.value < 0\n})"
+        },
+        {
+          "key": "D",
+          "name": "Defer ask-your-codebase engine to Epoch 6",
+          "detail": "Do not build a query engine now. Revisit in Epoch 6 after the stable semantic index and impact analyzer have proven useful.",
+          "code": "// Use semantic-index API primitives now.\n// Epoch 6 revisit: natural-language/structural query engine."
         }
       ],
       "comparisons": [
@@ -7022,7 +7242,7 @@
       "explainer": "Without ring layering, every stdlib import implicitly requires a heap and OS syscalls. That blocks embedded targets and makes the 'same code from server to microcontroller' goal impossible without ad-hoc #[no_std] patches. The three-ring model (proven by Rust's core/alloc/std split) solves this cleanly: code written against core compiles anywhere; code that imports std is desktop/server only. Jet would express this as platform capabilities gated by which ring a module declares. This interacts with the explicit-allocation card (what 'alloc' means in Jet), the pack.jet platform target field, and the aarch64/QEMU CI work (c57). The ring declaration would live in pack.jet, not in source syntax — no new markers needed.",
       "story": "I'm writing a fixed-point math library. I want it to work on an STM32 microcontroller with no heap and on my server. Today I can't import it into a no-heap target because the stdlib isn't layered.",
       "inWild": "// pack.jet for an embedded library — declares core ring only\n[package]\nname = \"fixed-math\"\nring = \"core\"  // no heap, no OS; portable anywhere\n\n// pack.jet for a server app — full std available\n[package]\nname = \"my-server\"\nring = \"std\"",
-      "detail": "",
+      "detail": "Owner instruction (2026-06-28): include a visible option to defer this decision to Epoch 6.\nAgent response: added that option and left the ballot open for owner choice.",
       "options": [
         {
           "key": "A",
@@ -7041,6 +7261,12 @@
           "name": "Defer — design after explicit-allocation and platform-target cards settle",
           "detail": "The ring boundary between alloc and std depends on how Jet defines explicit allocation and what platform targets look like in pack.jet. Defer ring formalization until those are stable. Lower risk of rework.",
           "code": "// Status quo: no ring layering; embedded targets blocked\n// Revisit after: explicit-allocation card, pack.jet platform targets"
+        },
+        {
+          "key": "D",
+          "name": "Defer ring layering contract to Epoch 6",
+          "detail": "Do not formalize `core ⊂ alloc ⊂ std` now. Revisit in Epoch 6 when embedded/no-runtime work is active.",
+          "code": "// Keep current core/std split for now.\n// Epoch 6 revisit: formal core/alloc/std ring contract for embedded/no-runtime targets."
         }
       ],
       "comparisons": [
@@ -7698,10 +7924,10 @@
       "cardId": "c2rj09ov",
       "title": "How should Jet unify motion and authored animation while preserving beginner magic and expert timeline control?",
       "gist": "Now that reactive UI is ratified, motion should be the primitive signal layer and animation should be an authored timeline/scene layer that produces motion values.",
-      "explainer": "Manim is strongest where it treats animation as a scene made of objects, transformations, timelines, groups, waits, and reusable camera/render concepts; its docs organize the model around Mobject, Animation, and Scene, plus rich animation families and updaters. Jet should learn that structure without copying Python ceremony. Beginner app UI needs \"state changed, animate it\" by default. Expert educational/video/game work needs explicit timelines, keyframes, transforms, tracks, camera, scrubbing, deterministic render, and frame hooks. The cohesive model is layered: core.motion is the low-level time-varying value/signal layer; core.animation is the high-level authored timeline/scene layer that compiles to motion tracks. One runtime, two abstraction levels, no conflict.",
+      "explainer": "Owner questions answered: motion and animation should be one layered system, not competing runtimes. `core.motion` is the signal/time/value primitive connected to reactivity and the M:N task clock. `core.animation` is a Manim-inspired scene/timeline layer on top: objects, transformations, keyframes, camera/render concepts, updaters, and timeline sequencing. Adversarial pass: two layers can drift. Patch: one clock, one scheduler integration, one render-target seam; `core.animation` only produces motion tracks/render commands that `core.motion` drives.",
       "story": "Maya builds a dashboard and gets a spring transition by changing state. Later she records a product explainer: the same values become timeline tracks with named beats, camera moves, transforms, and frame-accurate export. She does not switch languages or abandon the reactive UI model.",
       "inWild": "state @= Signal.new(false)\nopacity @= motion.spring(state.map((on) => on ? 1.0 : 0.0))\n\nscene @= animation.scene {\n    title @= Text(\"Jet\")\n    play title.write(duration: 0.6)\n    play title.move_to(x: 0, y: 2).ease(.out_cubic)\n    wait(seconds: 0.25)\n}",
-      "detail": "",
+      "detail": "Owner Q: How does this interplay with the planned aync/concurrency/tasks/etc? Could we do both motion & animation runtime? Could they be different libs or modules?\nAgent answer: Interplay with async runtime: if D-REACTCORE1 chooses Option A or D (library signals), the `clock` signal that drives animation is just an M:N task that wakes at 60fps, updates signal values, and propagates to dependents. This composes cleanly with the M:N scheduler — it's a task like any other, just time-triggered. No scheduling conflict. Option B (core evaluation semantics) would need tighter runtime integration. Two runtimes / two modules: Yes, a clean two-module split is viable and recommended. `core.motion` (E3, signal-based): spring physics, tweening, interpolation, easing. Animations are derived signals over a `Clock` signal. Covers 95% of app animation needs. Runs on the M:N task runtime. `core.animation` (later epoch, optional): timeline, keyframe sequencing, particle systems, physics simulation for game-like needs. Implemented as a programmatic generator of `core.motion` values — the two modules compose rather than compete. The key insight: `core.animation` timelines PRODUCE motion values that `core.motion` delivers to the signal graph. They're different abstraction levels, not competing runtimes. `core.motion` is the low-level, reactive-graph-connected layer; `core.animation` is the high-level orchestration layer on top. Both integrate with the M:N scheduler. This matches how SwiftUI animation layers work over Core Animation. Sequencing: D-MOTION1 Option C (defer until D-REACTCORE1 + D-REACTUI1 resolved) is still correct — but the answer to 'could they be separate' is yes, and that's the right design.\n\nOwner Q: Please update to support a cohesive vision of both animation & motion. I want better options to choose from that give magic out of the box to beginners & full control for experts -> the manim library for python is a great example of an anim lib, consult that for potential inclusions/features/ergonomics that are lauded by the community\nAgent answer: Updated D-MOTION1. New recommendation is A: core.motion as the signal/time/value primitive, core.animation as a Manim-inspired scene/timeline layer on top. Manim influenced the ballot through its Mobject/Animation/Scene split, transformation catalog, updaters, camera/render concepts, and timeline sequencing. Devil’s advocate: a two-layer design can drift into two runtimes. Patch: one clock, one scheduler integration, one render-target seam; core.animation only produces motion tracks and render commands, while core.motion delivers values into the reactive graph.",
       "options": [
         {
           "key": "A",
@@ -7726,6 +7952,12 @@
           "name": "Animation/video package only, no UI motion primitive",
           "detail": "Good for Manim-style educational rendering, bad for ordinary app motion. Beginners still need a separate package to animate UI state.",
           "code": "use core.animation\n// UI transitions remain manual"
+        },
+        {
+          "key": "E",
+          "name": "Defer motion and animation to Epoch 6",
+          "detail": "Do not add motion primitives or an animation library in the current UI stack. Keep static/reactive UI only; revisit a unified motion/animation system in Epoch 6 with real renderer experience.",
+          "code": "Button(label: \"Save\", on_click: save)\n\n// Epoch 6 revisit:\n// fade @= animation.fade_in(button).duration(ms: 180)\n// clock.play(fade)"
         }
       ],
       "comparisons": [
@@ -7749,7 +7981,7 @@
       "status": "open",
       "group": "web-ui",
       "bestCurrent": "SwiftUI: SwiftUI treats animation as state changes over time, so views derive frames from reactive state.",
-      "recommendation": "Choose A. It gives beginner magic through reactive motion and expert control through explicit timelines, without two competing runtimes."
+      "recommendation": "Recommendation: A if UI needs best-in-class motion now; E if motion/animation should wait for Epoch 6 renderer maturity. Devil’s advocate against A: overbuilding animation can distract from UI basics. Patch: layer `core.motion` first; `core.animation` rides on top, no second runtime."
     },
     {
       "id": "D-ADAPTRT1",
@@ -8301,10 +8533,10 @@
       "cardId": "c1iqde7",
       "title": "What visible spelling deliberately discards a #MustUse / fallible result?",
       "gist": "D-IGNORERET1=B ratified that discarding a fallible result must be explicit + visible (never silent, I1) and emits a lint pointing at what was dropped. This decides the spelling. It must be impossible to type by accident and obvious in review.",
-      "explainer": "`#MustUse` makes ignoring a fallible result a compile error; this is the one sanctioned escape. Blast radius: parser, the `#MustUse` sema check (error→lint when present), a W-code + ui snapshot. The sigil must not resemble normal binding.\n\nRecommendation: A — `!_` is postfix like `?`, visually unmistakable, and the `!` signals deliberate intent — impossible to type by reflex unlike `_ =`.",
+      "explainer": "Owner question answered: the ballot now offers more than three spellings and separates terse sigils from audit-readable words. Adversarial pass on `.ignore(\"reason\")`: method syntax can look like an ordinary user method and reasons can become boilerplate. Patch: sema treats it as a blessed escape only for `#MustUse`/fallible values, requires a non-empty literal reason, emits a lint naming the dropped type, and rejects user-defined `.ignore` from silently intercepting must-use semantics.",
       "story": "",
       "inWild": "",
-      "detail": "",
+      "detail": "Owner Q: Give me other syntax options that read a little better, i am potentially ok with A but want multiple options, can have more than 3\nAgent answer: Updated D-IGNORERET2 with six options. Best revised rec: `.ignore(\"reason\")`. It reads better than `!_`, is attached to the value being dropped, and creates an audit trail. Devil’s advocate: method shape can look ordinary. Patch: sema treats it as a blessed escape, requires a non-empty literal reason, emits a lint with the dropped type, and refuses user-defined `.ignore` on `#MustUse` results.\n\nOwner instruction (2026-06-28): include a visible option to defer to Epoch 6.\nAgent response: added Option G for Epoch 6 deferral even though this is a narrow spelling gate.",
       "options": [
         {
           "key": "A",
@@ -8341,6 +8573,12 @@
           "name": "Assignment to `_`",
           "detail": "Familiar from Rust/Go. Downside: too easy to type by habit; hides the safety meaning behind ordinary assignment.",
           "code": "_ = write_log(event)"
+        },
+        {
+          "key": "G",
+          "name": "Defer discard spelling to Epoch 6",
+          "detail": "Do not implement the explicit discard escape now. Keep `#MustUse`/fallible results mandatory-handled until Epoch 6 chooses a spelling.",
+          "code": "parse_config()?\n// no sanctioned ignore spelling yet\n// Epoch 6 revisit: expr.ignore(\"reason\") / !_ / discard expr"
         }
       ],
       "comparisons": [
@@ -8354,17 +8592,17 @@
       "status": "open",
       "group": "syntax",
       "bestCurrent": "Rust: Rust uses `let _ = expr` to make ignored `must_use` results explicit.",
-      "recommendation": "Use `.ignore(\"reason\")` if auditability wins; use `!_` if terseness wins. Recommendation moves to D because fallible-result discard is rare and should leave a reason in review."
+      "recommendation": "Recommendation: D if auditability matters more than terseness; A if the owner wants the shortest visible sigil. No Epoch 6 defer option added here because this is a narrow spelling gate for an already-ratified discard requirement, not a research track."
     },
     {
       "id": "D-DISPLAYDBG2",
       "cardId": "cfiv3fb",
       "title": "How does interpolation select the Debug hook instead of the default Display hook?",
       "gist": "Debug formatting should read as a formatting selector, not as field access. The owner asked for method-like operators that signal \"non-member feature\"; this ballot now compares those explicitly.",
-      "explainer": "S8 is `\"hi {name}\"`, rendering via Display. This adds a per-slot Debug selector. Blast radius: the in-string interpolation parser, the formatter (must round-trip the selector — formatter-round-trip rule), codegen dispatch. I8: one selector for one job, not a format mini-language.\n\nRecommendation: A — `{x:?}` is the established unambiguous convention many users know, and can't be mistaken for a real member access like `.debug`.",
+      "explainer": "Owner question answered: the ballot now has six non-member-looking selectors. `{value#debug}` marks Debug as a compiler-known interpolation feature, not a field or method. Adversarial pass: `#` inside interpolation is new and could invite a mini-language. Patch: selector set is closed (`#debug` only unless a future decision adds another), formatter round-trips it exactly, and unknown selectors produce Jet diagnostics.",
       "story": "",
       "inWild": "",
-      "detail": "",
+      "detail": "Owner Q: Try a method operator with different sigils that could identify it as a non-member/feature rather than a field. Give me multiple options, not just 3 & update the ballot accordingly\nAgent answer: Updated D-DISPLAYDBG2 with six method/operator-style selectors. New rec: `{value#debug}`. It marks Debug as a compiler-known formatting feature, not a field or method. Devil’s advocate: `#` inside interpolation is new. Patch: restrict it to a tiny closed selector set (`#debug` now, maybe `#repr` later only by decision), formatter round-trips it, and sema errors on unknown selectors with Jet-owned diagnostics.\n\nOwner instruction (2026-06-28): include a visible option to defer to Epoch 6.\nAgent response: added Option G for Epoch 6 deferral even though this is a narrow spelling gate.",
       "options": [
         {
           "key": "A",
@@ -8401,6 +8639,12 @@
           "name": "At selector `{value@debug}`",
           "detail": "Clearly metadata-ish. Downside: `@` is retired as an attribute prefix, so this fights D-ATTR1.",
           "code": "print(\"{user@debug}\")"
+        },
+        {
+          "key": "G",
+          "name": "Defer Debug interpolation selector to Epoch 6",
+          "detail": "Do not add a Debug interpolation selector now. Keep Display-only interpolation until Epoch 6 chooses the selector.",
+          "code": "print(\"value = {value}\")\n// no Debug interpolation selector yet\n// Epoch 6 revisit: {value#debug} / {value:?} / {value!debug}"
         }
       ],
       "comparisons": [
@@ -8414,7 +8658,7 @@
       "status": "open",
       "group": "syntax",
       "bestCurrent": "Rust: Rust interpolation uses `{}` for Display and `{:?}` for Debug, a compact convention developers already know.",
-      "recommendation": "Use `{value#debug}`. It reads as a Jet-recognized formatting feature, not a member field, and keeps S8 interpolation from becoming Rust’s full format mini-language."
+      "recommendation": "Recommendation: B. It is compact, non-member-like, and does not import Rust’s format mini-language. No Epoch 6 defer option added here because Display/Debug already needs a concrete interpolation spelling to implement D-DISPLAYDBG1."
     },
     {
       "id": "D-REPLAY2",
@@ -8597,10 +8841,10 @@
       "cardId": "c73xs2f",
       "title": "Should Jet pursue refinement types (e.g. PositiveInt proved > 0), and if so as a construction-time subset or a full SMT-backed prover?",
       "gist": "We're deciding whether Jet should let you attach a predicate to a type — PositiveInt = Int where it > 0 — so the value is known good everywhere it flows, instead of re-checking with scattered require() calls. The real fork is how much proving the compiler does: nothing (decline), a pragmatic subset proved at construction plus flow-narrowing (no theorem prover), or a full SMT-solver-backed prover. The central cost of the full version is that an SMT solver is a large external dependency, which collides head-on with I6 (zero external crates in the compiler).",
-      "explainer": "A refinement type is a base type plus a predicate the compiler tracks as part of the type: once a value has type PositiveInt, no callee needs to re-validate it. The win is real — it removes a class of beginner footguns (forgot to check) and a class of expert boilerplate (re-checking the same invariant at every layer). The danger is duplicating I8: Jet already has require()/T ? E/? for runtime validation, so refinement types must extend that path, not fork it — construction must funnel through one fallible smart-constructor that returns PositiveInt ? Error, reusing require under the hood. The deep divide is foundational-vs-research. A subset that only proves predicates at the construction boundary (literal-checked, or returned as T ? E) and then narrows them flow-sensitively (after if x > 0, x is PositiveInt in that branch) needs no solver — it's a few sema rules over existing machinery and could land in Epoch 3. The full version — proving that arbitrary arithmetic preserves a predicate, e.g. that a+b stays in-range — needs a decision procedure, i.e. an SMT solver (Z3-class). That is the I6 problem: it's tens of thousands of lines of external C++/Rust we cannot vendor under our zero-external-crate rule, it makes errors come from a solver (risking I2: rustc/solver must never speak to users), and solver timeouts make compile times nondeterministic. So the honest framing is: the cheap, safe, beginner-friendly slice (B) is mostly independent of the expensive research slice (C), and we can ship the former without ever committing to the latter.",
+      "explainer": "Owner question answered: B loses real theorem-prover power compared with C. B can validate constructors, literals, and local flow narrowing; it cannot prove arbitrary arithmetic, universal properties, cross-function postconditions, or eliminate bounds checks from a proof. Adversarial pass: a small subset can become a dead-end half-feature. Patch: phrase B as the stable predicate surface/invariant discipline, so a later solver tier can reuse the same predicates instead of replacing them.",
       "story": "I'm writing a billing function and I type fn charge(cents: PositiveInt). A caller passes a value computed from user input. The compiler stops me at the call site: it can't prove the value is positive, and it points me at the one constructor — PositiveInt.new(n) returns PositiveInt ? String — so I write let amt = PositiveInt.new(raw)? once at the boundary. From there it flows through three layers of my code untouched, and nobody re-checks it. When I later guard with if amt > 0 the compiler already knew; when I forgot a guard last week, require() would have blown up at runtime — now it's a compile error with a fix-it pointing at the constructor.",
       "inWild": "// TODAY: re-check the invariant at every layer; nothing ties the checks together\nfn charge(cents: Int) -> Receipt ? String {\n  require(cents > 0, \"charge: cents must be positive\");\n  meter(cents)        // meter ALSO re-checks, because the type forgot\n}\nfn meter(cents: Int) {\n  require(cents > 0, \"meter: cents must be positive\"); // duplicated invariant (I8 smell)\n}\n\n// PROPOSED (subset, option B): the type carries the proof; check once at the edge\nrefine PositiveInt = Int where it > 0;   // one definition; .new is the only door in\n\nfn charge(cents: PositiveInt) -> Receipt ? String {\n  meter(cents)        // no re-check: the type already guarantees > 0\n}\nfn meter(cents: PositiveInt) { /* always positive, by construction */ }\n\nlet amt = PositiveInt.new(raw)?;   // single boundary check, reuses require/T ? E path\ncharge(amt);",
-      "detail": "",
+      "detail": "Owner Q: What are the tradeoffs of option B instead of c? What is lost by going with b over c?\nAgent answer: B vs C for refinements: B gives construction-checked refined values, literal checks, and flow narrowing. It does not prove arbitrary arithmetic or quantified facts. C can prove `a + b` remains PositiveInt, prove indexing is in bounds, eliminate runtime checks, and verify function postconditions over all inputs. What is lost with B: proof-preserving arithmetic, universal proofs, cross-function theorem reasoning, and check elision based on proofs. What B keeps: the most common product value, one constructor path, no solver dependency, deterministic compile times, and beginner-friendly diagnostics. Best sequencing: ship B as the surface and invariant discipline; let future C reuse those predicates if a solver/prover tier is owner-approved.",
       "options": [
         {
           "key": "A",
@@ -8619,6 +8863,12 @@
           "name": "Full SMT-backed refinement types (post-Epoch research)",
           "detail": "Liquid-Haskell/F*/Dafny-class: the compiler proves that operations PRESERVE predicates — that `a + b` is positive, that an index stays in bounds, that a returned value satisfies its refinement for all inputs — by discharging verification conditions to an SMT solver. This is the strongest guarantee (eliminates whole classes of runtime checks and is genuinely magic). It is also the expensive, risky path and is NOT recommended for now. Central cost is I6: an SMT solver (Z3-class) is tens of thousands of lines of external C++/Rust we cannot vendor under zero-external-crate; writing our own decision procedure is a multi-year research project of its own. Secondary costs: solver output must never reach users (I2) so we'd need to translate every failed proof into a Jet diagnostic; solver timeouts make compile times nondeterministic (anti-beginner); and the annotation burden (writing predicates the solver can discharge) is an expert-only skill that conflicts with beginner-magic defaults. Reasonable as a FUTURE research track layered on top of B's surface syntax — B's `refine` definitions become the predicates C would later prove — but committing now means owning the I6 carve-out and the solver-error translation problem. Treat as research, gated behind its own decision when/if a pure-Jet decision procedure exists.",
           "code": "refine PositiveInt = Int where it > 0;\n\n// What C buys over B: arithmetic preservation is PROVEN, no re-check:\nfn add(a: PositiveInt, b: PositiveInt) -> PositiveInt {\n  a + b        // C: solver proves (a>0 && b>0) => a+b>0 — compiles, no .new\n}              // B: this is an error; a+b is Int, must round-trip through .new\n\n// Bounds proven away — no runtime check emitted:\nfn first(xs: NonEmpty[Int]) -> Int { xs[0] }   // C proves 0 < xs.len()\n\n// The I6 cost, made concrete:\n//   $ jet build\n//   internal: refinement prover requires an SMT backend (Z3-class)\n//   -> violates I6 (zero external crates in Source/); needs owner carve-out\n//   -> or a pure-Jet decision procedure (multi-year research item)"
+        },
+        {
+          "key": "D",
+          "name": "Defer refinement types to Epoch 6",
+          "detail": "Do not add refinement syntax or predicate types now. Keep `require(...)`, property tests, and ordinary distinct types. Re-open refinements in Epoch 6 when solver/proof infrastructure and real workloads exist.",
+          "code": "fn divide(total: Int, count: Int) -> Int {\n    require(count > 0)\n    total / count\n}\n\n// Epoch 6 revisit:\n// count: PositiveInt"
         }
       ],
       "comparisons": [
@@ -8652,17 +8902,17 @@
       "status": "open",
       "group": "research",
       "bestCurrent": "Liquid Haskell: Liquid Haskell proves rich predicates with SMT-backed refinements, but the model is expert-only.",
-      "recommendation": "Choose construction-checked predicate types plus flow narrowing. Jet gets most beginner-facing value without importing a theorem-prover UX."
+      "recommendation": "Recommendation: B if Jet wants near-term value; D if owner wants refinements held for an Epoch 6 proof-system wave. Devil’s advocate against B: it may disappoint experts expecting C. Patch: explicitly name B as construction-time only and reserve C for later."
     },
     {
       "id": "D-VERIFY1",
       "cardId": "c93y9sk",
       "title": "Should Jet pursue machine-checked formal verification, and if so as a bounded foundational checker, a full proof-carrying-code engine, or not at all?",
       "gist": "A request to attach machine-checked proofs to functions (e.g. prove constant_time_eq is input-independent) and refuse to ship if the proof fails. Real proof engines (SMT solvers, theorem provers) are enormous external dependencies that collide head-on with I6 (zero external crates in the compiler). The question is whether any verification story belongs in Jet, and if so, the narrowest honest form.",
-      "explainer": "Formal verification spans a huge cost gradient. At the cheap end, bounded/exhaustive checking and property-tests-as-contracts give real machine-checked guarantees for small finite domains with zero new dependencies — we already own the test runner and comptime evaluator. At the expensive end, a true proof of a universally-quantified property over an infinite domain needs an SMT solver (Z3 is ~500k lines of C++) or a proof assistant (Lean/Coq), each a massive external dependency that violates I6 in the one place I6 is strictest: the compiler itself. The honest tradeoff: anything that proves 'for all inputs' either ships a solver in the default path (no), gates one behind an opt-in expert wall that is never reached by beginners and never required to build (maybe, Epoch 3+), or stays research (post-Epoch). It matters because verification is the master-of-ALL pitch for crypto/safety-critical code, but a second checking mechanism risks I8 (we already have #Test) and a solver in the build risks I2/I6. The pragmatic subset must be a deepening of #Test, not a rival to it.",
+      "explainer": "Owner question answered: B cannot do what full proof tools do. B gives bounded/exhaustive finite-domain checks and randomized contracts through Jet-owned test/comptime machinery. C can prove universal properties: constant-time behavior, overflow absence for all inputs, functional correctness, and proof-carrying APIs. Adversarial pass: B risks being marketed as proof when it is only evidence. Patch: diagnostics and docs must call it bounded verification; C remains a separate expert prover tier, likely Epoch 6, with external solver errors translated into Jet diagnostics.",
       "story": "I'm writing a constant-time comparison for a password check. I write the function, mark it #Verify(constant_time), and `jet build` either proves the timing is input-independent and ships, or refuses with a diagnostic pointing at the branch that leaks. I never install a solver, never learn Dafny, and a teammate who's never heard of formal methods can read the marker and know exactly what's guaranteed. The day my logic stops being checkable by the bounded checker, Jet tells me plainly instead of silently downgrading to 'probably fine'.",
       "inWild": "// Today: you write a test and hope your cases cover it\n#Test(\"eq is symmetric\") {\n  require_eq(ct_eq(a, b), ct_eq(b, a))  // only the inputs you wrote\n}\n\n// Proposed (Option B — bounded foundational checker):\n#Verify(forall x: U8, y: U8 => ct_eq(x, y) == ct_eq(y, x))\nfn ct_eq(a: U8, b: U8) -> Bool ? VerifyError { ... }\n// `jet build` exhaustively checks all 256x256 cases at compile time.\n// Domain too large to enumerate -> randomized + boundary sampling,\n// and a diagnostic tells you it's checked-not-proven. Zero new deps.\n\n// Proposed (Option C — full proof-carrying code, post-Epoch):\n#Prove(constant_time)  // universal over an infinite domain\nfn ct_eq(a: Bytes, b: Bytes) -> Bool ? VerifyError { ... }\n// requires an SMT/proof backend behind #Unsafe-grade expert opt-in.",
-      "detail": "",
+      "detail": "Owner Q: What are the tradeoffs of going with b over c? What is lost from a feature/ability perspective? What could experts do with c that they cant do with b?\nAgent answer: B vs C for formal verification: B can exhaustively check finite domains and sample large domains through Jet’s own comptime/test engine. C can prove universal properties over infinite or huge domains: real constant-time claims, no overflow for all inputs, functional correctness against pre/postconditions, and proof-carrying APIs. Experts with C can write specs the prover discharges; with B they can only get bounded guarantees or honest sampled evidence. What B preserves: zero solver in the compiler, no default build tax, no solver error leakage, and a direct extension of #Test. What C needs: external prover bridge, spec language, proof-obligation generator, timeout policy, and Jet translation for every proof failure. Recommendation remains B now, C as explicit post-Epoch expert tier.",
       "options": [
         {
           "key": "A",
@@ -8681,6 +8931,12 @@
           "name": "Full proof-carrying code — #Prove backed by an external SMT/proof engine behind an expert opt-in (post-Epoch research)",
           "detail": "The literal ask: machine-checked proofs of universally-quantified properties over infinite domains (true constant-time, no-overflow-ever, functional correctness vs a spec). This requires a real proof backend — an SMT solver (Z3) or a proof assistant (Lean/Coq/Why3) — which is an enormous external dependency. It is admitted ONLY behind an #Unsafe-grade expert gate that (1) is never on the default build path, (2) is never required to compile any program, (3) is opt-in per-project and per-function via #Prove, and (4) is wired as an FFI/bridge backend (per the FFI-bridge stdlib pattern) so the solver is invoked as an external tool, never linked into the Source/ compiler — keeping I6 intact for the compiler proper while being honest that the *verification step* depends on an outside prover the user must install. Jet's front end still owns the diagnostic (I2): a failed/timed-out proof is a Jet error, never solver output leaked to the user. This is post-Epoch research: the verification-condition generator, the spec language, trust in the bridge, and solver-output translation are each large. Cost: highest complexity, real external dependency for the prove step, and the spec language is a second surface to design carefully so it doesn't fork the type system.",
           "code": "// Opt-in per project (env.jet declares the prover backend, user-installed):\n//   verify.backend = z3        // external tool, invoked via FFI bridge\n\n#Prove(constant_time)   // universal: no data-dependent timing, any length\n#Prove(forall a, b: Bytes => ct_eq(a, b) == naive_eq(a, b))\nfn ct_eq(a: Bytes, b: Bytes) -> Bool ? VerifyError {\n  var diff: U8 = 0\n  for i in 0..a.len { diff |= a[i] ^ b[i] }\n  diff == 0\n}\n\n// `jet build` (only when verify is opted in):\n//   verified: ct_eq is constant-time over all inputs (z3, 0.8s)\n// On failure Jet — not z3 — speaks:\n//   error[E0712]: proof obligation unmet for #Prove(constant_time)\n//     the loop bound `a.len` is data-dependent; timing leaks length.\n//     fix: compare against a fixed-width buffer, or weaken the claim.\n//   note: requires the `z3` backend (jetpack add --verify z3); never\n//         on the default path — programs without #Prove build solver-free."
+        },
+        {
+          "key": "D",
+          "name": "Defer formal verification to Epoch 6",
+          "detail": "Ship no `#Verify` or `#Prove` now. Keep `#Test`, property tests, fuzzing, and `#Unsafe` audits as the verification story until Epoch 6 funds a full proof track.",
+          "code": "#Test(\"ct_eq examples\") {\n    assert ct_eq([1,2], [1,2])\n    assert !ct_eq([1,2], [1,3])\n}\n\n// Epoch 6 revisit:\n// #Prove(constant_time) fn ct_eq(...) -> Bool { ... }"
         }
       ],
       "comparisons": [
@@ -8714,7 +8970,7 @@
       "status": "open",
       "group": "research",
       "bestCurrent": "Dafny: Dafny gives machine-checked pre/postconditions and proofs, but it is a verification language.",
-      "recommendation": "Start with bounded `#Verify` contracts. Jet should deepen tests into executable/exhaustive checks before taking on a full proof language."
+      "recommendation": "Recommendation: B if we want an Epoch 3 bridge from tests to bounded guarantees; D if any verifier surface should wait until Epoch 6. Devil’s advocate against B: bounded checks can create false confidence. Patch: name the bound in every report and never call it a proof."
     },
     {
       "id": "D-BUDGET1",
@@ -8821,10 +9077,10 @@
       "cardId": "c63xl5c",
       "title": "How should Jet track taint, PII, secrets, and audited release without becoming a full IFC research language?",
       "gist": "Generalize `#Tainted` into `#Tainted(.Kind)` labels over one existing taint-flow engine: small closed built-ins now, user/org labels later behind policy, full principal lattice deferred.",
-      "explainer": "The cohesive system is not separate #Pii/#Secret markers and not full Jif-style IFC. Use one value-fact mechanism: `#Tainted(.Input)`, `#Tainted(.PII)`, `#Tainted(.Secret)`, etc. Labels compose as a small set on the value, flow through existing taint propagation, and are checked only at sinks. Release uses one audited gate: `declassify(\"reason\", .PII) value` or a named sanitizer for transformation. Beginners mostly never write labels: std/web/db APIs mark inputs and fields, and diagnostics fire only at risky sinks. Experts get full auditability: exact label sets, sink policies, org-defined labels, reason strings, reports, and policy files. Full principal lattice remains available as a future research tier but is not needed for best-in-class practical compliance.",
+      "explainer": "Owner question answered: the cohesive best-in-class shape is one taint mechanism, not separate #Pii/#Secret systems and not a full Jif lattice by default. Values carry a small set of labels (`#Tainted(.Input)`, `#Tainted(.PII)`, `#Tainted(.Secret)`) that flow through existing taint propagation and are checked only at sinks. Experts get control through sink policies, org labels, audit reports, and required declassify reasons. Adversarial pass: label sets can explode and become compliance theater. Patch: built-in labels stay closed in the language; org labels live in policy; diagnostics fire at sinks, not at every assignment; full principal lattices are deferred unless Epoch 6 explicitly funds them.",
       "story": "A signup form stores an email. The web package marks it `#Tainted(.PII)`. Passing it to `log.info` fails until the developer redacts or declassifies with a reason. Security can grep every declassification and can add an org label like `.HIPAA` without changing the language.",
       "inWild": "fn signup(email: #Tainted(.PII) String, raw: #Tainted(.Input) String) {\n    db.query(raw)                         // E0721: .Input reaches Db\n    log.info(email)                       // E0722: .PII reaches Log\n    safe @= redact_email(email)\n    log.info(declassify(\"support trace\", .PII) safe)\n}",
-      "detail": "",
+      "detail": "Owner Q: How can we give full control while keeping the system as small as it can be without cutting functionality? Can we turn tainted from a pure marker into something like `#Tainted(.PII)` or something? I dont know what to do for this so please propose a cohesive, excellent system that will be best in class, but challenge your approach using devils advocate to harden, patch holes, and ensure extraordinary ergonomics\nAgent answer: Updated D-IFC1 around `#Tainted(.Kind)`. Best system: one taint mechanism, label set on values, built-in labels first (`.Input`, `.PII`, `.Secret`, `.Credential`), audited `declassify(\"reason\", .Kind)`, sink policies, and later org labels through policy. Devil’s advocate: labels can explode and become compliance theater. Patch: closed built-ins in language, org labels only in policy, no principal lattice in Epoch 3, diagnostics at sinks only, and declassification reports generated from semantic graph. Full control comes from policy labels + exact sink/declassify audit, not from making every variable carry a Jif lattice.",
       "options": [
         {
           "key": "A",
@@ -8849,6 +9105,12 @@
           "name": "Full principal-lattice IFC",
           "detail": "Jif/LIO-class labels with principals, authority, confidentiality/integrity lattice, and endorsement. Maximum expressiveness; maximum annotation burden and research surface. Deferred.",
           "code": "msg: String @ {alice -> billing}\ndeclassify(msg, from: alice, to: public, by: alice.authority)"
+        },
+        {
+          "key": "E",
+          "name": "Defer rich information-flow to Epoch 6",
+          "detail": "Keep today’s one-bit taint/sanitizer model now. In Epoch 6, revisit the full label/policy/declassify system with real compliance workloads and decide whether to ship `#Tainted(.Kind)` or a principal lattice.",
+          "code": "raw: #Tainted String\nsafe @= sanitize(raw)\n\n// Epoch 6 revisit:\n// email: #Tainted(.PII) String\n// log.info(declassify(\"support trace\", .PII) redact(email))"
         }
       ],
       "comparisons": [
@@ -8872,7 +9134,7 @@
       "status": "open",
       "group": "safety",
       "bestCurrent": "Jif: Jif supports label-based information-flow control with principals and declassification, but its surface is heavy.",
-      "recommendation": "Choose B now, design C as the expert policy extension. This keeps one taint mechanism, supports `#Tainted(.PII)`, gives auditors exact release points, and avoids full IFC ceremony."
+      "recommendation": "Recommendation: B now, with C designed as the expert policy extension. Devil’s advocate says labels can bloat; the patch is a closed built-in label set plus policy-only org labels. Choose E if you want all rich compliance tracking explicitly deferred to Epoch 6."
     },
     {
       "id": "D-VISDEFAULT2",
@@ -8974,6 +9236,12 @@
           "name": "Beginner presets only",
           "detail": "Stack/grid/form helpers cover common cases. Not enough expert control for custom constraints, animation, or solver debugging.",
           "code": "Form.columns(label_min: 80.px, gap: 16.px)"
+        },
+        {
+          "key": "E",
+          "name": "Defer constraint solver to Epoch 6",
+          "detail": "Ship only stack/grid/form presets for the UI stack now. Do not expose solver variables, priorities, or edit suggestions until Epoch 6.",
+          "code": "Form.columns(label_min: 80.px, gap: 16.px)\n\n// Epoch 6 revisit:\n// solver.add((label.width >= 80.px).named(\"label min\"))"
         }
       ],
       "rec": "B",
@@ -8982,10 +9250,11 @@
       "raisedBy": "agent",
       "raisedAt": "2026-06-26",
       "group": "web-ui",
-      "explainer": "Best current practice is Apple Auto Layout/Cassowary for incremental linear constraints, but raw Auto Layout APIs are verbose and error-prone. Jet can improve by making constraints first-class typed values: the math reads naturally, but the value is inspectable/removable/named. No user-defined operator overloading is introduced globally; only core.layout variable types support the comparison/arithmetic builders as blessed library/compiler-known operations.",
+      "explainer": "Owner question answered: best current practice is Cassowary/Auto Layout: linear constraints, priorities, edit variables, and conflict explanation. Jet can improve with typed `Constraint` values: math-like authoring for layout vars, but every constraint remains a named/removable/inspectable value. Adversarial pass: infix constraints can look like general operator overloading. Patch: only `core.layout.Var`/`Length` get blessed builders; ordinary user types still cannot overload operators.",
       "bestCurrent": "Apple Auto Layout: Auto Layout expresses UI constraints as linear equations and inequalities over anchors, the strongest production layout solver model.",
-      "recommendation": "Choose B. It preserves Auto Layout’s expressive power, improves diagnostics by naming constraints as values, and avoids a separate layout language. Presets can be built on top.",
-      "title": "What is Jet’s constraint-layout API surface?"
+      "recommendation": "Recommendation: B. It gives Auto Layout power with better typed handles and Jet diagnostics. Choose E only if the UI stack should avoid solver semantics entirely until Epoch 6.",
+      "title": "What is Jet’s constraint-layout API surface?",
+      "detail": "Owner Q: Consider the best approach currently in any language, then consider how to improve on it from a functionality & ergonomics perspective. Present me a devil's advocate-challenges updated ballot that gives the best of all worlds & explains why it is the best & what it is like compared to other languages\nAgent answer: Updated D-LAYOUT1. Best current model is Cassowary/Auto Layout: linear constraints, priorities, edit variables. Jet improves it with typed `Constraint` values: math-like authoring, but every constraint is inspectable, removable, named, prioritized, and traceable. Devil’s advocate: math operators look like global operator overloading. Patch: only `core.layout.Var/Length` comparison/arithmetic builders are blessed; no general user operator overloading. Beginner magic comes from `Stack/Grid/Form`; experts drop to solver vars, strengths, edit suggestions, and conflict traces."
     },
     {
       "id": "D-RENDERTGT2",
@@ -9107,6 +9376,12 @@
           "name": "File/package target boundaries",
           "detail": "Clear for large teams, but coarse. Useful as a package policy layered on C, not the sole model.",
           "code": "#Target(Wasm)\nmodule compute { ... }"
+        },
+        {
+          "key": "E",
+          "name": "Defer web partitioning to Epoch 6",
+          "detail": "Do not decide the JS/WASM boundary now. Keep web backend planning blocked; revisit after render targets, JS interop, and typed protocol foundations have shipped.",
+          "code": "// no web target partition policy yet\n// Epoch 6 revisit:\n// #Wasm #Pure fn transform(points: [Point]) -> [Point] { ... }\n// jet build --target web --explain-partition"
         }
       ],
       "rec": "C",
@@ -9116,9 +9391,10 @@
       "raisedAt": "2026-06-26",
       "group": "runtime",
       "title": "For the web backend, how does Jet partition JS DOM code and WASM logic while preserving expert control?",
-      "explainer": "Pure inference is great beginner magic but insufficient for experts who need to inspect bundle boundaries, force a function across the seam, or audit JS/WASM crossings. Marker-only control is too noisy for normal apps. The best hybrid is inferred-by-default plus explicit override markers and generated partition reports. Jet owns the diagnostics: if a JS-only browser handle crosses into WASM, sema reports the exact boundary and fix.",
+      "explainer": "Owner question answered: pure inference is not enough for experts. Best shape is inferred default plus explicit markers and a partition report. Compared with Next/SvelteKit, Jet should keep the magic boundary inference but add typed bridge/audit reports. Compared with wasm-bindgen, Jet should require less manual glue and own all diagnostics. Adversarial pass: override markers can create unsound crossings. Patch: sema rejects browser handles in WASM, checks bridgeable types/effects, emits a build manifest, and snapshots boundary diagnostics.",
       "bestCurrent": "SvelteKit / Next.js: Modern web frameworks infer client/server splits from imports and boundaries, minimizing manual export markers.",
-      "recommendation": "Choose C. Beginners get automatic partitioning; experts get pinned boundaries, generated bridge types, and audit reports."
+      "recommendation": "Recommendation: C for magic plus expert control. Choose E if the web backend should not lock a JS/WASM partition model until Epoch 6.",
+      "detail": "Owner Q: We must ensure full expert control & auditability. We want magic out of the box for beginners but experts need to be able to see the inner workings & control as needed. Reconsider this ballot with devils advocate, make it best in the world, ensure ergonomics, magic, and full control are all considered. Tell my why your new option set is best, why you recommend your new recommendation, and how it compares to other languages\nAgent answer: Updated D-WASM1. New rec: C, not pure inference. Default is inferred from effects and browser API use, but experts can pin `#Wasm`, `#Js`, and `#WasmExport`, then inspect `jet build --target web --explain-partition`. Devil’s advocate: overrides can create unsound crossings. Patch: sema checks all boundary types/effects, rejects browser handles in WASM, emits a bridge manifest, and snapshots boundary diagnostics. Compared to Next/SvelteKit: similar magic boundary inference, stronger typed bridge/audit story. Compared to Rust wasm-bindgen: less manual glue, more front-end-owned diagnostics."
     },
     {
       "id": "D-REFLECT1",
@@ -9266,10 +9542,10 @@
       "cardId": "c0ikwz8",
       "title": "Should Jet add a structured select combinator for channels, timers, task handles, and I/O events?",
       "gist": "Jet needs Go-class event selection, but syntax should be cohesive with task scopes and not invent a `case` mini-language.",
-      "explainer": "D-CONCCOMB1 and D-RACEWIN1 give Jet Verse-style task combinators over scoped task groups. Networking and actors also need event selection: wait for inbound data, outbound capacity, shutdown signal, timer, or child result without busy polling or unstructured callbacks. This should be a task-scope/context-aware library combinator, not new syntax and not a second spawn model. It must observe cancellation and deadlines, and all cases must be owned by the current task/scope so losing waits are deregistered safely. Exact task-scope spelling is decided by D-TASKSCOPE1.",
+      "explainer": "Owner question answered: syntax should be cohesive with task scopes and avoid a second `case` mini-language. A scoped fluent builder keeps ownership under the nursery/taskgroup and lets losing waits deregister safely. Adversarial pass: fluent chains can get long and hide arm identity. Patch: formatter keeps one wait arm per line, every arm has an explicit result tag, and reusable select sets can become values later without new syntax.",
       "story": "I am writing a WebSocket hub. For each connection I need to react to whichever happens first: a client message, a broadcast channel message, a heartbeat timer, or server shutdown. I want one structured wait that cleans up the losing waits automatically.",
       "inWild": "taskgroup g {\n    ev @= g.select()\n        .recv(inbox, as: .Message)\n        .read(conn, as: .ClientData)\n        .after(ms: 30_000, as: .Heartbeat)\n        .cancelled(as: .Shutdown)\n        .wait()?\n    handle(ev)?\n}",
-      "detail": "",
+      "detail": "Owner Q: I like a but dont like the syntax. Please provide an updated ballot that presents more cohesive options with much better syntax. Play devils advocate on your answers to improve/harden/patch holes, then represent them to me\nAgent answer: Updated D-CONCSELECT1. New syntax recommendation: fluent scoped select, `g.select().recv(...).read(...).after(...).wait()?`. It avoids `case`/block syntax, keeps ownership under the taskgroup, and gives each event an explicit result tag. Devil’s advocate: fluent chains can get long. Patch: formatter keeps one arm per line, each arm has a stable typed result, and a later helper can build reusable select sets as values.",
       "options": [
         {
           "key": "A",
@@ -9294,6 +9570,12 @@
           "name": "Race helper tasks only",
           "detail": "No selection API. Works but noisy, allocates helper tasks, and obscures cleanup of losing waits.",
           "code": "ev @= g.race([g.task { inbox.recv() }, g.task { time.sleep(ms: 50) }])?"
+        },
+        {
+          "key": "E",
+          "name": "Defer select to Epoch 6",
+          "detail": "Do not add a select API in the structured-concurrency wave. Use channels, task handles, timers, and `race`/`any` helpers for now; revisit a unified event select in Epoch 6 after runtime experience.",
+          "code": "ev @= g.race([\n    g.task { inbox.recv() },\n    g.task { time.sleep(ms: 50) },\n])?\n\n// Epoch 6 revisit:\n// ev @= g.select().recv(inbox, as: .Message).after(ms: 50, as: .Timeout).wait()?"
         }
       ],
       "comparisons": [
@@ -9317,7 +9599,7 @@
       "status": "open",
       "group": "runtime",
       "bestCurrent": "Go select proves event choice belongs in the core concurrency toolbox; Tokio select proves the same need for async runtimes.",
-      "recommendation": "Choose fluent scoped select. It is library-shaped, typed, readable, and tied to the taskgroup that owns cleanup.",
+      "recommendation": "Recommendation: A if event choice ships with structured concurrency; E if select should wait until Epoch 6 runtime evidence. Devil’s advocate against A: chains can become visual noise. Patch: one arm per line, typed tags, reusable select values.",
       "created": "2026-06-28",
       "raisedBy": "agent",
       "raisedAt": "2026-06-28"

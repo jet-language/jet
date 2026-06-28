@@ -264,6 +264,7 @@ pub(crate) fn rewrite_inline_calls_expr(
                 rewrite_inline_calls_expr(item, siblings, modname);
             }
         }
+        Expr::Paren(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
     }
 }
 
@@ -1638,6 +1639,7 @@ pub(crate) fn collect_core_expr(
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
         | Expr::ComptimeSplice { .. } => {}
+        Expr::Paren(inner, _) => collect_core_expr(inner, imports, used),
     }
 }
 

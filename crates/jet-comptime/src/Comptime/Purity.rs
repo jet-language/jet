@@ -144,6 +144,7 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
         Expr::EnumLit { args, .. } => args.iter().for_each(|a| match a {
             EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => walk_calls(e, f),
         }),
+        Expr::Paren(inner, _) => walk_calls(inner, f),
         _ => {}
     }
 }

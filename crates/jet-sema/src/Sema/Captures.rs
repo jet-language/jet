@@ -240,6 +240,7 @@ pub(crate) fn walk_expr_for_const_refs(
                 walk_expr_for_const_refs(item, const_names, taken);
             }
         }
+        Expr::Paren(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
     }
 }
 
@@ -331,6 +332,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
         | Expr::ComptimeSplice { .. } => false,
+        Expr::Paren(inner, _) => expr_refs_name(inner, name),
     }
 }
 
@@ -648,6 +650,7 @@ pub(crate) fn expr_collect_captures(
             }
         }
         Expr::Lambda(_) => {}
+        Expr::Paren(inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
         _ => {}
     }
 }

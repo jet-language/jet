@@ -224,6 +224,7 @@ function availFacets(d) {
   if (d.explainer) f.push(['why', 'Why it matters']);
   if (d.inWild) f.push(['wild', 'In the wild']);
   if ((d.comparisons || []).length) f.push(['langs', 'Other languages']);
+  if (d.detail) f.push(['detail', 'Owner Q&A']);
   return f;
 }
 function facetBody(d, fk) {
@@ -231,6 +232,7 @@ function facetBody(d, fk) {
   if (fk === 'why') return `<p>${esc(d.explainer)}</p>`;
   if (fk === 'wild') return codeBlock(d.inWild);
   if (fk === 'langs') return (d.comparisons || []).map(c => `<div class="cmp"><div class="cmp__head"><span class="cmp__lang">${esc(c.lang)}</span><span class="cmp__note">${esc(c.note || '')}</span></div>${codeBlock(c.code || '')}</div>`).join('');
+  if (fk === 'detail') return `<p>${esc(d.detail).replace(/\n/g, '<br>')}</p>`;
   return '';
 }
 function renderFocus() {

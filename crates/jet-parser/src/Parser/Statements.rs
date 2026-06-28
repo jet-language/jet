@@ -1393,18 +1393,19 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-IF3: parse one bare arm head (no leading `subject ==`) and bind it to
-    /// the subject. A pattern head (`Active(id)`, `value(n)`, `ok(n)`, `null`,
-    /// `A(x) | B(x)`) becomes a `PatternTest` on `pat_subject`; a bare value (or
-    /// `||` chain of values) becomes `subject == value`. A predicate head
-    /// (`code >= 500`, `(a) && (b)`) is rejected with E0993; a leftover redundant
-    /// `subject ==` prefix with E0994 (both recover so the file still checks).
+    /// D-IF3 / D-MATCHARM1: parse one bare arm head (no leading `subject ==`) and
+    /// bind it to the subject.
+    /// - A pattern head (`.Active(id)`, `A(x) | B(x)`) becomes a `PatternTest`.
+    /// - Values use the D-MATCHARM1 grammar: `|` alternates values, `&&`/`||`
+    ///   combine booleans, parens group. E0328 (D-MATCHARM2=B) fires for
+    ///   unparenthesized mixing of `|` with `&&`/`||`.
+    /// - A leftover redundant `subject ==` prefix emits E0994 and recovers.
     fn if_arm_head(&mut self, subject: &Expr, pat_subject: &Expr) -> Result<Expr, Diagnostic> {
         // A bare pattern head: parse it standalone and attach the subject.
         let save = self.pos;
         if let Some(pattern) = self.try_pattern_rhs()? {
             // Only a pattern if it consumed up to the `->`; otherwise it was an
-            // ordinary value (e.g. a `value`-typed local) — rewind and re-parse.
+            // ordinary value — rewind and re-parse as the value grammar.
             if matches!(self.peek().kind, TokKind::Arrow) {
                 let span = pat_span(&pattern);
                 return Ok(Expr::PatternTest {
@@ -1415,44 +1416,32 @@ impl<'a> Parser<'a> {
             }
             self.pos = save;
         }
-        let raw = self.expr_no_struct_lit()?;
-        // E0994: a leftover `subject ==` prefix on the arm head.
-        match &raw {
-            Expr::PatternTest {
-                subject: lhs, span, ..
-            } if Self::same_subject(lhs, subject) => {
-                self.diags.push(Self::redundant_subject_diag(*span));
-                return Ok(raw);
+        // E0994: peek for a redundant `subject ==` prefix before entering the
+        // new grammar (parse-and-rewind so diagnostics don't leak).
+        let save_pos = self.pos;
+        let save_diags = self.diags.len();
+        if let Ok(raw) = self.expr_no_struct_lit() {
+            match &raw {
+                Expr::PatternTest { subject: lhs, span, .. }
+                    if Self::same_subject(lhs, subject) =>
+                {
+                    self.diags.push(Self::redundant_subject_diag(*span));
+                    return Ok(raw);
+                }
+                Expr::Binary(BinOp::Eq, lhs, _, span)
+                    if Self::same_subject(lhs, subject) =>
+                {
+                    self.diags.push(Self::redundant_subject_diag(*span));
+                    return Ok(raw);
+                }
+                _ => {}
             }
-            Expr::Binary(BinOp::Eq, lhs, _, span) if Self::same_subject(lhs, subject) => {
-                self.diags.push(Self::redundant_subject_diag(*span));
-                return Ok(raw);
-            }
-            _ => {}
         }
-        // E0993: a predicate / Bool head (Q4 disallows free conditions here).
-        if Self::is_predicate_head(&raw) {
-            self.diags.push(Diagnostic::error(
-                "E0993",
-                "an arm head here is matched against the subject, not a free condition".to_string(),
-                format!(
-                    "every arm in `{} subject == {{ … }}` tests the subject; an arbitrary predicate has no subject to match",
-                    Syntax::KW_IF
-                ),
-                format!(
-                    "use a range arm like `400..499 {}` for a band, or a boolean `{} … {{ }} {} {} … {{ }}` for arbitrary predicates",
-                    Syntax::OP_ARM_ARROW,
-                    Syntax::KW_IF,
-                    Syntax::KW_ELSE,
-                    Syntax::KW_IF
-                ),
-                Some(raw.span()),
-            ));
-            // Recover: keep the predicate as a Bool guard arm so the rest checks.
-            return Ok(raw);
-        }
-        // A bare value or `||` chain of values → `subject == value`.
-        Ok(Self::switch_pipe_cond(subject.clone(), raw))
+        // Rewind — the new arm-head grammar re-parses from the saved position.
+        self.pos = save_pos;
+        self.diags.truncate(save_diags);
+        // D-MATCHARM1: value-alternates grammar.
+        self.parse_arm_value_cond(subject)
     }
 
     fn redundant_subject_diag(span: Span) -> Diagnostic {
@@ -1471,17 +1460,130 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-IF3 (Q4): a head that is a free Bool predicate rather than a value or
-    /// pattern matched against the subject — a top-level `&&`, a comparison, or a
-    /// `||` whose alternatives are themselves predicates.
-    fn is_predicate_head(e: &Expr) -> bool {
-        match e {
-            Expr::Binary(BinOp::And, ..) => true,
-            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
-                Self::is_predicate_head(lhs) || Self::is_predicate_head(rhs)
+    // ── D-MATCHARM1 arm-head grammar ─────────────────────────────────────────
+
+    /// Entry point: `arm_bool_expr = arm_and_expr ("||" arm_and_expr)*`
+    fn parse_arm_value_cond(&mut self, subject: &Expr) -> Result<Expr, Diagnostic> {
+        let lhs = self.parse_arm_and_cond(subject)?;
+        if !matches!(self.peek().kind, TokKind::OrOr) {
+            return Ok(lhs);
+        }
+        let mut parts = vec![lhs];
+        while matches!(self.peek().kind, TokKind::OrOr) {
+            self.bump();
+            parts.push(self.parse_arm_and_cond(subject)?);
+        }
+        Ok(parts
+            .into_iter()
+            .reduce(|a, b| {
+                let span = Span::new(a.span().start, b.span().end);
+                Expr::Binary(BinOp::Or, Box::new(a), Box::new(b), span)
+            })
+            .unwrap())
+    }
+
+    /// `arm_and_expr = arm_alternates ("&&" arm_alternates)*`
+    /// D-MATCHARM2=B: if LHS has >1 alternates and `&&` follows → E0328.
+    fn parse_arm_and_cond(&mut self, subject: &Expr) -> Result<Expr, Diagnostic> {
+        let (lhs_cond, lhs_count) = self.parse_arm_alternates_cond(subject)?;
+        if !matches!(self.peek().kind, TokKind::AndAnd) {
+            return Ok(lhs_cond);
+        }
+        if lhs_count > 1 {
+            let span = self.peek().span;
+            self.diags.push(Diagnostic::error(
+                "E0328",
+                "value alternates mixed with `&&` without grouping parentheses".to_string(),
+                "`|` and `&&` at the same arm-head level are ambiguous to read (D-MATCHARM2)".to_string(),
+                "group the alternates: `(400 | 404) && condition` instead of `400 | 404 && condition`".to_string(),
+                Some(span),
+            ));
+            // Sync to arm body delimiter for recovery.
+            while !matches!(
+                self.peek().kind,
+                TokKind::Arrow | TokKind::LBrace | TokKind::RBrace | TokKind::Eof
+            ) {
+                self.bump();
             }
-            Expr::Binary(op, ..) if op.is_comparison() => true,
-            _ => false,
+            return Ok(lhs_cond);
+        }
+        let mut parts = vec![lhs_cond];
+        while matches!(self.peek().kind, TokKind::AndAnd) {
+            self.bump();
+            let (rhs_cond, _) = self.parse_arm_alternates_cond(subject)?;
+            parts.push(rhs_cond);
+        }
+        Ok(parts
+            .into_iter()
+            .reduce(|a, b| {
+                let span = Span::new(a.span().start, b.span().end);
+                Expr::Binary(BinOp::And, Box::new(a), Box::new(b), span)
+            })
+            .unwrap())
+    }
+
+    /// `arm_alternates = arm_atom ("|" arm_atom)*`
+    /// Returns `(condition_expr, alternate_count)`.
+    fn parse_arm_alternates_cond(&mut self, subject: &Expr) -> Result<(Expr, usize), Diagnostic> {
+        let first = self.parse_arm_atom_cond(subject)?;
+        let mut alts = vec![first];
+        // Consume single `|` but not `||` (peek at the token after `|`).
+        while matches!(self.peek().kind, TokKind::Pipe)
+            && !matches!(
+                self.toks.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokKind::Pipe)
+            )
+        {
+            self.bump(); // consume `|`
+            alts.push(self.parse_arm_atom_cond(subject)?);
+        }
+        let n = alts.len();
+        if n == 1 {
+            return Ok((alts.into_iter().next().unwrap(), 1));
+        }
+        // Each alt is already a condition (Eq(subject, value) or a comparison
+        // from `parse_arm_atom_cond`). Just Or them together.
+        let combined = alts
+            .into_iter()
+            .reduce(|a, b| {
+                let span = Span::new(a.span().start, b.span().end);
+                Expr::Binary(BinOp::Or, Box::new(a), Box::new(b), span)
+            })
+            .unwrap();
+        Ok((combined, n))
+    }
+
+    /// `arm_atom = "(" arm_bool_expr ")" | single_value`
+    /// Paren groups recurse with full arm semantics (inner `|` = alternation).
+    fn parse_arm_atom_cond(&mut self, subject: &Expr) -> Result<Expr, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // consume `(`
+            let inner = self.parse_arm_value_cond(subject)?;
+            self.expect(TokKind::RParen, "to close the arm head group")?;
+            return Ok(inner);
+        }
+        // Single value: parse at comparison level so `&&`/`||` are left for the
+        // outer arm-head grammar (`parse_arm_and_cond`/`parse_arm_value_cond`).
+        // Setting `arm_head_term = true` stops `expr_bitor` before top-level `|`
+        // so the caller (`parse_arm_alternates_cond`) handles alternation itself.
+        let old = self.arm_head_term;
+        self.arm_head_term = true;
+        let raw = self.expr_cmp(false);
+        self.arm_head_term = old;
+        let raw = raw?;
+        Ok(Self::arm_atom_to_cond(subject.clone(), raw))
+    }
+
+    /// Wrap a single value as a condition. Comparisons / PatternTest / Bool are
+    /// kept as-is; plain values get `subject == value` wrapping.
+    fn arm_atom_to_cond(subject: Expr, value: Expr) -> Expr {
+        match &value {
+            Expr::Binary(op, ..) if op.is_comparison() => value,
+            Expr::PatternTest { .. } | Expr::Bool(_, _) => value,
+            _ => {
+                let span = Span::new(subject.span().start, value.span().end);
+                Expr::Binary(BinOp::Eq, Box::new(subject), Box::new(value), span)
+            }
         }
     }
 
@@ -1662,8 +1764,7 @@ impl<'a> Parser<'a> {
                         }
                         else_body = Some(body);
                     } else {
-                        let raw_cond = self.expr_no_struct_lit()?;
-                        let cond = Self::switch_pipe_cond(subject.clone(), raw_cond);
+                        let cond = self.parse_arm_value_cond(&subject)?;
                         self.expect(TokKind::LBrace, "to open the arm's body")?;
                         let body = self.block_stmts();
                         let end = self.peek().span.end;
@@ -1902,31 +2003,6 @@ impl<'a> Parser<'a> {
             else_body,
             span,
         })
-    }
-
-    fn switch_pipe_cond(subject: Expr, cond: Expr) -> Expr {
-        match cond {
-            Expr::Binary(BinOp::And, lhs, rhs, span) => Expr::Binary(
-                BinOp::And,
-                Box::new(Self::switch_pipe_cond(subject.clone(), *lhs)),
-                Box::new(Self::switch_pipe_cond(subject, *rhs)),
-                span,
-            ),
-            Expr::Binary(BinOp::Or, lhs, rhs, span) => Expr::Binary(
-                BinOp::Or,
-                Box::new(Self::switch_pipe_cond(subject.clone(), *lhs)),
-                Box::new(Self::switch_pipe_cond(subject, *rhs)),
-                span,
-            ),
-            Expr::Binary(op, lhs, rhs, span) if op.is_comparison() => {
-                Expr::Binary(op, lhs, rhs, span)
-            }
-            Expr::PatternTest { .. } | Expr::Bool(_, _) => cond,
-            other => {
-                let span = Span::new(subject.span().start, other.span().end);
-                Expr::Binary(BinOp::Eq, Box::new(subject), Box::new(other), span)
-            }
-        }
     }
 
     /// D-BIND1: a binding starting with the target (no keyword), written

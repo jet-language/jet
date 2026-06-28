@@ -4,14 +4,14 @@
 // `else ->` catches the rest.
 // The backend lowers value-equality chains to a native Rust match (jump
 // tables where profitable), so this is never slower than if/else.
-// S25: in a `||` chain, a plain value re-applies the nearest comparison —
-// `"sat" || "sun"` means `day == "sat" || day == "sun"`.
+// D-MATCHARM1=A: `|` alternates values in an arm head.
+// `"sat" | "sun"` means `day == "sat" || day == "sun"`.
 fn day_type(day: String) -> String {
     if day == {
-        "sat" || "sun" -> {
+        "sat" | "sun" -> {
             return "weekend"
         }
-        "mon" || "tue" || "wed" || "thu" || "fri" -> {
+        "mon" | "tue" | "wed" | "thu" | "fri" -> {
             return "weekday"
         }
         else -> {
@@ -21,12 +21,11 @@ fn day_type(day: String) -> String {
 }
 fn main() {
     code @= 404
-    // D-IF3 Q4: a band uses a range arm, not a predicate.
     if code == {
         200 -> {
             print("ok")
         }
-        301 || 302 -> {
+        301 | 302 -> {
             print("redirected")
         }
         400..499 -> {

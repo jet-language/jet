@@ -172,6 +172,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Todo { .. }
             | Expr::Lambda(_)
             | Expr::ComptimeSplice { .. } => false,
+            Expr::Paren(inner, _) => self.is_tainted(inner),
         }
     }
 
@@ -298,6 +299,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
             | Expr::ComptimeSplice { .. } => {}
+            Expr::Paren(inner, _) => self.check_expr(inner),
         }
     }
 

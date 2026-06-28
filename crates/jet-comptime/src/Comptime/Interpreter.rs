@@ -896,6 +896,7 @@ impl<'a> Interp<'a> {
                     }
                 }
             }
+            Expr::Paren(inner, _) => self.eval(inner, scope),
             other => Err(unsupported_expr(other)),
         }
     }

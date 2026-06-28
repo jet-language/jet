@@ -396,6 +396,20 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_switch_cond(&mut self, subject: &Expr, cond: &Expr, prec: Prec) {
+        // D-MATCHARM1: if the whole expression is an Or of subject-equalities,
+        // emit it with `|` alternation syntax instead of `||`.
+        if self.is_all_subject_alts(subject, cond) {
+            // D-MATCHARM2=B: parens required when inside && or || context.
+            let needs_paren = prec > Prec::OrFallback;
+            if needs_paren {
+                self.write("(");
+            }
+            self.fmt_arm_alternates(subject, cond);
+            if needs_paren {
+                self.write(")");
+            }
+            return;
+        }
         match cond {
             Expr::Binary(op @ (BinOp::And | BinOp::Or), lhs, rhs, _) => {
                 let my_prec = Prec::of_bin(*op);
@@ -427,6 +441,45 @@ impl<'a> Fmt<'a> {
                 self.fmt_pattern(pattern);
             }
             _ => self.fmt_expr(cond, prec),
+        }
+    }
+
+    /// True when `e` is an Or tree whose every leaf is Eq(subject, value).
+    /// A bare single Eq is NOT matched here — the existing `fmt_switch_cond`
+    /// match arm already strips the `subject ==` prefix for that case.
+    fn is_all_subject_alts(&self, subject: &Expr, e: &Expr) -> bool {
+        match e {
+            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+                self.is_subject_alt_leaf(subject, lhs)
+                    && self.is_subject_alt_leaf(subject, rhs)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_subject_alt_leaf(&self, subject: &Expr, e: &Expr) -> bool {
+        match e {
+            Expr::Binary(BinOp::Eq, lhs, _, _) => self.same_subject(lhs, subject),
+            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+                self.is_subject_alt_leaf(subject, lhs)
+                    && self.is_subject_alt_leaf(subject, rhs)
+            }
+            _ => false,
+        }
+    }
+
+    /// Emit alternates with `|` separators (caller adds outer parens if needed).
+    fn fmt_arm_alternates(&mut self, subject: &Expr, e: &Expr) {
+        match e {
+            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+                self.fmt_arm_alternates(subject, lhs);
+                self.write(" | ");
+                self.fmt_arm_alternates(subject, rhs);
+            }
+            Expr::Binary(BinOp::Eq, _, rhs, _) => {
+                self.fmt_expr(rhs, Prec::Cmp);
+            }
+            _ => unreachable!("is_all_subject_alts should guard this path"),
         }
     }
 

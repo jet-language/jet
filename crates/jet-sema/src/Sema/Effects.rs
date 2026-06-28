@@ -836,6 +836,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
         | Expr::ComptimeSplice { .. } => None,
+        Expr::Paren(inner, _) => expr_handle_escape(inner, handle),
     }
 }
 

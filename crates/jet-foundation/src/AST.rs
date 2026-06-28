@@ -2128,6 +2128,9 @@ pub enum Expr {
         name: String,
         span: Span,
     },
+    /// D-FMTPARENS1=A: explicit author grouping parentheses `(expr)`.
+    /// Transparent to type-checking and codegen; formatter always emits the parens.
+    Paren(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -2167,6 +2170,7 @@ impl Expr {
             | Expr::FanOut { span: s, .. }
             | Expr::PtrFromAddr { span: s, .. }
             | Expr::ComptimeSplice { span: s, .. } => *s,
+            Expr::Paren(_, s) => *s,
             Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,
             Expr::MethodCall { method_span, .. } => *method_span,

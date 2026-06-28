@@ -175,8 +175,8 @@ fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
         "expected mixed condition arm, got:\n{out}"
     );
     assert!(
-        out.contains("tangerine || yuzu -> {"),
-        "expected repeated subject equality to collapse, got:\n{out}"
+        out.contains("tangerine | yuzu -> {"),
+        "expected repeated subject equality to collapse to `|` alternates, got:\n{out}"
     );
     assert!(out.contains("else -> {"), "expected else arm, got:\n{out}");
     let twice = jet::format_source(&out).expect("pipe switch output should re-fmt");
@@ -184,8 +184,9 @@ fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
 }
 
 #[test]
-fn fmt_if_expression_and_strips_redundant_condition_parens() {
-    // S68 (D-SG2): `if` as a value round-trips; redundant condition parens go.
+fn fmt_if_expression_preserves_condition_parens() {
+    // S68 (D-SG2): `if` as a value round-trips.
+    // D-FMTPARENS1=A: author-written grouping parens are always preserved.
     let src = r#"fn main() {
     m @= if (a > b) {
         a
@@ -199,12 +200,12 @@ fn fmt_if_expression_and_strips_redundant_condition_parens() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept an if-expression");
     assert!(
-        out.contains("m @= if a > b {"),
-        "expected paren-free condition in if-expression, got:\n{out}"
+        out.contains("m @= if (a > b) {"),
+        "expected parens preserved in if-expression condition, got:\n{out}"
     );
     assert!(
-        out.contains("    if a > b {"),
-        "expected paren-free statement-if condition, got:\n{out}"
+        out.contains("    if (a > b) {"),
+        "expected parens preserved in statement-if condition, got:\n{out}"
     );
     assert!(
         out.contains("} else {"),

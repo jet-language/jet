@@ -189,7 +189,11 @@ impl<'a> Parser<'a> {
             return Ok(Expr::Int(0, open, None));
         }
         self.expect(TokKind::RParen, "to close this `(`")?;
-        Ok(inner)
+        let close_span = self.toks[self.pos - 1].span;
+        let span = Span::new(open.start, close_span.end);
+        // D-FMTPARENS1=A: preserve author parens as a distinct AST node so
+        // the formatter can always re-emit them, even when redundant.
+        Ok(Expr::Paren(Box::new(inner), span))
     }
 
     /// True when `(` starts `( expr , … )` without member names — rejected (S73).
@@ -353,7 +357,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Comparisons don't chain: `a < b < c` is a parse error with guidance.
-    fn expr_cmp(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+    pub(super) fn expr_cmp(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let lhs = self.expr_bitor(allow_struct_lit)?;
         let op = match &self.peek().kind {
             TokKind::EqEq => Some(BinOp::Eq),
@@ -406,6 +410,11 @@ impl<'a> Parser<'a> {
 
     fn expr_bitor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let mut lhs = self.expr_bitxor(allow_struct_lit)?;
+        // D-MATCHARM1: arm-head term mode — stop before top-level `|` so the
+        // arm-head parser can collect `|`-separated value alternates itself.
+        if self.arm_head_term {
+            return Ok(lhs);
+        }
         while matches!(self.peek().kind, TokKind::Pipe) {
             let op_span = self.bump().span;
             let rhs = self.expr_bitxor(allow_struct_lit)?;
@@ -1054,6 +1063,7 @@ impl<'a> Parser<'a> {
                                 type_generic_depth: 0,
                                 type_generic_chain: Vec::new(),
                                 type_generic_truncated: false,
+                                arm_head_term: false,
                             };
                             let e = sub.expr()?;
                             if !sub.diags.is_empty() {

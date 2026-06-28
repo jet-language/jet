@@ -562,6 +562,7 @@ impl<'a> StateCtx<'a> {
             | Expr::Todo { .. }
             | Expr::Lambda(_)
             | Expr::ComptimeSplice { .. } => {}
+            Expr::Paren(inner, _) => self.check_expr(inner),
         }
     }
 

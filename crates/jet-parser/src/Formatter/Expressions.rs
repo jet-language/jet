@@ -519,6 +519,12 @@ impl<'a> Fmt<'a> {
             Expr::ComptimeSplice { name, .. } => {
                 self.write(&format!("${}", name));
             }
+            // D-FMTPARENS1=A: author-written grouping parens are always re-emitted.
+            Expr::Paren(inner, _) => {
+                self.write("(");
+                self.fmt_expr(inner, Prec::OrFallback);
+                self.write(")");
+            }
         }
     }
 

@@ -2309,6 +2309,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // inside `use core.mem` + an `#Unsafe` region (sema-gated by E0208); the
         // deref/cast forms are byte-for-byte the AST path (no convention facts).
         Expr::Deref(inner, _) | Expr::RawOf(inner, _) => expr_in_subset(inner, cx, locals),
+        Expr::Paren(inner, _) => expr_in_subset(inner, cx, locals),
         // Everything else (tuples, …) is out.
         _ => false,
     }

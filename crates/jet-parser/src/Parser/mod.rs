@@ -50,6 +50,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
+        arm_head_term: false,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -73,6 +74,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
+        arm_head_term: false,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -149,7 +151,6 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0986"
             | "E0320"
             | "E0992"
-            | "E0993"
             | "E0994"
     )
 }
@@ -174,6 +175,9 @@ struct Parser<'a> {
     type_generic_chain: Vec<String>,
     /// Set when generic depth exceeds the limit mid-parse.
     type_generic_truncated: bool,
+    /// D-MATCHARM1: when true, `expr_bitor` stops before consuming a top-level `|`
+    /// so the arm-head parser can treat `|` as value-alternation.
+    arm_head_term: bool,
 }
 
 fn too_deep(span: Span) -> Diagnostic {

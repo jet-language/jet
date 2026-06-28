@@ -201,6 +201,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
             }
         }
         Expr::PtrFromAddr { addr, .. } => collect_tuple_shapes_from_expr(addr, out),
+        Expr::Paren(inner, _) => collect_tuple_shapes_from_expr(inner, out),
     }
 }
 

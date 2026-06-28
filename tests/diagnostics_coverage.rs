@@ -591,6 +591,7 @@ fn registered_unimplemented_codes_are_expected() {
         "L2801", // E2-M10 — staged
         "L2901", // E2-M11 — staged
         "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
+        "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed
     ];
 
     let expected: BTreeSet<String> = EXPECTED_SPEC_AHEAD_OF_IMPL

@@ -643,6 +643,8 @@ impl<'a> Checker<'a> {
                 }
                 None
             }
+            // D-FMTPARENS1=A: parenthesized expressions are transparent to type checking.
+            Expr::Paren(inner, _) => self.infer(inner),
         }
     }
 

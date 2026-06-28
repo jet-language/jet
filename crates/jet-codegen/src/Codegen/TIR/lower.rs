@@ -3328,6 +3328,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        Expr::Paren(inner, _) => lower_expr(inner, cx, env),
         _ => unreachable!("expression not in TIR subset"),
     }
 }

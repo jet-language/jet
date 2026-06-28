@@ -125,7 +125,7 @@ before continuing.
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
 | E0991 | parse | teaching: `::` retired immutable-binding sigil → `@=` (D-BIND2) |
 | E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs `==` between the subject and `{` (D-IF3) |
-| E0993 | parse | a predicate/Bool arm head in `if subject == { … }` — use a range arm or a boolean `if`/`else if` (D-IF3 Q4) |
+| E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
 | E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
@@ -199,6 +199,7 @@ before continuing.
 | E0321 | parse | teaching: `impl Type: Trait` old colon separator → `impl Type.Trait` (D-IMPLDOT1) |
 | E0322 | parse | assignment `=` in `if` condition — did you mean `==`? (D-ASSIGNCOND1) |
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
+| E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | teaching: `use jet.<ring>` old ring namespace — use `use core.<ring>` (D-CORENS1) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
