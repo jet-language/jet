@@ -922,11 +922,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Preserved from v1 deferred ballot (D-BUDGET1); not decidable until post-v1 proof/solver/policy layer exists"
@@ -941,7 +945,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c93y9sk",
@@ -2059,13 +2063,17 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Misuse-resistant crypto envelope (D-CRYPTOENV1=A): `crypto.seal`/`crypto.open` (AEAD) + `crypto.sign`/`crypto.verify` (signatures) as the canonical API hiding nonce/IV/mode (libsodium model); raw AES/ChaCha/RSA behind an explicit expert import (I1).\nGATED two ways: (a) the crypto primitive backend is an I6 dep — ballot D-DEP-CRYPTO1 (RustCrypto vs ring vs libsodium); (b) the envelope's CSPRNG must come from the ratified random API — card #52 (Random API) is still open: blockedBy #52. Steps once cleared: seal/open + sign/verify over the chosen backend; raw primitives gated behind expert import; examples + goldens.",
       "blockedBy": [
         "cgiv599"
       ],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Decision cleared (D-CRYPTOENV1=A); raised crypto-backend I6 ballot D-DEP-CRYPTO1; also blockedBy the open Random API decision (#52). Held in deciding."
@@ -2080,7 +2088,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "ctiw01r",
@@ -2214,11 +2222,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
       "plan": "Opt-in GC library (D-OPTGC1=A): a `gc` stdlib module with a `Gc<T>` traced handle for cyclic heap data. Ownership stays the default; `Gc<T>` is a deliberate expert import; all Jet outside @unsafe stays sound (library type, not a language primitive).\nGATED on the backing implementation — ballot D-DEP-GC1 (hand-rolled pure-Rust mark-sweep vs an external GC crate vs defer); the external-crate path is an I6 owner gate. Steps once cleared: Gc<T> handle + traced collector (root set + tracing) per the chosen backend; examples (cyclic graph) + goldens. Does not touch sema/codegen rules or the default allocation path.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Decision cleared (D-OPTGC1=A) but the backing collector is an I6 gate — raised ballot D-DEP-GC1; card held in deciding."
@@ -2233,7 +2245,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "cyiwb6t",
@@ -2821,9 +2833,13 @@
       "epoch": "e5",
       "phase": "building",
       "priority": "P2",
-      "plan": "D-WORKSPACE1/B + D-WORKSPACE2/A current state: `workspace.jet` / `module workspace { members: ... }` is shipped for explicit string lists and `find(\"./packages\")`; tests/workspace.rs and examples/workspace cover it. Remaining: (1) arbitrary comptime expressions in `members:` after D-CTMARKER1/D-CTEFFECT1; (2) decide/bless whether `.jet/workspace.lock` stays separate or folds into unified `.jet/lock`, then wire `--locked`; (3) index-first sparse subtree fetch for monorepo source members; (4) migration/teaching diagnostic for legacy `jetpack.toml` monorepo `[packages]`.",
+      "plan": "D-WORKSPACE1/B + D-WORKSPACE2/A current state: `workspace.jet` / `module workspace { members: ... }` is shipped for explicit string lists and `find(\"./packages\")`; tests/workspace.rs and examples/workspace cover it; legacy `jetpack.toml` `[packages]` now emits E1225 and examples no longer use the retired index. Remaining: (1) arbitrary comptime expressions in `members:` after D-CTMARKER1/D-CTEFFECT1; (2) decide/bless whether `.jet/workspace.lock` stays separate or folds into unified `.jet/lock`, then wire `--locked`; (3) index-first sparse subtree fetch for monorepo source members.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implemented Stage 5 migration slice: `jetpack.toml` `[packages]` now emits E1225 pointing at `workspace.jet`; examples moved off the retired table; focused ManifestTOML and jetpack integration tests pass."
+        },
         {
           "at": "2026-06-27",
           "text": "Reconciled stale decision state: D-WORKSPACE1 is ratified in syntax-decisions.md; advanced to planning."
@@ -3158,13 +3174,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P1",
       "plan": null,
       "blockedBy": [
         "D-TASKSCOPE1"
       ],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L148). Full design ballot attached — owner decides proceed/direction."
@@ -3441,11 +3461,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L161). Full design ballot attached — owner decides proceed/direction."
@@ -3456,7 +3480,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26",
+      "updated": "2026-06-28",
       "logs": [
         {
           "at": "2026-06-28",
@@ -3668,11 +3692,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L170). Full design ballot attached — owner decides proceed/direction."
@@ -3683,7 +3711,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c2dizcmj",
@@ -3906,11 +3934,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L183). Full design ballot attached — owner decides proceed/direction."
@@ -3921,7 +3953,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c2kizq8n",
@@ -4248,18 +4280,22 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L199). Full design ballot attached — owner decides proceed/direction."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c2vj0hg0",
@@ -4439,18 +4475,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-26",
           "text": "Raised from D-ENUMDOT1 sub-question (value-position dot); ballot D-ENUMDOT2 queued for the owner."
         }
       ],
       "created": "2026-06-26T00:00:00.000Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "cs7vu8u1",
@@ -6174,10 +6214,12 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "runtime",
       "bestCurrent": "Trio proves lexical task lifetime; Swift TaskGroup proves mainstream naming; Go proves why unstructured goroutines need better lifetime ownership.",
-      "recommendation": "Adopt scoped task groups as canonical spawn. Jet can keep Go-like simplicity while making task leaks, dropped errors, and forgotten joins structurally impossible."
+      "recommendation": "Adopt scoped task groups as canonical spawn. Jet can keep Go-like simplicity while making task leaks, dropped errors, and forgotten joins structurally impossible.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-RACEWIN1",
@@ -6682,10 +6724,12 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "runtime",
       "bestCurrent": "Kotlin withTimeout inherits through coroutine scope; Go context proves the value of deadline propagation but makes every call thread ctx manually.",
-      "recommendation": "Put deadlines on Jet #Context and enforce them at I/O/wait points. Jet improves on Go by making propagation part of structured concurrency instead of another parameter to forget."
+      "recommendation": "Put deadlines on Jet #Context and enforce them at I/O/wait points. Jet improves on Go by making propagation part of structured concurrency instead of another parameter to forget.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-APPROX1",
@@ -7023,10 +7067,13 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "web-ui",
       "bestCurrent": "Elm: Elm’s typed UI ecosystem catches many invalid attributes and values at compile time.",
-      "recommendation": "Sequence typed styles inside the reactive UI stack. Jet should match Elm’s safety while sharing one component/layout model."
+      "recommendation": "Sequence typed styles inside the reactive UI stack. Jet should match Elm’s safety while sharing one component/layout model.",
+      "outcome": "A",
+      "comment": "I want this also ratified: How Jet can be decisively better than all of them: (A) UNIT POSTFIX from #Unit system: `14.px`, `1.5.rem`, `16.ms`, `100.pct` — more ergonomic than elm-css's `px 14`, safer than CSS strings. Every length is a typed value. (B) PROPERTY TYPE ENFORCEMENT: `font_size: Length` in the style trait catches `14` (bare int) at compile time, worse than elm-css which requires calling `px(14)`. Jet catches it without ceremony. (C) THEME TOKENS AS ENUM TYPES: `Color.Primary`, `Spacing.SM` — symbols, not CSS-variable strings. Autocomplete + compile-time checking. (D) RESPONSIVE AS PATTERN MATCH: `#Responsive { .mobile → style_a, .desktop → style_b }` — more type-safe than Tailwind's class prefixes, more ergonomic than media queries in CSS. (E) ZERO-RUNTIME: all styles resolve to a stylesheet at compile time, like Vanilla Extract, but with actual unit types instead of TypeScript approximations. (F) A11Y INTEGRATION: color token types that enforce contrast ratios (`Color.Fg` must contrast on `Color.Bg`), flagged at compile time. No other system does this. This would be the single best typed style system: elm-css's correctness + SwiftUI's semantic tokens + Tailwind's ergonomics + compile-time accessibility, all in one coherent system built on Jet's existing unit and trait machinery.",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-A11Y1",
@@ -7786,10 +7833,12 @@
         }
       ],
       "rec": "C",
-      "status": "open",
+      "status": "ratified",
       "group": "stdlib",
       "bestCurrent": "Browser / mobile APIs: Platforms expose battery/performance hints; carbon intensity is usually app/service-provided.",
-      "recommendation": "Fold into adaptive runtime later. Jet should not standardize environmental signals before the runtime policy surface exists."
+      "recommendation": "Fold into adaptive runtime later. Jet should not standardize environmental signals before the runtime policy surface exists.",
+      "outcome": "C",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-CASTORE1",
@@ -8188,10 +8237,12 @@
         }
       ],
       "rec": "B",
-      "status": "open",
+      "status": "ratified",
       "group": "syntax",
       "bestCurrent": "Rust: Rust gives `|` in patterns its own grammar and requires guards after `if`, avoiding ambiguous boolean/pattern mixtures.",
-      "recommendation": "Require parens on mixed heads. Jet keeps compact alternation while making mixed boolean logic impossible to misread."
+      "recommendation": "Require parens on mixed heads. Jet keeps compact alternation while making mixed boolean logic impossible to misread.",
+      "outcome": "B",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-IGNORERET2",
@@ -8314,10 +8365,12 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "safety",
       "bestCurrent": "Workflow engines: Temporal-style workflow engines use replayability as the contract for deterministic reruns.",
-      "recommendation": "Use `#Replayable`. It names the user goal directly: this function is safe to record and replay."
+      "recommendation": "Use `#Replayable`. It names the user goal directly: this function is safe to record and replay.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-DEP-GC1",
@@ -8356,10 +8409,12 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "runtime",
       "bestCurrent": "Go: Go has a production tracing GC integrated into the runtime, but it is always part of the language cost model.",
-      "recommendation": "Hand-roll an opt-in pure-Rust mark-sweep library. Jet preserves ownership by default and pays GC cost only where cyclic graphs need it."
+      "recommendation": "Hand-roll an opt-in pure-Rust mark-sweep library. Jet preserves ownership by default and pays GC cost only where cyclic graphs need it.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-DEP-CRYPTO1",
@@ -8398,10 +8453,12 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "safety",
       "bestCurrent": "RustCrypto: RustCrypto offers pure-Rust AEADs, hashes, signatures, and traits with broad audit attention and no C toolchain.",
-      "recommendation": "Use RustCrypto behind Jet’s misuse-resistant envelope. Jet can expose fewer knobs than Rust while keeping pure-Rust portability."
+      "recommendation": "Use RustCrypto behind Jet’s misuse-resistant envelope. Jet can expose fewer knobs than Rust while keeping pure-Rust portability.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-ENUMDOT2",
@@ -8440,10 +8497,12 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "syntax",
       "bestCurrent": "Swift: Swift allows `.case` when the enum type is known, making assignments and calls concise without losing type context.",
-      "recommendation": "Extend dot to value position. Jet already chose dot for inferred enum patterns; value-position parity gives Swift’s ergonomics with one inferred-member rule."
+      "recommendation": "Extend dot to value position. Jet already chose dot for inferred enum patterns; value-position parity gives Swift’s ergonomics with one inferred-member rule.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-REFINE1",
@@ -8616,10 +8675,12 @@
         }
       ],
       "rec": "B",
-      "status": "open",
+      "status": "ratified",
       "group": "research",
       "bestCurrent": "RTSJ / Ada: Real-time systems express priorities/deadlines; full static cost inference is rare and niche.",
-      "recommendation": "Use a foundational `#Budget` marker, not full cost inference. Jet can connect budgets to effects/deadlines now and leave exact proofs to research."
+      "recommendation": "Use a foundational `#Budget` marker, not full cost inference. Jet can connect budgets to effects/deadlines now and leave exact proofs to research.",
+      "outcome": "B",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-REVERSE1",
@@ -8722,7 +8783,7 @@
     {
       "id": "D-VISDEFAULT2",
       "cardId": "c2jizomr",
-      "status": "open",
+      "status": "ratified",
       "gist": "D-VISDEFAULT1 already approved a file-scope marker. This card decides the marker spelling and whether the exception is a new private keyword or the existing per-item `pub` model inverted. It is one syntax choice; it does not reopen private-by-default as the language baseline.",
       "story": "Maya owns `core.http.server`. Almost every function in the file is public API. She wants one line at the top so the file reads like an API surface, while `parse_header_fast_path` stays private without being moved to another file.",
       "inWild": "use core.http\n\n#PubFile\n\nfn listen(port: Int) -> Server { ... }\nfn route(path: String, handler: Handler) -> Route { ... }\nfn middleware(f: Handler) -> Middleware { ... }\n\npriv fn parse_header_fast_path(bytes: [U8]) -> Header { ... }",
@@ -8777,7 +8838,9 @@
       "title": "What is the file-scope public-by-default marker, and how do private exceptions read?",
       "explainer": "S18 stays private-by-default. The approved marker is an opt-in escape for files that are mostly public API. The owner needs to pick two visible words: the file marker and the explicit-private exception inside that file. Avoid section markers here: S18 already rejected grouped visibility because moving an item across a line silently changes its export status. Also avoid `@` markers: D-ATTR1 retired `@` as an attribute prefix; Jet markers use `#PascalCase`/`#Name(...)`.",
       "bestCurrent": "Swift: Swift supports file-scoped access and explicit public API boundaries.",
-      "recommendation": "Use `#PubFile` with `priv` exceptions. Jet keeps private-by-default globally while giving API-heavy files a clear opt-in."
+      "recommendation": "Use `#PubFile` with `priv` exceptions. Jet keeps private-by-default globally while giving API-heavy files a clear opt-in.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-LAYOUT1",
@@ -8826,7 +8889,7 @@
     {
       "id": "D-RENDERTGT2",
       "cardId": "c2pj04xf",
-      "status": "open",
+      "status": "ratified",
       "gist": "D-RENDERTGT1 approved a backend seam. This card decides the minimum trait between Jet UI and platform renderers: layout phases, event delivery, and paint calls. It is internal API shape, not user syntax.",
       "story": "Sophie is implementing the web backend for Jet's UI. She needs to implement the Backend trait. She wants to know: what methods does she have to implement, what data types do they pass around, and how do events flow back to Jet code?",
       "inWild": "// What a TUI backend implementor writes:\nimpl Backend for TermBackend {\n    fn measure(node: &Node, constraint: SizeConstraint) -> Size { ... }\n    fn layout(node: &Node, frame: Rect) { ... }\n    fn paint(node: &Node, painter: &mut Painter) { ... }\n    fn on_event(event: Event) -> EventResult { ... }\n}",
@@ -8865,7 +8928,9 @@
       "group": "web-ui",
       "explainer": "Group this with layout/reactive UI. The owner is choosing architectural contract, not syntax. The trait must support native widgets, browser DOM, and future custom renderers without leaking one platform into the Jet UI model.",
       "bestCurrent": "Flutter: Flutter separates layout, paint, and hit testing through renderer objects.",
-      "recommendation": "Use a three-phase measure-layout-paint trait. Jet gets Flutter-grade backend portability while keeping layout decisions explicit and testable."
+      "recommendation": "Use a three-phase measure-layout-paint trait. Jet gets Flutter-grade backend portability while keeping layout decisions explicit and testable.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-NATIVEUI2",
@@ -8951,7 +9016,7 @@
     {
       "id": "D-REFLECT1",
       "cardId": "c2mizubb",
-      "status": "open",
+      "status": "ratified",
       "gist": "Rich reflection is already approved. This card decides whether `T.reflect()` returns one typed handle with methods, a variant description you pattern-match, or trait-gated reflection. The goal is derive authors reading fields, methods, generics, and markers without raw AST access.",
       "story": "Victor writes a `Codable` derive. For each field he needs the Jet field name, type, visibility, default marker, and rename marker. He should not parse source text or inspect generated Rust; he should ask the reflected type handle.",
       "inWild": "comptime fn derive_codable(T: Type) -> Source {\n    info @= T.reflect()\n    loop field in info.fields() {\n        wire_name @= field.marker(#Rename)?.text() ?? field.name()\n        emit_field_encoder(wire_name, field.ty())\n    }\n}",
@@ -8991,12 +9056,14 @@
       "title": "What shape does the typed reflection API return to comptime code?",
       "explainer": "D-METAREFLECT1 chose one reflected type handle, not AST injection. D-CTCODEGEN1 says generated code re-enters lexer/parser/sema, so reflection must expose sema-approved facts only. That means no raw parser nodes, no Rust types, and no untyped `Any` blob that makes derive authors guess. Examples use ratified Jet spellings: `comptime`, `@=` bindings, `if subject == { }` style dispatch when needed.",
       "bestCurrent": "Swift: Swift exposes reflection through `Mirror`, a single value describing children/labels/types.",
-      "recommendation": "Return one typed `TypeInfo` handle. Jet can make Swift-style reflection compile-time-only and strongly typed for derives."
+      "recommendation": "Return one typed `TypeInfo` handle. Jet can make Swift-style reflection compile-time-only and strongly typed for derives.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-SIGNAL1",
       "cardId": "c2oizyqs",
-      "status": "open",
+      "status": "ratified",
       "gist": "`#Reactive` is already the opt-in scope marker. This card decides the library vocabulary underneath it: mutable sources, derived values, and side-effect scopes. It should be one small API, not a second language.",
       "story": "Fiona writes a counter widget. `count` changes on click, `doubled` updates from `count`, and the label rerenders when either value changes. She should see exactly which values are mutable and which are derived.",
       "inWild": "use core.reactive: Signal, Computed\n\nfn counter(label: Label, button: Button) {\n    count @= Signal(0)\n    doubled @= Computed(() => count.get() * 2)\n\n    #Reactive {\n        label.set_text(doubled.get().to_string())\n    }\n\n    button.on_click(() => { count.set(count.get() + 1) })\n}",
@@ -9036,12 +9103,14 @@
       "title": "What are the primitive `core.reactive` types under `#Reactive`?",
       "explainer": "Reactive code has three jobs: hold changing state, compute a value from other reactive reads, and rerun an effect when dependencies change. `#Reactive { }` should desugar to the effect job only; ordinary library types do the rest. Avoid syntax-shaped examples like `let` or operator lambdas that Jet has not ratified. This card is API naming, not new syntax.",
       "bestCurrent": "SolidJS: SolidJS has primitive signals, memos, and effects with fine-grained dependency tracking.",
-      "recommendation": "Use `Signal<T>`, `Computed<T>`, and `Effect`. Jet should adopt the clearest fine-grained reactive triad and let `#Reactive` wire capture."
+      "recommendation": "Use `Signal<T>`, `Computed<T>`, and `Effect`. Jet should adopt the clearest fine-grained reactive triad and let `#Reactive` wire capture.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-MNIO1",
       "cardId": "c2iizmyx",
-      "status": "open",
+      "status": "ratified",
       "gist": "M:N green threads are decided. This card chooses the runtime implementation behind blocking-looking socket/file APIs. It is not user syntax: user code keeps `task { }`, channels, and ordinary reads/writes.",
       "story": "Gary runs a chat server with 50,000 open TCP connections. Most sockets are idle. `socket.read()` should park the Jet task and free the OS thread until the socket is ready, without Gary learning epoll, kqueue, or IOCP.",
       "inWild": "task {\n    socket @= tcp.accept()?\n    loop {\n        data @= socket.read()?   // parks Jet task, not OS thread\n        socket.write(handle(data))?\n    }\n}",
@@ -9081,7 +9150,9 @@
       "title": "Which OS readiness backend parks M:N tasks on I/O?",
       "explainer": "The scheduler needs one park/wake layer per platform. The decision is between owning native backends, owning a lowest-common-denominator poller, or depending on libuv. I6 matters: compiler Source has zero external crates, and runtime-side deps still need owner approval. The E3 goal is better-than-Go networking, so the backend must support task-per-connection scale, O(ready events) wakeups, low allocation pressure, and runtime observability.",
       "bestCurrent": "Go: Go parks goroutines on epoll/kqueue/IOCP through platform-native netpollers, enabling high concurrency.",
-      "recommendation": "Build own platform-native backends. Jet needs Go-class scaling as the floor and a higher ceiling through native pollers, structured cancellation, deadlines, and runtime metrics."
+      "recommendation": "Build own platform-native backends. Jet needs Go-class scaling as the floor and a higher ceiling through native pollers, structured cancellation, deadlines, and runtime metrics.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-CONCSELECT1",
@@ -9197,13 +9268,15 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "runtime",
       "bestCurrent": "Swift TaskGroup has the clearest mainstream name; Trio nursery has the strongest semantics but weaker product language.",
       "recommendation": "Use `taskgroup g { ... }` unless the owner prefers another spelling. It keeps the task relationship obvious and avoids Trio-specific vocabulary.",
       "created": "2026-06-28",
       "raisedBy": "agent",
-      "raisedAt": "2026-06-28"
+      "raisedAt": "2026-06-28",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     }
   ],
   "binder": [
@@ -9804,6 +9877,106 @@
       "answer": "Reconciled in tools/Tower/docs/plans/epoch-3/concurrency-vision.md. The coherent model is: ordinary Jet code -> task { }/channels -> nursery scopes own task lifetime -> all/race/any are nursery combinators -> deadlines/cancellation flow through nursery context -> M:N scheduler parks tasks on I/O/timers -> platform readiness backend wakes tasks. D-ASYNCRT1=A already rejects async/await function coloring. D-COROUTINE1 should decide whether coroutines stay internal substrate (rec B); D-NURSERY1 chooses the user-facing structured-concurrency scope; D-RACEWIN1/D-CONCCOMB1 fold into that scope; D-DEADLINE1 rides context/nursery propagation; D-MNIO1 is runtime plumbing only.",
       "created": "2026-06-28T03:06:26.398Z",
       "updated": "2026-06-28"
+    },
+    {
+      "id": "q65o1qy",
+      "cardId": "c1tiy3ge",
+      "by": "owner",
+      "kind": "question",
+      "text": "What are all the tradeoffs between A & B? We need experts to have full control -> is there anything that cannot be accomplished with option B that could be accomplished with option A? If we are limiting the expert features or control, that is not acceptable. It is our job to make it easy & merge the visions so they arent disparate",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T10:52:31.128Z"
+    },
+    {
+      "id": "q7d05qs",
+      "cardId": "c2rj09ov",
+      "by": "owner",
+      "kind": "question",
+      "text": "Please update to support a cohesive vision of both animation & motion. I want better options to choose from that give magic out of the box to beginners & full control for experts -> the manim library for python is a great example of an anim lib, consult that for potential inclusions/features/ergonomics that are lauded by the community",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:00:51.317Z"
+    },
+    {
+      "id": "q84ybow",
+      "cardId": "c1iqde7",
+      "by": "owner",
+      "kind": "question",
+      "text": "Give me other syntax options that read a little better, i am potentially ok with A but want multiple options, can have more than 3",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:04:20.032Z"
+    },
+    {
+      "id": "q9cbbci",
+      "cardId": "cfiv3fb",
+      "by": "owner",
+      "kind": "question",
+      "text": "Try a method operator with different sigils that could identify it as a non-member/feature rather than a field. Give me multiple options, not just 3 & update the ballot accordingly",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:07:16.848Z"
+    },
+    {
+      "id": "qaclkf4",
+      "cardId": "c73xs2f",
+      "by": "owner",
+      "kind": "question",
+      "text": "What are the tradeoffs of option B instead of c? What is lost by going with b over c?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:11:56.444Z"
+    },
+    {
+      "id": "qbzugjf",
+      "cardId": "c93y9sk",
+      "by": "owner",
+      "kind": "question",
+      "text": "What are the tradeoffs of going with b over c? What is lost from a feature/ability perspective? What could experts do with c that they cant do with b?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:14:04.248Z"
+    },
+    {
+      "id": "qcw2bsc",
+      "cardId": "c63xl5c",
+      "by": "owner",
+      "kind": "question",
+      "text": "How can we give full control while keeping the system as small as it can be without cutting functionality? Can we turn tainted from a pure marker into something like `#Tainted(.PII)` or something? I dont know what to do for this so please propose a cohesive, excellent system that will be best in class, but challenge your approach using devils advocate to harden, patch holes, and ensure extraordinary ergonomics",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:18:05.018Z"
+    },
+    {
+      "id": "qdkue0f",
+      "cardId": "ca3ynsl",
+      "by": "owner",
+      "kind": "question",
+      "text": "Consider the best approach currently in any language, then consider how to improve on it from a functionality & ergonomics perspective. Present me a devil's advocate-challenges updated ballot that gives the best of all worlds & explains why it is the best & what it is like compared to other languages",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:20:56.058Z"
+    },
+    {
+      "id": "qeuf4zr",
+      "cardId": "c2fizfx3",
+      "by": "owner",
+      "kind": "question",
+      "text": "We must ensure full expert control & auditability. We want magic out of the box for beginners but experts need to be able to see the inner workings & control as needed. Reconsider this ballot with devils advocate, make it best in the world, ensure ergonomics, magic, and full control are all considered. Tell my why your new option set is best, why you recommend your new recommendation, and how it compares to other languages",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:23:24.277Z"
+    },
+    {
+      "id": "qfoz4n5",
+      "cardId": "c0ikwz8",
+      "by": "owner",
+      "kind": "question",
+      "text": "I like a but dont like the syntax. Please provide an updated ballot that presents more cohesive options with much better syntax. Play devils advocate on your answers to improve/harden/patch holes, then represent them to me",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-28T11:27:12.951Z"
     }
   ]
 }
