@@ -22,11 +22,21 @@ $ jet flamegraph app.jet   →   jet-flamegraph app.jet
 PATH discovery **remains** for simple tools; the plugin API is for deep
 integration only — not a replacement for `jet-*` binaries.
 
-## Open design questions
+## Ratified substrate
 
-- In-process vs out-of-process plugins (security vs latency).
-- Stable C ABI vs WASM sandbox vs separate LSP-style JSON-RPC.
-- Which compiler pipelines expose hooks (parse-only, sema, after-codegen).
+- D-PLUGIN1=B: `target: plugin` means a sandboxed WASM module, safe by default, no
+  `#Unsafe` gate for loading untrusted plugins.
+- D-DEP-WASM1=A: wasmtime + Component Model is the approved runtime-side engine.
+- PATH discovery remains for simple `jet-*` tools; WASM plugins are for deep typed
+  integration.
+
+Implementation plan lives in [`../sidequests/plugin-target.md`](../sidequests/plugin-target.md).
+
+## Remaining design questions
+
+- Version / ABI handshake over the Component Model.
+- Export surface spelling (`#Plugin` marker vs manifest `entry:` + `pub` contract).
+- Which compiler pipelines expose hooks first (parse-only, sema, after-codegen).
 
 ## Non-goals
 

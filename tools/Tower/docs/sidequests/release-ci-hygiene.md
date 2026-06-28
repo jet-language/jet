@@ -1,6 +1,6 @@
 # Plan: Release and CI hygiene for v1 credibility
 
-**Status:** planned. No language decision is required.
+**Status:** implemented through the CI baseline. No language decision is required.
 
 ## Problem
 
@@ -33,7 +33,7 @@ This is credibility work, not language design.
 
 ### 2. CI baseline
 
-- Create `.github/workflows/ci.yml`.
+- Create `.github/workflows/ci.yml`. **Done 2026-06-28.**
 - Run:
   - `nix flake check`
   - `nix develop -c cargo check`
@@ -52,6 +52,7 @@ This is credibility work, not language design.
 ### 4. Local developer path
 
 - Update docs to say the supported full test path is through `nix develop`.
+  **Done 2026-06-28** in `README.md`.
 - Keep plain `cargo check` usable where possible, but do not imply plain `cargo test`
   is the official environment when it requires system linker/toolchain setup.
 

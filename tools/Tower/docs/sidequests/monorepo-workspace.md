@@ -1,6 +1,13 @@
 # Monorepo: `workspace.jet` index + package addressing (c156)
 
-**Status:** Ratified, not implemented. Gated on the computed-modules / comptime-block work (D-CTMARKER1=C, c155-adjacent). Build plan only — do not implement until the gate lands and the workspace keyword/filename ballot (Owner Q4) is confirmed.
+**Status:** Partially implemented. D-WORKSPACE2 chose `module workspace` in
+`workspace.jet`; the restricted common case ships now: explicit member lists and
+`members: find("./packages")` evaluate through `Jetpack::WorkspaceFile`, build
+workspace members, emit a best-effort `.jet/workspace.lock`, and have
+`tests/workspace.rs` coverage plus `examples/workspace/`. Remaining work:
+arbitrary comptime member expressions, unified-lock integration, sparse
+subtree fetch, and migration/teaching diagnostics for old `jetpack.toml`
+monorepo indexes.
 
 ## Goal
 
@@ -9,10 +16,14 @@ One grammar for the whole project. Replace the root `jetpack.toml` monorepo inde
 ## Current state (verified, file:line)
 
 **Module surface (the `module <name> { … }` typed config syntax):**
-- Keyword `module` = U3 at `Source/Syntax.rs:935-936`; reserved namespaces `env`/`system`/`image` at `Syntax.rs:954-957`; field names `sources`/`imports` = U8 at `Syntax.rs:1031-1032`; filenames `ENV_FILE="env.jet"` / `CONFIG_FILE="config.jet"` at `Syntax.rs:1001-1002`. No `workspace` keyword or `workspace.jet` anywhere.
+- Keyword `module`, namespace `workspace`, field `members`, and
+  `WORKSPACE_FILE = "workspace.jet"` are registered in
+  `crates/jet-foundation/src/Syntax.rs` per D-WORKSPACE2 (I7).
 - Item dispatch: `Source/Parser/Items.rs:377-380` routes `KwModule` to `code_module` vs `module_decl()` via `is_code_module_at` (`Source/Parser/Modules.rs:61-116`, syntactic — `sources`/`imports`/`ident .` → typed module).
-- Typed-module parser: `module_decl()` at `Source/Parser/Modules.rs:7-50`; sub-parsers `module_sources()` `:248-293`, `module_import()` `:297-305` (only `imports: find(...)`), `contribution()` `:310-358`.
-- AST: `ModuleDecl` (`Source/AST.rs:581`) holds `sources: Vec<SourceDecl>`, `imports: Vec<Expr>`, `contributions: Vec<Contribution>`; `SourceDecl` `:602`, `Contribution` `:614`, `ContribValue` `:629`. **No `members:` field exists today.**
+- Typed-module parser: `crates/jet-parser/src/Parser/Modules.rs` recognizes
+  `members:` in `module workspace { … }`.
+- AST: `ModuleDecl` carries `members`; `WorkspaceFile` evaluates the source
+  independently of normal `jet check` because it is a Jetpack workspace index.
 - File dispatch is at the Jetpack/CLI layer, not the parser: `Source/Jetpack/CLI.rs:280-307` (`load_project_plan` reads `env.jet`) → `ModuleEval::is_module_surface` (`Source/Jetpack/ModuleEval/Source.rs:27-39`) → `evaluate_env` (`Source.rs:46`). `config.jet` (system/image) takes the *same* `evaluate_env` path at `Source/Jetpack/JetOS.rs:80-94`.
 
 **Current `jetpack.toml` monorepo index:**
@@ -47,15 +58,18 @@ Card: `tools/Tower/board.json:526-539`.
 
 Each stage is independently testable; later stages assume earlier ones. New diagnostic codes start at **E1219** (E1218 is the last used jetpack code; verify free at build time).
 
-### Stage 0 — gate confirmation (no code)
-Confirm the workspace keyword + filename (Open Owner-Q below). Until then use the placeholder "the confirmed workspace keyword/filename" throughout; do not bake `module workspace`/`workspace.jet` into `Syntax.rs`.
+### Stage 0/1 — shipped restricted workspace evaluator
+- `workspace.jet` / `module workspace` is confirmed and registered.
+- `members: []`, explicit string lists, and `members: find("./packages")` work.
+- Diagnostics are E0995/E0996/E0997 and are specified in
+  `docs/spec/diagnostics.md`.
+- `tests/workspace.rs` covers evaluation, dot ref classification, find(),
+  and the committed `examples/workspace/workspace.jet`.
+- `jetpack build` builds all workspace members when `workspace.jet` is present.
 
-### Stage 1 — `workspace.jet` parsing + `members:` comptime evaluation
-- Add the confirmed keyword constant + filename to `Source/Syntax.rs` (decision id D-WORKSPACE1), next to U3/U8 entries (`Syntax.rs:935-1002`).
-- Extend the typed-module surface to recognise a workspace block. Two shapes to settle (see Open Owner-Q): the simplest is a new namespace handled in `contribution()` / `module_decl()` (`Source/Parser/Modules.rs:7-50`) producing a `members:` field whose value is a general `Expr` (list of package addresses). Add a `members: Vec<Expr>` (or a `WorkspaceDecl`) to `Source/AST.rs` near `ModuleDecl:581`.
-- File dispatch: teach the loader to read the workspace file alongside `env.jet` (`Source/Jetpack/CLI.rs:280-307`) and route it through module-eval (`ModuleEval/Source.rs:27-46`).
-- Evaluate `members:` through comptime. Common case `find("./packages")` reuses the U4 directive machinery (`ModuleEval/mod.rs:331`, `Eval.rs:134`). Full power (`+ comptime gen()`) requires the comptime-block work — see Sequencing. The result is a list of resolved package roots (paths to `pkg.jet` / `module <name>` dirs), validated by the existing module-name discovery (`Discovery.rs:27-53`).
-- Diagnostics: E1219 workspace `members:` value isn't a list of package addresses; E1220 a member path/glob resolves to no package (no `module <name>` / `pkg.jet`). Snapshots in `tests/ui_*`.
+Remaining Stage 1 work: evaluate arbitrary comptime expressions in `members:`
+once D-CTMARKER1/D-CTEFFECT1 land. Today only the common list/find subset is
+accepted.
 
 ### Stage 2 — index + addressing (dot / path / bare sugar + ambiguity)
 - Build the in-memory workspace index from Stage 1's member list: `{ package-name → root, source-name → members }`.
@@ -73,9 +87,12 @@ Confirm the workspace keyword + filename (Open Owner-Q below). Until then use th
 - Transitive in-repo deps: resolve each member's `pkg.jet`/`module` deps against the same workspace index; pull only the reachable subtrees.
 - Diagnostics: E1223 sparse fetch failed and full-clone fallback also failed (provider/network); E1224 a transitive in-repo dep names a member outside the workspace.
 
-### Stage 4 — generated lock (the static-readable mitigation)
-- Emit a generated lock capturing the evaluated workspace layout (member name → resolved root → pinned rev/tree-hash), so external tools and `--locked` builds need not re-evaluate Jet. Extend `Source/Lock.rs` (`LockSource`, `:18-55`) with a subtree/member selector; reuse `Store.rs` entry fingerprints (`:131-139`).
-- Filename: settle in Open Owner-Q (rec A had `.jet/workspace.lock`; the unified `.jet/lock` may absorb it). Wire read into `Loader.rs:147-159` and `--locked` verify (`Lock.rs:310-345`).
+### Stage 4 — generated lock (partially shipped)
+- `.jet/workspace.lock` is emitted as a best-effort static-readable layout by
+  `Jetpack::WorkspaceLock`.
+- Remaining: fold member resolution into the unified `.jet/lock` or explicitly
+  bless the separate file as the durable public lock contract, then wire
+  `--locked` verification to it.
 
 ### Stage 5 — migration from `jetpack.toml` monorepo index
 - The `[packages]`/monorepo role of `jetpack.toml` moves entirely to `workspace.jet`. Since `[packages]` is currently parsed-but-unconsumed (`CLI.rs:113-139` ignores it), removing the index role is low-risk.
@@ -92,34 +109,21 @@ Confirm the workspace keyword + filename (Open Owner-Q below). Until then use th
 
 1. **Hard gate — comptime execution block.** D-WORKSPACE1=B's "arbitrary comptime in `members:`" requires evaluating general expressions inside a module field. Today comptime is bindings + `comptime if` only; there is no `comptime { … }` block and no field-expression evaluation. That capability is **D-CTMARKER1=C** (`$` splice + `comptime { }` block — ratified, not implemented, `tools/Tower/board.json:624-629`, downstream of c155), plus the effect boundary **D-CTEFFECT1=A** (`find`/`fetch`/`@embed` as Tier-1 hashed-reproducible effects, `board.json:545-549`). **Build c155/D-CTMARKER1 + D-CTEFFECT1 first.**
 2. **Soft path — ship the restricted common case early.** `members: find("./packages")` needs only the existing U4 `find()` directive + Stages 2-4, no comptime block. If the gate slips, Stages 1-5 can land for the `find()`-only common case and accept arbitrary-comptime members once the block lands. (Do not advertise this as the final surface; it is the same syntax with a narrower evaluator.)
-3. **Confirm keyword/filename (Owner Q4) before any `Syntax.rs` change** — Stage 0.
+3. **Keyword/filename is resolved.** D-WORKSPACE2=A chose `module workspace`
+   and `workspace.jet`.
 4. **Coordinate with the env.jet/sources consolidation** (pack.jet→env.jet memo): D-WORKSPACE1 ends the `sources:` double-home; do not implement a second sources home in `workspace.jet`. Sequence after the sources move settles.
 5. Stages 1→2→3→4 are strictly ordered (index feeds addressing feeds sparse fetch feeds lock). Stage 5 migration and Stage 6 docs/tests close out.
 
-## Open Owner-Q
+## Remaining Owner-Q
 
-### Q1 — Workspace keyword + filename (D-WORKSPACE1 Owner Q4, on a separate ballot)
-The board's working name is `module workspace` / `workspace.jet`; not yet ratified. Candidate menu (keyword → filename), aviation/jet themed, original:
-
-| Keyword | Filename | Read |
-|---|---|---|
-| `module workspace` | `workspace.jet` | plain, matches industry term, longest/most generic |
-| `module fleet` | `fleet.jet` | a set of aircraft = a set of packages; on-theme, short |
-| `module hangar` | `hangar.jet` | **collision** — "hangar" already names the store in `Store.rs`; avoid |
-| `module manifest` | `manifest.jet` | descriptive but overloaded vs `pkg.jet` manifest |
-| `module roster` | `roster.jet` | the list of members; reads as an index |
-| `module wing` | `wing.jet` | a wing = a formation of aircraft; short, distinctive |
-
-**Recommendation:** `module fleet` / `fleet.jet` — on-theme with jet/jetpack/jetos canon, short, and unambiguous against `pkg.jet`/`env.jet`/`config.jet`; "the fleet" reads naturally as "all the packages in this repo." Falls back cleanly to the generic `module workspace`/`workspace.jet` if the owner prefers the industry term. (Reject `hangar` — name collision with the store.)
-
-### Q2 — `members:` value grammar / workspace record type
+### Q1 — `members:` value grammar / workspace record type
 The decision names the field `members:` but not its value shape or whether the workspace block carries a typed record (analogous to `Env`/`System`/`Image`). Unsettled:
 - (a) `members:` is a bare list expression evaluated at comptime → `[PackagePath]` (simplest; mirrors `imports: find(...)`).
 - (b) a typed `Workspace { members: […], … }` record (room for future workspace-level fields: shared deps, default profile).
 
 **Recommendation:** start with (a) — a single comptime-evaluated list field, no record wrapper — to keep the default surface minimal (I8); promote to (b) only if a concrete second workspace-level field is needed. Flagged because (b) would add a reserved type name to `Syntax.rs` that should not be guessed.
 
-### Q3 — Generated-lock filename
+### Q2 — Generated-lock filename
 Rec A proposed `.jet/workspace.lock`; the owner chose B but kept "a generated lock for the common case." Open: dedicated `.jet/workspace.lock` vs folding member resolution into the existing unified `.jet/lock` (`Syntax.rs:1121`).
 
 **Recommendation:** fold into the unified `.jet/lock` (one lockfile, one read path in `Loader.rs:147-159`) with a `workspace`/member section, unless the owner wants a separately-committable workspace layout file for external tools. Flagged because it adds a user-visible file/path either way.

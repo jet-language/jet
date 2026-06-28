@@ -57,11 +57,13 @@ Everything (cards, decisions, questions, collapse state, numbering) lives in
 
 - **cards** — `{ id, num, title, body, kind, track, epoch, phase, priority, plan,
   blockedBy, log }`. `num` is the stable tracking number shown as `#N`.
-- **decisions** — `{ id, cardId, title, gist, story, explainer, inWild,
+- **decisions** — `{ id, cardId, group, title, gist, story, explainer, inWild,
   options[{key,name,detail,code}], comparisons[{lang,note,code}], rec, status,
   outcome, comment }`. Each names exactly one card; its state is **computed** on
   every read (`store.mjs` → `clearanceOf`/`laneOf`), never stored twice — so a
-  decision and its lane can never desync.
+  decision and its lane can never desync. `group` controls the Decisions page
+  grouping (`syntax`, `runtime`, `web-ui`, `stdlib`, `tooling`, `safety`,
+  `research`; missing/unknown falls into `other`).
 - **questions** — `{ id, cardId, by, kind, text, status, answer }`. Owner notes /
   questions; agents answer.
 - **meta.ui.open** — which collapsible groups are expanded (Done stays collapsed

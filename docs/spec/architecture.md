@@ -25,7 +25,7 @@
 ### Typed IR (TIR) — the codegen seam
 
 Codegen does not read the AST plus side registries; it lowers the checked AST to a
-**typed IR** (`Source/Codegen/TIR.rs`) that carries only sema-approved facts, then emits
+**typed IR** (`crates/jet-codegen/src/Codegen/TIR/`) that carries only sema-approved facts, then emits
 Rust from the TIR with **zero inference** (every type/convention/mangle/overflow decision
 is resolved at lowering — R1/I3). The TIR is the **only** codegen seam (R7) for every emitted
 body: free functions, methods, trait methods, `#Test` block bodies, and error-conversion
@@ -39,17 +39,25 @@ in a value fn E0405, nested `T??`, a bare `Variant(n) ->` arm) — they never re
 (Type *definitions* — `emit_struct`/`emit_enum`/`emit_trait_def` — are structural, not bodies,
 and emit directly; only executable bodies go through the TIR.)
 
-## Module map
+## Compiler crate map
 
-| File           | Job                                  | May emit diagnostics? |
-|----------------|--------------------------------------|-----------------------|
-| Source/Syntax.rs  | every user-typeable keyword/sigil    | no                    |
-| Source/Diagnostics.rs    | Span, Diagnostic, rendering          | renders them          |
-| Source/Lexer.rs   | text → tokens                        | yes (E00xx)           |
-| Source/Parser.rs  | tokens → AST, fail-fast              | yes (E00xx)           |
-| Source/Sema.rs    | all semantic checks, collects all    | yes (E01xx, M2: E02xx)|
-| Source/Codegen.rs | AST → Rust text                      | **never**             |
-| Source/main.rs    | CLI, rustc invocation, ICE policy    | only I/O + ICE        |
+D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
+`jet` crate is now a thin facade and binary host over these internal APIs.
+
+| Crate | Job | May emit diagnostics? |
+|-------|-----|-----------------------|
+| `jet-foundation` | shared leaf types: `Syntax`, `Diagnostics`, `AST`, `Span`, `Generics`, `JitBackend` | renders them |
+| `jet-lexer` | text to tokens | yes (E00xx) |
+| `jet-parser` | tokens to AST, formatter | yes (E00xx) |
+| `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
+| `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
+| `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
+| `jet-driver` | CLI/build orchestration, rustc invocation, ICE policy | only I/O + ICE |
+
+I6 is machine-checked by `tests/truthfulness.rs`: the compiler seam crates may
+depend only on each other through path dependencies. Runtime-side crates such as
+`jet-jit` and `jet-net` are separate workspace members with their own
+owner-approved dependency posture.
 
 ## Rules
 

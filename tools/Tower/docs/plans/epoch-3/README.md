@@ -12,13 +12,16 @@ Epoch 2 GA (E2-M17) is complete; development highlights are in `docs/spec/roadma
 
 | Doc | ID(s) | Summary |
 |---|---|---|
-| [`jit-runtime-type-server.md`](jit-runtime-type-server.md) | D-DEV2 | Long-lived JIT process; hot-swap typed handlers; TS/JS-class app server |
+| [`../sidequests/jit-cranelift.md`](../sidequests/jit-cranelift.md) | D-JITDEP1, D-JIT2 | Cranelift tier-1 JIT over the `JitBackend` seam; hot-swap dev loop |
 | [`async-networking.md`](async-networking.md) | D-NET2, E2-V5 | `@async` runtime; Go-class concurrency; 100k+ connections |
-| [`plugin-api.md`](plugin-api.md) | D-DX5-B | Formal `jet` plugin ABI (PATH discovery stays Epoch 2) |
-| [`user-derives-reflection.md`](user-derives-reflection.md) | S56, layer 3 | User-defined `@derive` / typed reflection |
+| [`plugin-api.md`](plugin-api.md) / [`../sidequests/plugin-target.md`](../sidequests/plugin-target.md) | D-PLUGIN1, D-DEP-WASM1 | Sandboxed WASM plugin target + formal plugin ABI |
+| [`../sidequests/epoch-3-handoff.md`](../sidequests/epoch-3-handoff.md) | 2026-06-27 sweep | Current unblocked/gated card handoff |
+| Tower cards c129–c131 | S56, D-METAREFLECT1, D-METADERIVE1 | User-defined derives and typed reflection |
 | [`c-header-bindings.md`](c-header-bindings.md) | D-CBIND2…6 ✅ ratified | `jet bind` engine — surface in **E2-M14** / S59 |
-| [`package-build-from-source.md`](package-build-from-source.md) | M9 wave-2 | jetpack compiles a dependency from its Jet source in `realize()`; then `jet.regex`/`jet.archive`/`jet.db` ship as real packages (owner, 2026-06-18: → Epoch 3) |
 | [`testing-docs-ergonomics.md`](testing-docs-ergonomics.md) | D-TEST1, D-TEST4 | property testing (w/ shrinking), doctests, coverage — syntax-gated M11 niceties (owner, 2026-06-18: → Epoch 3) |
+| [`../sidequests/compression-codecs.md`](../sidequests/compression-codecs.md) | D-CODECS1 | `core.compress.gzip` + `core.compress.zstd` |
+| [`../sidequests/unicode-text.md`](../sidequests/unicode-text.md) | D-GRAPHEME1 | Opt-in Unicode grapheme + normalization package |
+| [`../sidequests/raylib-graphics.md`](../sidequests/raylib-graphics.md) | D-RAYLIB1 | Official `core.raylib` graphics bridge |
 
 ---
 
@@ -27,7 +30,7 @@ Epoch 2 GA (E2-M17) is complete; development highlights are in `docs/spec/roadma
 | Topic | Epoch 2 today | Epoch 3 doc |
 |---|---|---|
 | Expression-body `fn … = expr` | deferred (D-FP2) | revisit when one-liner `fn`s pile up |
-| Cranelift JIT in `jet dev` | interpreter only | `jit-runtime-type-server.md` |
+| Cranelift JIT in `jet dev` | interpreter only | `../sidequests/jit-cranelift.md` |
 | Go-scale HTTP/WebSocket servers | S53 tasks/channels for internal scale | `async-networking.md` |
 
 ---

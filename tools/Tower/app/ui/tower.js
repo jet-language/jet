@@ -116,6 +116,22 @@ function trackSection(key, def, o, buildBody) {
 }
 
 // ---- decisions (default) -----------------------------------------------
+const DECISION_GROUPS = [
+  ['syntax', 'Syntax', 'surface choices'],
+  ['runtime', 'Runtime', 'tasks, I/O, build targets'],
+  ['web-ui', 'Web / UI', 'reactivity, layout, rendering'],
+  ['stdlib', 'Stdlib', 'core libraries'],
+  ['tooling', 'Tooling', 'fmt, docs, semantic tools'],
+  ['safety', 'Safety', 'effects, crypto, correctness'],
+  ['research', 'Research', 'far-horizon ideas'],
+  ['other', 'Other', 'needs triage'],
+];
+
+function decisionGroupOf(d) {
+  const id = d.group || 'other';
+  return DECISION_GROUPS.find(([k]) => k === id) ? id : 'other';
+}
+
 function viewDecisions() {
   const v = $('#view');
   const open = S.decisions.filter(d => d.status !== 'ratified');
@@ -144,7 +160,16 @@ function viewDecisions() {
 
   const feed = el('<div class="decfeed"></div>');
   if (!open.length) feed.appendChild(emptyState('✓', 'All decisions made — nothing is waiting on you.'));
-  open.forEach(d => feed.appendChild(decisionCard(d)));
+  if (open.length) {
+    DECISION_GROUPS.forEach(([key, name, blurb]) => {
+      const ds = open.filter(d => decisionGroupOf(d) === key);
+      if (!ds.length) return;
+      const g = group('dec-group:' + key, { name, blurb, n: ds.length }, (body) => {
+        ds.forEach(d => body.appendChild(decisionCard(d)));
+      });
+      feed.appendChild(g);
+    });
+  }
   if (decided.length) {
     const g = group('dec-done', { name: 'Decided', blurb: 'history', n: decided.length }, (body) => {
       decided.slice().reverse().forEach(d => body.appendChild(decisionCard(d)));
@@ -159,7 +184,8 @@ function viewDecisions() {
 function decisionCard(d) {
   const c = cardById(d.cardId);
   const decided = d.status === 'ratified';
-  const meta = `${(d.options || []).length} options · ${(d.comparisons || []).length} language comparisons${c && c.openQ ? ` · ${c.openQ} open question${c.openQ > 1 ? 's' : ''}` : ''}`;
+  const groupName = (DECISION_GROUPS.find(([k]) => k === decisionGroupOf(d)) || [null, 'Other'])[1];
+  const meta = `${groupName} · ${(d.options || []).length} options · ${(d.comparisons || []).length} language comparisons${c && c.openQ ? ` · ${c.openQ} open question${c.openQ > 1 ? 's' : ''}` : ''}`;
   const node = el(`<article class="deccard ${decided ? 'deccard--decided' : ''}">
       <div class="deccard__head">
         <span class="deccard__id">${esc(d.id)}</span>
@@ -246,7 +272,7 @@ function renderFocus() {
       ${facets.length ? `<div class="facets" id="f-facets">${facets.map(([fk, l]) => `<button class="facet${fk === focusFacet ? ' on' : ''}" data-fk="${fk}">${esc(l)}</button>`).join('')}</div><div class="facetbody" id="f-facetbody">${facetBody(d, focusFacet)}</div>` : ''}
       <div class="optslabel">Choose one</div>
       <div class="opts" id="f-opts"></div>
-      ${d.rec ? `<div class="recline"><b>Recommendation:</b> Option ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}.</div>` : ''}
+      ${d.rec ? `<div class="recline"><b>Recommendation:</b> Option ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}.${d.recommendation ? ' ' + esc(d.recommendation) : ''}</div>` : ''}
       <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
       <div class="deck-actions">
         ${chosen ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}

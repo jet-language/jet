@@ -114,6 +114,8 @@ nix develop                  # dev shell with Rust, jet, and repo utilities
 ```
 
 All `jet` and `cargo` commands should run inside `nix develop -c …` to use the pinned toolchain.
+CI uses the same Nix path (`nix flake check`, `nix develop -c cargo check`,
+and focused test suites), so local failures match the hosted environment.
 
 ## License
 

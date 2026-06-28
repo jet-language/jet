@@ -4,9 +4,14 @@
 
 ## Goal
 
-Ship a typed **`@async` / `@await`** runtime (reserved in S82) so Jet services
-can handle **100k+ idle connections** and CPU-heavy concurrent workloads without
-giving up memory safety or Jet-owned diagnostics.
+Ship a Go-scale **M:N green-thread runtime under Jet's existing task/channel
+model** (D-ASYNCRT1=A) so Jet services can handle **100k+ idle connections** and
+CPU-heavy concurrent workloads without function coloring, memory-safety holes, or
+rustc-facing diagnostics.
+
+The target is async/await ergonomics without async/await function coloring:
+ordinary reads, writes, channel waits, timers, and task joins may park the Jet
+task. The runtime resumes that task when the operation is ready.
 
 ## Epoch 2 vs Epoch 3
 
@@ -14,27 +19,38 @@ giving up memory safety or Jet-owned diagnostics.
 |---|---|---|
 | Model | S53 **tasks + channels** (E2-V5) | Integrated async runtime |
 | Scale target | Internal services, thousands of connections | Public APIs, 100k+ websockets |
-| Syntax | blocking I/O + worker tasks | `@async { await … }` blocks |
+| Syntax | blocking I/O + worker tasks | same surface; blocking-looking I/O parks Jet tasks |
 | Honest line | "Go circa 2012" | "Go-class, but typed + safe" |
 
-Epoch 2 **does not** block on this pillar — E2-M10 ships blocking HTTP/TLS with
-task-per-request where needed.
+Epoch 2 did not block on this pillar. Epoch 3 upgrades the runtime under the
+same user model.
 
 ## Likely building blocks
 
-- `@async` / `@await` (S82 statement form, Epoch 3 activation).
-- Netpoll / epoll / io_uring-backed executor (implementation TBD).
+- M:N task scheduler under `task { }` and channels (D-ASYNCRT1=A).
+- Platform readiness backend for task parking (D-MNIO1 open).
+- Structured-concurrency task scope (D-NURSERY1 open; spelling in D-TASKSCOPE1).
+- Task-scope combinators: all/race/any (D-CONCCOMB1, D-RACEWIN1=A).
+- First-ready event selection for channels/timers/I/O (D-CONCSELECT1 open).
+- Deadline propagation through task context (D-DEADLINE1 open).
+- Expert-visible runtime controls: detached-task audit, scheduler/poller metrics,
+  task names, worker/poller tuning, and fairness policy.
 - Integration with `Fallible` + `?` (no callback-colored types in user surface).
 - TLS and DB drivers remain FFI-bridged; async wraps blocking bridges first,
   native async I/O later.
 
 ## Open design questions
 
-- Green threads vs work-stealing pool vs hybrid.
-- Whether `@async fn` whole-function form mirrors `@transact`.
-- Migration path from Epoch 2 `server.on_request(task => …)` APIs.
+- Exact scoped task-group syntax/API (D-TASKSCOPE1).
+- Whether user-facing coroutines exist or remain internal substrate (D-COROUTINE1).
+- Deadline propagation carrier (D-DEADLINE1).
+- OS readiness backend (D-MNIO1).
+- Whether structured `select` joins the combinator set (D-CONCSELECT1).
 
 ## Non-goals
 
-- No full async rewrite inside Epoch 2.
+- No `@async`/`await` function coloring.
 - No `unsafe` callback bridges in user code.
+- No unstructured task leaks as the beginner path.
+
+See also: [`concurrency-vision.md`](concurrency-vision.md).

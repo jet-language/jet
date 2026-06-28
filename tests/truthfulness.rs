@@ -294,6 +294,56 @@ fn cli_rs_is_declared_module() {
 }
 
 // ---------------------------------------------------------------------------
+// Check 8: Compiler seam crates stay dependency-clean (I6)
+// ---------------------------------------------------------------------------
+#[test]
+fn compiler_seam_crates_have_only_path_dependencies() {
+    let root = root();
+    let compiler_crates = [
+        "Cargo.toml",
+        "crates/jet-foundation/Cargo.toml",
+        "crates/jet-lexer/Cargo.toml",
+        "crates/jet-parser/Cargo.toml",
+        "crates/jet-comptime/Cargo.toml",
+        "crates/jet-sema/Cargo.toml",
+        "crates/jet-codegen/Cargo.toml",
+        "crates/jet-driver/Cargo.toml",
+    ];
+
+    let mut offenders = Vec::new();
+    for rel in compiler_crates {
+        let text = fs::read_to_string(root.join(rel)).unwrap_or_else(|_| panic!("{rel} missing"));
+        for line in dependency_lines(&text) {
+            if !line.contains(" path = ") && !line.contains("{ path =") {
+                offenders.push(format!("{rel}: {line}"));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "compiler seam crates must not add external dependencies (I6):\n{}",
+        offenders.join("\n")
+    );
+}
+
+fn dependency_lines(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut in_deps = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('[') {
+            in_deps = matches!(line, "[dependencies]" | "[dev-dependencies]" | "[build-dependencies]");
+            continue;
+        }
+        if in_deps && !line.is_empty() && !line.starts_with('#') {
+            out.push(line.to_string());
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
