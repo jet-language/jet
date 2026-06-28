@@ -99,11 +99,11 @@ constant in `Source/Syntax.rs` changed to `"pkg.jet"`; all hardcoded strings in
 snapshots re-blessed. Tests: all green.
 
 **Phase 2a — `jetpack.toml` parser** (this commit): `Source/Jetpack/ManifestTOML.rs`
-— hand-written std-only TOML-subset parser (I6); tables `[repo]`, `[sources]`,
-`[packages]`; diagnostics E1214/E1215 with did-you-mean; rendered-form snapshots
-pinned inside `manifest_toml.rs` (I4 note: `tests/ui/` harness only renders
-front-end `.jet` diagnostics; the faithful what/why/fix snapshot awaits CLI
-wiring). New constants in `Source/Syntax.rs` (I7). Example at
+— std-only TOML parser (I6); active tables `[repo]`, `[sources]`; retired
+`[packages]` now emits E1225 pointing at `workspace.jet` (D-WORKSPACE1).
+Diagnostics E1214/E1215/E1225 have rendered-form snapshots pinned inside
+`manifest_toml.rs` (I4 note: `tests/ui/` harness only renders front-end `.jet`
+diagnostics). New constants in `Source/Syntax.rs` (I7). Example at
 `examples/jetpack/jetpack.toml`.
 
 **Phase 2b — CLI wiring + discovery** (commit `TBD`): `manifest_toml::load`

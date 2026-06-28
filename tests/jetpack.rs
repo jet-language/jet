@@ -603,10 +603,7 @@ fn committed_example_builds_offline_end_to_end() {
             "expected `{pkg}` in build output: {stderr}"
         );
     }
-    assert!(
-        stderr.contains("built 3 package(s)"),
-        "stderr: {stderr}"
-    );
+    assert!(stderr.contains("built 3 package(s)"), "stderr: {stderr}");
 }
 
 #[test]
@@ -620,8 +617,7 @@ fn typed_module_example_builds_offline_end_to_end() {
     // into the same merge. All three realize from the committed fixtures, fully
     // offline. The store lives under a scratch JETPACK_ROOT, so nothing is
     // written back.
-    let typed_dir =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-typed");
+    let typed_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-typed");
     let root = Scratch::new("typed-e2e");
     let output = jetpack()
         .args(["build", "--no-color", "--offline"])
@@ -969,11 +965,7 @@ fn malformed_jetpack_toml_fires_e1215_from_cli() {
     // usage. An unknown table name fires E1215 with did-you-mean.
     let proj = Scratch::new("bad-toml-e1215");
     let root = Scratch::new("bad-toml-root2");
-    fs::write(
-        proj.join("jetpack.toml"),
-        "[workspace]\nfoo = \"bar\"\n",
-    )
-    .unwrap();
+    fs::write(proj.join("jetpack.toml"), "[workspace]\nfoo = \"bar\"\n").unwrap();
     fs::write(
         proj.join("env.jet"),
         "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])];\n}\n",
@@ -996,6 +988,47 @@ fn malformed_jetpack_toml_fires_e1215_from_cli() {
     assert!(
         stderr.contains("E1215"),
         "expected E1215 in stderr: {stderr}"
+    );
+}
+
+#[test]
+fn jetpack_toml_packages_fires_e1225_from_cli() {
+    // D-WORKSPACE1: the old `[packages]` monorepo index moved to
+    // `workspace.jet`; keep a real CLI test so the migration diagnostic is
+    // reachable from user commands.
+    let proj = Scratch::new("bad-toml-e1225");
+    let root = Scratch::new("bad-toml-root3");
+    fs::write(
+        proj.join("jetpack.toml"),
+        "[packages]\ngreeter = \"packages/greeter/pkg.jet\"\n",
+    )
+    .unwrap();
+    fs::write(
+        proj.join("env.jet"),
+        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])];\n}\n",
+    )
+    .unwrap();
+    let out = jetpack()
+        .args(["build", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", example_fixtures())
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "expected exit 2, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E1225"),
+        "expected E1225 in stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("workspace.jet"),
+        "expected workspace.jet migration hint: {stderr}"
     );
 }
 
@@ -1024,10 +1057,7 @@ fn jetpack_toml_sources_merge_into_cwd_table() {
     // jetpack.toml declares `mine` as a path source (no via — inferred as core).
     fs::write(
         proj.join("jetpack.toml"),
-        format!(
-            "[sources]\nmine = \"path@{}\"\n",
-            repo.to_string_lossy()
-        ),
+        format!("[sources]\nmine = \"path@{}\"\n", repo.to_string_lossy()),
     )
     .unwrap();
     // env.jet references `mine:hello` — the source name is resolved from jetpack.toml.
@@ -1055,14 +1085,12 @@ fn jetpack_toml_sources_merge_into_cwd_table() {
 
 #[test]
 fn mono_example_has_two_pkg_jet_members() {
-    // D-JPK-FILES Phase 2b: the committed monorepo example contains ≥2 pkg.jet
-    // members under packages/, verifying find-based discovery would locate both.
-    // We don't execute `jetpack build` here (no env.jet declared in the mono
-    // example), just assert the fixture structure is correct.
+    // D-WORKSPACE1: the committed monorepo example now uses workspace.jet
+    // instead of the retired jetpack.toml [packages] index.
     let mono = mono_example_dir();
     assert!(
-        mono.join("jetpack.toml").exists(),
-        "jetpack.toml missing from mono example"
+        mono.join("workspace.jet").exists(),
+        "workspace.jet missing from mono example"
     );
     let greeter_pkg = mono.join("packages/greeter/pkg.jet");
     let logger_pkg = mono.join("packages/logger/pkg.jet");
@@ -1074,8 +1102,9 @@ fn mono_example_has_two_pkg_jet_members() {
         logger_pkg.exists(),
         "packages/logger/pkg.jet missing: {logger_pkg:?}"
     );
-    // Verify jetpack.toml lists both in [packages].
-    let toml_src = fs::read_to_string(mono.join("jetpack.toml")).unwrap();
-    assert!(toml_src.contains("greeter"), "jetpack.toml should index greeter");
-    assert!(toml_src.contains("logger"), "jetpack.toml should index logger");
+    let workspace_src = fs::read_to_string(mono.join("workspace.jet")).unwrap();
+    assert!(
+        workspace_src.contains("find(\"./packages\")"),
+        "workspace.jet should use find-based member discovery"
+    );
 }

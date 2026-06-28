@@ -542,14 +542,14 @@ pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `#extern module`, not 
 /// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
 /// only to emit the E0055 teaching error.
 pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
-// D-LOOPLABEL2=A (ratified 2026-06-26): loop label `@` is a SUFFIX on the name.
-// `outer@ loop { … }` / `break outer@` / `continue outer@`. Reverses D-LABEL1
-// (which had `@outer loop`). Old prefix form emits E0988 teaching error.
-// D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
-// D-QUAL4=A (ratified 2026-06-26): `#Marker T` is a value-tag qualifier in type
-// position. Transparent to type identity (the underlying type is still `T`).
-// Documented intent only; does not affect codegen or runtime behaviour.
-// Parser: `TokKind::Hash` followed by PascalCase ident → `Type::Tagged { marker, inner }`.
+                                      // D-LOOPLABEL2=A (ratified 2026-06-26): loop label `@` is a SUFFIX on the name.
+                                      // `outer@ loop { … }` / `break outer@` / `continue outer@`. Reverses D-LABEL1
+                                      // (which had `@outer loop`). Old prefix form emits E0988 teaching error.
+                                      // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
+                                      // D-QUAL4=A (ratified 2026-06-26): `#Marker T` is a value-tag qualifier in type
+                                      // position. Transparent to type identity (the underlying type is still `T`).
+                                      // Documented intent only; does not affect codegen or runtime behaviour.
+                                      // Parser: `TokKind::Hash` followed by PascalCase ident → `Type::Tagged { marker, inner }`.
 /// S59: cache directory segment under `.jet/` for generated C bindings.
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 
@@ -949,7 +949,14 @@ pub const REF_SOURCE_PATH: &str = "path";
 
 /// D-JPK2/9: the Phase 1 verb set.
 pub const JETPACK_VERBS: &[&str] = &[
-    "run", "enter", "build", "list", "clean", "add", "remove", OS_SUBCOMMAND,
+    "run",
+    "enter",
+    "build",
+    "list",
+    "clean",
+    "add",
+    "remove",
+    OS_SUBCOMMAND,
 ];
 
 /// D-JPK14: the default visible prompt label inside a Jetpack shell.
@@ -1190,8 +1197,9 @@ pub const UNIFIED_LOCK_FILE: &str = ".jet/lock";
 /// addressed store ("hangar"), global and never relocated.
 pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 
-/// D-JPK-FILES (ratified 2026-06-18): the monorepo manifest at repo root.
-/// TOML format; holds `[repo]`, `[sources]`, and `[packages]` tables.
+/// D-JPK-FILES (ratified 2026-06-18): repo metadata and source defaults at
+/// repo root. TOML format; holds `[repo]` and `[sources]`. D-WORKSPACE1 moved
+/// the old `[packages]` monorepo index to `workspace.jet`.
 pub const JETPACK_TOML: &str = "jetpack.toml";
 
 /// D-JPK-FILES (ratified 2026-06-18): `[repo]` table in `jetpack.toml`.
@@ -1201,8 +1209,8 @@ pub const JTOML_TABLE_REPO: &str = "repo";
 /// named source refs (`name = "provider@target#ver"`).
 pub const JTOML_TABLE_SOURCES: &str = "sources";
 
-/// D-JPK-FILES (ratified 2026-06-18): `[packages]` table in `jetpack.toml` —
-/// optional explicit index (`name = "relative/pkg.jet"`).
+/// D-WORKSPACE1: retired `[packages]` table in `jetpack.toml`. Kept only so
+/// the parser can emit E1225 with a targeted migration hint.
 pub const JTOML_TABLE_PACKAGES: &str = "packages";
 
 /// D-JPK-FILES (ratified 2026-06-18): `name` key in `[repo]`.
@@ -1371,8 +1379,8 @@ pub const ATTR_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
 /// D-REPRC1: the C-compatible layout variant — `#layout(c)` → `#[repr(C)]`.
 pub const LAYOUT_C: &str = "c"; // D-REPRC1
 /// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
-pub const LAYOUT_PACKED: &str = "packed";     // D-REPRC1 (reserved)
-pub const LAYOUT_ALIGN: &str = "align";       // D-REPRC1 (reserved)
+pub const LAYOUT_PACKED: &str = "packed"; // D-REPRC1 (reserved)
+pub const LAYOUT_ALIGN: &str = "align"; // D-REPRC1 (reserved)
 /// D-SOA1 / D-SOA2A=C (implemented): the struct-of-arrays layout variant —
 /// `#layout(columnar) struct S` stores a `[S]` collection column-per-field.
 /// Whole-struct only in v1 (D-SOA2B); the partial form `#layout(columnar: …)`
@@ -1388,17 +1396,17 @@ pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
 pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
 pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
-// Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
+                                        // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
 pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
 pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
 pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]
 pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
-// Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
+                                          // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
 pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
 pub const ATTR_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
 pub const ATTR_TAG: &str = "Tag"; // D-SERDE7  #[Tag("type")] internal tagging
 pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
-// D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
+                                            // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
 pub const RENAME_ALL_CAMEL: &str = "camel"; // D-SERDE3
 pub const RENAME_ALL_SNAKE: &str = "snake"; // D-SERDE3
 pub const RENAME_ALL_PASCAL: &str = "pascal"; // D-SERDE3
@@ -1428,31 +1436,71 @@ pub const RENAME_ALL_SCREAMING: &str = "screaming"; // D-SERDE3
 /// to emit a diagnostic, not valid syntax.
 pub const JET_KEYWORD_LIST: &[&str] = &[
     // Core structure (S1, S18, S16, S50, U3)
-    KW_FN, KW_PUB, KW_USE, KW_EXTERN, KW_MODULE,
+    KW_FN,
+    KW_PUB,
+    KW_USE,
+    KW_EXTERN,
+    KW_MODULE,
     // Control flow (M1, S19, S23, M1/M2)
-    KW_IF, KW_ELSE, KW_SWITCH, KW_LOOP, KW_IN, KW_BREAK, KW_CONTINUE, KW_RETURN,
+    KW_IF,
+    KW_ELSE,
+    KW_SWITCH,
+    KW_LOOP,
+    KW_IN,
+    KW_BREAK,
+    KW_CONTINUE,
+    KW_RETURN,
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
-    KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_TAG, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
+    KW_STRUCT,
+    KW_ENUM,
+    KW_IMPL,
+    KW_TRAIT,
+    KW_TAG,
+    KW_DERIVE,
+    KW_CONST,
+    KW_COMPTIME,
+    KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
-    KW_MIGRATION, KW_RENAME, KW_ADD, KW_REMOVE, KW_CHANGE, KW_VIA,
+    KW_MIGRATION,
+    KW_RENAME,
+    KW_ADD,
+    KW_REMOVE,
+    KW_CHANGE,
+    KW_VIA,
     // Ownership / borrow keywords (S10, M2). D-CAP7 retired KW_MUTATE/KW_MOVE/
     // KW_VIEW in favor of the `~`/`^`/`&` sigils — they live only as teaching
     // errors (E0056/E0057/E0058) now, so they are NOT in the keyword list.
-    KW_STORED, KW_SELF,
+    KW_STORED,
+    KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1, D-CTEFFECT1)
-    KW_UNSAFE, KW_IMPURE, KW_REGION, CTX_BLOCK, KW_LIVE,
+    KW_UNSAFE,
+    KW_IMPURE,
+    KW_REGION,
+    CTX_BLOCK,
+    KW_LIVE,
     // Determinism escape (D-DET1): `assume_deterministic { … }`
     KW_ASSUME_DET,
     // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
     KW_TRANSACT,
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
-    KW_TEST, KW_BENCH, KW_PURE, KW_TODO,
+    KW_TEST,
+    KW_BENCH,
+    KW_PURE,
+    KW_TODO,
     // Taint tracking (D-TAINT1): value-fact tag + sanitizer modifier
-    KW_TAINTED, KW_SANITIZER,
+    KW_TAINTED,
+    KW_SANITIZER,
     // Typestate (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS)
-    KW_STATE, KW_TRANSITION, KW_STATE_DECL,
+    KW_STATE,
+    KW_TRANSITION,
+    KW_STATE_DECL,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
-    LIT_TRUE, LIT_FALSE, LIT_NULL, LIT_OK, LIT_ERR, KW_IT,
+    LIT_TRUE,
+    LIT_FALSE,
+    LIT_NULL,
+    LIT_OK,
+    LIT_ERR,
+    KW_IT,
     // Binding sigils (SIGIL_BIND_IMMUT / SIGIL_BIND_MUT) are not words; omitted.
 ];
 
@@ -1462,8 +1510,24 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
 /// (S34) kept for teaching errors; it is intentionally excluded here since
 /// `T ? E` is the current spelling.
 pub const JET_TYPE_LIST: &[&str] = &[
-    TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_STRING, TYPE_CHAR, TYPE_LIST, TYPE_MAP, TYPE_SHARED,
-    TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_F32, TYPE_F64,
+    TYPE_INT,
+    TYPE_FLOAT,
+    TYPE_BOOL,
+    TYPE_STRING,
+    TYPE_CHAR,
+    TYPE_LIST,
+    TYPE_MAP,
+    TYPE_SHARED,
+    TYPE_I8,
+    TYPE_I16,
+    TYPE_I32,
+    TYPE_I64,
+    TYPE_U8,
+    TYPE_U16,
+    TYPE_U32,
+    TYPE_U64,
+    TYPE_F32,
+    TYPE_F64,
 ];
 
 /// D-BUILDPROFILE1 (ratified 2026-06-25): the `build { }` block in `pkg.jet`
@@ -1498,9 +1562,7 @@ pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
 /// Used by Sema/Purity and Comptime/Purity to detect I/O calls inside
 /// `pure fn` or comptime contexts. Both consumers must agree on this set;
 /// having it here prevents silent divergence.
-pub const IMPURE_BUILTINS: &[&str] = &[
-    BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "read_all_input",
-];
+pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "read_all_input"];
 
 // ── Module name resolution helpers ───────────────────────────────────────────
 //

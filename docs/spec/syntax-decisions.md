@@ -1267,7 +1267,7 @@ the jetpack project layout is three named files plus one managed folder:
 
 | File | Format | Location | Role | Checked in? |
 |---|---|---|---|---|
-| `jetpack.toml` | TOML | repo root | monorepo manifest: `[repo]`, `[sources]`, `[packages]` index | yes |
+| `jetpack.toml` | TOML | repo root | repo metadata and source defaults: `[repo]`, `[sources]`; `[packages]` moved to `workspace.jet` by D-WORKSPACE1 | yes |
 | `env.jet` | Jet | repo root | dev environment: sources + packages + shell prompt | yes |
 | `pkg.jet` | Jet | each package dir (user-chosen) | package identity: `payload: { name, version }` + `packages: { name: library\|executable }` | yes |
 | `.jet/lock` | TOML | `.jet/` | generated lockfile (resolved deps + fingerprints) | no |

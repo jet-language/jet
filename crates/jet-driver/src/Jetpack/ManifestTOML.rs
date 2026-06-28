@@ -1,6 +1,6 @@
 //! `jetpack.toml` monorepo manifest parser (D-JPK-FILES, ratified 2026-06-18).
 //!
-//! Parses a TOML subset with three tables:
+//! Parses a TOML subset with two active tables:
 //!
 //! ```toml
 //! [repo]
@@ -10,23 +10,20 @@
 //! [sources]
 //! core = "path@./packages"
 //! nixpkgs = "github@NixOS/nixpkgs/nixos-24.05"
-//!
-//! [packages]
-//! wordstats = "packages/wordstats/pkg.jet"
-//! hello = "packages/hello/pkg.jet"
 //! ```
 //!
 //! A schema layer over the full TOML 1.0 parser in [`super::TOML`] (std-only,
 //! I6): the generic parser owns all syntax (every value type, dotted/quoted
 //! keys, arrays, inline tables, multi-line strings, comments); this file
-//! validates the parsed statements against the three-table `jetpack.toml`
+//! validates the parsed statements against the active `jetpack.toml`
 //! schema. Error model: a TOML syntax error becomes E1214; an unknown table or
-//! key becomes E1215 with a did-you-mean suggestion. Parsing continues past
-//! errors so the caller sees all problems in one run.
+//! key becomes E1215 with a did-you-mean suggestion; the retired `[packages]`
+//! monorepo index becomes E1225. Parsing continues past errors so the caller
+//! sees all problems in one run.
 
-use crate::Syntax::edit_distance;
 use crate::Jetpack::TOML;
 use crate::Syntax;
+use crate::Syntax::edit_distance;
 use std::path::Path;
 
 // ──────────────────────────────────────────────
@@ -40,8 +37,7 @@ pub struct JetpackToml {
     pub repo: RepoMeta,
     /// `[sources]` table: `name → provider@target[#ver]` ref strings.
     pub sources: Vec<(String, String)>,
-    /// `[packages]` table: `name → relative/path/pkg.jet` (optional explicit
-    /// index; discovery falls back to `find . -name pkg.jet`).
+    /// Retired `[packages]` entries. Kept only for migration diagnostics.
     pub packages: Vec<(String, String)>,
 }
 
@@ -90,17 +86,25 @@ impl TomlError {
             message: msg,
         }
     }
+
+    fn e1225(line: usize) -> Self {
+        TomlError {
+            code: "E1225",
+            line,
+            message: format!(
+                "`{}` `[packages]` is retired. Use `{}` with `module workspace {{ members: find(\"./packages\") }}`.",
+                Syntax::JETPACK_TOML,
+                Syntax::WORKSPACE_FILE,
+            ),
+        }
+    }
 }
 
 // ──────────────────────────────────────────────
 // Known names (for did-you-mean)
 // ──────────────────────────────────────────────
 
-const KNOWN_TABLES: &[&str] = &[
-    Syntax::JTOML_TABLE_REPO,
-    Syntax::JTOML_TABLE_SOURCES,
-    Syntax::JTOML_TABLE_PACKAGES,
-];
+const KNOWN_TABLES: &[&str] = &[Syntax::JTOML_TABLE_REPO, Syntax::JTOML_TABLE_SOURCES];
 
 const KNOWN_REPO_KEYS: &[&str] = &[Syntax::JTOML_KEY_NAME, Syntax::JTOML_KEY_VERSION];
 
@@ -168,7 +172,10 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                 table = match path.as_slice() {
                     [t] if t == Syntax::JTOML_TABLE_REPO => Table::Repo,
                     [t] if t == Syntax::JTOML_TABLE_SOURCES => Table::Sources,
-                    [t] if t == Syntax::JTOML_TABLE_PACKAGES => Table::Packages,
+                    [t] if t == Syntax::JTOML_TABLE_PACKAGES => {
+                        errors.push(TomlError::e1225(*line));
+                        Table::Packages
+                    }
                     _ => {
                         let suggest = if path.len() == 1 {
                             closest_in(&name, KNOWN_TABLES)
@@ -188,7 +195,10 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                         match path[0].as_str() {
                             t if t == Syntax::JTOML_TABLE_REPO => (Table::Repo, &path[1..]),
                             t if t == Syntax::JTOML_TABLE_SOURCES => (Table::Sources, &path[1..]),
-                            t if t == Syntax::JTOML_TABLE_PACKAGES => (Table::Packages, &path[1..]),
+                            t if t == Syntax::JTOML_TABLE_PACKAGES => {
+                                errors.push(TomlError::e1225(*line));
+                                (Table::Packages, &path[1..])
+                            }
                             _ => (Table::None, &path[..]),
                         }
                     } else {
@@ -223,7 +233,8 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                     }
                     Table::Sources | Table::Packages => {
                         if key.is_empty() {
-                            errors.push(TomlError::e1214(*line, "An entry name must not be empty."));
+                            errors
+                                .push(TomlError::e1214(*line, "An entry name must not be empty."));
                             continue;
                         }
                         match as_string(value, &key, *line) {
@@ -336,25 +347,29 @@ mod tests {
 
     #[test]
     fn parse_sources_table() {
-        let raw = "[sources]\ncore = \"path@./pkgs\"\nnixpkgs = \"github@NixOS/nixpkgs/nixos-24.05\"\n";
+        let raw =
+            "[sources]\ncore = \"path@./pkgs\"\nnixpkgs = \"github@NixOS/nixpkgs/nixos-24.05\"\n";
         let m = ok(raw);
         assert_eq!(m.sources.len(), 2);
-        assert_eq!(m.sources[0], ("core".to_string(), "path@./pkgs".to_string()));
+        assert_eq!(
+            m.sources[0],
+            ("core".to_string(), "path@./pkgs".to_string())
+        );
         assert_eq!(
             m.sources[1],
-            ("nixpkgs".to_string(), "github@NixOS/nixpkgs/nixos-24.05".to_string())
+            (
+                "nixpkgs".to_string(),
+                "github@NixOS/nixpkgs/nixos-24.05".to_string()
+            )
         );
     }
 
     #[test]
     fn parse_packages_table() {
         let raw = "[packages]\nhello = \"packages/hello/pkg.jet\"\n";
-        let m = ok(raw);
-        assert_eq!(m.packages.len(), 1);
-        assert_eq!(
-            m.packages[0],
-            ("hello".to_string(), "packages/hello/pkg.jet".to_string())
-        );
+        let es = errs(raw);
+        assert_eq!(es.len(), 1);
+        assert_eq!(es[0].code, "E1225");
     }
 
     #[test]
@@ -367,13 +382,11 @@ version = \"0.1.0\"
 [sources]
 core = \"path@./packages\"
 
-[packages]
-wordstats = \"packages/wordstats/pkg.jet\"
 ";
-        let m = ok(raw);
+        let (m, es) = parse(raw);
+        assert!(es.is_empty(), "unexpected errors: {es:?}");
         assert_eq!(m.repo.name.as_deref(), Some("acme"));
         assert_eq!(m.sources[0].0, "core");
-        assert_eq!(m.packages[0].0, "wordstats");
     }
 
     #[test]
@@ -414,7 +427,11 @@ wordstats = \"packages/wordstats/pkg.jet\"
         assert_eq!(es.len(), 1);
         assert_eq!(es[0].code, "E1215");
         // "nmae" is close to "name" — suggestion expected.
-        assert!(es[0].message.contains("name"), "expected did-you-mean `name` in: {}", es[0].message);
+        assert!(
+            es[0].message.contains("name"),
+            "expected did-you-mean `name` in: {}",
+            es[0].message
+        );
     }
 
     #[test]
@@ -422,7 +439,10 @@ wordstats = \"packages/wordstats/pkg.jet\"
         let es = errs("[repo]\nzxqwvbn = \"x\"\n");
         assert_eq!(es.len(), 1);
         assert_eq!(es[0].code, "E1215");
-        assert!(!es[0].message.contains("Did you mean"), "no suggestion expected");
+        assert!(
+            !es[0].message.contains("Did you mean"),
+            "no suggestion expected"
+        );
     }
 
     #[test]
@@ -462,6 +482,18 @@ Check the allowed names for this table.\n";
     }
 
     #[test]
+    fn render_e1225_snapshot() {
+        // I4: pin the rendered migration diagnostic for the retired monorepo
+        // index.
+        let path = "jetpack.toml";
+        let raw = "[packages]\nhello = \"packages/hello/pkg.jet\"\n";
+        let (_, errors) = parse(raw);
+        let rendered = render_errors(path, &errors);
+        let expected = "Error [E1225]: `jetpack.toml` `[packages]` is retired. Use `workspace.jet` with `module workspace { members: find(\"./packages\") }`.\n";
+        assert_eq!(rendered, expected);
+    }
+
+    #[test]
     fn full_toml_value_types_parse() {
         // The schema only stores strings, but the full parser accepts every
         // TOML construct under the recognized tables (escapes here prove the
@@ -483,6 +515,10 @@ Check the allowed names for this table.\n";
         let es = errs("[repo]\nversion = 1\n");
         assert_eq!(es.len(), 1);
         assert_eq!(es[0].code, "E1214");
-        assert!(es[0].message.contains("must be a quoted string"), "{}", es[0].message);
+        assert!(
+            es[0].message.contains("must be a quoted string"),
+            "{}",
+            es[0].message
+        );
     }
 }
