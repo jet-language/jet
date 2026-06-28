@@ -529,7 +529,10 @@ fn main() {
 }
 "#;
     let diags = jet::check_document("snippet.jet", src);
-    assert!(diags.iter().any(|d| d.code == "E0009"), "let → binding sigil");
+    assert!(
+        diags.iter().any(|d| d.code == "E0009"),
+        "let → binding sigil"
+    );
     assert!(diags.iter().any(|d| d.code == "E0037"), "println → print");
     assert!(diags.iter().any(|d| d.code == "E0008"), "def → fn");
 
@@ -939,7 +942,8 @@ fn c40_is_keyword_retired_words_not_keywords() {
             let t = format!("{} {} {}", d.what, d.why, d.fix);
             t.contains("switch_count") && t.contains("keyword")
         }),
-        "switch_count should not be rejected as a keyword: {:?}", diags
+        "switch_count should not be rejected as a keyword: {:?}",
+        diags
     );
 }
 
@@ -965,7 +969,9 @@ fn c40_is_keyword_real_keywords_recognized() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["renameProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -1008,7 +1014,9 @@ fn c40_is_keyword_value_is_not_a_keyword() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["renameProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -1050,7 +1058,9 @@ fn c40_is_keyword_switch_not_a_keyword() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["renameProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -1092,7 +1102,9 @@ fn c40_is_keyword_import_not_a_keyword() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["renameProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -1136,7 +1148,8 @@ fn c40_keyword_like_identifier_usable_as_variable() {
             assert!(
                 !(all_text.contains(name) && all_text.to_lowercase().contains("keyword")),
                 "identifier `{}` containing keyword substring wrongly flagged as keyword: {:?}",
-                name, d
+                name,
+                d
             );
         }
     }
@@ -1214,11 +1227,26 @@ fn c44_lsp_keywords_derive_from_syntax() {
     // in what completions return. Instead, verify the key structural invariants:
     // 1. Real keywords are present.
     let required = [
-        Syntax::KW_FN, Syntax::KW_PUB, Syntax::KW_USE, Syntax::KW_IF,
-        Syntax::KW_ELSE, Syntax::KW_LOOP, Syntax::KW_RETURN, Syntax::KW_STRUCT,
-        Syntax::KW_ENUM, Syntax::KW_IMPL, Syntax::KW_UNSAFE, Syntax::KW_TEST,
-        Syntax::KW_PURE, Syntax::KW_TODO, Syntax::LIT_TRUE, Syntax::LIT_FALSE,
-        Syntax::LIT_NULL, Syntax::LIT_OK, Syntax::LIT_ERR, Syntax::KW_DISTINCT,
+        Syntax::KW_FN,
+        Syntax::KW_PUB,
+        Syntax::KW_USE,
+        Syntax::KW_IF,
+        Syntax::KW_ELSE,
+        Syntax::KW_LOOP,
+        Syntax::KW_RETURN,
+        Syntax::KW_STRUCT,
+        Syntax::KW_ENUM,
+        Syntax::KW_IMPL,
+        Syntax::KW_UNSAFE,
+        Syntax::KW_TEST,
+        Syntax::KW_PURE,
+        Syntax::KW_TODO,
+        Syntax::LIT_TRUE,
+        Syntax::LIT_FALSE,
+        Syntax::LIT_NULL,
+        Syntax::LIT_OK,
+        Syntax::LIT_ERR,
+        Syntax::KW_DISTINCT,
         Syntax::KW_MODULE,
     ];
     for kw in &required {
@@ -1230,9 +1258,15 @@ fn c44_lsp_keywords_derive_from_syntax() {
     }
     // 2. FOREIGN_* teaching words must NOT be in the keyword list.
     let banned = [
-        Syntax::FOREIGN_VAL, Syntax::FOREIGN_VAR, Syntax::FOREIGN_SWITCH,
-        Syntax::FOREIGN_IMPORT, Syntax::FOREIGN_OR_FALLBACK, Syntax::FOREIGN_WHILE,
-        Syntax::FOREIGN_FOR, Syntax::FOREIGN_LET, Syntax::FOREIGN_MATCH,
+        Syntax::FOREIGN_VAL,
+        Syntax::FOREIGN_VAR,
+        Syntax::FOREIGN_SWITCH,
+        Syntax::FOREIGN_IMPORT,
+        Syntax::FOREIGN_OR_FALLBACK,
+        Syntax::FOREIGN_WHILE,
+        Syntax::FOREIGN_FOR,
+        Syntax::FOREIGN_LET,
+        Syntax::FOREIGN_MATCH,
         Syntax::FOREIGN_CLASS,
     ];
     for word in &banned {
@@ -1262,9 +1296,14 @@ fn c44_lsp_keywords_derive_from_syntax() {
 fn c44_lsp_types_derive_from_syntax() {
     use jet::Syntax;
     let required_types = [
-        Syntax::TYPE_INT, Syntax::TYPE_FLOAT, Syntax::TYPE_BOOL,
-        Syntax::TYPE_STRING, Syntax::TYPE_CHAR, Syntax::TYPE_LIST,
-        Syntax::TYPE_MAP, Syntax::TYPE_SHARED,
+        Syntax::TYPE_INT,
+        Syntax::TYPE_FLOAT,
+        Syntax::TYPE_BOOL,
+        Syntax::TYPE_STRING,
+        Syntax::TYPE_CHAR,
+        Syntax::TYPE_LIST,
+        Syntax::TYPE_MAP,
+        Syntax::TYPE_SHARED,
     ];
     for ty in &required_types {
         assert!(

@@ -100,7 +100,10 @@ pub enum Type {
     Tuple(Vec<(String, Box<Type>)>),
     /// S76 (2026-06-16): fixed-size list `[T#N]` — a compile-time refinement of
     /// `[T]` with a statically-known length. Erases to `Vec<T>` at codegen (I3).
-    FixedList { elem: Box<Type>, len: u64 },
+    FixedList {
+        elem: Box<Type>,
+        len: u64,
+    },
     /// D-SG9/S42: explicit fixed-width integer. The default 64-bit *signed*
     /// integer is spelled `Int` (and equivalently `I64`) and lives in
     /// `Type::Int`, so it never appears here — `I64` canonicalises to
@@ -108,14 +111,20 @@ pub enum Type {
     /// {8,16,32,64}, and `(signed: true, bits: 64)` is excluded by construction
     /// because that *is* `Int`. So `U8` = `{signed:false, bits:8}`,
     /// `U64` = `{signed:false, bits:64}`, `I32` = `{signed:true, bits:32}`.
-    IntN { signed: bool, bits: u8 },
+    IntN {
+        signed: bool,
+        bits: u8,
+    },
     /// D-SG9/S42: 32-bit float. The default 64-bit float is spelled `Float`
     /// (and `F64`) and lives in `Type::Float`; only `F32` is a `Float32`.
     Float32,
     /// D-QUAL4=A: value-tag type qualifier — `#Marker T` in signature/binding
     /// position. Transparent to type identity (the tag is a flow annotation only,
     /// not a structural difference); sema treats it as `inner` for all purposes.
-    Tagged { marker: String, inner: Box<Type> },
+    Tagged {
+        marker: String,
+        inner: Box<Type>,
+    },
 }
 
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
@@ -139,9 +148,18 @@ impl PartialEq for Type {
             (Option(a), Option(b)) => a == b,
             (Result { ok: o1, err: e1 }, Result { ok: o2, err: e2 }) => o1 == o2 && e1 == e2,
             // D-EFF2: effect_bound deliberately excluded from the comparison.
-            (Fn { params: p1, ret: r1, .. }, Fn { params: p2, ret: r2, .. }) => {
-                p1 == p2 && r1 == r2
-            }
+            (
+                Fn {
+                    params: p1,
+                    ret: r1,
+                    ..
+                },
+                Fn {
+                    params: p2,
+                    ret: r2,
+                    ..
+                },
+            ) => p1 == p2 && r1 == r2,
             (Named(a), Named(b)) => a == b,
             (Apply { name: n1, args: a1 }, Apply { name: n2, args: a2 }) => n1 == n2 && a1 == a2,
             (TraitObject(a), TraitObject(b)) => a == b,
@@ -149,10 +167,21 @@ impl PartialEq for Type {
             (FixedList { elem: e1, len: l1 }, FixedList { elem: e2, len: l2 }) => {
                 e1 == e2 && l1 == l2
             }
-            (IntN { signed: s1, bits: b1 }, IntN { signed: s2, bits: b2 }) => s1 == s2 && b1 == b2,
+            (
+                IntN {
+                    signed: s1,
+                    bits: b1,
+                },
+                IntN {
+                    signed: s2,
+                    bits: b2,
+                },
+            ) => s1 == s2 && b1 == b2,
             // D-QUAL4: tagged types are transparent — identity is on the inner type.
             (Tagged { inner: a, .. }, Tagged { inner: b, .. }) => a == b,
-            (Tagged { inner, .. }, other) | (other, Tagged { inner, .. }) => inner.as_ref() == other,
+            (Tagged { inner, .. }, other) | (other, Tagged { inner, .. }) => {
+                inner.as_ref() == other
+            }
             _ => false,
         }
     }
@@ -181,7 +210,10 @@ pub fn numeric_type_from_name(name: &str) -> Option<Type> {
             let bits: u8 = name[1..].parse().ok()?;
             match bits {
                 8 | 16 | 32 => Some(Type::IntN { signed, bits }),
-                64 if !signed => Some(Type::IntN { signed: false, bits: 64 }),
+                64 if !signed => Some(Type::IntN {
+                    signed: false,
+                    bits: 64,
+                }),
                 _ => None,
             }
         }
@@ -551,10 +583,7 @@ pub enum MigrationOp {
         default_span: Span,
     },
     /// D-MIGRATE2D: `remove f` — deletes a field (verb is `remove`, not `drop`).
-    Remove {
-        field: String,
-        field_span: Span,
-    },
+    Remove { field: String, field_span: Span },
     /// D-MIGRATE2E: `change f: Old -> New [via { expr }]` — a field type change.
     /// `converter` is the inline `via { … }` body (an expression, usually a
     /// lambda); `None` falls back to an `impl Old -> New` in scope (D-MIGRATE2B).
@@ -763,7 +792,11 @@ pub struct SystemField {
 pub enum SystemFieldValue {
     /// `target: linux.x64` — a dotted typed platform value (U13). Stores the two
     /// dotted segments (`os`, `arch`) and the whole value's span.
-    Platform { os: String, arch: String, span: Span },
+    Platform {
+        os: String,
+        arch: String,
+        span: Span,
+    },
     /// `packages: [ … ]` — a `ListLit` whose Pkg sugar modeval slices from source.
     Packages(Expr),
     /// `services: { name: { … }, … }` — a keyed map of bare `Service` records (U12).
@@ -832,7 +865,11 @@ pub enum ImageFieldValue {
     /// `format: iso` — a bare format keyword. Stores the word and its span.
     Format { word: String, span: Span },
     /// `target: linux.x64` — an explicit cross-compile platform (U14).
-    Platform { os: String, arch: String, span: Span },
+    Platform {
+        os: String,
+        arch: String,
+        span: Span,
+    },
     /// Any other field — captured so modeval can reject restated inherited fields.
     Other(Expr),
 }
@@ -1286,7 +1323,11 @@ pub enum PatSlot {
 impl PatSlot {
     /// Returns the binding name if this is a `Bind` slot, else `None`.
     pub fn as_bind(&self) -> Option<&str> {
-        if let PatSlot::Bind(s) = self { Some(s) } else { None }
+        if let PatSlot::Bind(s) = self {
+            Some(s)
+        } else {
+            None
+        }
     }
 }
 
@@ -1315,7 +1356,11 @@ pub enum Pattern {
     },
     /// D-PATR (ratified 2026-06-19): range pattern at arm-head level (`0..59 -> "F"`).
     /// Subject must be Int or Char. Open types always still require `else`.
-    Range { lo: i64, hi: i64, span: Span },
+    Range {
+        lo: i64,
+        hi: i64,
+        span: Span,
+    },
     /// D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
     /// All alternatives must bind the same names at the same types (E0317).
     Or(Vec<Pattern>, Span),
@@ -1721,7 +1766,9 @@ pub enum ForKind {
         end: Expr,
         step: Option<Expr>,
     },
-    In { collection: Expr },
+    In {
+        collection: Expr,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -2246,7 +2293,10 @@ impl CtValue {
             CtValue::Bool(_) => Type::Bool,
             CtValue::Char(_) => Type::Char,
             CtValue::Str(_) => Type::String,
-            CtValue::Bytes(_) => Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+            CtValue::Bytes(_) => Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            })),
             CtValue::List(xs) => {
                 let inner = xs.first().map(|x| x.jet_type()).unwrap_or(Type::Int);
                 Type::List(Box::new(inner))
@@ -2394,7 +2444,11 @@ impl CtValue {
                     out.push('}');
                 }
             }
-            CtValue::Enum { type_name, variant, args } => {
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
                 out.push_str(type_name);
                 out.push_str("::");
                 out.push_str(variant);
@@ -2402,7 +2456,9 @@ impl CtValue {
                     out.push('(');
                     let mut first = true;
                     for (label, v) in args {
-                        if !first { out.push_str(", "); }
+                        if !first {
+                            out.push_str(", ");
+                        }
                         first = false;
                         if let Some(lbl) = label {
                             out.push_str(lbl);
@@ -2438,8 +2494,11 @@ impl CtValue {
             CtValue::Int(n) => n.to_string(),
             CtValue::Float(f) => {
                 let s = format!("{:?}", f);
-                if s.contains('.') || s.contains('e') || s.contains('E') { s }
-                else { format!("{}.0", s) }
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
             }
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("\"{}\"", c),
@@ -2551,7 +2610,11 @@ impl CtValue {
                     .collect();
                 format!("user_{} {{ {} }}", type_name, parts.join(", "))
             }
-            CtValue::Enum { type_name, variant, args } => {
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
                 let prefix = format!("user_{}::{}", type_name, ct_mangle(variant));
                 if args.is_empty() {
                     prefix
@@ -2562,7 +2625,9 @@ impl CtValue {
                     let parts: Vec<String> = args
                         .iter()
                         .filter_map(|(label, v)| {
-                            label.as_ref().map(|name| format!("{}: {}", ct_mangle(name), v.serialize()))
+                            label
+                                .as_ref()
+                                .map(|name| format!("{}: {}", ct_mangle(name), v.serialize()))
                         })
                         .collect();
                     format!("{} {{ {} }}", prefix, parts.join(", "))
@@ -2574,7 +2639,11 @@ impl CtValue {
 }
 
 fn ct_mangle(name: &str) -> String {
-    if name == "main" { "main".to_string() } else { format!("user_{}", name) }
+    if name == "main" {
+        "main".to_string()
+    } else {
+        format!("user_{}", name)
+    }
 }
 
 // ── C-FFI data types ──────────────────────────────────────────────────────────

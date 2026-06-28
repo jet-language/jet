@@ -9,9 +9,9 @@
 //! D-JITDEP1 approved this as a scoped runtime-side exception.
 
 use jet_foundation::{
-    AST::ProgramBundle,
     Diagnostics::Diagnostic,
     JitBackend::{JitBackend, RunOutcome},
+    AST::ProgramBundle,
 };
 
 /// c139 tier-1 JIT backend over the `JitBackend` seam.

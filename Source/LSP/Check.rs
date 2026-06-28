@@ -1,7 +1,7 @@
 //! Document check (used by LSP and tests) + unified fix engine + doctor/bench.
 
-use crate::AST::ProgramBundle;
 use crate::Diagnostics::{Diagnostic, TextEdit};
+use crate::AST::ProgramBundle;
 use std::path::{Path, PathBuf};
 
 // ── Document check (used by LSP and tests) ────────────────────────────────────

@@ -1,8 +1,8 @@
 //! Binary operators, comparisons, builtin method dispatch, and the `as_*`
 //! coercions shared by the interpreter spine.
 
-use crate::AST::{BinOp, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{BinOp, Type};
 
 use super::Diagnostics::{divide_by_zero, index_oob, overflow, unsupported};
 use super::Value::{CtKey, CtValue};
@@ -23,7 +23,12 @@ pub(super) fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
 
 /// Binary operators with runtime-identical semantics (i64 wrapping is
 /// rejected: debug-profile rustc panics on overflow, so comptime does too).
-pub(super) fn eval_binop(op: BinOp, l: CtValue, r: CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+pub(super) fn eval_binop(
+    op: BinOp,
+    l: CtValue,
+    r: CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
     use CtValue::*;
     match (op, l, r) {
         (BinOp::Add, Int(a), Int(b)) => a
@@ -102,21 +107,28 @@ pub(super) fn apply_static_type_method(
             };
             Some(Ok(match s.trim().parse::<i64>() {
                 Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
-                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(
-                    format!("cannot parse `{}` as an integer", s),
-                ))),
+                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "cannot parse `{}` as an integer",
+                    s
+                )))),
             }))
         }
         ("Float", "parse") => {
             let s = match args.into_iter().next() {
                 Some(CtValue::Str(s)) => s,
-                _ => return Some(Err(unsupported("Float.parse with a non-text argument", span))),
+                _ => {
+                    return Some(Err(unsupported(
+                        "Float.parse with a non-text argument",
+                        span,
+                    )))
+                }
             };
             Some(Ok(match s.trim().parse::<f64>() {
                 Ok(f) => CtValue::ResOk(Box::new(CtValue::Float(f))),
-                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(
-                    format!("cannot parse `{}` as a float", s),
-                ))),
+                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "cannot parse `{}` as a float",
+                    s
+                )))),
             }))
         }
         _ => None,
@@ -226,7 +238,10 @@ pub(super) fn apply_method(
         (CtValue::Bytes(bs), "get") => {
             let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(if i < 0 || i as usize >= bs.len() {
-                CtValue::None(Type::IntN { signed: false, bits: 8 })
+                CtValue::None(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                })
             } else {
                 CtValue::Some(Box::new(CtValue::Int(bs[i as usize] as i64)))
             })
@@ -297,9 +312,10 @@ pub(super) fn apply_method(
         // c97/D-STRPARSE1: `.to_int()` — fallible integer parse, returns `Int ? ParseError`.
         (CtValue::Str(s), "to_int") => Ok(match s.trim().parse::<i64>() {
             Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
-            Err(_) => CtValue::ResErr(Box::new(CtValue::Str(
-                format!("cannot parse `{}` as an integer", s),
-            ))),
+            Err(_) => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                "cannot parse `{}` as an integer",
+                s
+            )))),
         }),
         // D-METAREFLECT1=B: `.reflect()` on a TypeInfo struct is identity.
         (CtValue::Struct { type_name, .. }, "reflect") if type_name == "TypeInfo" => {
@@ -312,7 +328,9 @@ pub(super) fn apply_method(
                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),
             };
             if let Some((_, CtValue::List(markers))) = fields.iter().find(|(n, _)| n == "markers") {
-                let found = markers.iter().any(|m| matches!(m, CtValue::Str(s) if *s == needle));
+                let found = markers
+                    .iter()
+                    .any(|m| matches!(m, CtValue::Str(s) if *s == needle));
                 return Ok(CtValue::Bool(found));
             }
             Ok(CtValue::Bool(false))

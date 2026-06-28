@@ -10,10 +10,8 @@ fn jet_bin() -> PathBuf {
 }
 
 fn logbook_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/capstone/logbook")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/capstone/logbook")
 }
-
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -26,8 +24,8 @@ fn run_logbook(jet: &PathBuf, args: &[&str]) -> std::process::Output {
     let root = repo_root();
     let mut cmd = Command::new(jet);
     cmd.current_dir(&root)
-       .arg("run")
-       .arg("examples/capstone/logbook/logbook.jet");
+        .arg("run")
+        .arg("examples/capstone/logbook/logbook.jet");
     for arg in args {
         cmd.arg(arg);
     }

@@ -57,9 +57,7 @@ impl<'a> Fmt<'a> {
         match ty {
             Type::Int => self.write(Syntax::TYPE_INT),
             Type::Float => self.write(Syntax::TYPE_FLOAT),
-            Type::IntN { signed, bits } => {
-                self.write(&crate::AST::int_spelling(*signed, *bits))
-            }
+            Type::IntN { signed, bits } => self.write(&crate::AST::int_spelling(*signed, *bits)),
             Type::Float32 => self.write("F32"),
             Type::Bool => self.write(Syntax::TYPE_BOOL),
             Type::String => self.write(Syntax::TYPE_STRING),
@@ -90,7 +88,11 @@ impl<'a> Fmt<'a> {
                 self.write(" ? ");
                 self.fmt_type(err);
             }
-            Type::Fn { params, ret, effect_bound } => {
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+            } => {
                 // D-EFF2: render the callback effect bound prefix — `#Pure ` for an
                 // empty bound, `#(E1, E2) ` for a listed one.
                 if let Some(bound) = effect_bound {

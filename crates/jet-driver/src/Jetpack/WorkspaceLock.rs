@@ -19,8 +19,8 @@
 //! path = "packages/ranker"
 //! ```
 
-use std::path::Path;
 use crate::Syntax;
+use std::path::Path;
 
 use super::WorkspaceFile::WorkspacePlan;
 
@@ -109,7 +109,10 @@ fn unquote(s: &str) -> String {
                     Some('t') => out.push('\t'),
                     Some('\\') => out.push('\\'),
                     Some('"') => out.push('"'),
-                    Some(c) => { out.push('\\'); out.push(c); }
+                    Some(c) => {
+                        out.push('\\');
+                        out.push(c);
+                    }
                     None => out.push('\\'),
                 }
             } else {
@@ -127,11 +130,14 @@ const _: &str = Syntax::WORKSPACE_FILE;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::WorkspaceFile::WorkspaceMember;
+    use super::*;
 
     fn member(name: &str, path: &str) -> WorkspaceMember {
-        WorkspaceMember { name: name.to_string(), path: path.to_string() }
+        WorkspaceMember {
+            name: name.to_string(),
+            path: path.to_string(),
+        }
     }
 
     #[test]
@@ -179,7 +185,8 @@ mod tests {
 
     #[test]
     fn parse_lock_ignores_comments_and_blanks() {
-        let src = "# header\nversion = 1\n\n[[member]]\nname = \"hello\"\npath = \"packages/hello\"\n";
+        let src =
+            "# header\nversion = 1\n\n[[member]]\nname = \"hello\"\npath = \"packages/hello\"\n";
         let plan = parse_lock(src);
         assert_eq!(plan.members.len(), 1);
         assert_eq!(plan.members[0].name, "hello");

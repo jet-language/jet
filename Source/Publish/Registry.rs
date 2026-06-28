@@ -43,7 +43,9 @@ impl RegistryConfig {
 /// Parse registry configs from a simple block in the manifest extra fields.
 /// Format: `registries: { name: { url: "...", mirror: true } }`
 /// This is the placeholder for the future registry section in pkg.jet.
-pub fn parse_registries_from_env(env: &std::collections::HashMap<String, String>) -> Vec<RegistryConfig> {
+pub fn parse_registries_from_env(
+    env: &std::collections::HashMap<String, String>,
+) -> Vec<RegistryConfig> {
     // Look for JET_REGISTRY_<NAME>_URL env vars.
     let mut result = Vec::new();
     for (key, url) in env {

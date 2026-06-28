@@ -149,7 +149,10 @@ pub(crate) fn run_update(dep: Option<&str>) {
         }
         Err(diags) => {
             let src = String::new();
-            eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &src, &diags));
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &src, &diags)
+            );
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -204,7 +207,10 @@ pub(crate) fn run_store_generations() {
     }
     println!("{} generation(s):", gens.len());
     for g in &gens {
-        println!("  gen {}: {} (hash: {})", g.number, g.timestamp, g.entry_hash);
+        println!(
+            "  gen {}: {} (hash: {})",
+            g.number, g.timestamp, g.entry_hash
+        );
     }
 }
 
@@ -220,7 +226,10 @@ pub(crate) fn run_store_rollback(gen_str: &str) {
     };
     match jet::Store::rollback_to(gen_number) {
         Ok(g) => {
-            println!("rolled back to generation {} (entry hash: {})", g.number, g.entry_hash);
+            println!(
+                "rolled back to generation {} (entry hash: {})",
+                g.number, g.entry_hash
+            );
             println!("hint: the store is append-only; run `jet fetch` to restore the generation's packages");
         }
         Err(e) => {
@@ -259,7 +268,10 @@ fn do_fetch(root: &Path, locked: bool) {
             }
         }
         Err(diags) => {
-            eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags));
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+            );
             exit(ExitCodes::USER_ERROR);
         }
     }

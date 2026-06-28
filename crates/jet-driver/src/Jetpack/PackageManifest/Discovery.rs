@@ -36,17 +36,15 @@ pub fn discover_module_in(root: &Path, name: &str) -> Result<PathBuf, DiscoveryE
         }
     }
     match matches.len() {
-        0 => Err(DiscoveryError::NotFound { name: name.to_string() }),
+        0 => Err(DiscoveryError::NotFound {
+            name: name.to_string(),
+        }),
         1 => Ok(matches[0].parent().unwrap_or(root).to_path_buf()),
         _ => Err(DiscoveryError::Ambiguous {
             name: name.to_string(),
             paths: matches
                 .into_iter()
-                .map(|p| {
-                    p.strip_prefix(root)
-                        .unwrap_or(&p)
-                        .to_path_buf()
-                })
+                .map(|p| p.strip_prefix(root).unwrap_or(&p).to_path_buf())
                 .collect(),
         }),
     }
@@ -99,24 +97,19 @@ pub(super) fn file_declares_module(text: &str, name: &str) -> bool {
                 if bytes[i..].starts_with(kw) {
                     let after_kw = i + kw.len();
                     // `module` must be followed by whitespace.
-                    if bytes
-                        .get(after_kw)
-                        .map_or(false, |&c| c == b' ' || c == b'\t' || c == b'\n' || c == b'\r')
-                    {
+                    if bytes.get(after_kw).map_or(false, |&c| {
+                        c == b' ' || c == b'\t' || c == b'\n' || c == b'\r'
+                    }) {
                         // Skip whitespace between keyword and name.
                         let mut j = after_kw;
-                        while j < bytes.len()
-                            && (bytes[j] == b' ' || bytes[j] == b'\t')
-                        {
+                        while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
                             j += 1;
                         }
                         if bytes[j..].starts_with(name_bytes) {
                             let after_name = j + name_bytes.len();
                             let next = bytes.get(after_name).copied();
                             // Word boundary: end of input or a non-ident char.
-                            if next
-                                .map_or(true, |c| !c.is_ascii_alphanumeric() && c != b'_')
-                            {
+                            if next.map_or(true, |c| !c.is_ascii_alphanumeric() && c != b'_') {
                                 return true;
                             }
                         }

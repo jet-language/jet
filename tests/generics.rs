@@ -92,7 +92,11 @@ fn main() {
 }
 "#;
     let diags = jet::compile(src);
-    assert!(diags.is_ok(), "multi-char type param (struct) failed: {:?}", diags.err());
+    assert!(
+        diags.is_ok(),
+        "multi-char type param (struct) failed: {:?}",
+        diags.err()
+    );
 }
 
 /// c148: multi-char type param in a free function (no struct) must infer correctly.
@@ -111,7 +115,11 @@ fn main() {
 }
 "#;
     let diags = jet::compile(src);
-    assert!(diags.is_ok(), "multi-char type param (fn) failed: {:?}", diags.err());
+    assert!(
+        diags.is_ok(),
+        "multi-char type param (fn) failed: {:?}",
+        diags.err()
+    );
 }
 
 /// c148: multi-char must work as a drop-in for single-char — same program, renamed param.
@@ -134,5 +142,9 @@ fn main() {
 }
 "#;
     let diags = jet::compile(src);
-    assert!(diags.is_ok(), "multi-char matches single-char failed: {:?}", diags.err());
+    assert!(
+        diags.is_ok(),
+        "multi-char matches single-char failed: {:?}",
+        diags.err()
+    );
 }

@@ -1,7 +1,7 @@
 //! Driver-level schema snapshot writer — loads entry bundle and writes snapshots.
 //! Pure types live in `Sema::Schema` and are re-exported from `Publish/mod.rs`.
 
-use crate::Sema::Schema::{snapshot_from_struct, save_snapshot};
+use crate::Sema::Schema::{save_snapshot, snapshot_from_struct};
 
 /// Write schema snapshots for all `#PublishedSchema` structs in the entry bundle.
 /// Called during `jet publish`. Returns the number of snapshots written.

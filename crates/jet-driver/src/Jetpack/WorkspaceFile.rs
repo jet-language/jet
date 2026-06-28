@@ -20,9 +20,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::AST::{Expr, Func, Item, StrPart};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{Expr, Func, Item, StrPart};
 
 // ──────────────────────────────────────────────
 // Public types
@@ -109,11 +109,7 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
 /// Evaluate one `members:` expression to a list of relative package directory
 /// paths. Handles `find("./dir")` specially (the common case); falls back to
 /// comptime for arbitrary expressions.
-fn eval_members_expr(
-    expr: &Expr,
-    _src: &str,
-    base_dir: &Path,
-) -> Result<Vec<String>, Diagnostic> {
+fn eval_members_expr(expr: &Expr, _src: &str, base_dir: &Path) -> Result<Vec<String>, Diagnostic> {
     // Fast path: `find("./dir")` — scan for package directories.
     if let Expr::Call(call) = expr {
         if call.name == Syntax::BUILTIN_FIND {
@@ -166,10 +162,7 @@ fn extract_literal_string(expr: &Expr) -> Option<String> {
 
 /// Extract `[String]` from a `CtValue::List` of `CtValue::Str`. Any non-string
 /// element or a non-list value is E0996.
-fn extract_string_list(
-    v: crate::Comptime::CtValue,
-    span: Span,
-) -> Result<Vec<String>, Diagnostic> {
+fn extract_string_list(v: crate::Comptime::CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
     match v {
         crate::Comptime::CtValue::List(xs) => {
             let mut out = Vec::with_capacity(xs.len());
@@ -232,8 +225,7 @@ fn find_package_dirs(
         let rel = abs.strip_prefix(workspace_root).map(|p| {
             // Normalise to forward-slash form even on Windows (workspace.lock
             // stores POSIX paths; the platform join handles them on read).
-            p.to_string_lossy()
-                .replace(std::path::MAIN_SEPARATOR, "/")
+            p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/")
         });
         match rel {
             Ok(r) => out.push(r),
@@ -318,10 +310,7 @@ fn e0995_no_workspace_module() -> Diagnostic {
 fn e0997_find_dir_missing(dir: &Path, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0997",
-        format!(
-            "`find` can't read the directory `{}`",
-            dir.display()
-        ),
+        format!("`find` can't read the directory `{}`", dir.display()),
         "`members: find(\"<dir>\")` scans that directory for package subdirectories; \
          it must exist relative to this file"
             .to_string(),
@@ -356,7 +345,8 @@ mod tests {
     #[test]
     fn explicit_string_list() {
         // Paths that don't exist: name falls back to the path basename.
-        let src = "module workspace {\n    members: [\"./packages/hello\", \"./packages/ranker\"]\n}\n";
+        let src =
+            "module workspace {\n    members: [\"./packages/hello\", \"./packages/ranker\"]\n}\n";
         let plan = eval(src);
         assert_eq!(plan.members.len(), 2);
         assert_eq!(plan.members[0].path, "./packages/hello");
@@ -421,8 +411,14 @@ mod tests {
         let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["hello", "ranker"]);
         let paths: Vec<&str> = plan.members.iter().map(|m| m.path.as_str()).collect();
-        assert!(paths.iter().any(|p| p.contains("hello")), "paths: {paths:?}");
-        assert!(paths.iter().any(|p| p.contains("ranker")), "paths: {paths:?}");
+        assert!(
+            paths.iter().any(|p| p.contains("hello")),
+            "paths: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p.contains("ranker")),
+            "paths: {paths:?}"
+        );
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -440,8 +436,7 @@ mod tests {
     /// with the expected member names when run against the fixture packages.
     #[test]
     fn committed_workspace_example_evaluates_clean() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/workspace");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workspace");
         if !dir.exists() {
             // Skip when the examples directory hasn't been created yet.
             return;
@@ -452,7 +447,10 @@ mod tests {
             Err(_) => return,
         };
         let plan = evaluate(&src, &dir).expect("example workspace should evaluate clean");
-        assert!(!plan.members.is_empty(), "example workspace must have members");
+        assert!(
+            !plan.members.is_empty(),
+            "example workspace must have members"
+        );
         let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
         assert!(
             names.contains(&"hello"),

@@ -59,8 +59,7 @@ pub struct Advisory {
 impl Advisory {
     /// Does `version` fall within the affected range?
     pub fn affects(&self, version: &SemVer) -> bool {
-        self.affected.matches(version)
-            && self.fixed.as_ref().map(|f| version < f).unwrap_or(true)
+        self.affected.matches(version) && self.fixed.as_ref().map(|f| version < f).unwrap_or(true)
     }
 }
 
@@ -89,7 +88,14 @@ pub fn parse_advisory_db(text: &str) -> Vec<Advisory> {
                 .get(5)
                 .map(|s| Severity::parse(s))
                 .unwrap_or(Severity::Medium);
-            Some(Advisory { id, package, affected, fixed, title, severity })
+            Some(Advisory {
+                id,
+                package,
+                affected,
+                fixed,
+                title,
+                severity,
+            })
         })
         .collect()
 }
@@ -103,10 +109,7 @@ pub struct AuditMatch {
 
 /// Check a set of locked packages against the advisory database.
 /// Returns one match (severity + E2603) per advisory that applies.
-pub fn audit_lockfile(
-    lock: &LockFile,
-    advisories: &[Advisory],
-) -> Vec<AuditMatch> {
+pub fn audit_lockfile(lock: &LockFile, advisories: &[Advisory]) -> Vec<AuditMatch> {
     let mut matches = Vec::new();
     for pkg in &lock.packages {
         let ver = match SemVer::parse(&pkg.version) {
@@ -178,10 +181,7 @@ pub fn e2604(package: &str, version: &str, expected: &str, actual: &str) -> Diag
 }
 
 /// Verify a locked package's store entry against its recorded hash.
-pub fn verify_package_integrity(
-    pkg: &LockedPackage,
-    store_entry: &Path,
-) -> Result<(), Diagnostic> {
+pub fn verify_package_integrity(pkg: &LockedPackage, store_entry: &Path) -> Result<(), Diagnostic> {
     use crate::SHA256::tree_hash;
     let actual = tree_hash(store_entry);
     if actual != pkg.fingerprint {

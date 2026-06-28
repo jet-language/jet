@@ -181,8 +181,8 @@ fn readme_subcommands_exist_in_cli() {
     }
 
     // `jet upgrade` is mentioned in docs/reference/versioning.md
-    let versioning = fs::read_to_string(root.join("docs/reference/versioning.md"))
-        .unwrap_or_default();
+    let versioning =
+        fs::read_to_string(root.join("docs/reference/versioning.md")).unwrap_or_default();
     if versioning.contains("`jet upgrade`") && !known.contains("upgrade") {
         missing.push("upgrade (referenced in versioning.md)".to_string());
     }
@@ -333,7 +333,10 @@ fn dependency_lines(text: &str) -> Vec<String> {
     for raw in text.lines() {
         let line = raw.trim();
         if line.starts_with('[') {
-            in_deps = matches!(line, "[dependencies]" | "[dev-dependencies]" | "[build-dependencies]");
+            in_deps = matches!(
+                line,
+                "[dependencies]" | "[dev-dependencies]" | "[build-dependencies]"
+            );
             continue;
         }
         if in_deps && !line.is_empty() && !line.starts_with('#') {

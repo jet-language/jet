@@ -55,7 +55,9 @@ fn examples_compile_and_run() {
         let src = fs::read_to_string(&path).unwrap();
 
         if (stem == "22_ffi" || stem == "127_archive" || stem == "128_db") && !have_cargo {
-            eprintln!("note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)");
+            eprintln!(
+                "note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)"
+            );
             checked += 1;
             continue;
         }
@@ -65,7 +67,11 @@ fn examples_compile_and_run() {
             Err(diags) => panic!(
                 "example {} failed the front end:\n{}",
                 stem,
-                jet::render_diagnostics(&format!("examples/features/{}.{}", stem, ext), &src, &diags)
+                jet::render_diagnostics(
+                    &format!("examples/features/{}.{}", stem, ext),
+                    &src,
+                    &diags
+                )
             ),
         };
         let rust_code = compiled.rust;
@@ -94,10 +100,16 @@ fn examples_compile_and_run() {
                     let mut seen_brace = false;
                     while i < bytes.len() {
                         match bytes[i] {
-                            b'{' => { depth += 1; seen_brace = true; }
+                            b'{' => {
+                                depth += 1;
+                                seen_brace = true;
+                            }
                             b'}' => {
                                 depth -= 1;
-                                if seen_brace && depth == 0 { end = i + 1; break; }
+                                if seen_brace && depth == 0 {
+                                    end = i + 1;
+                                    break;
+                                }
                             }
                             _ => {}
                         }
@@ -131,7 +143,9 @@ fn examples_compile_and_run() {
         // `#Unsafe fn`, or `#Uninit` which lowers to `MaybeUninit::uninit().assume_init()`
         // inside an inline `unsafe { }` block). Their generated `unsafe` is allowed, but
         // ONLY in the gated block/fn form — never ungated (I1).
-        if stem == "48_lowlevel" || stem == "100_rawptr" || stem == "121_single_use_discard"
+        if stem == "48_lowlevel"
+            || stem == "100_rawptr"
+            || stem == "121_single_use_discard"
             || stem == "124_uninit"
         {
             assert!(
@@ -209,8 +223,9 @@ fn examples_compile_and_run() {
             let run = Command::new(&bin).output().unwrap();
             let err_path = ex_dir.join("expected").join(format!("{}.err.out", stem));
             if err_path.exists() {
-                let expected_err = fs::read_to_string(&err_path)
-                    .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.err.out", stem));
+                let expected_err = fs::read_to_string(&err_path).unwrap_or_else(|_| {
+                    panic!("missing examples/features/expected/{}.err.out", stem)
+                });
                 assert_eq!(
                     run.status.code(),
                     Some(70),
@@ -233,7 +248,9 @@ fn examples_compile_and_run() {
                 );
                 let expected =
                     fs::read_to_string(ex_dir.join("expected").join(format!("{}.out", stem)))
-                        .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.out", stem));
+                        .unwrap_or_else(|_| {
+                            panic!("missing examples/features/expected/{}.out", stem)
+                        });
                 assert_eq!(
                     String::from_utf8_lossy(&run.stdout),
                     expected,

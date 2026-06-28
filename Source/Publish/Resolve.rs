@@ -81,13 +81,7 @@ pub struct VersionConstraint {
 }
 
 /// E2602 — resolver cannot satisfy two conflicting constraints.
-pub fn e2602(
-    package: &str,
-    req_a: &str,
-    from_a: &str,
-    req_b: &str,
-    from_b: &str,
-) -> Diagnostic {
+pub fn e2602(package: &str, req_a: &str, from_a: &str, req_b: &str, from_b: &str) -> Diagnostic {
     Diagnostic::error(
         "E2602",
         format!("dependency resolver conflict: `{}` has incompatible version requirements", package),
@@ -137,7 +131,13 @@ pub fn check_conflicts(
                     .any(|v| r.req.matches(v) && a.req.matches(v))
             });
             if let Some(b) = b {
-                diags.push(e2602(pkg, a.req.display(), &a.from, b.req.display(), &b.from));
+                diags.push(e2602(
+                    pkg,
+                    a.req.display(),
+                    &a.from,
+                    b.req.display(),
+                    &b.from,
+                ));
             }
         }
         // When no candidates at all: surface if two constraints' ranges exclude each other.

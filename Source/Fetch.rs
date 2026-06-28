@@ -7,9 +7,9 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
 use crate::Manifest::{check_toolchain, DepSpec, GitSelector, Manifest};
-use crate::SHA256::tree_hash;
 use crate::Store;
 use crate::Syntax;
+use crate::SHA256::tree_hash;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -37,7 +37,10 @@ pub fn fetch(
     opts: &FetchOptions,
 ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
     // Validate toolchain constraint.
-    let manifest_path = project_root.join(Syntax::PAYLOAD_FILE).display().to_string();
+    let manifest_path = project_root
+        .join(Syntax::PAYLOAD_FILE)
+        .display()
+        .to_string();
     if let Err(d) = check_toolchain(manifest, &manifest_path) {
         return Err(vec![d]);
     }
@@ -46,13 +49,19 @@ pub fn fetch(
     if opts.locked {
         let lock = existing_lock.ok_or_else(|| {
             vec![Lock::e1202(
-                &project_root.join(Syntax::UNIFIED_LOCK_FILE).display().to_string(),
+                &project_root
+                    .join(Syntax::UNIFIED_LOCK_FILE)
+                    .display()
+                    .to_string(),
             )]
         })?;
         if let Err(d) = Lock::verify_lock_matches_manifest(
             lock,
             manifest,
-            &project_root.join(Syntax::UNIFIED_LOCK_FILE).display().to_string(),
+            &project_root
+                .join(Syntax::UNIFIED_LOCK_FILE)
+                .display()
+                .to_string(),
         ) {
             return Err(vec![d]);
         }
@@ -273,8 +282,9 @@ impl<'a> Resolver<'a> {
 
                 // Store the path dep (copy to store for inode sharing).
                 // D-CASTORE1=A: returns (path, content_hash) for lock recording.
-                let (store_path, content_hash) = Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
-                    .map_err(|d| vec![d])?;
+                let (store_path, content_hash) =
+                    Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
+                        .map_err(|d| vec![d])?;
                 let _ = content_hash; // recorded in lock on next `jet fetch` pass
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its
@@ -371,8 +381,9 @@ impl<'a> Resolver<'a> {
 
                 // Store.
                 // D-CASTORE1=A: returns (path, content_hash).
-                let (store_path, _content_hash) = Store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)
-                    .map_err(|d| vec![d])?;
+                let (store_path, _content_hash) =
+                    Store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)
+                        .map_err(|d| vec![d])?;
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its
                 // recorded content hash before it is linked into the build.
@@ -431,9 +442,20 @@ impl<'a> Resolver<'a> {
         match result {
             None => Err(vec![Diagnostic::error(
                 "E1206",
-                format!("dependency `{}` has no `{}`", dep_name, crate::Syntax::PAYLOAD_FILE),
-                format!("every Jet package must have a `{}` manifest", crate::Syntax::PAYLOAD_FILE),
-                format!("add a `{}` to `{}`", crate::Syntax::PAYLOAD_FILE, dir.display()),
+                format!(
+                    "dependency `{}` has no `{}`",
+                    dep_name,
+                    crate::Syntax::PAYLOAD_FILE
+                ),
+                format!(
+                    "every Jet package must have a `{}` manifest",
+                    crate::Syntax::PAYLOAD_FILE
+                ),
+                format!(
+                    "add a `{}` to `{}`",
+                    crate::Syntax::PAYLOAD_FILE,
+                    dir.display()
+                ),
                 None,
             )]),
             Some(Err(d)) => Err(vec![d]),
@@ -560,7 +582,10 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
             "E1203",
             format!("couldn't resolve git ref `{}` at `{}`", refname, url),
             "the git ref may not exist or the URL may be unreachable".to_string(),
-            format!("check the URL and ref name in {}", crate::Syntax::PAYLOAD_FILE),
+            format!(
+                "check the URL and ref name in {}",
+                crate::Syntax::PAYLOAD_FILE
+            ),
             None,
         ));
     }

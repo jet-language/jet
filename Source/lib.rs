@@ -14,11 +14,33 @@
 // Seam crates — re-export everything so callers use `jet::AST`, `jet::Sema`, etc.
 // unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.
 pub use jet_driver::{
-    AST, CBind, CFFI, Codegen, Collections, Compile, Comptime, Diagnostics, Driver, FFI,
-    Formatter, Generics, Jetpack, Lexer, Loader, Lock, Manifest, Parser, Sema, SHA256,
-    Syntax, Traits, PhaseTiming,
     // Top-level re-exports from Compile module:
-    bundle_uses_unsafe, Capabilities, CompileOutput,
+    bundle_uses_unsafe,
+    CBind,
+    Capabilities,
+    Codegen,
+    Collections,
+    Compile,
+    CompileOutput,
+    Comptime,
+    Diagnostics,
+    Driver,
+    Formatter,
+    Generics,
+    Jetpack,
+    Lexer,
+    Loader,
+    Lock,
+    Manifest,
+    Parser,
+    PhaseTiming,
+    Sema,
+    Syntax,
+    Traits,
+    AST,
+    CFFI,
+    FFI,
+    SHA256,
 };
 pub mod BuildCache;
 pub mod CLI;
@@ -173,7 +195,13 @@ pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
     };
     let entry = &bundle.modules[bundle.entry];
     let src = &entry.source;
-    let line_of = |off: usize| src[..off.min(src.len())].bytes().filter(|&b| b == b'\n').count() + 1;
+    let line_of = |off: usize| {
+        src[..off.min(src.len())]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count()
+            + 1
+    };
     let mut out = Vec::new();
     for item in &entry.items {
         match item {
@@ -202,7 +230,10 @@ pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
             }
             AST::Item::Impl(i) => {
                 for m in &i.methods {
-                    out.push((format!("{}.{}", i.type_name, m.name), line_of(m.name_span.start)));
+                    out.push((
+                        format!("{}.{}", i.type_name, m.name),
+                        line_of(m.name_span.start),
+                    ));
                 }
             }
             _ => {}
@@ -224,10 +255,10 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
     compile(src).map(|o| o.rust)
 }
 
+pub use Comptime::CtValue;
 pub use Diagnostics::render_all as render_diagnostics;
 pub use Diagnostics::{render_all_colored, render_all_json, render_all_linked};
 pub use Sema::check_pure_program_root;
-pub use Comptime::CtValue;
 
 /// Pretty-print source to canonical Jet style (M6/S44).
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
@@ -276,10 +307,12 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
         )]
     })?;
 
-    let base_dir = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
+    let base_dir = std::path::Path::new(file)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let mut sink = Comptime::DevSink::new();
-    let value = Comptime::run_main_value(main_fn, &func_map, base_dir, &mut sink)
-        .map_err(|d| vec![d])?;
+    let value =
+        Comptime::run_main_value(main_fn, &func_map, base_dir, &mut sink).map_err(|d| vec![d])?;
     Ok(value)
 }
 
@@ -322,10 +355,11 @@ pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic
     })?;
 
     // Run main() via the comptime engine with a dev sink capturing print output.
-    let base_dir = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
+    let base_dir = std::path::Path::new(file)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let mut sink = Comptime::DevSink::new();
-    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink)
-        .map_err(|d| vec![d])?;
+    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink).map_err(|d| vec![d])?;
     let text = sink.stdout;
     // Render the captured output as a JSON string.
     let json = if text.trim().is_empty() {

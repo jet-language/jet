@@ -1,13 +1,13 @@
 //! LSP language features: hover, go-to-definition, references, rename,
 //! semantic tokens, inlay hints.
 
-use crate::Lexer::{TokKind, Token};
 use crate::Diagnostics::Span;
+use crate::Lexer::{TokKind, Token};
 
 use super::Completion::{JET_KEYWORDS, JET_TYPES};
-use super::JSON::json_escape;
 use super::Position::byte_offset_to_lsp;
 use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
+use super::JSON::json_escape;
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
 

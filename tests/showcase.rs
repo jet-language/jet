@@ -152,8 +152,9 @@ fn showcase_tools_golden() {
                 );
             }
             let err_path = expected_dir.join(format!("{}.err.out", case.name));
-            let expected_err = fs::read_to_string(&err_path)
-                .unwrap_or_else(|_| panic!("missing examples/showcase/expected/{}.err.out", case.name));
+            let expected_err = fs::read_to_string(&err_path).unwrap_or_else(|_| {
+                panic!("missing examples/showcase/expected/{}.err.out", case.name)
+            });
             assert_eq!(stderr, expected_err, "stderr mismatch for {}", case.name);
         } else {
             assert!(

@@ -6,12 +6,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::AST::{
-    Func, ImageFieldValue, ImageLit, ServiceEntry, SystemFieldValue, SystemLit,
-};
 use crate::Comptime;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{Func, ImageFieldValue, ImageLit, ServiceEntry, SystemFieldValue, SystemLit};
 
 use super::Diagnostics::{
     image_bad_format, image_missing_from, image_restated_field, missing_system_target,
@@ -83,8 +81,7 @@ pub(super) fn evaluate_system(
 
 /// U13: a `target`/cross-compile platform must name a known OS+arch pair.
 fn check_platform(os: &str, arch: &str, span: Span) -> Result<String, Diagnostic> {
-    let known_arch =
-        matches!(arch, _ if arch == Syntax::PLATFORM_ARCH_X64 || arch == Syntax::PLATFORM_ARCH_ARM64);
+    let known_arch = matches!(arch, _ if arch == Syntax::PLATFORM_ARCH_X64 || arch == Syntax::PLATFORM_ARCH_ARM64);
     if os == Syntax::PLATFORM_OS_LINUX && known_arch {
         Ok(format!("{os}.{arch}"))
     } else {

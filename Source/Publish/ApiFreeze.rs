@@ -4,10 +4,8 @@
 use std::path::Path;
 
 pub use crate::Sema::ApiFreeze::{
-    FrozenFn, ApiSnapshot, API_SNAPSHOT_VERSION,
-    fn_signature, snapshot_from_items,
-    api_cache_dir, load_snapshot, save_snapshot, load_all_snapshots,
-    project_capability_digest,
+    api_cache_dir, fn_signature, load_all_snapshots, load_snapshot, project_capability_digest,
+    save_snapshot, snapshot_from_items, ApiSnapshot, FrozenFn, API_SNAPSHOT_VERSION,
 };
 
 /// Freeze the public capability surface of `package` to disk for an

@@ -376,7 +376,10 @@ fn e1206(_file: &str, detail: &str) -> Diagnostic {
         "E1206",
         format!("`{}` has a shape error", Syntax::PAYLOAD_FILE),
         detail.to_string(),
-        format!("check `{}` against docs/spec/syntax-decisions.md (U1)", Syntax::PAYLOAD_FILE),
+        format!(
+            "check `{}` against docs/spec/syntax-decisions.md (U1)",
+            Syntax::PAYLOAD_FILE
+        ),
         None,
     )
 }

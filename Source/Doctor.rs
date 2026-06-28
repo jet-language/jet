@@ -43,13 +43,40 @@ pub struct Check {
 
 impl Check {
     fn ok(section: &'static str, label: impl Into<String>, detail: impl Into<String>) -> Self {
-        Check { section, label: label.into(), health: Health::Ok, detail: detail.into(), fix: None, auto_fixable: false }
+        Check {
+            section,
+            label: label.into(),
+            health: Health::Ok,
+            detail: detail.into(),
+            fix: None,
+            auto_fixable: false,
+        }
     }
     fn note(section: &'static str, label: impl Into<String>, detail: impl Into<String>) -> Self {
-        Check { section, label: label.into(), health: Health::Note, detail: detail.into(), fix: None, auto_fixable: false }
+        Check {
+            section,
+            label: label.into(),
+            health: Health::Note,
+            detail: detail.into(),
+            fix: None,
+            auto_fixable: false,
+        }
     }
-    fn problem(section: &'static str, label: impl Into<String>, detail: impl Into<String>, fix: impl Into<String>, auto_fixable: bool) -> Self {
-        Check { section, label: label.into(), health: Health::Problem, detail: detail.into(), fix: Some(fix.into()), auto_fixable }
+    fn problem(
+        section: &'static str,
+        label: impl Into<String>,
+        detail: impl Into<String>,
+        fix: impl Into<String>,
+        auto_fixable: bool,
+    ) -> Self {
+        Check {
+            section,
+            label: label.into(),
+            health: Health::Problem,
+            detail: detail.into(),
+            fix: Some(fix.into()),
+            auto_fixable,
+        }
     }
 }
 
@@ -72,7 +99,11 @@ pub fn run(opts: Options) -> Vec<Check> {
     if opts.online {
         out.push(check_registry());
     } else {
-        out.push(Check::note("registry", "registry", "skipped (offline; pass --online to check)"));
+        out.push(Check::note(
+            "registry",
+            "registry",
+            "skipped (offline; pass --online to check)",
+        ));
     }
     out.extend(check_ffi());
     if let Some(triple) = &opts.cross_target {
@@ -118,7 +149,11 @@ fn check_caches() -> Vec<Check> {
 /// problem with an auto-fix (remove it).
 fn cache_check(label: &'static str, dir: PathBuf) -> Check {
     if !dir.exists() {
-        return Check::ok("cache", label, format!("{} (created on demand)", dir.display()));
+        return Check::ok(
+            "cache",
+            label,
+            format!("{} (created on demand)", dir.display()),
+        );
     }
     if !dir.is_dir() {
         return Check::problem(
@@ -152,7 +187,11 @@ fn check_path() -> Check {
 fn check_lsp() -> Check {
     // The LSP ships inside this same binary (`jet lsp`); there is no external
     // server to find. Report it as wired.
-    Check::ok("lsp", "language server", format!("built in (`{} lsp`)", crate::Syntax::BINARY_NAME))
+    Check::ok(
+        "lsp",
+        "language server",
+        format!("built in (`{} lsp`)", crate::Syntax::BINARY_NAME),
+    )
 }
 
 fn check_registry() -> Check {
@@ -181,9 +220,17 @@ fn check_ffi() -> Vec<Check> {
     }
     // cargo: needed to build the hidden FFI bridge crate.
     if command_ok("cargo", &["--version"]) {
-        out.push(Check::ok("c-ffi", "cargo", "found (builds the FFI bridge crate)"));
+        out.push(Check::ok(
+            "c-ffi",
+            "cargo",
+            "found (builds the FFI bridge crate)",
+        ));
     } else {
-        out.push(Check::note("c-ffi", "cargo", "not found (only needed for C FFI builds)"));
+        out.push(Check::note(
+            "c-ffi",
+            "cargo",
+            "not found (only needed for C FFI builds)",
+        ));
     }
     // Hangar link dirs: the shared C-lib store.
     let hangar = PathBuf::from(crate::Syntax::HANGAR_DIR);
@@ -193,7 +240,10 @@ fn check_ffi() -> Vec<Check> {
         out.push(Check::note(
             "c-ffi",
             "hangar",
-            format!("{} not present (created when you realize a C library)", hangar.display()),
+            format!(
+                "{} not present (created when you realize a C library)",
+                hangar.display()
+            ),
         ));
     }
     out
@@ -230,7 +280,8 @@ fn ffi_cache_dir() -> PathBuf {
 fn check_cross_target(triple: &str) -> Check {
     // Step 1: is it a known rustc target at all?
     let known = Command::new("rustc")
-        .arg("--print").arg("target-list")
+        .arg("--print")
+        .arg("target-list")
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -255,7 +306,8 @@ fn check_cross_target(triple: &str) -> Check {
 
     // Step 2: is the std library installed for this target?
     let sysroot = Command::new("rustc")
-        .arg("--print").arg("sysroot")
+        .arg("--print")
+        .arg("sysroot")
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -275,9 +327,17 @@ fn check_cross_target(triple: &str) -> Check {
                 false,
             );
         }
-        Check::ok("cross", triple, format!("installed ({})", target_lib.display()))
+        Check::ok(
+            "cross",
+            triple,
+            format!("installed ({})", target_lib.display()),
+        )
     } else {
-        Check::note("cross", triple, "could not determine sysroot; target may or may not be installed")
+        Check::note(
+            "cross",
+            triple,
+            "could not determine sysroot; target may or may not be installed",
+        )
     }
 }
 

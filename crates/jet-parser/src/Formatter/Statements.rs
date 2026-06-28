@@ -50,7 +50,9 @@ impl<'a> Fmt<'a> {
                 }
             }
             Stmt::If(i) => self.fmt_if(i),
-            Stmt::While { cond, body, label, .. } => {
+            Stmt::While {
+                cond, body, label, ..
+            } => {
                 // S19: canonical loop keyword is `loop`. D-LOOPLABEL2=A: `name@ loop`.
                 if let Some((_n, _)) = label {
                     self.write(&format!("{}@ ", _n));
@@ -130,7 +132,9 @@ impl<'a> Fmt<'a> {
             Stmt::Continue(_) => self.write("continue"),
             Stmt::BreakLabel(name, _) => self.write(&format!("break {}@", name)),
             Stmt::ContinueLabel(name, _) => self.write(&format!("continue {}@", name)),
-            Stmt::Loop { body: inner, label, .. } => {
+            Stmt::Loop {
+                body: inner, label, ..
+            } => {
                 if let Some((_n, _)) = label {
                     self.write(&format!("{}@ ", _n));
                 }
@@ -180,7 +184,12 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             // D-SCAP1: `#Grant(Fs) { caps -> … }` scoped-capability grant region.
-            Stmt::Grant { caps, binding, body, .. } => {
+            Stmt::Grant {
+                caps,
+                binding,
+                body,
+                ..
+            } => {
                 let list = caps
                     .iter()
                     .map(|(n, _)| n.as_str())
@@ -188,7 +197,10 @@ impl<'a> Fmt<'a> {
                     .join(", ");
                 self.write(&format!(
                     "#{}({}) {{ {} {}",
-                    Syntax::KW_GRANT, list, binding, Syntax::GRANT_ARROW
+                    Syntax::KW_GRANT,
+                    list,
+                    binding,
+                    Syntax::GRANT_ARROW
                 ));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -202,7 +214,12 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             // D-WHEN1 (ratified 2026-06-19): format like `if` with `comptime` lead.
-            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
                 self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));
                 self.fmt_cond(cond);
                 self.write(" {");
@@ -299,14 +316,10 @@ impl<'a> Fmt<'a> {
         if !stmts.is_empty() {
             return false;
         }
-        self.value_block_braces(value)
-            .is_some_and(|(open, close)| {
-                !self.span_has_comment(open, close)
-                    && self
-                        .src
-                        .get(open..close)
-                        .is_some_and(|s| !s.contains('\n'))
-            })
+        self.value_block_braces(value).is_some_and(|(open, close)| {
+            !self.span_has_comment(open, close)
+                && self.src.get(open..close).is_some_and(|s| !s.contains('\n'))
+        })
     }
 
     fn fmt_if(&mut self, i: &IfStmt) {

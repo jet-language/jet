@@ -32,7 +32,9 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
             DepSource::Provider {
                 provider: Source::Path,
                 target,
-            } => DepSpec::Path { path: target.clone() },
+            } => DepSpec::Path {
+                path: target.clone(),
+            },
             DepSource::Provider {
                 provider: Source::Github,
                 target,

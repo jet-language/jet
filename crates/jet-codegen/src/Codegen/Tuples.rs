@@ -1,7 +1,7 @@
 use super::*;
 use crate::AST::{
-    ElseBranch, EnumLitArg, Expr,
-    ForKind, IfStmt, Item, LambdaBody, OrFallback, Stmt, StrPart, Type, VariantPayload,
+    ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, Item, LambdaBody, OrFallback, Stmt, StrPart,
+    Type, VariantPayload,
 };
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
@@ -259,12 +259,22 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
         }
         // D-REGION1: a region body is real code — collect tuple shapes from it.
         // D-EFF1: a `#Caps` region body is likewise real code.
-        Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => {
+        Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::AssumeDet { body, .. } => {
             for s in body {
                 collect_tuple_shapes_from_stmt(s, out);
             }
         }
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Loop { .. } | Stmt::Unsafe { .. } | Stmt::Impure { .. } => {}
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..)
+        | Stmt::Loop { .. }
+        | Stmt::Unsafe { .. }
+        | Stmt::Impure { .. } => {}
         // D-CTX1: collect tuple shapes from context block fields and body.
         Stmt::ContextBlock { fields, body, .. } => {
             for (_, e, _) in fields {
@@ -283,7 +293,12 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
         // D-CTMARKER1: comptime block erases; no tuple shapes in emitted Rust.
         Stmt::ComptimeBlock { .. } => {}
         // D-WHEN1: collect tuple shapes from both arms (conservative).
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             collect_tuple_shapes_from_expr(cond, out);
             for s in then_body {
                 collect_tuple_shapes_from_stmt(s, out);
@@ -404,7 +419,11 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
     {
         derives.push("PartialEq");
     }
-    out.push_str(&format!("#[derive({})]\nstruct {} {{\n", derives.join(", "), name));
+    out.push_str(&format!(
+        "#[derive({})]\nstruct {} {{\n",
+        derives.join(", "),
+        name
+    ));
     for (fname, fty) in fields {
         out.push_str(&format!(
             "    pub {}: {},\n",
@@ -415,7 +434,11 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
     out.push_str("}\n\n");
 }
 
-pub(crate) fn emit_tuple_structs(cx: &Cx, shapes: &BTreeMap<String, Vec<(String, Type)>>, out: &mut String) {
+pub(crate) fn emit_tuple_structs(
+    cx: &Cx,
+    shapes: &BTreeMap<String, Vec<(String, Type)>>,
+    out: &mut String,
+) {
     for (name, fields) in shapes {
         emit_tuple_struct(cx, name, fields, out);
     }

@@ -84,8 +84,14 @@ pub(crate) fn run_dev(
             last_mtime = now;
             // A debounce sleep lets editors finish writing before we read.
             std::thread::sleep(std::time::Duration::from_millis(30));
-            prev_bundle =
-                render_dev_change(file, try_anyway, policy, prev_bundle.as_ref(), mode, use_interpreter);
+            prev_bundle = render_dev_change(
+                file,
+                try_anyway,
+                policy,
+                prev_bundle.as_ref(),
+                mode,
+                use_interpreter,
+            );
         }
     }
 }
@@ -123,8 +129,7 @@ fn render_dev_change(
     // Load+check the new bundle so we can both diff its type surface and run it.
     let new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
-            let diags =
-                jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+            let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
             let errs: Vec<_> = diags
                 .into_iter()
                 .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -169,15 +174,22 @@ fn render_dev_change(
             Some(old) => {
                 match jet::Sema::HotSwap::type_stable_check(old, &new_bundle, &module_name) {
                     Ok(()) => {
-                        println!("\n[hot-swap] {} — types stable, code re-applied", module_name);
-                        run_resident_swap(&new_bundle, try_anyway, &module_name, file, mode, use_interpreter);
+                        println!(
+                            "\n[hot-swap] {} — types stable, code re-applied",
+                            module_name
+                        );
+                        run_resident_swap(
+                            &new_bundle,
+                            try_anyway,
+                            &module_name,
+                            file,
+                            mode,
+                            use_interpreter,
+                        );
                     }
                     Err(diags) => {
                         // E2210 names what changed; surface it on the restart line.
-                        let what = diags
-                            .first()
-                            .map(|d| d.what.clone())
-                            .unwrap_or_default();
+                        let what = diags.first().map(|d| d.what.clone()).unwrap_or_default();
                         println!("\n[restart] {} — {}", module_name, what);
                         run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter);
                     }
@@ -192,7 +204,11 @@ fn render_dev_change(
     } else {
         // Run-to-completion (default / `--restart`): plain rerun.
         println!("\n— {} changed, re-running —", file);
-        render_outcome(jet::Interpreter::dev_iteration(file, try_anyway), file, mode);
+        render_outcome(
+            jet::Interpreter::dev_iteration(file, try_anyway),
+            file,
+            mode,
+        );
     }
 
     Some(new_bundle)
@@ -265,7 +281,11 @@ fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
 /// output mode. Diagnostics use the SAME renderer as batch compilation
 /// (D-DEV), so a problem looks identical whether seen via `jet check` or
 /// `jet dev`.
-fn render_dev_iteration(file: &str, try_anyway: bool, mode: OutputMode) -> Option<jet::AST::ProgramBundle> {
+fn render_dev_iteration(
+    file: &str,
+    try_anyway: bool,
+    mode: OutputMode,
+) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
     let outcome = jet::Interpreter::dev_iteration(file, try_anyway);
     let elapsed = started.elapsed();
@@ -337,9 +357,12 @@ pub(crate) fn run_completions(shell: Option<&str>) {
 /// problems is L2101.
 pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
     // E2-M15: `jet doctor --target=<triple>` checks cross-compilation readiness.
-    let cross_target = std::env::args()
-        .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
-    let checks = jet::Doctor::run(jet::Doctor::Options { online, cross_target });
+    let cross_target =
+        std::env::args().find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    let checks = jet::Doctor::run(jet::Doctor::Options {
+        online,
+        cross_target,
+    });
     let color = mode.color_stderr_for(std::io::stdout().is_terminal());
 
     if apply {
@@ -356,9 +379,27 @@ pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
     }
 
     use jet::Doctor::Health;
-    let bold = |s: &str| if color { format!("\x1b[1m{}\x1b[0m", s) } else { s.to_string() };
-    let green = |s: &str| if color { format!("\x1b[32m{}\x1b[0m", s) } else { s.to_string() };
-    let yellow = |s: &str| if color { format!("\x1b[33m{}\x1b[0m", s) } else { s.to_string() };
+    let bold = |s: &str| {
+        if color {
+            format!("\x1b[1m{}\x1b[0m", s)
+        } else {
+            s.to_string()
+        }
+    };
+    let green = |s: &str| {
+        if color {
+            format!("\x1b[32m{}\x1b[0m", s)
+        } else {
+            s.to_string()
+        }
+    };
+    let yellow = |s: &str| {
+        if color {
+            format!("\x1b[33m{}\x1b[0m", s)
+        } else {
+            s.to_string()
+        }
+    };
 
     println!("{}", bold(&format!("{} doctor", jet::Syntax::BINARY_NAME)));
     let mut last_section = "";
@@ -377,7 +418,10 @@ pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
         if let Some(fix) = &c.fix {
             println!("        Fix: {}", fix);
             if c.auto_fixable {
-                println!("        (auto-fixable: run `{} doctor --fix`)", jet::Syntax::BINARY_NAME);
+                println!(
+                    "        (auto-fixable: run `{} doctor --fix`)",
+                    jet::Syntax::BINARY_NAME
+                );
             }
         }
     }
@@ -434,7 +478,10 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// prototypes — use `#extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
-        eprintln!("usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+        eprintln!(
+            "usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        );
         eprintln!();
         eprintln!("Generate a C binding cache from a header (S59). The output is");
         eprintln!("a `#bindgen module c.<lib>.__bindgen__` file, by default written");
@@ -459,7 +506,10 @@ pub(crate) fn run_bind(args: &[&String]) {
             }
             other => {
                 eprintln!("error: unknown `bind` flag `{}`", other);
-                eprintln!("usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+                eprintln!(
+                    "usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]",
+                    jet::Syntax::BINARY_NAME
+                );
                 exit(ExitCodes::USAGE);
             }
         }
@@ -474,7 +524,10 @@ pub(crate) fn run_bind(args: &[&String]) {
     let header_src = match std::fs::read_to_string(header) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error [E3208]: Could not generate bindings from `{}`.", header);
+            eprintln!(
+                "Error [E3208]: Could not generate bindings from `{}`.",
+                header
+            );
             eprintln!(" Why: the header file could not be read ({}).", e);
             eprintln!(" Fix: check the path, or install the library's dev headers.");
             exit(ExitCodes::USER_ERROR);
@@ -485,7 +538,10 @@ pub(crate) fn run_bind(args: &[&String]) {
     let result = match jet::CBind::generate(&header_src, &lib) {
         Ok(r) => r,
         Err(why) => {
-            eprintln!("Error [E3208]: Could not generate bindings from `{}`.", header);
+            eprintln!(
+                "Error [E3208]: Could not generate bindings from `{}`.",
+                header
+            );
             eprintln!(" Why: {}.", why);
             eprintln!(
                 " Fix: hand-write `#extern module c.{} {{ … }}` for the symbols you need.",
@@ -496,9 +552,8 @@ pub(crate) fn run_bind(args: &[&String]) {
     };
 
     // Default cache path follows D-CBIND7: .jet/bindings/c/<lib>.jet.
-    let out_path = out.unwrap_or_else(|| {
-        format!(".jet/bindings/c/{}.{}", lib, jet::Syntax::FILE_EXT)
-    });
+    let out_path =
+        out.unwrap_or_else(|| format!(".jet/bindings/c/{}.{}", lib, jet::Syntax::FILE_EXT));
     if let Some(parent) = std::path::Path::new(&out_path).parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             eprintln!("error: could not create `{}`: {}", parent.display(), e);
@@ -578,17 +633,32 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
         let mut ast_funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
         for item in &prog.items {
             if let jet::AST::Item::Func(f) = item {
-                funcs_sig.insert(f.name.clone(), jet::Sema::FuncSig {
-                    params: f.params.iter().map(|p| (p.convention.clone(), p.ty.clone())).collect(),
-                    return_type: f.return_type.clone(),
-                    is_view_return: f.is_view_return,
-                    is_extern: false,
-                    is_unsafe: f.is_unsafe,
-                    is_pure: f.is_pure,
-                    is_sanitizer: f.is_sanitizer,
-                    param_info: f.params.iter().map(|p| (p.name.clone(), p.default.is_some())).collect(),
-                    defaults: f.params.iter().map(|p| p.default.as_ref().map(|d| *d.clone())).collect(),
-                });
+                funcs_sig.insert(
+                    f.name.clone(),
+                    jet::Sema::FuncSig {
+                        params: f
+                            .params
+                            .iter()
+                            .map(|p| (p.convention.clone(), p.ty.clone()))
+                            .collect(),
+                        return_type: f.return_type.clone(),
+                        is_view_return: f.is_view_return,
+                        is_extern: false,
+                        is_unsafe: f.is_unsafe,
+                        is_pure: f.is_pure,
+                        is_sanitizer: f.is_sanitizer,
+                        param_info: f
+                            .params
+                            .iter()
+                            .map(|p| (p.name.clone(), p.default.is_some()))
+                            .collect(),
+                        defaults: f
+                            .params
+                            .iter()
+                            .map(|p| p.default.as_ref().map(|d| *d.clone()))
+                            .collect(),
+                    },
+                );
                 ast_funcs.insert(f.name.clone(), f);
             }
         }
@@ -697,7 +767,17 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
         }
     };
     let bin = PathBuf::from("build").join(format!("bench_{}", stem(file)));
-    build(file, &rust_code, bin.clone(), BuildProfile::Default, ffi_link.as_ref(), &[], false, None, mode);
+    build(
+        file,
+        &rust_code,
+        bin.clone(),
+        BuildProfile::Default,
+        ffi_link.as_ref(),
+        &[],
+        false,
+        None,
+        mode,
+    );
 
     let warmups = 5u32;
     let trials = 20u32;

@@ -7,19 +7,17 @@
 //! canonical form had been written, so one foreign word doesn't hide the
 //! rest of the file's problems.
 
-use crate::AST::{
-    AccessConvention, BinOp, Binding, BindName, BindPattern, Call, CallArg, CodeModule,
-    ConstAttr, ConstDef, Contribution, ElseBranch, EnumDef,
-    Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
-    ModuleDecl, Namespace,
-    LambdaMeta, LambdaParam, Marker, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
-    SwitchArm, TagDef, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp,
-    Variant, VariantField, VariantPayload,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics;
 use crate::Lexer::{describe, StrTokPart, TokKind, Token};
 use crate::Syntax;
+use crate::AST::{
+    AccessConvention, BinOp, BindName, BindPattern, Binding, Call, CallArg, CodeModule, ConstAttr,
+    ConstDef, Contribution, ElseBranch, EnumDef, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item,
+    LValue, Lambda, LambdaBody, LambdaMeta, LambdaParam, Marker, ModuleDecl, Namespace, OrFallback,
+    Param, Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, TagDef, TraitDef, TraitImplBlock,
+    TraitMethodSig, TryConvert, Type, TypeParam, UnOp, Variant, VariantField, VariantPayload,
+};
 
 mod Expressions;
 mod Items;
@@ -210,7 +208,6 @@ fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
     Ok(())
 }
 
-
 impl<'a> Parser<'a> {
     fn peek(&self) -> &Token {
         &self.toks[self.pos.min(self.toks.len() - 1)]
@@ -344,9 +341,11 @@ impl<'a> Parser<'a> {
             TokKind::RBrace | TokKind::Eof => Ok(()),
             other => Err(Diagnostic::error(
                 "E0003",
-                format!("something unexpected appeared after this line, found {}", describe(other)),
-                "each line ends where the line break is (no `;` needed)"
-                    .to_string(),
+                format!(
+                    "something unexpected appeared after this line, found {}",
+                    describe(other)
+                ),
+                "each line ends where the line break is (no `;` needed)".to_string(),
                 "put the next line of code on a new line".to_string(),
                 Some(self.peek().span),
             )),
@@ -424,7 +423,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-
 /// End byte of a parsed `System` field value, for the field's span.
 fn value_end_system(v: &crate::AST::SystemFieldValue) -> usize {
     use crate::AST::SystemFieldValue::*;
@@ -471,8 +469,8 @@ fn pat_span(pat: &Pattern) -> Span {
 #[cfg(test)]
 mod s61_tests {
     use super::*;
-    use crate::AST::{BinOp, Expr, Stmt};
     use crate::Lexer::lex;
+    use crate::AST::{BinOp, Expr, Stmt};
 
     fn program(src: &str) -> Program {
         let (toks, errs) = lex(src);

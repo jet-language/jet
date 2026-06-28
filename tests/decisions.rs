@@ -12,7 +12,8 @@ use std::fs;
 fn ratified_decisions_enforced() {
     let docs =
         fs::read_to_string("docs/spec/syntax-decisions.md").expect("docs/spec/syntax-decisions.md");
-    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("crates/jet-foundation/src/Syntax.rs");
+    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs")
+        .expect("crates/jet-foundation/src/Syntax.rs");
     let diag = fs::read_to_string("docs/spec/diagnostics.md").expect("docs/spec/diagnostics.md");
 
     let ratified = extract_section_ids(&docs, "## Ratified", "## Provisional");
@@ -163,9 +164,9 @@ fn section_between<'a>(docs: &'a str, start: &str, end: &str) -> &'a str {
         .find(start)
         .unwrap_or_else(|| panic!("docs/spec/syntax-decisions.md missing section header: {start}"));
     let rest = &docs[from + start.len()..];
-    let to = rest
-        .find(end)
-        .unwrap_or_else(|| panic!("docs/spec/syntax-decisions.md missing section header after {start}: {end}"));
+    let to = rest.find(end).unwrap_or_else(|| {
+        panic!("docs/spec/syntax-decisions.md missing section header after {start}: {end}")
+    });
     &rest[..to]
 }
 

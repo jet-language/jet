@@ -43,7 +43,11 @@ fn extract_grammar_keyword_words(grammar_text: &str) -> BTreeSet<String> {
                 if let Some(val_start) = after.find('"').and_then(|_| {
                     let rest = &after[after.find(':').unwrap_or(0) + 1..];
                     let rest = rest.trim_start();
-                    if rest.starts_with('"') { Some(rest) } else { None }
+                    if rest.starts_with('"') {
+                        Some(rest)
+                    } else {
+                        None
+                    }
                 }) {
                     // val_start is the string value (starts with `"`).
                     let inner = &val_start[1..];
@@ -144,8 +148,8 @@ fn grammar_excludes_foreign_words() {
     let grammar_path = "editors/vscode/syntaxes/jet.tmLanguage.json";
     let grammar_text =
         fs::read_to_string(grammar_path).expect("editors/vscode/syntaxes/jet.tmLanguage.json");
-    let syntax_text =
-        fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("crates/jet-foundation/src/Syntax.rs");
+    let syntax_text = fs::read_to_string("crates/jet-foundation/src/Syntax.rs")
+        .expect("crates/jet-foundation/src/Syntax.rs");
 
     let grammar_words = extract_grammar_keyword_words(&grammar_text);
     let foreign_words = extract_foreign_words_from_syntax(&syntax_text);

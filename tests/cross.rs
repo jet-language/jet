@@ -115,10 +115,10 @@ fn main() {
 /// Pin the exact rendered output for E3301 so it matches docs/spec/diagnostics.md.
 #[test]
 fn e3301_snapshot() {
-    let src_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/ui/freestanding_e3301.jet");
-    let snap_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/ui/freestanding_e3301.stderr");
+    let src_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/freestanding_e3301.jet");
+    let snap_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/freestanding_e3301.stderr");
 
     if !src_path.exists() {
         panic!("missing tests/ui/freestanding_e3301.jet (I4 requires a snapshot)");

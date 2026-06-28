@@ -3,8 +3,8 @@
 //! it for completion, hover, go-to-def, references, rename, and inlay hints.
 //! (LSP-I1: no new "language knowledge" here — just indexing what sema knows.)
 
-use crate::AST::{self, Item, LoadedModule, ProgramBundle};
 use crate::Diagnostics::Span;
+use crate::AST::{self, Item, LoadedModule, ProgramBundle};
 
 /// The semantic kind of a defined symbol.
 #[derive(Debug, Clone)]
@@ -618,7 +618,12 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
         | AST::Stmt::ContinueLabel(..) => {}
         // D-CTMARKER1: collect symbols from comptime block body.
         AST::Stmt::ComptimeBlock { body, .. } => collect_stmts(body, mp, module, db),
-        AST::Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        AST::Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             collect_expr(cond, mp, db);
             collect_stmts(then_body, mp, module, db);
             if let Some(eb) = else_body {

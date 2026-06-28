@@ -1,10 +1,7 @@
 use super::*;
-use crate::AST::{
-    AccessConvention, CModule,
-    ExternFn, ExternRustBlock, Type, VariantPayload,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{AccessConvention, CModule, ExternFn, ExternRustBlock, Type, VariantPayload};
 use std::collections::HashMap;
 
 pub(crate) fn check_extern_block(
@@ -38,7 +35,11 @@ pub(crate) fn check_extern_block(
     ok
 }
 
-pub(crate) fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mut Vec<Diagnostic>) -> bool {
+pub(crate) fn check_extern_fn(
+    ef: &ExternFn,
+    registry: &TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
     let mut ok = true;
     if ef.is_view_return {
         diags.push(ffi_type_error(
@@ -52,9 +53,16 @@ pub(crate) fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mu
     for p in &ef.params {
         // D-CAP8: `Infer` (unmarked) is by-value, like `Read` — both are fine at the
         // boundary; only an explicit `~`/`^`/`&` marker is rejected.
-        if !matches!(p.convention, AccessConvention::Read | AccessConvention::Infer) {
+        if !matches!(
+            p.convention,
+            AccessConvention::Read | AccessConvention::Infer
+        ) {
             diags.push(ffi_type_error(
-                &format!("`{}` can't use `{}` at the FFI boundary", p.name, access_keyword(p.convention)),
+                &format!(
+                    "`{}` can't use `{}` at the FFI boundary",
+                    p.name,
+                    access_keyword(p.convention)
+                ),
                 "foreign functions take owned copies — `~`, `^`, and `&` aren't allowed here",
                 "remove the capability sigil and pass by value",
                 p.name_span,
@@ -117,11 +125,13 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
         Some(TypeDef::Struct { fields, .. }) => fields
             .iter()
             .all(|(_, _, ty, _, _)| is_c_abi_type(ty, registry)),
-        Some(TypeDef::Enum { variants, .. }) => variants.values().all(|(_, payload)| match payload {
-            VariantPayload::Unit => true,
-            VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
-            VariantPayload::Named(fs) => fs.iter().all(|f| is_c_abi_type(&f.ty, registry)),
-        }),
+        Some(TypeDef::Enum { variants, .. }) => {
+            variants.values().all(|(_, payload)| match payload {
+                VariantPayload::Unit => true,
+                VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
+                VariantPayload::Named(fs) => fs.iter().all(|f| is_c_abi_type(&f.ty, registry)),
+            })
+        }
         // D-DIST1: distinct types are repr(transparent) over a scalar; treat as C-compatible.
         Some(TypeDef::Distinct { base, .. }) => is_c_abi_type(base, registry),
         None => false,
@@ -132,12 +142,17 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
 pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3203",
-        format!("`{}` is not a C-compatible type for a foreign function parameter or return.", ty.name()),
+        format!(
+            "`{}` is not a C-compatible type for a foreign function parameter or return.",
+            ty.name()
+        ),
         format!(
             "`#{}` / `#{}` functions must use types with a stable C ABI at the edge.",
-            Syntax::ATTR_EXTERN_MODULE, Syntax::ATTR_BINDGEN,
+            Syntax::ATTR_EXTERN_MODULE,
+            Syntax::ATTR_BINDGEN,
         ),
-        "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.".to_string(),
+        "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier."
+            .to_string(),
         Some(span),
     )
 }
@@ -199,7 +214,11 @@ pub fn e3303(span: Span) -> Diagnostic {
 
 /// Validate one C FFI module's signatures (E3203/E3202). Registers nothing; the
 /// caller registers the functions after a clean check.
-pub(crate) fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut Vec<Diagnostic>) -> bool {
+pub(crate) fn check_c_module(
+    cm: &CModule,
+    registry: &TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
     let mut ok = true;
     for ef in &cm.functions {
         if ef.is_view_return {
@@ -208,9 +227,16 @@ pub(crate) fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut 
         }
         for p in &ef.params {
             // D-CAP8: `Infer` (unmarked) is by-value like `Read`; only explicit markers reject.
-            if !matches!(p.convention, AccessConvention::Read | AccessConvention::Infer) {
+            if !matches!(
+                p.convention,
+                AccessConvention::Read | AccessConvention::Infer
+            ) {
                 diags.push(ffi_type_error(
-                    &format!("`{}` can't use `{}` at the C boundary", p.name, access_keyword(p.convention)),
+                    &format!(
+                        "`{}` can't use `{}` at the C boundary",
+                        p.name,
+                        access_keyword(p.convention)
+                    ),
                     "C functions take values by copy — `~`, `^`, and `&` aren't allowed here",
                     "remove the capability sigil and pass by value",
                     p.name_span,
@@ -327,4 +353,3 @@ pub(crate) fn register_extern_fn(
     }
     funcs.insert(ef.name.clone(), extern_to_sig(ef));
 }
-

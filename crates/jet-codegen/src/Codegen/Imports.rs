@@ -1,8 +1,6 @@
 use super::*;
-use crate::AST::{
-    AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type,
-};
 use crate::Traits;
+use crate::AST::{AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type};
 use std::collections::HashMap;
 
 /// Look up the pre-resolved module index for an import. Returns `None` for
@@ -24,8 +22,7 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
                 if !cx.cloneable.contains(&s.name) && type_is_cloneable_struct(s, &cx.type_names) {
                     cx.cloneable.insert(s.name.clone());
                 }
-                if !cx.comparable.contains(&s.name)
-                    && type_is_comparable_struct(s, &cx.type_names)
+                if !cx.comparable.contains(&s.name) && type_is_comparable_struct(s, &cx.type_names)
                 {
                     cx.comparable.insert(s.name.clone());
                 }
@@ -34,8 +31,7 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
                 if !cx.cloneable.contains(&e.name) && type_is_cloneable_enum(e, &cx.type_names) {
                     cx.cloneable.insert(e.name.clone());
                 }
-                if !cx.comparable.contains(&e.name) && type_is_comparable_enum(e, &cx.type_names)
-                {
+                if !cx.comparable.contains(&e.name) && type_is_comparable_enum(e, &cx.type_names) {
                     cx.comparable.insert(e.name.clone());
                 }
             }
@@ -47,7 +43,10 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
 /// Build a map from pub type name → Rust module path for all types defined in
 /// imported file-modules of `module_idx`. Used by codegen to qualify cross-module
 /// type references (e.g. `Note` → `user_note::user_Note`).
-pub(crate) fn foreign_type_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
+pub(crate) fn foreign_type_map(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
@@ -74,7 +73,11 @@ pub(crate) fn foreign_type_map(bundle: &ProgramBundle, module_idx: usize) -> Has
 
 /// Populate `cx.variant_owner` and `cx.enum_variants` with pub enum variants
 /// from imported file-modules, so cross-module pattern matching works in codegen.
-pub(crate) fn register_foreign_enum_variants(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+pub(crate) fn register_foreign_enum_variants(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) {
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
         if imp.is_c_import() {
@@ -143,7 +146,12 @@ pub(crate) fn reexport_call_map(
         };
         let target = &bundle.modules[target_idx];
         for reimp in &target.imports {
-            let ImportKind::Unqualified { module_alias, items, .. } = &reimp.kind else {
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &reimp.kind
+            else {
                 continue;
             };
             if !reimp.is_pub {
@@ -171,7 +179,10 @@ pub(crate) fn reexport_call_map(
     map
 }
 
-pub(crate) fn core_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
+pub(crate) fn core_import_map(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
@@ -182,7 +193,12 @@ pub(crate) fn core_import_map(bundle: &ProgramBundle, module_idx: usize) -> Hash
         // D-MOD3: `use core.item` / `use core.{a,b}` — bind each item name to its
         // full std path so that `item.method(...)` resolves the same way as
         // `import core.item as item` would.
-        if let ImportKind::Unqualified { module_alias, items, .. } = &imp.kind {
+        if let ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &imp.kind
+        {
             if module_alias == "core" || module_alias == "jet" {
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
@@ -222,7 +238,12 @@ pub(crate) fn unqualified_import_maps(
         })
         .collect();
     for imp in &module.imports {
-        let ImportKind::Unqualified { module_alias, items, .. } = &imp.kind else {
+        let ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } = &imp.kind
+        else {
             continue;
         };
         if module_alias == "core" || module_alias == "jet" {

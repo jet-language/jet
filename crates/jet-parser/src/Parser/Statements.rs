@@ -14,10 +14,10 @@ impl<'a> Parser<'a> {
             let audit_start = self.peek().span;
             self.bump(); // `#`
             self.bump(); // `Audit`
-            // Consume the optional `("…")` argument so we can keep parsing.
+                         // Consume the optional `("…")` argument so we can keep parsing.
             if matches!(self.peek().kind, TokKind::LParen) {
                 self.bump(); // `(`
-                // skip the string argument
+                             // skip the string argument
                 let _ = self.expect_plain_string(
                     "for the audit reason",
                     "`#Audit` is retired; write `#Unsafe(\"reason\") { … }` instead",
@@ -54,13 +54,16 @@ impl<'a> Parser<'a> {
                 "E0003",
                 format!("expected `#{}` here", Syntax::KW_UNSAFE),
                 "an audited region opens with `#Unsafe(\"reason\") { … }`".to_string(),
-                format!("write `#{}(\"why this is safe\") {{ … }}`", Syntax::KW_UNSAFE),
+                format!(
+                    "write `#{}(\"why this is safe\") {{ … }}`",
+                    Syntax::KW_UNSAFE
+                ),
                 Some(self.peek().span),
             ));
         }
         self.bump(); // `#`
         self.bump(); // `Unsafe`
-        // Optional `("reason")` argument — absent means L3101 fires in sema.
+                     // Optional `("reason")` argument — absent means L3101 fires in sema.
         let mut audit = None;
         if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`
@@ -88,7 +91,7 @@ impl<'a> Parser<'a> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Impure`
-        // Optional `("reason")` argument — absent means L3102 fires in sema.
+                     // Optional `("reason")` argument — absent means L3102 fires in sema.
         let mut reason = None;
         if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`
@@ -122,8 +125,7 @@ impl<'a> Parser<'a> {
         // Parse comma-separated `ident : expr` pairs.
         while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
             let field_start = self.peek().span;
-            let (field_name, field_name_span) =
-                self.expect_ident("for the context field name")?;
+            let (field_name, field_name_span) = self.expect_ident("for the context field name")?;
             // E0760: `=` is reassignment (S17); context fields use `:`.
             if matches!(self.peek().kind, TokKind::Eq) {
                 let eq_span = self.peek().span;
@@ -139,11 +141,12 @@ impl<'a> Parser<'a> {
                     Some(eq_span),
                 ));
             }
-            self.expect(TokKind::Colon, &format!("after the field name `{}`", field_name))?;
+            self.expect(
+                TokKind::Colon,
+                &format!("after the field name `{}`", field_name),
+            )?;
             // E0761: unknown field name.
-            if field_name != Syntax::CTX_FIELD_ALLOCATOR
-                && field_name != Syntax::CTX_FIELD_LOGGER
-            {
+            if field_name != Syntax::CTX_FIELD_ALLOCATOR && field_name != Syntax::CTX_FIELD_LOGGER {
                 return Err(Diagnostic::error(
                     "E0761",
                     format!("`{}` isn't a context field", field_name),
@@ -163,7 +166,10 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
         }
-        self.expect(TokKind::RParen, &format!("after `#{}(…`", Syntax::CTX_BLOCK))?;
+        self.expect(
+            TokKind::RParen,
+            &format!("after `#{}(…`", Syntax::CTX_BLOCK),
+        )?;
         self.expect(
             TokKind::LBrace,
             &format!("after `#{}(…)`", Syntax::CTX_BLOCK),
@@ -198,7 +204,10 @@ impl<'a> Parser<'a> {
             }
         }
         let rparen = self.peek().span;
-        self.expect(TokKind::RParen, &format!("to close the `#{}(…)` list", Syntax::KW_CAPS))?;
+        self.expect(
+            TokKind::RParen,
+            &format!("to close the `#{}(…)` list", Syntax::KW_CAPS),
+        )?;
         self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_CAPS))?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -233,15 +242,23 @@ impl<'a> Parser<'a> {
             }
         }
         let rparen = self.peek().span;
-        self.expect(TokKind::RParen, &format!("to close the `#{}(…)` list", Syntax::KW_GRANT))?;
-        self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_GRANT))?;
+        self.expect(
+            TokKind::RParen,
+            &format!("to close the `#{}(…)` list", Syntax::KW_GRANT),
+        )?;
+        self.expect(
+            TokKind::LBrace,
+            &format!("after `#{}(…)`", Syntax::KW_GRANT),
+        )?;
         // The capability handle binding: `{ caps -> … }`.
         let (binding, binding_span) = self.expect_ident("for the capability handle name")?;
         self.expect(
             TokKind::Arrow,
             &format!(
                 "after the `#{}` handle name (`#{}(…) {{ caps {} … }}`)",
-                Syntax::KW_GRANT, Syntax::KW_GRANT, Syntax::GRANT_ARROW
+                Syntax::KW_GRANT,
+                Syntax::KW_GRANT,
+                Syntax::GRANT_ARROW
             ),
         )?;
         let body = self.block_stmts();
@@ -263,8 +280,8 @@ impl<'a> Parser<'a> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Transact`
-        // D-TXN4: `#Transact(name) { … }` binds a handle; a bare `#Transact { … }`
-        // (no handle, hence no `on_commit` hooks) stays legal.
+                     // D-TXN4: `#Transact(name) { … }` binds a handle; a bare `#Transact { … }`
+                     // (no handle, hence no `on_commit` hooks) stays legal.
         let (name, name_span) = if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`
             let (n, ns) = self.expect_ident("for the transaction handle name")?;
@@ -276,7 +293,10 @@ impl<'a> Parser<'a> {
         } else {
             (None, None)
         };
-        self.expect(TokKind::LBrace, &format!("after `#{}`", Syntax::KW_TRANSACT))?;
+        self.expect(
+            TokKind::LBrace,
+            &format!("after `#{}`", Syntax::KW_TRANSACT),
+        )?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Transact {
@@ -292,11 +312,11 @@ impl<'a> Parser<'a> {
     /// `loop` keyword.
     fn loop_stmt(&mut self, label: Option<(String, Span)>) -> Result<Stmt, Diagnostic> {
         let span = self.bump().span; // `loop`
-        // S19-amend: `loop` handles all three loop forms by header.
-        //   loop { }               → infinite
-        //   loop cond { }          → conditional (was `while`)
-        //   loop x in ... { }      → iteration (was `for`)
-        //   loop k, v in ... { }   → key-value iteration
+                                     // S19-amend: `loop` handles all three loop forms by header.
+                                     //   loop { }               → infinite
+                                     //   loop cond { }          → conditional (was `while`)
+                                     //   loop x in ... { }      → iteration (was `for`)
+                                     //   loop k, v in ... { }   → key-value iteration
         if matches!(self.peek().kind, TokKind::LBrace) {
             // Infinite loop
             self.bump();
@@ -325,19 +345,36 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
-                ForKind::Range { start: first, end, step }
+                ForKind::Range {
+                    start: first,
+                    end,
+                    step,
+                }
             } else {
                 ForKind::In { collection: first }
             };
             self.expect(TokKind::LBrace, "to open the loop body")?;
             let body = self.block_stmts();
-            Ok(Stmt::For { var, var_span, var2, kind, body, span, label })
+            Ok(Stmt::For {
+                var,
+                var_span,
+                var2,
+                kind,
+                body,
+                span,
+                label,
+            })
         } else {
             // Conditional: loop cond { }
             let cond = self.expr_no_struct_lit()?;
             self.expect(TokKind::LBrace, "to open the loop body")?;
             let body = self.block_stmts();
-            Ok(Stmt::While { cond, body, span, label })
+            Ok(Stmt::While {
+                cond,
+                body,
+                span,
+                label,
+            })
         }
     }
 
@@ -406,7 +443,10 @@ impl<'a> Parser<'a> {
         }
         self.bump(); // `:`
         let (ty, ty_span) = self.type_()?;
-        if matches!(self.peek().kind, TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq) {
+        if matches!(
+            self.peek().kind,
+            TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq
+        ) {
             let sigil_span = self.peek().span;
             return Err(Diagnostic::error(
                 "E0422",
@@ -438,11 +478,12 @@ impl<'a> Parser<'a> {
         match &self.peek().kind {
             // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
             // position is misplaced — E0601 points at the top level.
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) => {
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>
+            {
                 let span = self.peek().span;
                 self.bump(); // `#`
                 self.bump(); // `Test`
-                // Recovery: consume `("name")` or bare `"name"` (old form) before `{`.
+                             // Recovery: consume `("name")` or bare `"name"` (old form) before `{`.
                 if matches!(self.peek().kind, TokKind::LParen) {
                     self.bump(); // `(`
                     if matches!(self.peek().kind, TokKind::Str(_)) {
@@ -474,8 +515,9 @@ impl<'a> Parser<'a> {
             }
             // D-BIND1: retired binding keywords `val` / `var` → E0985, then parse
             // the old `name = e` form so `jet fmt` can migrate them to sigils.
-            TokKind::Ident(n) if (n == Syntax::FOREIGN_VAL || n == Syntax::FOREIGN_VAR)
-                && self.binding_target_follows() =>
+            TokKind::Ident(n)
+                if (n == Syntax::FOREIGN_VAL || n == Syntax::FOREIGN_VAR)
+                    && self.binding_target_follows() =>
             {
                 let t = self.bump();
                 let foreign = if let TokKind::Ident(n) = &t.kind {
@@ -671,7 +713,12 @@ impl<'a> Parser<'a> {
                 let cond = self.expr_no_struct_lit()?;
                 self.expect(TokKind::LBrace, "to open the loop body")?;
                 let body = self.block_stmts();
-                Ok(Stmt::While { cond, body, span, label: None })
+                Ok(Stmt::While {
+                    cond,
+                    body,
+                    span,
+                    label: None,
+                })
             }
             TokKind::KwFor => {
                 // S19-amend (E0051): `for` is now a teaching error; use `loop x in ... { }`.
@@ -714,13 +761,25 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    ForKind::Range { start: first, end, step }
+                    ForKind::Range {
+                        start: first,
+                        end,
+                        step,
+                    }
                 } else {
                     ForKind::In { collection: first }
                 };
                 self.expect(TokKind::LBrace, "to open the loop body")?;
                 let body = self.block_stmts();
-                Ok(Stmt::For { var, var_span, var2, kind, body, span, label: None })
+                Ok(Stmt::For {
+                    var,
+                    var_span,
+                    var2,
+                    kind,
+                    body,
+                    span,
+                    label: None,
+                })
             }
             // D-IF1: `when` is retired — `if` is the one branching keyword. Emit
             // E0984, then parse the old body so `jet fmt` can migrate it to
@@ -831,7 +890,11 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 Err(Diagnostic::error(
                     "E0003",
-                    format!("`{}` blocks are written with `#{}`", Syntax::FOREIGN_UNSAFE, Syntax::KW_UNSAFE),
+                    format!(
+                        "`{}` blocks are written with `#{}`",
+                        Syntax::FOREIGN_UNSAFE,
+                        Syntax::KW_UNSAFE
+                    ),
                     "the expert low-level gate is an attribute marker, never a bare keyword"
                         .to_string(),
                     format!(
@@ -902,8 +965,10 @@ impl<'a> Parser<'a> {
                 Err(Diagnostic::error(
                     "E0990",
                     format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
-                    "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
-                    "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                    "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)"
+                        .to_string(),
+                    "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`"
+                        .to_string(),
                     Some(t.span),
                 ))
             }
@@ -912,8 +977,7 @@ impl<'a> Parser<'a> {
             // recognised only when immediately followed by `{`, so a variable or
             // function named `live` still works everywhere else.
             TokKind::Ident(n)
-                if n == Syntax::KW_LIVE
-                    && matches!(self.peek2().kind, TokKind::LBrace) =>
+                if n == Syntax::KW_LIVE && matches!(self.peek2().kind, TokKind::LBrace) =>
             {
                 let start = self.bump().span; // `live`
                 self.expect(TokKind::LBrace, "after `live`")?;
@@ -929,11 +993,13 @@ impl<'a> Parser<'a> {
             // (like `live`): recognised only when immediately followed by `{`, so
             // a name `assume_deterministic` still works everywhere else.
             TokKind::Ident(n)
-                if n == Syntax::KW_ASSUME_DET
-                    && matches!(self.peek2().kind, TokKind::LBrace) =>
+                if n == Syntax::KW_ASSUME_DET && matches!(self.peek2().kind, TokKind::LBrace) =>
             {
                 let start = self.bump().span; // `assume_deterministic`
-                self.expect(TokKind::LBrace, &format!("after `{}`", Syntax::KW_ASSUME_DET))?;
+                self.expect(
+                    TokKind::LBrace,
+                    &format!("after `{}`", Syntax::KW_ASSUME_DET),
+                )?;
                 let body = self.block_stmts();
                 let end = self.toks[self.pos - 1].span.end;
                 return Ok(Stmt::AssumeDet {
@@ -1010,7 +1076,10 @@ impl<'a> Parser<'a> {
             }
             other => Err(Diagnostic::error(
                 "E0003",
-                format!("expected a call, binding, assignment, or `return`, found {}", describe(other)),
+                format!(
+                    "expected a call, binding, assignment, or `return`, found {}",
+                    describe(other)
+                ),
                 "inside a function body, write a call, binding, assignment, or `return`"
                     .to_string(),
                 format!(
@@ -1058,7 +1127,8 @@ impl<'a> Parser<'a> {
                 "E0322",
                 "assignment `=` cannot appear in an `if` condition".to_string(),
                 "`=` binds a name; use `==` to compare two values".to_string(),
-                "replace `=` with `==` to compare, or move the assignment before the `if`".to_string(),
+                "replace `=` with `==` to compare, or move the assignment before the `if`"
+                    .to_string(),
                 Some(eq_span),
             ));
         }
@@ -1134,7 +1204,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 // `lo .. hi step n ->` (6 tokens: lo, .., hi, step, n, ->)  — E0319 porting hazard
-                if matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(s)) if s == Syntax::KW_RANGE_STEP) {
+                if matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(s)) if s == Syntax::KW_RANGE_STEP)
+                {
                     if let Some(tok_after_step_n) = self.toks.get(self.pos + 5) {
                         if matches!(tok_after_step_n.kind, TokKind::Arrow) {
                             return true;
@@ -1142,7 +1213,10 @@ impl<'a> Parser<'a> {
                     }
                 }
                 // `lo ..= hi ->` (5 tokens: lo, .., =, hi, ->)  — E0318 porting hazard
-                if matches!(self.toks.get(self.pos + 2).map(|t| &t.kind), Some(TokKind::Eq)) {
+                if matches!(
+                    self.toks.get(self.pos + 2).map(|t| &t.kind),
+                    Some(TokKind::Eq)
+                ) {
                     if let Some(tok_after_eq_hi) = self.toks.get(self.pos + 4) {
                         if matches!(tok_after_eq_hi.kind, TokKind::Arrow) {
                             return true;
@@ -1218,8 +1292,8 @@ impl<'a> Parser<'a> {
                             let lo = *lo_val;
                             let range_start = self.bump().span; // consume lo
                             self.bump(); // consume `..`
-                            // C25/E0318: `..=` is Rust's inclusive range — Jet's `..` is already inclusive.
-                            // Push the error, then recover by consuming hi and building a valid range arm.
+                                         // C25/E0318: `..=` is Rust's inclusive range — Jet's `..` is already inclusive.
+                                         // Push the error, then recover by consuming hi and building a valid range arm.
                             if matches!(self.peek().kind, TokKind::Eq) {
                                 self.bump(); // consume `=`
                                 if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
@@ -1235,7 +1309,11 @@ impl<'a> Parser<'a> {
                                     ));
                                     Expr::PatternTest {
                                         subject: Box::new(pat_subject.clone()),
-                                        pattern: Pattern::Range { lo, hi, span: pat_span },
+                                        pattern: Pattern::Range {
+                                            lo,
+                                            hi,
+                                            span: pat_span,
+                                        },
                                         span: pat_span,
                                     }
                                 } else {
@@ -1253,7 +1331,8 @@ impl<'a> Parser<'a> {
                                 let pat_span = Span::new(range_start.start, range_end.end);
                                 // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
                                 // Push the error and skip `step N` so the arm can still be parsed.
-                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP) {
+                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP)
+                                {
                                     self.diags.push(Diagnostic::error(
                                         "E0319",
                                         "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
@@ -1268,7 +1347,11 @@ impl<'a> Parser<'a> {
                                 }
                                 Expr::PatternTest {
                                     subject: Box::new(pat_subject.clone()),
-                                    pattern: Pattern::Range { lo, hi, span: pat_span },
+                                    pattern: Pattern::Range {
+                                        lo,
+                                        hi,
+                                        span: pat_span,
+                                    },
                                     span: pat_span,
                                 }
                             } else {
@@ -1276,7 +1359,8 @@ impl<'a> Parser<'a> {
                                     "E0003",
                                     "expected an integer after `..` in a range arm".to_string(),
                                     "range arms need both ends: `lo..hi -> body`".to_string(),
-                                    "write `0..59 -> { body }` for an inclusive range arm".to_string(),
+                                    "write `0..59 -> { body }` for an inclusive range arm"
+                                        .to_string(),
                                     Some(self.peek().span),
                                 ));
                             }
@@ -1334,7 +1418,9 @@ impl<'a> Parser<'a> {
         let raw = self.expr_no_struct_lit()?;
         // E0994: a leftover `subject ==` prefix on the arm head.
         match &raw {
-            Expr::PatternTest { subject: lhs, span, .. } if Self::same_subject(lhs, subject) => {
+            Expr::PatternTest {
+                subject: lhs, span, ..
+            } if Self::same_subject(lhs, subject) => {
                 self.diags.push(Self::redundant_subject_diag(*span));
                 return Ok(raw);
             }
@@ -1463,7 +1549,7 @@ impl<'a> Parser<'a> {
             ));
         }
         self.bump(); // `else`
-        // `else if …` nests as the else branch's value.
+                     // `else if …` nests as the else branch's value.
         let (else_body, else_value) = if matches!(self.peek().kind, TokKind::KwIf) {
             let e = self.parse_if_expr()?;
             (Vec::new(), e)
@@ -1641,8 +1727,7 @@ impl<'a> Parser<'a> {
                         && matches!(
                             self.toks.get(self.pos + 1).map(|t| &t.kind),
                             Some(TokKind::Ident(_))
-                        )
-                    {
+                        ) {
                         let dot_span = self.bump().span; // consume `.`
                         let (variant, variant_span) =
                             self.expect_ident("after `.` in a variant pattern")?;
@@ -1655,15 +1740,12 @@ impl<'a> Parser<'a> {
                                     {
                                         self.bump();
                                         crate::AST::PatSlot::Wildcard
-                                    } else if let TokKind::Int(lo_val) =
-                                        &self.peek().kind.clone()
-                                    {
+                                    } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
                                         let lo = *lo_val;
                                         self.bump();
                                         if matches!(self.peek().kind, TokKind::DotDot) {
                                             self.bump();
-                                            if let TokKind::Int(hi_val) =
-                                                &self.peek().kind.clone()
+                                            if let TokKind::Int(hi_val) = &self.peek().kind.clone()
                                             {
                                                 let hi = *hi_val;
                                                 self.bump();
@@ -1687,8 +1769,7 @@ impl<'a> Parser<'a> {
                                             ));
                                         }
                                     } else {
-                                        let (b, _) =
-                                            self.expect_ident("for a pattern binding")?;
+                                        let (b, _) = self.expect_ident("for a pattern binding")?;
                                         crate::AST::PatSlot::Bind(b)
                                     };
                                     bindings.push(slot);
@@ -1707,7 +1788,11 @@ impl<'a> Parser<'a> {
                         let pat_span = Span::new(dot_span.start, end);
                         Expr::PatternTest {
                             subject: Box::new(subject.clone()),
-                            pattern: Pattern::Variant { variant, bindings, span: pat_span },
+                            pattern: Pattern::Variant {
+                                variant,
+                                bindings,
+                                span: pat_span,
+                            },
                             span: pat_span,
                         }
                     } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
@@ -1718,8 +1803,8 @@ impl<'a> Parser<'a> {
                             let lo = *lo_val;
                             let range_start = self.bump().span; // consume lo
                             self.bump(); // consume `..`
-                            // C25/E0318: `..=` is Rust's inclusive range — Jet's `..` is already inclusive.
-                            // Push the error, then recover by consuming hi and building a valid range arm.
+                                         // C25/E0318: `..=` is Rust's inclusive range — Jet's `..` is already inclusive.
+                                         // Push the error, then recover by consuming hi and building a valid range arm.
                             if matches!(self.peek().kind, TokKind::Eq) {
                                 self.bump(); // consume `=`
                                 if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
@@ -1735,7 +1820,11 @@ impl<'a> Parser<'a> {
                                     ));
                                     Expr::PatternTest {
                                         subject: Box::new(subject.clone()),
-                                        pattern: Pattern::Range { lo, hi, span: pat_span },
+                                        pattern: Pattern::Range {
+                                            lo,
+                                            hi,
+                                            span: pat_span,
+                                        },
                                         span: pat_span,
                                     }
                                 } else {
@@ -1753,7 +1842,8 @@ impl<'a> Parser<'a> {
                                 let pat_span = Span::new(range_start.start, range_end.end);
                                 // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
                                 // Push the error and skip `step N` so the arm can still be parsed.
-                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP) {
+                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP)
+                                {
                                     self.diags.push(Diagnostic::error(
                                         "E0319",
                                         "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
@@ -1769,7 +1859,11 @@ impl<'a> Parser<'a> {
                                 // Wrap as PatternTest so sema/codegen treat it uniformly.
                                 Expr::PatternTest {
                                     subject: Box::new(subject.clone()),
-                                    pattern: Pattern::Range { lo, hi, span: pat_span },
+                                    pattern: Pattern::Range {
+                                        lo,
+                                        hi,
+                                        span: pat_span,
+                                    },
                                     span: pat_span,
                                 }
                             } else {
@@ -1777,7 +1871,8 @@ impl<'a> Parser<'a> {
                                     "E0003",
                                     "expected an integer after `..` in a range arm".to_string(),
                                     "range arms need both ends: `lo..hi -> body`".to_string(),
-                                    "write `0..59 -> { body }` for an inclusive range arm".to_string(),
+                                    "write `0..59 -> { body }` for an inclusive range arm"
+                                        .to_string(),
                                     Some(self.peek().span),
                                 ));
                             }
@@ -2003,7 +2098,10 @@ impl<'a> Parser<'a> {
         match &self.peek().kind {
             // `name @= e` / `name := e` / `name :: e` (retired, for E0991)
             TokKind::Ident(_) | TokKind::KwSelf
-                if matches!(self.peek2().kind, TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq) =>
+                if matches!(
+                    self.peek2().kind,
+                    TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq
+                ) =>
             {
                 true
             }
@@ -2015,9 +2113,7 @@ impl<'a> Parser<'a> {
             // `name : type :: e` / `name : type := e` / `name: Type = e` — typed binding.
             // A bare `:` only ever opens a type annotation here, so any `name :` at
             // statement start is a binding (a map index uses `[`, not `:`).
-            TokKind::Ident(_) | TokKind::KwSelf
-                if matches!(self.peek2().kind, TokKind::Colon) =>
-            {
+            TokKind::Ident(_) | TokKind::KwSelf if matches!(self.peek2().kind, TokKind::Colon) => {
                 true
             }
             // Destructuring targets: scan ahead to a `::`/`:=` after the matching
@@ -2252,8 +2348,7 @@ impl<'a> Parser<'a> {
                 let mut elems = Vec::new();
                 if !matches!(self.peek().kind, TokKind::RParen) {
                     loop {
-                        let (name, span) =
-                            self.expect_ident("for a tuple-pattern binding")?;
+                        let (name, span) = self.expect_ident("for a tuple-pattern binding")?;
                         elems.push(BindName { name, span });
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
@@ -2369,5 +2464,4 @@ impl<'a> Parser<'a> {
     }
 
     // --- expressions -----------------------------------------------------
-
 }

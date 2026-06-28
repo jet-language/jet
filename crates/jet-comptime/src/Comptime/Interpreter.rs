@@ -5,8 +5,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use crate::AST::{BinOp, BindPattern, EnumLitArg, Expr, Func, OrFallback as FallbackKind, Stmt, StrPart, Type, UnOp};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{
+    BinOp, BindPattern, EnumLitArg, Expr, Func, OrFallback as FallbackKind, Stmt, StrPart, Type,
+    UnOp,
+};
 
 use super::Builtins::{as_bool, as_int, eval_binop};
 use super::Diagnostics::{
@@ -199,10 +202,7 @@ impl<'a> Interp<'a> {
                         .find(|(n, _)| n == &f.name)
                         .map(|(_, v)| v.clone())
                         .ok_or_else(|| {
-                            comptime_panic(
-                                &format!("this value has no field `{}`", f.name),
-                                f.span,
-                            )
+                            comptime_panic(&format!("this value has no field `{}`", f.name), f.span)
                         })?;
                     scope.insert(f.name.clone(), v);
                 }
@@ -286,7 +286,9 @@ impl<'a> Interp<'a> {
                 Ok(Flow::Return(v))
             }
             Stmt::If(ifs) => self.exec_if(ifs, scope),
-            Stmt::While { cond, body, span, .. } => {
+            Stmt::While {
+                cond, body, span, ..
+            } => {
                 loop {
                     self.burn(*span)?;
                     let c = self.eval(cond, scope)?;
@@ -808,7 +810,11 @@ impl<'a> Interp<'a> {
                     }
                 }
             }
-            Expr::FanOut { callee, items, span } => self.eval_fan_out(callee, items, *span, scope),
+            Expr::FanOut {
+                callee,
+                items,
+                span,
+            } => self.eval_fan_out(callee, items, *span, scope),
             // D-CTMARKER1=C: `$name` outside an emit() string — look up in scope like Ident.
             Expr::ComptimeSplice { name, span } => scope
                 .get(name)
@@ -836,17 +842,23 @@ impl<'a> Interp<'a> {
                         Err(err_propagate_sentinel(&e.jet_show(), *span))
                     }
                     CtValue::Some(inner) => Ok(*inner),
-                    CtValue::None(_) => {
-                        Err(err_propagate_sentinel("null propagated via ?", *span))
-                    }
+                    CtValue::None(_) => Err(err_propagate_sentinel("null propagated via ?", *span)),
                     other => Err(unsupported(
-                        &format!("using `?` on a value that isn't a result or option (got {})", other.jet_show()),
+                        &format!(
+                            "using `?` on a value that isn't a result or option (got {})",
+                            other.jet_show()
+                        ),
                         *span,
                     )),
                 }
             }
             // c97/D-STRPARSE1: `value ?? fallback` — use fallback on failure/absence.
-            Expr::OrFallback { value, fallback, is_option, span: _ } => {
+            Expr::OrFallback {
+                value,
+                fallback,
+                is_option,
+                span: _,
+            } => {
                 let v = self.eval(value, scope)?;
                 // Determine if the value is "absent" (needs fallback).
                 let is_absent = if *is_option {

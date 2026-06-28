@@ -15,9 +15,7 @@ pub enum FetchError {
 impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FetchError::Io(s) | FetchError::Http(s) | FetchError::Scheme(s) => {
-                f.write_str(s)
-            }
+            FetchError::Io(s) | FetchError::Http(s) | FetchError::Scheme(s) => f.write_str(s),
         }
     }
 }

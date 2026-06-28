@@ -2,8 +2,8 @@
 //! E0956 unsupported construct). E0952/E2202 fuel diagnostics are inline in
 //! `Interp::burn`; E0955 embed-file errors are inline in `eval_embed_file`.
 
-use crate::AST::Expr;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::Expr;
 
 pub(super) fn comptime_panic(msg: &str, span: Span) -> Diagnostic {
     Diagnostic::error(

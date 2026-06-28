@@ -285,9 +285,14 @@ fn main() {
         None,
     );
     assert_eq!(code_a, 0, "probe (a) failed: {stderr_a}");
-    assert_eq!(stdout_a, "8081\n", "probe (a): decoded value should be plain number + 1");
+    assert_eq!(
+        stdout_a, "8081\n",
+        "probe (a): decoded value should be plain number + 1"
+    );
     assert!(
-        stderr_a.contains("json coerce") && stderr_a.contains("port") && stderr_a.contains("number"),
+        stderr_a.contains("json coerce")
+            && stderr_a.contains("port")
+            && stderr_a.contains("number"),
         "probe (a): coercion log line missing or malformed; got: {stderr_a}"
     );
 
@@ -338,10 +343,17 @@ fn main() {
         None,
     );
     assert_eq!(code_c, 0, "probe (c) failed: {stderr_c}");
-    assert_eq!(stdout_c, "8080\ntrue\n", "probe (c): both coerced values should come back plain");
-    let coerce_lines: Vec<&str> = stderr_c.lines().filter(|l| l.contains("json coerce")).collect();
     assert_eq!(
-        coerce_lines.len(), 2,
+        stdout_c, "8080\ntrue\n",
+        "probe (c): both coerced values should come back plain"
+    );
+    let coerce_lines: Vec<&str> = stderr_c
+        .lines()
+        .filter(|l| l.contains("json coerce"))
+        .collect();
+    assert_eq!(
+        coerce_lines.len(),
+        2,
         "probe (c): expected 2 coercion lines, got {}; stderr: {stderr_c}",
         coerce_lines.len()
     );
@@ -413,7 +425,10 @@ fn main() {
         None,
     );
     assert_eq!(code_b, 0, "probe (b) failed: {stderr_b}");
-    assert_eq!(stdout_b, "ERR: invalid escape in string\n", "probe (b): bad escape rejected");
+    assert_eq!(
+        stdout_b, "ERR: invalid escape in string\n",
+        "probe (b): bad escape rejected"
+    );
 
     // Probe (c): a raw control character (literal tab) inside a string is rejected.
     let (code_c, stdout_c, stderr_c) = build_and_run(
@@ -432,7 +447,10 @@ fn main() {
         None,
     );
     assert_eq!(code_c, 0, "probe (c) failed: {stderr_c}");
-    assert_eq!(stdout_c, "ERR: control character in string\n", "probe (c): raw control char rejected");
+    assert_eq!(
+        stdout_c, "ERR: control character in string\n",
+        "probe (c): raw control char rejected"
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -524,15 +542,19 @@ fn core_module_items_covers_known_core_modules() {
     // D-CORENS1: ring packages have two spellings: `core.*` (user-facing, in KNOWN_CORE_MODULES)
     // and `jet.*` (internal dispatch key). The arms cover both via `|` alternation. Build an
     // expanded `known` that accepts either spelling for ring modules so the check is stable.
-    let ring_names = ["log", "time", "crypto", "http", "regex", "reactive", "archive", "db"];
+    let ring_names = [
+        "log", "time", "crypto", "http", "regex", "reactive", "archive", "db",
+    ];
     let known_raw = jet::Loader::KNOWN_CORE_MODULES;
-    let mut known: std::collections::BTreeSet<String> = known_raw.iter().map(|s| s.to_string()).collect();
+    let mut known: std::collections::BTreeSet<String> =
+        known_raw.iter().map(|s| s.to_string()).collect();
     for ring in &ring_names {
         known.insert(format!("core.{ring}"));
         known.insert(format!("jet.{ring}"));
     }
 
-    let missing_from_items: Vec<&String> = known.iter().filter(|m| !items_keys.contains(*m)).collect();
+    let missing_from_items: Vec<&String> =
+        known.iter().filter(|m| !items_keys.contains(*m)).collect();
     let extra_in_items: Vec<&String> = items_keys.iter().filter(|m| !known.contains(*m)).collect();
 
     assert!(

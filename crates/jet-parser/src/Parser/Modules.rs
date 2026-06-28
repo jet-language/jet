@@ -6,8 +6,8 @@ impl<'a> Parser<'a> {
     /// list of typed namespace contributions (`env.dev: Env { … }`).
     pub(super) fn module_decl(&mut self) -> Result<ModuleDecl, Diagnostic> {
         let start = self.bump().span; // `module`
-        // S84: module names may be kebab-case (a module is the package the
-        // payload manifest discovers by name).
+                                      // S84: module names may be kebab-case (a module is the package the
+                                      // payload manifest discovers by name).
         let (name, name_span) = self.expect_dashed_name("for the module name")?;
         let disabled = name.starts_with('_');
         self.expect(TokKind::LBrace, "to open the module body")?;
@@ -21,7 +21,10 @@ impl<'a> Parser<'a> {
         // distinguished by their reserved name followed by `:`; contributions
         // begin with a namespace name followed by `.`.
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             match &self.peek().kind {
                 TokKind::Ident(n)
                     if n == Syntax::MODULE_FIELD_SOURCES
@@ -70,8 +73,8 @@ impl<'a> Parser<'a> {
     pub(super) fn is_code_module_at(&self, offset: usize) -> bool {
         // After `module` is at pos+offset, name is at pos+offset+1.
         let kw_pos = self.pos + offset - 1; // position of `module` token
-        // If the token after the name is `-`, the name is dashed (my-host) —
-        // that's always a JetOS module; code module names are plain identifiers.
+                                            // If the token after the name is `-`, the name is dashed (my-host) —
+                                            // that's always a JetOS module; code module names are plain identifiers.
         let after_name = kw_pos + 2;
         if matches!(
             self.toks.get(after_name).map(|t| &t.kind),
@@ -148,7 +151,10 @@ impl<'a> Parser<'a> {
                 self.bump(); // consume `{`
                 let mut items = Vec::new();
                 while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+                    if matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                        continue;
+                    }
                     match self.top_level_item_in_code_module() {
                         Ok(item) => items.push(item),
                         Err(d) => {
@@ -195,9 +201,7 @@ impl<'a> Parser<'a> {
                 self.func().map(Item::Func)
             }
             // D-ATTR2 / D-SERDE: `#[Codable] struct …` inside a module body.
-            TokKind::Hash
-                if matches!(self.peek2().kind, TokKind::LBracket) =>
-            {
+            TokKind::Hash if matches!(self.peek2().kind, TokKind::LBracket) => {
                 self.type_def_with_markers()
             }
             TokKind::KwPub => match self.peek2().kind {
@@ -261,14 +265,20 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the sources block")?;
         let mut out = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             let (name, name_span) = self.expect_ident("for a source name")?;
             self.expect(TokKind::Colon, "after a source name")?;
             // Consume the `provider@target` ref tokens up to the next `,`/`}`;
             // the recovered span slices back to the exact written text.
             let ref_start = self.peek().span;
             let mut ref_end = ref_start.end;
-            if matches!(self.peek().kind, TokKind::Comma | TokKind::RBrace | TokKind::Eof) {
+            if matches!(
+                self.peek().kind,
+                TokKind::Comma | TokKind::RBrace | TokKind::Eof
+            ) {
                 return Err(Diagnostic::error(
                     "E0003",
                     "a source needs a `provider@target` ref".to_string(),
@@ -388,7 +398,10 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open a `System` record")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             fields.push(self.system_field()?);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -445,9 +458,7 @@ impl<'a> Parser<'a> {
                 let (os, arch, span) = self.platform_value()?;
                 crate::AST::SystemFieldValue::Platform { os, arch, span }
             }
-            Syntax::SYSTEM_FIELD_PACKAGES => {
-                crate::AST::SystemFieldValue::Packages(self.expr()?)
-            }
+            Syntax::SYSTEM_FIELD_PACKAGES => crate::AST::SystemFieldValue::Packages(self.expr()?),
             Syntax::SYSTEM_FIELD_SERVICES => {
                 crate::AST::SystemFieldValue::Services(self.services_map()?)
             }
@@ -480,14 +491,20 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the `services` map")?;
         let mut out = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             let (name, name_span) = self.expect_ident("for a service name")?;
             self.expect(TokKind::Colon, "after a service name")?;
             let explicit_type = self.opt_record_type(Syntax::TYPE_SERVICE)?;
             self.expect(TokKind::LBrace, "to open a `Service` record")?;
             let mut fields = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                    continue;
+                }
                 let (field, field_span) = self.expect_ident("for a `Service` field name")?;
                 self.expect(TokKind::Colon, "after a `Service` field name")?;
                 let value = self.expr()?;
@@ -520,7 +537,8 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBracket, "to open the `options` list")?;
         let mut out = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
-            let (mut key, key_start) = self.expect_ident("for an option key, e.g. `net.hostName`")?;
+            let (mut key, key_start) =
+                self.expect_ident("for an option key, e.g. `net.hostName`")?;
             let mut key_end = key_start.end;
             while matches!(self.peek().kind, TokKind::Dot) {
                 self.bump();
@@ -560,7 +578,10 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open an `Image` record")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             fields.push(self.image_field()?);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -614,5 +635,4 @@ impl<'a> Parser<'a> {
             span: Span::new(name_span.start, end),
         })
     }
-
 }

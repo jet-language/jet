@@ -13,12 +13,15 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
     match &tir.kind {
         TFuncKind::TopLevel => emit_tir_toplevel(tir, cx, out),
         TFuncKind::Method { self_conv } => emit_tir_method(tir, *self_conv, cx, out),
-        TFuncKind::TraitMethod { is_unsafe, self_conv } => {
-            emit_tir_trait_method(tir, *is_unsafe, *self_conv, cx, out)
-        }
-        TFuncKind::Delegation { sig, fwd, has_return } => {
-            emit_tir_delegation(tir, sig, fwd, *has_return, cx, out)
-        }
+        TFuncKind::TraitMethod {
+            is_unsafe,
+            self_conv,
+        } => emit_tir_trait_method(tir, *is_unsafe, *self_conv, cx, out),
+        TFuncKind::Delegation {
+            sig,
+            fwd,
+            has_return,
+        } => emit_tir_delegation(tir, sig, fwd, *has_return, cx, out),
     }
 }
 
@@ -32,9 +35,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     let params = tir
         .params
         .iter()
-        .map(|(rust_name, ty, conv)| {
-            format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty))
-        })
+        .map(|(rust_name, ty, conv)| format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)))
         .collect::<Vec<_>>()
         .join(", ");
     let vis = if tir.is_main { "" } else { "pub " };
@@ -65,7 +66,12 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
 /// `    pub fn user_<name>(<self>, <params>) -> <ret> {\n … \n    }\n`. The `self`
 /// receiver form comes from `self_conv` (`Read`→`&self`, `Mutate`→`&mut self`,
 /// `Move`→`self`); a static method (`self_conv == None`) emits no receiver.
-pub(crate) fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, out: &mut String) {
+pub(crate) fn emit_tir_method(
+    tir: &TFunc,
+    self_conv: Option<AccessConvention>,
+    cx: &Cx,
+    out: &mut String,
+) {
     let indent = 1;
     let pad = "    ".repeat(indent);
     let ret_clause = match &tir.ret {
@@ -114,7 +120,13 @@ pub(crate) fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, 
 /// Byte-identical to `emit_trait_method` (Source/Codegen/Items.rs): a BARE method name
 /// (no `user_` mangle — the trait owns it), NO `pub`, an always-`&self` receiver, and
 /// an `unsafe ` prefix iff the source was an `@unsafe fn`.
-pub(crate) fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, self_conv: AccessConvention, cx: &Cx, out: &mut String) {
+pub(crate) fn emit_tir_trait_method(
+    tir: &TFunc,
+    is_unsafe: bool,
+    self_conv: AccessConvention,
+    cx: &Cx,
+    out: &mut String,
+) {
     let indent = 1;
     let pad = "    ".repeat(indent);
     let ret_clause = match &tir.ret {
@@ -166,7 +178,14 @@ pub(crate) fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, self_conv: Acc
 /// `emit_delegation_method` (Source/Codegen/Items.rs): the pre-rendered signature line,
 /// then the single forwarding call (`(self).<field>.<method>(args)`) at 8-space indent —
 /// with a trailing `;` for a unit method, none for a returning one — then `    }`.
-pub(crate) fn emit_tir_delegation(tir: &TFunc, sig: &str, fwd: &str, has_return: bool, cx: &Cx, out: &mut String) {
+pub(crate) fn emit_tir_delegation(
+    tir: &TFunc,
+    sig: &str,
+    fwd: &str,
+    has_return: bool,
+    cx: &Cx,
+    out: &mut String,
+) {
     // E2-M12 D-OBS1: track the current function name (parity with the AST path, though a
     // delegation body has no panic site of its own).
     *cx.current_fn.borrow_mut() = tir.name.clone();
@@ -203,12 +222,21 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 emit_tir_expr(init, cx),
             ));
         }
-        TStmt::Assign { place, op, value, clone_value } => {
+        TStmt::Assign {
+            place,
+            op,
+            value,
+            clone_value,
+        } => {
             let v = emit_tir_expr(value, cx);
             // c150: append `.clone()` when the value is a borrowed non-scalar (computed
             // at lowering). `({v}).clone()` matches how other clone sites in the AST
             // path parenthesise the receiver before the method call.
-            let v = if *clone_value { format!("({}).clone()", v) } else { v };
+            let v = if *clone_value {
+                format!("({}).clone()", v)
+            } else {
+                v
+            };
             match op {
                 Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.spell(), v)),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
@@ -217,8 +245,18 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         // c109 Phase 23: tuple destructure. Mirrors `emit_stmt`'s `BindPattern::Tuple`
         // arm byte-for-byte: borrow the init into a temp, then bind each element from a
         // cloned canonical field of it.
-        TStmt::TupleDestructure { tmp, init, kw, binds } => {
-            out.push_str(&format!("{}let {} = &({});\n", pad, tmp, emit_tir_expr(init, cx)));
+        TStmt::TupleDestructure {
+            tmp,
+            init,
+            kw,
+            binds,
+        } => {
+            out.push_str(&format!(
+                "{}let {} = &({});\n",
+                pad,
+                tmp,
+                emit_tir_expr(init, cx)
+            ));
             for (elem_rust, field_rust) in binds {
                 out.push_str(&format!(
                     "{}{} {} = ({}).{}.clone();\n",
@@ -229,8 +267,18 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         // c109: struct destructure. Mirrors `emit_stmt`'s `BindPattern::Struct` arm
         // byte-for-byte: borrow the init into a temp, then bind each field from a
         // cloned field of it (the field name is both the local and the `.field` read).
-        TStmt::StructDestructure { tmp, init, kw, fields } => {
-            out.push_str(&format!("{}let {} = &({});\n", pad, tmp, emit_tir_expr(init, cx)));
+        TStmt::StructDestructure {
+            tmp,
+            init,
+            kw,
+            fields,
+        } => {
+            out.push_str(&format!(
+                "{}let {} = &({});\n",
+                pad,
+                tmp,
+                emit_tir_expr(init, cx)
+            ));
             for field_rust in fields {
                 out.push_str(&format!(
                     "{}{} {} = ({}).{}.clone();\n",
@@ -243,8 +291,21 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         // the runtime bounds-checked `jet_unpack_vec(tmp, want, i, file, line)` move.
         // `{file:?}` reproduces the AST's debug-formatted path; `kw`/`want`/`line` were
         // all resolved at lowering.
-        TStmt::ListDestructure { tmp, init, kw, want, file, line, elems } => {
-            out.push_str(&format!("{}let {} = &({});\n", pad, tmp, emit_tir_expr(init, cx)));
+        TStmt::ListDestructure {
+            tmp,
+            init,
+            kw,
+            want,
+            file,
+            line,
+            elems,
+        } => {
+            out.push_str(&format!(
+                "{}let {} = &({});\n",
+                pad,
+                tmp,
+                emit_tir_expr(init, cx)
+            ));
             for (i, elem_rust) in elems.iter().enumerate() {
                 out.push_str(&format!(
                     "{}{} {} = jet_unpack_vec({}, {}, {}, {:?}, {});\n",
@@ -514,7 +575,10 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     ));
                 }
                 Some(TForInMethod::LinesStdin) => {
-                    out.push_str(&format!("{}{{ let mut _jet_stdin_h = {};\n", pad, collection_str));
+                    out.push_str(&format!(
+                        "{}{{ let mut _jet_stdin_h = {};\n",
+                        pad, collection_str
+                    ));
                     needs_extra_close = true;
                     out.push_str(&format!(
                         "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut _jet_stdin_h.inner) {{\n",
@@ -595,7 +659,10 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             let inner = indent + 1;
             let inner_pad = "    ".repeat(inner);
             out.push_str(&format!("{}{{\n", pad));
-            out.push_str(&format!("{}{}jet_term_enter();\n", inner_pad, cx.root_prefix));
+            out.push_str(&format!(
+                "{}{}jet_term_enter();\n",
+                inner_pad, cx.root_prefix
+            ));
             out.push_str(&format!(
                 "{}let _live_guard = {}jet_scope_guard(|| {{ {}jet_term_leave(); }});\n",
                 inner_pad, cx.root_prefix, cx.root_prefix
@@ -612,7 +679,11 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         // transaction guard, emit the body, then `commit()` on the clean fall-through
         // path. An early `?`/`return` skips `commit()`, so registered `on_commit` hooks
         // drop un-run (D-TXN3). Codegen is dumb (I3): no effect/rollback machinery here.
-        TStmt::Transact { handle, snapshots, body } => {
+        TStmt::Transact {
+            handle,
+            snapshots,
+            body,
+        } => {
             let inner = indent + 1;
             let inner_pad = "    ".repeat(inner);
             out.push_str(&format!("{}{{\n", pad));
@@ -672,10 +743,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                         inner_pad, i, val
                     ));
                 } else {
-                    out.push_str(&format!(
-                        "{}let _ctx_logger_{} = {};\n",
-                        inner_pad, i, val
-                    ));
+                    out.push_str(&format!("{}let _ctx_logger_{} = {};\n", inner_pad, i, val));
                 }
             }
             emit_tir_stmts(body, cx, out, inner);
@@ -768,7 +836,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 24: a comptime const inlined verbatim (the pre-rendered value).
         TExprKind::ConstInline(val) => val.clone(),
         TExprKind::Print(arg) => {
-            format!("println!(\"{{}}\", ({}).jet_show())", emit_tir_expr(arg, cx))
+            format!(
+                "println!(\"{{}}\", ({}).jet_show())",
+                emit_tir_expr(arg, cx)
+            )
         }
         // D-LIN1-DROP: `drop(x)` → Rust's safe `drop(x)`; the value moves in and
         // its `Drop` runs. No `unsafe` — the audit is sema-side (the `#Unsafe`
@@ -798,7 +869,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // D-SIMD2 / D-LINALG1: a math constructor / static method → the prelude free
         // function `{root}jet_math_<T>_<func>(args)`. Args are plain values (floats or
         // a `[T#N]` array) — no borrow/clone decisions.
-        TExprKind::MathBuiltin { type_name, func, args } => {
+        TExprKind::MathBuiltin {
+            type_name,
+            func,
+            args,
+        } => {
             let parts: Vec<String> = args.iter().map(|a| emit_tir_expr(a, cx)).collect();
             format!(
                 "{}jet_math_{}_{}({})",
@@ -840,7 +915,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             args,
         } => {
             let arg_str = emit_tir_call_args(args, cx);
-            format!("(({}).{})({})", emit_tir_expr(recv, cx), field_rust, arg_str)
+            format!(
+                "(({}).{})({})",
+                emit_tir_expr(recv, cx),
+                field_rust,
+                arg_str
+            )
         }
         // c109 Phase 7: a static method call. Mirrors the AST type-name dispatch:
         // `user_<Type>::user_<method>(args)`. All facts resolved at lowering.
@@ -858,7 +938,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // emitted PLAINLY (no clone/borrow wrappers — `arg(i)` is a raw `emit_expr`).
         TExprKind::BuiltinMethod { recv, op, args } => {
             let recv = emit_tir_expr(recv, cx);
-            let a = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+            let a = |i: usize| {
+                args.get(i)
+                    .map(|e| emit_tir_expr(e, cx))
+                    .unwrap_or_default()
+            };
             match op {
                 TBuiltinOp::LenString => format!("jet_char_len(&({}))", recv),
                 TBuiltinOp::LenList => format!("({}).len() as i64", recv),
@@ -874,7 +958,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::RemoveMap => format!("({}).remove(&({}).clone())", recv, a(0)),
                 TBuiltinOp::RemoveList { line } => format!(
                     "jet_list_remove(&mut ({}), {}, {:?}, {})",
-                    recv, a(0), cx.file, line
+                    recv,
+                    a(0),
+                    cx.file,
+                    line
                 ),
                 TBuiltinOp::GetMap => format!("({}).get(&({}).clone()).cloned()", recv, a(0)),
                 TBuiltinOp::GetList => format!("({}).get({} as usize).cloned()", recv, a(0)),
@@ -883,13 +970,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Contains => format!("({}).contains(&{})", recv, a(0)),
                 TBuiltinOp::IndexOf => format!(
                     "({}).iter().position(|x| *x == {}).map(|i| i as i64)",
-                    recv, a(0)
+                    recv,
+                    a(0)
                 ),
                 TBuiltinOp::Reverse => format!("({}).reverse()", recv),
                 TBuiltinOp::Sort => format!("({}).sort()", recv),
                 TBuiltinOp::JoinSep => format!(
                     "({}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
-                    recv, a(0)
+                    recv,
+                    a(0)
                 ),
                 TBuiltinOp::Clear => format!("({}).clear()", recv),
                 TBuiltinOp::Chars => format!("({}).chars().collect::<Vec<char>>()", recv),
@@ -904,7 +993,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // c97/D-STRPARSE1: `to_int()` on a String — fallible parse mirroring
                 // `Int.parse`. The `Err` (a `ParseError`) lowers to a plain message string.
                 TBuiltinOp::ToIntString => {
-                    format!("({}).trim().parse::<i64>().map_err(|e| e.to_string())", recv)
+                    format!(
+                        "({}).trim().parse::<i64>().map_err(|e| e.to_string())",
+                        recv
+                    )
                 }
                 TBuiltinOp::StartsWith => format!("({}).starts_with(&{})", recv, a(0)),
                 TBuiltinOp::EndsWith => format!("({}).ends_with(&{})", recv, a(0)),
@@ -914,7 +1006,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Repeat => format!("({}).repeat({} as usize)", recv, a(0)),
                 TBuiltinOp::Slice { line } => format!(
                     "jet_string_slice(&({}), {}, {}, {:?}, {})",
-                    recv, a(0), a(1), cx.file, line
+                    recv,
+                    a(0),
+                    a(1),
+                    cx.file,
+                    line
                 ),
                 TBuiltinOp::Keys => {
                     format!("({}).keys().cloned().collect::<Vec<_>>()", recv)
@@ -930,7 +1026,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 // D-COLLBREADTH1=A: Set<T> operations.
                 TBuiltinOp::SetFrom => {
-                    format!("({}).into_iter().collect::<std::collections::HashSet<_>>()", recv)
+                    format!(
+                        "({}).into_iter().collect::<std::collections::HashSet<_>>()",
+                        recv
+                    )
                 }
                 TBuiltinOp::SetInsert => format!("({}).insert({})", recv, a(0)),
                 TBuiltinOp::SetRemove => format!("{{({}).remove(&{});}}", recv, a(0)),
@@ -939,7 +1038,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::SetUnion => format!(
                     "({}).union(&({})).cloned().collect::<std::collections::HashSet<_>>()",
-                    recv, a(0)
+                    recv,
+                    a(0)
                 ),
                 // D-COLLBREADTH1=A: Deque<T> operations.
                 TBuiltinOp::DequePushFront => format!("({}).push_front({})", recv, a(0)),
@@ -966,7 +1066,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "({}).clone().into_iter().zip(({}).clone().into_iter())\
                      .map(|(x, y)| {} {{ user_a: x, user_b: y }})\
                      .collect::<Vec<_>>()",
-                    recv, a(0), tuple_struct
+                    recv,
+                    a(0),
+                    tuple_struct
                 ),
             }
         }
@@ -981,7 +1083,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TNumericOp::BitCount(m) => format!("(({}).{}() as i64)", recv, m),
                 TNumericOp::ToShow => format!("({}).jet_show()", recv),
                 TNumericOp::CastAs { dst_rust } => format!("(({}) as {})", recv, dst_rust),
-                TNumericOp::TryFrom { dst_rust, dst_spelling } => format!(
+                TNumericOp::TryFrom {
+                    dst_rust,
+                    dst_spelling,
+                } => format!(
                     "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
                      \"value doesn't fit in {dst_spelling}\".to_string())"
                 ),
@@ -989,7 +1094,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         // c109 Phase 28: an overflow opt-out builtin. `prefix`/`op` were resolved at
         // lowering; reproduce `emit_call`'s `(ls).{name}_{suffix}(rs)` byte-for-byte.
-        TExprKind::OverflowOpt { prefix, op, lhs, rhs } => {
+        TExprKind::OverflowOpt {
+            prefix,
+            op,
+            lhs,
+            rhs,
+        } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
             format!("({}).{}_{}({})", ls, prefix, op, rs)
@@ -1000,9 +1110,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // (read here, like Phase 9's `cx.file`). Args were lowered PLAINLY — the
         // per-arm `&(…)`/`&mut (…)`/move wrappers are baked into each arm, exactly
         // as `emit_core_call` does (it ignores `CallArg.flags`).
-        TExprKind::CoreCall { module, method, args } => {
-            emit_tir_core_call(module, method, args, &e.ty, cx)
-        }
+        TExprKind::CoreCall {
+            module,
+            method,
+            args,
+        } => emit_tir_core_call(module, method, args, &e.ty, cx),
         TExprKind::Binary {
             op,
             overflow,
@@ -1019,8 +1131,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 match op {
                     // D-NUMOPS1: shift-count traps. The count is widened to `i128`
                     // so a count of any integer width reaches `jet_shl`/`jet_shr`.
-                    BinOp::Shl => format!("({}).jet_shl(({}) as i128, {:?}, {})", ls, rs, file, line),
-                    BinOp::Shr => format!("({}).jet_shr(({}) as i128, {:?}, {})", ls, rs, file, line),
+                    BinOp::Shl => {
+                        format!("({}).jet_shl(({}) as i128, {:?}, {})", ls, rs, file, line)
+                    }
+                    BinOp::Shr => {
+                        format!("({}).jet_shr(({}) as i128, {:?}, {})", ls, rs, file, line)
+                    }
                     _ => {
                         let method = match op {
                             BinOp::Add => "jet_add",
@@ -1045,7 +1161,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         // c109 Phase 3: `user_S { f: v, … }`. The Rust head and mangled field
         // names were resolved at lowering; values format like any other node.
-        TExprKind::StructLit { rust_type, fields, extra, as_trait } => {
+        TExprKind::StructLit {
+            rust_type,
+            fields,
+            extra,
+            as_trait,
+        } => {
             let mut parts = fields
                 .iter()
                 .map(|(field_rust, v, boxed)| {
@@ -1053,7 +1174,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     // c109: a boxed (self-referential) field is wrapped `Box::new(…)`,
                     // exactly as `emit_struct_lit`. The `boxed` flag is total (resolved
                     // at lowering from `cx.boxed_edges`).
-                    let value = if *boxed { format!("Box::new({})", value) } else { value };
+                    let value = if *boxed {
+                        format!("Box::new({})", value)
+                    } else {
+                        value
+                    };
                     format!("{}: {}", field_rust, value)
                 })
                 .collect::<Vec<_>>();
@@ -1073,7 +1198,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 3: `(recv).field`. Mirrors the AST `Expr::Field` emit form
         // exactly (no deref, no clone — owning reads were rewritten to a `.clone()`
         // MethodCall in sema and excluded from the subset).
-        TExprKind::Field { recv, field_rust, boxed } => {
+        TExprKind::Field {
+            recv,
+            field_rust,
+            boxed,
+        } => {
             let read = format!("({}).{}", emit_tir_expr(recv, cx), field_rust);
             if *boxed {
                 format!("(*{})", read)
@@ -1085,7 +1214,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // byte-for-byte `emit_expr`'s `PtrFromAddr` arm. The cast is safe Rust (no
         // `unsafe`); `elem_rust` was resolved at lowering.
         TExprKind::PtrFromAddr { elem_rust, addr } => {
-            format!("(({}) as usize as *mut {})", emit_tir_expr(addr, cx), elem_rust)
+            format!(
+                "(({}) as usize as *mut {})",
+                emit_tir_expr(addr, cx),
+                elem_rust
+            )
         }
         // D-CAP9: postfix `p.*` deref → Rust `(*(p))`. The `unsafe` is supplied by
         // the enclosing `#Unsafe` region (sema-gated); this node adds no `unsafe`.
@@ -1144,13 +1277,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         s
                     };
                     if variant == "Object" {
-                        format!("{}::{}(({}).into_iter().collect())", prefix, variant, arg_str)
+                        format!(
+                            "{}::{}(({}).into_iter().collect())",
+                            prefix, variant, arg_str
+                        )
                     } else {
                         format!("{}::{}({})", prefix, variant, arg_str)
                     }
                 }
             }
-        },
+        }
         TExprKind::IfExpr {
             cond,
             then_body,
@@ -1193,7 +1329,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             format!("({}).gather_at({}, {:?}, {})", b, i, cx.file, line)
         }
         // D-SOA1: `xs[i].field` on a columnar list → direct column read.
-        TExprKind::ColumnarColumnRead { base, index, column_rust, line } => {
+        TExprKind::ColumnarColumnRead {
+            base,
+            index,
+            column_rust,
+            line,
+        } => {
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(
@@ -1204,7 +1345,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 23: a named-tuple literal → `JetTup_<hash> { user_<f>: <v>, … }`.
         // Mirrors `emit_expr`'s `TupleLit` arm byte-for-byte (fields canonical-ordered,
         // resolved at lowering).
-        TExprKind::TupleLit { struct_name, fields } => {
+        TExprKind::TupleLit {
+            struct_name,
+            fields,
+        } => {
             let parts = fields
                 .iter()
                 .map(|(n, v)| format!("{}: {}", n, emit_tir_expr(v, cx)))
@@ -1218,8 +1362,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             if entries.is_empty() {
                 "std::collections::BTreeMap::new()".to_string()
             } else {
-                let mut s =
-                    String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
                 for (k, v) in entries {
                     s.push_str(&format!(
                         "_m.insert(({}).clone(), {}); ",
@@ -1234,7 +1377,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 5: `coll[i]`. Dispatch on the total `is_map` fact (never
         // re-inferred). Mirrors the AST `Expr::Index` form: a map index borrows the
         // key (`&(i)`), a vec index does not.
-        TExprKind::Index { base, index, is_map, line } => {
+        TExprKind::Index {
+            base,
+            index,
+            is_map,
+            line,
+        } => {
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             if *is_map {
@@ -1244,7 +1392,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // D-SIMD2: `v[i]` lane read → the bounds-checked prelude helper.
-        TExprKind::MathLaneIndex { lane_ty, base, index, line } => {
+        TExprKind::MathLaneIndex {
+            lane_ty,
+            base,
+            index,
+            line,
+        } => {
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(
@@ -1253,11 +1406,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             )
         }
         // c109 Phase 5: `coll[a..b]` → `jet_slice_vec`. Mirrors the AST `Expr::Slice`.
-        TExprKind::Slice { base, start, end, line } => {
+        TExprKind::Slice {
+            base,
+            start,
+            end,
+            line,
+        } => {
             let b = emit_tir_expr(base, cx);
             let a = emit_tir_expr(start, cx);
             let e = emit_tir_expr(end, cx);
-            format!("jet_slice_vec(&({}), {}, {}, {:?}, {})", b, a, e, cx.file, line)
+            format!(
+                "jet_slice_vec(&({}), {}, {}, {:?}, {})",
+                b, a, e, cx.file, line
+            )
         }
         // c109 Phase 8: `value(x)` → `Some(x)` / `null` → `None`. Mirrors the AST
         // `Expr::Present`/`Expr::Absent` exactly.
@@ -1266,7 +1427,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
         // AST `Expr::Todo` arm (Expression.rs): file/line/expected-type baked into the
         // panic string. `cx.file` is program-level (read here, like every other use).
-        TExprKind::Todo { line, expected_type } => format!(
+        TExprKind::Todo {
+            line,
+            expected_type,
+        } => format!(
             "todo!(\"#{} at {}:{} — expected {}\")",
             crate::Syntax::KW_TODO,
             cx.file,
@@ -1281,7 +1445,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // (Expression.rs): a debug trace frame wraps the value, then the error is
         // converted per the total `TryConvert`, then `?` propagates. `file`/`fn_name`
         // were pre-escaped at lowering; `line` is plain.
-        TExprKind::Try { inner, convert, file, line, fn_name } => {
+        TExprKind::Try {
+            inner,
+            convert,
+            file,
+            line,
+            fn_name,
+        } => {
             let v = emit_tir_expr(inner, cx);
             match convert {
                 // S80/D-LIB3: error implements Fallible → `.map_err(|e| e.to_error())`.
@@ -1304,19 +1474,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // (Statement.rs): a `Result` value unwraps `Ok`, an `Option` value unwraps
         // `Some`; the fallback runs on `Err(_)`/`None`. Decision read off the total
         // `is_option` flag — no re-inference.
-        TExprKind::OrFallback { value, fallback, is_option } => {
+        TExprKind::OrFallback {
+            value,
+            fallback,
+            is_option,
+        } => {
             let v = emit_tir_expr(value, cx);
             let fb = emit_tir_orfallback_rhs(fallback, cx);
             if *is_option {
                 format!("match {} {{ Some(__jet_v) => __jet_v, None => {} }}", v, fb)
             } else {
-                format!("match {} {{ Ok(__jet_ok) => __jet_ok, Err(_) => {} }}", v, fb)
+                format!(
+                    "match {} {{ Ok(__jet_ok) => __jet_ok, Err(_) => {} }}",
+                    v, fb
+                )
             }
         }
         // c109 Phase 8: optional chaining `base?.member`. Mirrors `Expr::OptField`:
         // `(base).clone().{and_then|map}(|__optv| __optv.{member})`. The combinator is
         // the total `flatten` fact (flatten → `and_then`, else → `map`).
-        TExprKind::OptField { base, member_rust, flatten } => {
+        TExprKind::OptField {
+            base,
+            member_rust,
+            flatten,
+        } => {
             let combinator = if *flatten { "and_then" } else { "map" };
             format!(
                 "({}).clone().{}(|__optv| __optv.{})",
@@ -1360,7 +1541,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // lambda + any seed) are emitted PLAINLY (raw `arg(i)`).
         TExprKind::ClosureMethod { recv, op, args } => {
             let recv = emit_tir_expr(recv, cx);
-            let a = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+            let a = |i: usize| {
+                args.get(i)
+                    .map(|e| emit_tir_expr(e, cx))
+                    .unwrap_or_default()
+            };
             match op {
                 TClosureOp::Map => format!("jet_list_map(({}).clone(), {})", recv, a(0)),
                 TClosureOp::MapMut => format!("jet_list_map_mut(({}).clone(), {})", recv, a(0)),
@@ -1391,8 +1576,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 // D-AUTOPAR1=A: parallel adapters.
                 TClosureOp::ParMap => format!("jet_list_par_map(({}).clone(), {})", recv, a(0)),
-                TClosureOp::ParFilter => format!("jet_list_par_filter(({}).clone(), {})", recv, a(0)),
-                TClosureOp::ParFold => format!("jet_list_par_fold(({}).clone(), {}, {})", recv, a(0), a(1)),
+                TClosureOp::ParFilter => {
+                    format!("jet_list_par_filter(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::ParFold => {
+                    format!("jet_list_par_fold(({}).clone(), {}, {})", recv, a(0), a(1))
+                }
                 TClosureOp::Scan => {
                     format!("jet_list_scan(({}).clone(), {}, {})", recv, a(0), a(1))
                 }
@@ -1418,7 +1607,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!(
                         "jet_list_partition(({}).clone(), {}, |__t, __f| \
                          {} {{ user_false_: __f, user_true_: __t }})",
-                        recv, a(0), tuple_struct
+                        recv,
+                        a(0),
+                        tuple_struct
                     )
                 }
             }
@@ -1429,7 +1620,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // emitted PLAINLY (raw `arg(i)`). `cx.root_prefix` is program-level.
         TExprKind::HandleMethod { recv, op, args } => {
             let recv = emit_tir_expr(recv, cx);
-            let a = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+            let a = |i: usize| {
+                args.get(i)
+                    .map(|e| emit_tir_expr(e, cx))
+                    .unwrap_or_default()
+            };
             let root = &cx.root_prefix;
             match op {
                 THandleOp::FileReaderReadLine => {
@@ -1437,7 +1632,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::FileWriterWriteLine => format!(
                     "{}jet_std_file_writer_write_line(&mut ({}), &({}))",
-                    root, recv, a(0)
+                    root,
+                    recv,
+                    a(0)
                 ),
                 THandleOp::FileWriterFlush => {
                     format!("{}jet_std_file_writer_flush(&mut ({}))", root, recv)
@@ -1514,17 +1711,23 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // (Rust autoref); args are plain (raw `emit_expr`). `join` reuses the
                 // no-arg `join` arm (`(recv).join()`); `detach` drops the handle (D-DETACH1).
                 // D-ARGS1: ArgsSpec builder methods (consuming by value; builder is moved on each call).
-                THandleOp::ArgsSpecFlag => format!(
-                    "{}jet_args_flag({}, &({}), &({}))",
-                    root, recv, a(0), a(1)
-                ),
+                THandleOp::ArgsSpecFlag => {
+                    format!("{}jet_args_flag({}, &({}), &({}))", root, recv, a(0), a(1))
+                }
                 THandleOp::ArgsSpecOption => format!(
                     "{}jet_args_option({}, &({}), &({}), &({}))",
-                    root, recv, a(0), a(1), a(2)
+                    root,
+                    recv,
+                    a(0),
+                    a(1),
+                    a(2)
                 ),
                 THandleOp::ArgsSpecPositional => format!(
                     "{}jet_args_positional({}, &({}), &({}))",
-                    root, recv, a(0), a(1)
+                    root,
+                    recv,
+                    a(0),
+                    a(1)
                 ),
                 THandleOp::ArgsSpecHelp => format!("({}).help()", recv),
                 THandleOp::ArgsSpecParse => {
@@ -1570,9 +1773,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     if kind == "HttpClientReq" {
                         match method.as_str() {
-                            "header" => format!("{}jet_http_client_request_header({}, &({}), &({}))", root, recv, a(0), a(1)),
-                            "body" => format!("{}jet_http_client_request_body({}, &({}))", root, recv, a(0)),
-                            "timeout" => format!("{}jet_http_client_request_timeout({}, {})", root, recv, a(0)),
+                            "header" => format!(
+                                "{}jet_http_client_request_header({}, &({}), &({}))",
+                                root,
+                                recv,
+                                a(0),
+                                a(1)
+                            ),
+                            "body" => format!(
+                                "{}jet_http_client_request_body({}, &({}))",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "timeout" => format!(
+                                "{}jet_http_client_request_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
                             "send" => {
                                 // call bridge with req fields; assemble JetHttpClientResp
                                 format!(
@@ -1584,9 +1803,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                     } else {
                         match method.as_str() {
-                            "status" => format!("{}jet_http_client_response_status(&({}))", root, recv),
+                            "status" => {
+                                format!("{}jet_http_client_response_status(&({}))", root, recv)
+                            }
                             "body" => format!("{}jet_http_client_response_body(&({}))", root, recv),
-                            "header" => format!("{}jet_http_client_response_header(&({}), &({}))", root, recv, a(0)),
+                            "header" => format!(
+                                "{}jet_http_client_response_header(&({}), &({}))",
+                                root,
+                                recv,
+                                a(0)
+                            ),
                             _ => format!("({}).{}()", recv, method),
                         }
                     }
@@ -1595,27 +1821,37 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::HttpServerMethod { kind, method } => {
                     match (kind.as_str(), method.as_str()) {
                         ("HttpMux", "get" | "post" | "put" | "delete" | "patch") => {
-                            format!("{{ {}jet_http_mux_add(&({}), \"{}\", &({}), {}) }}", root, recv, method.to_uppercase(), a(0), a(1))
+                            format!(
+                                "{{ {}jet_http_mux_add(&({}), \"{}\", &({}), {}) }}",
+                                root,
+                                recv,
+                                method.to_uppercase(),
+                                a(0),
+                                a(1)
+                            )
                         }
-                        ("HttpSrvReq", "method") => format!("{}jet_http_srv_req_method(&({}))", root, recv),
-                        ("HttpSrvReq", "path") => format!("{}jet_http_srv_req_path(&({}))", root, recv),
-                        ("HttpSrvReq", "body") => format!("{}jet_http_srv_req_body(&({}))", root, recv),
-                        ("HttpSrvReq", "param") => format!("{}jet_http_srv_req_param(&({}), &({}))", root, recv, a(0)),
-                        ("HttpSrvReq", "header") => format!("{}jet_http_srv_req_header(&({}), &({}))", root, recv, a(0)),
-                        ("HttpSrvResp", "header") => format!("{}jet_http_srv_response_header({}, &({}), &({}))", root, recv, a(0), a(1)),
-                        _ => {
-                            if args.is_empty() { format!("({}).{}()", recv, method) }
-                            else { format!("({}).{}({})", recv, method, a(0)) }
+                        ("HttpSrvReq", "method") => {
+                            format!("{}jet_http_srv_req_method(&({}))", root, recv)
                         }
-                    }
-                }
-                // D-TIMEDEPTH1=A: civil-time method call.
-                THandleOp::CivilTimeMethod { kind: _, method } => {
-                    match method.as_str() {
-                        "add_days" => format!("({}).add_days({})", recv, a(0)),
-                        "add_months" => format!("({}).add_months({})", recv, a(0)),
-                        "diff_days" => format!("({}).diff_days(&({}))", recv, a(0)),
-                        "to_string" => format!("({}).to_string_fmt()", recv),
+                        ("HttpSrvReq", "path") => {
+                            format!("{}jet_http_srv_req_path(&({}))", root, recv)
+                        }
+                        ("HttpSrvReq", "body") => {
+                            format!("{}jet_http_srv_req_body(&({}))", root, recv)
+                        }
+                        ("HttpSrvReq", "param") => {
+                            format!("{}jet_http_srv_req_param(&({}), &({}))", root, recv, a(0))
+                        }
+                        ("HttpSrvReq", "header") => {
+                            format!("{}jet_http_srv_req_header(&({}), &({}))", root, recv, a(0))
+                        }
+                        ("HttpSrvResp", "header") => format!(
+                            "{}jet_http_srv_response_header({}, &({}), &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
                         _ => {
                             if args.is_empty() {
                                 format!("({}).{}()", recv, method)
@@ -1625,12 +1861,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                     }
                 }
+                // D-TIMEDEPTH1=A: civil-time method call.
+                THandleOp::CivilTimeMethod { kind: _, method } => match method.as_str() {
+                    "add_days" => format!("({}).add_days({})", recv, a(0)),
+                    "add_months" => format!("({}).add_months({})", recv, a(0)),
+                    "diff_days" => format!("({}).diff_days(&({}))", recv, a(0)),
+                    "to_string" => format!("({}).to_string_fmt()", recv),
+                    _ => {
+                        if args.is_empty() {
+                            format!("({}).{}()", recv, method)
+                        } else {
+                            format!("({}).{}({})", recv, method, a(0))
+                        }
+                    }
+                },
                 // D-APPROX1=A: sketch method call. `add` args may be string borrows;
                 // `count`/`quantile` pass by value; `sample` returns Vec<String>.
                 THandleOp::SketchMethod { sketch, method } => {
                     match method.as_str() {
                         "add" if sketch == "TDigest" => format!("({}).add({})", recv, a(0)),
-                        "add" if sketch == "ReservoirSampler" => format!("({}).add(({}).clone())", recv, a(0)),
+                        "add" if sketch == "ReservoirSampler" => {
+                            format!("({}).add(({}).clone())", recv, a(0))
+                        }
                         "add" => format!("({}).add(&({}))", recv, a(0)),
                         // HLL.count() and CMS.count(key) — different arities.
                         "count" if args.is_empty() => format!("({}).count()", recv),
@@ -1650,13 +1902,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // the pre-rendered boxed closure.
                 THandleOp::HttpRouterRegister { verb, handler } => format!(
                     "{}jet_http_router_register(&mut ({}), \"{}\".to_string(), {}, {})",
-                    root, recv, verb, a(0), handler
+                    root,
+                    recv,
+                    verb,
+                    a(0),
+                    handler
                 ),
                 // D-SIMD2 / D-LINALG1: a math-type instance method → the prelude free
                 // function `jet_math_<type>_<method>(&(recv), <args>)`. `reduce`
                 // dispatches on the validated marker op. All take `&recv` (immutable;
                 // these types are value semantics — every op returns a fresh value).
-                THandleOp::MathMethod { type_name, method, reduce_op } => {
+                THandleOp::MathMethod {
+                    type_name,
+                    method,
+                    reduce_op,
+                } => {
                     let fname = match reduce_op {
                         Some(op) => format!("jet_math_{}_reduce_{}", type_name, op.to_lowercase()),
                         None => format!("jet_math_{}_{}", type_name, method),
@@ -1670,27 +1930,29 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 // D-SERDE-ACCESS=B: DataTree accessor methods.
                 THandleOp::DataTreeField => format!("({}).field(&({}))", recv, a(0)),
-                THandleOp::DataTreeAt    => format!("({}).at({})", recv, a(0)),
-                THandleOp::DataTreeInt   => format!("({}).int()", recv),
-                THandleOp::DataTreeText  => format!("({}).text()", recv),
-                THandleOp::DataTreeBool  => format!("({}).bool()", recv),
+                THandleOp::DataTreeAt => format!("({}).at({})", recv, a(0)),
+                THandleOp::DataTreeInt => format!("({}).int()", recv),
+                THandleOp::DataTreeText => format!("({}).text()", recv),
+                THandleOp::DataTreeBool => format!("({}).bool()", recv),
                 THandleOp::DataTreeFloat => format!("({}).float()", recv),
                 // D-SERDE-ACCESS=B: same accessors on Json/Data.
                 THandleOp::JsonField => format!("({}).field(&({}))", recv, a(0)),
-                THandleOp::JsonAt    => format!("({}).at({})", recv, a(0)),
-                THandleOp::JsonInt   => format!("({}).int()", recv),
-                THandleOp::JsonText  => format!("({}).text()", recv),
-                THandleOp::JsonBool  => format!("({}).bool()", recv),
+                THandleOp::JsonAt => format!("({}).at({})", recv, a(0)),
+                THandleOp::JsonInt => format!("({}).int()", recv),
+                THandleOp::JsonText => format!("({}).text()", recv),
+                THandleOp::JsonBool => format!("({}).bool()", recv),
                 THandleOp::JsonFloat => format!("({}).float()", recv),
                 // D-PATHFS1: Path object methods.
-                THandleOp::PathFrom        => format!("{}jet_path_from(&({}))", root, recv),
-                THandleOp::PathJoin        => format!("{}jet_path_join(&({}), &({}))", root, recv, a(0)),
-                THandleOp::PathParent      => format!("{}jet_path_parent(&({}))", root, recv),
-                THandleOp::PathExtension   => format!("{}jet_path_extension(&({}))", root, recv),
-                THandleOp::PathStem        => format!("{}jet_path_stem(&({}))", root, recv),
-                THandleOp::PathToString    => format!("({}).jet_show()", recv),
-                THandleOp::PathWriteAtomic => format!("{}jet_path_write_atomic(&({}), &({}))", root, recv, a(0)),
-                THandleOp::PathWalk        => format!("{}jet_path_walk(&({}))", root, recv),
+                THandleOp::PathFrom => format!("{}jet_path_from(&({}))", root, recv),
+                THandleOp::PathJoin => format!("{}jet_path_join(&({}), &({}))", root, recv, a(0)),
+                THandleOp::PathParent => format!("{}jet_path_parent(&({}))", root, recv),
+                THandleOp::PathExtension => format!("{}jet_path_extension(&({}))", root, recv),
+                THandleOp::PathStem => format!("{}jet_path_stem(&({}))", root, recv),
+                THandleOp::PathToString => format!("({}).jet_show()", recv),
+                THandleOp::PathWriteAtomic => {
+                    format!("{}jet_path_write_atomic(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::PathWalk => format!("{}jet_path_walk(&({}))", root, recv),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -1698,7 +1960,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // (Source/Codegen/Expression.rs).
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn { spawn_closure } => {
-                format!("{}jet_std::JetTask::spawn({})", cx.root_prefix, spawn_closure)
+                format!(
+                    "{}jet_std::JetTask::spawn({})",
+                    cx.root_prefix, spawn_closure
+                )
             }
             TCoreClosureKind::Serve { addr, closure } => format!(
                 "{}jet_http_serve(&({}), {})",
@@ -1726,7 +1991,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             // D-REACT1=B: an effect re-run when a signal it read changes.
             TCoreClosureKind::ReactiveEffect { closure } => {
-                format!("{}jet_std::jet_reactive_effect({})", cx.root_prefix, closure)
+                format!(
+                    "{}jet_std::jet_reactive_effect({})",
+                    cx.root_prefix, closure
+                )
             }
         },
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
@@ -1840,8 +2108,18 @@ pub(crate) fn enc_arg_is_string_rows(args: &[TExpr]) -> bool {
             if matches!(&**inner, Type::List(s) if matches!(&**s, Type::String))
     )
 }
-pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret_ty: &Type, cx: &Cx) -> String {
-    let arg = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+pub(crate) fn emit_tir_core_call(
+    module: &str,
+    method: &str,
+    args: &[TExpr],
+    ret_ty: &Type,
+    cx: &Cx,
+) -> String {
+    let arg = |i: usize| {
+        args.get(i)
+            .map(|e| emit_tir_expr(e, cx))
+            .unwrap_or_default()
+    };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
     let regex_fn = |name: &str| {
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
@@ -1863,7 +2141,12 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         }
         // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
         ("core.science.measurement", "from") => {
-            format!("{}jet_std::JetMeasurement::new({}, {})", cx.root_prefix, arg(0), arg(1))
+            format!(
+                "{}jet_std::JetMeasurement::new({}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )
         }
         // D-PENDING1=B: Loadable<T,E> constructors.
         // idle/loading/loaded/failed need concrete type params for E: Clone bound satisfaction.
@@ -1937,23 +2220,35 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // D-FLOATW1: width-generic math — choose the f32 helper when the arg is F32.
         ("core.math", "sqrt") => {
             let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
-            if f32_path { format!("{}({})", helper("jet_std_math_sqrt_f32"), arg(0)) }
-            else { format!("{}({})", helper("jet_std_math_sqrt"), arg(0)) }
+            if f32_path {
+                format!("{}({})", helper("jet_std_math_sqrt_f32"), arg(0))
+            } else {
+                format!("{}({})", helper("jet_std_math_sqrt"), arg(0))
+            }
         }
         ("core.math", "pow") => {
             let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
-            if f32_path { format!("{}({}, {})", helper("jet_std_math_pow_f32"), arg(0), arg(1)) }
-            else { format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1)) }
+            if f32_path {
+                format!("{}({}, {})", helper("jet_std_math_pow_f32"), arg(0), arg(1))
+            } else {
+                format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1))
+            }
         }
         ("core.math", "floor") => {
             let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
-            if f32_path { format!("{}({})", helper("jet_std_math_floor_f32"), arg(0)) }
-            else { format!("{}({})", helper("jet_std_math_floor"), arg(0)) }
+            if f32_path {
+                format!("{}({})", helper("jet_std_math_floor_f32"), arg(0))
+            } else {
+                format!("{}({})", helper("jet_std_math_floor"), arg(0))
+            }
         }
         ("core.math", "ceil") => {
             let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
-            if f32_path { format!("{}({})", helper("jet_std_math_ceil_f32"), arg(0)) }
-            else { format!("{}({})", helper("jet_std_math_ceil"), arg(0)) }
+            if f32_path {
+                format!("{}({})", helper("jet_std_math_ceil_f32"), arg(0))
+            } else {
+                format!("{}({})", helper("jet_std_math_ceil"), arg(0))
+            }
         }
         ("core.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
         ("core.random", "int") => {
@@ -1976,12 +2271,19 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // forms route through the Encode/Decode model, distinguished by the lowered arg
         // type (encode) or the resolved return type (decode). `is_json_value` etc. read
         // those total facts — codegen never re-infers (I3).
-        ("core.encoding.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        ("core.encoding.json", "parse") => {
+            format!("{}(&({}))", helper("jet_std_json_parse"), arg(0))
+        }
         ("core.encoding.json", "decode") => {
             if enc_ok_is_json(ret_ty) {
                 format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0))
             } else {
-                format!("{}::<{}>(&({}))", helper("jet_enc_json_decode"), enc_target_rust(ret_ty, cx), arg(0))
+                format!(
+                    "{}::<{}>(&({}))",
+                    helper("jet_enc_json_decode"),
+                    enc_target_rust(ret_ty, cx),
+                    arg(0)
+                )
             }
         }
         ("core.encoding.json", "to_string") => {
@@ -1998,9 +2300,16 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
                 format!("{}(&({}))", helper("jet_enc_json_to_string_pretty"), arg(0))
             }
         }
-        ("core.encoding.csv", "parse") => format!("{}(&({}))", helper("jet_ring_csv_parse"), arg(0)),
+        ("core.encoding.csv", "parse") => {
+            format!("{}(&({}))", helper("jet_ring_csv_parse"), arg(0))
+        }
         ("core.encoding.csv", "decode") => {
-            format!("{}::<{}>(&({}))", helper("jet_enc_csv_decode"), enc_target_rust(ret_ty, cx), arg(0))
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_csv_decode"),
+                enc_target_rust(ret_ty, cx),
+                arg(0)
+            )
         }
         ("core.encoding.csv", "to_string") => {
             if enc_arg_is_string_rows(args) {
@@ -2009,9 +2318,16 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
                 format!("{}(&({}))", helper("jet_enc_csv_to_string"), arg(0))
             }
         }
-        ("core.encoding.toml", "parse") => format!("{}(&({}))", helper("jet_std_toml_parse"), arg(0)),
+        ("core.encoding.toml", "parse") => {
+            format!("{}(&({}))", helper("jet_std_toml_parse"), arg(0))
+        }
         ("core.encoding.toml", "decode") => {
-            format!("{}::<{}>(&({}))", helper("jet_enc_toml_decode"), enc_target_rust(ret_ty, cx), arg(0))
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_toml_decode"),
+                enc_target_rust(ret_ty, cx),
+                arg(0)
+            )
         }
         ("core.encoding.toml", "to_string") => {
             if enc_arg_is_json(args) {
@@ -2020,9 +2336,16 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
                 format!("{}(&({}))", helper("jet_enc_toml_to_string"), arg(0))
             }
         }
-        ("core.encoding.yaml", "parse") => format!("{}(&({}))", helper("jet_std_yaml_parse"), arg(0)),
+        ("core.encoding.yaml", "parse") => {
+            format!("{}(&({}))", helper("jet_std_yaml_parse"), arg(0))
+        }
         ("core.encoding.yaml", "decode") => {
-            format!("{}::<{}>(&({}))", helper("jet_enc_yaml_decode"), enc_target_rust(ret_ty, cx), arg(0))
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_yaml_decode"),
+                enc_target_rust(ret_ty, cx),
+                arg(0)
+            )
         }
         ("core.encoding.yaml", "to_string") => {
             if enc_arg_is_json(args) {
@@ -2032,10 +2355,18 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
             }
         }
         // D-UUIDENC1=A: hex and base64 encode/decode.
-        ("core.encoding.hex", "encode") => format!("{}(&({}))", helper("jet_std_hex_encode"), arg(0)),
-        ("core.encoding.hex", "decode") => format!("{}(&({}))", helper("jet_std_hex_decode"), arg(0)),
-        ("core.encoding.base64", "encode") => format!("{}(&({}))", helper("jet_std_b64_encode"), arg(0)),
-        ("core.encoding.base64", "decode") => format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0)),
+        ("core.encoding.hex", "encode") => {
+            format!("{}(&({}))", helper("jet_std_hex_encode"), arg(0))
+        }
+        ("core.encoding.hex", "decode") => {
+            format!("{}(&({}))", helper("jet_std_hex_decode"), arg(0))
+        }
+        ("core.encoding.base64", "encode") => {
+            format!("{}(&({}))", helper("jet_std_b64_encode"), arg(0))
+        }
+        ("core.encoding.base64", "decode") => {
+            format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0))
+        }
         // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
         ("core.uuid", "v4") => format!("{}()", helper("jet_std_uuid_v4")),
         ("core.uuid", "v7") => format!("{}(&({}))", helper("jet_std_uuid_v7"), arg(0)),
@@ -2046,11 +2377,17 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // E2-M7: std.path helpers (D-IO1).
         ("core.path", "join") => format!(
             "{}(&({}), &({}))",
-            helper("jet_std_path_join"), arg(0), arg(1)
+            helper("jet_std_path_join"),
+            arg(0),
+            arg(1)
         ),
         ("core.path", "parent") => format!("{}(&({}))", helper("jet_std_path_parent"), arg(0)),
-        ("core.path", "extension") => format!("{}(&({}))", helper("jet_std_path_extension"), arg(0)),
-        ("core.path", "normalize") => format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0)),
+        ("core.path", "extension") => {
+            format!("{}(&({}))", helper("jet_std_path_extension"), arg(0))
+        }
+        ("core.path", "normalize") => {
+            format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0))
+        }
         // E2-M9: first-party ring packages.
         ("jet.log", "info") => format!("{}(&({}))", helper("jet_ring_log_info"), arg(0)),
         ("jet.log", "warn") => format!("{}(&({}))", helper("jet_ring_log_warn"), arg(0)),
@@ -2058,28 +2395,57 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         ("jet.log", "debug") => format!("{}(&({}))", helper("jet_ring_log_debug"), arg(0)),
         ("jet.log", "set_level") => format!("{}(&({}))", helper("jet_ring_log_set_level"), arg(0)),
         // E2-M12 D-OBS3: trace context for structured log records.
-        ("jet.log", "set_trace_id") => format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0)),
+        ("jet.log", "set_trace_id") => {
+            format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0))
+        }
         // D-LOGFMT1=A: explicit log format override.
         ("jet.log", "setup") => format!("{}(&({}))", helper("jet_ring_log_setup"), arg(0)),
         ("jet.time", "now") => format!("{}()", helper("jet_std_time_now")),
-        ("jet.time", "format") => format!("{}({}, &({}))", helper("jet_ring_time_format"), arg(0), arg(1)),
+        ("jet.time", "format") => format!(
+            "{}({}, &({}))",
+            helper("jet_ring_time_format"),
+            arg(0),
+            arg(1)
+        ),
         ("jet.crypto", "sha256") => format!("{}(&({}))", helper("jet_ring_crypto_sha256"), arg(0)),
-        ("jet.crypto", "sha256_bytes") => format!("{}(&({}))", helper("jet_ring_crypto_sha256_bytes"), arg(0)),
+        ("jet.crypto", "sha256_bytes") => {
+            format!("{}(&({}))", helper("jet_ring_crypto_sha256_bytes"), arg(0))
+        }
         // E2-M10: core.net — blocking TCP sockets.
         ("core.net", "tcp_listen") => format!("{}(&({}))", helper("jet_net_tcp_listen"), arg(0)),
         ("core.net", "tcp_accept") => format!("{}(&({}))", helper("jet_net_tcp_accept"), arg(0)),
         ("core.net", "tcp_connect") => format!("{}(&({}))", helper("jet_net_tcp_connect"), arg(0)),
         ("core.net", "tcp_read") => format!("{}(&mut ({}))", helper("jet_net_tcp_read"), arg(0)),
         ("core.net", "tcp_write") => {
-            format!("{}(&mut ({}), &({}))", helper("jet_net_tcp_write"), arg(0), arg(1))
+            format!(
+                "{}(&mut ({}), &({}))",
+                helper("jet_net_tcp_write"),
+                arg(0),
+                arg(1)
+            )
         }
-        ("core.net", "tcp_local_addr") => format!("{}(&({}))", helper("jet_net_tcp_local_addr"), arg(0)),
-        ("core.net", "tcp_peer_addr") => format!("{}(&({}))", helper("jet_net_tcp_peer_addr"), arg(0)),
+        ("core.net", "tcp_local_addr") => {
+            format!("{}(&({}))", helper("jet_net_tcp_local_addr"), arg(0))
+        }
+        ("core.net", "tcp_peer_addr") => {
+            format!("{}(&({}))", helper("jet_net_tcp_peer_addr"), arg(0))
+        }
         ("core.net", "set_timeout") => {
-            format!("{}(&mut ({}), {})", helper("jet_net_set_timeout"), arg(0), arg(1))
+            format!(
+                "{}(&mut ({}), {})",
+                helper("jet_net_set_timeout"),
+                arg(0),
+                arg(1)
+            )
         }
         ("core.net", "tcp_reply") => {
-            format!("{}({}, &({}), &({}))", helper("jet_net_tcp_reply"), arg(0), arg(1), arg(2))
+            format!(
+                "{}({}, &({}), &({}))",
+                helper("jet_net_tcp_reply"),
+                arg(0),
+                arg(1),
+                arg(2)
+            )
         }
         // E2-M10: jet.http — HTTP client.
         ("jet.http", "get") => format!("{}(&({}))", helper("jet_http_get"), arg(0)),
@@ -2094,31 +2460,64 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         ("jet.http", "parse") => format!("{}(&({}))", helper("jet_http_parse_request"), arg(0)),
         ("jet.http", "dispatch") => format!(
             "{}(&({}), {})",
-            helper("jet_http_router_dispatch"), arg(0), arg(1)
+            helper("jet_http_router_dispatch"),
+            arg(0),
+            arg(1)
         ),
         // D-REGEX1: jet.regex — calls land in the FFI bridge crate.
         ("jet.regex", "is_match") => {
-            format!("{}(&({}), &({}))", regex_fn("jet_regex_is_match"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({}))",
+                regex_fn("jet_regex_is_match"),
+                arg(0),
+                arg(1)
+            )
         }
         ("jet.regex", "match") => {
-            format!("{}(&({}), &({}))", regex_fn("jet_regex_match"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({}))",
+                regex_fn("jet_regex_match"),
+                arg(0),
+                arg(1)
+            )
         }
         ("jet.regex", "find") => {
-            format!("{}(&({}), &({}))", regex_fn("jet_regex_find"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({}))",
+                regex_fn("jet_regex_find"),
+                arg(0),
+                arg(1)
+            )
         }
         ("jet.regex", "find_all") => {
-            format!("{}(&({}), &({}))", regex_fn("jet_regex_find_all"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({}))",
+                regex_fn("jet_regex_find_all"),
+                arg(0),
+                arg(1)
+            )
         }
         ("jet.regex", "split") => {
-            format!("{}(&({}), &({}))", regex_fn("jet_regex_split"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({}))",
+                regex_fn("jet_regex_split"),
+                arg(0),
+                arg(1)
+            )
         }
         ("jet.regex", "replace") => format!(
             "{}(&({}), &({}), &({}))",
-            regex_fn("jet_regex_replace"), arg(0), arg(1), arg(2)
+            regex_fn("jet_regex_replace"),
+            arg(0),
+            arg(1),
+            arg(2)
         ),
         ("jet.regex", "replace_all") => format!(
             "{}(&({}), &({}), &({}))",
-            regex_fn("jet_regex_replace_all"), arg(0), arg(1), arg(2)
+            regex_fn("jet_regex_replace_all"),
+            arg(0),
+            arg(1),
+            arg(2)
         ),
         // D-DEP-ARCHIVE1=A: jet.archive — gzip compress/decompress via the FFI bridge crate.
         // Arguments are `[U8]` (Vec<u8>); bridge functions take `&[u8]` (auto-coerce from &Vec<u8>).
@@ -2131,7 +2530,12 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // D-DEP-ARCHIVE1=A: jet.archive — zip compress/decompress via the `zip` crate FFI bridge.
         // zip_compress takes (&str, &[u8]); zip_decompress takes &[u8].
         ("jet.archive", "zip_compress") => {
-            format!("{}(&({}), &({}))", regex_fn("jet_archive_zip_compress"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({}))",
+                regex_fn("jet_archive_zip_compress"),
+                arg(0),
+                arg(1)
+            )
         }
         ("jet.archive", "zip_decompress") => {
             format!("{}(&({}))", regex_fn("jet_archive_zip_decompress"), arg(0))
@@ -2139,10 +2543,21 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // D-DEP-ARCHIVE1=A: tar_add / tar_get / tar_names_json via the FFI bridge.
         // All three take &[u8] / &str args (non-scalar → borrow); none take scalars.
         ("jet.archive", "tar_add") => {
-            format!("{}(&({}), &({}), &({}))", regex_fn("jet_archive_tar_add"), arg(0), arg(1), arg(2))
+            format!(
+                "{}(&({}), &({}), &({}))",
+                regex_fn("jet_archive_tar_add"),
+                arg(0),
+                arg(1),
+                arg(2)
+            )
         }
         ("jet.archive", "tar_get") => {
-            format!("{}(&({}), &({}))", regex_fn("jet_archive_tar_get"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({}))",
+                regex_fn("jet_archive_tar_get"),
+                arg(0),
+                arg(1)
+            )
         }
         ("jet.archive", "tar_names_json") => {
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
@@ -2162,7 +2577,12 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
             format!("{}({}, &({}))", regex_fn("jet_db_exec"), arg(0), arg(1))
         }
         ("jet.db", "query_json") => {
-            format!("{}({}, &({}))", regex_fn("jet_db_query_json"), arg(0), arg(1))
+            format!(
+                "{}({}, &({}))",
+                regex_fn("jet_db_query_json"),
+                arg(0),
+                arg(1)
+            )
         }
         // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.
         // Their return type is arg-type dependent (resolved by sema's bespoke
@@ -2192,22 +2612,31 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
         // Bridge returns (i64, String, Vec<String>); CoreLib assembles JetHttpClientResp.
         ("core.http.client", "get") => format!(
             "{}(&({})).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}})",
-            regex_fn("jet_http_client_get_impl"), arg(0)
+            regex_fn("jet_http_client_get_impl"),
+            arg(0)
         ),
         ("core.http.client", "post") => format!(
             "{}(&({}), &({})).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}})",
-            regex_fn("jet_http_client_post_impl"), arg(0), arg(1)
+            regex_fn("jet_http_client_post_impl"),
+            arg(0),
+            arg(1)
         ),
-        ("core.http.client", "request") => format!("jet_http_client_request_new(&({}), &({}))", arg(0), arg(1)),
+        ("core.http.client", "request") => {
+            format!("jet_http_client_request_new(&({}), &({}))", arg(0), arg(1))
+        }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {})", arg(0), arg(1)),
-        ("core.http.server", "response") => format!("jet_http_srv_response({}, &({}))", arg(0), arg(1)),
+        ("core.http.server", "response") => {
+            format!("jet_http_srv_response({}, &({}))", arg(0), arg(1))
+        }
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
         ("core.time.date", "today") => format!("JetDate::today_utc()"),
         ("core.time.date", "parse") => format!("JetDate::parse(&({})).map_err(|e| e)", arg(0)),
-        ("core.time.datetime", "from_timestamp") => format!("JetDateTime::from_timestamp({})", arg(0)),
+        ("core.time.datetime", "from_timestamp") => {
+            format!("JetDateTime::from_timestamp({})", arg(0))
+        }
         ("core.time.datetime", "now") => format!("JetDateTime::now()"),
         _ => "/* unknown std call */".to_string(),
     }
@@ -2269,7 +2698,10 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                 }
             }
             TStrPart::Interp(e) => {
-                body.push_str(&format!("_jet_s.push_str(&({}).jet_show()); ", emit_tir_expr(e, cx)));
+                body.push_str(&format!(
+                    "_jet_s.push_str(&({}).jet_show()); ",
+                    emit_tir_expr(e, cx)
+                ));
             }
         }
     }

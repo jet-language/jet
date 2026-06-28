@@ -40,7 +40,7 @@ fn ends_statement(kind: &TokKind) -> bool {
             | TokKind::RBrace
             | TokKind::Question      // S7: `expr?` trailing propagation
             | TokKind::Gt            // generic type close `List<Int>` at line end
-            | TokKind::Shr           // nested generic close `Map<K, List<V>>`
+            | TokKind::Shr // nested generic close `Map<K, List<V>>`
     )
 }
 
@@ -70,7 +70,7 @@ fn suppresses_terminator(kind: &TokKind) -> bool {
             | TokKind::Caret
             | TokKind::Shl
             | TokKind::Shr
-            | TokKind::QuestionQuestion  // S35/S71 fallback continues the expr
+            | TokKind::QuestionQuestion // S35/S71 fallback continues the expr
     )
 }
 

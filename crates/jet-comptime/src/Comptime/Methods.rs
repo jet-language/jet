@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
-use crate::AST::{CallArg, Expr, StrPart};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CallArg, Expr, StrPart};
 
 use super::Builtins::{apply_method, apply_mutating, apply_static_type_method, as_bool};
-use super::Diagnostics::{ERR_PROPAGATE_CODE, EARLY_RETURN_CODE};
 use super::Diagnostics::{comptime_panic, unsupported};
+use super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::Interpreter::{Flow, Interp};
 use super::Value::CtValue;
 
@@ -277,11 +277,7 @@ impl<'a> Interp<'a> {
         Ok(CtValue::Unit)
     }
 
-    fn eval_embed_file(
-        &mut self,
-        args: &[CallArg],
-        span: Span,
-    ) -> Result<CtValue, Diagnostic> {
+    fn eval_embed_file(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
         let builtin = crate::Syntax::BUILTIN_EMBED_FILE;
         let (rel, bytes) = self.read_embed(builtin, args, span)?;
         match String::from_utf8(bytes) {
@@ -299,11 +295,7 @@ impl<'a> Interp<'a> {
     /// D-CTIO1: `embed_bytes("path") -> [U8]` — the binary-safe sibling of
     /// `embed_file`. Same path-safety (E0957) and missing/unreadable (E0955)
     /// checks, but no UTF-8 requirement: any file embeds as raw bytes.
-    fn eval_embed_bytes(
-        &mut self,
-        args: &[CallArg],
-        span: Span,
-    ) -> Result<CtValue, Diagnostic> {
+    fn eval_embed_bytes(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
         let builtin = crate::Syntax::BUILTIN_EMBED_BYTES;
         let (_rel, bytes) = self.read_embed(builtin, args, span)?;
         Ok(CtValue::Bytes(bytes))
@@ -361,18 +353,15 @@ impl<'a> Interp<'a> {
     ///   4. Unreachable / fetch error → **E3414**.
     ///   5. Push `ComptimeInput { path: "url:{url}", hash: actual }` to `embed_inputs`.
     ///   6. Return `CtValue::Str(content)` (non-UTF-8 content needs its own code).
-    fn eval_net_fetch(
-        &mut self,
-        args: Vec<CtValue>,
-        span: Span,
-    ) -> Result<CtValue, Diagnostic> {
+    fn eval_net_fetch(&mut self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
         let url = match args.first() {
             Some(CtValue::Str(s)) => s.clone(),
             _ => return Err(Diagnostic::error(
                 "E3414",
                 "fetch: first argument must be a string URL".to_string(),
                 "`core.net.fetch` expects a string URL as its first argument".to_string(),
-                "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`".to_string(),
+                "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`"
+                    .to_string(),
                 Some(span),
             )),
         };
@@ -381,7 +370,8 @@ impl<'a> Interp<'a> {
             _ => return Err(Diagnostic::error(
                 "E3414",
                 "fetch: `sha256:` argument missing or not a string".to_string(),
-                "`core.net.fetch` requires a `sha256:` labelled argument for content verification".to_string(),
+                "`core.net.fetch` requires a `sha256:` labelled argument for content verification"
+                    .to_string(),
                 "add `sha256: '<64-hex-chars>'` as the second argument".to_string(),
                 Some(span),
             )),
@@ -401,7 +391,8 @@ impl<'a> Interp<'a> {
                 "E3413",
                 format!("fetch: sha256 mismatch for `{url}`"),
                 format!("expected `{expected}` but content hashes to `{actual}`"),
-                "update the `sha256:` pin to match the content, or verify the URL is correct".to_string(),
+                "update the `sha256:` pin to match the content, or verify the URL is correct"
+                    .to_string(),
                 Some(span),
             ));
         }
@@ -464,8 +455,10 @@ impl<'a> Interp<'a> {
                     return self.eval_net_fetch(argv, span);
                 }
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate.
-                let is_tier2 = matches!(module.as_str(),
-                    "core.fs" | "core.env" | "core.io" | "core.exec" | "core.net");
+                let is_tier2 = matches!(
+                    module.as_str(),
+                    "core.fs" | "core.env" | "core.io" | "core.exec" | "core.net"
+                );
                 if is_tier2 {
                     if self.impure_depth == 0 {
                         return Err(Diagnostic::error(
@@ -537,14 +530,20 @@ fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
     match v {
         CtValue::Float(f) => Ok(*f),
         CtValue::Int(n) => Ok(*n as f64),
-        _ => Err(unsupported("non-numeric argument to comptime math call", span)),
+        _ => Err(unsupported(
+            "non-numeric argument to comptime math call",
+            span,
+        )),
     }
 }
 
 fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
     match v {
         CtValue::Str(s) => Ok(s.as_str()),
-        _ => Err(unsupported("non-string argument to comptime string call", span)),
+        _ => Err(unsupported(
+            "non-string argument to comptime string call",
+            span,
+        )),
     }
 }
 
@@ -557,8 +556,9 @@ fn apply_core_call(
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
-        args.get(i)
-            .ok_or_else(|| unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span))
+        args.get(i).ok_or_else(|| {
+            unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span)
+        })
     };
 
     match (module, method) {
@@ -567,13 +567,11 @@ fn apply_core_call(
         ("core.math", "floor") => Ok(CtValue::Float(as_float(one(0)?, span)?.floor())),
         ("core.math", "ceil") => Ok(CtValue::Float(as_float(one(0)?, span)?.ceil())),
         ("core.math", "round") => Ok(CtValue::Int(as_float(one(0)?, span)?.round() as i64)),
-        ("core.math", "abs") => {
-            match one(0)? {
-                CtValue::Int(n) => Ok(CtValue::Int(n.abs())),
-                CtValue::Float(f) => Ok(CtValue::Float(f.abs())),
-                _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
-            }
-        }
+        ("core.math", "abs") => match one(0)? {
+            CtValue::Int(n) => Ok(CtValue::Int(n.abs())),
+            CtValue::Float(f) => Ok(CtValue::Float(f.abs())),
+            _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
+        },
         ("core.math", "pow") => {
             let a = as_float(one(0)?, span)?;
             let b = as_float(one(1)?, span)?;
@@ -640,11 +638,17 @@ fn apply_core_call(
         ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {
             Err(Diagnostic::error(
                 "E3410",
-                format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate", module, method),
+                format!(
+                    "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
+                    module, method
+                ),
                 "ambient I/O (filesystem, environment, process) is not allowed in \
-                 pure comptime evaluation".to_string(),
-                format!("wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
-                         pass `--allow-impure` to the build"),
+                 pure comptime evaluation"
+                    .to_string(),
+                format!(
+                    "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
+                         pass `--allow-impure` to the build"
+                ),
                 Some(span),
             ))
         }
@@ -668,10 +672,14 @@ fn apply_impure_core_call(
     span: Span,
     base_dir: &std::path::Path,
 ) -> Result<CtValue, Diagnostic> {
-    let one = |i: usize| args.get(i).ok_or_else(|| unsupported(
-        &format!("`{}.{}` (wrong number of arguments)", module, method),
-        span,
-    ));
+    let one = |i: usize| {
+        args.get(i).ok_or_else(|| {
+            unsupported(
+                &format!("`{}.{}` (wrong number of arguments)", module, method),
+                span,
+            )
+        })
+    };
     match (module, method) {
         ("core.fs", "read") => {
             let path_str = as_string(one(0)?, span)?;
@@ -701,7 +709,8 @@ fn apply_impure_core_call(
             "E3412",
             format!("`core.net.{}()` is not available at comptime", method),
             "only `core.net.fetch(url, sha256:)` is supported at compile time".to_string(),
-            "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads".to_string(),
+            "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads"
+                .to_string(),
             Some(span),
         )),
         _ => Err(unsupported(

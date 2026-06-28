@@ -63,7 +63,13 @@ impl SemVer {
             Some(b) => Some(validate_build(b)?),
             None => None,
         };
-        Some(Self { major, minor, patch, pre, build })
+        Some(Self {
+            major,
+            minor,
+            patch,
+            pre,
+            build,
+        })
     }
 
     /// `true` when `self` is API-compatible with (an upgrade from) `other`
@@ -312,7 +318,13 @@ struct Partial {
 fn parse_partial(s: &str) -> Option<Partial> {
     let s = s.trim();
     if s.is_empty() {
-        return Some(Partial { major: None, minor: None, patch: None, pre: None, build: None });
+        return Some(Partial {
+            major: None,
+            minor: None,
+            patch: None,
+            pre: None,
+            build: None,
+        });
     }
     let (rest, build) = match s.split_once('+') {
         Some((r, b)) => (r, Some(validate_build(b)?)),
@@ -345,12 +357,24 @@ fn parse_partial(s: &str) -> Option<Partial> {
             _ => patch = val,
         }
     }
-    Some(Partial { major, minor, patch, pre, build })
+    Some(Partial {
+        major,
+        minor,
+        patch,
+        pre,
+        build,
+    })
 }
 
 /// A fully-specified version from a partial's components (missing → 0).
 fn ver(major: u64, minor: u64, patch: u64) -> SemVer {
-    SemVer { major, minor, patch, pre: None, build: None }
+    SemVer {
+        major,
+        minor,
+        patch,
+        pre: None,
+        build: None,
+    }
 }
 
 /// Parse one range (whitespace-AND of simples, or a hyphen range).
@@ -431,47 +455,101 @@ fn expand_op(op: Op, p: Partial) -> Option<Vec<Comparator>> {
     let comps = match op {
         Op::Eq => match (p.minor, p.patch) {
             (None, _) => vec![
-                Comparator { op: Op::Gte, version: ver(major, 0, 0) },
-                Comparator { op: Op::Lt, version: ver(major + 1, 0, 0) },
+                Comparator {
+                    op: Op::Gte,
+                    version: ver(major, 0, 0),
+                },
+                Comparator {
+                    op: Op::Lt,
+                    version: ver(major + 1, 0, 0),
+                },
             ],
             (Some(mi), None) => vec![
-                Comparator { op: Op::Gte, version: ver(major, mi, 0) },
-                Comparator { op: Op::Lt, version: ver(major, mi + 1, 0) },
+                Comparator {
+                    op: Op::Gte,
+                    version: ver(major, mi, 0),
+                },
+                Comparator {
+                    op: Op::Lt,
+                    version: ver(major, mi + 1, 0),
+                },
             ],
             (Some(_), Some(_)) => {
-                vec![Comparator { op: Op::Eq, version: full(p.pre.clone(), p.build.clone()) }]
+                vec![Comparator {
+                    op: Op::Eq,
+                    version: full(p.pre.clone(), p.build.clone()),
+                }]
             }
         },
         Op::Gt => {
             let c = match (p.minor, p.patch) {
-                (None, _) => Comparator { op: Op::Gte, version: ver(major + 1, 0, 0) },
-                (Some(mi), None) => Comparator { op: Op::Gte, version: ver(major, mi + 1, 0) },
+                (None, _) => Comparator {
+                    op: Op::Gte,
+                    version: ver(major + 1, 0, 0),
+                },
+                (Some(mi), None) => Comparator {
+                    op: Op::Gte,
+                    version: ver(major, mi + 1, 0),
+                },
                 (Some(mi), Some(pa)) => Comparator {
                     op: Op::Gt,
-                    version: SemVer { major, minor: mi, patch: pa, pre: p.pre.clone(), build: p.build.clone() },
+                    version: SemVer {
+                        major,
+                        minor: mi,
+                        patch: pa,
+                        pre: p.pre.clone(),
+                        build: p.build.clone(),
+                    },
                 },
             };
             vec![c]
         }
         Op::Lt => {
             let c = match (p.minor, p.patch) {
-                (None, _) => Comparator { op: Op::Lt, version: ver(major, 0, 0) },
-                (Some(mi), None) => Comparator { op: Op::Lt, version: ver(major, mi, 0) },
+                (None, _) => Comparator {
+                    op: Op::Lt,
+                    version: ver(major, 0, 0),
+                },
+                (Some(mi), None) => Comparator {
+                    op: Op::Lt,
+                    version: ver(major, mi, 0),
+                },
                 (Some(mi), Some(pa)) => Comparator {
                     op: Op::Lt,
-                    version: SemVer { major, minor: mi, patch: pa, pre: p.pre.clone(), build: p.build.clone() },
+                    version: SemVer {
+                        major,
+                        minor: mi,
+                        patch: pa,
+                        pre: p.pre.clone(),
+                        build: p.build.clone(),
+                    },
                 },
             };
             vec![c]
         }
-        Op::Gte => vec![Comparator { op: Op::Gte, version: full(p.pre.clone(), p.build.clone()) }],
+        Op::Gte => vec![Comparator {
+            op: Op::Gte,
+            version: full(p.pre.clone(), p.build.clone()),
+        }],
         Op::Lte => {
             let c = match (p.minor, p.patch) {
-                (None, _) => Comparator { op: Op::Lt, version: ver(major + 1, 0, 0) },
-                (Some(mi), None) => Comparator { op: Op::Lt, version: ver(major, mi + 1, 0) },
+                (None, _) => Comparator {
+                    op: Op::Lt,
+                    version: ver(major + 1, 0, 0),
+                },
+                (Some(mi), None) => Comparator {
+                    op: Op::Lt,
+                    version: ver(major, mi + 1, 0),
+                },
                 (Some(mi), Some(pa)) => Comparator {
                     op: Op::Lte,
-                    version: SemVer { major, minor: mi, patch: pa, pre: p.pre.clone(), build: p.build.clone() },
+                    version: SemVer {
+                        major,
+                        minor: mi,
+                        patch: pa,
+                        pre: p.pre.clone(),
+                        build: p.build.clone(),
+                    },
                 },
             };
             vec![c]
@@ -497,7 +575,7 @@ fn expand_caret(p: Partial) -> Option<Vec<Comparator>> {
     } else {
         // major == 0
         match p.minor {
-            None => ver(1, 0, 0),            // ^0
+            None => ver(1, 0, 0),                    // ^0
             Some(mi) if mi > 0 => ver(0, mi + 1, 0), // ^0.2 / ^0.2.3
             Some(mi) => match p.patch {
                 Some(pa) => ver(0, mi, pa + 1), // ^0.0.3
@@ -506,8 +584,14 @@ fn expand_caret(p: Partial) -> Option<Vec<Comparator>> {
         }
     };
     Some(vec![
-        Comparator { op: Op::Gte, version: lower },
-        Comparator { op: Op::Lt, version: upper },
+        Comparator {
+            op: Op::Gte,
+            version: lower,
+        },
+        Comparator {
+            op: Op::Lt,
+            version: upper,
+        },
     ])
 }
 
@@ -528,8 +612,14 @@ fn expand_tilde(p: Partial) -> Option<Vec<Comparator>> {
         None => ver(major + 1, 0, 0),      // ~1 → <2.0.0
     };
     Some(vec![
-        Comparator { op: Op::Gte, version: lower },
-        Comparator { op: Op::Lt, version: upper },
+        Comparator {
+            op: Op::Gte,
+            version: lower,
+        },
+        Comparator {
+            op: Op::Lt,
+            version: upper,
+        },
     ])
 }
 
@@ -552,11 +642,23 @@ fn expand_hyphen(lo: &str, hi: &str) -> Option<Vec<Comparator>> {
     // Upper bound: partial high → exclusive next; full → inclusive.
     let hmajor = hp.major?;
     let upper = match (hp.minor, hp.patch) {
-        (None, _) => Comparator { op: Op::Lt, version: ver(hmajor + 1, 0, 0) },
-        (Some(mi), None) => Comparator { op: Op::Lt, version: ver(hmajor, mi + 1, 0) },
+        (None, _) => Comparator {
+            op: Op::Lt,
+            version: ver(hmajor + 1, 0, 0),
+        },
+        (Some(mi), None) => Comparator {
+            op: Op::Lt,
+            version: ver(hmajor, mi + 1, 0),
+        },
         (Some(mi), Some(pa)) => Comparator {
             op: Op::Lte,
-            version: SemVer { major: hmajor, minor: mi, patch: pa, pre: hp.pre.clone(), build: None },
+            version: SemVer {
+                major: hmajor,
+                minor: mi,
+                patch: pa,
+                pre: hp.pre.clone(),
+                build: None,
+            },
         },
     };
     comps.push(upper);
@@ -591,7 +693,13 @@ fn set_satisfiable(set: &[Comparator]) -> bool {
     // Lower bound (version, inclusive) and upper bound (version, inclusive).
     let mut lower: Option<(SemVer, bool)> = None;
     let mut upper: Option<(SemVer, bool)> = None;
-    let release = |v: &SemVer| SemVer { major: v.major, minor: v.minor, patch: v.patch, pre: None, build: None };
+    let release = |v: &SemVer| SemVer {
+        major: v.major,
+        minor: v.minor,
+        patch: v.patch,
+        pre: None,
+        build: None,
+    };
     for c in set {
         let v = release(&c.version);
         match c.op {

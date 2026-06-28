@@ -3,10 +3,10 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::AST::{Expr, IndexKind, StrPart, Type, UnOp};
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{Expr, IndexKind, StrPart, Type, UnOp};
 use std::collections::HashSet;
 
 impl<'a> Checker<'a> {
@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
                         type_args: Vec::new(),
                         args: Vec::new(),
                         recv_type: None,
-                            resolved_ret: None,
+                        resolved_ret: None,
                     };
                 }
             }
@@ -332,8 +332,7 @@ impl<'a> Checker<'a> {
                 let t = self.infer(inner)?;
                 match op {
                     UnOp::Neg => {
-                        if t.is_float()
-                            || matches!(t, Type::Int | Type::IntN { signed: true, .. })
+                        if t.is_float() || matches!(t, Type::Int | Type::IntN { signed: true, .. })
                         {
                             Some(t)
                         } else if let Type::IntN { bits, .. } = t {
@@ -439,7 +438,10 @@ impl<'a> Checker<'a> {
                     other => {
                         self.diags.push(Diagnostic::error(
                             "E0047",
-                            format!("`?.` needs an optional on the left, but this is `{}`", other.show()),
+                            format!(
+                                "`?.` needs an optional on the left, but this is `{}`",
+                                other.show()
+                            ),
                             "optional chaining short-circuits a `T?` to absent on a missing link"
                                 .to_string(),
                             "use plain `.` here, or make the value optional first".to_string(),
@@ -469,7 +471,13 @@ impl<'a> Checker<'a> {
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
                 self.clear_uninit_mut_args(args);
                 self.infer_method_call(
-                    receiver, method, *method_span, type_args, args, recv_type, resolved_ret,
+                    receiver,
+                    method,
+                    *method_span,
+                    type_args,
+                    args,
+                    recv_type,
+                    resolved_ret,
                 )
             }
             Expr::StructLit {
@@ -499,7 +507,9 @@ impl<'a> Checker<'a> {
                                     .to_string(),
                                 Some(*span),
                             ));
-                            for (_, _, e) in fields.iter_mut() { self.infer(e); }
+                            for (_, _, e) in fields.iter_mut() {
+                                self.infer(e);
+                            }
                             return None;
                         }
                     }
@@ -575,7 +585,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E2510",
                     format!("`#{}` is only valid inside a lane `.reduce(…)`", name),
-                    "a reduce-op marker names the fold operation; it isn't a value on its own".to_string(),
+                    "a reduce-op marker names the fold operation; it isn't a value on its own"
+                        .to_string(),
                     "write `v.reduce(#Add)` / `#Mul` / `#Min` / `#Max`".to_string(),
                     Some(*span),
                 ));
@@ -613,9 +624,11 @@ impl<'a> Checker<'a> {
                 self.check_lambda(lam, expected.as_ref())
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
-            Expr::FanOut { callee, items, span } => {
-                self.infer_fan_out(callee, items, *span)
-            }
+            Expr::FanOut {
+                callee,
+                items,
+                span,
+            } => self.infer_fan_out(callee, items, *span),
             // D-CTMARKER1=C: `$name` comptime splice. Valid only in comptime contexts;
             // the Comptime interpreter resolves the value. In runtime code: E2712.
             Expr::ComptimeSplice { name: _, span } => {
@@ -632,7 +645,6 @@ impl<'a> Checker<'a> {
             }
         }
     }
-
 
     pub(crate) fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
         if self.freestanding {
@@ -656,7 +668,11 @@ impl<'a> Checker<'a> {
         }
         // D-FIXARR1: a list literal in a `[T#N]` binding context keeps the fixed-size type.
         // Sema validates element types and count, codegen emits a Rust array `[e1, …]`.
-        if let Some(Type::FixedList { elem: expected_inner, len }) = self.expected_type.clone() {
+        if let Some(Type::FixedList {
+            elem: expected_inner,
+            len,
+        }) = self.expected_type.clone()
+        {
             if elems.len() as u64 != len {
                 self.diags.push(Diagnostic::error(
                     "E0963",
@@ -668,7 +684,11 @@ impl<'a> Checker<'a> {
                         len,
                     ),
                     "a fixed-size list `[T#N]` requires exactly N elements".to_string(),
-                    format!("provide exactly {} element{}", len, if len == 1 { "" } else { "s" }),
+                    format!(
+                        "provide exactly {} element{}",
+                        len,
+                        if len == 1 { "" } else { "s" }
+                    ),
                     Some(span),
                 ));
                 return None;
@@ -681,7 +701,10 @@ impl<'a> Checker<'a> {
                 }
             }
             self.expected_type = saved;
-            return Some(Type::FixedList { elem: expected_inner, len });
+            return Some(Type::FixedList {
+                elem: expected_inner,
+                len,
+            });
         }
         if let Some(Type::List(expected_inner)) = self.expected_type.clone() {
             if let Type::TraitObject(trait_name) = expected_inner.as_ref() {
@@ -749,7 +772,11 @@ impl<'a> Checker<'a> {
         Some(Type::List(Box::new(first)))
     }
 
-    pub(crate) fn infer_tuple_lit(&mut self, fields: &mut [(String, Expr)], _span: Span) -> Option<Type> {
+    pub(crate) fn infer_tuple_lit(
+        &mut self,
+        fields: &mut [(String, Expr)],
+        _span: Span,
+    ) -> Option<Type> {
         let mut seen = HashSet::new();
         let mut typed = Vec::with_capacity(fields.len());
         for (name, expr) in fields.iter_mut() {
@@ -793,7 +820,11 @@ impl<'a> Checker<'a> {
                         if !is_printable(&t, self.registry) {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
-                                format!("`{}` doesn't know how to show {}", Syntax::BUILTIN_PRINT, t.show()),
+                                format!(
+                                    "`{}` doesn't know how to show {}",
+                                    Syntax::BUILTIN_PRINT,
+                                    t.show()
+                                ),
                                 "print shows values that have a display".to_string(),
                                 "print one of its parts instead".to_string(),
                                 Some(item.span()),
@@ -816,9 +847,11 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
-            Some(Type::Fn { ref params, ref ret, .. }) if params.len() == 1 => {
-                (params[0].clone(), ret.as_ref().map(|r| *r.clone()))
-            }
+            Some(Type::Fn {
+                ref params,
+                ref ret,
+                ..
+            }) if params.len() == 1 => (params[0].clone(), ret.as_ref().map(|r| *r.clone())),
             Some(ref other) => {
                 let msg = if let Type::Fn { params, .. } = other {
                     format!(
@@ -884,11 +917,18 @@ impl<'a> Checker<'a> {
         if len == 0 {
             Some(Type::List(Box::new(elem)))
         } else {
-            Some(Type::FixedList { elem: Box::new(elem), len })
+            Some(Type::FixedList {
+                elem: Box::new(elem),
+                len,
+            })
         }
     }
 
-    pub(crate) fn infer_map_lit(&mut self, entries: &mut [(Expr, Expr)], span: Span) -> Option<Type> {
+    pub(crate) fn infer_map_lit(
+        &mut self,
+        entries: &mut [(Expr, Expr)],
+        span: Span,
+    ) -> Option<Type> {
         if self.freestanding {
             self.diags.push(e3303(span));
         }
@@ -1058,8 +1098,13 @@ impl<'a> Checker<'a> {
                 if idx_ty != Type::Int {
                     self.diags.push(Diagnostic::error(
                         "E0505",
-                        format!("lane indexes must be {}, not {}", Type::Int.show(), idx_ty.show()),
-                        "a SIMD lane is read by position with a whole-number index starting at 0".to_string(),
+                        format!(
+                            "lane indexes must be {}, not {}",
+                            Type::Int.show(),
+                            idx_ty.show()
+                        ),
+                        "a SIMD lane is read by position with a whole-number index starting at 0"
+                            .to_string(),
                         "use an Int index, like `v[0]`".to_string(),
                         Some(index.span()),
                     ));
@@ -1068,8 +1113,15 @@ impl<'a> Checker<'a> {
                     if *num < 0 || *num >= lanes {
                         self.diags.push(Diagnostic::error(
                             "E0965",
-                            format!("lane {} is out of range for `{}` ({} lanes)", num, lane_name, lanes),
-                            format!("the valid lanes for `{}` are 0 through {}", lane_name, lanes - 1),
+                            format!(
+                                "lane {} is out of range for `{}` ({} lanes)",
+                                num, lane_name, lanes
+                            ),
+                            format!(
+                                "the valid lanes for `{}` are 0 through {}",
+                                lane_name,
+                                lanes - 1
+                            ),
                             format!("use a lane index between 0 and {}", lanes - 1),
                             Some(index.span()),
                         ));
@@ -1172,7 +1224,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn infer_field(&mut self, inner: &mut Box<Expr>, member: &str, span: Span) -> Option<Type> {
+    pub(crate) fn infer_field(
+        &mut self,
+        inner: &mut Box<Expr>,
+        member: &str,
+        span: Span,
+    ) -> Option<Type> {
         if member == "clone" {
             return self.infer(inner);
         }
@@ -1318,5 +1375,4 @@ impl<'a> Checker<'a> {
         ));
         None
     }
-
 }

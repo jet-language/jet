@@ -19,7 +19,10 @@ fn main() {
     process.run(["echo", name]) ?? return
 }
 "#;
-    assert!(codes(src).contains(&"E0721"), "direct tainted→sink must be E0721");
+    assert!(
+        codes(src).contains(&"E0721"),
+        "direct tainted→sink must be E0721"
+    );
 }
 
 /// Routing the tainted value through a `#Sanitizer fn` clears taint — the sink
@@ -35,7 +38,11 @@ fn main() {
     process.run(["echo", safe]) ?? return
 }
 "#;
-    assert!(codes(src).is_empty(), "sanitized value at sink must compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "sanitized value at sink must compile: {:?}",
+        codes(src)
+    );
 }
 
 /// Taint spreads through a binding: a value derived from a tainted value (here a
@@ -50,7 +57,10 @@ fn main() {
     process.run(["echo", cmd]) ?? return
 }
 "#;
-    assert!(codes(src).contains(&"E0721"), "taint must propagate through a binding");
+    assert!(
+        codes(src).contains(&"E0721"),
+        "taint must propagate through a binding"
+    );
 }
 
 /// Taint spreads through string interpolation: a tainted value spliced into a
@@ -65,7 +75,10 @@ fn main() {
     process.run(["echo", arg]) ?? return
 }
 "#;
-    assert!(codes(src).contains(&"E0721"), "taint must propagate through interpolation");
+    assert!(
+        codes(src).contains(&"E0721"),
+        "taint must propagate through interpolation"
+    );
 }
 
 /// A reassignment to a clean value clears taint — the local is no longer tainted.
@@ -79,7 +92,11 @@ fn main() {
     process.run(["echo", x]) ?? return
 }
 "#;
-    assert!(codes(src).is_empty(), "reassign to a clean value must clear taint: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "reassign to a clean value must clear taint: {:?}",
+        codes(src)
+    );
 }
 
 /// An ordinary (untainted) value at a sink is fine — no false positive.
@@ -91,7 +108,11 @@ fn main() {
     process.run(["echo", "hello"]) ?? return
 }
 "#;
-    assert!(codes(src).is_empty(), "clean value at sink must compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "clean value at sink must compile: {:?}",
+        codes(src)
+    );
 }
 
 /// A tainted value at a non-sink call (an ordinary `print`, an `Io` effect — not
@@ -104,7 +125,10 @@ fn main() {
     print(name)
 }
 "#;
-    assert!(!codes(src).contains(&"E0721"), "a non-sink call is not a taint sink");
+    assert!(
+        !codes(src).contains(&"E0721"),
+        "a non-sink call is not a taint sink"
+    );
 }
 
 /// I3: taint is erased in codegen — a `#Tainted` value and its bare twin generate
@@ -125,7 +149,10 @@ fn main() {
 "#;
     let a = jet::compile(tagged).expect("tagged compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
-    assert_eq!(a, b, "the #Tainted tag must leave no trace in generated Rust (I3)");
+    assert_eq!(
+        a, b,
+        "the #Tainted tag must leave no trace in generated Rust (I3)"
+    );
 }
 
 /// A `#Sanitizer fn` is a real, callable function; its body and signature behave
@@ -138,7 +165,11 @@ fn main() {
     print(clean("a b c"))
 }
 "#;
-    assert!(codes(src).is_empty(), "a #Sanitizer fn must compile and run: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "a #Sanitizer fn must compile and run: {:?}",
+        codes(src)
+    );
 }
 
 // --- D-TAINT-SAN (ratified 2026-06-25): bare `sanitizer fn` teaching error ---
@@ -153,7 +184,11 @@ fn main() {
     print(clean("a b c"))
 }
 "#;
-    assert!(codes(src).contains(&"E0059"), "bare `sanitizer fn` must teach E0059: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0059"),
+        "bare `sanitizer fn` must teach E0059: {:?}",
+        codes(src)
+    );
 }
 
 /// The teaching error fires for `sanitizer pub fn` too (the modifier may precede
@@ -166,7 +201,11 @@ fn main() {
     print(clean("a b c"))
 }
 "#;
-    assert!(codes(src).contains(&"E0059"), "bare `sanitizer pub fn` must teach E0059: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0059"),
+        "bare `sanitizer pub fn` must teach E0059: {:?}",
+        codes(src)
+    );
 }
 
 /// `sanitizer` as an ordinary identifier (a variable name) is unaffected — only
@@ -179,5 +218,9 @@ fn main() {
     print("{sanitizer}")
 }
 "#;
-    assert!(codes(src).is_empty(), "`sanitizer` as a binding name must be fine: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "`sanitizer` as a binding name must be fine: {:?}",
+        codes(src)
+    );
 }

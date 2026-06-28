@@ -27,8 +27,8 @@
 //! Lives at `.jet/cache/api/<package>.api` (committed, durable contract — the same
 //! discipline as the D-MIGRATE1 `#PublishedSchema` snapshot).
 
-use crate::AST::{Func, Item};
 use crate::Syntax;
+use crate::AST::{Func, Item};
 use std::path::{Path, PathBuf};
 
 pub const API_SNAPSHOT_VERSION: u32 = 1;
@@ -79,16 +79,21 @@ impl ApiSnapshot {
                 continue;
             }
             if let Some(rest) = line.strip_prefix("api_version = ") {
-                api_version =
-                    Some(rest.parse().map_err(|_| format!("invalid api_version: {}", rest))?);
+                api_version = Some(
+                    rest.parse()
+                        .map_err(|_| format!("invalid api_version: {}", rest))?,
+                );
             } else if let Some(rest) = line.strip_prefix("package = ") {
                 package = Some(rest.to_string());
             } else if let Some(rest) = line.strip_prefix("published_version = ") {
                 published_version = Some(rest.to_string());
             } else if line.starts_with("fn ") {
-                let name = fn_name_of(line)
-                    .ok_or_else(|| format!("malformed fn line: {}", line))?;
-                funcs.push(FrozenFn { name, signature: line.to_string() });
+                let name =
+                    fn_name_of(line).ok_or_else(|| format!("malformed fn line: {}", line))?;
+                funcs.push(FrozenFn {
+                    name,
+                    signature: line.to_string(),
+                });
             } else {
                 return Err(format!("unknown line in api snapshot: {}", line));
             }
@@ -184,7 +189,9 @@ pub fn api_cache_dir(project_root: &Path) -> PathBuf {
     if let Ok(override_dir) = std::env::var("JET_API_CACHE_DIR") {
         PathBuf::from(override_dir)
     } else {
-        project_root.join(Syntax::SOURCE_ROOT_DIR).join(Syntax::API_CACHE_SUBDIR)
+        project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(Syntax::API_CACHE_SUBDIR)
     }
 }
 
@@ -245,8 +252,8 @@ pub fn project_capability_digest(project_root: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AST::{AccessConvention, Func, Param, Type};
     use crate::Diagnostics::Span;
+    use crate::AST::{AccessConvention, Func, Param, Type};
 
     fn zero() -> Span {
         Span::new(0, 0)
@@ -303,13 +310,21 @@ mod tests {
             Item::Func(func(
                 "length",
                 true,
-                vec![param("v", AccessConvention::Read, Type::Named("Vec3".into()))],
+                vec![param(
+                    "v",
+                    AccessConvention::Read,
+                    Type::Named("Vec3".into()),
+                )],
                 Some(Type::Float),
             )),
             Item::Func(func(
                 "scale",
                 true,
-                vec![param("v", AccessConvention::Write, Type::Named("Vec3".into()))],
+                vec![param(
+                    "v",
+                    AccessConvention::Write,
+                    Type::Named("Vec3".into()),
+                )],
                 None,
             )),
             // private fn — excluded
@@ -331,7 +346,11 @@ mod tests {
             let items = vec![Item::Func(func(
                 "scale",
                 true,
-                vec![param("v", AccessConvention::Write, Type::Named("Vec3".into()))],
+                vec![param(
+                    "v",
+                    AccessConvention::Write,
+                    Type::Named("Vec3".into()),
+                )],
                 None,
             ))];
             snapshot_from_items(&items, "mathkit", ver).capability_digest()
@@ -345,7 +364,11 @@ mod tests {
             &[Item::Func(func(
                 "scale",
                 true,
-                vec![param("v", AccessConvention::Read, Type::Named("Vec3".into()))],
+                vec![param(
+                    "v",
+                    AccessConvention::Read,
+                    Type::Named("Vec3".into()),
+                )],
                 None,
             ))],
             "mathkit",
@@ -355,7 +378,11 @@ mod tests {
             &[Item::Func(func(
                 "scale",
                 true,
-                vec![param("v", AccessConvention::Write, Type::Named("Vec3".into()))],
+                vec![param(
+                    "v",
+                    AccessConvention::Write,
+                    Type::Named("Vec3".into()),
+                )],
                 None,
             ))],
             "mathkit",

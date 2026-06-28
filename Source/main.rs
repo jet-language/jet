@@ -23,8 +23,8 @@ mod CmdSupply;
 
 use CmdCompile::{run_compile_cmd, run_fix, run_fmt, run_new, run_test, run_test_cov};
 use CmdDevTools::{
-    run_bench, run_bind, run_completions, run_dev, run_doctor, run_emit_rust, run_eval, run_explain,
-    run_repl, run_serve, watch_policy_from, WatchPolicy,
+    run_bench, run_bind, run_completions, run_dev, run_doctor, run_emit_rust, run_eval,
+    run_explain, run_repl, run_serve, watch_policy_from, WatchPolicy,
 };
 use CmdPkg::{
     run_add, run_fetch, run_gc, run_remove, run_store_generations, run_store_rollback,
@@ -238,9 +238,15 @@ Get started:
 fn unknown_subcommand(cmd: &str) -> ! {
     let bin = jet::Syntax::BINARY_NAME;
     eprintln!("Error [E2101]: `{}` isn't a {} command.", cmd, bin);
-    eprintln!(" Why: every {} run starts with a command like `run`, `check`, or `new`.", bin);
+    eprintln!(
+        " Why: every {} run starts with a command like `run`, `check`, or `new`.",
+        bin
+    );
     match jet::CLI::closest_command(cmd) {
-        Some(close) => eprintln!(" Fix: did you mean `{} {}`? Run `{} help` to see them all.", bin, close, bin),
+        Some(close) => eprintln!(
+            " Fix: did you mean `{} {}`? Run `{} help` to see them all.",
+            bin, close, bin
+        ),
         None => eprintln!(" Fix: run `{} help` to see every command.", bin),
     }
     exit(ExitCodes::USAGE);
@@ -269,12 +275,18 @@ fn check_flags(raw: &[String], subcmd: &str) {
                 " Fix: did you mean `{}`? Or use `{} {} <file> -- {}` to pass it to your program",
                 close, bin, subcmd, head
             ),
-            Some(close) => eprintln!(" Fix: did you mean `{}`? (run `{} help` for the flags)", close, bin),
+            Some(close) => eprintln!(
+                " Fix: did you mean `{}`? (run `{} help` for the flags)",
+                close, bin
+            ),
             None if matches!(subcmd, "run" | "test") => eprintln!(
                 " Fix: use `{} {} <file> -- {}` to pass this flag to your program",
                 bin, subcmd, head
             ),
-            None => eprintln!(" Fix: drop the flag, or run `{} help` to see the flags", bin),
+            None => eprintln!(
+                " Fix: drop the flag, or run `{} help` to see the flags",
+                bin
+            ),
         }
         exit(ExitCodes::USAGE);
     }
@@ -412,9 +424,23 @@ fn main() {
     let known = jet::CLI::is_builtin(cmd)
         || matches!(
             cmd,
-            "lsp" | "install" | "doctor" | "completions" | "man" | "dev" | "serve" | "debug"
-                | "publish" | "yank" | "vendor" | "audit" | "sbom"
-                | "emit" | "bench" | "repl" | "schema"
+            "lsp"
+                | "install"
+                | "doctor"
+                | "completions"
+                | "man"
+                | "dev"
+                | "serve"
+                | "debug"
+                | "publish"
+                | "yank"
+                | "vendor"
+                | "audit"
+                | "sbom"
+                | "emit"
+                | "bench"
+                | "repl"
+                | "schema"
         );
     if !known {
         if let Some(bin) = find_external(cmd) {
@@ -441,8 +467,23 @@ fn main() {
     // downstream (so their flags aren't measured against the global set).
     let owns_flags = matches!(
         cmd,
-        "env" | "dev" | "serve" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
-            | "publish" | "yank" | "vendor" | "audit" | "sbom" | "repl" | "schema"
+        "env"
+            | "dev"
+            | "serve"
+            | "add"
+            | "remove"
+            | "bind"
+            | "lsp"
+            | "store"
+            | "update"
+            | "fetch"
+            | "publish"
+            | "yank"
+            | "vendor"
+            | "audit"
+            | "sbom"
+            | "repl"
+            | "schema"
     );
     if !owns_flags {
         check_flags(jet_argv, cmd);
@@ -743,7 +784,9 @@ fn main() {
         "fix" => run_fix(target, jet_argv.iter().any(|a| a == "--dry-run")),
         "new" => run_new(target, annotated),
         "test" => {
-            let update_snapshots = jet_argv.iter().any(|a| a == "--update-snapshots" || a == "-u");
+            let update_snapshots = jet_argv
+                .iter()
+                .any(|a| a == "--update-snapshots" || a == "-u");
             // D-COV1: `jet test --coverage` builds an instrumented harness and
             // reports per-function / per-line coverage after the test results.
             let coverage = jet_argv.iter().any(|a| a == "--coverage");
@@ -757,9 +800,17 @@ fn main() {
         "emit" => {
             let rust_flag = jet_argv.iter().any(|a| a == "--rust");
             if !rust_flag {
-                eprintln!("usage: {} emit --rust <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                eprintln!(
+                    "usage: {} emit --rust <file.{}>",
+                    jet::Syntax::BINARY_NAME,
+                    jet::Syntax::FILE_EXT
+                );
                 eprintln!(" Why: `emit` needs a mode flag; today only `--rust` is supported");
-                eprintln!(" Fix: run `{} emit --rust <file.{}>` to print the generated Rust", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                eprintln!(
+                    " Fix: run `{} emit --rust <file.{}>` to print the generated Rust",
+                    jet::Syntax::BINARY_NAME,
+                    jet::Syntax::FILE_EXT
+                );
                 exit(ExitCodes::USAGE);
             }
             run_emit_rust(target, mode);
@@ -790,7 +841,21 @@ fn main() {
             } else {
                 target.to_string()
             };
-            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, allow_impure, cross_target.as_deref(), verbose, capabilities_json, sbom, named_profile.as_deref(), &program_args, mode);
+            run_compile_cmd(
+                cmd,
+                &resolved,
+                emit_rust,
+                small,
+                freestanding,
+                allow_impure,
+                cross_target.as_deref(),
+                verbose,
+                capabilities_json,
+                sbom,
+                named_profile.as_deref(),
+                &program_args,
+                mode,
+            );
         }
     }
 }
@@ -862,14 +927,25 @@ fn run_upgrade() {
 /// "N problems found" count and (in human mode) one quiet `jet explain`
 /// pointer naming the first code. Suppressed entirely in `--json`, where the
 /// code is already structured.
-pub(crate) fn report_problems(mode: OutputMode, file: &str, src: &str, diags: &[jet::Diagnostics::Diagnostic]) {
+pub(crate) fn report_problems(
+    mode: OutputMode,
+    file: &str,
+    src: &str,
+    diags: &[jet::Diagnostics::Diagnostic],
+) {
     if mode.json {
         eprint!("{}", jet::render_all_json(file, src, diags));
         return;
     }
     eprint!(
         "{}",
-        jet::render_all_linked(file, src, diags, mode.color_stderr(), mode.hyperlinks_stderr())
+        jet::render_all_linked(
+            file,
+            src,
+            diags,
+            mode.color_stderr(),
+            mode.hyperlinks_stderr()
+        )
     );
     let n = diags.len();
     eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });

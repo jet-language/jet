@@ -164,5 +164,8 @@ fn later_breaking_milestones_name_their_gate() {
         }
         checked += 1;
     }
-    assert!(checked >= 1, "expected at least one non-m2 epoch-2 plan to scan");
+    assert!(
+        checked >= 1,
+        "expected at least one non-m2 epoch-2 plan to scan"
+    );
 }

@@ -111,7 +111,11 @@ impl<'a> Fmt<'a> {
                 f.write(")");
                 // D-EFF3: `#(Gpu)` effect bound between params and the arrow.
                 if let Some(effects) = &m.declared_effects {
-                    let list = effects.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                    let list = effects
+                        .iter()
+                        .map(|(n, _)| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     f.write(&format!(" #({})", list));
                 }
                 if let Some(ret) = &m.return_type {
@@ -353,7 +357,12 @@ impl<'a> Fmt<'a> {
         }
         if let Some(tr) = &f.state_transition {
             let from = tr.from.as_deref().unwrap_or(Syntax::STATE_ENTRY);
-            self.write(&format!("#{}({} -> {}) ", Syntax::KW_TRANSITION, from, tr.to));
+            self.write(&format!(
+                "#{}({} -> {}) ",
+                Syntax::KW_TRANSITION,
+                from,
+                tr.to
+            ));
         }
         if top_level {
             self.fmt_pub(f.is_pub);
@@ -677,7 +686,11 @@ impl<'a> Fmt<'a> {
                     self.write(&imp.alias);
                 }
             }
-            ImportKind::Unqualified { module_alias, items, .. } => {
+            ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } => {
                 let fmt_item = |(orig, alias): &(String, Option<String>)| {
                     if let Some(a) = alias {
                         format!("{orig} as {a}")

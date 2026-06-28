@@ -25,7 +25,11 @@ fn main() {
 use core.time as time;
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "injected Clock should compile: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "injected Clock should compile: {:?}",
+        res.err()
+    );
 }
 
 /// A `#Pure fn` drawing randomness through an injected `~Rng` param compiles.
@@ -60,7 +64,11 @@ use core.random as random;
 fn main() { print("{seeded()}") }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "cap constructors should be pure: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "cap constructors should be pure: {:?}",
+        res.err()
+    );
 }
 
 /// Ambient `time.now()` inside a `#Pure fn` is STILL E3403 — the injection is
@@ -162,7 +170,10 @@ use core.time as time;
 fn main() { print("{risky()}") }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "ambient call outside the block must still fail");
+    assert!(
+        res.is_err(),
+        "ambient call outside the block must still fail"
+    );
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
@@ -215,7 +226,11 @@ fn main() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "widened Rng draws should compile: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "widened Rng draws should compile: {:?}",
+        res.err()
+    );
 }
 
 /// `rng.pick(list)` returns the element's optional type (`[String]` → `String?`).
@@ -233,7 +248,11 @@ fn main() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "rng.pick element typing should compile: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "rng.pick element typing should compile: {:?}",
+        res.err()
+    );
 }
 
 /// Every `Rng` draw advances the stream, so a non-`~` receiver is rejected (E0202).
@@ -270,7 +289,10 @@ fn main() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "rng.shuffle without `~` on the list must fail");
+    assert!(
+        res.is_err(),
+        "rng.shuffle without `~` on the list must fail"
+    );
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
@@ -295,7 +317,11 @@ fn main() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "widened Clock surface should compile: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "widened Clock surface should compile: {:?}",
+        res.err()
+    );
 }
 
 /// `clock.advance`/`clock.wait` move the clock, so a non-`~` receiver fails (E0202).
@@ -332,5 +358,9 @@ use core.time as time;
 fn main() { print("{span_ms()}") }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "Duration value ops should be pure: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "Duration value ops should be pure: {:?}",
+        res.err()
+    );
 }

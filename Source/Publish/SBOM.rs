@@ -21,17 +21,12 @@ pub fn emit_spdx(lock: &LockFile, root_name: &str, root_version: &str) -> String
     // Document creation information.
     out.push_str("SPDXVersion: SPDX-2.3\n");
     out.push_str("DataLicense: CC0-1.0\n");
-    out.push_str(&format!(
-        "SPDXID: SPDXRef-DOCUMENT\n"
-    ));
+    out.push_str(&format!("SPDXID: SPDXRef-DOCUMENT\n"));
     out.push_str(&format!(
         "DocumentNamespace: https://jet-lang.org/spdx/{}-{}-{}\n",
         root_name, root_version, ts
     ));
-    out.push_str(&format!(
-        "DocumentName: {}-{}\n",
-        root_name, root_version
-    ));
+    out.push_str(&format!("DocumentName: {}-{}\n", root_name, root_version));
     out.push_str("Creator: Tool: jet\n");
     out.push_str(&format!("Created: {}\n", spdx_timestamp(ts)));
     out.push_str("\n");

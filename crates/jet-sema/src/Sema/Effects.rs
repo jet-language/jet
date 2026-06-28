@@ -70,8 +70,16 @@ impl Effect {
     /// body the compiler cannot inspect and for escaping function values.
     pub fn all() -> EffectSet {
         [
-            Effect::Net, Effect::Fs, Effect::Io, Effect::Db, Effect::Time,
-            Effect::Rand, Effect::Env, Effect::Exec, Effect::Log, Effect::Gpu,
+            Effect::Net,
+            Effect::Fs,
+            Effect::Io,
+            Effect::Db,
+            Effect::Time,
+            Effect::Rand,
+            Effect::Env,
+            Effect::Exec,
+            Effect::Log,
+            Effect::Gpu,
         ]
         .into_iter()
         .collect()
@@ -148,8 +156,7 @@ impl<'a> super::Checker<'a> {
             }
         }
         let direct: EffectSet = self.fx_direct.difference(before_direct).copied().collect();
-        let edges: BTreeSet<String> =
-            self.fx_edges.difference(before_edges).cloned().collect();
+        let edges: BTreeSet<String> = self.fx_edges.difference(before_edges).cloned().collect();
         let maximal = self.fx_maximal && !before_maximal;
         self.fx_callback_obligations.push(CallbackObligation {
             bound,
@@ -200,7 +207,9 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     }
     Some(match module {
         "core.fs" | "core.files" => Effect::Fs,
-        "core.net" | "jet.http" | "core.http" | "core.http.client" | "core.http.server" => Effect::Net,
+        "core.net" | "jet.http" | "core.http" | "core.http.client" | "core.http.server" => {
+            Effect::Net
+        }
         "core.time" | "jet.time" => Effect::Time,
         "core.random" => Effect::Rand,
         "core.env" => Effect::Env,
@@ -513,7 +522,10 @@ pub fn check_callback_bounds(
 pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
-        format!("the parameter is `#{} fn(…)`, so the callback must be pure", crate::Syntax::KW_PURE)
+        format!(
+            "the parameter is `#{} fn(…)`, so the callback must be pure",
+            crate::Syntax::KW_PURE
+        )
     } else {
         format!(
             "the parameter is `#({}) fn(…)`, so the callback may use only those effects",
@@ -521,13 +533,23 @@ pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
         )
     };
     let fix = if bound.is_empty() {
-        format!("pass a `#{} fn` (or a lambda that uses no effects), or widen the parameter's bound", crate::Syntax::KW_PURE)
+        format!(
+            "pass a `#{} fn` (or a lambda that uses no effects), or widen the parameter's bound",
+            crate::Syntax::KW_PURE
+        )
     } else {
-        format!("pass a callback within `#({})`, or add `{}` to the parameter's bound", show_set(bound), over_list)
+        format!(
+            "pass a callback within `#({})`, or add `{}` to the parameter's bound",
+            show_set(bound),
+            over_list
+        )
     };
     Diagnostic::error(
         "E0747",
-        format!("this callback uses the effect `{}`, which the parameter doesn't allow", over_list),
+        format!(
+            "this callback uses the effect `{}`, which the parameter doesn't allow",
+            over_list
+        ),
         format!("{}; `{}` is outside that bound", bound_desc, over_list),
         fix,
         Some(span),
@@ -552,7 +574,10 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
             "the signature declares {}, so the body may only use those; `{}` is outside that set",
             decl, over_list
         ),
-        format!("add `{}` to the effect list, or stop using it in `{}`", over_list, fn_name),
+        format!(
+            "add `{}` to the effect list, or stop using it in `{}`",
+            over_list, fn_name
+        ),
         Some(span),
     )
 }
@@ -630,10 +655,12 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         Stmt::Return(Some(e), _) => expr_handle_escape(e, handle),
         Stmt::If(i) => expr_handle_escape(&i.cond, handle)
             .or_else(|| block(&i.then_body))
-            .or_else(|| i.else_branch.as_ref().and_then(|e| else_handle_escape(e, handle))),
-        Stmt::While { cond, body, .. } => {
-            expr_handle_escape(cond, handle).or_else(|| block(body))
-        }
+            .or_else(|| {
+                i.else_branch
+                    .as_ref()
+                    .and_then(|e| else_handle_escape(e, handle))
+            }),
+        Stmt::While { cond, body, .. } => expr_handle_escape(cond, handle).or_else(|| block(body)),
         Stmt::For { kind, body, .. } => {
             let coll = match kind {
                 ForKind::Range { start, end, step } => expr_handle_escape(start, handle)
@@ -643,11 +670,15 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
             };
             coll.or_else(|| block(body))
         }
-        Stmt::Switch { subject, arms, else_body, .. } => expr_handle_escape(subject, handle)
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => expr_handle_escape(subject, handle)
             .or_else(|| {
-                arms.iter().find_map(|a| {
-                    expr_handle_escape(&a.cond, handle).or_else(|| block(&a.body))
-                })
+                arms.iter()
+                    .find_map(|a| expr_handle_escape(&a.cond, handle).or_else(|| block(&a.body)))
             })
             .or_else(|| else_body.as_ref().and_then(|b| block(b))),
         Stmt::Loop { body, .. }
@@ -661,7 +692,12 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Live { body, .. } => block(body),
         // D-CTMARKER1: comptime block erases; no handle can escape a build-time block.
         Stmt::ComptimeBlock { .. } => None,
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => expr_handle_escape(cond, handle)
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => expr_handle_escape(cond, handle)
             .or_else(|| block(then_body))
             .or_else(|| else_body.as_ref().and_then(|b| block(b))),
         Stmt::ContextBlock { fields, body, .. } => fields
@@ -681,8 +717,16 @@ fn else_handle_escape(e: &crate::AST::ElseBranch, handle: &str) -> Option<Span> 
     match e {
         ElseBranch::Else(stmts) => stmts.iter().find_map(|s| stmt_handle_escape(s, handle)),
         ElseBranch::ElseIf(i) => expr_handle_escape(&i.cond, handle)
-            .or_else(|| i.then_body.iter().find_map(|s| stmt_handle_escape(s, handle)))
-            .or_else(|| i.else_branch.as_ref().and_then(|e| else_handle_escape(e, handle))),
+            .or_else(|| {
+                i.then_body
+                    .iter()
+                    .find_map(|s| stmt_handle_escape(s, handle))
+            })
+            .or_else(|| {
+                i.else_branch
+                    .as_ref()
+                    .and_then(|e| else_handle_escape(e, handle))
+            }),
     }
 }
 
@@ -865,15 +909,31 @@ pub fn e0742(
 ) -> Diagnostic {
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
-        format!("`{}` declares `{}` `#{}`, so impls must be pure", trait_name, method, crate::Syntax::KW_PURE)
+        format!(
+            "`{}` declares `{}` `#{}`, so impls must be pure",
+            trait_name,
+            method,
+            crate::Syntax::KW_PURE
+        )
     } else {
-        format!("`{}` bounds `{}` to `#({})`, so impls may use only those", trait_name, method, show_set(bound))
+        format!(
+            "`{}` bounds `{}` to `#({})`, so impls may use only those",
+            trait_name,
+            method,
+            show_set(bound)
+        )
     };
     Diagnostic::error(
         "E0742",
-        format!("this `{}` impl uses the effect `{}`, which the trait doesn't allow", method, over_list),
+        format!(
+            "this `{}` impl uses the effect `{}`, which the trait doesn't allow",
+            method, over_list
+        ),
         format!("{}; `{}` is outside that bound", bound_desc, over_list),
-        format!("remove the `{}` work from this impl, or widen the bound on the trait method", over_list),
+        format!(
+            "remove the `{}` work from this impl, or widen the bound on the trait method",
+            over_list
+        ),
         Some(span),
     )
 }

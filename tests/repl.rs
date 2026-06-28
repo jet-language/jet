@@ -46,7 +46,8 @@ fn run_transcript_file(txt: &str) {
         }
         let got = actual_lines.get(ai).copied().unwrap_or("<no output>");
         assert_eq!(
-            got, exp.as_str(),
+            got,
+            exp.as_str(),
             "transcript line {}: expected {:?} but got {:?}\nfull actual output:\n{}",
             i + 1,
             exp,
@@ -111,20 +112,36 @@ fn repl_reset_clears_bindings() {
 fn repl_function_declare_and_call() {
     let inputs = &["fn double(n: Int) -> Int { return n * 2 }", "double(5)"];
     let out = run_transcript(inputs, None);
-    assert!(out.contains("ok"), "no ok for fn declaration, got: {:?}", out);
-    assert!(out.contains("10 : Int"), "fn call result wrong, got: {:?}", out);
+    assert!(
+        out.contains("ok"),
+        "no ok for fn declaration, got: {:?}",
+        out
+    );
+    assert!(
+        out.contains("10 : Int"),
+        "fn call result wrong, got: {:?}",
+        out
+    );
 }
 
 #[test]
 fn repl_hard_reject_unsafe() {
     let out = run_transcript(&["#Unsafe { }"], None);
-    assert!(out.contains("E1802"), "expected E1802 hard-reject, got: {:?}", out);
+    assert!(
+        out.contains("E1802"),
+        "expected E1802 hard-reject, got: {:?}",
+        out
+    );
 }
 
 #[test]
 fn repl_hard_reject_extern_rust() {
     let out = run_transcript(&["extern rust \"mycrate\" { }"], None);
-    assert!(out.contains("E1802"), "expected E1802 hard-reject, got: {:?}", out);
+    assert!(
+        out.contains("E1802"),
+        "expected E1802 hard-reject, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -156,7 +173,11 @@ fn repl_help_shows_commands() {
 fn repl_load_hello() {
     // Load examples/features/01_hello.jet and check it runs.
     let out = run_transcript(&[":load examples/features/01_hello.jet"], None);
-    assert!(out.contains("hello, world"), "load should run main, got: {:?}", out);
+    assert!(
+        out.contains("hello, world"),
+        "load should run main, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -176,12 +197,19 @@ fn repl_move_across_inputs_string() {
     // The error will be E0121 ("was given away") because the binding_stubs_src
     // emits a synthetic consume of s before the check.
     assert!(
-        out.contains("error") && (out.contains("E0121") || out.contains("given away") || out.contains("nothing named")),
+        out.contains("error")
+            && (out.contains("E0121")
+                || out.contains("given away")
+                || out.contains("nothing named")),
         "expected use-after-move error, got: {:?}",
         out
     );
     // Must NOT silently succeed (no echo of the moved value).
-    assert!(!out.trim_end().ends_with(": String"), "moved value should not be echoed, got: {:?}", out);
+    assert!(
+        !out.trim_end().ends_with(": String"),
+        "moved value should not be echoed, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -190,7 +218,11 @@ fn repl_move_within_single_input_still_errors() {
     let inputs = &["x @= \"hi\"", "y @= x; x"];
     let out = run_transcript(inputs, None);
     // Within the same input, sema catches the use after move.
-    assert!(out.contains("error"), "expected within-input move error, got: {:?}", out);
+    assert!(
+        out.contains("error"),
+        "expected within-input move error, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -199,7 +231,11 @@ fn repl_move_int_not_moved() {
     let inputs = &["s @= 42", "t @= s", "s"];
     let out = run_transcript(inputs, None);
     // s should still be accessible since Int is copy.
-    assert!(out.contains("42 : Int"), "Int should be accessible after copy, got: {:?}", out);
+    assert!(
+        out.contains("42 : Int"),
+        "Int should be accessible after copy, got: {:?}",
+        out
+    );
 }
 
 // ── D-REPL-FUEL=A: :run ──────────────────────────────────────────────────
@@ -214,7 +250,11 @@ fn repl_run_empty_session() {
         out
     );
     // Must not produce an error code.
-    assert!(!out.contains("error [E"), "empty :run must not error, got: {:?}", out);
+    assert!(
+        !out.contains("error [E"),
+        "empty :run must not error, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -272,13 +312,15 @@ fn repl_probe_exact_outputs() {
     // --project probe
     let fixture = std::env::temp_dir().join("jet_repl_project_probe");
     std::fs::create_dir_all(&fixture).ok();
-    std::fs::write(fixture.join("helper.jet"),
-        "fn add_three(x: Int) -> Int { return x + 3; }\n").ok();
+    std::fs::write(
+        fixture.join("helper.jet"),
+        "fn add_three(x: Int) -> Int { return x + 3; }\n",
+    )
+    .ok();
     let project_dir = fixture.to_string_lossy().to_string();
     let out = run_transcript(&["add_three(10)"], Some(&project_dir));
     eprintln!("PROJECT_ADD_THREE: {:?}", out);
     std::fs::remove_dir_all(&fixture).ok();
-
 }
 
 // ── D-REPL10=A: --project mode ───────────────────────────────────────────
@@ -291,7 +333,8 @@ fn repl_project_loads_items() {
     std::fs::write(
         fixture.join("helper.jet"),
         "fn add_three(x: Int) -> Int { return x + 3; }\n",
-    ).expect("write fixture");
+    )
+    .expect("write fixture");
 
     let project_dir = fixture.to_string_lossy().to_string();
     // With --project, add_three() is available without `use`.
@@ -328,8 +371,16 @@ fn repl_use_import_accepted() {
     // A bare `use core.math as math` import is accepted (not "expected a
     // statement, found `use`"), and reports `ok`.
     let out = run_transcript(&["use core.math as math"], None);
-    assert!(out.contains("ok"), "import should be accepted, got: {:?}", out);
-    assert!(!out.contains("E0003"), "import must not be a statement error, got: {:?}", out);
+    assert!(
+        out.contains("ok"),
+        "import should be accepted, got: {:?}",
+        out
+    );
+    assert!(
+        !out.contains("E0003"),
+        "import must not be a statement error, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -364,8 +415,16 @@ fn repl_use_import_persists_across_unrelated_input() {
 fn repl_use_unknown_core_module_rejected() {
     // An unknown core module reports E1001 and is not retained.
     let out = run_transcript(&["use core.bogus as b"], None);
-    assert!(out.contains("E1001"), "unknown core module should error, got: {:?}", out);
-    assert!(!out.contains("ok"), "bad import must not be accepted, got: {:?}", out);
+    assert!(
+        out.contains("E1001"),
+        "unknown core module should error, got: {:?}",
+        out
+    );
+    assert!(
+        !out.contains("ok"),
+        "bad import must not be accepted, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -373,7 +432,11 @@ fn repl_use_repl_incompatible_module_hard_rejected() {
     // Modules the interpreter can't run (fs, tasks, …) hard-reject with E1802
     // before being treated as an import.
     let out = run_transcript(&["use core.fs as fs"], None);
-    assert!(out.contains("E1802"), "core.fs should hard-reject, got: {:?}", out);
+    assert!(
+        out.contains("E1802"),
+        "core.fs should hard-reject, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -419,7 +482,11 @@ fn repl_core_math_multiple_calls() {
     assert!(out.contains("3"), "floor(3.7) should be 3, got: {:?}", out);
     assert!(out.contains("3"), "ceil(2.1) should be 3, got: {:?}", out);
     assert!(out.contains("5"), "abs(-5) should be 5, got: {:?}", out);
-    assert!(!out.contains("E0956"), "no E0956 for whitelisted calls, got: {:?}", out);
+    assert!(
+        !out.contains("E0956"),
+        "no E0956 for whitelisted calls, got: {:?}",
+        out
+    );
 }
 
 #[test]
@@ -437,11 +504,7 @@ fn repl_core_math_pow_inline() {
 #[test]
 fn repl_core_result_stored_in_binding() {
     // The result of a whitelisted core call can be stored and used.
-    let inputs = &[
-        "use core.math as math",
-        "r @= math.sqrt(9.0)",
-        "r",
-    ];
+    let inputs = &["use core.math as math", "r @= math.sqrt(9.0)", "r"];
     let out = run_transcript(inputs, None);
     assert!(
         out.contains("3") && !out.contains("E0956"),

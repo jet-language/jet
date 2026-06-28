@@ -56,15 +56,36 @@ fn fmt_rewrites_capability_keywords_to_sigils() {
     let src = "fn bump(mut n: Int) {\n    n += 1\n}\n\nfn archive(take name: String) -> view String {\n    return name\n}\n\nstruct Acc {\n    n: Int\n\n    fn step(mut self) {\n        self.n += 1\n    }\n}\n\nfn main() {\n    x: Int := 1\n    bump(mut x)\n    print(archive(take \"v\"))\n}\n";
     let out = jet::format_source(src).expect("fmt should recover capability keywords");
     assert!(out.contains("n: ~Int"), "param write → `: ~T`, got:\n{out}");
-    assert!(out.contains("name: ^String"), "param move → `: ^T`, got:\n{out}");
-    assert!(out.contains("-> &String"), "view return → `-> &T`, got:\n{out}");
-    assert!(out.contains("fn step(~self)"), "receiver write → `~self`, got:\n{out}");
-    assert!(out.contains("bump(~x)"), "call-site write → `~x`, got:\n{out}");
-    assert!(out.contains("archive(^\"v\")"), "call-site move → `^…`, got:\n{out}");
+    assert!(
+        out.contains("name: ^String"),
+        "param move → `: ^T`, got:\n{out}"
+    );
+    assert!(
+        out.contains("-> &String"),
+        "view return → `-> &T`, got:\n{out}"
+    );
+    assert!(
+        out.contains("fn step(~self)"),
+        "receiver write → `~self`, got:\n{out}"
+    );
+    assert!(
+        out.contains("bump(~x)"),
+        "call-site write → `~x`, got:\n{out}"
+    );
+    assert!(
+        out.contains("archive(^\"v\")"),
+        "call-site move → `^…`, got:\n{out}"
+    );
     // No retired keyword spelling survives.
     assert!(!out.contains("mut "), "no `mut ` keyword left, got:\n{out}");
-    assert!(!out.contains("take "), "no `take ` keyword left, got:\n{out}");
-    assert!(!out.contains("view "), "no `view ` keyword left, got:\n{out}");
+    assert!(
+        !out.contains("take "),
+        "no `take ` keyword left, got:\n{out}"
+    );
+    assert!(
+        !out.contains("view "),
+        "no `view ` keyword left, got:\n{out}"
+    );
     let twice = jet::format_source(&out).expect("sigil output re-fmts");
     assert_eq!(out, twice, "sigil fmt must be idempotent");
 }
@@ -185,7 +206,10 @@ fn fmt_if_expression_and_strips_redundant_condition_parens() {
         out.contains("    if a > b {"),
         "expected paren-free statement-if condition, got:\n{out}"
     );
-    assert!(out.contains("} else {"), "expected else branch, got:\n{out}");
+    assert!(
+        out.contains("} else {"),
+        "expected else branch, got:\n{out}"
+    );
     let twice = jet::format_source(&out).expect("if-expression output should re-fmt");
     assert_eq!(out, twice, "if-expression formatting must be idempotent");
 }
@@ -439,7 +463,10 @@ fn assert_fmt_stable(src: &str, label: &str) {
             jet::render_diagnostics(label, src, &d)
         )
     });
-    assert_eq!(out, src, "{label}: fmt changed the source\n--- got ---\n{out}");
+    assert_eq!(
+        out, src,
+        "{label}: fmt changed the source\n--- got ---\n{out}"
+    );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "{label}: fmt is not idempotent");
 }
@@ -466,8 +493,7 @@ fn fmt_if_else_chain_one_multiline_expands_all() {
     let src = "fn main() {\n    if a { x() } else {\n        y()\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should accept the mixed chain");
     assert_eq!(
-        out,
-        "fn main() {\n    if a {\n        x()\n    } else {\n        y()\n    }\n}\n",
+        out, "fn main() {\n    if a {\n        x()\n    } else {\n        y()\n    }\n}\n",
         "mixed if/else chain should expand wholesale, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("expanded chain should re-fmt");
@@ -550,7 +576,10 @@ fn fmt_preserves_single_line_if_expr_branch() {
 /// Assert every needle appears in `format_source(src)`, then that fmt is stable.
 fn assert_fmt_keeps(src: &str, needles: &[&str], label: &str) {
     let out = jet::format_source(src).unwrap_or_else(|d| {
-        panic!("fmt failed for {label}:\n{}", jet::render_diagnostics(label, src, &d))
+        panic!(
+            "fmt failed for {label}:\n{}",
+            jet::render_diagnostics(label, src, &d)
+        )
     });
     for needle in needles {
         assert!(
@@ -559,7 +588,10 @@ fn assert_fmt_keeps(src: &str, needles: &[&str], label: &str) {
         );
     }
     let twice = jet::format_source(&out).expect("second fmt should succeed");
-    assert_eq!(out, twice, "{label}: fmt is not idempotent\n--- got ---\n{out}");
+    assert_eq!(
+        out, twice,
+        "{label}: fmt is not idempotent\n--- got ---\n{out}"
+    );
 }
 
 #[test]
@@ -621,8 +653,14 @@ struct Particle {
     );
     // And no `derive Encode`/`derive Decode` body lines leak in.
     let out = jet::format_source(src).unwrap();
-    assert!(!out.contains("derive Encode"), "no leaked body derive:\n{out}");
-    assert!(!out.contains("derive Decode"), "no leaked body derive:\n{out}");
+    assert!(
+        !out.contains("derive Encode"),
+        "no leaked body derive:\n{out}"
+    );
+    assert!(
+        !out.contains("derive Decode"),
+        "no leaked body derive:\n{out}"
+    );
 }
 
 #[test]
@@ -660,7 +698,10 @@ struct Score {
     assert_fmt_keeps(src, &["derive Comparable"], "body derive line");
     // And it must NOT be promoted to a bracket marker.
     let out = jet::format_source(src).unwrap();
-    assert!(!out.contains("#[Comparable]"), "body derive must not become bracket:\n{out}");
+    assert!(
+        !out.contains("#[Comparable]"),
+        "body derive must not become bracket:\n{out}"
+    );
 }
 
 #[test]
@@ -724,7 +765,10 @@ fn fmt_box_drawing_comment_does_not_panic() {
     // round-trip verbatim.
     let src = "fn main() {\n    x @= foo()\n        // \u{2502}\u{250c}\u{2514}\u{2500}\n        .bar()\n    print(x)\n}\n";
     let out = jet::format_source(src).expect("fmt should not panic on box-drawing comments");
-    assert!(out.contains('\u{250c}') && out.contains('\u{2502}'), "box glyphs dropped:\n{out}");
+    assert!(
+        out.contains('\u{250c}') && out.contains('\u{2502}'),
+        "box glyphs dropped:\n{out}"
+    );
     let twice = jet::format_source(&out).expect("box-drawing fmt must re-fmt");
     assert_eq!(out, twice, "box-drawing fmt must be idempotent");
 }
@@ -774,7 +818,10 @@ fn fmt_keeps_parens_around_binary_receiver() {
     );
     // The common case must NOT gain spurious parens.
     let plain = jet::format_source("fn main() {\n    a @= 1 + 2 * 3\n    print(a)\n}\n").unwrap();
-    assert!(plain.contains("a @= 1 + 2 * 3"), "added spurious parens:\n{plain}");
+    assert!(
+        plain.contains("a @= 1 + 2 * 3"),
+        "added spurious parens:\n{plain}"
+    );
     let twice = jet::format_source(&out).expect("paren fmt must re-fmt");
     assert_eq!(out, twice, "paren fmt must be idempotent");
 }
@@ -900,7 +947,10 @@ fn main() {
         "bare payload variant `Square(side)` must gain leading dot, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("second fmt of dot-form must succeed");
-    assert_eq!(out, twice, "dot-form variant patterns must be fmt-idempotent");
+    assert_eq!(
+        out, twice,
+        "dot-form variant patterns must be fmt-idempotent"
+    );
 }
 
 #[test]
@@ -912,7 +962,10 @@ fn fmt_comptime_splice_stability() {
     let src = "derive Debug for T {\n    info @= T.reflect()\n    tname @= info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn main() {\n    print(\"ok\")\n}\n";
     let once = jet::format_source(src).expect("fmt should accept derive with $name in string");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
-    assert_eq!(once, twice, "derive body with $name in emit string must be fmt-idempotent");
+    assert_eq!(
+        once, twice,
+        "derive body with $name in emit string must be fmt-idempotent"
+    );
 
     // Standalone `$name` expression (outside emit string) round-trips as `$name`.
     let splice_src = "derive Named for T {\n    tname @= \"test\"\n    x @= $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn main() {}\n";
@@ -977,7 +1030,11 @@ fn main() {
     print(\"{x} {s}\")
 }
 ";
-    assert_fmt_keeps(src, &["x@ Int = 42", "s: String = \"hi\""], "explicit binding");
+    assert_fmt_keeps(
+        src,
+        &["x@ Int = 42", "s: String = \"hi\""],
+        "explicit binding",
+    );
     let once = jet::format_source(src).expect("fmt should accept explicit-type bindings");
     let twice = jet::format_source(&once).expect("second fmt of explicit bindings must succeed");
     assert_eq!(once, twice, "explicit-type binding fmt must be idempotent");
@@ -1023,7 +1080,11 @@ fn main() {
     print(c2(5, 0, 3))
 }
 ";
-    assert_fmt_keeps(src, &["use math.{clamp, clamp as c2}"], "selective import with alias");
+    assert_fmt_keeps(
+        src,
+        &["use math.{clamp, clamp as c2}"],
+        "selective import with alias",
+    );
     let once = jet::format_source(src).expect("fmt should accept selective imports");
     let twice = jet::format_source(&once).expect("second fmt of selective imports must succeed");
     assert_eq!(once, twice, "selective import fmt must be idempotent");

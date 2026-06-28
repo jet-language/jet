@@ -71,8 +71,16 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::StoreEnt
         offline: true,
     };
     let r = Provider::realize(&spec, &table, &ctx).expect("library realizes offline");
-    Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin, &r.rlib)
-        .expect("records into hangar")
+    Store::record(
+        roots,
+        &r.name,
+        &r.version,
+        &r.reference,
+        &r.out,
+        &r.bin,
+        &r.rlib,
+    )
+    .expect("records into hangar")
 }
 
 /// `use jsonutil;` resolves a realized library and `jsonutil.parse(...)` works.
@@ -100,7 +108,10 @@ fn realized_library_is_consumed_with_use() {
     );
 
     let entry = realize_into_hangar(&roots, &producer, "jsonutil");
-    assert!(entry.bin.is_empty(), "a library stages no PATH bin: {entry:?}");
+    assert!(
+        entry.bin.is_empty(),
+        "a library stages no PATH bin: {entry:?}"
+    );
 
     // Consumer project: declares the dependency, then `use`s the library. The
     // dep is a remote (git) ref — its source isn't on disk as a path dep, so the
@@ -153,7 +164,10 @@ fn executable_is_not_importable() {
     write(&producer.join("bin/deploy"), "#!/bin/sh\necho deploying\n");
 
     let entry = realize_into_hangar(&roots, &producer, "deploy");
-    assert!(!entry.bin.is_empty(), "an executable stages a PATH bin: {entry:?}");
+    assert!(
+        !entry.bin.is_empty(),
+        "an executable stages a PATH bin: {entry:?}"
+    );
 
     let consumer = s.join("app");
     write(

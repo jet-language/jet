@@ -14,10 +14,10 @@
 //! the resolved capability, never `Infer`. Determinism: params and statements are
 //! visited in source order; no hashed iteration feeds the decision.
 
+use crate::Syntax;
 use crate::AST::{
     AccessConvention, ElseBranch, Expr, ForKind, Func, IfStmt, Item, LValue, ProgramBundle, Stmt,
 };
-use crate::Syntax;
 use std::collections::HashMap;
 
 /// Lattice rank for elevation. `Read`/`Infer` floor at 0; `Move` dominates.
@@ -103,13 +103,13 @@ fn resolve_fn(f: &mut Func, method_map: &HashMap<(String, String), AccessConvent
         .params
         .iter()
         .filter(|p| p.convention == AccessConvention::Infer)
-        .filter_map(|p| {
-            p.ty.base_name().map(|n| (p.name.clone(), n.to_string()))
-        })
+        .filter_map(|p| p.ty.base_name().map(|n| (p.name.clone(), n.to_string())))
         .collect();
     // Floor every inferred param at Read, then elevate from the body.
-    let mut caps: HashMap<String, AccessConvention> =
-        infer.iter().map(|n| (n.clone(), AccessConvention::Read)).collect();
+    let mut caps: HashMap<String, AccessConvention> = infer
+        .iter()
+        .map(|n| (n.clone(), AccessConvention::Read))
+        .collect();
     scan_stmts(&f.body, &mut caps, method_map, &param_types);
     for p in f.params.iter_mut() {
         if p.convention == AccessConvention::Infer {
@@ -209,7 +209,12 @@ fn scan_stmt(
             }
             scan_stmts(body, caps, method_map, param_types);
         }
-        Stmt::Switch { subject, arms, else_body, .. } => {
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
             scan_expr(subject, caps, method_map, param_types);
             for a in arms {
                 scan_expr(&a.cond, caps, method_map, param_types);
@@ -230,7 +235,12 @@ fn scan_stmt(
         | Stmt::Transact { body, .. } => scan_stmts(body, caps, method_map, param_types),
         // D-CTMARKER1: comptime block erases; walk body conservatively for caps scan.
         Stmt::ComptimeBlock { body, .. } => scan_stmts(body, caps, method_map, param_types),
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             scan_expr(cond, caps, method_map, param_types);
             scan_stmts(then_body, caps, method_map, param_types);
             if let Some(eb) = else_body {
@@ -278,7 +288,12 @@ fn scan_expr(
                 scan_arg(a, caps, method_map, param_types);
             }
         }
-        Expr::MethodCall { receiver, method, args, .. } => {
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
             // Receiver-method mutation signal: if the receiver is rooted at an
             // inferred param whose type `T` is known, and `(T, method)` has an
             // explicit non-Read receiver convention, elevate the param.

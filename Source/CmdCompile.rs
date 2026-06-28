@@ -48,7 +48,10 @@ fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> Bui
             if mode.json {
                 eprint!("{}", jet::render_all_json("<cli>", "", &[diag]));
             } else {
-                eprint!("{}", jet::render_all_colored("<cli>", "", &[diag], mode.color_stderr()));
+                eprint!(
+                    "{}",
+                    jet::render_all_colored("<cli>", "", &[diag], mode.color_stderr())
+                );
             }
             std::process::exit(jet::ExitCodes::USER_ERROR);
         }
@@ -165,7 +168,17 @@ pub(crate) fn run_compile_cmd(
 
     match cmd {
         "build" => {
-            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks, verbose, cross_target, mode);
+            build(
+                file,
+                &rust_code,
+                bin_path(file),
+                profile,
+                ffi_link.as_ref(),
+                &clinks,
+                verbose,
+                cross_target,
+                mode,
+            );
             println!("built: {}", bin_path(file).display());
             if let Some(triple) = cross_target {
                 println!("target: {}", triple);
@@ -183,7 +196,17 @@ pub(crate) fn run_compile_cmd(
         }
         "run" => {
             let out = bin_path(file);
-            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks, verbose, cross_target, mode);
+            build(
+                file,
+                &rust_code,
+                out.clone(),
+                profile,
+                ffi_link.as_ref(),
+                &clinks,
+                verbose,
+                cross_target,
+                mode,
+            );
             if cross_target.is_some() {
                 eprintln!("note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)");
                 exit(ExitCodes::OK);
@@ -290,7 +313,12 @@ pub(crate) fn run_fix(file: &str, dry_run: bool) {
         eprintln!("error: couldn't write {}: {}", file, e);
         exit(ExitCodes::USER_ERROR);
     });
-    println!("{}: applied {} fix{}", file, n, if n == 1 { "" } else { "es" });
+    println!(
+        "{}: applied {} fix{}",
+        file,
+        n,
+        if n == 1 { "" } else { "es" }
+    );
 }
 
 pub(crate) fn run_new(name: &str, annotated: bool) {
@@ -320,7 +348,11 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         eprintln!("error: couldn't write .jet/main.jet: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
-    fs::write(dir.join(".gitignore"), "build/\n.jet-build/\n.jet/lock\n.jet/cache/\n").unwrap_or_else(|e| {
+    fs::write(
+        dir.join(".gitignore"),
+        "build/\n.jet-build/\n.jet/lock\n.jet/cache/\n",
+    )
+    .unwrap_or_else(|e| {
         eprintln!("error: couldn't write .gitignore: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
@@ -628,7 +660,10 @@ fn test_bin_path(path: &Path) -> PathBuf {
 fn validate_target(triple: &str, mode: OutputMode) {
     // rustc --print target-list gives the full list; if the output contains
     // the triple exactly (one per line), the target is known.
-    let out = Command::new("rustc").arg("--print").arg("target-list").output();
+    let out = Command::new("rustc")
+        .arg("--print")
+        .arg("target-list")
+        .output();
     let known = match out {
         Ok(o) if o.status.success() => {
             let list = String::from_utf8_lossy(&o.stdout);
@@ -647,7 +682,10 @@ fn validate_target(triple: &str, mode: OutputMode) {
     let sysroot = Command::new("rustc").arg("--print").arg("sysroot").output();
     if let Ok(o) = sysroot {
         let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        let target_lib = PathBuf::from(&root).join("lib").join("rustlib").join(triple);
+        let target_lib = PathBuf::from(&root)
+            .join("lib")
+            .join("rustlib")
+            .join(triple);
         if !target_lib.exists() {
             let diag = jet::Sema::e3302(triple);
             let src = format!("// cross-build for {}", triple);
@@ -733,7 +771,11 @@ pub(crate) fn build(
         }
     }
 
-    step(format!("rustc      {} -> {}", rs_path.display(), bin.display()));
+    step(format!(
+        "rustc      {} -> {}",
+        rs_path.display(),
+        bin.display()
+    ));
     let mut cmd = Command::new("rustc");
     cmd.arg("--edition").arg("2021");
     // E2-M15: cross-compilation target triple.
@@ -750,7 +792,10 @@ pub(crate) fn build(
         }
         // D-BUILDPROFILE1: `--release` / `--profile=release` — full opt-level=3.
         BuildProfile::Release => {
-            cmd.arg("-C").arg("opt-level=3").arg("-C").arg("strip=symbols");
+            cmd.arg("-C")
+                .arg("opt-level=3")
+                .arg("-C")
+                .arg("strip=symbols");
             if ffi.is_none() {
                 cmd.arg("-C").arg("lto=thin");
             }
@@ -763,8 +808,12 @@ pub(crate) fn build(
         BuildProfile::Named(opt) => {
             match opt {
                 OptimizeLevel::None => { /* opt-level=0 is the default */ }
-                OptimizeLevel::Basic => { cmd.arg("-O"); }
-                OptimizeLevel::Full => { cmd.arg("-C").arg("opt-level=3"); }
+                OptimizeLevel::Basic => {
+                    cmd.arg("-O");
+                }
+                OptimizeLevel::Full => {
+                    cmd.arg("-C").arg("opt-level=3");
+                }
             }
             cmd.arg("-C").arg("strip=symbols");
             if ffi.is_none() {
@@ -895,7 +944,10 @@ mod missing_c_lib_tests {
 
     #[test]
     fn detects_bare_form() {
-        assert_eq!(missing_c_lib("ld: cannot find -lsqlite3\n").as_deref(), Some("sqlite3"));
+        assert_eq!(
+            missing_c_lib("ld: cannot find -lsqlite3\n").as_deref(),
+            Some("sqlite3")
+        );
     }
 
     #[test]

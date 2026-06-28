@@ -1,6 +1,6 @@
 use super::*;
-use crate::AST::Func;
 use crate::Diagnostics::Diagnostic;
+use crate::AST::Func;
 use std::collections::{HashMap, HashSet};
 
 /// Return E3401 if `fn_name` (which is marked `pure`) calls an impure function.
@@ -15,7 +15,9 @@ pub fn e3401(
     let why = if path.is_empty() {
         format!(
             "`{}` is impure, but `{}` is declared `#{} fn`",
-            call_name, pure_fn_name, crate::Syntax::KW_PURE
+            call_name,
+            pure_fn_name,
+            crate::Syntax::KW_PURE
         )
     } else {
         format!(
@@ -27,11 +29,16 @@ pub fn e3401(
     };
     Diagnostic::error(
         "E3401",
-        format!("`{}` calls the impure function `{}`", pure_fn_name, call_name),
+        format!(
+            "`{}` calls the impure function `{}`",
+            pure_fn_name, call_name
+        ),
         why,
         format!(
             "mark `{}` as `#{} fn`, or remove the call from `{}`",
-            call_name, crate::Syntax::KW_PURE, pure_fn_name
+            call_name,
+            crate::Syntax::KW_PURE,
+            pure_fn_name
         ),
         Some(span),
     )
@@ -41,7 +48,10 @@ pub fn e3401(
 pub fn e3402(call_name: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
     Diagnostic::error(
         "E3402",
-        format!("`{}` is not allowed during a sandboxed package build", call_name),
+        format!(
+            "`{}` is not allowed during a sandboxed package build",
+            call_name
+        ),
         "package builds run with ambient I/O and network access disabled (D-PURE2)".to_string(),
         "compute this value at compile time or pass it in as a parameter".to_string(),
         span,
@@ -52,9 +62,15 @@ pub fn e3402(call_name: &str, span: Option<crate::Diagnostics::Span>) -> Diagnos
 pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
     Diagnostic::error(
         "E3403",
-        format!("`{}` is non-deterministic and cannot appear in a pure evaluation", what),
+        format!(
+            "`{}` is non-deterministic and cannot appear in a pure evaluation",
+            what
+        ),
         "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
-        format!("remove this call, or do not mark the enclosing function `#{}`", crate::Syntax::KW_PURE),
+        format!(
+            "remove this call, or do not mark the enclosing function `#{}`",
+            crate::Syntax::KW_PURE
+        ),
         span,
     )
 }
@@ -70,7 +86,10 @@ pub(crate) fn is_impure_builtin(name: &str) -> bool {
 /// D-STDIN1=A: std module calls that are impure (read from environment/stdin).
 /// Unlike `is_nondeterministic_core` (E3403), these fire E3401 in pure context.
 pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
-    matches!((module, method), ("core.io", "stdin" | "input" | "read_all_input"))
+    matches!(
+        (module, method),
+        ("core.io", "stdin" | "input" | "read_all_input")
+    )
 }
 
 /// E3403: std calls that are non-deterministic — their result depends on wall
@@ -90,10 +109,7 @@ pub(crate) fn is_nondeterministic_core(module: &str, method: &str) -> bool {
 /// impure call found (with the call-trace path so the user sees exactly
 /// what broke purity). Stops at the first violation per function to avoid
 /// a flood of errors.
-pub fn check_pure_fn(
-    f: &Func,
-    funcs: &HashMap<String, FuncSig>,
-) -> Vec<Diagnostic> {
+pub fn check_pure_fn(f: &Func, funcs: &HashMap<String, FuncSig>) -> Vec<Diagnostic> {
     if !f.is_pure {
         return Vec::new();
     }
@@ -167,7 +183,12 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
-        Stmt::Switch { subject, arms, else_body, .. } => {
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
             if let Some(d) = check_pure_expr(subject, pure_fn, funcs) {
                 return Some(d);
             }
@@ -190,7 +211,12 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
-        Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
+        Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. } => {
             for st in body {
                 if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
                     return Some(d);
@@ -202,7 +228,12 @@ pub(crate) fn check_pure_stmt(
         // D-CTMARKER1: comptime block is build-time only; pure by construction.
         Stmt::ComptimeBlock { .. } => None,
         // D-WHEN1: check both arms of a comptime if for purity (conservative).
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             if let Some(d) = check_pure_expr(cond, pure_fn, funcs) {
                 return Some(d);
             }
@@ -274,9 +305,7 @@ pub(crate) fn check_pure_if(
             }
             None
         }
-        Some(crate::AST::ElseBranch::ElseIf(nested)) => {
-            check_pure_if(nested, pure_fn, funcs)
-        }
+        Some(crate::AST::ElseBranch::ElseIf(nested)) => check_pure_if(nested, pure_fn, funcs),
         None => None,
     }
 }
@@ -341,39 +370,40 @@ fn check_pure_expr_with_path(
             }
             None
         }
-        Expr::Binary(_, left, right, _) => {
-            rec!(left).or_else(|| rec!(right))
-        }
+        Expr::Binary(_, left, right, _) => rec!(left).or_else(|| rec!(right)),
         Expr::Unary(_, operand, _) => rec!(operand),
-        Expr::Index { base, index, .. } => {
-            rec!(base).or_else(|| rec!(index))
-        }
-        Expr::Slice { base, start, end, .. } => {
-            rec!(base).or_else(|| rec!(start)).or_else(|| rec!(end))
-        }
+        Expr::Index { base, index, .. } => rec!(base).or_else(|| rec!(index)),
+        Expr::Slice {
+            base, start, end, ..
+        } => rec!(base).or_else(|| rec!(start)).or_else(|| rec!(end)),
         Expr::Field(inner, _, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _) => rec!(inner),
         Expr::OptField { base, .. } => rec!(base),
-        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
-            rec!(cond)
-                .or_else(|| {
-                    for st in then_body {
-                        if let Some(d) = rec_stmt!(st) {
-                            return Some(d);
-                        }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => rec!(cond)
+            .or_else(|| {
+                for st in then_body {
+                    if let Some(d) = rec_stmt!(st) {
+                        return Some(d);
                     }
-                    None
-                })
-                .or_else(|| rec!(then_value))
-                .or_else(|| {
-                    for st in else_body {
-                        if let Some(d) = rec_stmt!(st) {
-                            return Some(d);
-                        }
+                }
+                None
+            })
+            .or_else(|| rec!(then_value))
+            .or_else(|| {
+                for st in else_body {
+                    if let Some(d) = rec_stmt!(st) {
+                        return Some(d);
                     }
-                    None
-                })
-                .or_else(|| rec!(else_value))
-        }
+                }
+                None
+            })
+            .or_else(|| rec!(else_value)),
         Expr::ListLit(items, _) => {
             for item in items {
                 if let Some(d) = rec!(item) {
@@ -413,17 +443,20 @@ fn check_pure_expr_with_path(
             }
             None
         }
-        Expr::Tainted(inner, _) | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _) => rec!(inner),
+        Expr::Tainted(inner, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _) => rec!(inner),
         Expr::Try(inner, _, _) => rec!(inner),
-        Expr::OrFallback { value, fallback, .. } => {
-            rec!(value).or_else(|| {
-                use crate::AST::OrFallback as OF;
-                match fallback {
-                    OF::Value(fe) => rec!(fe),
-                    OF::Return(..) | OF::Panic { .. } => None,
-                }
-            })
-        }
+        Expr::OrFallback {
+            value, fallback, ..
+        } => rec!(value).or_else(|| {
+            use crate::AST::OrFallback as OF;
+            match fallback {
+                OF::Value(fe) => rec!(fe),
+                OF::Return(..) | OF::Panic { .. } => None,
+            }
+        }),
         Expr::CallValue { callee, args, .. } => {
             if let Some(d) = rec!(callee) {
                 return Some(d);
@@ -533,7 +566,12 @@ fn check_pure_stmt_with_path(
             }
             None
         }
-        Stmt::Switch { subject, arms, else_body, .. } => {
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
             if let Some(d) = rec!(subject) {
                 return Some(d);
             }
@@ -556,7 +594,12 @@ fn check_pure_stmt_with_path(
             }
             None
         }
-        Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
+        Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. } => {
             for st in body {
                 if let Some(d) = rec_s!(st) {
                     return Some(d);
@@ -567,7 +610,12 @@ fn check_pure_stmt_with_path(
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
         // D-CTMARKER1: comptime block is build-time only; pure by construction.
         Stmt::ComptimeBlock { .. } => None,
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             if let Some(d) = rec!(cond) {
                 return Some(d);
             }
@@ -666,7 +714,15 @@ pub fn check_pure_program_root(
     let mut diags = Vec::new();
     if let Some(f) = ast_funcs.get(entry_fn) {
         visited.insert(entry_fn.to_string());
-        check_pure_fn_body_transitive(f, entry_fn, funcs_sig, ast_funcs, &mut path, &mut visited, &mut diags);
+        check_pure_fn_body_transitive(
+            f,
+            entry_fn,
+            funcs_sig,
+            ast_funcs,
+            &mut path,
+            &mut visited,
+            &mut diags,
+        );
     }
     diags
 }
@@ -725,7 +781,9 @@ fn walk_expr_for_calls(
             if let Some(callee_ast) = ast_funcs.get(name.as_str()) {
                 if visited.insert(name.to_string()) {
                     path.push(name.to_string());
-                    check_pure_fn_body_transitive(callee_ast, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                    check_pure_fn_body_transitive(
+                        callee_ast, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                    );
                     path.pop();
                     if !diags.is_empty() {
                         return;
@@ -734,17 +792,23 @@ fn walk_expr_for_calls(
             }
             // Recurse into args.
             for arg in &c.args {
-                walk_expr_for_calls(&arg.expr, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                walk_expr_for_calls(
+                    &arg.expr, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                );
                 if !diags.is_empty() {
                     return;
                 }
             }
         }
         Expr::MethodCall { receiver, args, .. } => {
-            walk_expr_for_calls(receiver, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+            walk_expr_for_calls(
+                receiver, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+            );
             if diags.is_empty() {
                 for arg in args {
-                    walk_expr_for_calls(&arg.expr, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                    walk_expr_for_calls(
+                        &arg.expr, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                    );
                     if !diags.is_empty() {
                         return;
                     }
@@ -766,10 +830,16 @@ fn walk_expr_for_calls(
                 walk_expr_for_calls(index, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             }
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice {
+            base, start, end, ..
+        } => {
             walk_expr_for_calls(base, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-            if diags.is_empty() { walk_expr_for_calls(start, root_fn, funcs_sig, ast_funcs, path, visited, diags); }
-            if diags.is_empty() { walk_expr_for_calls(end, root_fn, funcs_sig, ast_funcs, path, visited, diags); }
+            if diags.is_empty() {
+                walk_expr_for_calls(start, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+            }
+            if diags.is_empty() {
+                walk_expr_for_calls(end, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+            }
         }
         Expr::Field(inner, _, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _) => {
             walk_expr_for_calls(inner, root_fn, funcs_sig, ast_funcs, path, visited, diags);
@@ -777,40 +847,67 @@ fn walk_expr_for_calls(
         Expr::OptField { base, .. } => {
             walk_expr_for_calls(base, root_fn, funcs_sig, ast_funcs, path, visited, diags);
         }
-        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
             walk_expr_for_calls(cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
                 for st in then_body {
                     walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
-            if diags.is_empty() { walk_expr_for_calls(then_value, root_fn, funcs_sig, ast_funcs, path, visited, diags); }
+            if diags.is_empty() {
+                walk_expr_for_calls(
+                    then_value, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                );
+            }
             if diags.is_empty() {
                 for st in else_body {
                     walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
-            if diags.is_empty() { walk_expr_for_calls(else_value, root_fn, funcs_sig, ast_funcs, path, visited, diags); }
+            if diags.is_empty() {
+                walk_expr_for_calls(
+                    else_value, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                );
+            }
         }
         Expr::ListLit(items, _) => {
             for item in items {
                 walk_expr_for_calls(item, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
         Expr::MapLit(pairs, _) => {
             for (k, v) in pairs {
                 walk_expr_for_calls(k, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if diags.is_empty() { walk_expr_for_calls(v, root_fn, funcs_sig, ast_funcs, path, visited, diags); }
-                if !diags.is_empty() { return; }
+                if diags.is_empty() {
+                    walk_expr_for_calls(v, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
         Expr::StructLit { fields, .. } => {
             for (_, _, v) in fields {
                 walk_expr_for_calls(v, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
         Expr::EnumLit { args, .. } => {
@@ -820,16 +917,23 @@ fn walk_expr_for_calls(
                     crate::AST::EnumLitArg::Named { expr, .. } => expr,
                 };
                 walk_expr_for_calls(expr, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
-        Expr::Tainted(inner, _) | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _) => {
+        Expr::Tainted(inner, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _) => {
             walk_expr_for_calls(inner, root_fn, funcs_sig, ast_funcs, path, visited, diags);
         }
         Expr::Try(inner, _, _) => {
             walk_expr_for_calls(inner, root_fn, funcs_sig, ast_funcs, path, visited, diags);
         }
-        Expr::OrFallback { value, fallback, .. } => {
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
             walk_expr_for_calls(value, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
                 use crate::AST::OrFallback as OF;
@@ -842,8 +946,12 @@ fn walk_expr_for_calls(
             walk_expr_for_calls(callee, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
                 for arg in args {
-                    walk_expr_for_calls(&arg.expr, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    walk_expr_for_calls(
+                        &arg.expr, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                    );
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
         }
@@ -852,14 +960,18 @@ fn walk_expr_for_calls(
             if diags.is_empty() {
                 for item in items {
                     walk_expr_for_calls(item, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
         }
         Expr::TupleLit(fields, _, _) => {
             for (_, v) in fields {
                 walk_expr_for_calls(v, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
         // Leaf expressions (literals, ident, etc.) have no calls.
@@ -881,18 +993,30 @@ fn walk_stmt_for_calls(
     }
     use crate::AST::Stmt;
     match s {
-        Stmt::Val(b) => walk_expr_for_calls(&b.init, root_fn, funcs_sig, ast_funcs, path, visited, diags),
-        Stmt::Assign { value, .. } => walk_expr_for_calls(value, root_fn, funcs_sig, ast_funcs, path, visited, diags),
-        Stmt::Return(Some(e), _) => walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags),
+        Stmt::Val(b) => {
+            walk_expr_for_calls(&b.init, root_fn, funcs_sig, ast_funcs, path, visited, diags)
+        }
+        Stmt::Assign { value, .. } => {
+            walk_expr_for_calls(value, root_fn, funcs_sig, ast_funcs, path, visited, diags)
+        }
+        Stmt::Return(Some(e), _) => {
+            walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags)
+        }
         Stmt::Return(None, _) => {}
-        Stmt::Expr(e) => walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags),
-        Stmt::If(if_stmt) => walk_if_for_calls(if_stmt, root_fn, funcs_sig, ast_funcs, path, visited, diags),
+        Stmt::Expr(e) => {
+            walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags)
+        }
+        Stmt::If(if_stmt) => {
+            walk_if_for_calls(if_stmt, root_fn, funcs_sig, ast_funcs, path, visited, diags)
+        }
         Stmt::While { cond, body, .. } => {
             walk_expr_for_calls(cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
                 for st in body {
                     walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
         }
@@ -901,49 +1025,84 @@ fn walk_stmt_for_calls(
             match kind {
                 ForKind::Range { start, end, step } => {
                     walk_expr_for_calls(start, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if diags.is_empty() { walk_expr_for_calls(end, root_fn, funcs_sig, ast_funcs, path, visited, diags); }
+                    if diags.is_empty() {
+                        walk_expr_for_calls(
+                            end, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                        );
+                    }
                     if diags.is_empty() {
                         if let Some(step_e) = step {
-                            walk_expr_for_calls(step_e, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                            walk_expr_for_calls(
+                                step_e, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                            );
                         }
                     }
                 }
                 ForKind::In { collection } => {
-                    walk_expr_for_calls(collection, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                    walk_expr_for_calls(
+                        collection, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                    );
                 }
             }
             if diags.is_empty() {
                 for st in body {
                     walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
         }
-        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } => {
+        Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. } => {
             for st in body {
                 walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
-        Stmt::Switch { subject, arms, else_body, .. } => {
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
             walk_expr_for_calls(subject, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
                 for arm in arms {
-                    walk_expr_for_calls(&arm.cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                    walk_expr_for_calls(
+                        &arm.cond, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                    );
                     if diags.is_empty() {
                         for st in &arm.body {
-                            walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                            if !diags.is_empty() { return; }
+                            walk_stmt_for_calls(
+                                st, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                            );
+                            if !diags.is_empty() {
+                                return;
+                            }
                         }
                     }
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
             if diags.is_empty() {
                 if let Some(eb) = else_body {
                     for st in eb {
-                        walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                        if !diags.is_empty() { return; }
+                        walk_stmt_for_calls(
+                            st, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                        );
+                        if !diags.is_empty() {
+                            return;
+                        }
                     }
                 }
             }
@@ -951,19 +1110,30 @@ fn walk_stmt_for_calls(
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
         // D-CTMARKER1: comptime block is build-time only; no runtime calls to check.
         Stmt::ComptimeBlock { .. } => {}
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             walk_expr_for_calls(cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
                 for st in then_body {
                     walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
             if diags.is_empty() {
                 if let Some(eb) = else_body {
                     for st in eb {
-                        walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                        if !diags.is_empty() { return; }
+                        walk_stmt_for_calls(
+                            st, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                        );
+                        if !diags.is_empty() {
+                            return;
+                        }
                     }
                 }
             }
@@ -971,18 +1141,24 @@ fn walk_stmt_for_calls(
         Stmt::ContextBlock { fields, body, .. } => {
             for (_, e, _) in fields {
                 walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
             for st in body {
                 walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
         // D-TERM1 (ratified 2026-06-22): walk live block body for call-chain purity.
         Stmt::Live { body, .. } => {
             for st in body {
                 walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                if !diags.is_empty() { return; }
+                if !diags.is_empty() {
+                    return;
+                }
             }
         }
         // D-DET1: skip `assume_deterministic { … }` bodies (suspension). The
@@ -1000,11 +1176,21 @@ fn walk_if_for_calls(
     visited: &mut HashSet<String>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    walk_expr_for_calls(&if_stmt.cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+    walk_expr_for_calls(
+        &if_stmt.cond,
+        root_fn,
+        funcs_sig,
+        ast_funcs,
+        path,
+        visited,
+        diags,
+    );
     if diags.is_empty() {
         for st in &if_stmt.then_body {
             walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-            if !diags.is_empty() { return; }
+            if !diags.is_empty() {
+                return;
+            }
         }
     }
     if diags.is_empty() {
@@ -1012,7 +1198,9 @@ fn walk_if_for_calls(
             Some(crate::AST::ElseBranch::Else(stmts)) => {
                 for st in stmts {
                     walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-                    if !diags.is_empty() { return; }
+                    if !diags.is_empty() {
+                        return;
+                    }
                 }
             }
             Some(crate::AST::ElseBranch::ElseIf(nested)) => {

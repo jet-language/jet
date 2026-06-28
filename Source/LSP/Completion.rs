@@ -1,10 +1,10 @@
 //! Completion: keyword/type tables + completion assembly.
 
-use crate::AST;
 use crate::Syntax;
+use crate::AST;
 
-use super::JSON::json_escape;
 use super::SymbolDB::{SymKind, SymbolDB};
+use super::JSON::json_escape;
 
 /// LSP completion item kinds (standard integers).
 #[allow(dead_code)]

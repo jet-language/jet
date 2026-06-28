@@ -9,12 +9,10 @@ mod Expressions;
 mod Items;
 mod Statements;
 
-use crate::AST::{
-    BinOp, ElseBranch, Func, IfStmt, Item, LValue, Program, Stmt,
-};
 use crate::Diagnostics::Span;
 use crate::Lexer::{comments, TokKind, Token};
 use crate::Syntax;
+use crate::AST::{BinOp, ElseBranch, Func, IfStmt, Item, LValue, Program, Stmt};
 
 const INDENT: usize = 4;
 
@@ -298,15 +296,26 @@ fn stmt_end(stmt: &Stmt) -> usize {
                     .map(|a| a.body.last().map(stmt_end).unwrap_or(a.span.end))
             })
             .unwrap_or(0),
-        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.end,
-        Stmt::Loop { body: inner, span: s, .. } => inner.last().map(stmt_end).unwrap_or(s.end),
+        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {
+            s.end
+        }
+        Stmt::Loop {
+            body: inner,
+            span: s,
+            ..
+        } => inner.last().map(stmt_end).unwrap_or(s.end),
         Stmt::Unsafe { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Impure { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Region { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Caps { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Grant { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
-        Stmt::ComptimeIf { else_body, then_body, span, .. } => else_body
+        Stmt::ComptimeIf {
+            else_body,
+            then_body,
+            span,
+            ..
+        } => else_body
             .as_ref()
             .and_then(|b| b.last())
             .or_else(|| then_body.last())
@@ -457,11 +466,7 @@ impl<'a> Fmt<'a> {
     /// `.`? `from` is the receiver's end offset, `to` is the method/field's
     /// start offset; a `\n` in between means the chain was broken on purpose.
     fn chain_break_between(&self, from: usize, to: usize) -> bool {
-        from <= to
-            && self
-                .src
-                .get(from..to)
-                .is_some_and(|s| s.contains('\n'))
+        from <= to && self.src.get(from..to).is_some_and(|s| s.contains('\n'))
     }
 
     fn end_block(&mut self) {
@@ -482,10 +487,7 @@ impl<'a> Fmt<'a> {
             && body.len() == 1
             && is_simple_stmt(&body[0])
             && !self.span_has_comment(open, close)
-            && self
-                .src
-                .get(open..close)
-                .is_some_and(|s| !s.contains('\n'))
+            && self.src.get(open..close).is_some_and(|s| !s.contains('\n'))
     }
 
     /// True if any tracked comment falls inside `open..close` (gate c).
@@ -620,7 +622,9 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Return(_, s) => s.start,
         Stmt::If(i) => i.span.start,
         Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::Switch { span, .. } => span.start,
-        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.start,
+        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {
+            s.start
+        }
         Stmt::Loop { span: s, .. } => s.start,
         Stmt::Unsafe { span, .. } => span.start,
         Stmt::Impure { span, .. } => span.start,

@@ -3,13 +3,11 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::AST::{
-    AccessConvention, BinOp, Call, EnumLitArg, Expr, Lambda, LambdaBody, Stmt, Type,
-};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0901, e0904};
 use crate::Syntax;
+use crate::AST::{AccessConvention, BinOp, Call, EnumLitArg, Expr, Lambda, LambdaBody, Stmt, Type};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -76,7 +74,11 @@ impl<'a> Checker<'a> {
         ret.map(|r| *r)
     }
 
-    pub(crate) fn check_lambda(&mut self, lam: &mut Lambda, expected: Option<&Type>) -> Option<Type> {
+    pub(crate) fn check_lambda(
+        &mut self,
+        lam: &mut Lambda,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
         let (exp_params, exp_ret) = match expected {
             Some(Type::Fn { params, ret, .. }) => (Some(params.as_slice()), ret.as_ref()),
             _ => (None, None),
@@ -374,7 +376,8 @@ impl<'a> Checker<'a> {
                                     "`{}` was not moved here, so the lambda cannot take it (`^`)",
                                     name
                                 ),
-                                "this function has read access only and does not own the value".to_string(),
+                                "this function has read access only and does not own the value"
+                                    .to_string(),
                                 format!(
                                     "take ownership in this function with `{}: {}{}`",
                                     name,
@@ -547,7 +550,10 @@ impl<'a> Checker<'a> {
                     }
                     // D-FAILCOMP1: filter_map(f: T->V?E) → [V]; refine from closure's ok type.
                     if Collections::is_closure_method(method) && i == 0 && method == "filter_map" {
-                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
                             if let Type::Result { ok, .. } = r.as_ref() {
                                 refined_ret = Some(Type::List(Box::new(*ok.clone())));
                             }
@@ -555,13 +561,19 @@ impl<'a> Checker<'a> {
                     }
                     // D-AUTOPAR1=A: par_map → [V]; refine V from closure's return type.
                     if Collections::is_closure_method(method) && i == 0 && method == "par_map" {
-                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
                             refined_ret = Some(Type::List(Box::new((**r).clone())));
                         }
                     }
                     // D-AUTOPAR1=A: par_fold → acc; refine from closure's return type.
                     if Collections::is_closure_method(method) && i == 1 && method == "par_fold" {
-                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
                             refined_ret = Some((**r).clone());
                         }
                     }
@@ -574,8 +586,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                     // Skip E0108 for closure methods with ret: None (open return type).
-                    let open_ret = matches!(et, Type::Fn { ret: None, .. })
-                        && matches!(gt, Type::Fn { .. });
+                    let open_ret =
+                        matches!(et, Type::Fn { ret: None, .. }) && matches!(gt, Type::Fn { .. });
                     if !open_ret && !fn_types_compatible(et, &gt) && gt != *et {
                         self.diags.push(Diagnostic::error(
                             "E0108",
@@ -643,7 +655,11 @@ impl<'a> Checker<'a> {
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
-            return if method == "pick" { Some(Type::Option(Box::new(Type::Int))) } else { None };
+            return if method == "pick" {
+                Some(Type::Option(Box::new(Type::Int)))
+            } else {
+                None
+            };
         }
         // `shuffle` edits the list in place — the list arg needs `~`.
         if method == "shuffle" && args[0].convention != AccessConvention::Write {
@@ -664,7 +680,11 @@ impl<'a> Checker<'a> {
                 "pass a `[T]` value".to_string(),
                 Some(args[0].expr.span()),
             ));
-            return if method == "pick" { Some(Type::Option(Box::new(Type::Int))) } else { None };
+            return if method == "pick" {
+                Some(Type::Option(Box::new(Type::Int)))
+            } else {
+                None
+            };
         };
         // `pick` returns `T?`; `shuffle` returns nothing.
         if method == "pick" {
@@ -673,7 +693,6 @@ impl<'a> Checker<'a> {
             None
         }
     }
-
 
     pub(crate) fn infer_method_call(
         &mut self,
@@ -688,7 +707,9 @@ impl<'a> Checker<'a> {
         // D-PATHFS1 / E0340: `read_dir` is not a Jet API — teach the typed path path.
         if method == "read_dir" {
             self.infer(receiver); // still type-check the receiver
-            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
             self.diags.push(Diagnostic::error(
                 "E0340",
                 "`read_dir` is not a method in Jet".to_string(),
@@ -711,8 +732,12 @@ impl<'a> Checker<'a> {
                     if !args.is_empty() {
                         self.diags.push(Diagnostic::error(
                             "E0103",
-                            format!("`.{}()` takes no arguments", crate::Syntax::METHOD_DISTINCT_RAW),
-                            "`.raw()` simply unwraps the base value — no arguments needed".to_string(),
+                            format!(
+                                "`.{}()` takes no arguments",
+                                crate::Syntax::METHOD_DISTINCT_RAW
+                            ),
+                            "`.raw()` simply unwraps the base value — no arguments needed"
+                                .to_string(),
                             "write `.raw()` with no arguments".to_string(),
                             Some(span),
                         ));
@@ -722,9 +747,15 @@ impl<'a> Checker<'a> {
             }
             self.diags.push(Diagnostic::error(
                 "E0311",
-                format!("`.{}()` is only valid on a distinct type value", crate::Syntax::METHOD_DISTINCT_RAW),
+                format!(
+                    "`.{}()` is only valid on a distinct type value",
+                    crate::Syntax::METHOD_DISTINCT_RAW
+                ),
                 "`.raw()` unwraps a distinct type to its base representation".to_string(),
-                format!("only call `.raw()` on a value whose type was declared with `{} distinct`", crate::Syntax::SIGIL_BIND_IMMUT),
+                format!(
+                    "only call `.raw()` on a value whose type was declared with `{} distinct`",
+                    crate::Syntax::SIGIL_BIND_IMMUT
+                ),
                 Some(span),
             ));
             return None;
@@ -733,14 +764,22 @@ impl<'a> Checker<'a> {
         // assertion. Recognized by checking the receiver type.
         if method == Syntax::BUILTIN_SNAPSHOT {
             let recv_ty = self.infer(receiver);
-            if recv_ty.as_ref().map(|t| t == &Type::Named("__JetExpect__".to_string())).unwrap_or(false) {
+            if recv_ty
+                .as_ref()
+                .map(|t| t == &Type::Named("__JetExpect__".to_string()))
+                .unwrap_or(false)
+            {
                 // Valid: snapshot assertion — void, no return type.
                 return None;
             }
             // Not from expect() — error.
             self.diags.push(Diagnostic::error(
                 "E2901",
-                format!("`.{}()` is only valid on the result of `{}(…)`", Syntax::BUILTIN_SNAPSHOT, Syntax::BUILTIN_EXPECT),
+                format!(
+                    "`.{}()` is only valid on the result of `{}(…)`",
+                    Syntax::BUILTIN_SNAPSHOT,
+                    Syntax::BUILTIN_EXPECT
+                ),
                 "snapshot testing: call `expect(value).snapshot()` in a test block".to_string(),
                 format!("e.g. `{}(my_result).snapshot()`", Syntax::BUILTIN_EXPECT),
                 Some(span),
@@ -774,8 +813,14 @@ impl<'a> Checker<'a> {
                 if let Some(ns) = self.core_imports.get(alias).cloned() {
                     let submodule = format!("{}.{}", ns, leaf);
                     if crate::Syntax::is_known_core_module(&submodule) {
-                        let ret =
-                            self.infer_core_call(&submodule, method, *alias_span, span, type_args, args);
+                        let ret = self.infer_core_call(
+                            &submodule,
+                            method,
+                            *alias_span,
+                            span,
+                            type_args,
+                            args,
+                        );
                         if is_polymorphic_core_special(&submodule, method) {
                             *resolved_ret_out = ret.clone();
                         }
@@ -816,7 +861,8 @@ impl<'a> Checker<'a> {
                 }
             }
             {
-                let has_variant = self.resolve_enum_variants_cloned(type_name)
+                let has_variant = self
+                    .resolve_enum_variants_cloned(type_name)
                     .map(|v| v.contains_key(method))
                     .unwrap_or(false);
                 if has_variant {
@@ -861,7 +907,10 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                return Some(Type::Apply { name: "Set".to_string(), args: vec![elem_ty] });
+                return Some(Type::Apply {
+                    name: "Set".to_string(),
+                    args: vec![elem_ty],
+                });
             }
             // D-COLLBREADTH1=A: `Deque.new()` → `Deque<T>`.
             // T is inferred from the type annotation's expected type.
@@ -872,7 +921,10 @@ impl<'a> Checker<'a> {
                     }
                     _ => Type::Int,
                 };
-                return Some(Type::Apply { name: "Deque".to_string(), args: vec![elem_ty] });
+                return Some(Type::Apply {
+                    name: "Deque".to_string(),
+                    args: vec![elem_ty],
+                });
             }
             // D-PATHFS1: `Path.from(str)` — typed path constructor.
             if type_name == "Path" && method == "from" && !self.registry.contains("Path") {
@@ -885,7 +937,9 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Named("Path".to_string()));
             }
             // D-SIMD2 / D-LINALG1: a STATIC method on a built-in math type —
@@ -903,8 +957,20 @@ impl<'a> Checker<'a> {
                                 if g != want {
                                     self.diags.push(Diagnostic::error(
                                         "E0128",
-                                        format!("`{}.{}()` expects a `{}`, got `{}`", type_name, method, want.name(), g.name()),
-                                        format!("`{}.{}` builds a `{}` from a `{}`", type_name, method, type_name, want.name()),
+                                        format!(
+                                            "`{}.{}()` expects a `{}`, got `{}`",
+                                            type_name,
+                                            method,
+                                            want.name(),
+                                            g.name()
+                                        ),
+                                        format!(
+                                            "`{}.{}` builds a `{}` from a `{}`",
+                                            type_name,
+                                            method,
+                                            type_name,
+                                            want.name()
+                                        ),
                                         format!("pass a `{}` value", want.name()),
                                         Some(arg.expr.span()),
                                     ));
@@ -945,7 +1011,8 @@ impl<'a> Checker<'a> {
         // bound or discarded like a `scope.guard`. Sets `recv_type` so codegen
         // routes the node to the commit-guard lowering (I3).
         if let Type::Named(handle_ty) = &recv_ty {
-            if handle_ty == crate::Syntax::TXN_HANDLE_TYPE && method == crate::Syntax::TXN_ON_COMMIT {
+            if handle_ty == crate::Syntax::TXN_HANDLE_TYPE && method == crate::Syntax::TXN_ON_COMMIT
+            {
                 if args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0104",
@@ -955,10 +1022,16 @@ impl<'a> Checker<'a> {
                             args.len()
                         ),
                         "a post-commit hook registers a single cleanup lambda".to_string(),
-                        format!("write `{}.{}(() => {{ … }})`", "<handle>", crate::Syntax::TXN_ON_COMMIT),
+                        format!(
+                            "write `{}.{}(() => {{ … }})`",
+                            "<handle>",
+                            crate::Syntax::TXN_ON_COMMIT
+                        ),
                         Some(span),
                     ));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     *recv_type_out = Some(handle_ty.clone());
                     return Some(Type::Named("TransactionGuard".to_string()));
                 }
@@ -983,9 +1056,17 @@ impl<'a> Checker<'a> {
                     Some(other) => {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`{}` needs a lambda, not {}", crate::Syntax::TXN_ON_COMMIT, other.show()),
-                            "a post-commit hook runs a lambda only after the transaction commits".to_string(),
-                            format!("write `<handle>.{}(() => {{ … }})`", crate::Syntax::TXN_ON_COMMIT),
+                            format!(
+                                "`{}` needs a lambda, not {}",
+                                crate::Syntax::TXN_ON_COMMIT,
+                                other.show()
+                            ),
+                            "a post-commit hook runs a lambda only after the transaction commits"
+                                .to_string(),
+                            format!(
+                                "write `<handle>.{}(() => {{ … }})`",
+                                crate::Syntax::TXN_ON_COMMIT
+                            ),
                             Some(args[0].expr.span()),
                         ));
                     }
@@ -1000,7 +1081,9 @@ impl<'a> Checker<'a> {
         // lambda, Drop-backed, run LIFO on a `?`-failure/rollback and dropped on a
         // clean commit. Returns the same `TransactionGuard` handle.
         if let Type::Named(handle_ty) = &recv_ty {
-            if handle_ty == crate::Syntax::TXN_HANDLE_TYPE && method == crate::Syntax::TXN_ON_ROLLBACK {
+            if handle_ty == crate::Syntax::TXN_HANDLE_TYPE
+                && method == crate::Syntax::TXN_ON_ROLLBACK
+            {
                 if args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0104",
@@ -1010,10 +1093,16 @@ impl<'a> Checker<'a> {
                             args.len()
                         ),
                         "a rollback hook registers a single undo lambda".to_string(),
-                        format!("write `{}.{}(() => {{ … }})`", "<handle>", crate::Syntax::TXN_ON_ROLLBACK),
+                        format!(
+                            "write `{}.{}(() => {{ … }})`",
+                            "<handle>",
+                            crate::Syntax::TXN_ON_ROLLBACK
+                        ),
                         Some(span),
                     ));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     *recv_type_out = Some(handle_ty.clone());
                     return Some(Type::Named("TransactionGuard".to_string()));
                 }
@@ -1038,9 +1127,17 @@ impl<'a> Checker<'a> {
                     Some(other) => {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`{}` needs a lambda, not {}", crate::Syntax::TXN_ON_ROLLBACK, other.show()),
-                            "a rollback hook runs a lambda only when the transaction rolls back".to_string(),
-                            format!("write `<handle>.{}(() => {{ … }})`", crate::Syntax::TXN_ON_ROLLBACK),
+                            format!(
+                                "`{}` needs a lambda, not {}",
+                                crate::Syntax::TXN_ON_ROLLBACK,
+                                other.show()
+                            ),
+                            "a rollback hook runs a lambda only when the transaction rolls back"
+                                .to_string(),
+                            format!(
+                                "write `<handle>.{}(() => {{ … }})`",
+                                crate::Syntax::TXN_ON_ROLLBACK
+                            ),
                             Some(args[0].expr.span()),
                         ));
                     }
@@ -1052,16 +1149,24 @@ impl<'a> Checker<'a> {
         }
         // E2-M7: method calls on streaming file handles (D-IO2).
         if let Type::Named(handle_ty) = &recv_ty {
-            if let Some(ret) = file_handle_method_return(handle_ty, method, args.len(), span, &mut self.diags) {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+            if let Some(ret) =
+                file_handle_method_return(handle_ty, method, args.len(), span, &mut self.diags)
+            {
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 *recv_type_out = Some(handle_ty.clone());
                 return ret;
             }
         }
         // E2-M10: method calls on net/http opaque types.
         if let Type::Named(handle_ty) = &recv_ty {
-            if let Some(ret) = net_method_return(handle_ty, method, args.len(), span, &mut self.diags) {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+            if let Some(ret) =
+                net_method_return(handle_ty, method, args.len(), span, &mut self.diags)
+            {
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 *recv_type_out = Some(handle_ty.clone());
                 return ret;
             }
@@ -1069,8 +1174,12 @@ impl<'a> Checker<'a> {
         // D-PATHFS1: method calls on `Path` typed handle.
         if let Type::Named(handle_ty) = &recv_ty {
             if handle_ty == "Path" {
-                if let Some(ret) = path_method_return(handle_ty, method, args.len(), span, &mut self.diags) {
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                if let Some(ret) =
+                    path_method_return(handle_ty, method, args.len(), span, &mut self.diags)
+                {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     *recv_type_out = Some("Path".to_string());
                     return ret;
                 }
@@ -1078,19 +1187,25 @@ impl<'a> Checker<'a> {
         }
         // D-PENDING1=B: method calls on `Loadable<T,E>` handle.
         if let Some(ret) = loadable_method_return(&recv_ty, method, args.len()) {
-            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
             *recv_type_out = Some("Loadable".to_string());
             return ret;
         }
         // D-APPROX1=A: method calls on sketch data structures.
         if let Some(ret) = sketch_method_return(&recv_ty, method, args) {
-            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
             *recv_type_out = Some(sketch_type_name(&recv_ty).unwrap_or("Sketch").to_string());
             return ret;
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: method calls on HTTP types.
         if let Some(ret) = http_type_method_return(&recv_ty, method, args) {
-            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
             *recv_type_out = Some(match &recv_ty {
                 Type::Named(n) => n.clone(),
                 _ => "HttpClientReq".to_string(),
@@ -1099,7 +1214,9 @@ impl<'a> Checker<'a> {
         }
         // D-TIMEDEPTH1=A: method calls on Date/DateTime.
         if let Some(ret) = civil_time_method_return(&recv_ty, method, args) {
-            for a in args.iter_mut() { self.infer(&mut a.expr); }
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
             *recv_type_out = Some(match &recv_ty {
                 Type::Named(n) => n.clone(),
                 _ => "Date".to_string(),
@@ -1110,9 +1227,15 @@ impl<'a> Checker<'a> {
         // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
         if let Type::Named(handle_ty) = &recv_ty {
             let handle_ty_s = handle_ty.clone();
-            if let Some(ret) = alloc_method_return(&handle_ty_s, method, args, span, &mut self.diags) {
+            if let Some(ret) =
+                alloc_method_return(&handle_ty_s, method, args, span, &mut self.diags)
+            {
                 // E3104: check for use-after-free/reset before inferring args.
-                let recv_name = if let Expr::Ident(n, _) = &**receiver { Some(n.clone()) } else { None };
+                let recv_name = if let Expr::Ident(n, _) = &**receiver {
+                    Some(n.clone())
+                } else {
+                    None
+                };
                 // D-ALLOC-D: E3104 — `alloc` after `free` is always wrong (the allocator
                 // is consumed). After `reset`, further `alloc` is valid (buffer is reused).
                 if method == "alloc" {
@@ -1125,7 +1248,8 @@ impl<'a> Checker<'a> {
                 // Mark the allocator as freed only on `free`. `reset` keeps it alive.
                 if method == "free" {
                     if let Some(ref name) = recv_name {
-                        self.freed_allocators.insert(name.clone(), "free".to_string());
+                        self.freed_allocators
+                            .insert(name.clone(), "free".to_string());
                     }
                 }
                 // D-ALLOC2: `reset`/`free` invalidate every value previously
@@ -1146,22 +1270,32 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return ret;
             }
         }
         // D-ARGS1: method calls on ArgsSpec / ParsedArgs (builder and result types).
         if let Type::Named(handle_ty) = &recv_ty {
             if handle_ty == "ArgsSpec" {
-                if let Some(ret) = args_spec_method_return(method, args.len(), span, &mut self.diags) {
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                if let Some(ret) =
+                    args_spec_method_return(method, args.len(), span, &mut self.diags)
+                {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     *recv_type_out = Some("ArgsSpec".to_string());
                     return ret;
                 }
             }
             if handle_ty == "ParsedArgs" {
-                if let Some(ret) = parsed_args_method_return(method, args.len(), span, &mut self.diags) {
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                if let Some(ret) =
+                    parsed_args_method_return(method, args.len(), span, &mut self.diags)
+                {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     *recv_type_out = Some("ParsedArgs".to_string());
                     return ret;
                 }
@@ -1182,10 +1316,16 @@ impl<'a> Checker<'a> {
                 *recv_type_out = Some(handle_ty);
                 return result;
             }
-            if matches!(handle_ty.as_str(), "Clock" | "Rng" | "Stopwatch" | "Duration") {
-                if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+            if matches!(
+                handle_ty.as_str(),
+                "Clock" | "Rng" | "Stopwatch" | "Duration"
+            ) {
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
                     let handle_ty = handle_ty.clone();
-                    let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                     *recv_type_out = Some(handle_ty);
                     return result;
                 }
@@ -1274,7 +1414,8 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E2510",
                             "`reduce` takes a reduce-op marker, not a value".to_string(),
-                            "the operation is named with a marker so the fold is explicit".to_string(),
+                            "the operation is named with a marker so the fold is explicit"
+                                .to_string(),
                             "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
                             Some(args[0].expr.span()),
                         ));
@@ -1289,15 +1430,28 @@ impl<'a> Checker<'a> {
                     for arg in args.iter_mut() {
                         let want = math_method_arg_ty(&math_ty, method);
                         let old = self.expected_type.take();
-                        if let Some(w) = &want { self.expected_type = Some(w.clone()); }
+                        if let Some(w) = &want {
+                            self.expected_type = Some(w.clone());
+                        }
                         let got = self.infer(&mut arg.expr);
                         self.expected_type = old;
                         if let (Some(w), Some(g)) = (&want, &got) {
                             if g != w {
                                 self.diags.push(Diagnostic::error(
                                     "E0128",
-                                    format!("`.{}()` on `{}` expects a `{}`, got `{}`", method, math_ty, w.name(), g.name()),
-                                    format!("`{}.{}(…)` operates on a `{}`", math_ty, method, w.name()),
+                                    format!(
+                                        "`.{}()` on `{}` expects a `{}`, got `{}`",
+                                        method,
+                                        math_ty,
+                                        w.name(),
+                                        g.name()
+                                    ),
+                                    format!(
+                                        "`{}.{}(…)` operates on a `{}`",
+                                        math_ty,
+                                        method,
+                                        w.name()
+                                    ),
                                     format!("pass a `{}` value", w.name()),
                                     Some(arg.expr.span()),
                                 ));
@@ -1336,7 +1490,8 @@ impl<'a> Checker<'a> {
             if let Type::Named(elem) = inner.as_ref() {
                 if self.registry.is_columnar(elem)
                     && !matches!(method, "len" | "is_empty" | "push")
-                    && Collections::builtin_method_return(&recv_ty, method, args.len(), false).is_some()
+                    && Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                        .is_some()
                 {
                     self.diags.push(Diagnostic::error(
                         "E1108",
@@ -1367,19 +1522,25 @@ impl<'a> Checker<'a> {
                         Type::Result { ok, err } => Type::Result {
                             ok: if matches!(*ok, Type::Named(ref n) if n == "DataTree") {
                                 Box::new(json_ty())
-                            } else { ok },
+                            } else {
+                                ok
+                            },
                             err,
                         },
                         other => other,
                     };
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     *recv_type_out = Some(tn.clone());
                     return Some(json_ret);
                 }
             }
             if tn == "DataTree" {
                 if let Some(ret) = datatree_method_return(method, args.len()) {
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     *recv_type_out = Some("DataTree".to_string());
                     return Some(ret);
                 }
@@ -1585,7 +1746,6 @@ impl<'a> Checker<'a> {
         msig.return_type.clone()
     }
 
-
     /// Check a call. Returns:
     ///   None             — problem already reported
     ///   Some(None)       — fine, no value handed back
@@ -1601,7 +1761,8 @@ impl<'a> Checker<'a> {
             for a in call.args.iter_mut() {
                 ty = ty.or(self.infer(&mut a.expr));
             }
-            self.diags.push(overflow_opt_in_error(&kind, call.name_span));
+            self.diags
+                .push(overflow_opt_in_error(&kind, call.name_span));
             // Hand back a plausible type so the use site doesn't cascade.
             return ty.filter(Type::is_integer).or(Some(Type::Int));
         }
@@ -1613,7 +1774,8 @@ impl<'a> Checker<'a> {
         );
         let int_ok = arg_ty.as_ref().is_some_and(|t| t.is_integer());
         if !is_arith || !int_ok {
-            self.diags.push(overflow_opt_in_error(&kind, call.name_span));
+            self.diags
+                .push(overflow_opt_in_error(&kind, call.name_span));
             return arg_ty.filter(Type::is_integer).or(Some(Type::Int));
         }
         let t = arg_ty.unwrap();
@@ -1705,7 +1867,8 @@ impl<'a> Checker<'a> {
                 format!("`{}` is not in Jet; use `tasks.spawn` instead", call.name),
                 "Jet uses blocking tasks and channels, not async/await — simpler and race-free"
                     .to_string(),
-                "import `core.tasks as tasks` and call `tasks.spawn(() => your_work())`".to_string(),
+                "import `core.tasks as tasks` and call `tasks.spawn(() => your_work())`"
+                    .to_string(),
                 Some(call.name_span),
             ));
             for a in call.args.iter_mut() {
@@ -1781,8 +1944,12 @@ impl<'a> Checker<'a> {
             && self.lookup(Syntax::BUILTIN_INPUT).is_none()
         {
             if call.args.len() > 1 {
-                self.diags
-                    .push(wrong_core_arity(Syntax::BUILTIN_INPUT, 1, call.args.len(), call.name_span));
+                self.diags.push(wrong_core_arity(
+                    Syntax::BUILTIN_INPUT,
+                    1,
+                    call.args.len(),
+                    call.name_span,
+                ));
             }
             if let Some(arg) = call.args.get_mut(0) {
                 self.expect_core_arg(Syntax::BUILTIN_INPUT, 0, &Type::String, arg);
@@ -1854,7 +2021,10 @@ impl<'a> Checker<'a> {
             if call.args.len() != 1 {
                 self.diags.push(Diagnostic::error(
                     "E2901",
-                    format!("`{}` needs exactly one value to test", Syntax::BUILTIN_EXPECT),
+                    format!(
+                        "`{}` needs exactly one value to test",
+                        Syntax::BUILTIN_EXPECT
+                    ),
                     "snapshot testing wraps one value at a time".to_string(),
                     format!("e.g. {}(my_value).snapshot()", Syntax::BUILTIN_EXPECT),
                     Some(call.name_span),
@@ -1885,12 +2055,24 @@ impl<'a> Checker<'a> {
             // D-MOD3: check unqualified inline-module imports (e.g. `use math.clamp`).
             if let Some(mangled) = self.unqualified.get(&call.name).cloned() {
                 let alias = mangled.split("__").next().unwrap_or(&mangled).to_string();
-                let result = self.infer_code_module_call(&alias, &mangled, call.name_span, call.name_span, &mut call.args);
+                let result = self.infer_code_module_call(
+                    &alias,
+                    &mangled,
+                    call.name_span,
+                    call.name_span,
+                    &mut call.args,
+                );
                 return Some(result);
             }
             // D-MOD3: check unqualified file-module imports (e.g. `use math.clamp` for a file module).
             if let Some((fn_name, mod_idx)) = self.unqualified_file.get(&call.name).cloned() {
-                let result = self.infer_import_call(mod_idx, &fn_name, call.name_span, call.name_span, &mut call.args);
+                let result = self.infer_import_call(
+                    mod_idx,
+                    &fn_name,
+                    call.name_span,
+                    call.name_span,
+                    &mut call.args,
+                );
                 return Some(result);
             }
         }
@@ -1915,13 +2097,19 @@ impl<'a> Checker<'a> {
                         format!(
                             "`{}` is a built-in {} type — construct it from its {} components",
                             call.name,
-                            if is_simd_lane_type(&call.name) { "SIMD lane" } else { "linear-algebra" },
+                            if is_simd_lane_type(&call.name) {
+                                "SIMD lane"
+                            } else {
+                                "linear-algebra"
+                            },
                             arity
                         ),
                         format!("write `{}({})`", call.name, vec!["…"; arity].join(", ")),
                         Some(call.name_span),
                     ));
-                    for a in call.args.iter_mut() { self.infer(&mut a.expr); }
+                    for a in call.args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return Some(Some(Type::Named(call.name.clone())));
                 }
                 for (i, want) in arg_types.iter().enumerate() {
@@ -1934,10 +2122,15 @@ impl<'a> Checker<'a> {
                                 "E0128",
                                 format!(
                                     "component {} of `{}` must be `{}`, got `{}`",
-                                    i + 1, call.name, want.name(), at.name()
+                                    i + 1,
+                                    call.name,
+                                    want.name(),
+                                    at.name()
                                 ),
                                 format!(
-                                    "every component of `{}` is a `{}`", call.name, want.name()
+                                    "every component of `{}` is a `{}`",
+                                    call.name,
+                                    want.name()
                                 ),
                                 format!("write a `{}` value here", want.name()),
                                 Some(call.args[i].expr.span()),
@@ -1960,11 +2153,20 @@ impl<'a> Checker<'a> {
                             call.name,
                             call.args.len()
                         ),
-                        format!("`{}` is a distinct type; construct it with `{}(value)`", call.name, call.name),
-                        format!("write `{}(expr)` with a single value of type `{}`", call.name, base_ty.name()),
+                        format!(
+                            "`{}` is a distinct type; construct it with `{}(value)`",
+                            call.name, call.name
+                        ),
+                        format!(
+                            "write `{}(expr)` with a single value of type `{}`",
+                            call.name,
+                            base_ty.name()
+                        ),
                         Some(call.name_span),
                     ));
-                    for a in call.args.iter_mut() { self.infer(&mut a.expr); }
+                    for a in call.args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 let old_expected = self.expected_type.replace(base_ty.clone());
@@ -2046,10 +2248,7 @@ impl<'a> Checker<'a> {
                 format!("`{}` is an `#Unsafe` function", call.name),
                 "its contract can't be checked by the compiler, so the caller must vouch for it"
                     .to_string(),
-                format!(
-                    "call it inside `#{}(\"…\") {{ … }}`",
-                    Syntax::KW_UNSAFE
-                ),
+                format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
                 Some(call.name_span),
             ));
         }
@@ -2114,11 +2313,7 @@ impl<'a> Checker<'a> {
         // identifier (invariant I2).
         if call.args.len() < sig.params.len() && !sig.defaults.is_empty() {
             let provided = call.args.len();
-            let required: usize = sig
-                .defaults
-                .iter()
-                .take_while(|d| d.is_none())
-                .count();
+            let required: usize = sig.defaults.iter().take_while(|d| d.is_none()).count();
             if provided >= required {
                 // fill trailing omitted params with their defaults. We build
                 // `earlier_names` incrementally so a default like `d: Int = h`
@@ -2240,7 +2435,13 @@ impl<'a> Checker<'a> {
             // effect contribution (the delta) can be checked against the
             // parameter's declared bound after the walk.
             let cb_bound: Option<Vec<(String, Span)>> = match effective_params.get(i) {
-                Some((_, Type::Fn { effect_bound: Some(b), .. })) => Some(b.clone()),
+                Some((
+                    _,
+                    Type::Fn {
+                        effect_bound: Some(b),
+                        ..
+                    },
+                )) => Some(b.clone()),
                 _ => None,
             };
             let cb_snapshot = cb_bound.as_ref().map(|_| {
@@ -2271,15 +2472,15 @@ impl<'a> Checker<'a> {
             if let (Some(bound), Some((bd, be, bm))) = (&cb_bound, &cb_snapshot) {
                 self.record_callback_obligation(bound, bd, be, *bm, arg.expr.span());
             }
-            if arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _))
-            {
+            if arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _)) {
                 self.diags.push(Diagnostic::error(
                     "E0202",
                     format!(
                         "`{}` needs a plain named binding after it",
                         Syntax::SIGIL_MUTATE
                     ),
-                    "write access (`~`) can only be granted to a named binding, not an expression".to_string(),
+                    "write access (`~`) can only be granted to a named binding, not an expression"
+                        .to_string(),
                     format!(
                         "bind the value first: `x {} ...` then pass `{}x`",
                         Syntax::SIGIL_BIND_MUT,
@@ -2330,8 +2531,7 @@ impl<'a> Checker<'a> {
                         .map(|info| info.single_use_span.is_some())
                         .unwrap_or(false);
                     if is_single_use {
-                        self.diags
-                            .push(e0142_aliased(name, &call.name, *span));
+                        self.diags.push(e0142_aliased(name, &call.name, *span));
                         continue;
                     }
                 }
@@ -2439,7 +2639,11 @@ impl<'a> Checker<'a> {
                                         call.name,
                                         Syntax::SIGIL_BIND_MUT
                                     ),
-                                    format!("declare it with `{} {} ...`", name, Syntax::SIGIL_BIND_MUT),
+                                    format!(
+                                        "declare it with `{} {} ...`",
+                                        name,
+                                        Syntax::SIGIL_BIND_MUT
+                                    ),
                                     Some(*span),
                                 ));
                             }
@@ -2453,7 +2657,8 @@ impl<'a> Checker<'a> {
                             "`{}` passed to a parameter that does not consume",
                             Syntax::SIGIL_MOVE
                         ),
-                        "only move (`^`) parameters accept a moved value at the call site".to_string(),
+                        "only move (`^`) parameters accept a moved value at the call site"
+                            .to_string(),
                         format!(
                             "remove `{}` or change the parameter to take ownership (`{}`)",
                             Syntax::SIGIL_MOVE,

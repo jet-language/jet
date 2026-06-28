@@ -3,9 +3,9 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::AST::{BinOp, Expr, Pattern, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::COMPARABLE;
+use crate::AST::{BinOp, Expr, Pattern, Type};
 
 impl<'a> Checker<'a> {
     /// Binary operators, including comparison distribution (S25):
@@ -105,15 +105,43 @@ impl<'a> Checker<'a> {
 
         // D-DIST3 (ratified 2026-06-20): distinct type arithmetic rules (E0127/E0128).
         {
-            let lt_is_distinct = if let Type::Named(n) = &lt { self.registry.is_distinct(n) } else { false };
-            let rt_is_distinct = if let Type::Named(n) = &rt { self.registry.is_distinct(n) } else { false };
-            let is_arith = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr);
+            let lt_is_distinct = if let Type::Named(n) = &lt {
+                self.registry.is_distinct(n)
+            } else {
+                false
+            };
+            let rt_is_distinct = if let Type::Named(n) = &rt {
+                self.registry.is_distinct(n)
+            } else {
+                false
+            };
+            let is_arith = matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Rem
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::Shl
+                    | BinOp::Shr
+            );
             let is_eq = matches!(op, BinOp::Eq | BinOp::Ne);
             if (lt_is_distinct || rt_is_distinct) && is_arith {
                 let distinct_name = if lt_is_distinct {
-                    if let Type::Named(n) = &lt { n.as_str() } else { "" }
+                    if let Type::Named(n) = &lt {
+                        n.as_str()
+                    } else {
+                        ""
+                    }
                 } else {
-                    if let Type::Named(n) = &rt { n.as_str() } else { "" }
+                    if let Type::Named(n) = &rt {
+                        n.as_str()
+                    } else {
+                        ""
+                    }
                 };
                 if lt != rt {
                     // Arithmetic between different types (or distinct + base) — E0127/E0128.
@@ -156,15 +184,29 @@ impl<'a> Checker<'a> {
                 // Equality between distinct and different type: E0128.
                 if lt != rt {
                     let dt_name = if lt_is_distinct {
-                        if let Type::Named(n) = &lt { n.clone() } else { lt.name() }
+                        if let Type::Named(n) = &lt {
+                            n.clone()
+                        } else {
+                            lt.name()
+                        }
                     } else {
-                        if let Type::Named(n) = &rt { n.clone() } else { rt.name() }
+                        if let Type::Named(n) = &rt {
+                            n.clone()
+                        } else {
+                            rt.name()
+                        }
                     };
                     self.diags.push(Diagnostic::error(
                         "E0128",
                         format!("a `{}` can't be compared with a `{}`", lt.name(), rt.name()),
-                        format!("`{}` is a distinct type; it only compares equal to another `{}`", dt_name, dt_name),
-                        format!("use `.raw()` to compare the underlying values, or construct a `{}`", dt_name),
+                        format!(
+                            "`{}` is a distinct type; it only compares equal to another `{}`",
+                            dt_name, dt_name
+                        ),
+                        format!(
+                            "use `.raw()` to compare the underlying values, or construct a `{}`",
+                            dt_name
+                        ),
                         Some(span),
                     ));
                     return None;
@@ -181,8 +223,14 @@ impl<'a> Checker<'a> {
         {
             // A user struct sharing a math name isn't part of the closed family;
             // skip the math-operator path so it gets the normal operator handling.
-            let lname = match &lt { Type::Named(n) if !self.registry.contains(n) => n.clone(), _ => String::new() };
-            let rname = match &rt { Type::Named(n) if !self.registry.contains(n) => n.clone(), _ => String::new() };
+            let lname = match &lt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
+            let rname = match &rt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
             if is_math_type(&lname) || is_math_type(&rname) {
                 if let Some(result) = math_binop_result(op, &lname, &rname) {
                     return Some(result);
@@ -364,5 +412,4 @@ impl<'a> Checker<'a> {
     }
 
     // --- calls -----------------------------------------------------------
-
 }

@@ -17,8 +17,8 @@
 
 use super::JSON::{self, Json};
 use crate::SHA256;
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 /// The subdir of the resolved root that holds the content-addressed store.
 /// Mirrors the trailing segment of `Syntax::HANGAR_DIR` (`/etc/jet/hangar`).
@@ -258,8 +258,26 @@ mod tests {
     #[test]
     fn clean_removes_entries() {
         let (roots, _g) = temp_roots();
-        record(&roots, "a", "1.0", "nixpkgs:a", "/nix/store/a", "/nix/store/a/bin", "").unwrap();
-        record(&roots, "b", "1.0", "nixpkgs:b", "/nix/store/b", "/nix/store/b/bin", "").unwrap();
+        record(
+            &roots,
+            "a",
+            "1.0",
+            "nixpkgs:a",
+            "/nix/store/a",
+            "/nix/store/a/bin",
+            "",
+        )
+        .unwrap();
+        record(
+            &roots,
+            "b",
+            "1.0",
+            "nixpkgs:b",
+            "/nix/store/b",
+            "/nix/store/b/bin",
+            "",
+        )
+        .unwrap();
         assert_eq!(clean(&roots).unwrap(), 2);
         assert!(list(&roots).is_empty());
     }

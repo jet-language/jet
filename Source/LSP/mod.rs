@@ -49,7 +49,10 @@ mod tests {
         let src = "fn main() {\n    let x = 1\n}\n";
         let diags = check_document("test.jet", src);
         let e0009 = diags.iter().find(|d| d.code == "E0009").expect("E0009");
-        assert!(e0009.edit.is_none(), "E0009 fix moves tokens; no trivial edit");
+        assert!(
+            e0009.edit.is_none(),
+            "E0009 fix moves tokens; no trivial edit"
+        );
         assert!(e0009.fix.contains(crate::Syntax::SIGIL_BIND_IMMUT));
     }
 

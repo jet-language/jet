@@ -77,7 +77,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.is_empty(), "passthrough should be clean, got {:?}", codes);
+    assert!(
+        codes.is_empty(),
+        "passthrough should be clean, got {:?}",
+        codes
+    );
 }
 
 /// Dropped without consuming → E0140.
@@ -90,7 +94,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.contains(&"E0140".to_string()), "expected E0140, got {:?}", codes);
+    assert!(
+        codes.contains(&"E0140".to_string()),
+        "expected E0140, got {:?}",
+        codes
+    );
 }
 
 /// Consumed on only one `if` branch → E0141.
@@ -107,9 +115,17 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.contains(&"E0141".to_string()), "expected E0141, got {:?}", codes);
+    assert!(
+        codes.contains(&"E0141".to_string()),
+        "expected E0141, got {:?}",
+        codes
+    );
     // It is NOT also flagged E0140 — the divergence is the single, precise error.
-    assert!(!codes.contains(&"E0140".to_string()), "E0141 should not double-report as E0140: {:?}", codes);
+    assert!(
+        !codes.contains(&"E0140".to_string()),
+        "E0141 should not double-report as E0140: {:?}",
+        codes
+    );
 }
 
 /// Consumed on BOTH branches → clean.
@@ -128,7 +144,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.is_empty(), "both-branch consume should be clean, got {:?}", codes);
+    assert!(
+        codes.is_empty(),
+        "both-branch consume should be clean, got {:?}",
+        codes
+    );
 }
 
 /// Used twice → E0121 (the move tracker catches use-after-move).
@@ -143,7 +163,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.contains(&"E0121".to_string()), "expected E0121, got {:?}", codes);
+    assert!(
+        codes.contains(&"E0121".to_string()),
+        "expected E0121, got {:?}",
+        codes
+    );
 }
 
 /// Lent to a read/borrow parameter instead of moved → E0142 (no aliasing).
@@ -161,7 +185,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.contains(&"E0142".to_string()), "expected E0142, got {:?}", codes);
+    assert!(
+        codes.contains(&"E0142".to_string()),
+        "expected E0142, got {:?}",
+        codes
+    );
 }
 
 // --- D-LIN1-DROP (ratified 2026-06-25): the audited deliberate-discard hatch ---
@@ -180,7 +208,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.is_empty(), "audited drop should compile, got {:?}", codes);
+    assert!(
+        codes.is_empty(),
+        "audited drop should compile, got {:?}",
+        codes
+    );
 }
 
 /// `drop(x)` inside an `#Unsafe fn` body is equally audited — the fn's reason IS
@@ -201,7 +233,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.is_empty(), "drop in #Unsafe fn should compile, got {:?}", codes);
+    assert!(
+        codes.is_empty(),
+        "drop in #Unsafe fn should compile, got {:?}",
+        codes
+    );
 }
 
 /// `drop(x)` of a `#SingleUse` value OUTSIDE any `#Unsafe` context → E0143,
@@ -216,9 +252,17 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.contains(&"E0143".to_string()), "expected E0143, got {:?}", codes);
+    assert!(
+        codes.contains(&"E0143".to_string()),
+        "expected E0143, got {:?}",
+        codes
+    );
     // E0143 is the single, precise error — not buried under a cascade E0140.
-    assert!(!codes.contains(&"E0140".to_string()), "E0143 should not also report E0140: {:?}", codes);
+    assert!(
+        !codes.contains(&"E0140".to_string()),
+        "E0143 should not also report E0140: {:?}",
+        codes
+    );
 }
 
 /// After an audited `drop`, the value is gone: reusing it is E0121 (use-after-move).
@@ -235,7 +279,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.contains(&"E0121".to_string()), "expected E0121 after drop, got {:?}", codes);
+    assert!(
+        codes.contains(&"E0121".to_string()),
+        "expected E0121 after drop, got {:?}",
+        codes
+    );
 }
 
 /// A user-defined `drop` function shadows the builtin (it is not reserved).
@@ -254,7 +302,11 @@ fn main() {
 }
 "#,
     );
-    assert!(codes.is_empty(), "user `drop` fn should shadow the builtin, got {:?}", codes);
+    assert!(
+        codes.is_empty(),
+        "user `drop` fn should shadow the builtin, got {:?}",
+        codes
+    );
 }
 
 /// `drop` erases to a plain Rust `drop(...)` — no `unsafe` in generated code (I1/I3).
@@ -265,7 +317,10 @@ fn drop_erases_no_unsafe_in_codegen() {
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");
-    assert!(out.rust.contains("drop("), "drop should lower to a Rust drop(...) call");
+    assert!(
+        out.rust.contains("drop("),
+        "drop should lower to a Rust drop(...) call"
+    );
 }
 
 /// A `#SingleUse` enum gets the same treatment as a struct.
@@ -287,7 +342,11 @@ fn main() {
 }
 "#;
     let codes = codes_of(src);
-    assert!(codes.contains(&"E0140".to_string()), "expected E0140 for enum, got {:?}", codes);
+    assert!(
+        codes.contains(&"E0140".to_string()),
+        "expected E0140 for enum, got {:?}",
+        codes
+    );
 }
 
 /// The `#SingleUse` tag erases in codegen: the generated Rust is a plain struct,
@@ -299,7 +358,16 @@ fn tag_erases_in_codegen() {
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");
-    assert!(!out.rust.contains("unsafe"), "I1: no unsafe in generated code");
-    assert!(!out.rust.contains("SingleUse"), "tag must erase, found SingleUse in output");
-    assert!(out.rust.contains("struct user_Lock"), "Lock should lower to a plain struct");
+    assert!(
+        !out.rust.contains("unsafe"),
+        "I1: no unsafe in generated code"
+    );
+    assert!(
+        !out.rust.contains("SingleUse"),
+        "tag must erase, found SingleUse in output"
+    );
+    assert!(
+        out.rust.contains("struct user_Lock"),
+        "Lock should lower to a plain struct"
+    );
 }

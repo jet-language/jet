@@ -34,7 +34,10 @@ fn main() { s @= Square.{ side: 3 }; print("{s.area()}"); run(2); }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
-    assert_eq!(a, b, "effect annotations must leave no trace in generated Rust (I3)");
+    assert_eq!(
+        a, b,
+        "effect annotations must leave no trace in generated Rust (I3)"
+    );
 }
 
 /// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
@@ -51,10 +54,19 @@ fn main() {
 }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
-    assert!(!rust.contains("Caps"), "generated Rust must not mention Caps:\n{rust}");
-    assert!(!rust.contains("#("), "generated Rust must carry no effect annotation:\n{rust}");
+    assert!(
+        !rust.contains("Caps"),
+        "generated Rust must not mention Caps:\n{rust}"
+    );
+    assert!(
+        !rust.contains("#("),
+        "generated Rust must carry no effect annotation:\n{rust}"
+    );
     // The region body is still emitted (a plain block).
-    assert!(rust.contains("inside") && rust.contains("outside"), "region body must survive:\n{rust}");
+    assert!(
+        rust.contains("inside") && rust.contains("outside"),
+        "region body must survive:\n{rust}"
+    );
 }
 
 /// A `#(Fs)` bound that matches the body's only effect compiles clean.
@@ -67,7 +79,11 @@ fn load(path: String) #(Fs) -> String {
 }
 fn main() { print(load("x")); }
 "#;
-    assert!(codes(src).is_empty(), "matching bound should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "matching bound should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// A bound that omits an effect the body uses is E0740.
@@ -80,7 +96,11 @@ fn load(path: String) #(Net) -> String {
 }
 fn main() { print(load("x")); }
 "#;
-    assert!(codes(src).contains(&"E0740"), "expected E0740, got {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0740"),
+        "expected E0740, got {:?}",
+        codes(src)
+    );
 }
 
 /// Effects propagate transitively along calls: `load` reaches `Fs` only through
@@ -93,7 +113,11 @@ fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn load(path: String) #(Net) -> String { return helper(path); }
 fn main() { print(load("x")); }
 "#;
-    assert!(codes(src).contains(&"E0740"), "transitive Fs should trip E0740: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0740"),
+        "transitive Fs should trip E0740: {:?}",
+        codes(src)
+    );
 }
 
 /// A wider bound than the body uses is allowed — `#(…)` is a ceiling, not exact.
@@ -106,7 +130,11 @@ fn load(path: String) #(Fs, Net) -> String {
 }
 fn main() { print(load("x")); }
 "#;
-    assert!(codes(src).is_empty(), "a wider ceiling should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "a wider ceiling should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// `print` contributes `Io`; an `#(Io)` bound covers it.
@@ -116,7 +144,11 @@ fn io_effect_from_print_ok() {
 fn announce(n: Int) #(Io) { print("{n}"); }
 fn main() { announce(1); }
 "#;
-    assert!(codes(src).is_empty(), "Io bound should cover print: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "Io bound should cover print: {:?}",
+        codes(src)
+    );
 }
 
 /// An unannotated function infers freely — no bound, no E0740.
@@ -127,7 +159,11 @@ use core.fs as fs
 fn load(path: String) -> String { return fs.read(path) ?? ""; }
 fn main() { print(load("x")); }
 "#;
-    assert!(!codes(src).contains(&"E0740"), "unannotated fn must not trip E0740: {:?}", codes(src));
+    assert!(
+        !codes(src).contains(&"E0740"),
+        "unannotated fn must not trip E0740: {:?}",
+        codes(src)
+    );
 }
 
 /// `#Pure fn` with a non-empty `#(…)` list is the contradiction E0745.
@@ -137,7 +173,11 @@ fn pure_with_effects_is_e0745() {
 #Pure fn calc() #(Fs) -> Int { return 1; }
 fn main() { print(calc()); }
 "#;
-    assert!(codes(src).contains(&"E0745"), "expected E0745, got {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0745"),
+        "expected E0745, got {:?}",
+        codes(src)
+    );
 }
 
 /// D-EFF3: an impl of a `#Pure` trait method that reaches an effect is E0742.
@@ -152,7 +192,11 @@ impl Doc.Hasher {
 }
 fn main() { d @= Doc.{ path: "x" }; print(d.hash()); }
 "#;
-    assert!(codes(src).contains(&"E0742"), "impl exceeding #Pure bound should be E0742: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0742"),
+        "impl exceeding #Pure bound should be E0742: {:?}",
+        codes(src)
+    );
 }
 
 /// A conformant impl of a bounded trait method compiles clean.
@@ -166,7 +210,11 @@ impl Square.Shape {
 }
 fn main() { s @= Square.{ side: 5 }; print("{s.area()}"); }
 "#;
-    assert!(codes(src).is_empty(), "conformant impl should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "conformant impl should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// D-EFF2 (transparent flow-through): passing a named effectful function as a
@@ -180,7 +228,11 @@ fn apply(f: fn() -> String) -> String { return f(); }
 fn caller() #(Net) -> String { return apply(readit); }
 fn main() { print(caller()); }
 "#;
-    assert!(codes(src).contains(&"E0740"), "callback Fs should flow to caller: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0740"),
+        "callback Fs should flow to caller: {:?}",
+        codes(src)
+    );
 }
 
 /// A lambda callback's effects flow into the enclosing function too (the lambda
@@ -197,7 +249,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0741"), "lambda Fs should surface in region: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0741"),
+        "lambda Fs should surface in region: {:?}",
+        codes(src)
+    );
 }
 
 /// A pure named callback flows nothing — a bounded caller stays clean.
@@ -209,7 +265,11 @@ fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x); }
 fn caller() #(Io) { print("{apply(inc, 1)}"); }
 fn main() { caller(); }
 "#;
-    assert!(codes(src).is_empty(), "pure callback must not trip a bound: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "pure callback must not trip a bound: {:?}",
+        codes(src)
+    );
 }
 
 /// D-EFF1 reconciliation: `#Pure` is the empty effect set, so an effectful Core
@@ -222,7 +282,11 @@ use core.fs as fs
 #Pure fn readit(p: String) -> String { return fs.read(p) ?? ""; }
 fn main() { print(readit("x")); }
 "#;
-    assert!(codes(src).contains(&"E3401"), "Fs in #Pure fn should be E3401: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E3401"),
+        "Fs in #Pure fn should be E3401: {:?}",
+        codes(src)
+    );
 }
 
 /// A `#Caps(…)` region whose body stays within the cap set compiles clean.
@@ -236,7 +300,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).is_empty(), "in-set caps region should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "in-set caps region should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// An effect used inside a `#Caps(…)` region but not in its cap list is E0741.
@@ -251,7 +319,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0741"), "expected E0741, got {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0741"),
+        "expected E0741, got {:?}",
+        codes(src)
+    );
 }
 
 /// A `#Caps(…)` region restriction is transitive: an effect reached only through
@@ -268,7 +340,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0741"), "transitive Fs should trip E0741: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0741"),
+        "transitive Fs should trip E0741: {:?}",
+        codes(src)
+    );
 }
 
 /// An unknown effect name is E0119, and does not also trip E0740.
@@ -280,7 +356,11 @@ fn main() { work(); }
 "#;
     let c = codes(src);
     assert!(c.contains(&"E0119"), "expected E0119, got {:?}", c);
-    assert!(!c.contains(&"E0740"), "unknown name should suppress E0740: {:?}", c);
+    assert!(
+        !c.contains(&"E0740"),
+        "unknown name should suppress E0740: {:?}",
+        c
+    );
 }
 
 // ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────
@@ -298,7 +378,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).is_empty(), "in-set grant should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "in-set grant should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// D-SCAP1: an effect used inside a `#Grant(…)` that the grant doesn't authorize
@@ -314,7 +398,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0712"), "expected E0712, got {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0712"),
+        "expected E0712, got {:?}",
+        codes(src)
+    );
 }
 
 /// D-SCAP1: the grant restriction is transitive — an effect reached only through
@@ -331,7 +419,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0712"), "transitive Fs should trip E0712: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0712"),
+        "transitive Fs should trip E0712: {:?}",
+        codes(src)
+    );
 }
 
 /// D-SCAP1: the capability handle may not escape its grant — aliasing it to
@@ -346,7 +438,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0711"), "aliasing the handle should be E0711: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0711"),
+        "aliasing the handle should be E0711: {:?}",
+        codes(src)
+    );
 }
 
 /// D-SCAP1: not naming the handle anywhere (never escaping it) compiles clean —
@@ -360,7 +456,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).is_empty(), "an unused grant handle should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "an unused grant handle should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// D-SCAP1: an unknown effect name in a `#Grant(…)` list is E0119 (shared with
@@ -376,7 +476,11 @@ fn main() {
 "#;
     let c = codes(src);
     assert!(c.contains(&"E0119"), "expected E0119, got {:?}", c);
-    assert!(!c.contains(&"E0712"), "unknown name should suppress E0712: {:?}", c);
+    assert!(
+        !c.contains(&"E0712"),
+        "unknown name should suppress E0712: {:?}",
+        c
+    );
 }
 
 /// I3: a `#Grant(…)` region lowers to a plain lexical block — the generated Rust
@@ -393,11 +497,26 @@ fn main() {
 }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
-    assert!(!rust.contains("grant"), "generated Rust must not mention grant:\n{rust}");
-    assert!(!rust.contains("Capability"), "generated Rust must not mention the handle type:\n{rust}");
-    assert!(!rust.contains("#("), "generated Rust must carry no effect annotation:\n{rust}");
-    assert!(!rust.contains("unsafe"), "grant codegen must contain no `unsafe`:\n{rust}");
-    assert!(rust.contains("inside") && rust.contains("outside"), "region body must survive:\n{rust}");
+    assert!(
+        !rust.contains("grant"),
+        "generated Rust must not mention grant:\n{rust}"
+    );
+    assert!(
+        !rust.contains("Capability"),
+        "generated Rust must not mention the handle type:\n{rust}"
+    );
+    assert!(
+        !rust.contains("#("),
+        "generated Rust must carry no effect annotation:\n{rust}"
+    );
+    assert!(
+        !rust.contains("unsafe"),
+        "grant codegen must contain no `unsafe`:\n{rust}"
+    );
+    assert!(
+        rust.contains("inside") && rust.contains("outside"),
+        "region body must survive:\n{rust}"
+    );
 }
 
 /// I3 (D-SCAP1): a `#Grant(…)` region lowers to the SAME plain Rust block as the
@@ -424,7 +543,10 @@ fn main() {
 "#;
     let a = jet::compile(granted).expect("granted compiles").rust;
     let b = jet::compile(caps).expect("caps compiles").rust;
-    assert_eq!(a, b, "#Grant region must lower identically to the erased #Caps region (I3)");
+    assert_eq!(
+        a, b,
+        "#Grant region must lower identically to the erased #Caps region (I3)"
+    );
 }
 
 // ── Transactions (D-TXN1–D-TXN4) ──────────────────────────────────────────────
@@ -442,7 +564,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0746"), "Fs in #Transact should be E0746: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0746"),
+        "Fs in #Transact should be E0746: {:?}",
+        codes(src)
+    );
 }
 
 /// D-TXN2: a Net effect directly in the block is also rejected (E0746).
@@ -457,7 +583,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0746"), "Net in #Transact should be E0746: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0746"),
+        "Net in #Transact should be E0746: {:?}",
+        codes(src)
+    );
 }
 
 /// D-TXN2: a reversible-or-benign effect (Io via `print`) is NOT rejected inside
@@ -471,7 +601,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).is_empty(), "Io in #Transact should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "Io in #Transact should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// D-TXN2 fix-it: the same Fs effect is accepted when registered via
@@ -489,7 +623,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).is_empty(), "Fs inside on_commit should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "Fs inside on_commit should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// D-TXN3/D-TXN4: `on_commit` needs a zero-parameter lambda (E0104).
@@ -502,7 +640,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0104"), "on_commit with a param should be E0104: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0104"),
+        "on_commit with a param should be E0104: {:?}",
+        codes(src)
+    );
 }
 
 /// I3: a `#Transact` block + `on_commit` carry no effect/transaction machinery
@@ -519,10 +661,21 @@ fn main() {
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     // The transaction lowers to the safe `JetTransaction` prelude + boxed hooks.
-    assert!(rust.contains("jet_transaction()"), "expected the transaction guard: {}", rust);
-    assert!(rust.contains(".on_commit(Box::new("), "expected a boxed commit hook: {}", rust);
+    assert!(
+        rust.contains("jet_transaction()"),
+        "expected the transaction guard: {}",
+        rust
+    );
+    assert!(
+        rust.contains(".on_commit(Box::new("),
+        "expected a boxed commit hook: {}",
+        rust
+    );
     // No `unsafe` word anywhere in generated code (golden grep parity).
-    assert!(!rust.contains("unsafe"), "transaction codegen must contain no `unsafe`");
+    assert!(
+        !rust.contains("unsafe"),
+        "transaction codegen must contain no `unsafe`"
+    );
 }
 
 /// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` — the mirror of
@@ -538,9 +691,17 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).is_empty(), "on_rollback should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "on_rollback should compile: {:?}",
+        codes(src)
+    );
     let rust = jet::compile(src).expect("compiles").rust;
-    assert!(rust.contains(".on_rollback(Box::new("), "expected a boxed rollback hook: {}", rust);
+    assert!(
+        rust.contains(".on_rollback(Box::new("),
+        "expected a boxed rollback hook: {}",
+        rust
+    );
 }
 
 /// D-TXN-ROLLBACK (layer 3): `on_rollback` needs a zero-parameter lambda (E0104),
@@ -554,7 +715,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).contains(&"E0104"), "on_rollback with a param should be E0104: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0104"),
+        "on_rollback with a param should be E0104: {:?}",
+        codes(src)
+    );
 }
 
 /// D-TXN-ROLLBACK (layer 1): a value mutated inside a `#Transact` block is
@@ -581,12 +746,22 @@ fn main() {
     print("{n}")
 }
 "#;
-    assert!(codes(src).is_empty(), "auto-snapshot transfer should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "auto-snapshot transfer should compile: {:?}",
+        codes(src)
+    );
     let rust = jet::compile(src).expect("compiles").rust;
-    assert!(rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_from))"),
-        "expected an auto-snapshot of the mutated `from`: {}", rust);
-    assert!(rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_to))"),
-        "expected an auto-snapshot of the mutated `to`: {}", rust);
+    assert!(
+        rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_from))"),
+        "expected an auto-snapshot of the mutated `from`: {}",
+        rust
+    );
+    assert!(
+        rust.contains("jet_txn::snapshot(&mut user_tx, &mut (*user_to))"),
+        "expected an auto-snapshot of the mutated `to`: {}",
+        rust
+    );
 }
 
 /// D-TXN-ROLLBACK (layer 1): the auto-snapshot mechanism's one vetted raw-pointer
@@ -607,21 +782,35 @@ fn main() { a: Int := 0; n @= bump(~a) ?? (-1); print("{n}"); }
     let rust = jet::compile(src).expect("compiles").rust;
     // The only `unsafe` is inside `mod jet_txn { … }`. Strip it and assert none remain.
     let stripped = {
-        let start = rust.find("mod jet_txn").expect("jet_txn module present (snapshot used)");
+        let start = rust
+            .find("mod jet_txn")
+            .expect("jet_txn module present (snapshot used)");
         let bytes = rust.as_bytes();
         let (mut depth, mut seen, mut i, mut end) = (0usize, false, start, rust.len());
         while i < bytes.len() {
             match bytes[i] {
-                b'{' => { depth += 1; seen = true; }
-                b'}' => { depth -= 1; if seen && depth == 0 { end = i + 1; break; } }
+                b'{' => {
+                    depth += 1;
+                    seen = true;
+                }
+                b'}' => {
+                    depth -= 1;
+                    if seen && depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
                 _ => {}
             }
             i += 1;
         }
         format!("{}{}", &rust[..start], &rust[end..])
     };
-    assert!(!stripped.contains("unsafe"),
-        "auto-snapshot `unsafe` must be confined to `mod jet_txn`: {}", stripped);
+    assert!(
+        !stripped.contains("unsafe"),
+        "auto-snapshot `unsafe` must be confined to `mod jet_txn`: {}",
+        stripped
+    );
 }
 
 /// D-TXN4: a bare `#Transact { … }` with no handle stays legal (no hooks).
@@ -634,7 +823,11 @@ fn main() {
     }
 }
 "#;
-    assert!(codes(src).is_empty(), "bare #Transact should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "bare #Transact should compile: {:?}",
+        codes(src)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -651,7 +844,11 @@ fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
 #Pure fn inc(n: Int) -> Int { return n + 1; }
 fn main() { print("{transform([1, 2], inc)}"); }
 "#;
-    assert!(codes(src).is_empty(), "pure callback to a #Pure bound is clean: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "pure callback to a #Pure bound is clean: {:?}",
+        codes(src)
+    );
 }
 
 /// Lever 1: a `#Pure fn(…)` parameter handed an impure callback is E0747.
@@ -664,7 +861,11 @@ fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
 fn noisy(n: Int) -> Int { print("{n}"); return n; }
 fn main() { print("{transform([1, 2], noisy)}"); }
 "#;
-    assert_eq!(codes(src), vec!["E0747"], "impure callback to a #Pure bound is E0747");
+    assert_eq!(
+        codes(src),
+        vec!["E0747"],
+        "impure callback to a #Pure bound is E0747"
+    );
 }
 
 /// Lever 1: a `#(E) fn(…)` parameter handed a callback within `E` compiles clean.
@@ -677,7 +878,11 @@ fn run(n: Int, act: #(Io) fn(Int)) {
 fn show(n: Int) { print("{n}"); }
 fn main() { run(5, show); }
 "#;
-    assert!(codes(src).is_empty(), "Io callback within an #(Io) bound is clean: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "Io callback within an #(Io) bound is clean: {:?}",
+        codes(src)
+    );
 }
 
 /// Lever 1: a `#(E) fn(…)` parameter handed a callback that reaches an effect
@@ -692,7 +897,11 @@ fn run(p: String, act: #(Io) fn(String)) {
 fn read_it(p: String) { x @= fs.read(p) ?? ""; print("{x}"); }
 fn main() { run("f.txt", read_it); }
 "#;
-    assert_eq!(codes(src), vec!["E0747"], "Fs callback to an #(Io) bound is E0747");
+    assert_eq!(
+        codes(src),
+        vec!["E0747"],
+        "Fs callback to an #(Io) bound is E0747"
+    );
 }
 
 /// Lever 1: an unknown effect name in a callback bound is E0119.
@@ -703,7 +912,11 @@ fn run(n: Int, act: #(Nope) fn(Int)) { act(n); }
 fn show(n: Int) { print("{n}"); }
 fn main() { run(5, show); }
 "#;
-    assert_eq!(codes(src), vec!["E0119"], "unknown effect in a callback bound is E0119");
+    assert_eq!(
+        codes(src),
+        vec!["E0119"],
+        "unknown effect in a callback bound is E0119"
+    );
 }
 
 /// Lever 2: `#(via f)` publishes the callback's effects — a `#Pure fn` calling a
@@ -719,7 +932,11 @@ fn show(n: Int) { print("{n}"); }
 #Pure fn caller() -> Int { run(5, show); return 0; }
 fn main() { print("{caller()}"); }
 "#;
-    assert_eq!(codes(src), vec!["E3401"], "#(via act) must publish the Io effect to callers");
+    assert_eq!(
+        codes(src),
+        vec!["E3401"],
+        "#(via act) must publish the Io effect to callers"
+    );
 }
 
 /// Lever 2: `#(via f)` naming a non-existent parameter is E0748.
@@ -740,7 +957,11 @@ fn effect_via_non_callback_param_is_e0748() {
 fn run(n: Int) #(via n) { print("{n}"); }
 fn main() { run(5); }
 "#;
-    assert_eq!(codes(src), vec!["E0748"], "#(via n) on a non-fn param is E0748");
+    assert_eq!(
+        codes(src),
+        vec!["E0748"],
+        "#(via n) on a non-fn param is E0748"
+    );
 }
 
 /// I3: the D-EFF2 levers are erased — a program using `#Pure fn(…)` callback
@@ -767,5 +988,8 @@ fn main() { print("{transform([1], inc)}"); run(5, show); }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
-    assert_eq!(a, b, "D-EFF2 levers must leave no trace in generated Rust (I3)");
+    assert_eq!(
+        a, b,
+        "D-EFF2 levers must leave no trace in generated Rust (I3)"
+    );
 }

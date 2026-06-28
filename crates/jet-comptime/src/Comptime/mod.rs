@@ -24,8 +24,8 @@ mod Value;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::AST::Func;
 use crate::Diagnostics::Diagnostic;
+use crate::AST::Func;
 
 pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
@@ -35,8 +35,7 @@ use Interpreter::{Interp, DEV_FUEL_BUDGET, FUEL_BUDGET};
 use Purity::check_purity;
 
 // An empty core_imports map for paths that don't have `use` declarations.
-static EMPTY_IMPORTS: std::sync::OnceLock<HashMap<String, String>> =
-    std::sync::OnceLock::new();
+static EMPTY_IMPORTS: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
 fn empty_imports() -> &'static HashMap<String, String> {
     EMPTY_IMPORTS.get_or_init(HashMap::new)
 }
@@ -52,7 +51,14 @@ pub fn evaluate(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
 ) -> Result<CtValue, Diagnostic> {
-    evaluate_with_imports(init, funcs, extern_names, base_dir, globals, &HashMap::new())
+    evaluate_with_imports(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        &HashMap::new(),
+    )
 }
 
 /// Like `evaluate` but with module alias map for D-CTCORE1 whitelisted Core calls.
@@ -64,7 +70,16 @@ pub fn evaluate_with_imports(
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
 ) -> Result<CtValue, Diagnostic> {
-    evaluate_with_imports_opts(init, funcs, extern_names, base_dir, globals, core_imports, false, 0)
+    evaluate_with_imports_opts(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        false,
+        0,
+    )
 }
 
 /// Like `evaluate_with_imports` but with `allow_impure` and `initial_impure_depth`
@@ -394,7 +409,14 @@ pub fn evaluate_owned(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
 ) -> Result<CtValue, Diagnostic> {
-    evaluate_owned_with_imports(init, funcs, extern_names, base_dir, globals, &HashMap::new())
+    evaluate_owned_with_imports(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        &HashMap::new(),
+    )
 }
 
 /// Like `evaluate_owned` but with module alias map for D-CTCORE1 whitelisted Core calls.
@@ -406,7 +428,16 @@ pub fn evaluate_owned_with_imports(
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
 ) -> Result<CtValue, Diagnostic> {
-    evaluate_owned_with_imports_opts(init, funcs, extern_names, base_dir, globals, core_imports, false, 0)
+    evaluate_owned_with_imports_opts(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        false,
+        0,
+    )
 }
 
 /// Like `evaluate_owned_with_imports` but with D-CTEFFECT1 `allow_impure` flag
@@ -424,7 +455,16 @@ pub fn evaluate_owned_with_imports_opts(
     initial_impure_depth: usize,
 ) -> Result<CtValue, Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
-    evaluate_with_imports_opts(init, &refs, extern_names, base_dir, globals, core_imports, allow_impure, initial_impure_depth)
+    evaluate_with_imports_opts(
+        init,
+        &refs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        allow_impure,
+        initial_impure_depth,
+    )
 }
 
 /// Like [`evaluate_owned_with_imports_opts`] but also returns Tier-1 embed
@@ -440,7 +480,16 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     initial_impure_depth: usize,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
-    evaluate_with_imports_opts_collecting(init, &refs, extern_names, base_dir, globals, core_imports, allow_impure, initial_impure_depth)
+    evaluate_with_imports_opts_collecting(
+        init,
+        &refs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        allow_impure,
+        initial_impure_depth,
+    )
 }
 
 /// D-METADERIVE1=A: evaluate the body of a user-authored `derive Trait for T { … }`

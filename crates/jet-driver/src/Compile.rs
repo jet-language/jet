@@ -1,8 +1,8 @@
 //! Compiler output types: CompileOutput, Capabilities, bundle_uses_unsafe.
 use crate::Diagnostics::Diagnostic;
+use crate::Lock;
 use crate::AST;
 use crate::FFI;
-use crate::Lock;
 
 /// Result of a successful compile: generated Rust plus any lint warnings.
 #[derive(Debug)]
@@ -66,12 +66,24 @@ impl Capabilities {
 
     pub fn summary(&self) -> String {
         let mut caps = Vec::new();
-        if self.uses_network { caps.push("network"); }
-        if self.uses_file_io { caps.push("file-io"); }
-        if self.uses_crypto { caps.push("crypto"); }
-        if self.uses_concurrency { caps.push("concurrency"); }
-        if self.uses_ffi { caps.push("ffi"); }
-        if self.uses_unsafe { caps.push("unsafe"); }
+        if self.uses_network {
+            caps.push("network");
+        }
+        if self.uses_file_io {
+            caps.push("file-io");
+        }
+        if self.uses_crypto {
+            caps.push("crypto");
+        }
+        if self.uses_concurrency {
+            caps.push("concurrency");
+        }
+        if self.uses_ffi {
+            caps.push("ffi");
+        }
+        if self.uses_unsafe {
+            caps.push("unsafe");
+        }
         if caps.is_empty() {
             "capabilities: none".to_string()
         } else {
@@ -100,11 +112,15 @@ pub fn bundle_uses_unsafe(bundle: &AST::ProgramBundle) -> bool {
             Item::Func(f) => f.is_unsafe,
             Item::Struct(s) => {
                 s.methods.iter().any(|x| x.is_unsafe)
-                    || s.trait_impls.iter().any(|b| b.methods.iter().any(|x| x.is_unsafe))
+                    || s.trait_impls
+                        .iter()
+                        .any(|b| b.methods.iter().any(|x| x.is_unsafe))
             }
             Item::Enum(e) => {
                 e.methods.iter().any(|x| x.is_unsafe)
-                    || e.trait_impls.iter().any(|b| b.methods.iter().any(|x| x.is_unsafe))
+                    || e.trait_impls
+                        .iter()
+                        .any(|b| b.methods.iter().any(|x| x.is_unsafe))
             }
             Item::Impl(i) => i.methods.iter().any(|x| x.is_unsafe),
             _ => false,

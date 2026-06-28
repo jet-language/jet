@@ -17,7 +17,10 @@ fn manifest_api_mode_inferred_by_default() {
     )
     .expect("parses");
     assert_eq!(mf.packages[0].api, PackageManifest::ApiMode::Inferred);
-    assert!(!mf.packages[0].api.freezes(), "inference never freezes (D-CAP6)");
+    assert!(
+        !mf.packages[0].api.freezes(),
+        "inference never freezes (D-CAP6)"
+    );
 }
 
 #[test]
@@ -53,9 +56,9 @@ fn manifest_api_mode_ignored_on_non_library() {
 
 #[test]
 fn snapshot_freezes_resolved_sigils_round_trip() {
-    use jet::AST::{AccessConvention, Func, Item, Param, Type};
     use jet::Diagnostics::Span;
     use jet::Publish::ApiFreeze;
+    use jet::AST::{AccessConvention, Func, Item, Param, Type};
 
     let z = Span::new(0, 0);
     let param = |name: &str, c: AccessConvention, ty: Type| Param {
@@ -90,12 +93,20 @@ fn snapshot_freezes_resolved_sigils_round_trip() {
         func(
             "scale",
             true,
-            vec![param("v", AccessConvention::Write, Type::Named("Vec3".into()))],
+            vec![param(
+                "v",
+                AccessConvention::Write,
+                Type::Named("Vec3".into()),
+            )],
         ),
         func("internal", false, vec![]), // private — excluded
     ];
     let snap = ApiFreeze::snapshot_from_items(&items, "vecmath", "1.0.0");
-    assert_eq!(snap.funcs.len(), 1, "private fns are not part of the contract");
+    assert_eq!(
+        snap.funcs.len(),
+        1,
+        "private fns are not part of the contract"
+    );
     assert_eq!(snap.funcs[0].signature, "fn scale(v: ~Vec3)");
 
     let text = snap.write();
@@ -107,9 +118,9 @@ fn snapshot_freezes_resolved_sigils_round_trip() {
 
 #[test]
 fn fingerprint_folds_in_capability_digest() {
-    use jet::AST::{AccessConvention, Func, Item, Param, Type};
     use jet::Diagnostics::Span;
     use jet::Publish::ApiFreeze;
+    use jet::AST::{AccessConvention, Func, Item, Param, Type};
 
     let z = Span::new(0, 0);
     let mk = |conv: AccessConvention| {

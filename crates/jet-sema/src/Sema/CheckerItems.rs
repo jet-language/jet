@@ -1,10 +1,7 @@
 use super::*;
-use crate::AST::{
-    AccessConvention, BinOp, Call, EnumLitArg,
-    Expr, Pattern, Type, VariantPayload,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -132,7 +129,9 @@ impl<'a> Checker<'a> {
                         );
                         // Use the first non-self param conv (offset by self).
                         let param_idx = if sig.self_conv.is_some() { i + 1 } else { i };
-                        let conv = sig.params.get(param_idx)
+                        let conv = sig
+                            .params
+                            .get(param_idx)
                             .map(|(c, _)| *c)
                             .unwrap_or(crate::AST::AccessConvention::Read);
                         args.push(crate::AST::CallArg {
@@ -348,7 +347,11 @@ impl<'a> Checker<'a> {
         sig.return_type.clone()
     }
 
-    pub(crate) fn struct_owner_module(&self, type_name: &str, import_ns: Option<&str>) -> Option<usize> {
+    pub(crate) fn struct_owner_module(
+        &self,
+        type_name: &str,
+        import_ns: Option<&str>,
+    ) -> Option<usize> {
         if let Some(alias) = import_ns {
             let mod_idx = *self.imports.get(alias)?;
             let mods = self.modules?;
@@ -469,27 +472,39 @@ impl<'a> Checker<'a> {
         // E2-M10: compiler-known constructable struct types (HttpRequest, HttpResponse).
         // These have no user-module owner but are valid in struct literals.
         if let Some(core_fields) = core_constructable_fields(type_name) {
-            let str_map_ty = Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
-            let provided_names: std::collections::HashSet<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
+            let str_map_ty = Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(Type::String),
+            };
+            let provided_names: std::collections::HashSet<String> =
+                fields.iter().map(|(n, ..)| n.clone()).collect();
             for (fname, _, fexpr) in fields.iter_mut() {
-                let expected_ty: Option<Type> = core_fields.iter()
+                let expected_ty: Option<Type> = core_fields
+                    .iter()
                     .find(|(n, _)| n == fname)
                     .map(|(_, t)| t.clone());
                 let saved = self.expected_type.clone();
-                if let Some(et) = expected_ty.as_ref() { self.expected_type = Some(et.clone()); }
+                if let Some(et) = expected_ty.as_ref() {
+                    self.expected_type = Some(et.clone());
+                }
                 self.infer(fexpr);
                 self.expected_type = saved;
                 let _ = (&str_map_ty, &expected_ty);
             }
             // Report missing fields.
-            let missing: Vec<_> = core_fields.iter()
+            let missing: Vec<_> = core_fields
+                .iter()
                 .filter(|(n, _)| !provided_names.contains(n))
                 .map(|(n, _)| n.clone())
                 .collect();
             if !missing.is_empty() {
                 self.diags.push(Diagnostic::error(
                     "E0303",
-                    format!("struct literal for `{}` is missing fields: {}", type_name, missing.join(", ")),
+                    format!(
+                        "struct literal for `{}` is missing fields: {}",
+                        type_name,
+                        missing.join(", ")
+                    ),
                     "every field must appear exactly once".to_string(),
                     format!("add: {}", missing.join(", ")),
                     Some(span),
@@ -891,25 +906,43 @@ impl<'a> Checker<'a> {
             // Also handles JSON patterns written in the arm-head position
             // (the same call-as-pattern reuse JSON already relies on).
             Expr::Ident(variant, span) if subject_name.is_some() => {
-                let Type::Named(enum_name) = subj_ty else { return None; };
+                let Type::Named(enum_name) = subj_ty else {
+                    return None;
+                };
                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
                 let (_, payload) = variants.get(variant.as_str())?;
                 if !matches!(payload, crate::AST::VariantPayload::Unit) {
                     return None;
                 }
                 // Only accept if the variant is NOT a live local (avoids shadowing).
-                if self.lookup(variant).is_some() { return None; }
-                Some(Pattern::Variant { variant: variant.clone(), bindings: vec![], span: *span })
+                if self.lookup(variant).is_some() {
+                    return None;
+                }
+                Some(Pattern::Variant {
+                    variant: variant.clone(),
+                    bindings: vec![],
+                    span: *span,
+                })
             }
             Expr::Call(call) if subject_name.is_some() => {
                 // Only a single positional binding arg is the pattern form.
-                if call.args.len() != 1 { return None; }
-                let Expr::Ident(binding, _) = &call.args[0].expr else { return None; };
-                if self.lookup(binding).is_some() { return None; } // it's a real local
-                let Type::Named(enum_name) = subj_ty else { return None; };
+                if call.args.len() != 1 {
+                    return None;
+                }
+                let Expr::Ident(binding, _) = &call.args[0].expr else {
+                    return None;
+                };
+                if self.lookup(binding).is_some() {
+                    return None;
+                } // it's a real local
+                let Type::Named(enum_name) = subj_ty else {
+                    return None;
+                };
                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
                 let (_, payload) = variants.get(call.name.as_str())?;
-                if !matches!(payload, crate::AST::VariantPayload::Single(..)) { return None; }
+                if !matches!(payload, crate::AST::VariantPayload::Single(..)) {
+                    return None;
+                }
                 Some(Pattern::Variant {
                     variant: call.name.clone(),
                     bindings: vec![crate::AST::PatSlot::Bind(binding.clone())],
@@ -938,7 +971,11 @@ impl<'a> Checker<'a> {
     /// Binding a non-copy payload out of a pattern gives the subject away in
     /// the generated Rust (`if let` / `matches!` move the place), so the old
     /// name must stop being usable — otherwise rustc rejects the output (I2).
-    pub(crate) fn mark_pattern_subject_moved(&mut self, subject: &Expr, bindings: &HashMap<String, Type>) {
+    pub(crate) fn mark_pattern_subject_moved(
+        &mut self,
+        subject: &Expr,
+        bindings: &HashMap<String, Type>,
+    ) {
         if bindings.values().all(type_is_copy) {
             return;
         }
@@ -1006,7 +1043,8 @@ impl<'a> Checker<'a> {
                             ),
                             "pattern tests must name a variant on the value's enum type"
                                 .to_string(),
-                            "the `Data` variants are Null/Bool/Int/Float/Text/Array/Object".to_string(),
+                            "the `Data` variants are Null/Bool/Int/Float/Text/Array/Object"
+                                .to_string(),
                             Some(span),
                         ));
                         return HashMap::new();
@@ -1037,7 +1075,9 @@ impl<'a> Checker<'a> {
                     let mut result = HashMap::new();
                     for (slot, ty) in bindings.iter().zip(expected.iter()) {
                         match slot {
-                            crate::AST::PatSlot::Bind(name) => { result.insert(name.clone(), ty.clone()); }
+                            crate::AST::PatSlot::Bind(name) => {
+                                result.insert(name.clone(), ty.clone());
+                            }
                             crate::AST::PatSlot::Wildcard => {}
                             crate::AST::PatSlot::Range { .. } => {
                                 self.diags.push(Diagnostic::error(
@@ -1093,7 +1133,9 @@ impl<'a> Checker<'a> {
                     let mut result = HashMap::new();
                     for (slot, ty) in bindings.iter().zip(expected.iter()) {
                         match slot {
-                            crate::AST::PatSlot::Bind(name) => { result.insert(name.clone(), ty.clone()); }
+                            crate::AST::PatSlot::Bind(name) => {
+                                result.insert(name.clone(), ty.clone());
+                            }
                             crate::AST::PatSlot::Wildcard => {}
                             crate::AST::PatSlot::Range { .. } => {
                                 self.diags.push(Diagnostic::error(
@@ -1155,7 +1197,9 @@ impl<'a> Checker<'a> {
                 let mut result = HashMap::new();
                 for (slot, ty) in bindings.iter().zip(expected.iter()) {
                     match slot {
-                        crate::AST::PatSlot::Bind(name) => { result.insert(name.clone(), ty.clone()); }
+                        crate::AST::PatSlot::Bind(name) => {
+                            result.insert(name.clone(), ty.clone());
+                        }
                         crate::AST::PatSlot::Wildcard => {}
                         crate::AST::PatSlot::Range { lo, hi } => {
                             // D-PATR: field must be Int or Char; lo must be <= hi.
@@ -1245,7 +1289,10 @@ impl<'a> Checker<'a> {
                 } else if lo > hi {
                     self.diags.push(Diagnostic::error(
                         "E0316",
-                        format!("range pattern `{}..{}` is empty — lower bound exceeds upper bound", lo, hi),
+                        format!(
+                            "range pattern `{}..{}` is empty — lower bound exceeds upper bound",
+                            lo, hi
+                        ),
                         "the lower end of a range must be ≤ the upper end".to_string(),
                         format!("swap to `{}..{}`", hi, lo),
                         Some(span),
@@ -1264,12 +1311,15 @@ impl<'a> Checker<'a> {
                     let alt_bindings = self.validate_pattern(subject_ty, alt, span);
                     // E0317: alternatives must bind the same names at the same types.
                     let names_match = first_bindings.len() == alt_bindings.len()
-                        && first_bindings.iter().all(|(k, v)| alt_bindings.get(k) == Some(v));
+                        && first_bindings
+                            .iter()
+                            .all(|(k, v)| alt_bindings.get(k) == Some(v));
                     if !names_match {
                         self.diags.push(Diagnostic::error(
                             "E0317",
                             "or-pattern alternatives bind different names or types".to_string(),
-                            "every arm of `A(x) | B(y)` must bind the same names at the same types".to_string(),
+                            "every arm of `A(x) | B(y)` must bind the same names at the same types"
+                                .to_string(),
                             "rename bindings so both alternatives bind identical names".to_string(),
                             Some(span),
                         ));
@@ -1437,5 +1487,4 @@ impl<'a> Checker<'a> {
             _ => {}
         }
     }
-
 }

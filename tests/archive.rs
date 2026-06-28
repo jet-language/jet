@@ -115,8 +115,7 @@ fn main() {
 "#;
     let out = run_archive(src);
     assert_eq!(
-        out,
-        "true\ntrue\n",
+        out, "true\ntrue\n",
         "compression/decompression of repetitive data failed: {out:?}"
     );
 }
@@ -205,7 +204,10 @@ fn core_provider_compiles_ring_package_to_rlib() {
     )
     .expect("recording ring package in hangar must succeed");
 
-    assert_eq!(entry.rlib, r.rlib, "rlib path must survive hangar round-trip");
+    assert_eq!(
+        entry.rlib, r.rlib,
+        "rlib path must survive hangar round-trip"
+    );
     let listed = Store::list(&roots);
     let found = listed
         .iter()

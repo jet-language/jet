@@ -11,15 +11,11 @@
 //!     in the prelude (Float keeps its decimal part there, S21)
 //!   - every operator result is fully parenthesized
 
-use crate::AST::{
-    BenchDef, Item,
-    Program, ProgramBundle, TestDef,
-};
-use crate::AST::FfiLink;
-use crate::Traits;
 use crate::Sema::CompileMode;
 use crate::Syntax;
-
+use crate::Traits;
+use crate::AST::FfiLink;
+use crate::AST::{BenchDef, Item, Program, ProgramBundle, TestDef};
 
 mod CModule;
 mod Context;
@@ -258,10 +254,16 @@ fn strip_unused_mem_prelude(out: String) -> String {
     let mut i = start;
     while i < bytes.len() {
         match bytes[i] {
-            b'{' => { depth += 1; seen = true; }
+            b'{' => {
+                depth += 1;
+                seen = true;
+            }
             b'}' => {
                 depth -= 1;
-                if seen && depth == 0 { end = i + 1; break; }
+                if seen && depth == 0 {
+                    end = i + 1;
+                    break;
+                }
             }
             _ => {}
         }
@@ -296,10 +298,16 @@ fn strip_unused_txn_prelude(out: String) -> String {
     let mut i = start;
     while i < bytes.len() {
         match bytes[i] {
-            b'{' => { depth += 1; seen = true; }
+            b'{' => {
+                depth += 1;
+                seen = true;
+            }
             b'}' => {
                 depth -= 1;
-                if seen && depth == 0 { end = i + 1; break; }
+                if seen && depth == 0 {
+                    end = i + 1;
+                    break;
+                }
             }
             _ => {}
         }
@@ -333,18 +341,28 @@ fn strip_unused_term_prelude(out: String) -> String {
     // platform modules plus the enter/leave/read_key dispatchers that call into
     // them). Excise it as a single span — stripping only the `mod` blocks would
     // leave the dispatchers referencing now-missing modules (I2: E0433).
-    let Some(unix_mod) = out.find("mod jet_term_unix {") else { return out; };
+    let Some(unix_mod) = out.find("mod jet_term_unix {") else {
+        return out;
+    };
     let block_start = out[..unix_mod].rfind("#[cfg(unix)]").unwrap_or(unix_mod);
-    let Some(read_key) = out.find("fn jet_term_read_key") else { return out; };
+    let Some(read_key) = out.find("fn jet_term_read_key") else {
+        return out;
+    };
     let bytes = out.as_bytes();
     let (mut depth, mut seen, mut i) = (0usize, false, read_key);
     let mut end = out.len();
     while i < bytes.len() {
         match bytes[i] {
-            b'{' => { depth += 1; seen = true; }
+            b'{' => {
+                depth += 1;
+                seen = true;
+            }
             b'}' => {
                 depth -= 1;
-                if seen && depth == 0 { end = i + 1; break; }
+                if seen && depth == 0 {
+                    end = i + 1;
+                    break;
+                }
             }
             _ => {}
         }
@@ -377,8 +395,14 @@ pub(crate) fn emit_synthetic_rollback_trait(out: &mut String) {
 pub(crate) fn program_has_rollback_impl(items: &[Item]) -> bool {
     items.iter().any(|i| match i {
         Item::Impl(im) => im.trait_name.as_deref() == Some(Syntax::TRAIT_ROLLBACK),
-        Item::Struct(s) => s.trait_impls.iter().any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
-        Item::Enum(e) => e.trait_impls.iter().any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
+        Item::Struct(s) => s
+            .trait_impls
+            .iter()
+            .any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
+        Item::Enum(e) => e
+            .trait_impls
+            .iter()
+            .any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
         _ => false,
     })
 }
@@ -665,7 +689,9 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
         let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
         out.push_str(&format!(
             "    let run = |input: &{}| -> Result<(), String> {{ jet_prop_{}({}) }};\n",
-            tuple_ty, i, call_args.join(", ")
+            tuple_ty,
+            i,
+            call_args.join(", ")
         ));
         out.push_str(&format!("    for _ in 0..{} {{\n", CASES));
         let gen_components: Vec<String> = types
@@ -695,7 +721,9 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
             out.push_str("                    let mut trial = input.clone();\n");
             out.push_str(&format!("                    trial.{} = cand;\n", k));
             out.push_str("                    if let Err(m) = run(&trial) {\n");
-            out.push_str("                        input = trial; msg = m; improved = true; break;\n");
+            out.push_str(
+                "                        input = trial; msg = m; improved = true; break;\n",
+            );
             out.push_str("                    }\n");
             out.push_str("                }\n");
         }
@@ -819,7 +847,11 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
 /// `coverage = false` is byte-identical to the historical `emit_bundle_tests`
 /// (golden tests rely on this), so the probes/prelude only appear under
 /// `jet test --coverage`.
-pub fn emit_bundle_tests_cov(bundle: &ProgramBundle, link: Option<&FfiLink>, coverage: bool) -> String {
+pub fn emit_bundle_tests_cov(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    coverage: bool,
+) -> String {
     let entry = &bundle.modules[bundle.entry];
     let tests: Vec<&TestDef> = entry
         .items

@@ -490,10 +490,8 @@ pub fn shell() -> [JSON] {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let p = std::env::temp_dir().join(format!(
-            "jpk-env-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
+        let p =
+            std::env::temp_dir().join(format!("jpk-env-{nanos}-{:?}", std::thread::current().id()));
         std::fs::create_dir_all(&p).unwrap();
         p
     }

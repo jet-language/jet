@@ -2,8 +2,8 @@
 //! M8 adds closure-powered methods (`map`, `filter`, …).
 //! Sema calls into this module; codegen mirrors the same method names.
 
-use crate::AST::Type;
 use crate::Syntax;
+use crate::AST::Type;
 
 /// Built-in type names that users cannot redefine (E0106).
 pub const RESERVED_TYPES: &[&str] = &[
@@ -30,12 +30,7 @@ pub fn is_map_key_type(ty: &Type) -> bool {
 pub fn is_hashable_type(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Int
-            | Type::Bool
-            | Type::String
-            | Type::Char
-            | Type::Named(_)
-            | Type::IntN { .. }
+        Type::Int | Type::Bool | Type::String | Type::Char | Type::Named(_) | Type::IntN { .. }
     )
 }
 
@@ -109,7 +104,10 @@ pub fn builtin_method_return(
 
 /// D-SG9: the byte type `U8`.
 fn u8t() -> Type {
-    Type::IntN { signed: false, bits: 8 }
+    Type::IntN {
+        signed: false,
+        bits: 8,
+    }
 }
 
 /// `(signed, bits)` if `ty` is an integer type (`Int` = signed 64-bit).
@@ -124,14 +122,35 @@ fn int_kind(ty: &Type) -> Option<(bool, u8)> {
 /// The target type a `to_*` width-conversion method names (D-SG9/D-NUMOPS1).
 fn conv_target(method: &str) -> Option<Type> {
     Some(match method {
-        "to_i8" => Type::IntN { signed: true, bits: 8 },
-        "to_i16" => Type::IntN { signed: true, bits: 16 },
-        "to_i32" => Type::IntN { signed: true, bits: 32 },
+        "to_i8" => Type::IntN {
+            signed: true,
+            bits: 8,
+        },
+        "to_i16" => Type::IntN {
+            signed: true,
+            bits: 16,
+        },
+        "to_i32" => Type::IntN {
+            signed: true,
+            bits: 32,
+        },
         "to_i64" | "to_int" => Type::Int,
-        "to_u8" => Type::IntN { signed: false, bits: 8 },
-        "to_u16" => Type::IntN { signed: false, bits: 16 },
-        "to_u32" => Type::IntN { signed: false, bits: 32 },
-        "to_u64" => Type::IntN { signed: false, bits: 64 },
+        "to_u8" => Type::IntN {
+            signed: false,
+            bits: 8,
+        },
+        "to_u16" => Type::IntN {
+            signed: false,
+            bits: 16,
+        },
+        "to_u32" => Type::IntN {
+            signed: false,
+            bits: 32,
+        },
+        "to_u64" => Type::IntN {
+            signed: false,
+            bits: 64,
+        },
         "to_f32" => Type::Float32,
         "to_f64" | "to_float" => Type::Float,
         _ => return None,
@@ -260,9 +279,9 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         // D-ITER1: non-closure lazy adapters (return [T]).
         ("take" | "skip" | "step_by", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("dedup", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("chunks" | "windows", 1) => {
-            Some(Some(Type::List(Box::new(Type::List(Box::new(inner.clone()))))))
-        }
+        ("chunks" | "windows", 1) => Some(Some(Type::List(Box::new(Type::List(Box::new(
+            inner.clone(),
+        )))))),
         // D-ITER1: enumerate → [(idx: Int, item: T)].
         ("enumerate", 0) => Some(Some(Type::List(Box::new(enumerate_elem_ty(inner))))),
         // D-ITER1: zip([U]) → [(a: T, b: U)]; sema refines `b` from arg type.
@@ -303,9 +322,9 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         // D-AUTOPAR1=A: parallel adapters. Return types mirror their sequential equivalents;
         // sema refines V/acc from closure body (ret: None open return).
-        ("par_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),    // sema refines V
+        ("par_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
         ("par_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("par_fold", 2) => Some(Some(Type::Int)),                          // sema refines acc
+        ("par_fold", 2) => Some(Some(Type::Int)), // sema refines acc
         _ => None,
     }
 }
@@ -504,7 +523,10 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         }
         // D-COLLBREADTH1=A: Deque mutating methods.
         Type::Apply { name, .. } if name == "Deque" => {
-            matches!(method, "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
+            matches!(
+                method,
+                "push_front" | "push_back" | "pop_front" | "pop_back" | "clear"
+            )
         }
         // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
         // `rng` draw advances the PRNG stream — these need an edit-access (`~`)

@@ -324,30 +324,38 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwPub => match self.peek2().kind {
                     // D-REPRC1: `pub #layout(c) struct Name { … }`
-                    TokKind::Hash if {
-                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT)
-                    } => {
+                    TokKind::Hash
+                        if {
+                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT)
+                        } =>
+                    {
                         self.bump(); // consume `pub`
                         self.layout_struct_def(true).map(Item::Struct)
                     }
                     // D-MIGRATE1: `pub #PublishedSchema struct Name { … }`
-                    TokKind::Hash if {
-                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
-                    } => {
+                    TokKind::Hash
+                        if {
+                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
+                        } =>
+                    {
                         self.bump(); // consume `pub`
                         self.published_schema_struct_def(true).map(Item::Struct)
                     }
                     // D-LIN1: `pub #SingleUse struct|enum Name { … }`
-                    TokKind::Hash if {
-                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE)
-                    } => {
+                    TokKind::Hash
+                        if {
+                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE)
+                        } =>
+                    {
                         self.bump(); // consume `pub`
                         self.single_use_type_def(true)
                     }
                     // D-QUAL3: `pub #UnitFamily(name) { m, … }`
-                    TokKind::Hash if {
-                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
-                    } => {
+                    TokKind::Hash
+                        if {
+                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
+                        } =>
+                    {
                         self.bump(); // consume `pub`
                         self.unit_family_def(true).map(Item::UnitFamily)
                     }
@@ -418,9 +426,7 @@ impl<'a> Parser<'a> {
                     self.published_schema_struct_def(false).map(Item::Struct)
                 }
                 // D-LIN1: `#SingleUse struct|enum Name { … }`
-                TokKind::Hash if self.at_single_use_type() => {
-                    self.single_use_type_def(false)
-                }
+                TokKind::Hash if self.at_single_use_type() => self.single_use_type_def(false),
                 // D-MIGRATE1: `migration TypeName { rename a -> b }`
                 TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
                     self.migration_decl().map(Item::Migration)
@@ -437,8 +443,10 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0990",
                         format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
-                        "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
-                        "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                        "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)"
+                            .to_string(),
+                        "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`"
+                            .to_string(),
                         Some(t.span),
                     ));
                     self.sync_top();
@@ -500,7 +508,8 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0323",
                         "in-file grouping uses `module name { }`, not `namespace`".to_string(),
-                        "Jet has one spelling for in-file grouping: a named `module` block".to_string(),
+                        "Jet has one spelling for in-file grouping: a named `module` block"
+                            .to_string(),
                         "write `module mygroup { fn foo() { … } }` instead".to_string(),
                         Some(t.span),
                     ));
@@ -529,7 +538,8 @@ impl<'a> Parser<'a> {
                         format!("replace `{}` with `{}`", foreign, Syntax::KW_FN),
                         Some(t.span),
                     ));
-                    self.func_after_fn(false, false, false, false, None, None).map(Item::Func)
+                    self.func_after_fn(false, false, false, false, None, None)
+                        .map(Item::Func)
                 }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_IMPORT => {
                     let t = self.bump();
@@ -782,15 +792,24 @@ impl<'a> Parser<'a> {
             let span = self.peek().span;
             return Err(Diagnostic::error(
                 "E0052",
-                format!("test name must be parenthesized: `#{}(\"name\")`", Syntax::KW_TEST),
+                format!(
+                    "test name must be parenthesized: `#{}(\"name\")`",
+                    Syntax::KW_TEST
+                ),
                 "the name is now an argument to the marker, not a bare adjacent string".to_string(),
-                format!("write: #{} (\"describes this block\") {{ ... }}", Syntax::KW_TEST),
+                format!(
+                    "write: #{} (\"describes this block\") {{ ... }}",
+                    Syntax::KW_TEST
+                ),
                 Some(span),
             ));
         }
         self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_TEST))?;
         let (name, name_span) = self.expect_test_name_str()?;
-        self.expect(TokKind::RParen, &format!("to close `#{}(…)`", Syntax::KW_TEST))?;
+        self.expect(
+            TokKind::RParen,
+            &format!("to close `#{}(…)`", Syntax::KW_TEST),
+        )?;
         Ok((name, name_span))
     }
 
@@ -807,7 +826,10 @@ impl<'a> Parser<'a> {
                         describe(other)
                     ),
                     "each test needs a name so failures are easy to find".to_string(),
-                    format!("write: #{} (\"describes this test\") {{ ... }}", Syntax::KW_TEST),
+                    format!(
+                        "write: #{} (\"describes this test\") {{ ... }}",
+                        Syntax::KW_TEST
+                    ),
                     Some(self.peek().span),
                 ));
             }
@@ -909,7 +931,10 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the extern block")?;
         let mut functions = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             functions.push(self.extern_fn()?);
         }
         self.expect(TokKind::RBrace, "to close the extern block")?;
@@ -1080,12 +1105,18 @@ impl<'a> Parser<'a> {
                 "E0003",
                 format!(
                     "a C FFI module path starts with `{}.`, found `{}`",
-                    Syntax::C_MODULE_ROOT, root
+                    Syntax::C_MODULE_ROOT,
+                    root
                 ),
                 "C libraries live under the `c.` module root — `c.raylib`, `c.sqlite3`".to_string(),
-                format!("write: {} module {}.<lib> {{ … }}",
-                    match kind { CModuleKind::Extern => "#extern", CModuleKind::Bindgen => "#bindgen" },
-                    Syntax::C_MODULE_ROOT),
+                format!(
+                    "write: {} module {}.<lib> {{ … }}",
+                    match kind {
+                        CModuleKind::Extern => "#extern",
+                        CModuleKind::Bindgen => "#bindgen",
+                    },
+                    Syntax::C_MODULE_ROOT
+                ),
                 Some(path_start),
             ));
         }
@@ -1139,10 +1170,13 @@ impl<'a> Parser<'a> {
                     "a `#bindgen` module path must end in `.{}`",
                     Syntax::C_BINDGEN_SEGMENT
                 ),
-                "the compiler generates `#bindgen module c.<lib>.__bindgen__` cache files".to_string(),
+                "the compiler generates `#bindgen module c.<lib>.__bindgen__` cache files"
+                    .to_string(),
                 format!(
                     "write: #bindgen module {}.{}.{} {{ … }}",
-                    Syntax::C_MODULE_ROOT, lib, Syntax::C_BINDGEN_SEGMENT
+                    Syntax::C_MODULE_ROOT,
+                    lib,
+                    Syntax::C_BINDGEN_SEGMENT
                 ),
                 Some(path_span),
             ));
@@ -1151,7 +1185,10 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the C FFI module body")?;
         let mut functions = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             functions.push(self.extern_fn()?);
         }
         self.expect(TokKind::RBrace, "to close the C FFI module body")?;
@@ -1276,11 +1313,18 @@ impl<'a> Parser<'a> {
             let (n, _) = self.expect_ident("the from-state inside `#Transition(…)`")?;
             Some(n)
         };
-        self.expect(TokKind::Arrow, "between the from- and to-state in `#Transition(From -> To)`")?;
+        self.expect(
+            TokKind::Arrow,
+            "between the from- and to-state in `#Transition(From -> To)`",
+        )?;
         let (to, _) = self.expect_ident("the to-state inside `#Transition(…)`")?;
         let end = self.peek().span.end;
         self.expect(TokKind::RParen, "to close `#Transition(…)`")?;
-        Ok(crate::AST::StateTransition { from, to, span: Span::new(start, end) })
+        Ok(crate::AST::StateTransition {
+            from,
+            to,
+            span: Span::new(start, end),
+        })
     }
 
     /// Parse a function whose purity is already known (the bare-`pure` teaching
@@ -1312,7 +1356,14 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-        self.func_after_fn(is_pub, false, is_pure, is_sanitizer, state_requires, state_transition)
+        self.func_after_fn(
+            is_pub,
+            false,
+            is_pure,
+            is_sanitizer,
+            state_requires,
+            state_transition,
+        )
     }
 
     fn func_after_fn(
@@ -1361,7 +1412,11 @@ impl<'a> Parser<'a> {
             let expr = self.expr_no_struct_lit()?;
             let expr_end = expr.span().end;
             self.expect(TokKind::Semi, "after the single-expression function body")?;
-            let end = if self.pos > 0 { self.toks[self.pos - 1].span.end } else { expr_end };
+            let end = if self.pos > 0 {
+                self.toks[self.pos - 1].span.end
+            } else {
+                expr_end
+            };
             let ret_span = Span::new(start, end);
             let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
             return Ok(Func {
@@ -1406,9 +1461,7 @@ impl<'a> Parser<'a> {
     /// D-EFF1 / D-QUAL1: parse an optional `#(Net, Db)` effect bound. Returns
     /// `None` when the cursor is not at `#(`. Effect names are bare idents here;
     /// sema validates them against the known effect vocabulary.
-    fn parse_opt_effect_annotation(
-        &mut self,
-    ) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
+    fn parse_opt_effect_annotation(&mut self) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
         // Trait methods (and any caller that can't host a `#(via f)` pass-through)
         // route through here: a `via` clause is parsed and discarded as a list,
         // so it surfaces as an unknown-effect E0119 in sema rather than silently
@@ -1547,7 +1600,10 @@ impl<'a> Parser<'a> {
         let mut trait_impls = Vec::new();
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             // D-SERDE5: `#[Rename("x")] who: String` — field-level serde markers.
             if self.at_marker_list() {
                 let field_markers = self.parse_marker_groups()?;
@@ -1627,7 +1683,10 @@ impl<'a> Parser<'a> {
         let mut trait_impls = Vec::new();
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             // D-SERDE5/7: `#[Rename("x")]` on a variant — variant-level serde markers.
             if self.at_marker_list() {
                 let variant_markers = self.parse_marker_groups()?;
@@ -1732,11 +1791,17 @@ impl<'a> Parser<'a> {
             // Consume `.Ident` segments only when they're followed by ANOTHER `.`
             // (path continuation), leaving the final `.Ident` for the trait check.
             loop {
-                if !matches!(self.peek().kind, TokKind::Dot) { break; }
-                if !matches!(self.peek2().kind, TokKind::Ident(_)) { break; }
+                if !matches!(self.peek().kind, TokKind::Dot) {
+                    break;
+                }
+                if !matches!(self.peek2().kind, TokKind::Ident(_)) {
+                    break;
+                }
                 // peek3() is the token after the candidate ident — if it's `.`,
                 // this is a path component; otherwise it's the trait separator.
-                if !matches!(self.peek3().kind, TokKind::Dot) { break; }
+                if !matches!(self.peek3().kind, TokKind::Dot) {
+                    break;
+                }
                 self.bump(); // `.`
                 let (part, _) = self.expect_ident("in type path after `impl`")?;
                 name = format!("{name}.{part}");
@@ -1752,14 +1817,15 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E0003",
                     "expected `{` to open the error-conversion body".to_string(),
-                    "an error conversion body is a block: `impl Source -> Target { … }`".to_string(),
+                    "an error conversion body is a block: `impl Source -> Target { … }`"
+                        .to_string(),
                     "add `{` after the target type".to_string(),
                     Some(self.peek().span),
                 ));
             }
             let brace_start = self.bump().span.start; // consume `{`
-            // block_stmts consumes statements AND the closing `}`.
-            // We need to track where the `}` ended — peek first to record pos.
+                                                      // block_stmts consumes statements AND the closing `}`.
+                                                      // We need to track where the `}` ended — peek first to record pos.
             let body = self.block_stmts();
             // After block_stmts, the `}` is consumed; the last consumed token is at pos-1.
             let rbrace_end = self.toks[self.pos.saturating_sub(1)].span.end;
@@ -1817,7 +1883,10 @@ impl<'a> Parser<'a> {
         let mut methods = Vec::new();
         let mut assoc_type_impls = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
                 if kw == "type" {
                     let kw_span = self.bump().span;
@@ -1825,7 +1894,11 @@ impl<'a> Parser<'a> {
                     self.expect(TokKind::Eq, "after associated type name")?;
                     let (assoc_ty, _) = self.type_()?;
                     self.finish_stmt()?;
-                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
+                    assoc_type_impls.push((
+                        assoc_name,
+                        Span::new(kw_span.start, name_span.end),
+                        assoc_ty,
+                    ));
                     continue;
                 }
             }
@@ -1851,7 +1924,10 @@ impl<'a> Parser<'a> {
         let mut methods = Vec::new();
         let mut assoc_type_impls = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             // D-LIB2: `type Name = ConcreteType;`
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
                 if kw == "type" {
@@ -1860,7 +1936,11 @@ impl<'a> Parser<'a> {
                     self.expect(TokKind::Eq, "after associated type name")?;
                     let (assoc_ty, _) = self.type_()?;
                     self.finish_stmt()?;
-                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
+                    assoc_type_impls.push((
+                        assoc_name,
+                        Span::new(kw_span.start, name_span.end),
+                        assoc_ty,
+                    ));
                     continue;
                 }
             }
@@ -1885,8 +1965,7 @@ impl<'a> Parser<'a> {
 
     /// True when the cursor is at a `#[ … ]` bracket-marker group (D-ATTR2).
     fn at_marker_list(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(self.peek2().kind, TokKind::LBracket)
+        matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
     }
 
     /// D-ATTR2 / D-SERDE2–8: parse one or more stacked `#[ … ]` bracket-marker
@@ -1976,14 +2055,10 @@ impl<'a> Parser<'a> {
         let item = match &self.peek().kind {
             TokKind::KwStruct => self.struct_def(false).map(Item::Struct)?,
             TokKind::KwEnum => self.enum_def(false).map(Item::Enum)?,
-            TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT) =>
-            {
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT) => {
                 self.layout_struct_def(is_pub).map(Item::Struct)?
             }
-            TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) =>
-            {
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) => {
                 self.published_schema_struct_def(is_pub).map(Item::Struct)?
             }
             other => {
@@ -2031,7 +2106,10 @@ impl<'a> Parser<'a> {
         let mut methods = Vec::new();
         let mut assoc_types = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             // D-LIB2: `type Name;` associated type declaration.
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
                 if kw == "type" {
@@ -2208,7 +2286,14 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a method")?;
-        self.func_after_fn(is_pub, false, is_pure, is_sanitizer, state_requires, state_transition)
+        self.func_after_fn(
+            is_pub,
+            false,
+            is_pure,
+            is_sanitizer,
+            state_requires,
+            state_transition,
+        )
     }
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
@@ -2350,7 +2435,10 @@ impl<'a> Parser<'a> {
     }
 
     /// D-DIST1/D-DIST3: parse `[#Numeric] Name @= distinct BaseType`.
-    pub(super) fn distinct_def(&mut self, is_pub: bool) -> Result<crate::AST::DistinctDef, Diagnostic> {
+    pub(super) fn distinct_def(
+        &mut self,
+        is_pub: bool,
+    ) -> Result<crate::AST::DistinctDef, Diagnostic> {
         let start = self.peek().span;
         // optional `#Numeric` attribute
         let is_numeric = if matches!(&self.peek().kind, TokKind::Hash) {
@@ -2359,7 +2447,10 @@ impl<'a> Parser<'a> {
             if attr != Syntax::ATTR_NUMERIC {
                 return Err(Diagnostic::error(
                     "E0003",
-                    format!("`#{}` isn't a valid attribute on a distinct type declaration", attr),
+                    format!(
+                        "`#{}` isn't a valid attribute on a distinct type declaration",
+                        attr
+                    ),
                     "only `#Numeric` is supported before a distinct type".to_string(),
                     "write `#Numeric` before the declaration, or remove the attribute".to_string(),
                     Some(self.peek().span),
@@ -2372,7 +2463,9 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident("as the distinct type name")?;
         // Accept `@=` (D-BIND2) or retired `::` (E0991 teaching error).
         match self.peek().kind {
-            TokKind::AtEq => { self.bump(); }
+            TokKind::AtEq => {
+                self.bump();
+            }
             TokKind::ColonColon => {
                 let span = self.peek().span;
                 self.bump();
@@ -2412,21 +2505,41 @@ impl<'a> Parser<'a> {
                         Syntax::SIGIL_BIND_IMMUT,
                         Syntax::KW_DISTINCT
                     ),
-                    format!("write: {} {} {} Int", name, Syntax::SIGIL_BIND_IMMUT, Syntax::KW_DISTINCT),
+                    format!(
+                        "write: {} {} {} Int",
+                        name,
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::KW_DISTINCT
+                    ),
                     Some(self.peek().span),
                 ));
             }
         }
         // consume `distinct` keyword
         match &self.peek().kind {
-            TokKind::Ident(n) if n == Syntax::KW_DISTINCT => { self.bump(); }
+            TokKind::Ident(n) if n == Syntax::KW_DISTINCT => {
+                self.bump();
+            }
             other => {
                 let other = other.clone();
                 return Err(Diagnostic::error(
                     "E0003",
-                    format!("expected `{}` here, found {}", Syntax::KW_DISTINCT, describe(&other)),
-                    format!("a distinct type declaration is `Name {} {} BaseType`", Syntax::SIGIL_BIND_IMMUT, Syntax::KW_DISTINCT),
-                    format!("write: {} {} {} Int", name, Syntax::SIGIL_BIND_IMMUT, Syntax::KW_DISTINCT),
+                    format!(
+                        "expected `{}` here, found {}",
+                        Syntax::KW_DISTINCT,
+                        describe(&other)
+                    ),
+                    format!(
+                        "a distinct type declaration is `Name {} {} BaseType`",
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::KW_DISTINCT
+                    ),
+                    format!(
+                        "write: {} {} {} Int",
+                        name,
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::KW_DISTINCT
+                    ),
                     Some(self.peek().span),
                 ));
             }
@@ -2512,7 +2625,10 @@ impl<'a> Parser<'a> {
     /// `c` (C-compatible) and `columnar` (struct-of-arrays) are supported;
     /// `packed`, `align` parse-and-error; the partial form `columnar: f, g`
     /// (D-SOA2B) is rejected (deferred post-v1).
-    fn layout_struct_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
+    fn layout_struct_def(
+        &mut self,
+        outer_is_pub: bool,
+    ) -> Result<crate::AST::StructDef, Diagnostic> {
         let attr_start = self.peek().span;
         self.bump(); // consume `#`
         let (attr_name, attr_name_span) = self.expect_ident("after `#`")?;
@@ -2560,12 +2676,13 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let is_pub = outer_is_pub || if matches!(&self.peek().kind, TokKind::KwPub) {
-            self.bump();
-            true
-        } else {
-            false
-        };
+        let is_pub = outer_is_pub
+            || if matches!(&self.peek().kind, TokKind::KwPub) {
+                self.bump();
+                true
+            } else {
+                false
+            };
         let mut def = self.struct_def_after_pub(is_pub)?;
         def.layout = layout;
         def.layout_span = Some(attr_span);
@@ -2672,14 +2789,20 @@ impl<'a> Parser<'a> {
     }
 
     /// D-MIGRATE1 (ratified 2026-06-22): parse `#PublishedSchema [pub] struct Name { … }`.
-    fn published_schema_struct_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
+    fn published_schema_struct_def(
+        &mut self,
+        outer_is_pub: bool,
+    ) -> Result<crate::AST::StructDef, Diagnostic> {
         let attr_start = self.peek().span;
         self.bump(); // consume `#`
         let (attr, attr_name_span) = self.expect_ident("after `#`")?;
         if attr != Syntax::ATTR_PUBLISHED_SCHEMA {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("`#{}` isn't a valid attribute on a struct declaration", attr),
+                format!(
+                    "`#{}` isn't a valid attribute on a struct declaration",
+                    attr
+                ),
                 "only `#PublishedSchema` is supported here".to_string(),
                 "write `#PublishedSchema` before the struct".to_string(),
                 Some(attr_name_span),
@@ -2692,12 +2815,13 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         // optional `pub` after the marker
-        let is_pub = outer_is_pub || if matches!(&self.peek().kind, TokKind::KwPub) {
-            self.bump();
-            true
-        } else {
-            false
-        };
+        let is_pub = outer_is_pub
+            || if matches!(&self.peek().kind, TokKind::KwPub) {
+                self.bump();
+                true
+            } else {
+                false
+            };
         let mut def = self.struct_def_after_pub(is_pub)?;
         def.is_published_schema = true;
         def.published_schema_span = Some(attr_span);
@@ -2716,7 +2840,10 @@ impl<'a> Parser<'a> {
         let mut trait_impls = Vec::new();
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             // D-SERDE5: `#[Rename("x")] who: String` — field-level serde markers.
             if self.at_marker_list() {
                 let field_markers = self.parse_marker_groups()?;
@@ -2789,9 +2916,17 @@ impl<'a> Parser<'a> {
                 // D-MIGRATE1: `rename old -> new`.
                 TokKind::Ident(kw) if kw == Syntax::KW_RENAME => {
                     let (from, from_span) = self.expect_ident("as the field to rename")?;
-                    self.expect(TokKind::Arrow, "between the old and new field names in `rename`")?;
+                    self.expect(
+                        TokKind::Arrow,
+                        "between the old and new field names in `rename`",
+                    )?;
                     let (to, to_span) = self.expect_ident("as the new field name")?;
-                    ops.push(crate::AST::MigrationOp::Rename { from, from_span, to, to_span });
+                    ops.push(crate::AST::MigrationOp::Rename {
+                        from,
+                        from_span,
+                        to,
+                        to_span,
+                    });
                 }
                 // D-MIGRATE2A: `add field: Type = default`.
                 TokKind::Ident(kw) if kw == Syntax::KW_ADD => {
@@ -2802,7 +2937,12 @@ impl<'a> Parser<'a> {
                     let default = self.expr()?;
                     let default_span = default.span();
                     ops.push(crate::AST::MigrationOp::Add {
-                        field, field_span, ty, ty_span, default, default_span,
+                        field,
+                        field_span,
+                        ty,
+                        ty_span,
+                        default,
+                        default_span,
                     });
                 }
                 // D-MIGRATE2D: `remove field`.
@@ -2812,19 +2952,28 @@ impl<'a> Parser<'a> {
                 }
                 // D-MIGRATE2E: `change field: Old -> New [via { expr }]`.
                 TokKind::Ident(kw) if kw == Syntax::KW_CHANGE => {
-                    let (field, field_span) = self.expect_ident("as the field whose type changes")?;
+                    let (field, field_span) =
+                        self.expect_ident("as the field whose type changes")?;
                     self.expect(TokKind::Colon, "after the changed field name")?;
                     let (from_ty, from_span) = self.type_()?;
-                    self.expect(TokKind::Arrow, "between the old and new field types in `change`")?;
+                    self.expect(
+                        TokKind::Arrow,
+                        "between the old and new field types in `change`",
+                    )?;
                     let (to_ty, to_span) = self.type_()?;
                     // Optional `via { expr }` inline converter (D-MIGRATE2B).
-                    let (converter, converter_span) = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
+                    let (converter, converter_span) = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA)
+                    {
                         let via_start = self.bump().span; // consume `via`
                         self.expect(TokKind::LBrace, "to open the `via { … }` converter body")?;
                         // Tolerate a newline-inserted `Semi` after `{`.
-                        while matches!(&self.peek().kind, TokKind::Semi) { self.bump(); }
+                        while matches!(&self.peek().kind, TokKind::Semi) {
+                            self.bump();
+                        }
                         let body = self.expr()?;
-                        while matches!(&self.peek().kind, TokKind::Semi) { self.bump(); }
+                        while matches!(&self.peek().kind, TokKind::Semi) {
+                            self.bump();
+                        }
                         let rbrace_end = self.peek().span.end;
                         self.expect(TokKind::RBrace, "to close the `via { … }` converter body")?;
                         (Some(body), Some(Span::new(via_start.start, rbrace_end)))
@@ -2832,7 +2981,14 @@ impl<'a> Parser<'a> {
                         (None, None)
                     };
                     ops.push(crate::AST::MigrationOp::Change {
-                        field, field_span, from_ty, from_span, to_ty, to_span, converter, converter_span,
+                        field,
+                        field_span,
+                        from_ty,
+                        from_span,
+                        to_ty,
+                        to_span,
+                        converter,
+                        converter_span,
                     });
                 }
                 // D-MIGRATE2D: `drop` → teach `remove` (E0911 teaching error).
@@ -2844,7 +3000,10 @@ impl<'a> Parser<'a> {
                         "write `remove <field>` to delete a published field".to_string(),
                         Some(op_tok.span),
                     ));
-                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
+                    while !matches!(
+                        &self.peek().kind,
+                        TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                    ) {
                         self.bump();
                     }
                 }
@@ -2857,7 +3016,10 @@ impl<'a> Parser<'a> {
                         "delete the `reorder` line; just write the fields in the order you want".to_string(),
                         Some(op_tok.span),
                     ));
-                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
+                    while !matches!(
+                        &self.peek().kind,
+                        TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                    ) {
                         self.bump();
                     }
                 }
@@ -2870,7 +3032,10 @@ impl<'a> Parser<'a> {
                         "use `rename old -> new`, `add f: T = default`, `remove f`, or `change f: Old -> New via { … }`".to_string(),
                         Some(op_tok.span),
                     ));
-                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
+                    while !matches!(
+                        &self.peek().kind,
+                        TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                    ) {
                         self.bump();
                     }
                 }
@@ -2883,7 +3048,10 @@ impl<'a> Parser<'a> {
                         "write `rename fieldA -> fieldB` (or `add` / `remove` / `change`)".to_string(),
                         Some(op_tok.span),
                     ));
-                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
+                    while !matches!(
+                        &self.peek().kind,
+                        TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                    ) {
                         self.bump();
                     }
                 }
@@ -2892,7 +3060,12 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::RBrace, "to close the migration block")?;
         let end = self.toks[self.pos - 1].span;
         let span = Span::new(start.start, end.end);
-        Ok(crate::AST::MigrationDecl { type_name, type_span, ops, span })
+        Ok(crate::AST::MigrationDecl {
+            type_name,
+            type_span,
+            ops,
+            span,
+        })
     }
 
     /// D-STATE-DECL: true when `state <TypeName> {` is at the cursor (contextual).
@@ -2910,7 +3083,8 @@ impl<'a> Parser<'a> {
     fn state_decl(&mut self, is_pub: bool) -> Result<crate::AST::StateDecl, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // consume `state`
-        let (type_name, type_name_span) = self.expect_ident("the type name in `state TypeName { … }`")?;
+        let (type_name, type_name_span) =
+            self.expect_ident("the type name in `state TypeName { … }`")?;
         self.expect(TokKind::LBrace, "to open the state declaration block")?;
         let mut states = Vec::new();
         while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -2927,7 +3101,13 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RBrace, "to close the state declaration block")?;
         let end = self.toks[self.pos - 1].span.end;
-        Ok(crate::AST::StateDecl { is_pub, type_name, type_name_span, states, span: Span::new(start.start, end) })
+        Ok(crate::AST::StateDecl {
+            is_pub,
+            type_name,
+            type_name_span,
+            states,
+            span: Span::new(start.start, end),
+        })
     }
 
     /// D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive block.
@@ -2935,9 +3115,15 @@ impl<'a> Parser<'a> {
         let start = self.peek().span.start;
         self.bump(); // consume `derive`
         let (trait_name, trait_span) = self.expect_ident("after `derive`")?;
-        self.expect(TokKind::KwFor, "after the trait name in `derive Trait for T`")?;
+        self.expect(
+            TokKind::KwFor,
+            "after the trait name in `derive Trait for T`",
+        )?;
         let (type_param, _) = self.expect_ident("after `for` in `derive Trait for T`")?;
-        self.expect(TokKind::LBrace, "after the type parameter in `derive Trait for T`")?;
+        self.expect(
+            TokKind::LBrace,
+            "after the type parameter in `derive Trait for T`",
+        )?;
         let body = self.block_stmts(); // consumes `}`
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::AST::DeriveDef {

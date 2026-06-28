@@ -31,7 +31,6 @@ fn read(p: &PathBuf) -> String {
     fs::read_to_string(p).unwrap_or_else(|_| panic!("cannot read {}", p.display()))
 }
 
-
 /// Collect all [EL]NNNN codes emitted in Source/ via Diagnostic::error /
 /// Diagnostic::warn (the string literal form `"E0xxx"` / `"L0xxx"`).
 fn emitted_codes() -> BTreeSet<String> {
@@ -79,7 +78,9 @@ fn extract_quoted_codes(text: &str) -> Vec<String> {
 }
 
 fn walk_rs(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -320,19 +321,8 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // These fire only from `jet::Jetpack::ModuleEval::evaluate_env` / `evaluate_modules`,
     // not from `jet check`/`jet build`/`jet run`. No unit tests exist for ModuleEval yet.
     // TODO: add tests/module_eval.rs using jet::Jetpack::ModuleEval::evaluate_source().
-    "E0966",
-    "E0967",
-    "E0968",
-    "E0969",
-    "E0970",
-    "E0971",
-    "E0972",
-    "E0973",
-    "E0974",
-    "E0975",
-    "E0976",
-    "E0977",
-    "E0978",
+    "E0966", "E0967", "E0968", "E0969", "E0970", "E0971", "E0972", "E0973", "E0974", "E0975",
+    "E0976", "E0977", "E0978",
     // Environment-specific: require git-not-installed or a specific store condition.
     // These are integration-test scenarios that need CI matrix variations.
     "E1203", // git not installed (requires git to be absent from PATH)
@@ -433,7 +423,8 @@ fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
             !snaps.contains(code),
             "I2 violation: rustc code {} appears in a user-facing snapshot as [{}]. \
              Rustc error codes must never reach end users.",
-            code, code
+            code,
+            code
         );
         let _ = (in_ffi, &allowed_fn_context, &bracketed);
     }
@@ -619,10 +610,7 @@ fn registered_unimplemented_codes_are_expected() {
         .collect();
 
     // Anything in spec_ahead_of_impl but NOT in expected is a surprise.
-    let mut unexpected: Vec<String> = spec_ahead_of_impl
-        .difference(&expected)
-        .cloned()
-        .collect();
+    let mut unexpected: Vec<String> = spec_ahead_of_impl.difference(&expected).cloned().collect();
     unexpected.sort();
 
     assert!(

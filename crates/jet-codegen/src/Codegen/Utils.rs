@@ -31,8 +31,19 @@ pub(crate) fn is_json_variant(variant: &str) -> bool {
 pub(crate) fn is_key_variant(variant: &str) -> bool {
     matches!(
         variant,
-        "Char" | "Enter" | "Escape" | "Backspace" | "Tab" | "Delete"
-        | "Up" | "Down" | "Left" | "Right" | "F" | "Ctrl" | "Unknown"
+        "Char"
+            | "Enter"
+            | "Escape"
+            | "Backspace"
+            | "Tab"
+            | "Delete"
+            | "Up"
+            | "Down"
+            | "Left"
+            | "Right"
+            | "F"
+            | "Ctrl"
+            | "Unknown"
     )
 }
 

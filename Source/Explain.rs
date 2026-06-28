@@ -101,13 +101,9 @@ pub fn live_codes() -> Vec<String> {
 /// Look up one code (case-insensitive).
 pub fn lookup(code: &str) -> Option<Explanation> {
     let want = normalize(code);
-    index().into_iter().find_map(|(k, v)| {
-        if normalize(&k) == want {
-            Some(v)
-        } else {
-            None
-        }
-    })
+    index()
+        .into_iter()
+        .find_map(|(k, v)| if normalize(&k) == want { Some(v) } else { None })
 }
 
 /// Render the offline essay for a code. Uses readable, beginner-friendly
@@ -115,7 +111,11 @@ pub fn lookup(code: &str) -> Option<Explanation> {
 pub fn render(ex: &Explanation, color: bool) -> String {
     let mut out = String::new();
     let bold = |s: &str| {
-        if color { format!("\x1b[1m{}\x1b[0m", s) } else { s.to_string() }
+        if color {
+            format!("\x1b[1m{}\x1b[0m", s)
+        } else {
+            s.to_string()
+        }
     };
     out.push_str(&format!("{}\n\n", bold(&ex.code)));
     if ex.retired {
@@ -156,7 +156,11 @@ pub fn render(ex: &Explanation, color: bool) -> String {
 /// The teaching pointer appended after a rendered error (one dim line).
 /// Suppressed in `--json` (the code is already structured there).
 pub fn pointer_line(code: &str, color: bool) -> String {
-    let body = format!("run `{} explain {}` to learn more", crate::Syntax::BINARY_NAME, code);
+    let body = format!(
+        "run `{} explain {}` to learn more",
+        crate::Syntax::BINARY_NAME,
+        code
+    );
     if color {
         format!("\x1b[2m{}\x1b[0m", body)
     } else {
@@ -170,9 +174,7 @@ fn normalize(code: &str) -> String {
 
 fn is_code(s: &str) -> bool {
     let b = s.as_bytes();
-    b.len() == 5
-        && (b[0] == b'E' || b[0] == b'L')
-        && b[1..].iter().all(|c| c.is_ascii_digit())
+    b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())
 }
 
 /// Yield each markdown table row as a vector of trimmed cells. Separator rows

@@ -11,8 +11,10 @@
 //! NEVER asks rustc whether the layout changed (I3: all checking lives in
 //! sema). It compares declared shapes directly.
 
-use crate::AST::{EnumDef, Func, Item, LoadedModule, ProgramBundle, StructDef, Type, VariantPayload};
 use crate::Diagnostics::Diagnostic;
+use crate::AST::{
+    EnumDef, Func, Item, LoadedModule, ProgramBundle, StructDef, Type, VariantPayload,
+};
 
 /// E2210: a hot-swap edit changed a type surface, so `jet dev`/`jet serve`
 /// must restart rather than swap. `what_changed` is the human summary the
@@ -57,9 +59,10 @@ pub fn type_stable_check(
             None => Ok(()),
         },
         // A module that appeared or vanished is itself a surface change.
-        (Some(_), None) | (None, Some(_)) => {
-            Err(vec![e2210(&format!("the module `{}` was added or removed", module_name))])
-        }
+        (Some(_), None) | (None, Some(_)) => Err(vec![e2210(&format!(
+            "the module `{}` was added or removed",
+            module_name
+        ))]),
         (None, None) => Ok(()),
     }
 }
@@ -183,10 +186,7 @@ fn struct_diff(name: &str, old: &StructDef, new: &StructDef) -> Option<String> {
             ));
         }
         if !types_eq(&o.ty, &n.ty) {
-            return Some(format!(
-                "struct `{}` retyped field `{}`",
-                name, o.name
-            ));
+            return Some(format!("struct `{}` retyped field `{}`", name, o.name));
         }
     }
     None

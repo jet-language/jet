@@ -170,17 +170,10 @@ pub struct MergedEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MergeError {
     /// Two `sources` declarations share a name but resolve to different refs.
-    SourceConflict {
-        name: String,
-        a: String,
-        b: String,
-    },
+    SourceConflict { name: String, a: String, b: String },
     /// A scalar setting got conflicting values at the same (highest) priority
     /// with no `force`/`default` to break the tie.
-    ScalarConflict {
-        key: String,
-        values: Vec<String>,
-    },
+    ScalarConflict { key: String, values: Vec<String> },
 }
 
 /// Merge `sources` maps by key: identical refs de-duplicate; the same name with
@@ -373,8 +366,8 @@ mod tests {
     fn packages_concat_dedup_preserve_source_and_order() {
         let l1 = vec![Pkg::new("default", "ripgrep"), Pkg::new("default", "fd")];
         let l2 = vec![
-            Pkg::new("default", "ripgrep"),   // dup → dropped
-            Pkg::new("unstable", "ripgrep"),  // different source → kept
+            Pkg::new("default", "ripgrep"),  // dup → dropped
+            Pkg::new("unstable", "ripgrep"), // different source → kept
             Pkg::new("default", "jq"),
         ];
         let merged = merge_packages(&[l1, l2]);
@@ -423,7 +416,11 @@ mod tests {
     fn scalar_force_overrides_normal() {
         let v = resolve_scalar(
             "k",
-            &[Scalar::normal("on"), Scalar::normal("on2"), Scalar::force("win")],
+            &[
+                Scalar::normal("on"),
+                Scalar::normal("on2"),
+                Scalar::force("win"),
+            ],
         )
         .unwrap();
         assert_eq!(v, Some("win".to_string()));

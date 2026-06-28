@@ -1,12 +1,12 @@
 use super::*;
-use crate::AST::{
-    AccessConvention, ConstAttr, DistinctDef, EnumDef,
-    Expr, Func, Item, Param, Program, RustConstKind, StructDef, Type,
-};
 use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Traits::TraitRegistry;
 use crate::Syntax;
+use crate::Traits::TraitRegistry;
+use crate::AST::{
+    AccessConvention, ConstAttr, DistinctDef, EnumDef, Expr, Func, Item, Param, Program,
+    RustConstKind, StructDef, Type,
+};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -95,7 +95,6 @@ impl<'a> Checker<'a> {
         }
     }
 }
-
 
 pub fn check(prog: &mut Program) -> Vec<Diagnostic> {
     check_with_mode(prog, CompileMode::Run)
@@ -263,7 +262,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // D-METADERIVE1=A: user-derive expansion — run after registration so derive bodies
     // can reference helper functions and TypeInfo. All items are local; no orphan possible.
     {
-        let user_derives: Vec<(String, String, Vec<crate::AST::Stmt>)> = prog.items.iter()
+        let user_derives: Vec<(String, String, Vec<crate::AST::Stmt>)> = prog
+            .items
+            .iter()
             .filter_map(|i| {
                 if let Item::UserDerive(d) = i {
                     Some((d.trait_name.clone(), d.type_param.clone(), d.body.clone()))
@@ -274,7 +275,13 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             .collect();
 
         if !user_derives.is_empty() {
-            let struct_infos: Vec<(String, Vec<(String, crate::Diagnostics::Span)>, Vec<crate::AST::Field>)> = prog.items.iter()
+            let struct_infos: Vec<(
+                String,
+                Vec<(String, crate::Diagnostics::Span)>,
+                Vec<crate::AST::Field>,
+            )> = prog
+                .items
+                .iter()
                 .filter_map(|i| {
                     if let Item::Struct(s) = i {
                         Some((s.name.clone(), s.derives.clone(), s.fields.clone()))
@@ -284,9 +291,15 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 })
                 .collect();
 
-            let actual_funcs: HashMap<String, &crate::AST::Func> = prog.items.iter()
+            let actual_funcs: HashMap<String, &crate::AST::Func> = prog
+                .items
+                .iter()
                 .filter_map(|i| {
-                    if let Item::Func(f) = i { Some((f.name.clone(), f)) } else { None }
+                    if let Item::Func(f) = i {
+                        Some((f.name.clone(), f))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
 
@@ -295,27 +308,52 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
 
             for (struct_name, derives, fields) in &struct_infos {
                 for (derive_name, derive_span) in derives {
-                    if let Some((_, type_param, body)) = user_derives.iter().find(|(tn, _, _)| tn == derive_name) {
+                    if let Some((_, type_param, body)) =
+                        user_derives.iter().find(|(tn, _, _)| tn == derive_name)
+                    {
                         // Build TypeInfo CtValue for this struct.
-                        let fields_info: Vec<crate::Comptime::CtValue> = fields.iter().map(|f| {
-                            let markers: Vec<crate::Comptime::CtValue> = f.serde_markers.iter()
-                                .map(|m| crate::Comptime::CtValue::Str(m.name.clone()))
-                                .collect();
-                            crate::Comptime::CtValue::Struct {
-                                type_name: "FieldInfo".to_string(),
-                                fields: vec![
-                                    ("name".to_string(), crate::Comptime::CtValue::Str(f.name.clone())),
-                                    ("ty".to_string(), crate::Comptime::CtValue::Str(f.ty.name())),
-                                    ("markers".to_string(), crate::Comptime::CtValue::List(markers)),
-                                    ("is_pub".to_string(), crate::Comptime::CtValue::Bool(f.is_pub)),
-                                ],
-                            }
-                        }).collect();
+                        let fields_info: Vec<crate::Comptime::CtValue> = fields
+                            .iter()
+                            .map(|f| {
+                                let markers: Vec<crate::Comptime::CtValue> = f
+                                    .serde_markers
+                                    .iter()
+                                    .map(|m| crate::Comptime::CtValue::Str(m.name.clone()))
+                                    .collect();
+                                crate::Comptime::CtValue::Struct {
+                                    type_name: "FieldInfo".to_string(),
+                                    fields: vec![
+                                        (
+                                            "name".to_string(),
+                                            crate::Comptime::CtValue::Str(f.name.clone()),
+                                        ),
+                                        (
+                                            "ty".to_string(),
+                                            crate::Comptime::CtValue::Str(f.ty.name()),
+                                        ),
+                                        (
+                                            "markers".to_string(),
+                                            crate::Comptime::CtValue::List(markers),
+                                        ),
+                                        (
+                                            "is_pub".to_string(),
+                                            crate::Comptime::CtValue::Bool(f.is_pub),
+                                        ),
+                                    ],
+                                }
+                            })
+                            .collect();
                         let type_info = crate::Comptime::CtValue::Struct {
                             type_name: "TypeInfo".to_string(),
                             fields: vec![
-                                ("name".to_string(), crate::Comptime::CtValue::Str(struct_name.clone())),
-                                ("fields".to_string(), crate::Comptime::CtValue::List(fields_info)),
+                                (
+                                    "name".to_string(),
+                                    crate::Comptime::CtValue::Str(struct_name.clone()),
+                                ),
+                                (
+                                    "fields".to_string(),
+                                    crate::Comptime::CtValue::List(fields_info),
+                                ),
                             ],
                         };
 
@@ -346,7 +384,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                                     derive_name, derive_name, struct_name
                                 ),
                                 inner.what.clone(),
-                                "fix the `derive` body so it generates valid Jet at compile time".to_string(),
+                                "fix the `derive` body so it generates valid Jet at compile time"
+                                    .to_string(),
                                 Some(*derive_span),
                             )),
                         }
@@ -375,11 +414,11 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // Runs after trait_reg.register_items so implements_trait is populated.
     for item in &prog.items {
         if let Item::Impl(i) = item {
-            if let (Some(trait_name), Some(field_name)) =
-                (&i.trait_name, &i.delegation_field)
-            {
+            if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
                 if let Some(fields) = registry.struct_fields(&i.type_name) {
-                    if let Some((_, _, field_ty, _, _)) = fields.iter().find(|(n, _, _, _, _)| n == field_name) {
+                    if let Some((_, _, field_ty, _, _)) =
+                        fields.iter().find(|(n, _, _, _, _)| n == field_name)
+                    {
                         let field_type_name = field_ty.name();
                         if !trait_reg.implements_trait(&field_type_name, trait_name) {
                             diags.push(Diagnostic::error(
@@ -433,7 +472,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Some(sig) => {
                 // E0122: in Run mode main must be `fn main()` with no params and no return.
                 // In Eval mode we allow a return type (e.g. `pure fn main() -> Int`).
-                if mode == CompileMode::Run && (!sig.params.is_empty() || sig.return_type.is_some()) {
+                if mode == CompileMode::Run && (!sig.params.is_empty() || sig.return_type.is_some())
+                {
                     let span = prog.items.iter().find_map(|i| match i {
                         Item::Func(f) if f.name == "main" => Some(f.name_span),
                         _ => None,
@@ -818,7 +858,10 @@ pub(crate) fn check_effect_boundaries(
         let over: EffectSet = inferred.difference(&declared).copied().collect();
         if !over.is_empty() {
             // Point at the signature; name the offending effects.
-            let span = declared_list.first().map(|(_, s)| *s).unwrap_or(f.name_span);
+            let span = declared_list
+                .first()
+                .map(|(_, s)| *s)
+                .unwrap_or(f.name_span);
             diags.push(e0740(&f.name, &over, &declared, span));
         }
     }
@@ -873,7 +916,11 @@ pub(crate) fn check_effect_boundaries(
                                 }
                             }
                         }
-                        if ok { Some(set) } else { None }
+                        if ok {
+                            Some(set)
+                        } else {
+                            None
+                        }
                     }
                     (false, None) => None, // un-annotated: per-impl, no obligation
                 };
@@ -885,7 +932,12 @@ pub(crate) fn check_effect_boundaries(
     }
     let mut push_impl = |trait_name: &str, type_name: &str, methods: &[Func]| {
         for m in methods {
-            impls.push((trait_name.to_string(), type_name.to_string(), m.name.clone(), m.name_span));
+            impls.push((
+                trait_name.to_string(),
+                type_name.to_string(),
+                m.name.clone(),
+                m.name_span,
+            ));
         }
     };
     for item in items {
@@ -910,7 +962,6 @@ pub(crate) fn check_effect_boundaries(
     }
     check_trait_obligations(&impls, &trait_bounds, solved, diags);
 }
-
 
 pub(crate) fn name_defined(
     name: &str,
@@ -1021,7 +1072,12 @@ pub(crate) fn eval_comptime_items(
                 if c.is_comptime {
                     // D-CTCORE1: evaluate_with_imports so Core whitelist calls work.
                     match crate::Comptime::evaluate_with_imports(
-                        &c.value, &funcs, &externs, base_dir, &globals, core_imports,
+                        &c.value,
+                        &funcs,
+                        &externs,
+                        base_dir,
+                        &globals,
+                        core_imports,
                     ) {
                         Ok(v) => {
                             consts.insert(c.name.clone(), v.jet_type());
@@ -1216,10 +1272,7 @@ pub(crate) fn register_struct(
     // D-REPRC1: `#layout(c)` structs may not contain growable fields.
     if s.layout == Some(crate::AST::StructLayout::C) {
         for f in &s.fields {
-            let growable = matches!(
-                &f.ty,
-                Type::List(_) | Type::Map { .. } | Type::String
-            );
+            let growable = matches!(&f.ty, Type::List(_) | Type::Map { .. } | Type::String);
             if growable {
                 let layout_span = s.layout_span.unwrap_or(s.name_span);
                 diags.push(Diagnostic::error(
@@ -1230,7 +1283,8 @@ pub(crate) fn register_struct(
                         f.name,
                         f.ty.name()
                     ),
-                    "growable types (`[T]`, `Map`, `String`) don't have a stable C layout".to_string(),
+                    "growable types (`[T]`, `Map`, `String`) don't have a stable C layout"
+                        .to_string(),
                     "use a fixed-size array `[T#N]` instead, or remove `#layout(c)`".to_string(),
                     Some(layout_span),
                 ));
@@ -1309,7 +1363,11 @@ pub(crate) fn register_enum(
     );
 }
 
-pub(crate) fn register_type_methods(items: &[Item], registry: &mut TypeRegistry, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn register_type_methods(
+    items: &[Item],
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) {
     for item in items {
         let (type_name, methods, field_names) = match item {
             Item::Struct(s) => (s.name.as_str(), &s.methods, registry.field_names(&s.name)),
@@ -1329,7 +1387,12 @@ pub(crate) fn register_type_methods(items: &[Item], registry: &mut TypeRegistry,
             }
             if methods_map.contains_key(&m.name) {
                 let is_ctor = m.self_param().is_none();
-                diags.push(method_defined_twice(&m.name, type_name, m.name_span, is_ctor));
+                diags.push(method_defined_twice(
+                    &m.name,
+                    type_name,
+                    m.name_span,
+                    is_ctor,
+                ));
             } else {
                 // L2401 (D-NARG1): pub method with a positional Bool param.
                 if m.is_pub {
@@ -1353,7 +1416,12 @@ pub(crate) fn register_type_methods(items: &[Item], registry: &mut TypeRegistry,
                     }
                 }
                 // D-NARG-D2 (E0126): check defaults don't ref later params.
-                let non_self: Vec<_> = m.params.iter().filter(|p| p.name != "self").cloned().collect();
+                let non_self: Vec<_> = m
+                    .params
+                    .iter()
+                    .filter(|p| p.name != "self")
+                    .cloned()
+                    .collect();
                 check_default_forward_refs(&non_self, &m.name, diags);
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
@@ -1361,7 +1429,11 @@ pub(crate) fn register_type_methods(items: &[Item], registry: &mut TypeRegistry,
     }
 }
 
-pub(crate) fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn register_impl_methods(
+    items: &[Item],
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) {
     for item in items {
         let Item::Impl(i) = item else { continue };
         if !registry.contains(&i.type_name) {
@@ -1381,7 +1453,12 @@ pub(crate) fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry,
             }
             if methods_map.contains_key(&m.name) {
                 let is_ctor = m.self_param().is_none();
-                diags.push(method_defined_twice(&m.name, &i.type_name, m.name_span, is_ctor));
+                diags.push(method_defined_twice(
+                    &m.name,
+                    &i.type_name,
+                    m.name_span,
+                    is_ctor,
+                ));
             } else {
                 // L2401 (D-NARG1): pub method with a positional Bool param.
                 if m.is_pub {
@@ -1405,7 +1482,12 @@ pub(crate) fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry,
                     }
                 }
                 // D-NARG-D2 (E0126): check defaults don't ref later params.
-                let non_self: Vec<_> = m.params.iter().filter(|p| p.name != "self").cloned().collect();
+                let non_self: Vec<_> = m
+                    .params
+                    .iter()
+                    .filter(|p| p.name != "self")
+                    .cloned()
+                    .collect();
                 check_default_forward_refs(&non_self, &m.name, diags);
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
@@ -1546,7 +1628,11 @@ pub(crate) fn check_error_conv_body(
     // Synthesise a pseudo-function to reuse check_func_body.
     let mut synthetic = Func {
         is_pub: false,
-        name: format!("__errconv_{}_to_{}", ec.from_ty.replace('.', "_"), ec.to_ty.replace('.', "_")),
+        name: format!(
+            "__errconv_{}_to_{}",
+            ec.from_ty.replace('.', "_"),
+            ec.to_ty.replace('.', "_")
+        ),
         name_span: ec.from_span,
         type_params: Vec::new(),
         params: vec![Param {
@@ -1638,7 +1724,12 @@ pub(crate) fn method_field_clash(method: &str, type_name: &str, span: Span) -> D
 /// E0105: a method name appears twice on the same type.
 /// `is_ctor` is true when the duplicate is a no-`self` static (a named
 /// constructor per D-CTOR1), so the fix hint teaches constructor naming.
-pub(crate) fn method_defined_twice(method: &str, type_name: &str, span: Span, is_ctor: bool) -> Diagnostic {
+pub(crate) fn method_defined_twice(
+    method: &str,
+    type_name: &str,
+    span: Span,
+    is_ctor: bool,
+) -> Diagnostic {
     let fix = if is_ctor {
         format!(
             "named constructors must each have a unique name — call them `{}.{}` and `{}.other_name`",
@@ -1719,7 +1810,12 @@ pub(crate) fn synthesize_impls(items: &mut Vec<Item>) {
     for (idx, item) in items.iter().enumerate() {
         if let Item::Impl(i) = item {
             if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
-                delegations.push((idx, i.type_name.clone(), trait_name.clone(), field_name.clone()));
+                delegations.push((
+                    idx,
+                    i.type_name.clone(),
+                    trait_name.clone(),
+                    field_name.clone(),
+                ));
             }
         }
     }
@@ -1729,9 +1825,9 @@ pub(crate) fn synthesize_impls(items: &mut Vec<Item>) {
             .get(&type_name)
             .and_then(|fields| fields.get(&field_name))
             .cloned();
-        let can_delegate = field_type_name.as_ref().is_some_and(|ft| {
-            impl_pairs.contains(&(ft.clone(), trait_name.clone()))
-        });
+        let can_delegate = field_type_name
+            .as_ref()
+            .is_some_and(|ft| impl_pairs.contains(&(ft.clone(), trait_name.clone())));
         if !can_delegate {
             // Skip synthesis; E2401 validation will emit the appropriate error.
             continue;
@@ -1787,8 +1883,8 @@ pub(crate) fn synthesize_delegation_method(
     sig: &crate::AST::TraitMethodSig,
     field_name: &str,
 ) -> crate::AST::Func {
-    use crate::AST::{AccessConvention, CallArg, CallArgFlags, Expr, Func, Param, Stmt, Type};
     use crate::Diagnostics::Span;
+    use crate::AST::{AccessConvention, CallArg, CallArgFlags, Expr, Func, Param, Stmt, Type};
 
     let zero = Span::new(0, 0);
 
@@ -1817,7 +1913,7 @@ pub(crate) fn synthesize_delegation_method(
         type_args: Vec::new(),
         args,
         recv_type: None,
-                            resolved_ret: None,
+        resolved_ret: None,
     };
 
     // Wrap in a return stmt if there's a return type; otherwise a bare expr stmt.
@@ -1838,7 +1934,12 @@ pub(crate) fn synthesize_delegation_method(
     };
 
     let mut params = vec![self_param];
-    params.extend(sig.params.iter().filter(|p| p.name != Syntax::KW_SELF).cloned());
+    params.extend(
+        sig.params
+            .iter()
+            .filter(|p| p.name != Syntax::KW_SELF)
+            .cloned(),
+    );
 
     Func {
         is_pub: false,
@@ -1864,8 +1965,8 @@ pub(crate) fn synthesize_default_method(
     sig: &crate::AST::TraitMethodSig,
     body: &[crate::AST::Stmt],
 ) -> crate::AST::Func {
-    use crate::AST::{AccessConvention, Func, Param, Type};
     use crate::Diagnostics::Span;
+    use crate::AST::{AccessConvention, Func, Param, Type};
 
     let zero = Span::new(0, 0);
     let self_param = Param {
@@ -1877,7 +1978,12 @@ pub(crate) fn synthesize_default_method(
         default: None,
     };
     let mut params = vec![self_param];
-    params.extend(sig.params.iter().filter(|p| p.name != Syntax::KW_SELF).cloned());
+    params.extend(
+        sig.params
+            .iter()
+            .filter(|p| p.name != Syntax::KW_SELF)
+            .cloned(),
+    );
 
     Func {
         is_pub: false,
@@ -1932,4 +2038,3 @@ pub(crate) fn check_default_forward_refs(
 }
 
 // ─── S60 / E2-M16: purity checking ───────────────────────────────────────────
-

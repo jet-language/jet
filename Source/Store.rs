@@ -7,8 +7,8 @@
 //! removes unreferenced entries (stub in M12.1).
 
 use crate::Diagnostics::Diagnostic;
-use crate::SHA256::tree_hash;
 use crate::Syntax;
+use crate::SHA256::tree_hash;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -60,7 +60,11 @@ pub fn ensure_path_dep(
 
 /// D-CASTORE1=A: verify a store entry's content hash against the recorded lock value.
 /// Returns E1204 on mismatch (tampered store) or if entry is missing.
-pub fn verify_content_hash(pkg_name: &str, store_entry: &Path, expected_content_hash: &str) -> Result<(), Diagnostic> {
+pub fn verify_content_hash(
+    pkg_name: &str,
+    store_entry: &Path,
+    expected_content_hash: &str,
+) -> Result<(), Diagnostic> {
     if !store_entry.is_dir() {
         return Err(Diagnostic::error(
             "E1204",
@@ -78,7 +82,10 @@ pub fn verify_content_hash(pkg_name: &str, store_entry: &Path, expected_content_
         return Err(Diagnostic::error(
             "E1204",
             format!("the store entry for `{}` has been modified", pkg_name),
-            format!("expected content hash `{}` but got `{}`", expected_content_hash, actual),
+            format!(
+                "expected content hash `{}` but got `{}`",
+                expected_content_hash, actual
+            ),
             "delete the store entry and run `jet fetch` to re-install".to_string(),
             None,
         ));
@@ -332,7 +339,11 @@ pub fn list_generations() -> Vec<Generation> {
             let number = parts.next()?.parse::<u64>().ok()?;
             let timestamp = parts.next()?.to_string();
             let entry_hash = parts.next().unwrap_or("").to_string();
-            Some(Generation { number, timestamp, entry_hash })
+            Some(Generation {
+                number,
+                timestamp,
+                entry_hash,
+            })
         })
         .collect()
 }

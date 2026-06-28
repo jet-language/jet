@@ -1709,7 +1709,13 @@ fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32,
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
     let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -1718,7 +1724,10 @@ fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32,
         String::from_utf8_lossy(&rustc.stderr)
     );
     let run = Command::new(&bin).output().unwrap();
-    (run.status.code().unwrap_or(0), String::from_utf8_lossy(&run.stdout).into_owned())
+    (
+        run.status.code().unwrap_or(0),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+    )
 }
 
 /// c109 Phase 14: a qualified inline code-module call `math.double(5)` (D-MOD2).
@@ -2249,7 +2258,10 @@ fn main() {
     fs::write(&jet_path, src).unwrap();
     let shown = jet_path.to_string_lossy().into_owned();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
     });
     // HttpResponse: prelude head (`…JetHttpResponse`), PLAIN field names, no injected
     // `params`. The `…` root prefix varies by emit layout — assert the prefix-independent
@@ -2328,18 +2340,23 @@ fn main() {
     fs::write(&jet_path, src).unwrap();
     let shown = jet_path.to_string_lossy().into_owned();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
     });
     // `#Unsafe fn` → `pub unsafe fn …`.
     assert!(
-        out.rust.contains("pub unsafe fn user_read_reg(user_addr: i64) -> i64 {"),
+        out.rust
+            .contains("pub unsafe fn user_read_reg(user_addr: i64) -> i64 {"),
         "unsafe fn signature not byte-exact:\n{}",
         out.rust
     );
     // `mem.Ptr<Int>.from_addr(addr)` and `mem.volatile_read(p)` in the fn body (sema
     // annotates the inferred `p` binding with its resolved `*mut i64` type).
     assert!(
-        out.rust.contains("let user_p: *mut i64 = ((user_addr) as usize as *mut i64);"),
+        out.rust
+            .contains("let user_p: *mut i64 = ((user_addr) as usize as *mut i64);"),
         "PtrFromAddr not byte-exact:\n{}",
         out.rust
     );
@@ -2350,14 +2367,23 @@ fn main() {
     );
     // `mem.address_of(cell)` → the inert address cast (no `unsafe`).
     assert!(
-        out.rust.contains("let user_addr: i64 = (&(user_cell) as *const _ as usize as i64);"),
+        out.rust
+            .contains("let user_addr: i64 = (&(user_cell) as *const _ as usize as i64);"),
         "address_of not byte-exact:\n{}",
         out.rust
     );
     // `#Unsafe("…") { … }` → `unsafe {` (the reason string emits nothing).
-    assert!(out.rust.contains("    unsafe {\n"), "unsafe block not emitted:\n{}", out.rust);
+    assert!(
+        out.rust.contains("    unsafe {\n"),
+        "unsafe block not emitted:\n{}",
+        out.rust
+    );
     // Reason string emits nothing — "safe: cell is live" must not appear in generated Rust.
-    assert!(!out.rust.contains("safe: cell is live"), "reason string must emit nothing:\n{}", out.rust);
+    assert!(
+        !out.rust.contains("safe: cell is live"),
+        "reason string must emit nothing:\n{}",
+        out.rust
+    );
     // I1 self-check: drop the vetted `jet_mem` prelude, then every remaining `unsafe`
     // must be a gated form (`unsafe {` or `unsafe fn`).
     let user = if let Some(s) = out.rust.find("mod jet_mem") {
@@ -2365,8 +2391,17 @@ fn main() {
         let (mut d, mut i, mut end, mut seen) = (0usize, s, out.rust.len(), false);
         while i < b.len() {
             match b[i] {
-                b'{' => { d += 1; seen = true; }
-                b'}' => { d -= 1; if seen && d == 0 { end = i + 1; break; } }
+                b'{' => {
+                    d += 1;
+                    seen = true;
+                }
+                b'}' => {
+                    d -= 1;
+                    if seen && d == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
                 _ => {}
             }
             i += 1;
@@ -2472,8 +2507,9 @@ fn main() {
     });
     // The foreign struct head + mangled fields, byte-exact.
     assert!(
-        out.rust
-            .contains("user_note::user_Note { user_title: \"hello\".to_string(), user_pages: 3i64 }"),
+        out.rust.contains(
+            "user_note::user_Note { user_title: \"hello\".to_string(), user_pages: 3i64 }"
+        ),
         "foreign struct construction not byte-exact:\n{}",
         out.rust
     );
@@ -3070,7 +3106,8 @@ fn main() {
         out.rust
     );
     assert!(
-        out.rust.contains("(user_mat).get((0i64) as usize).cloned().flatten()"),
+        out.rust
+            .contains("(user_mat).get((0i64) as usize).cloned().flatten()"),
         "Match.group lowering not byte-exact:\n{}",
         out.rust
     );
@@ -3457,13 +3494,22 @@ fn build_and_run_stdin(name: &str, src: &str, stdin: &str) -> (i32, String) {
     fs::write(&jet_path, src).unwrap();
     let shown = jet_path.to_string_lossy().into_owned();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
     });
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
     let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -3476,9 +3522,17 @@ fn build_and_run_stdin(name: &str, src: &str, stdin: &str) -> (i32, String) {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
     let run = child.wait_with_output().unwrap();
-    (run.status.code().unwrap_or(0), String::from_utf8_lossy(&run.stdout).into_owned())
+    (
+        run.status.code().unwrap_or(0),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+    )
 }
 
 /// c109 Phase 29: qualified `io.input(prompt)` (surface (H), 34_parallel_scan
@@ -4190,13 +4244,15 @@ fn main() {
     // Byte-exact auto-clone emit: the free-call arg auto-clones the Arc, then the
     // `Read` non-scalar `Shared<Int>` param borrows it.
     assert!(
-        out.rust.contains("user_noop(&(std::sync::Arc::clone(&(*user_h))));"),
+        out.rust
+            .contains("user_noop(&(std::sync::Arc::clone(&(*user_h))));"),
         "shared auto-clone free-call arg not byte-exact:\n{}",
         out.rust
     );
     // The receiving param signature is the shared `rust_param_type` form.
     assert!(
-        out.rust.contains("pub fn user_noop(user_h: &std::sync::Arc<i64>)"),
+        out.rust
+            .contains("pub fn user_noop(user_h: &std::sync::Arc<i64>)"),
         "Shared<Int> param signature not byte-exact:\n{}",
         out.rust
     );
@@ -4247,7 +4303,8 @@ fn main() {
 ";
     let out = jet::compile(src).expect("should compile");
     assert!(
-        out.rust.contains("let user_s: String = ((user_p).user_name).clone();"),
+        out.rust
+            .contains("let user_s: String = ((user_p).user_name).clone();"),
         "owning non-scalar field-read clone not byte-exact:\n{}",
         out.rust
     );
@@ -4279,7 +4336,8 @@ fn main() {
 ";
     let out = jet::compile(src).expect("should compile");
     assert!(
-        out.rust.contains("jet_map_insert(&mut ((user_s).user_scores),"),
+        out.rust
+            .contains("jet_map_insert(&mut ((user_s).user_scores),"),
         "map-assign through field not byte-exact:\n{}",
         out.rust
     );
@@ -4357,13 +4415,16 @@ fn main() {
     let out = jet::compile(src).expect("should compile");
     // Byte-exact: `P.left` reads a field off the inlined struct literal.
     assert!(
-        out.rust.contains("(user_Pair { user_left: 7i64, user_right: \"seven\".to_string() }).user_left"),
+        out.rust.contains(
+            "(user_Pair { user_left: 7i64, user_right: \"seven\".to_string() }).user_left"
+        ),
         "comptime struct field read not byte-exact:\n{}",
         out.rust
     );
     // Byte-exact: `L == Light.Green` compares the inlined enum value.
     assert!(
-        out.rust.contains("(user_Light::user_Green) == (user_Light::user_Green)"),
+        out.rust
+            .contains("(user_Light::user_Green) == (user_Light::user_Green)"),
         "comptime enum `==` not byte-exact:\n{}",
         out.rust
     );
@@ -4395,7 +4456,8 @@ fn main() {
 ";
     let out = jet::compile(src).expect("should compile");
     assert!(
-        out.rust.contains("if let user_Wrapper::user_Some(_) = user_w"),
+        out.rust
+            .contains("if let user_Wrapper::user_Some(_) = user_w"),
         "wildcard enum-payload if-let not byte-exact:\n{}",
         out.rust
     );

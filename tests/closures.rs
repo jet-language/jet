@@ -135,11 +135,26 @@ fn main() {
 "#;
     let out = jet::compile(src).expect("D-ITER1 adapters should compile");
     assert!(!out.rust.contains("unsafe"), "invariant I1");
-    assert!(out.rust.contains("jet_list_take"), "take should lower to helper");
-    assert!(out.rust.contains("jet_list_skip("), "skip should lower to helper");
-    assert!(out.rust.contains("jet_list_fold"), "fold should lower to helper");
-    assert!(out.rust.contains("jet_list_take_while"), "take_while should lower");
-    assert!(out.rust.contains("jet_list_flat_map"), "flat_map should lower");
+    assert!(
+        out.rust.contains("jet_list_take"),
+        "take should lower to helper"
+    );
+    assert!(
+        out.rust.contains("jet_list_skip("),
+        "skip should lower to helper"
+    );
+    assert!(
+        out.rust.contains("jet_list_fold"),
+        "fold should lower to helper"
+    );
+    assert!(
+        out.rust.contains("jet_list_take_while"),
+        "take_while should lower"
+    );
+    assert!(
+        out.rust.contains("jet_list_flat_map"),
+        "flat_map should lower"
+    );
 }
 
 #[test]
@@ -153,5 +168,8 @@ fn main() {
 "#;
     let out = jet::compile(src).expect("chunks/windows should compile");
     assert!(out.rust.contains("jet_list_chunks"), "chunks should lower");
-    assert!(out.rust.contains("jet_list_windows"), "windows should lower");
+    assert!(
+        out.rust.contains("jet_list_windows"),
+        "windows should lower"
+    );
 }

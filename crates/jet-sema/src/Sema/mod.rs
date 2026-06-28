@@ -7,12 +7,9 @@
 //! view returns, use-after-move, and borrow rules that keep generated Rust
 //! sound without surfacing Rust concepts to users.
 
-use crate::AST::{
-    AccessConvention,
-    ExternFn, Func, Type, VariantPayload,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
+use crate::AST::{AccessConvention, ExternFn, Func, Type, VariantPayload};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.
@@ -89,7 +86,10 @@ impl TypeRegistry {
     /// D-SOA1: true when `name` is a `#layout(columnar)` struct (its `[name]`
     /// collections are stored struct-of-arrays).
     fn is_columnar(&self, name: &str) -> bool {
-        matches!(self.types.get(name), Some(TypeDef::Struct { columnar: true, .. }))
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Struct { columnar: true, .. })
+        )
     }
 
     fn enum_variants(&self, name: &str) -> Option<&HashMap<String, (Span, VariantPayload)>> {
@@ -134,8 +134,13 @@ impl TypeRegistry {
     pub(crate) fn is_single_use(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
-            Some(TypeDef::Struct { single_use: true, .. })
-                | Some(TypeDef::Enum { single_use: true, .. })
+            Some(TypeDef::Struct {
+                single_use: true,
+                ..
+            }) | Some(TypeDef::Enum {
+                single_use: true,
+                ..
+            })
         )
     }
 
@@ -149,7 +154,13 @@ impl TypeRegistry {
 
     /// D-DIST3: true when the distinct type has `#Numeric`.
     pub(crate) fn distinct_is_numeric(&self, name: &str) -> bool {
-        matches!(self.types.get(name), Some(TypeDef::Distinct { is_numeric: true, .. }))
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Distinct {
+                is_numeric: true,
+                ..
+            })
+        )
     }
 }
 
@@ -219,17 +230,13 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
             .iter()
             .map(|p| (p.convention, p.ty.clone()))
             .collect(),
-        param_info: ef
-            .params
-            .iter()
-            .map(|p| (p.name.clone(), false))
-            .collect(),
+        param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
         defaults: ef.params.iter().map(|_| None).collect(),
         return_type: ef.return_type.clone(),
         is_view_return: ef.is_view_return,
         is_extern: true,
         is_unsafe: false,
-        is_pure: false, // extern functions are always considered impure
+        is_pure: false,      // extern functions are always considered impure
         is_sanitizer: false, // extern functions can't be sanitizers
     }
 }
@@ -253,18 +260,22 @@ pub(crate) fn substitute_param_refs(
             }
             expr
         }
-        Expr::Unary(op, inner, span) => {
-            Expr::Unary(op, Box::new(substitute_param_refs(*inner, param_names, args)), span)
-        }
+        Expr::Unary(op, inner, span) => Expr::Unary(
+            op,
+            Box::new(substitute_param_refs(*inner, param_names, args)),
+            span,
+        ),
         Expr::Binary(op, lhs, rhs, span) => Expr::Binary(
             op,
             Box::new(substitute_param_refs(*lhs, param_names, args)),
             Box::new(substitute_param_refs(*rhs, param_names, args)),
             span,
         ),
-        Expr::Field(base, field, span) => {
-            Expr::Field(Box::new(substitute_param_refs(*base, param_names, args)), field, span)
-        }
+        Expr::Field(base, field, span) => Expr::Field(
+            Box::new(substitute_param_refs(*base, param_names, args)),
+            field,
+            span,
+        ),
         // All other expression forms don't mention parameter names directly
         // (calls, literals, etc.) — leave them as-is. A complex default
         // expression containing a nested call with a param ident would need
@@ -581,37 +592,36 @@ pub(crate) struct Checker<'a> {
     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
 }
 
-
-mod FFI;
-mod Registration;
-mod Bundle;
-mod CheckerCore;
-mod CheckerInfer;
-mod CheckerCoreLib;
-mod CheckerOwnership;
-mod CheckerItems;
-mod Diagnostics;
-mod Captures;
-mod Capability;
 pub mod ApiFreeze;
-pub mod Schema;
+mod Bundle;
+mod Capability;
 mod CapabilityFreeze;
-mod Purity;
+mod Captures;
+mod CheckerCore;
+mod CheckerCoreLib;
+mod CheckerInfer;
+mod CheckerItems;
+mod CheckerOwnership;
+mod Diagnostics;
 mod Effects;
-mod Taint;
-mod State;
-mod SchemaMigration;
+mod FFI;
 pub mod HotSwap;
+mod Purity;
+mod Registration;
+pub mod Schema;
+mod SchemaMigration;
+mod State;
+mod Taint;
 
-pub(crate) use FFI::*;
-pub use Registration::*;
 pub(crate) use Bundle::*;
+pub(crate) use Captures::*;
 pub use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
-pub(crate) use Captures::*;
-pub(crate) use Purity::*;
 pub(crate) use Effects::*;
+pub(crate) use Purity::*;
+pub use Registration::*;
 pub(crate) use Taint::{check_func_taint, collect_sanitizers};
+pub(crate) use FFI::*;
 // D-STATE1: typestate pass — wrong-state operation (E0150).
 pub(crate) use State::{check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
@@ -620,11 +630,11 @@ pub(crate) use State::{check_items_state, StateTable};
 pub(crate) use CheckerOwnership::{e0141_unconsumed_branch, e0142_aliased, e0143_drop_unaudited};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
-pub use Registration::{check, check_with_mode};
-pub use Bundle::{check_bundle, check_bundle_freestanding, check_bundle_allow_impure};
-pub use FFI::{e3202, e3301, e3302, e3303};
+pub use Bundle::{check_bundle, check_bundle_allow_impure, check_bundle_freestanding};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
+pub use Registration::{check, check_with_mode};
+pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.
-pub use SchemaMigration::check_schema_migrations;
-pub use CapabilityFreeze::check_capability_freeze;
 pub use Capability::resolve_capabilities;
+pub use CapabilityFreeze::check_capability_freeze;
+pub use SchemaMigration::check_schema_migrations;

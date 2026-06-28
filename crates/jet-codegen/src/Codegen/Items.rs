@@ -1,10 +1,9 @@
 use super::*;
-use crate::AST::{
-    ConstAttr, DistinctDef, EnumDef, Expr, Field,
-    Func, ImplDef, Marker, RustConstKind, StrPart, StructDef, TraitImplBlock, Type,
-    Variant, VariantPayload,
-};
 use crate::Generics;
+use crate::AST::{
+    ConstAttr, DistinctDef, EnumDef, Expr, Field, Func, ImplDef, Marker, RustConstKind, StrPart,
+    StructDef, TraitImplBlock, Type, Variant, VariantPayload,
+};
 use std::collections::HashMap;
 
 fn struct_lifetimes(fields: &[Field]) -> Vec<String> {
@@ -79,7 +78,10 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     let repr_c = s.layout == Some(crate::AST::StructLayout::C);
     if derives.is_empty() {
         if repr_c {
-            out.push_str(&format!("#[repr(C)]\npub struct user_{}{} {{\n", s.name, type_params));
+            out.push_str(&format!(
+                "#[repr(C)]\npub struct user_{}{} {{\n",
+                s.name, type_params
+            ));
         } else {
             out.push_str(&format!("pub struct user_{}{} {{\n", s.name, type_params));
         }
@@ -215,7 +217,9 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
         "    pub fn is_empty(&self) -> bool {{ self.{first}.is_empty() }}\n"
     ));
     // push(S) — distribute one logical value across the columns.
-    out.push_str(&format!("    pub fn push(&mut self, __v: user_{name}) {{\n"));
+    out.push_str(&format!(
+        "    pub fn push(&mut self, __v: user_{name}) {{\n"
+    ));
     for f in &fields {
         let m = mangle(&f.name);
         out.push_str(&format!("        self.{m}.push(__v.{m});\n"));
@@ -366,9 +370,11 @@ fn apply_rename_all(style: &str, name: &str) -> String {
         }
         crate::Syntax::RENAME_ALL_PASCAL => words.iter().map(|w| cap_word(w)).collect(),
         crate::Syntax::RENAME_ALL_KEBAB => words.join("-"),
-        crate::Syntax::RENAME_ALL_SCREAMING => {
-            words.iter().map(|w| w.to_uppercase()).collect::<Vec<_>>().join("_")
-        }
+        crate::Syntax::RENAME_ALL_SCREAMING => words
+            .iter()
+            .map(|w| w.to_uppercase())
+            .collect::<Vec<_>>()
+            .join("_"),
         // snake (and any unrecognized — sema rejects those with E2409)
         _ => words.join("_"),
     }
@@ -580,7 +586,10 @@ fn emit_enum_serde(cx: &Cx, e: &EnumDef, out: &mut String) {
             let body = encode_variant_body(cx, &v.payload, &wire, tag.as_deref(), untagged);
             match &v.payload {
                 VariantPayload::Unit => {
-                    out.push_str(&format!("            user_{}::{} => {},\n", e.name, vm, body.0));
+                    out.push_str(&format!(
+                        "            user_{}::{} => {},\n",
+                        e.name, vm, body.0
+                    ));
                 }
                 VariantPayload::Single(..) => {
                     out.push_str(&format!(
@@ -714,7 +723,10 @@ fn emit_enum_decode(
     }
     // Externally tagged (default): a unit variant is a bare string; a payload variant
     // is a single-key object `{{\"Variant\": payload}}`.
-    let has_unit = e.variants.iter().any(|v| matches!(v.payload, VariantPayload::Unit));
+    let has_unit = e
+        .variants
+        .iter()
+        .any(|v| matches!(v.payload, VariantPayload::Unit));
     if has_unit {
         out.push_str("        if let jet_std::DataTree::Text(__s) = __t {\n            match __s.as_str() {\n");
         for v in &e.variants {
@@ -736,7 +748,9 @@ fn emit_enum_decode(
         }
         let wire = variant_wire_name(v);
         let cons = decode_variant_from(cx, &e.name, v, "__v");
-        out.push_str(&format!("                    {wire:?} => return Ok({cons}),\n"));
+        out.push_str(&format!(
+            "                    {wire:?} => return Ok({cons}),\n"
+        ));
     }
     out.push_str("                    _ => {}\n                }\n            }\n        }\n");
     out.push_str(&format!(
@@ -819,7 +833,11 @@ pub(crate) fn emit_trait_impl(
     ));
     // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
     for (name, _, ty) in &block.assoc_type_impls {
-        out.push_str(&format!("    type {} = {};\n", name, Traits::rust_type_name(ty)));
+        out.push_str(&format!(
+            "    type {} = {};\n",
+            name,
+            Traits::rust_type_name(ty)
+        ));
     }
     for m in &block.methods {
         emit_trait_method(cx, type_name, m, out, 1);
@@ -836,7 +854,11 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
     ));
     // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
     for (name, _, ty) in &i.assoc_type_impls {
-        out.push_str(&format!("    type {} = {};\n", name, Traits::rust_type_name(ty)));
+        out.push_str(&format!(
+            "    type {} = {};\n",
+            name,
+            Traits::rust_type_name(ty)
+        ));
     }
     if let Some(field) = &i.delegation_field {
         // S62: delegation — emit forwarding methods directly to avoid the method
@@ -872,7 +894,10 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
     // method always emits at indent 1 inside the `impl Trait for user_<T>` block
     // the caller opened; it lowers + emits through the TIR. A gate-miss is an
     // internal compiler error (I2-class), never an AST fallback.
-    debug_assert_eq!(indent, 1, "trait methods always emit at impl-block indent 1");
+    debug_assert_eq!(
+        indent, 1,
+        "trait methods always emit at impl-block indent 1"
+    );
     if TIR::tir_covers_trait_method(f, type_name, cx) {
         let tir = TIR::lower_trait_method(f, type_name, cx);
         TIR::emit_tir_func(&tir, cx, out);
@@ -889,7 +914,10 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
     // method always emits at indent 1 inside the `impl` block the caller opened;
     // it lowers + emits through the TIR. A gate-miss is an internal compiler
     // error (I2-class), never an AST fallback.
-    debug_assert_eq!(indent, 1, "inherent methods always emit at impl-block indent 1");
+    debug_assert_eq!(
+        indent, 1,
+        "inherent methods always emit at impl-block indent 1"
+    );
     if TIR::tir_covers_method(f, type_name, cx) {
         let tir = TIR::lower_method(f, type_name, cx);
         TIR::emit_tir_func(&tir, cx, out);
@@ -960,11 +988,13 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
             (format!("{n}{rust}"), rust)
         }
         Expr::Int(n, _, None) => (format!("{}i64", n), "i64".to_string()),
-        Expr::Float(v, _, is_f32) => if *is_f32 {
-            (format!("{:?}f32", v), "f32".to_string())
-        } else {
-            (format!("{:?}f64", v), "f64".to_string())
-        },
+        Expr::Float(v, _, is_f32) => {
+            if *is_f32 {
+                (format!("{:?}f32", v), "f32".to_string())
+            } else {
+                (format!("{:?}f64", v), "f64".to_string())
+            }
+        }
         Expr::Bool(b, _) => (b.to_string(), "bool".to_string()),
         _ => ("0i64".to_string(), "i64".to_string()),
     };
@@ -991,8 +1021,7 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
     // c148: expose the current function's type-parameter names so `rust_type` and
     // `rust_param_type` can recognize multi-char params (e.g. `Kind`) in addition
     // to the single-letter heuristic. Cleared on exit (normal or panic).
-    *cx.current_type_params.borrow_mut() =
-        f.type_params.iter().map(|p| p.name.clone()).collect();
+    *cx.current_type_params.borrow_mut() = f.type_params.iter().map(|p| p.name.clone()).collect();
     // c109 Phase N: the typed IR (TIR) is the only codegen seam (R7). Every
     // reachable function lowers + emits through the TIR; a gate-miss is an
     // internal compiler error (I2-class), never an AST fallback.

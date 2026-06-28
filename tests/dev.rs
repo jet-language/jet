@@ -133,7 +133,10 @@ fn interpreter_matches_compiled_binary() {
         boundary,
         ran + boundary
     );
-    assert!(ran > 0, "expected at least some examples to run in the interpreter");
+    assert!(
+        ran > 0,
+        "expected at least some examples to run in the interpreter"
+    );
 }
 
 /// Every example that runs in the interpreter and has a checked-in
@@ -270,7 +273,9 @@ fn front_end_errors_surface_in_dev_iteration() {
         RunOutcome::Problems(diags) => {
             assert!(!diags.is_empty(), "broken program must report problems");
             assert!(
-                diags.iter().all(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
+                diags
+                    .iter()
+                    .all(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
                 "dev should surface errors"
             );
         }
@@ -349,7 +354,10 @@ fn struct_field_change_emits_e2210() {
 /// Changing a function's return type changes the surface → E2210.
 #[test]
 fn fn_signature_change_emits_e2210() {
-    let old = bundle_of("fn g(a: Int) -> Int {\n    return a\n}\nfn main() {\n    print(g(1))\n}\n", "sig_old");
+    let old = bundle_of(
+        "fn g(a: Int) -> Int {\n    return a\n}\nfn main() {\n    print(g(1))\n}\n",
+        "sig_old",
+    );
     let new = bundle_of(
         "fn g(a: Int) -> Bool {\n    return a == 0\n}\nfn main() {\n    print(g(1))\n}\n",
         "sig_new",
@@ -366,8 +374,14 @@ fn fn_signature_change_emits_e2210() {
 /// Adding an enum variant changes the surface → E2210.
 #[test]
 fn enum_variant_change_emits_e2210() {
-    let old = bundle_of("enum E {\n    A\n    B\n}\nfn main() {\n    print(1)\n}\n", "enum_old");
-    let new = bundle_of("enum E {\n    A\n    B\n    C\n}\nfn main() {\n    print(1)\n}\n", "enum_new");
+    let old = bundle_of(
+        "enum E {\n    A\n    B\n}\nfn main() {\n    print(1)\n}\n",
+        "enum_old",
+    );
+    let new = bundle_of(
+        "enum E {\n    A\n    B\n    C\n}\nfn main() {\n    print(1)\n}\n",
+        "enum_new",
+    );
     match jet::Sema::HotSwap::type_stable_check(&old, &new, "main") {
         Ok(()) => panic!("adding an enum variant must force a restart"),
         Err(diags) => {

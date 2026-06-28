@@ -56,14 +56,26 @@ fn step_stops_at_first_line_with_caret_and_locals() {
         "missing breakpoint banner; got:\n{out}"
     );
     // The current line carries the `<- here` caret (D-DBG3 layout).
-    assert!(out.contains("<- here"), "missing `<- here` caret; got:\n{out}");
+    assert!(
+        out.contains("<- here"),
+        "missing `<- here` caret; got:\n{out}"
+    );
     // The `(jet)` prompt echoes the typed command (D-DBG3 prompt = `(jet)`).
-    assert!(out.contains("(jet) s"), "missing `(jet)` prompt echo; got:\n{out}");
+    assert!(
+        out.contains("(jet) s"),
+        "missing `(jet)` prompt echo; got:\n{out}"
+    );
     // Locals are shown in Jet terms; after the first `s` the second stop sees `n`.
     assert!(out.contains("locals:"), "missing locals dump; got:\n{out}");
     // The program runs to completion once the script ends.
-    assert!(out.contains("total is 6"), "program output missing; got:\n{out}");
-    assert!(out.contains("program finished"), "missing end marker; got:\n{out}");
+    assert!(
+        out.contains("total is 6"),
+        "program output missing; got:\n{out}"
+    );
+    assert!(
+        out.contains("program finished"),
+        "missing end marker; got:\n{out}"
+    );
 }
 
 /// `locals` after stepping into the loop shows the live `total`/`n`/`i` values
@@ -78,7 +90,10 @@ fn locals_and_print_show_jet_values() {
         out.contains("locals:  i = 1   n = 3   total = 0"),
         "locals dump should show all three in Jet terms; got:\n{out}"
     );
-    assert!(out.contains("total = 0"), "`print total` should show the value; got:\n{out}");
+    assert!(
+        out.contains("total = 0"),
+        "`print total` should show the value; got:\n{out}"
+    );
 }
 
 /// A `break N` + `continue`/`c` runs to the breakpoint line — not stopping at
@@ -128,7 +143,10 @@ fn finish_returns_to_caller() {
         out.contains("b := double(a)") || out.contains("print"),
         "finish should return control to the caller frame; got:\n{out}"
     );
-    assert!(out.contains("program finished"), "should run to the end; got:\n{out}");
+    assert!(
+        out.contains("program finished"),
+        "should run to the end; got:\n{out}"
+    );
 }
 
 /// `quit`/`q` ends the session before the program finishes — surfaced as the
@@ -154,8 +172,20 @@ fn quit_ends_session_with_e2204() {
 fn help_lists_the_verbs() {
     let file = fixture("help", LOOPS);
     let out = jet::Debug::run_session(&file, &["help", "c"]);
-    for verb in ["step", "next", "continue", "finish", "break", "print", "backtrace", "quit"] {
-        assert!(out.contains(verb), "help should mention `{verb}`; got:\n{out}");
+    for verb in [
+        "step",
+        "next",
+        "continue",
+        "finish",
+        "break",
+        "print",
+        "backtrace",
+        "quit",
+    ] {
+        assert!(
+            out.contains(verb),
+            "help should mention `{verb}`; got:\n{out}"
+        );
     }
 }
 
@@ -164,7 +194,10 @@ fn help_lists_the_verbs() {
 /// the message names `jet debug`, never the generated Rust).
 #[test]
 fn unsupported_feature_stops_at_e2203_boundary() {
-    let file = fixture("boundary", "use core.fs as fs\nfn main() {\n    print(\"hi\")\n}\n");
+    let file = fixture(
+        "boundary",
+        "use core.fs as fs\nfn main() {\n    print(\"hi\")\n}\n",
+    );
     let out = jet::Debug::run_session(&file, &["c"]);
     assert!(
         out.contains("E2203"),
@@ -185,5 +218,8 @@ fn next_steps_over() {
     let out = jet::Debug::run_session(&file, &["s", "n", "n"]);
     // `next` from `b := double(a)` must NOT stop inside `double` — the callee's
     // `y := x * 2` line should never appear as a stop before we reach main's print.
-    assert!(out.contains("program finished"), "should run to the end; got:\n{out}");
+    assert!(
+        out.contains("program finished"),
+        "should run to the end; got:\n{out}"
+    );
 }

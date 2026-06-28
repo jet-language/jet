@@ -6,10 +6,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::AST::{Contribution, ContribValue, Expr, Func, Item, ModuleDecl, Namespace};
 use crate::Comptime;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
+use crate::AST::{ContribValue, Contribution, Expr, Func, Item, ModuleDecl, Namespace};
 
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::Diagnostics::{not_a_namespace_literal, packages_not_a_list, wrong_namespace_type};
@@ -34,7 +34,13 @@ pub(super) fn parse_program(src: &str) -> Result<crate::AST::Program, Diagnostic
     }
     crate::Parser::parse(&toks).map_err(|mut diags| {
         diags.pop().unwrap_or_else(|| {
-            Diagnostic::error("E0000", "parse failed".into(), String::new(), String::new(), None)
+            Diagnostic::error(
+                "E0000",
+                "parse failed".into(),
+                String::new(),
+                String::new(),
+                None,
+            )
         })
     })
 }

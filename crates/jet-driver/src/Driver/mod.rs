@@ -3,8 +3,8 @@
 //! `lib.rs` public functions are thin facades over these. `LSP/Check.rs` calls
 //! `check_file` directly for document checking.
 
-use std::path::Path;
 use crate::Diagnostics::{Diagnostic, Severity};
+use std::path::Path;
 
 /// Main pipeline: load from file path → sema → ffi → codegen.
 pub fn compile_bundle_path_opts(
@@ -156,7 +156,10 @@ pub fn check_file(
     match crate::Loader::load_entry_with_overlay(file, overlay, is_lsp) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            diags.extend(crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check));
+            diags.extend(crate::Sema::check_bundle(
+                &mut bundle,
+                crate::Sema::CompileMode::Check,
+            ));
             (diags, Some(bundle))
         }
         Err(diags) => (diags, None),
@@ -250,5 +253,8 @@ pub fn compile_benches(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    Ok((crate::Codegen::emit_bundle_benches(&bundle, ffi.as_ref()), ffi))
+    Ok((
+        crate::Codegen::emit_bundle_benches(&bundle, ffi.as_ref()),
+        ffi,
+    ))
 }

@@ -437,7 +437,8 @@ fn imported_struct_constructs_and_reads_fields() {
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
     assert!(
-        rust.contains("user_shapes::user_Point { user_x:") || rust.contains("user_shapes::user_Point{user_x:"),
+        rust.contains("user_shapes::user_Point { user_x:")
+            || rust.contains("user_shapes::user_Point{user_x:"),
         "cross-module struct literal must match the declaration: {rust}"
     );
     assert!(

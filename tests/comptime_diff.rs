@@ -198,7 +198,10 @@ fn main() {
 }
 "#,
     );
-    assert_eq!(stdout.lines().collect::<Vec<_>>(), vec!["10", "10", "20", "20"]);
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        vec!["10", "10", "20", "20"]
+    );
 }
 
 #[test]

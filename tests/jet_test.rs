@@ -51,7 +51,11 @@ fn jet_bench_example_regions() {
     }
 
     let example = root.join("examples/features/105_bench.jet");
-    let out = Command::new(&jet).arg("bench").arg(&example).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("bench")
+        .arg(&example)
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
@@ -119,7 +123,11 @@ fn jet_property_test_passes() {
         return;
     }
     let example = root.join("examples/features/114_property_tests.jet");
-    let out = Command::new(&jet).arg("test").arg(&example).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&example)
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
@@ -148,8 +156,15 @@ fn jet_property_test_shrinks_failure() {
         return;
     }
     let fixture = root.join("tests/fixtures/prop_shrink.jet");
-    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
-    assert!(!out.status.success(), "a failing property must exit nonzero");
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "a failing property must exit nonzero"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -173,8 +188,15 @@ fn jet_property_test_rejects_ungeneratable_param() {
         return;
     }
     let fixture = root.join("tests/fixtures/prop_bad_type.jet");
-    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
-    assert!(!out.status.success(), "an ungeneratable param must be rejected");
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "an ungeneratable param must be rejected"
+    );
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
@@ -194,7 +216,11 @@ fn jet_doctest_passes() {
         return;
     }
     let example = root.join("examples/features/115_doctests.jet");
-    let out = Command::new(&jet).arg("test").arg(&example).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&example)
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
@@ -202,7 +228,11 @@ fn jet_doctest_passes() {
         stdout,
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(stdout.contains("doctest at") && stdout.contains("pass"), "no doctest pass line:\n{}", stdout);
+    assert!(
+        stdout.contains("doctest at") && stdout.contains("pass"),
+        "no doctest pass line:\n{}",
+        stdout
+    );
 }
 
 #[test]
@@ -216,7 +246,11 @@ fn jet_doctest_mismatch_fires_e2901() {
         return;
     }
     let fixture = root.join("tests/fixtures/doctest_fail.jet");
-    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&fixture)
+        .output()
+        .unwrap();
     assert!(!out.status.success(), "a wrong doctest must exit nonzero");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2901"), "expected E2901:\n{}", stderr);
@@ -242,9 +276,21 @@ fn jet_test_coverage_reports_hit_and_miss() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "coverage run failed:\n{}", stdout);
-    assert!(stdout.contains("HIT") && stdout.contains("used"), "missing HIT used:\n{}", stdout);
-    assert!(stdout.contains("MISS") && stdout.contains("unused"), "missing MISS unused:\n{}", stdout);
-    assert!(stdout.contains("1/2 functions covered"), "wrong summary:\n{}", stdout);
+    assert!(
+        stdout.contains("HIT") && stdout.contains("used"),
+        "missing HIT used:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("MISS") && stdout.contains("unused"),
+        "missing MISS unused:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("1/2 functions covered"),
+        "wrong summary:\n{}",
+        stdout
+    );
 }
 
 #[test]
@@ -259,7 +305,11 @@ fn jet_bench_target_integration() {
         return;
     }
     let example = root.join("examples/features/123_bench_target/main.jet");
-    let out = Command::new(&jet).arg("bench").arg(&example).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("bench")
+        .arg(&example)
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),

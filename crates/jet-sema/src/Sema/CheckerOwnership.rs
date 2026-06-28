@@ -1,11 +1,8 @@
 use super::*;
-use crate::AST::{
-    AccessConvention,
-    Expr, Lambda, Type, VariantPayload,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::is_type_var_name;
 use crate::Syntax;
+use crate::AST::{AccessConvention, Expr, Lambda, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -54,10 +51,7 @@ impl<'a> Checker<'a> {
     /// call) or when `e` isn't a field/index access at all.
     pub(crate) fn view_return_local_owner(&self, e: &Expr) -> Option<String> {
         // Only field / index / slice access can borrow *into* an owner.
-        if !matches!(
-            e,
-            Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }
-        ) {
+        if !matches!(e, Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }) {
             return None;
         }
         let root = expr_root_ident(e)?;
@@ -194,7 +188,10 @@ impl<'a> Checker<'a> {
 
     /// If `init` is `arena.alloc(value)` on a name, return the arena's name.
     pub(crate) fn arena_alloc_source(&self, init: &Expr) -> Option<String> {
-        if let Expr::MethodCall { receiver, method, .. } = init {
+        if let Expr::MethodCall {
+            receiver, method, ..
+        } = init
+        {
             if method == Syntax::MEM_ALLOC_ALLOC {
                 if let Expr::Ident(arena, _) = &**receiver {
                     if self.lookup(arena).is_some_and(|i| is_allocator_type(&i.ty)) {
@@ -211,7 +208,11 @@ impl<'a> Checker<'a> {
         let scope_len = self.scopes.len();
         self.arena_views.insert(
             name.to_string(),
-            ArenaViewInfo { arena, scope_len, dead: None },
+            ArenaViewInfo {
+                arena,
+                scope_len,
+                dead: None,
+            },
         );
     }
 
@@ -414,7 +415,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn sendability_problem(&self, ty: &Type, closure_taken: bool) -> Option<SendabilityProblem> {
+    pub(crate) fn sendability_problem(
+        &self,
+        ty: &Type,
+        closure_taken: bool,
+    ) -> Option<SendabilityProblem> {
         let mut seen = HashSet::new();
         self.sendability_problem_inner(ty, closure_taken, &mut seen)
     }
@@ -462,11 +467,13 @@ impl<'a> Checker<'a> {
                 path: Vec::new(),
                 kind: SendProblemKind::TraitValue(name.clone()),
             }),
-            Type::Tuple(fields) => fields.iter().find_map(|(_, t)| {
-                self.sendability_problem_inner(t, true, seen)
-            }),
+            Type::Tuple(fields) => fields
+                .iter()
+                .find_map(|(_, t)| self.sendability_problem_inner(t, true, seen)),
             Type::FixedList { elem, .. } => self.sendability_problem_inner(elem, true, seen),
-            Type::Tagged { inner, .. } => self.sendability_problem_inner(inner, closure_taken, seen),
+            Type::Tagged { inner, .. } => {
+                self.sendability_problem_inner(inner, closure_taken, seen)
+            }
         }
     }
 
@@ -619,7 +626,10 @@ impl<'a> Checker<'a> {
         // binding name so the right detach diagnostic fires when `.detach()` is called:
         //   - ViewBorrow → E1106 ("pass an owned copy/share"); view can outlive the borrow
         //   - other sendability failures → E1103 (general unsound-detach)
-        if matches!(crossing, SendCrossing::TaskCapture | SendCrossing::TaskResult) {
+        if matches!(
+            crossing,
+            SendCrossing::TaskCapture | SendCrossing::TaskResult
+        ) {
             if let Some(name) = &self.current_binding_name {
                 if matches!(problem.kind, SendProblemKind::ViewBorrow) {
                     self.view_borrow_escape_tasks.insert(name.clone());
@@ -830,7 +840,6 @@ impl<'a> Checker<'a> {
         }
         None
     }
-
 }
 
 /// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value reached the end of

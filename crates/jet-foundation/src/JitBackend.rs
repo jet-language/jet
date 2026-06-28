@@ -7,8 +7,8 @@
 //! `Source/JitBackend.rs` re-exports everything here and adds
 //! `InterpreterBackend` (the tier-0 interpreter impl).
 
-use crate::AST::ProgramBundle;
 use crate::Diagnostics::Diagnostic;
+use crate::AST::ProgramBundle;
 
 /// What a single dev/serve iteration produced.
 ///

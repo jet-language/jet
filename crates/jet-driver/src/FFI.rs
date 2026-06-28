@@ -4,8 +4,8 @@
 //! driver materializes a cached cargo project under `~/.cache/jet/ffi/` and
 //! links the built rlib into the user's generated program.
 
-use crate::AST::{AccessConvention, ExternFn, ExternRustBlock, Item, ProgramBundle, Type};
 use crate::Diagnostics::Diagnostic;
+use crate::AST::{AccessConvention, ExternFn, ExternRustBlock, Item, ProgramBundle, Type};
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -96,7 +96,14 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         return Ok(None);
     }
 
-    build_bridge(&entries, needs_regex, needs_archive, needs_db, needs_http_client).map(Some)
+    build_bridge(
+        &entries,
+        needs_regex,
+        needs_archive,
+        needs_db,
+        needs_http_client,
+    )
+    .map(Some)
 }
 
 /// The `regex` crate version that backs `jet.regex` (D-REGEX1). Lives only here,
@@ -130,7 +137,10 @@ const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
 const FEATURED_DEPS: &[(&str, &str)] = &[
-    ("rusqlite", "{ version = \"0.31\", features = [\"bundled\"] }"),
+    (
+        "rusqlite",
+        "{ version = \"0.31\", features = [\"bundled\"] }",
+    ),
     ("ureq", "{ version = \"2\", features = [\"tls\"] }"),
 ];
 
@@ -155,10 +165,16 @@ pub fn build_bridge(
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
-        deps.insert(REGEX_CRATE_SPEC.0.to_string(), REGEX_CRATE_SPEC.1.to_string());
+        deps.insert(
+            REGEX_CRATE_SPEC.0.to_string(),
+            REGEX_CRATE_SPEC.1.to_string(),
+        );
     }
     if needs_archive {
-        deps.insert(ARCHIVE_CRATE_SPEC.0.to_string(), ARCHIVE_CRATE_SPEC.1.to_string());
+        deps.insert(
+            ARCHIVE_CRATE_SPEC.0.to_string(),
+            ARCHIVE_CRATE_SPEC.1.to_string(),
+        );
         deps.insert(ZIP_CRATE_SPEC.0.to_string(), ZIP_CRATE_SPEC.1.to_string());
         deps.insert(TAR_CRATE_SPEC.0.to_string(), TAR_CRATE_SPEC.1.to_string());
     }
@@ -166,9 +182,19 @@ pub fn build_bridge(
         deps.insert(DB_CRATE_SPEC.0.to_string(), DB_CRATE_SPEC.1.to_string());
     }
     if needs_http_client {
-        deps.insert(HTTP_CLIENT_CRATE_SPEC.0.to_string(), HTTP_CLIENT_CRATE_SPEC.1.to_string());
+        deps.insert(
+            HTTP_CLIENT_CRATE_SPEC.0.to_string(),
+            HTTP_CLIENT_CRATE_SPEC.1.to_string(),
+        );
     }
-    let key = cache_key_full(entries, &deps, needs_regex, needs_archive, needs_db, needs_http_client);
+    let key = cache_key_full(
+        entries,
+        &deps,
+        needs_regex,
+        needs_archive,
+        needs_db,
+        needs_http_client,
+    );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
 
@@ -194,8 +220,17 @@ pub fn build_bridge(
     let lib_rs = src_dir.join("lib.rs");
     fs::write(&manifest, emit_cargo_toml(&crate_name, &deps))
         .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
-    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex, needs_archive, needs_db, needs_http_client))
-        .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
+    fs::write(
+        &lib_rs,
+        emit_wrapper_lib(
+            entries,
+            needs_regex,
+            needs_archive,
+            needs_db,
+            needs_http_client,
+        ),
+    )
+    .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
     let target_dir = cache_root.join("target");
     let out = Command::new("cargo")
@@ -623,7 +658,13 @@ mod tests {
         // to Rust `u32` in the FFI bridge — not `i64` or any other type.
         let empty = HashSet::new();
         assert_eq!(
-            rust_type(&Type::IntN { signed: false, bits: 32 }, &empty),
+            rust_type(
+                &Type::IntN {
+                    signed: false,
+                    bits: 32
+                },
+                &empty
+            ),
             "u32",
             "U32 must map to Rust u32 in FFI"
         );
@@ -634,7 +675,13 @@ mod tests {
         // c43: signed 32-bit maps to Rust i32 (S44 signed-integer subset).
         let empty = HashSet::new();
         assert_eq!(
-            rust_type(&Type::IntN { signed: true, bits: 32 }, &empty),
+            rust_type(
+                &Type::IntN {
+                    signed: true,
+                    bits: 32
+                },
+                &empty
+            ),
             "i32",
             "I32 must map to Rust i32 in FFI"
         );

@@ -6,8 +6,8 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Manifest::{DepSpec, GitSelector, Manifest};
-use crate::SHA256::sha256_hex;
 use crate::Syntax;
+use crate::SHA256::sha256_hex;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -447,11 +447,7 @@ pub fn e1217(dep_name: &str) -> Diagnostic {
 /// source tree hash would otherwise match. Empty for a package with no frozen
 /// `api: stable|explicit` surface — the fingerprint is then unchanged from the
 /// pre-c129 form (tree + deps only), so existing locks stay stable.
-pub fn compute_fingerprint(
-    tree_hash: &str,
-    dep_fingerprints: &[&str],
-    cap_digest: &str,
-) -> String {
+pub fn compute_fingerprint(tree_hash: &str, dep_fingerprints: &[&str], cap_digest: &str) -> String {
     let mut data = tree_hash.as_bytes().to_vec();
     data.push(0);
     let mut sorted = dep_fingerprints.to_vec();

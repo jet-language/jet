@@ -6,9 +6,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::AST::{Expr, Item, Namespace, StrPart};
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
+use crate::AST::{Expr, Item, Namespace, StrPart};
 
 use super::super::Merge;
 use super::super::RefSpec::{self, ProviderKind, SourceTable};
@@ -254,10 +254,12 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
         }
     }
     let merged = Merge::merge_sources(&maps).map_err(|e| merge_error_to_diagnostic(&e))?;
-    Ok(SourceTable::from_decls(merged.into_iter().map(|(name, upstream)| {
-        let via = kinds.get(&name).copied().unwrap_or_default();
-        (name, upstream, via)
-    })))
+    Ok(SourceTable::from_decls(merged.into_iter().map(
+        |(name, upstream)| {
+            let via = kinds.get(&name).copied().unwrap_or_default();
+            (name, upstream, via)
+        },
+    )))
 }
 
 /// U9: infer whether a source is realized by the first-party `core` provider or

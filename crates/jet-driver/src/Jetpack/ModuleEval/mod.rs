@@ -33,11 +33,11 @@ pub use Types::{EnvPlan, EvaluatedModule, ImagePlan, OptionPlan, ServicePlan, Sy
 use std::path::Path;
 
 #[cfg(test)]
-use crate::AST::Namespace;
-#[cfg(test)]
 use super::Merge::{self, Scalar};
 #[cfg(test)]
 use super::RefSpec::ProviderKind;
+#[cfg(test)]
+use crate::AST::Namespace;
 
 #[cfg(test)]
 mod tests {
@@ -110,7 +110,8 @@ module _gaming {
 
     #[test]
     fn wrong_namespace_type_is_a_pinned_diagnostic() {
-        let src = "\nmodule dev {\n    env.dev: System.{\n        prompt: \"wrong type\",\n    }\n}\n";
+        let src =
+            "\nmodule dev {\n    env.dev: System.{\n        prompt: \"wrong type\",\n    }\n}\n";
         let err = evaluate_source(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0966");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
@@ -251,9 +252,7 @@ module b {
 "#;
         let modules = evaluate_source(src, &base_dir()).unwrap();
         let merged = merge_all(&modules).unwrap();
-        let entry = merged
-            .get(&(Namespace::Env, "dev".to_string()))
-            .unwrap();
+        let entry = merged.get(&(Namespace::Env, "dev".to_string())).unwrap();
         assert_eq!(
             entry.packages,
             vec![
@@ -303,7 +302,10 @@ module b {
         let src = "module dev {\n    sources: { default: nixpkgs@nixpkgs-unstable }\n    imports: find(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
         let plan = evaluate_env(src, &dir).unwrap();
         assert_eq!(plan.package_refs, vec!["default:ripgrep", "default:jq"]);
-        assert_eq!(plan.table.upstream("default"), Some("nixpkgs:nixpkgs-unstable"));
+        assert_eq!(
+            plan.table.upstream("default"),
+            Some("nixpkgs:nixpkgs-unstable")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -316,7 +318,10 @@ module b {
         // The span points at the `find(…)` call in the root file.
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
         assert!(rendered.contains("Error [E0970]:"), "{rendered}");
-        assert!(rendered.contains("3 |     imports: find(\"./nope\")"), "{rendered}");
+        assert!(
+            rendered.contains("3 |     imports: find(\"./nope\")"),
+            "{rendered}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -376,13 +381,25 @@ module installer {
         assert_eq!(sys.services[0].name, "pipewire");
         assert!(sys.services[0].enable);
         assert_eq!(sys.services[1].name, "openssh");
-        assert_eq!(sys.services[1].extra, vec![("ports".to_string(), "[22]".to_string())]);
+        assert_eq!(
+            sys.services[1].extra,
+            vec![("ports".to_string(), "[22]".to_string())]
+        );
         assert_eq!(
             sys.options,
             vec![
-                OptionPlan { key: "net.hostName".into(), value: "halcyon".into() },
-                OptionPlan { key: "time.timeZone".into(), value: "\"Europe/London\"".into() },
-                OptionPlan { key: "users.nate.shell".into(), value: "default.fish".into() },
+                OptionPlan {
+                    key: "net.hostName".into(),
+                    value: "halcyon".into()
+                },
+                OptionPlan {
+                    key: "time.timeZone".into(),
+                    value: "\"Europe/London\"".into()
+                },
+                OptionPlan {
+                    key: "users.nate.shell".into(),
+                    value: "default.fish".into()
+                },
             ]
         );
         assert_eq!(plan.images.len(), 1);
@@ -441,8 +458,7 @@ module net {
     /// system + image.
     #[test]
     fn committed_system_example_field_checks_clean() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/jetpack-typed/system.jet");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-typed/system.jet");
         let src = std::fs::read_to_string(&path).unwrap();
         let dir = path.parent().unwrap();
         let plan = evaluate_env(&src, dir).unwrap();
@@ -478,7 +494,8 @@ module m {
         let src = "module m { system.s: { target: linux.x64, gpu: true } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0972");
-        let rendered = crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
         assert_eq!(
             rendered,
             "Error [E0972]: `gpu` isn't a field of `System`\n  --> config.jet:1:43\n    |\n  1 | module m { system.s: { target: linux.x64, gpu: true } }\n    |                                           ^^^\n Why: a `System` has a fixed set of fields: `target`, `packages`, `services`, `options`\n Fix: remove `gpu`, or use one of `target`, `packages`, `services`, `options`\n"
@@ -490,8 +507,12 @@ module m {
         let src = "module m { system.s: { target: windows.x64 } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0973");
-        let rendered = crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
-        assert!(rendered.contains("`windows.x64` isn't a platform"), "{rendered}");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(
+            rendered.contains("`windows.x64` isn't a platform"),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -503,10 +524,12 @@ module m {
 
     #[test]
     fn service_without_enable_is_e0975() {
-        let src = "module m { system.s: { target: linux.x64, services: { ssh: { ports: [22] } } } }";
+        let src =
+            "module m { system.s: { target: linux.x64, services: { ssh: { ports: [22] } } } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0975");
-        let rendered = crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
         assert!(rendered.contains("`ssh` has no `enable`"), "{rendered}");
     }
 
@@ -519,11 +542,16 @@ module m {
 
     #[test]
     fn bad_image_format_is_e0976() {
-        let src = "module m { system.s: { target: linux.x64 } image.i: { from: system.s, format: dmg } }";
+        let src =
+            "module m { system.s: { target: linux.x64 } image.i: { from: system.s, format: dmg } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0976");
-        let rendered = crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
-        assert!(rendered.contains("`dmg` isn't a disk-image format"), "{rendered}");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(
+            rendered.contains("`dmg` isn't a disk-image format"),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -538,8 +566,12 @@ module m {
         let src = "module m { system.s: { target: linux.x64 } image.i: { from: system.s, packages: [default.fd] } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0977");
-        let rendered = crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
-        assert!(rendered.contains("doesn't restate `packages`"), "{rendered}");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(
+            rendered.contains("doesn't restate `packages`"),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -554,7 +586,8 @@ module m {
         let src = "module m { image.i: { from: system.nope } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0978");
-        let rendered = crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
         assert!(rendered.contains("unknown system `nope`"), "{rendered}");
     }
 

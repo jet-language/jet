@@ -106,19 +106,11 @@ fn format_struct_sig(s: &crate::AST::StructDef) -> String {
 }
 
 fn format_enum_sig(e: &crate::AST::EnumDef) -> String {
-    let variants: Vec<String> = e
-        .variants
-        .iter()
-        .map(|v| v.name.clone())
-        .collect();
+    let variants: Vec<String> = e.variants.iter().map(|v| v.name.clone()).collect();
     format!("enum {} {{ {} }}", e.name, variants.join(", "))
 }
 
 fn format_trait_sig(t: &crate::AST::TraitDef) -> String {
-    let methods: Vec<String> = t
-        .methods
-        .iter()
-        .map(|m| m.name.clone())
-        .collect();
+    let methods: Vec<String> = t.methods.iter().map(|m| m.name.clone()).collect();
     format!("trait {} {{ {} }}", t.name, methods.join(", "))
 }

@@ -64,7 +64,11 @@ pub fn discover(src: &str) -> Vec<DocBlock> {
                     let content = doc_inner(t);
                     if content.trim_start().starts_with("```") {
                         // closing fence
-                        blocks.push(DocBlock { fence_line, setup, expects });
+                        blocks.push(DocBlock {
+                            fence_line,
+                            setup,
+                            expects,
+                        });
                         i += 1;
                         break;
                     }

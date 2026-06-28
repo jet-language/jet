@@ -35,8 +35,7 @@ fn root() -> PathBuf {
 /// Kept here for M17 traceability.
 #[test]
 fn ga_every_diagnostic_has_explain() {
-    let md =
-        fs::read_to_string(root().join("docs/spec/diagnostics.md")).expect("diagnostics.md");
+    let md = fs::read_to_string(root().join("docs/spec/diagnostics.md")).expect("diagnostics.md");
     let index = jet::Explain::index();
 
     let mut missing = Vec::new();
@@ -45,7 +44,12 @@ fn ga_every_diagnostic_has_explain() {
         if !line.starts_with("| E") && !line.starts_with("| L") {
             continue;
         }
-        let first = line.trim_matches('|').split('|').next().unwrap_or("").trim();
+        let first = line
+            .trim_matches('|')
+            .split('|')
+            .next()
+            .unwrap_or("")
+            .trim();
         if is_code(first) && !index.contains_key(first) {
             missing.push(first.to_string());
         }
@@ -95,8 +99,8 @@ fn ga_all_showcases_front_end_clean() {
             path.display(),
             desc
         );
-        let src = fs::read_to_string(&path)
-            .unwrap_or_else(|_| panic!("cannot read {}", path.display()));
+        let src =
+            fs::read_to_string(&path).unwrap_or_else(|_| panic!("cannot read {}", path.display()));
         let result = jet::compile_with_path(&src, path.to_str().unwrap());
         assert!(
             result.is_ok(),

@@ -108,7 +108,10 @@ pub enum TFuncKind {
     /// trait method gets `&mut self` and may mutate the receiver in place. `is_unsafe`
     /// reproduces the `unsafe fn` prefix for an `@unsafe fn` trait method (S58/D-LL1 —
     /// the body may use gated ops; calling it is already gated to an `@unsafe` block).
-    TraitMethod { is_unsafe: bool, self_conv: AccessConvention },
+    TraitMethod {
+        is_unsafe: bool,
+        self_conv: AccessConvention,
+    },
     /// c109 Phase 15: a DELEGATION trait method (`using field`) — `emit_delegation_method`
     /// (Source/Codegen/Items.rs). The whole method is structural: a forwarding call
     /// `(self).<field>.<method>(<args>)` to the delegated field, with the BARE trait
@@ -118,7 +121,11 @@ pub enum TFuncKind {
     /// `has_return` decides whether the forward line ends in `;` (unit) or not (returns).
     /// `sig` is the fully-rendered signature line (`    fn name(params)  {\n` with its
     /// quirky double space) and `fwd` the forwarding call — both resolved at lowering.
-    Delegation { sig: String, fwd: String, has_return: bool },
+    Delegation {
+        sig: String,
+        fwd: String,
+        has_return: bool,
+    },
 }
 
 /// c109 Phase 17: how a `-> view T` return wraps its value, resolved at lowering from
@@ -251,7 +258,10 @@ pub enum TStmt {
     /// is the lowered expression `value`, wrapped per `wrap` (resolved at lowering from the
     /// AST node shape) — `&value` for a place that needs its address taken, the bare deref'd
     /// place for an already-borrowed ident, or `value` unwrapped. `emit` reads `wrap` only.
-    ViewReturn { value: TExpr, wrap: ViewWrap },
+    ViewReturn {
+        value: TExpr,
+        wrap: ViewWrap,
+    },
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
@@ -489,12 +499,19 @@ pub enum TExprKind {
     /// not this).
     ConstInline(String),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
-    Call { name: String, args: Vec<TCallArg> },
+    Call {
+        name: String,
+        args: Vec<TCallArg>,
+    },
     /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
     /// `Vec3(x,y,z)` / `Mat3(…)`, or a static method `F32x4.splat(x)` /
     /// `Vec3.from_array(a)`. Emits the prelude free function `{root}jet_math_<T>_<fn>(…)`
     /// (`_new` for the constructor) with plainly-lowered float/array args.
-    MathBuiltin { type_name: String, func: String, args: Vec<TExpr> },
+    MathBuiltin {
+        type_name: String,
+        func: String,
+        args: Vec<TExpr>,
+    },
     /// `print(x)` — the one builtin the subset covers.
     Print(Box<TExpr>),
     /// D-LIN1-DROP (ratified 2026-06-25): `drop(x)` — deliberately discard a
@@ -506,7 +523,9 @@ pub enum TExprKind {
     /// (no module alias) lowering to `{root}jet_std_io_input(None|Some(&(prompt)))`,
     /// byte-for-byte the `emit_call` ambient-input branch (Source/Codegen/Expression.rs
     /// ~L1778). `prompt` is `Some` when a String prompt arg is given, else `None`.
-    AmbientInput { prompt: Option<Box<TExpr>> },
+    AmbientInput {
+        prompt: Option<Box<TExpr>>,
+    },
     /// c109 Phase 26: a `require(cond[, msg])` / `require_eq(a, b)` / `panic(msg)`
     /// rich-runtime-report builtin (S36). The ENTIRE emit string (`{ if !(cond) {
     /// jet_panic_rich(…); } }` in the default build, or the `test_mode` `{ if !(cond) {
@@ -529,7 +548,10 @@ pub enum TExprKind {
         lhs: Box<TExpr>,
         rhs: Box<TExpr>,
     },
-    Unary { op: UnOp, operand: Box<TExpr> },
+    Unary {
+        op: UnOp,
+        operand: Box<TExpr>,
+    },
     /// c109 Phase 3: a struct literal `S { f: v, … }`. `rust_type` is the already
     /// resolved Rust type head (`user_S` or `user_S::<…>`); each field carries its
     /// *mangled* Rust name and its value expression. No clone/coercion is applied
@@ -625,11 +647,18 @@ pub enum TExprKind {
     /// Lowers to `user_<S>_columns::from_aos(vec![…])` — the elements build the
     /// array-of-structs, then `from_aos` distributes them across the columns.
     /// `columns_ty` is the resolved `user_<S>_columns` Rust path.
-    ColumnarListLit { columns_ty: String, elems: Vec<TExpr> },
+    ColumnarListLit {
+        columns_ty: String,
+        elems: Vec<TExpr>,
+    },
     /// D-SOA1: index-read `xs[i]` on a columnar list — gathers the logical `S`
     /// from the columns at `i` (bounds-checked, same panic as `jet_index_vec`).
     /// Lowers to `(base).gather_at(i, file, line)`.
-    ColumnarGather { base: Box<TExpr>, index: Box<TExpr>, line: usize },
+    ColumnarGather {
+        base: Box<TExpr>,
+        index: Box<TExpr>,
+        line: usize,
+    },
     /// D-SOA1: a fused `xs[i].field` field-read on a columnar list — reads
     /// directly from the field's column (`jet_index_vec(&(base).user_<field>, i,
     /// …)`), the cache-friendly fast path (no whole-`S` gather).
@@ -758,7 +787,10 @@ pub enum TExprKind {
     /// the AST node); `line` is the source line resolved at lowering. `cx.file` is
     /// program-level (read at emit, like every other `cx.file` use). `todo!()` is
     /// diverging in Rust so it type-checks in any expression position (I1: no unsafe).
-    Todo { line: usize, expected_type: String },
+    Todo {
+        line: usize,
+        expected_type: String,
+    },
     /// c109 Phase 23: `.raw()` on a distinct type (`Expr::MethodCall { method: "raw" }`,
     /// D-DIST3). The AST `emit_method_call` special-cases this BEFORE any user dispatch:
     /// `({recv}).0` (the newtype's inner field). The receiver is lowered as-is; the
@@ -823,7 +855,9 @@ pub enum TExprKind {
     /// per-item call expressions (a `Call`/`Print`/`CallValue` form, resolved at
     /// lowering exactly as the AST path routes an `Ident` callee through `emit_call`
     /// and any other callee through `(f)(item)`). Emit just wraps them in `vec![…]`.
-    FanOut { calls: Vec<TExpr> },
+    FanOut {
+        calls: Vec<TExpr>,
+    },
     /// c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/
     /// `find`/`any`/`all`/`sort_by`/`reduce`). The receiver-type + Fn-vs-FnMut
     /// dispatch (`emit_builtin_method`'s closure arms) is resolved at lowering into a
@@ -970,7 +1004,10 @@ pub enum TFnValueKind {
     NamedFn { wrapper: String },
     /// A call through a fn-value `(f)(args)`. `callee` lowers to its place (a local
     /// of `Type::Fn`, or another fn-value form); args are lowered plainly.
-    Call { callee: Box<TExpr>, args: Vec<TCallArg> },
+    Call {
+        callee: Box<TExpr>,
+        args: Vec<TCallArg>,
+    },
 }
 
 /// c109 Phase 12: a resolved numeric method form, one per `emit_builtin_method`
@@ -988,7 +1025,10 @@ pub enum TNumericOp {
     CastAs { dst_rust: String },
     /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form
     /// returning `Result<T, String>`. Both strings resolved at lowering.
-    TryFrom { dst_rust: String, dst_spelling: String },
+    TryFrom {
+        dst_rust: String,
+        dst_spelling: String,
+    },
     /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
     /// arm of `emit_builtin_method`, which fires for any receiver type).
     ToShow,
@@ -1364,12 +1404,19 @@ pub enum THandleOp {
     /// <path>, <handler>)` where `<path>` is the lowered first arg (args[0]) and `<handler>`
     /// is a pre-rendered boxed-closure string (`emit_router_handler` reproduction, resolved
     /// at lowering). `verb` is the uppercase HTTP method literal.
-    HttpRouterRegister { verb: &'static str, handler: String },
+    HttpRouterRegister {
+        verb: &'static str,
+        handler: String,
+    },
     /// D-SIMD2 / D-LINALG1: an INSTANCE method on a built-in math value type. Emits
     /// the prelude free function `{root}jet_math_<type>_<method>(&(recv), <args>)`
     /// (e.g. `jet_math_Vec3_dot(&(v), w)`, `jet_math_F32x4_sum(&(v))`). `reduce`
     /// carries the validated marker op so the right fold function is named.
-    MathMethod { type_name: String, method: String, reduce_op: Option<String> },
+    MathMethod {
+        type_name: String,
+        method: String,
+        reduce_op: Option<String>,
+    },
     /// D-REACT1=B: `Signal.get()`/`Derived.get()` → `(recv).get()` (reads + tracks).
     ReactiveGet,
     /// D-REACT1=B: `Signal.set(v)` → `(recv).set(<arg0>)` (writes + notifies).
@@ -1377,20 +1424,36 @@ pub enum THandleOp {
     /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
     /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
     /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
-    MeasurementMethod { method: String },
+    MeasurementMethod {
+        method: String,
+    },
     /// D-PENDING1=B: `Loadable<T,E>` predicate / accessor methods.
     /// `.is_loading()/.is_loaded()/.is_failed()/.is_idle()` → `(recv).<method>()`.
     /// `.loaded()` → `(recv).loaded()` → `Option<T>`.
     /// `.or_else(default)` → `(recv).or_else(a0)` → `T`.
-    LoadableMethod { method: String },
+    LoadableMethod {
+        method: String,
+    },
     /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    SketchMethod { sketch: String, method: String },
+    SketchMethod {
+        sketch: String,
+        method: String,
+    },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).
-    CivilTimeMethod { kind: String, method: String },
+    CivilTimeMethod {
+        kind: String,
+        method: String,
+    },
     /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP client type (HttpClientReq/HttpClientResp).
-    HttpClientMethod { kind: String, method: String },
+    HttpClientMethod {
+        kind: String,
+        method: String,
+    },
     /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP server type (HttpMux/HttpSrvReq/HttpSrvResp).
-    HttpServerMethod { kind: String, method: String },
+    HttpServerMethod {
+        kind: String,
+        method: String,
+    },
     /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
     DataTreeField,
     /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.
@@ -1474,7 +1537,6 @@ pub struct TFnCoerce {
 // The gate: is this function fully inside the Phase-1 subset?
 // ---------------------------------------------------------------------------
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1529,7 +1591,9 @@ mod tests {
         // No C imports in unit tests; CFfi::default() is the correct empty state.
         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
         assert!(
-            !diags.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            !diags
+                .iter()
+                .any(|d| d.severity == crate::Diagnostics::Severity::Error),
             "sema errors: {diags:?}"
         );
         let module = &bundle.modules[bundle.entry];
@@ -1600,12 +1664,18 @@ mod tests {
 
     #[test]
     fn covers_simple_arithmetic_fn() {
-        assert!(covers("fn add(a: Int, b: Int) -> Int {\n return (a + b)\n}\n", "add"));
+        assert!(covers(
+            "fn add(a: Int, b: Int) -> Int {\n return (a + b)\n}\n",
+            "add"
+        ));
     }
 
     #[test]
     fn covers_print_and_string_param() {
-        assert!(covers("fn greet(s: String) {\n print(\"hi {s}\")\n}\n", "greet"));
+        assert!(covers(
+            "fn greet(s: String) {\n print(\"hi {s}\")\n}\n",
+            "greet"
+        ));
     }
 
     #[test]
@@ -1680,7 +1750,8 @@ fn make(n: String) -> Person {
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let prog = crate::Parser::parse(&toks).expect("parse failed");
         let mut cx = build_cx(&prog, src, "test.jet");
-        cx.core_imports.insert("mem".to_string(), "core.mem".to_string());
+        cx.core_imports
+            .insert("mem".to_string(), "core.mem".to_string());
         let f = prog
             .items
             .iter()
@@ -1766,14 +1837,20 @@ fn mk() {
             let prog = crate::Parser::parse(&toks).expect("parse");
             build_cx(&prog, src, "test.jet")
         };
-        let fl = Type::FixedList { elem: Box::new(Type::Int), len: 3 };
+        let fl = Type::FixedList {
+            elem: Box::new(Type::Int),
+            len: 3,
+        };
         // param/return helper coverage:
         assert!(is_subset_param_ty(&fl, &mk("fn f(){}")));
         assert!(is_covered_collection_ty(&fl, &mk("fn f(){}")));
         assert!(collection_elem_covered(&fl, &mk("fn f(){}")));
         // struct-field coverage: a `[Int#3]` field keeps its owning struct covered.
         let src = "struct Grid { row: [Int#3] }\nfn f(){}";
-        assert!(is_covered_struct_ty(&Type::Named("Grid".to_string()), &mk(src)));
+        assert!(is_covered_struct_ty(
+            &Type::Named("Grid".to_string()),
+            &mk(src)
+        ));
     }
 
     #[test]
@@ -2092,9 +2169,27 @@ fn mk() {
         // SHADOWING a builtin name routes to the user method on both paths. The predicate
         // contents are unchanged; assert them.
         for name in [
-            "len", "push", "pop", "get", "map", "filter", "each", "find", "sort",
-            "join", "to_string", "clone", "raw", "snapshot", "new", "to_i32",
-            "is_nan", "chars", "trim", "keys", "values",
+            "len",
+            "push",
+            "pop",
+            "get",
+            "map",
+            "filter",
+            "each",
+            "find",
+            "sort",
+            "join",
+            "to_string",
+            "clone",
+            "raw",
+            "snapshot",
+            "new",
+            "to_i32",
+            "is_nan",
+            "chars",
+            "trim",
+            "keys",
+            "values",
         ] {
             assert!(
                 is_intercepted_method_name(name),
@@ -2135,7 +2230,14 @@ fn mk() {
         locals.insert("b".to_string());
         // Both builtin-name user methods are admitted (a real `method_sigs` entry exists).
         for m in ["get", "len"] {
-            if let Expr::MethodCall { receiver, method, args, recv_type, .. } = &mk(m) {
+            if let Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                recv_type,
+                ..
+            } = &mk(m)
+            {
                 assert!(
                     method_call_in_subset(receiver, method, args, recv_type, &cx, &locals),
                     "user method `{m}` shadowing a builtin name should be covered"
@@ -2144,7 +2246,14 @@ fn mk() {
         }
         // A builtin name with NO user method on the type stays excluded (`push` isn't a
         // method on `Bag`), so the builtin/name-keyed path keeps it on the AST side.
-        if let Expr::MethodCall { receiver, method, args, recv_type, .. } = &mk("push") {
+        if let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            recv_type,
+            ..
+        } = &mk("push")
+        {
             assert!(
                 !method_call_in_subset(receiver, method, args, recv_type, &cx, &locals),
                 "a builtin name with no user method must stay excluded"
@@ -2172,7 +2281,8 @@ fn mk() {
     #[test]
     fn covers_static_constructor() {
         // A static (no-`self`) associated function returning the owning type.
-        let src = "struct Cell {\n n: Int\n fn make(v: Int) -> Cell {\n return Cell.{ n: v }\n }\n}\n";
+        let src =
+            "struct Cell {\n n: Int\n fn make(v: Int) -> Cell {\n return Cell.{ n: v }\n }\n}\n";
         assert!(covers_method(src, "Cell", "make"));
     }
 
@@ -2271,7 +2381,8 @@ fn mk() {
         // selected branch's statements are emitted inline. (`build_cx`-only gate test:
         // the gate's `stmt_in_subset` admits `Stmt::ComptimeIf` unconditionally; the
         // lowering reads `selected_then`, but the gate does not need sema for routing.)
-        let src = "fn f(x: Int) -> Int {\n comptime if true {\n return x\n } else {\n return 0\n }\n}\n";
+        let src =
+            "fn f(x: Int) -> Int {\n comptime if true {\n return x\n } else {\n return 0\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -2316,7 +2427,9 @@ fn mk() {
         // A closure-taking builtin (`map`/`filter`/…) is deferred to the lambda
         // phase — `is_covered_builtin_name` returns false, and the lambda arg is
         // out-of-subset anyway. The owning function stays on the AST path.
-        for name in ["map", "filter", "each", "find", "any", "all", "sort_by", "reduce"] {
+        for name in [
+            "map", "filter", "each", "find", "any", "all", "sort_by", "reduce",
+        ] {
             assert!(
                 !is_covered_builtin_name(name, 1),
                 "{name} (closure method) must NOT be a covered builtin"
@@ -2329,7 +2442,8 @@ fn mk() {
         // `is_empty` is now Bool-typed (c109 fix) and covered (`TBuiltinOp::IsEmpty`);
         // a function using it routes through the TIR.
         assert!(is_covered_builtin_name("is_empty", 0));
-        let src = "fn f(xs: [Int]) -> Int {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n";
+        let src =
+            "fn f(xs: [Int]) -> Int {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -2338,7 +2452,10 @@ fn mk() {
         // Numeric width/predicate/bit methods (`to_i32`/`is_nan`/`count_ones`) are
         // Phase 12 — not covered builtins here, and they carry a `Some(recv_type)`.
         for name in ["to_i32", "to_u8", "is_nan", "count_ones", "to_f64"] {
-            assert!(!is_covered_builtin_name(name, 0), "{name} is a Phase-12 numeric method");
+            assert!(
+                !is_covered_builtin_name(name, 0),
+                "{name} is a Phase-12 numeric method"
+            );
         }
     }
 
@@ -2589,7 +2706,10 @@ fn greet() -> String { return input() }
         let (toks, _) = crate::Lexer::lex(src);
         let prog = crate::Parser::parse(&toks).expect("parse");
         let cx = build_cx(&prog, src, "test.jet");
-        assert!(is_covered_struct_ty(&Type::Named("Worker".to_string()), &cx));
+        assert!(is_covered_struct_ty(
+            &Type::Named("Worker".to_string()),
+            &cx
+        ));
         // The fn-field-call shape resolves the field's Fn type from a covered struct's
         // `struct_fields` (the `recv_type` half is the sema fact tests/tir.rs supplies).
         assert!(fn_field_call_ty("step", &Some("Worker".to_string()), &cx).is_some());
@@ -2640,7 +2760,10 @@ fn greet() -> String { return input() }
         let (toks, _) = crate::Lexer::lex(cx_src);
         let prog = crate::Parser::parse(&toks).expect("parse");
         let cx = build_cx(&prog, cx_src, "t.jet");
-        let apply = |n: &str| Type::Apply { name: n.to_string(), args: vec![Type::Int] };
+        let apply = |n: &str| Type::Apply {
+            name: n.to_string(),
+            args: vec![Type::Int],
+        };
         assert!(is_covered_reactive_ty(&apply("Signal"), &cx));
         assert!(is_covered_reactive_ty(&apply("Derived"), &cx));
         assert!(is_subset_param_ty(&apply("Signal"), &cx));
@@ -2648,7 +2771,10 @@ fn greet() -> String { return input() }
         assert!(!is_covered_reactive_ty(&apply("Channel"), &cx));
         // The producer + closure-call shapes are covered.
         assert!(core_call_covered("jet.reactive", "signal"));
-        assert!(crate::Sema::is_polymorphic_core_special("jet.reactive", "derived"));
+        assert!(crate::Sema::is_polymorphic_core_special(
+            "jet.reactive",
+            "derived"
+        ));
     }
 
     #[test]
@@ -2674,7 +2800,10 @@ fn greet() -> String { return input() }
         }));
         assert!(is_covered_collection_ty(&tasks, &cx));
         // `Closed` is a covered fallible payload (the `receive()` err type).
-        assert!(fallible_payload_covered(&Type::Named("Closed".to_string()), &cx));
+        assert!(fallible_payload_covered(
+            &Type::Named("Closed".to_string()),
+            &cx
+        ));
         // A non-concurrency `Apply` (e.g. a user generic) is NOT this shape.
         assert!(!is_covered_concurrency_ty(&apply("Pair"), &cx));
     }
@@ -2706,7 +2835,10 @@ fn consume(ch: Channel<Int>) -> Int {
     #[test]
     fn covers_pure_fn() {
         // c109 Phase 23: a `#Pure fn` is covered (purity is sema-only, erased at codegen).
-        assert!(covers("#Pure fn double(n: Int) -> Int {\n return (n * 2)\n}\n", "double"));
+        assert!(covers(
+            "#Pure fn double(n: Int) -> Int {\n return (n * 2)\n}\n",
+            "double"
+        ));
     }
 
     #[test]
@@ -2799,11 +2931,19 @@ fn consume(ch: Channel<Int>) -> Int {
         };
         let guard_args = lam("() => { print(\"x\") }");
         assert!(core_closure_call_in_subset(
-            "core.scope", "guard", &guard_args, &cx, &locals
+            "core.scope",
+            "guard",
+            &guard_args,
+            &cx,
+            &locals
         ));
         // A non-closure core call is not a closure-core-call.
         assert!(!core_closure_call_in_subset(
-            "core.fs", "read", &guard_args, &cx, &locals
+            "core.fs",
+            "read",
+            &guard_args,
+            &cx,
+            &locals
         ));
     }
 
@@ -3172,7 +3312,10 @@ fn main() {
     print(t)
 }
 "#;
-        assert!(covers_after_sema(src, "main"), "owning field-read clone not covered");
+        assert!(
+            covers_after_sema(src, "main"),
+            "owning field-read clone not covered"
+        );
     }
 
     #[test]
@@ -3194,7 +3337,10 @@ fn main() {
     print(s.scores["a"])
 }
 "#;
-        assert!(covers_after_sema(src, "main"), "map-assign through field not covered");
+        assert!(
+            covers_after_sema(src, "main"),
+            "map-assign through field not covered"
+        );
     }
 
     #[test]
@@ -3216,7 +3362,10 @@ fn main() {
     print(s.scores.len())
 }
 "#;
-        assert!(covers_after_sema(src, "main"), "map builtin on field receiver not covered");
+        assert!(
+            covers_after_sema(src, "main"),
+            "map builtin on field receiver not covered"
+        );
     }
 
     #[test]
@@ -3271,6 +3420,9 @@ fn main() {
     }
 }
 ";
-        assert!(covers(src, "main"), "wildcard enum-payload if-let not covered");
+        assert!(
+            covers(src, "main"),
+            "wildcard enum-payload if-let not covered"
+        );
     }
 }

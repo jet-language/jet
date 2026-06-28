@@ -30,8 +30,12 @@ fn check_snapshot(name: &str, actual: &str) {
         fs::write(&path, actual).unwrap();
         return;
     }
-    let expected = fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("missing snapshot {}; run UPDATE_EXPECT=1 cargo test", path.display()));
+    let expected = fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "missing snapshot {}; run UPDATE_EXPECT=1 cargo test",
+            path.display()
+        )
+    });
     assert_eq!(actual, expected, "snapshot mismatch for {}", name);
 }
 
@@ -78,10 +82,18 @@ fn exit_code_no_args_greets() {
 fn exit_code_unknown_subcommand_is_usage() {
     // A typo'd subcommand is a usage error (exit 2) and teaches E2101.
     let out = Command::new(jet()).arg("buld").output().unwrap();
-    assert_eq!(out.status.code(), Some(2), "unknown subcommand should exit 2");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "unknown subcommand should exit 2"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2101"), "should cite E2101:\n{}", stderr);
-    assert!(stderr.contains("build"), "should suggest `build`:\n{}", stderr);
+    assert!(
+        stderr.contains("build"),
+        "should suggest `build`:\n{}",
+        stderr
+    );
 }
 
 #[test]
@@ -171,7 +183,11 @@ fn ci_output_is_ansi_free_when_piped() {
     // Default (piped, not a TTY): must be plain.
     let piped = Command::new(jet()).arg("check").arg(&p).output().unwrap();
     let s = String::from_utf8_lossy(&piped.stderr);
-    assert!(!s.contains('\x1b'), "piped output must be ANSI-free:\n{}", s);
+    assert!(
+        !s.contains('\x1b'),
+        "piped output must be ANSI-free:\n{}",
+        s
+    );
 
     // NO_COLOR explicitly set: also plain.
     let no_color = Command::new(jet())
@@ -221,12 +237,21 @@ fn every_registered_code_has_an_explain_entry() {
         if !line.starts_with("| E") && !line.starts_with("| L") {
             continue;
         }
-        let first = line.trim_matches('|').split('|').next().unwrap_or("").trim();
+        let first = line
+            .trim_matches('|')
+            .split('|')
+            .next()
+            .unwrap_or("")
+            .trim();
         if is_code(first) && !codes.contains(&first.to_string()) {
             codes.push(first.to_string());
         }
     }
-    assert!(codes.len() > 150, "expected the full code registry, found {}", codes.len());
+    assert!(
+        codes.len() > 150,
+        "expected the full code registry, found {}",
+        codes.len()
+    );
 
     let index = jet::Explain::index();
     for code in &codes {
@@ -236,7 +261,11 @@ fn every_registered_code_has_an_explain_entry() {
             code
         );
         // And `jet explain <code>` must succeed at the CLI for every code.
-        let out = Command::new(jet()).arg("explain").arg(code).output().unwrap();
+        let out = Command::new(jet())
+            .arg("explain")
+            .arg(code)
+            .output()
+            .unwrap();
         assert_eq!(
             out.status.code(),
             Some(0),
@@ -301,7 +330,11 @@ fn unknown_flag_is_e2102() {
     assert_eq!(out.status.code(), Some(2), "unknown flag should exit 2");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2102"), "should cite E2102:\n{}", stderr);
-    assert!(stderr.contains("--json"), "should suggest --json:\n{}", stderr);
+    assert!(
+        stderr.contains("--json"),
+        "should suggest --json:\n{}",
+        stderr
+    );
 }
 
 #[test]
@@ -315,7 +348,10 @@ fn doctor_ok_golden() {
         .unwrap();
     let s = String::from_utf8_lossy(&out.stdout).into_owned();
     // Doctor must never emit ANSI when piped.
-    assert!(!s.contains('\x1b'), "doctor output must be ANSI-free when piped");
+    assert!(
+        !s.contains('\x1b'),
+        "doctor output must be ANSI-free when piped"
+    );
     // Structural assertions (a full golden would be machine-specific).
     assert!(s.contains("doctor"), "missing header:\n{}", s);
     assert!(s.contains("rustc"), "missing rustc check:\n{}", s);
@@ -331,7 +367,12 @@ fn completions_generate_for_every_shell() {
             .arg(shell)
             .output()
             .unwrap();
-        assert_eq!(out.status.code(), Some(0), "completions {} should exit 0", shell);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "completions {} should exit 0",
+            shell
+        );
         let s = String::from_utf8_lossy(&out.stdout);
         check_snapshot(&format!("completions_{}.txt", shell), &s);
     }
@@ -364,12 +405,19 @@ fn fix_dry_run_does_not_write() {
     assert!(s.contains("dry run"), "dry-run should say so:\n{}", s);
     assert!(s.contains("??"), "diff should show the fix:\n{}", s);
     // The file on disk is unchanged.
-    assert_eq!(fs::read_to_string(&p).unwrap(), original, "dry-run must not write");
+    assert_eq!(
+        fs::read_to_string(&p).unwrap(),
+        original,
+        "dry-run must not write"
+    );
 
     // And a real fix DOES write.
     let out2 = Command::new(jet()).arg("fix").arg(&p).output().unwrap();
     assert_eq!(out2.status.code(), Some(0));
-    assert!(fs::read_to_string(&p).unwrap().contains("x ?? 0"), "fix should rewrite the file");
+    assert!(
+        fs::read_to_string(&p).unwrap().contains("x ?? 0"),
+        "fix should rewrite the file"
+    );
 }
 
 #[test]
@@ -398,7 +446,11 @@ fn external_subcommand_is_discovered() {
         .output()
         .unwrap();
     let s = String::from_utf8_lossy(&out.stdout);
-    assert!(s.contains("hi from plugin world"), "external subcommand not forwarded:\n{}", s);
+    assert!(
+        s.contains("hi from plugin world"),
+        "external subcommand not forwarded:\n{}",
+        s
+    );
 }
 
 #[test]
@@ -412,7 +464,11 @@ fn osc8_hyperlinks_only_when_forced_on() {
         .output()
         .unwrap();
     let s = String::from_utf8_lossy(&piped.stderr);
-    assert!(!s.contains("\x1b]8;;"), "piped output must have no OSC 8 links:\n{:?}", s);
+    assert!(
+        !s.contains("\x1b]8;;"),
+        "piped output must have no OSC 8 links:\n{:?}",
+        s
+    );
     // The hyperlink layer is gated behind a real TTY; since tests run piped,
     // we exercise the renderer directly to prove the escape appears when asked.
     let src = "fn main() {}\n";
@@ -424,9 +480,15 @@ fn osc8_hyperlinks_only_when_forced_on() {
         Some(jet::Diagnostics::Span::new(3, 7)),
     );
     let linked = d.render_linked("a.jet", src, true, true);
-    assert!(linked.contains("\x1b]8;;"), "render_linked(hyperlinks=true) should emit OSC 8");
+    assert!(
+        linked.contains("\x1b]8;;"),
+        "render_linked(hyperlinks=true) should emit OSC 8"
+    );
     let plain = d.render_linked("a.jet", src, true, false);
-    assert!(!plain.contains("\x1b]8;;"), "render_linked(hyperlinks=false) must not");
+    assert!(
+        !plain.contains("\x1b]8;;"),
+        "render_linked(hyperlinks=false) must not"
+    );
 }
 
 // ── Ext-optional CLI (no syntax decision; pure CLI behavior) ──────────
@@ -438,7 +500,11 @@ fn ext_optional_check_resolves_dot_jet() {
     let stem = std::env::temp_dir().join("jet_cli_extopt_check");
     let file = stem.with_extension("jet");
     fs::write(&file, "fn main() {\n    print(\"ok\");\n}\n").unwrap();
-    let out = Command::new(jet()).arg("check").arg(&stem).output().unwrap();
+    let out = Command::new(jet())
+        .arg("check")
+        .arg(&stem)
+        .output()
+        .unwrap();
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -455,7 +521,12 @@ fn ext_optional_run_resolves_dot_jet() {
     let file = stem.with_extension("jet");
     fs::write(&file, "fn main() {\n    print(\"hello-extopt\");\n}\n").unwrap();
     let out = Command::new(jet()).arg("run").arg(&stem).output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "ext-optional run should exit 0; stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "ext-optional run should exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("hello-extopt"),
         "stdout: {}",
@@ -468,7 +539,11 @@ fn ext_optional_missing_path_keeps_original_name() {
     // Neither `<path>` nor `<path>.jet` exists: the original name must surface
     // in the file-not-found error (resolution returns it unchanged).
     let stem = std::env::temp_dir().join("jet_cli_extopt_absent_xyz");
-    let out = Command::new(jet()).arg("check").arg(&stem).output().unwrap();
+    let out = Command::new(jet())
+        .arg("check")
+        .arg(&stem)
+        .output()
+        .unwrap();
     assert_ne!(out.status.code(), Some(0));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -503,9 +578,11 @@ fn simple_exec_runs_without_a_manifest() {
 /// Write a Jet fixture that prints its argument count via `io.args()`.
 fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
-    fs::write(&p,
+    fs::write(
+        &p,
         "use core.io as io\nfn main() {\n    args @= io.args()\n    print(args.len())\n}\n",
-    ).unwrap();
+    )
+    .unwrap();
     p
 }
 
@@ -518,7 +595,12 @@ fn passthrough_forwards_tokens_after_separator() {
         .args(["run", p.to_str().unwrap(), "--", "--port", "8080", "x"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.trim() == "4",
@@ -534,7 +616,12 @@ fn bare_separator_gives_empty_passthrough() {
         .args(["run", p.to_str().unwrap(), "--"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.trim() == "1",
@@ -551,7 +638,12 @@ fn no_separator_positional_regression() {
         .args(["run", p.to_str().unwrap(), "hello"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.trim() == "2",
@@ -569,10 +661,17 @@ fn unknown_flag_before_separator_is_e2102_with_passthrough_hint() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2), "unknown flag before -- should exit 2");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "unknown flag before -- should exit 2"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2102"), "should cite E2102:\n{stderr}");
-    assert!(stderr.contains("--"), "Fix should mention `--` separator:\n{stderr}");
+    assert!(
+        stderr.contains("--"),
+        "Fix should mention `--` separator:\n{stderr}"
+    );
 }
 
 // ── D-BUILDPROFILE1: --release / --profile=<name> ─────────────────────────────
@@ -584,11 +683,7 @@ fn profile_unknown_name_emits_e1219() {
     let p = std::env::temp_dir().join("jet_cli_profile_test.jet");
     fs::write(&p, "fn main() { print(\"ok\") }\n").unwrap();
     let out = Command::new(jet())
-        .args([
-            "build",
-            p.to_str().unwrap(),
-            "--profile=staging",
-        ])
+        .args(["build", p.to_str().unwrap(), "--profile=staging"])
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -617,11 +712,7 @@ fn profile_release_flag_is_accepted() {
     // doesn't accept --release yet, so test that `jet build --release` at least
     // doesn't emit E1219. We check that the exit code is NOT 1-with-E1219.
     let out = Command::new(jet())
-        .args([
-            "build",
-            p.to_str().unwrap(),
-            "--release",
-        ])
+        .args(["build", p.to_str().unwrap(), "--release"])
         .env("NO_COLOR", "1")
         .output()
         .unwrap();

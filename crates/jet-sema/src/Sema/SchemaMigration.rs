@@ -30,10 +30,23 @@ use std::path::Path;
 
 /// A declared migration op for one type, flattened for diffing.
 enum DeclaredOp {
-    Rename { from: String, to: String },
-    Add { field: String, ty: String },
-    Remove { field: String },
-    Change { field: String, from_ty: String, to_ty: String, has_converter: bool },
+    Rename {
+        from: String,
+        to: String,
+    },
+    Add {
+        field: String,
+        ty: String,
+    },
+    Remove {
+        field: String,
+    },
+    Change {
+        field: String,
+        from_ty: String,
+        to_ty: String,
+        has_converter: bool,
+    },
 }
 
 /// Run the schema migration diff pass over the items in a single module.
@@ -50,15 +63,29 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
             for op in &m.ops {
                 match op {
                     MigrationOp::Rename { from, to, .. } => {
-                        entry.push(DeclaredOp::Rename { from: from.clone(), to: to.clone() });
+                        entry.push(DeclaredOp::Rename {
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
                     }
                     MigrationOp::Add { field, ty, .. } => {
-                        entry.push(DeclaredOp::Add { field: field.clone(), ty: ty.name() });
+                        entry.push(DeclaredOp::Add {
+                            field: field.clone(),
+                            ty: ty.name(),
+                        });
                     }
                     MigrationOp::Remove { field, .. } => {
-                        entry.push(DeclaredOp::Remove { field: field.clone() });
+                        entry.push(DeclaredOp::Remove {
+                            field: field.clone(),
+                        });
                     }
-                    MigrationOp::Change { field, from_ty, to_ty, converter, .. } => {
+                    MigrationOp::Change {
+                        field,
+                        from_ty,
+                        to_ty,
+                        converter,
+                        ..
+                    } => {
                         entry.push(DeclaredOp::Change {
                             field: field.clone(),
                             from_ty: from_ty.name(),
@@ -133,7 +160,12 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
                         diags.push(e0910_op_unknown_field(&s.name, field, "add", span));
                     }
                 }
-                DeclaredOp::Change { field, from_ty, to_ty, .. } => {
+                DeclaredOp::Change {
+                    field,
+                    from_ty,
+                    to_ty,
+                    ..
+                } => {
                     // The field must exist in both shapes, and the declared
                     // from/to must match the snapshot/current types.
                     match (old_fields.get(field), new_fields.get(field)) {
@@ -160,16 +192,25 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
             let renamed = ops.iter().any(|op| match op {
                 DeclaredOp::Rename { from, to } => {
                     from == &old_field.name
-                        && new_fields.get(to.as_str()).map_or(false, |t| t == &old_field.ty)
+                        && new_fields
+                            .get(to.as_str())
+                            .map_or(false, |t| t == &old_field.ty)
                 }
                 _ => false,
             });
             // Or by an explicit `remove old`?
-            let removed = ops.iter().any(|op| matches!(op, DeclaredOp::Remove { field } if field == &old_field.name));
+            let removed = ops
+                .iter()
+                .any(|op| matches!(op, DeclaredOp::Remove { field } if field == &old_field.name));
             if renamed || removed {
                 continue;
             }
-            diags.push(e0910_dropped(&s.name, &old_field.name, &prior.published_version, span));
+            diags.push(e0910_dropped(
+                &s.name,
+                &old_field.name,
+                &prior.published_version,
+                span,
+            ));
         }
 
         // ---- type-changed fields ----------------------------------------
@@ -185,9 +226,12 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
             // inline `via { … }` (D-MIGRATE2B step 1) OR an `impl Old -> New`
             // in scope (step 2). Without either → ask for a converter (step 3).
             let change_op = ops.iter().find_map(|op| match op {
-                DeclaredOp::Change { field, from_ty, to_ty, has_converter }
-                    if field == &f.name && from_ty == old_ty && to_ty == &new_ty =>
-                {
+                DeclaredOp::Change {
+                    field,
+                    from_ty,
+                    to_ty,
+                    has_converter,
+                } if field == &f.name && from_ty == old_ty && to_ty == &new_ty => {
                     Some(*has_converter)
                 }
                 _ => None,
@@ -196,9 +240,13 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
                 Some(true) => {} // inline converter present → OK
                 Some(false) => {
                     // No inline `via`; look for an `impl Old -> New` fallback.
-                    let has_impl = conv_impls.iter().any(|(from, to)| from == old_ty && to == &new_ty);
+                    let has_impl = conv_impls
+                        .iter()
+                        .any(|(from, to)| from == old_ty && to == &new_ty);
                     if !has_impl {
-                        diags.push(e0910_change_no_converter(&s.name, &f.name, old_ty, &new_ty, span));
+                        diags.push(e0910_change_no_converter(
+                            &s.name, &f.name, old_ty, &new_ty, span,
+                        ));
                     }
                 }
                 None => {
@@ -216,9 +264,13 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
                 continue; // existed before
             }
             // Bridged by `rename old -> f` (the new name of a renamed field)?
-            let from_rename = ops.iter().any(|op| matches!(op, DeclaredOp::Rename { to, .. } if to == &f.name));
+            let from_rename = ops
+                .iter()
+                .any(|op| matches!(op, DeclaredOp::Rename { to, .. } if to == &f.name));
             // Or declared `add f: T = default`?
-            let added = ops.iter().any(|op| matches!(op, DeclaredOp::Add { field, .. } if field == &f.name));
+            let added = ops
+                .iter()
+                .any(|op| matches!(op, DeclaredOp::Add { field, .. } if field == &f.name));
             if from_rename || added {
                 continue;
             }
@@ -250,7 +302,13 @@ fn e0910_dropped(type_name: &str, field: &str, version: &str, span: Span) -> Dia
 }
 
 /// E0910: a published field changed type, with no `change` op declaring intent.
-fn e0910_changed_type(type_name: &str, field: &str, old_ty: &str, new_ty: &str, span: Span) -> Diagnostic {
+fn e0910_changed_type(
+    type_name: &str,
+    field: &str,
+    old_ty: &str,
+    new_ty: &str,
+    span: Span,
+) -> Diagnostic {
     Diagnostic::error(
         "E0910",
         format!(
@@ -268,7 +326,13 @@ fn e0910_changed_type(type_name: &str, field: &str, old_ty: &str, new_ty: &str, 
 
 /// E0910: a `change` op is declared but no converter (neither inline `via` nor
 /// an `impl Old -> New` in scope) is available.
-fn e0910_change_no_converter(type_name: &str, field: &str, old_ty: &str, new_ty: &str, span: Span) -> Diagnostic {
+fn e0910_change_no_converter(
+    type_name: &str,
+    field: &str,
+    old_ty: &str,
+    new_ty: &str,
+    span: Span,
+) -> Diagnostic {
     Diagnostic::error(
         "E0910",
         format!(
@@ -352,7 +416,13 @@ fn e0910_change_type_mismatch(
 }
 
 /// E0910: an `add f: T` op's declared type doesn't match the struct field's type.
-fn e0910_add_type_mismatch(type_name: &str, field: &str, decl_ty: &str, real_ty: &str, span: Span) -> Diagnostic {
+fn e0910_add_type_mismatch(
+    type_name: &str,
+    field: &str,
+    decl_ty: &str,
+    real_ty: &str,
+    span: Span,
+) -> Diagnostic {
     Diagnostic::error(
         "E0910",
         format!(
@@ -392,7 +462,9 @@ mod tests {
     // The diff reads a process-global env var; serialize tests that set it.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    fn zero() -> Span { Span::new(0, 0) }
+    fn zero() -> Span {
+        Span::new(0, 0)
+    }
 
     fn field(name: &str, ty: Type) -> Field {
         Field {
@@ -462,7 +534,8 @@ mod tests {
         diags.iter().map(|d| d.code).collect()
     }
 
-    const SNAP_ONE: &str = "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\n";
+    const SNAP_ONE: &str =
+        "schema_version = 1\ntype = Rec\npublished_version = 1.0.0\nfield name: String\n";
 
     #[test]
     fn unchanged_struct_is_clean() {
@@ -493,7 +566,13 @@ mod tests {
     fn remove_op_bridges_a_drop() {
         let items = [
             published_struct("Rec", vec![]),
-            migration("Rec", vec![MigrationOp::Remove { field: "name".into(), field_span: zero() }]),
+            migration(
+                "Rec",
+                vec![MigrationOp::Remove {
+                    field: "name".into(),
+                    field_span: zero(),
+                }],
+            ),
         ];
         assert!(run_with_snapshot(SNAP_ONE, &items).is_empty());
     }
@@ -511,7 +590,10 @@ mod tests {
     #[test]
     fn add_op_bridges_a_new_field() {
         let items = [
-            published_struct("Rec", vec![field("name", Type::String), field("extra", Type::Bool)]),
+            published_struct(
+                "Rec",
+                vec![field("name", Type::String), field("extra", Type::Bool)],
+            ),
             migration(
                 "Rec",
                 vec![MigrationOp::Add {
@@ -582,7 +664,13 @@ mod tests {
         // remove `name` but the struct still has it.
         let items = [
             published_struct("Rec", vec![field("name", Type::String)]),
-            migration("Rec", vec![MigrationOp::Remove { field: "name".into(), field_span: zero() }]),
+            migration(
+                "Rec",
+                vec![MigrationOp::Remove {
+                    field: "name".into(),
+                    field_span: zero(),
+                }],
+            ),
         ];
         assert_eq!(run_with_snapshot(SNAP_ONE, &items), vec!["E0910"]);
     }
@@ -591,7 +679,8 @@ mod tests {
     fn no_prior_snapshot_is_clean() {
         // First release: no snapshot file → nothing to diff.
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("jet_schema_unit_empty_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("jet_schema_unit_empty_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("JET_SCHEMA_CACHE_DIR", &dir);
         let items = [published_struct("Brand", vec![field("x", Type::Int)])];

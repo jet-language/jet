@@ -1,14 +1,17 @@
 use super::*;
-use crate::AST::{
-    ElseBranch, EnumLitArg,
-    Expr, ForKind, IfStmt, LValue, LambdaBody,
-    OrFallback, Pattern, Stmt, StrPart,
-};
 use crate::Diagnostics::Span;
 use crate::Syntax;
+use crate::AST::{
+    ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, LValue, LambdaBody, OrFallback, Pattern, Stmt,
+    StrPart,
+};
 use std::collections::HashSet;
 
-pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], taken: &mut HashSet<String>) {
+pub(crate) fn walk_stmts_for_const_refs(
+    stmts: &[Stmt],
+    const_names: &[String],
+    taken: &mut HashSet<String>,
+) {
     for stmt in stmts {
         match stmt {
             Stmt::Expr(e) => walk_expr_for_const_refs(e, const_names, taken),
@@ -49,13 +52,26 @@ pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], 
                 }
                 walk_stmts_for_const_refs(else_body.as_deref().unwrap_or(&[]), const_names, taken);
             }
-            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
-            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Impure { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Grant { body: inner, .. } | Stmt::Transact { body: inner, .. } | Stmt::AssumeDet { body: inner, .. } => {
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
+            }
+            Stmt::Loop { body: inner, .. }
+            | Stmt::Unsafe { body: inner, .. }
+            | Stmt::Impure { body: inner, .. }
+            | Stmt::Region { body: inner, .. }
+            | Stmt::Caps { body: inner, .. }
+            | Stmt::Grant { body: inner, .. }
+            | Stmt::Transact { body: inner, .. }
+            | Stmt::AssumeDet { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
             }
             // D-CTMARKER1: walk comptime block body for const refs.
             Stmt::ComptimeBlock { body, .. } => walk_stmts_for_const_refs(body, const_names, taken),
-            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
                 walk_expr_for_const_refs(cond, const_names, taken);
                 walk_stmts_for_const_refs(then_body, const_names, taken);
                 if let Some(eb) = else_body {
@@ -76,7 +92,11 @@ pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], 
     }
 }
 
-pub(crate) fn walk_if_for_const_refs(ifs: &IfStmt, const_names: &[String], taken: &mut HashSet<String>) {
+pub(crate) fn walk_if_for_const_refs(
+    ifs: &IfStmt,
+    const_names: &[String],
+    taken: &mut HashSet<String>,
+) {
     walk_expr_for_const_refs(&ifs.cond, const_names, taken);
     walk_stmts_for_const_refs(&ifs.then_body, const_names, taken);
     match &ifs.else_branch {
@@ -86,7 +106,11 @@ pub(crate) fn walk_if_for_const_refs(ifs: &IfStmt, const_names: &[String], taken
     }
 }
 
-pub(crate) fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut HashSet<String>) {
+pub(crate) fn walk_expr_for_const_refs(
+    expr: &Expr,
+    const_names: &[String],
+    taken: &mut HashSet<String>,
+) {
     match expr {
         Expr::PtrFromAddr { addr, .. } => walk_expr_for_const_refs(addr, const_names, taken),
         Expr::Ident(name, _) => {
@@ -238,9 +262,10 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::CallValue { callee, args, .. } => {
             expr_refs_name(callee, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
         }
-        Expr::Field(inner, _, _) | Expr::Tainted(inner, _) | Expr::Present(inner, _) | Expr::Try(inner, _, _) => {
-            expr_refs_name(inner, name)
-        }
+        Expr::Field(inner, _, _)
+        | Expr::Tainted(inner, _)
+        | Expr::Present(inner, _)
+        | Expr::Try(inner, _, _) => expr_refs_name(inner, name),
         Expr::OptField { base, .. } => expr_refs_name(base, name),
         Expr::MethodCall { receiver, args, .. } => {
             expr_refs_name(receiver, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
@@ -352,14 +377,32 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                     .as_ref()
                     .is_some_and(|b| b.iter().any(|s| stmt_refs_name(s, name)))
         }
-        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => false,
+        Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::AssumeDet { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..)
+        | Stmt::Return(None, _) => false,
         // D-CTMARKER1: comptime block body may reference names.
         Stmt::ComptimeBlock { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             expr_refs_name(cond, name)
                 || then_body.iter().any(|s| stmt_refs_name(s, name))
-                || else_body.as_ref().is_some_and(|eb| eb.iter().any(|s| stmt_refs_name(s, name)))
+                || else_body
+                    .as_ref()
+                    .is_some_and(|eb| eb.iter().any(|s| stmt_refs_name(s, name)))
         }
         Stmt::ContextBlock { fields, body, .. } => {
             fields.iter().any(|(_, e, _)| expr_refs_name(e, name))
@@ -407,7 +450,10 @@ pub(crate) fn lambda_collect_captures(
     }
 }
 
-pub(crate) fn lambda_body_view_return_span(checker: &Checker<'_>, body: &LambdaBody) -> Option<Span> {
+pub(crate) fn lambda_body_view_return_span(
+    checker: &Checker<'_>,
+    body: &LambdaBody,
+) -> Option<Span> {
     match body {
         LambdaBody::Expr(e) => checker.is_view_call(e).then(|| e.span()),
         LambdaBody::Block(stmts) => {
@@ -439,7 +485,15 @@ pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Optio
                 .as_ref()
                 .and_then(|branch| else_view_return_span(checker, branch))
         }
-        Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => body
+        Stmt::While { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::AssumeDet { body, .. } => body
             .iter()
             .find_map(|stmt| stmt_view_return_span(checker, stmt)),
         Stmt::For { body, .. } => body
@@ -722,17 +776,32 @@ pub(crate) fn stmt_collect_captures(
                 block_collect_captures(b, &mut else_bound, read, mut_cap);
             }
         }
-        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => {
+        Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::AssumeDet { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => {}
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..)
+        | Stmt::Return(None, _) => {}
         // D-CTMARKER1: comptime block erases; still walk body for captures (conservative).
         Stmt::ComptimeBlock { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
-        Stmt::ComptimeIf { then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
             let mut then_bound = bound.clone();
             block_collect_captures(then_body, &mut then_bound, read, mut_cap);
             if let Some(eb) = else_body {

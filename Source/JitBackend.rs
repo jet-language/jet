@@ -8,9 +8,9 @@
 // Re-export the seam types from jet-foundation.
 pub use jet_foundation::JitBackend::{JitBackend, RunOutcome};
 
-use crate::AST::ProgramBundle;
 use crate::Diagnostics::Diagnostic;
 use crate::Interpreter::run_checked;
+use crate::AST::ProgramBundle;
 
 /// Tier-0 backend: the comptime interpreter. Stateless between runs (no
 /// resident heap), so every method funnels into [`run_checked`].

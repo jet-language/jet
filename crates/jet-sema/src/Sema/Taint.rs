@@ -21,12 +21,12 @@
 //! interpolation, field store, return, arithmetic) is exactly the dataflow this
 //! pass tracks.
 
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Effects::{core_effect, Effect};
 use crate::AST::{
     ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, Item, LValue, Lambda, LambdaBody, OrFallback,
     Stmt, StrPart,
 };
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Effects::{core_effect, Effect};
 use std::collections::{HashMap, HashSet};
 
 /// The sink effects (D-TAINT1): a tainted value reaching a Core call carrying one
@@ -54,10 +54,7 @@ struct TaintCtx<'a> {
 }
 
 impl<'a> TaintCtx<'a> {
-    fn new(
-        sanitizers: &'a HashSet<String>,
-        core_imports: &'a HashMap<String, String>,
-    ) -> Self {
+    fn new(sanitizers: &'a HashSet<String>, core_imports: &'a HashMap<String, String>) -> Self {
         TaintCtx {
             sanitizers,
             core_imports,
@@ -97,7 +94,13 @@ impl<'a> TaintCtx<'a> {
             // taint across the boundary in this intraprocedural model (that is
             // the deferred D-IFC1 analysis). Either way the result is clean.
             Expr::Call(_) => false,
-            Expr::MethodCall { receiver, method, recv_type, args, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                recv_type,
+                args,
+                ..
+            } => {
                 // `value.method(…)` where the method is a `#Sanitizer fn` clears
                 // taint. Otherwise taint flows from the receiver (a tainted
                 // string's `.trim()` is still tainted) and from any argument.
@@ -106,8 +109,7 @@ impl<'a> TaintCtx<'a> {
                         return false;
                     }
                 }
-                self.is_tainted(receiver)
-                    || args.iter().any(|a| self.is_tainted(&a.expr))
+                self.is_tainted(receiver) || args.iter().any(|a| self.is_tainted(&a.expr))
             }
             Expr::CallValue { .. } => false,
 
@@ -122,12 +124,10 @@ impl<'a> TaintCtx<'a> {
             | Expr::Err(inner, _)
             | Expr::Try(inner, _, _) => self.is_tainted(inner),
             Expr::OptField { base, .. } => self.is_tainted(base),
-            Expr::Index { base, index, .. } => {
-                self.is_tainted(base) || self.is_tainted(index)
-            }
-            Expr::Slice { base, start, end, .. } => {
-                self.is_tainted(base) || self.is_tainted(start) || self.is_tainted(end)
-            }
+            Expr::Index { base, index, .. } => self.is_tainted(base) || self.is_tainted(index),
+            Expr::Slice {
+                base, start, end, ..
+            } => self.is_tainted(base) || self.is_tainted(start) || self.is_tainted(end),
             Expr::ListLit(elems, _) => elems.iter().any(|el| self.is_tainted(el)),
             Expr::MapLit(entries, _) => entries
                 .iter()
@@ -143,7 +143,9 @@ impl<'a> TaintCtx<'a> {
                 StrPart::Interp(e) => self.is_tainted(e),
                 _ => false,
             }),
-            Expr::OrFallback { value, fallback, .. } => {
+            Expr::OrFallback {
+                value, fallback, ..
+            } => {
                 self.is_tainted(value)
                     || match fallback {
                         OrFallback::Value(e) => self.is_tainted(e),
@@ -152,9 +154,11 @@ impl<'a> TaintCtx<'a> {
                     }
             }
             Expr::PatternTest { subject, .. } => self.is_tainted(subject),
-            Expr::If { then_value, else_value, .. } => {
-                self.is_tainted(then_value) || self.is_tainted(else_value)
-            }
+            Expr::If {
+                then_value,
+                else_value,
+                ..
+            } => self.is_tainted(then_value) || self.is_tainted(else_value),
             Expr::FanOut { items, .. } => items.iter().any(|e| self.is_tainted(e)),
             Expr::PtrFromAddr { addr, .. } => self.is_tainted(addr),
 
@@ -176,7 +180,13 @@ impl<'a> TaintCtx<'a> {
     /// larger expression is still checked.
     fn check_expr(&mut self, e: &Expr) {
         match e {
-            Expr::MethodCall { receiver, method, method_span, args, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                method_span,
+                args,
+                ..
+            } => {
                 if let Some(effect) = self.call_sink_effect(receiver, method) {
                     for a in args {
                         if self.is_tainted(&a.expr) {
@@ -223,7 +233,9 @@ impl<'a> TaintCtx<'a> {
                 self.check_expr(base);
                 self.check_expr(index);
             }
-            Expr::Slice { base, start, end, .. } => {
+            Expr::Slice {
+                base, start, end, ..
+            } => {
                 self.check_expr(base);
                 self.check_expr(start);
                 self.check_expr(end);
@@ -246,7 +258,9 @@ impl<'a> TaintCtx<'a> {
                     self.check_expr(e);
                 }
             }),
-            Expr::OrFallback { value, fallback, .. } => {
+            Expr::OrFallback {
+                value, fallback, ..
+            } => {
                 self.check_expr(value);
                 match fallback {
                     OrFallback::Value(e) => self.check_expr(e),
@@ -255,7 +269,14 @@ impl<'a> TaintCtx<'a> {
                 }
             }
             Expr::PatternTest { subject, .. } => self.check_expr(subject),
-            Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+            Expr::If {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                ..
+            } => {
                 self.check_expr(cond);
                 self.check_block(then_body);
                 self.check_expr(then_value);
@@ -309,7 +330,9 @@ impl<'a> TaintCtx<'a> {
                     self.set_taint(b.name.clone(), init_tainted);
                 }
             }
-            Stmt::Assign { target, op, value, .. } => {
+            Stmt::Assign {
+                target, op, value, ..
+            } => {
                 self.check_expr(value);
                 if let LValue::Local { name, .. } = target {
                     // A plain `x = v` resets taint to v's; a compound `x += v`
@@ -339,7 +362,13 @@ impl<'a> TaintCtx<'a> {
                 self.check_expr(cond);
                 self.check_block(body);
             }
-            Stmt::For { kind, body, var, var2, .. } => {
+            Stmt::For {
+                kind,
+                body,
+                var,
+                var2,
+                ..
+            } => {
                 let coll_tainted = match kind {
                     ForKind::Range { start, end, step } => {
                         self.check_expr(start);
@@ -361,7 +390,12 @@ impl<'a> TaintCtx<'a> {
                 }
                 self.check_block(body);
             }
-            Stmt::Switch { subject, arms, else_body, .. } => {
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
                 self.check_expr(subject);
                 for a in arms {
                     self.check_expr(&a.cond);
@@ -382,7 +416,12 @@ impl<'a> TaintCtx<'a> {
             | Stmt::Live { body, .. } => self.check_block(body),
             // D-CTMARKER1: comptime block erases; walk body conservatively.
             Stmt::ComptimeBlock { body, .. } => self.check_block(body),
-            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
                 self.check_expr(cond);
                 self.check_block(then_body);
                 if let Some(b) = else_body {
@@ -395,10 +434,8 @@ impl<'a> TaintCtx<'a> {
                 }
                 self.check_block(body);
             }
-            Stmt::Break(_)
-            | Stmt::Continue(_)
-            | Stmt::BreakLabel(..)
-            | Stmt::ContinueLabel(..) => {}
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
+            }
         }
     }
 

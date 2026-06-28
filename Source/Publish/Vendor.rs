@@ -21,13 +21,20 @@ pub fn vendor(
     vendor_dir: &Path,
 ) -> Result<Vec<String>, Diagnostic> {
     let _ = project_root; // resolved by the caller into `vendor_dir`
-    std::fs::create_dir_all(vendor_dir).map_err(|e| Diagnostic::error(
-        "E2604",
-        format!("couldn't create vendor directory `{}`: {}", vendor_dir.display(), e),
-        "the vendor directory is where `jet vendor` writes offline copies of dependencies.".into(),
-        "check write permissions, or pass a writable `--vendor-dir <path>`.".into(),
-        None,
-    ))?;
+    std::fs::create_dir_all(vendor_dir).map_err(|e| {
+        Diagnostic::error(
+            "E2604",
+            format!(
+                "couldn't create vendor directory `{}`: {}",
+                vendor_dir.display(),
+                e
+            ),
+            "the vendor directory is where `jet vendor` writes offline copies of dependencies."
+                .into(),
+            "check write permissions, or pass a writable `--vendor-dir <path>`.".into(),
+            None,
+        )
+    })?;
 
     let mut copied = Vec::new();
     for (name, src_dir) in dep_dirs {
@@ -36,26 +43,31 @@ pub fn vendor(
             // Remove stale copy.
             std::fs::remove_dir_all(&dest).ok();
         }
-        copy_dir_recursive(src_dir, &dest).map_err(|e| Diagnostic::error(
-            "E2604",
-            format!("failed to vendor `{}`: {}", name, e),
-            "jet vendor copies dependency source into the vendor tree for offline builds.".into(),
-            "check that the dependency is correctly fetched first with `jet fetch`.".into(),
-            None,
-        ))?;
+        copy_dir_recursive(src_dir, &dest).map_err(|e| {
+            Diagnostic::error(
+                "E2604",
+                format!("failed to vendor `{}`: {}", name, e),
+                "jet vendor copies dependency source into the vendor tree for offline builds."
+                    .into(),
+                "check that the dependency is correctly fetched first with `jet fetch`.".into(),
+                None,
+            )
+        })?;
         copied.push(name.clone());
     }
     copied.sort();
 
     // Write the vendor manifest from the lock so offline builds can re-verify.
     let manifest = vendor_manifest_json(lock, &copied);
-    std::fs::write(vendor_dir.join("manifest.json"), manifest).map_err(|e| Diagnostic::error(
-        "E2604",
-        format!("couldn't write the vendor manifest: {}", e),
-        "vendor/manifest.json records each dependency's name, version, and fingerprint.".into(),
-        "check write permissions on the vendor directory.".into(),
-        None,
-    ))?;
+    std::fs::write(vendor_dir.join("manifest.json"), manifest).map_err(|e| {
+        Diagnostic::error(
+            "E2604",
+            format!("couldn't write the vendor manifest: {}", e),
+            "vendor/manifest.json records each dependency's name, version, and fingerprint.".into(),
+            "check write permissions on the vendor directory.".into(),
+            None,
+        )
+    })?;
 
     Ok(copied)
 }

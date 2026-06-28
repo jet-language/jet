@@ -1,12 +1,10 @@
 use super::*;
-use crate::AST::{
-    AccessConvention, EnumDef,
-    Func, Item,
-    Program, ProgramBundle, StructDef, Type, VariantPayload,
-};
-use crate::AST::FfiLink;
 use crate::Generics;
 use crate::Syntax;
+use crate::AST::FfiLink;
+use crate::AST::{
+    AccessConvention, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type, VariantPayload,
+};
 use std::collections::{HashMap, HashSet};
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
@@ -295,19 +293,35 @@ impl Cx {
             Type::Named(name) if name == "Key" => format!("{}JetKey", self.root_prefix),
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
-                format!("{}{}", self.root_prefix, file_handle_rust_type(name).unwrap())
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    file_handle_rust_type(name).unwrap()
+                )
             }
             // E2-M10: networking opaque types are top-level in the prelude.
             Type::Named(name) if net_handle_rust_type(name).is_some() => {
-                format!("{}{}", self.root_prefix, net_handle_rust_type(name).unwrap())
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    net_handle_rust_type(name).unwrap()
+                )
             }
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
-                format!("{}{}", self.root_prefix, alloc_handle_rust_type(name).unwrap())
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    alloc_handle_rust_type(name).unwrap()
+                )
             }
             // D-ARGS1 (ratified 2026-06-22): ArgsSpec / ParsedArgs are top-level prelude structs.
             Type::Named(name) if args_handle_rust_type(name).is_some() => {
-                format!("{}{}", self.root_prefix, args_handle_rust_type(name).unwrap())
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    args_handle_rust_type(name).unwrap()
+                )
             }
             // A user struct/enum sharing a built-in Core type name (e.g. a user
             // `Vec3`) wins — it keeps its own `user_<Name>` lowering. Only fall to the
@@ -419,7 +433,12 @@ impl Cx {
         }
     }
 
-    pub(crate) fn rust_fn_trait(&self, params: &[Type], ret: Option<&Type>, mut_capture: bool) -> String {
+    pub(crate) fn rust_fn_trait(
+        &self,
+        params: &[Type],
+        ret: Option<&Type>,
+        mut_capture: bool,
+    ) -> String {
         let ps = params
             .iter()
             .map(|p| self.rust_type(p))
@@ -761,7 +780,8 @@ pub(crate) fn build_cx_items(
                         .insert((i.type_name.clone(), m.name.clone()), m.return_type.clone());
                     // S62: track trait-impl methods so call sites know not to mangle.
                     if i.trait_name.is_some() {
-                        cx.trait_methods.insert((i.type_name.clone(), m.name.clone()));
+                        cx.trait_methods
+                            .insert((i.type_name.clone(), m.name.clone()));
                     }
                 }
             }
@@ -807,12 +827,10 @@ fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
         .collect()
 }
 
-
 pub(crate) fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
     // c148: pass the struct's declared type-param names so multi-char params are
     // treated as cloneable (they carry a `T: Clone` bound in the emitted impl).
-    let param_names: HashSet<String> =
-        s.type_params.iter().map(|p| p.name.clone()).collect();
+    let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
         .all(|f| !f.is_stored_ref && field_type_cloneable(&f.ty, types, &param_names))
@@ -820,14 +838,13 @@ pub(crate) fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -
 
 pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
     // c148: pass the enum's declared type-param names.
-    let param_names: HashSet<String> =
-        e.type_params.iter().map(|p| p.name.clone()).collect();
+    let param_names: HashSet<String> = e.type_params.iter().map(|p| p.name.clone()).collect();
     e.variants.iter().all(|v| match &v.payload {
         VariantPayload::Unit => true,
         VariantPayload::Single(t, _) => field_type_cloneable(t, types, &param_names),
-        VariantPayload::Named(fs) => {
-            fs.iter().all(|f| field_type_cloneable(&f.ty, types, &param_names))
-        }
+        VariantPayload::Named(fs) => fs
+            .iter()
+            .all(|f| field_type_cloneable(&f.ty, types, &param_names)),
     })
 }
 
@@ -847,13 +864,11 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSe
                 && field_type_cloneable(err, types, param_names)
         }
         // c148: recognize both single-char heuristic and declared multi-char params.
-        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => {
-            true
-        }
+        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
-        Type::Apply { args, .. } => {
-            args.iter().all(|a| field_type_cloneable(a, types, param_names))
-        }
+        Type::Apply { args, .. } => args
+            .iter()
+            .all(|a| field_type_cloneable(a, types, param_names)),
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, t)| field_type_cloneable(t, types, param_names)),
@@ -865,8 +880,7 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSe
 
 pub(crate) fn type_is_comparable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
     // c148: pass the struct's declared type-param names.
-    let param_names: HashSet<String> =
-        s.type_params.iter().map(|p| p.name.clone()).collect();
+    let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
         .all(|f| !f.is_stored_ref && field_type_comparable(&f.ty, types, &param_names))
@@ -874,14 +888,13 @@ pub(crate) fn type_is_comparable_struct(s: &StructDef, types: &HashSet<String>) 
 
 pub(crate) fn type_is_comparable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
     // c148: pass the enum's declared type-param names.
-    let param_names: HashSet<String> =
-        e.type_params.iter().map(|p| p.name.clone()).collect();
+    let param_names: HashSet<String> = e.type_params.iter().map(|p| p.name.clone()).collect();
     e.variants.iter().all(|v| match &v.payload {
         VariantPayload::Unit => true,
         VariantPayload::Single(t, _) => field_type_comparable(t, types, &param_names),
-        VariantPayload::Named(fs) => {
-            fs.iter().all(|f| field_type_comparable(&f.ty, types, &param_names))
-        }
+        VariantPayload::Named(fs) => fs
+            .iter()
+            .all(|f| field_type_comparable(&f.ty, types, &param_names)),
     })
 }
 
@@ -900,13 +913,11 @@ pub(crate) fn field_type_comparable(
         }
         Type::List(inner) => field_type_comparable(inner, types, param_names),
         // c148: recognize both single-char heuristic and declared multi-char params.
-        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => {
-            true
-        }
+        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
-        Type::Apply { args, .. } => {
-            args.iter().all(|a| field_type_comparable(a, types, param_names))
-        }
+        Type::Apply { args, .. } => args
+            .iter()
+            .all(|a| field_type_comparable(a, types, param_names)),
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, t)| field_type_comparable(t, types, param_names)),
@@ -1014,4 +1025,3 @@ fn walk_type_edge(
         _ => {}
     }
 }
-

@@ -109,9 +109,7 @@ fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
 /// return the `WorkspacePlan`. Returns `None` when the file is absent. Prints
 /// the diagnostic to stderr and returns `Err(2)` if the file exists but fails
 /// to evaluate (D-WORKSPACE1=B clean break: workspace.jet is the sole index).
-pub fn load_workspace(
-    dir: &Path,
-) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
+pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
     let result = WorkspaceFile::load(dir)?;
     match result {
         Ok(plan) => {
@@ -214,24 +212,23 @@ fn realize_ref(
     // silently force fixture mode for an ordinary online run. The provider check
     // resolves an inferred `github@…` source's kind (U9) so a `core` source is
     // not mistakenly asked for nix fixtures.
-    let fixtures = if flags.offline
-        && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
-    {
-        let fx = fixtures_for(flags);
-        if fx.is_none() {
-            theme.error(
-                "offline mode needs fixtures",
-                "`--offline` was set but no fixtures directory was given.",
-                "pass `--fixtures <dir>` or set JETPACK_FIXTURES.",
-            );
-            return None;
-        }
-        fx
-    } else {
-        // `--fixtures <dir>` without `--offline` is still honored (explicit
-        // opt-in); the bare env var alone is not.
-        flags.fixtures.clone()
-    };
+    let fixtures =
+        if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
+            let fx = fixtures_for(flags);
+            if fx.is_none() {
+                theme.error(
+                    "offline mode needs fixtures",
+                    "`--offline` was set but no fixtures directory was given.",
+                    "pass `--fixtures <dir>` or set JETPACK_FIXTURES.",
+                );
+                return None;
+            }
+            fx
+        } else {
+            // `--fixtures <dir>` without `--offline` is still honored (explicit
+            // opt-in); the bare env var alone is not.
+            flags.fixtures.clone()
+        };
     let ctx = Provider::Ctx {
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
@@ -241,7 +238,15 @@ fn realize_ref(
         Ok(r) => {
             theme.ok(&format!("{} ready", theme.bold(&r.name)));
             theme.detail(&theme.gray(&r.out));
-            match Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin, &r.rlib) {
+            match Store::record(
+                roots,
+                &r.name,
+                &r.version,
+                &r.reference,
+                &r.out,
+                &r.bin,
+                &r.rlib,
+            ) {
                 Ok(entry) => Some(entry),
                 Err(e) => {
                     theme.error(

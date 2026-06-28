@@ -379,8 +379,7 @@ deps: {
     fn targets_are_optional_and_inferred() {
         // D-ILE1/D-TGT1: a bare `name` declares no targets (inferred from the
         // module's `fn main` at realize time); an explicit target still wins.
-        let src =
-            "payload: { name: \"x\", version: \"1\" }\npackages: { deploy, web: library }";
+        let src = "payload: { name: \"x\", version: \"1\" }\npackages: { deploy, web: library }";
         let m = parse(src).unwrap();
         assert_eq!(m.packages.len(), 2);
         assert_eq!(m.packages[0].name, "deploy");
@@ -465,7 +464,10 @@ packages: {
 }
 "#;
         let m = parse(src).unwrap();
-        assert_eq!(m.packages[0].targets, vec![Target::Executable, Target::Library]);
+        assert_eq!(
+            m.packages[0].targets,
+            vec![Target::Executable, Target::Library]
+        );
         assert_eq!(m.package_kind("app"), Some(PackageKind::Executable));
     }
 
@@ -536,14 +538,26 @@ deps: {
         let m = parse(src).unwrap();
         assert_eq!(m.deps.len(), 3);
         assert_eq!(m.deps[0].name, "raylib");
-        assert_eq!(m.deps[0].source, DepSource::CLib { target: "system".into() });
+        assert_eq!(
+            m.deps[0].source,
+            DepSource::CLib {
+                target: "system".into()
+            }
+        );
         assert_eq!(m.deps[1].name, "mylib");
         assert_eq!(
             m.deps[1].source,
-            DepSource::CLib { target: "vendor/mylib".into() }
+            DepSource::CLib {
+                target: "vendor/mylib".into()
+            }
         );
         assert_eq!(m.deps[2].name, "c");
-        assert_eq!(m.deps[2].source, DepSource::CLib { target: "system".into() });
+        assert_eq!(
+            m.deps[2].source,
+            DepSource::CLib {
+                target: "system".into()
+            }
+        );
     }
 
     #[test]
@@ -583,8 +597,8 @@ deps: { textkit: "1.2.0", raylib: c@system }
     #[test]
     fn bad_dep_value_errors() {
         // A bare token with no `@` and no quotes is not a valid dep value.
-        let err = parse("payload: { name: \"x\", version: \"1\" }\ndeps: { y: notaref }")
-            .unwrap_err();
+        let err =
+            parse("payload: { name: \"x\", version: \"1\" }\ndeps: { y: notaref }").unwrap_err();
         assert!(matches!(err, ManifestError::BadDepValue { .. }));
     }
 
@@ -834,7 +848,10 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
         );
         let m = parse(&updated).unwrap();
         assert_eq!(
-            m.deps.iter().find(|d| d.name == "helpers").map(|d| &d.source),
+            m.deps
+                .iter()
+                .find(|d| d.name == "helpers")
+                .map(|d| &d.source),
             Some(&DepSource::Provider {
                 provider: Source::Path,
                 target: "../helpers".into(),
@@ -848,7 +865,9 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
         let updated = add_dep(
             raw,
             "b",
-            &crate::Manifest::DepSpec::Path { path: "../b".into() },
+            &crate::Manifest::DepSpec::Path {
+                path: "../b".into(),
+            },
         );
         let m = parse(&updated).unwrap();
         assert_eq!(m.deps.len(), 2);
@@ -955,7 +974,11 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
     #[test]
     fn discovery_ignores_module_in_comments() {
         let root = scratch_dir("disc-comment");
-        std::fs::write(root.join("x.jet"), "// module hello { }\nmodule other { }\n").unwrap();
+        std::fs::write(
+            root.join("x.jet"),
+            "// module hello { }\nmodule other { }\n",
+        )
+        .unwrap();
         let err = discover_module_in(&root, "hello").unwrap_err();
         assert!(matches!(err, DiscoveryError::NotFound { .. }));
         std::fs::remove_dir_all(&root).ok();

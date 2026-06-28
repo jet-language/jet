@@ -9,9 +9,9 @@
 //! path, or `JETPACK_FIXTURES`), we read a canned `nix build --json` file
 //! instead of shelling out — exactly the Forge fixture pattern.
 
-use super::JSON;
 use super::PackageManifest;
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
+use super::JSON;
 use crate::SHA256;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -160,15 +160,15 @@ impl Provider for CoreProvider {
             ProviderError::CoreBuild(format!("source `{source_name}` has no upstream"))
         })?;
         let repo = source_repo(upstream, ctx)?;
-        let src_dir = PackageManifest::discover_module_in(&repo, &spec.package).map_err(|e| {
-            match e {
-                PackageManifest::DiscoveryError::NotFound { name } => ProviderError::CoreBuild(
-                    format!(
+        let src_dir =
+            PackageManifest::discover_module_in(&repo, &spec.package).map_err(|e| match e {
+                PackageManifest::DiscoveryError::NotFound { name } => {
+                    ProviderError::CoreBuild(format!(
                         "source repo at {} has no `module {name}` — add a .{} file declaring it",
                         repo.display(),
                         crate::Syntax::FILE_EXT,
-                    ),
-                ),
+                    ))
+                }
                 PackageManifest::DiscoveryError::Ambiguous { name, paths } => {
                     let list = paths
                         .iter()
@@ -180,8 +180,7 @@ impl Provider for CoreProvider {
                         repo.display(),
                     ))
                 }
-            }
-        })?;
+            })?;
         if !src_dir.is_dir() {
             return Err(ProviderError::CoreBuild(format!(
                 "package source {} does not exist",
@@ -219,9 +218,10 @@ impl Provider for CoreProvider {
             .map(|pm| pm.package.version.clone())
             .unwrap_or_default();
         let (bin, rlib) = match kind {
-            PackageManifest::PackageKind::Executable => {
-                (out_dir.join("bin").to_string_lossy().into_owned(), String::new())
-            }
+            PackageManifest::PackageKind::Executable => (
+                out_dir.join("bin").to_string_lossy().into_owned(),
+                String::new(),
+            ),
             PackageManifest::PackageKind::Library => {
                 // D-BFS1: if the package ships a Cargo.toml, compile it to an
                 // rlib now and cache the artifact in the store. The rlib is
@@ -230,8 +230,7 @@ impl Provider for CoreProvider {
                 // need no rebuild.
                 let cargo_toml = out_dir.join("Cargo.toml");
                 let rlib = if cargo_toml.is_file() {
-                    build_rlib_from_cargo(&out_dir, ctx.store_dir)
-                        .unwrap_or_default()
+                    build_rlib_from_cargo(&out_dir, ctx.store_dir).unwrap_or_default()
                 } else {
                     String::new()
                 };
@@ -850,16 +849,20 @@ mod tests {
         // A `main` nested in a module/impl block is not the entry point.
         assert!(!file_has_top_level_main("module m { fn main() {} }\n"));
         // A library: no top-level `fn main`.
-        assert!(!file_has_top_level_main("fn add(a: Int, b: Int) -> Int { return a + b; }\n"));
+        assert!(!file_has_top_level_main(
+            "fn add(a: Int, b: Int) -> Int { return a + b; }\n"
+        ));
         // `fn main` inside a comment or string never counts.
         assert!(!file_has_top_level_main("// fn main()\nfn lib() {}\n"));
-        assert!(!file_has_top_level_main("fn lib() { let s = \"fn main()\"; }\n"));
+        assert!(!file_has_top_level_main(
+            "fn lib() { let s = \"fn main()\"; }\n"
+        ));
     }
 
     #[test]
     fn nix_store_version_parses_path_suffix() {
         let h = "0000000000000000000000000000000a"; // 32-char stand-in hash
-        // Plain `out` path: version is the trailing segment.
+                                                    // Plain `out` path: version is the trailing segment.
         assert_eq!(
             nix_store_version(&format!("/nix/store/{h}-fastfetch-2.1.0"), "fastfetch"),
             "2.1.0"
@@ -1001,7 +1004,10 @@ mod tests {
         };
         // Dispatch must select the core provider, and it must materialize the
         // tree into the store with a real bin dir — no nix involved.
-        assert_eq!(resolve_kind(&spec, &table, false, &store), ProviderKind::Core);
+        assert_eq!(
+            resolve_kind(&spec, &table, false, &store),
+            ProviderKind::Core
+        );
         assert_eq!(provider_for(ProviderKind::Core).name(), "core");
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
@@ -1036,8 +1042,7 @@ mod tests {
         std::fs::write(lib.join("mathlib.jet"), "module mathlib { }\n").unwrap();
 
         let upstream = format!("path:{}", repo.to_string_lossy());
-        let table =
-            SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
+        let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -1051,7 +1056,10 @@ mod tests {
         );
 
         let lib = realize(&classify_in("mine:mathlib", &table).unwrap(), &table, &ctx).unwrap();
-        assert!(lib.bin.is_empty(), "library must contribute no PATH entry: {lib:?}");
+        assert!(
+            lib.bin.is_empty(),
+            "library must contribute no PATH entry: {lib:?}"
+        );
         assert!(
             std::path::Path::new(&lib.out).join("mathlib.jet").is_file(),
             "library must stage its module source: {lib:?}"
@@ -1244,8 +1252,7 @@ mod tests {
         .trim()
         .to_string();
         let upstream = format!("file://{}#{}", repo.to_string_lossy(), sha);
-        let table =
-            SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Infer)]);
+        let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Infer)]);
         let spec = classify_in("mine:hello", &table).unwrap();
         assert_eq!(
             resolve_kind(&spec, &table, false, &store),
@@ -1278,8 +1285,7 @@ mod tests {
             return;
         }
         let upstream = format!("file://{}", repo.to_string_lossy());
-        let table =
-            SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Infer)]);
+        let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Infer)]);
         let spec = classify_in("mine:hello", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,

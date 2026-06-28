@@ -13,9 +13,7 @@ mod Terminators;
 mod Tokens;
 
 pub use Terminators::lex;
-pub use Tokens::{
-    comments, describe, is_comment, without_comments, StrTokPart, TokKind, Token,
-};
+pub use Tokens::{comments, describe, is_comment, without_comments, StrTokPart, TokKind, Token};
 
 // `lex_raw` is part of the public surface (interpolation sub-streams) and is
 // also called by sibling scan/strings modules.

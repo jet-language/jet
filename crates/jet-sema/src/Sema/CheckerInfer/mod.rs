@@ -1,8 +1,8 @@
 // Re-export the parent `Sema` glob so the split-out submodules
 // (`expr`/`fallible`/`calls`/`binary`) reach `Checker`, etc. via `use super::*`.
 pub(crate) use super::*;
-use crate::AST::Type;
 use crate::Syntax;
+use crate::AST::Type;
 
 /// D-ITER1: returns true when `ty` or an immediate inner layer is `Type::Tuple`.
 /// Used to decide whether to store `resolved_ret` on a `MethodCall` node so that

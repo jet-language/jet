@@ -82,11 +82,19 @@ fn jet_bind_native_backend_end_to_end() {
         const char *jetc_greeting(void);
     "#;
     let result = jet::CBind::generate(header, "jetc").expect("native bind backend");
-    assert!(result.skipped.is_empty(), "unexpected skips: {:?}", result.skipped);
+    assert!(
+        result.skipped.is_empty(),
+        "unexpected skips: {:?}",
+        result.skipped
+    );
     assert_eq!(result.bound.len(), 2);
     // The cache uses the real C symbol names verbatim (no aliasing).
-    assert!(result.source.contains("fn jetc_add_ints(a: Int, b: Int) -> Int = \"jetc_add_ints\";"));
-    assert!(result.source.contains("fn jetc_greeting() -> String = \"jetc_greeting\";"));
+    assert!(result
+        .source
+        .contains("fn jetc_add_ints(a: Int, b: Int) -> Int = \"jetc_add_ints\";"));
+    assert!(result
+        .source
+        .contains("fn jetc_greeting() -> String = \"jetc_greeting\";"));
     fs::write(cache.join("jetc.jet"), &result.source).unwrap();
 
     let main = root.join("main.jet");
@@ -126,7 +134,10 @@ fn main() {
         String::from_utf8_lossy(&status.stderr)
     );
     let run = Command::new(&bin).output().unwrap();
-    assert!(run.status.success(), "bind-generated program failed at runtime");
+    assert!(
+        run.status.success(),
+        "bind-generated program failed at runtime"
+    );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\nhi from C\n");
 
     let _ = fs::remove_dir_all(&root);
@@ -277,7 +288,10 @@ fn main() { print(jc.ping()); }
     let src = fs::read_to_string(&main).unwrap();
     let out = jet::compile_with_path(&src, main.to_str().unwrap())
         .unwrap_or_else(|d| panic!("empty overlay rejected:\n{:?}", d));
-    assert!(out.rust.contains("jetc_ping"), "bindgen symbol must survive empty overlay");
+    assert!(
+        out.rust.contains("jetc_ping"),
+        "bindgen symbol must survive empty overlay"
+    );
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -306,7 +320,10 @@ fn main() { print(jc.add(1, 2)); }
     let out = jet::compile_with_path(&src, main.to_str().unwrap())
         .unwrap_or_else(|d| panic!("override rejected:\n{:?}", d));
     assert!(out.rust.contains("real_add"), "overlay symbol must win");
-    assert!(!out.rust.contains("gen_add"), "bindgen symbol must be replaced");
+    assert!(
+        !out.rust.contains("gen_add"),
+        "bindgen symbol must be replaced"
+    );
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -332,7 +349,10 @@ fn cffi_header_use_form_lowers_to_lib() {
     let src = fs::read_to_string(&main).unwrap();
     let out = jet::compile_with_path(&src, main.to_str().unwrap())
         .unwrap_or_else(|d| panic!("header use form rejected:\n{:?}", d));
-    assert!(out.rust.contains("demo_ping"), "header form must reach the demo bindgen surface");
+    assert!(
+        out.rust.contains("demo_ping"),
+        "header form must reach the demo bindgen surface"
+    );
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -412,7 +432,10 @@ fn hash_invalidation_on_header_change() {
     jet::CBind::write_bind_hash(&cache_file, header_v1, "").unwrap();
 
     // Confirm v1 cache doesn't contain v2 symbol yet.
-    assert!(!bind_v1.source.contains("mylib2_v2"), "sanity: v2 not in v1 cache");
+    assert!(
+        !bind_v1.source.contains("mylib2_v2"),
+        "sanity: v2 not in v1 cache"
+    );
 
     // Step B: change the header — add `mylib2_v2`, remove `mylib2_v1`.
     let header_v2 = "int mylib2_v2(int y);\n";
@@ -558,9 +581,19 @@ deps: {
 "#;
     let pm = parse(manifest).expect("manifest parses");
     let raylib = pm.deps.iter().find(|d| d.name == "raylib").unwrap();
-    assert_eq!(raylib.source, DepSource::CLib { target: "system".into() });
+    assert_eq!(
+        raylib.source,
+        DepSource::CLib {
+            target: "system".into()
+        }
+    );
     let foo = pm.deps.iter().find(|d| d.name == "foo").unwrap();
-    assert_eq!(foo.source, DepSource::CLib { target: "/opt/foo".into() });
+    assert_eq!(
+        foo.source,
+        DepSource::CLib {
+            target: "/opt/foo".into()
+        }
+    );
     // A non-C dep stays a normal Jet dep, not a CLib.
     assert!(pm.deps.iter().all(|d| d.name != "sqlite3"));
 }

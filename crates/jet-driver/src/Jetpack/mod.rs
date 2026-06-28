@@ -11,8 +11,8 @@
 
 pub mod CLI;
 pub mod EnvFile;
-pub mod JetOS;
 pub mod JSON;
+pub mod JetOS;
 pub mod ManifestTOML;
 pub mod Merge;
 pub mod ModuleEval;

@@ -83,7 +83,10 @@ fn family_erases_in_codegen() {
         FAMILY
     );
     let out = jet::compile(&src).expect("should compile");
-    assert!(!out.rust.contains("unsafe"), "I1: no unsafe in generated code");
+    assert!(
+        !out.rust.contains("unsafe"),
+        "I1: no unsafe in generated code"
+    );
     assert!(
         !out.rust.contains("UnitFamily"),
         "the family marker must erase, found UnitFamily in output"

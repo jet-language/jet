@@ -45,7 +45,11 @@ pub fn check_capability_freeze(items: &[Item], project_root: &Path) -> Vec<Diagn
         for f in &s.funcs {
             frozen.insert(
                 f.name.clone(),
-                (f.signature.clone(), s.package.clone(), s.published_version.clone()),
+                (
+                    f.signature.clone(),
+                    s.package.clone(),
+                    s.published_version.clone(),
+                ),
             );
         }
     }
@@ -197,33 +201,77 @@ mod tests {
 
     #[test]
     fn unchanged_signature_is_clean() {
-        let items = [pub_fn("scale", vec![param("v", AccessConvention::Read, Type::Named("Vec3".into()))])];
+        let items = [pub_fn(
+            "scale",
+            vec![param(
+                "v",
+                AccessConvention::Read,
+                Type::Named("Vec3".into()),
+            )],
+        )];
         assert!(run_with_frozen(&["fn scale(v: Vec3)"], &items).is_empty());
     }
 
     #[test]
     fn read_to_write_drift_is_e0912() {
         // Frozen as read (no sigil); now resolves to ~ (write). Breaking.
-        let items = [pub_fn("scale", vec![param("v", AccessConvention::Write, Type::Named("Vec3".into()))])];
-        assert_eq!(run_with_frozen(&["fn scale(v: Vec3)"], &items), vec!["E0912"]);
+        let items = [pub_fn(
+            "scale",
+            vec![param(
+                "v",
+                AccessConvention::Write,
+                Type::Named("Vec3".into()),
+            )],
+        )];
+        assert_eq!(
+            run_with_frozen(&["fn scale(v: Vec3)"], &items),
+            vec!["E0912"]
+        );
     }
 
     #[test]
     fn read_to_take_drift_is_e0912() {
-        let items = [pub_fn("consume", vec![param("v", AccessConvention::Move, Type::Named("Vec3".into()))])];
-        assert_eq!(run_with_frozen(&["fn consume(v: Vec3)"], &items), vec!["E0912"]);
+        let items = [pub_fn(
+            "consume",
+            vec![param(
+                "v",
+                AccessConvention::Move,
+                Type::Named("Vec3".into()),
+            )],
+        )];
+        assert_eq!(
+            run_with_frozen(&["fn consume(v: Vec3)"], &items),
+            vec!["E0912"]
+        );
     }
 
     #[test]
     fn read_to_share_drift_is_e0912() {
-        let items = [pub_fn("keep", vec![param("v", AccessConvention::Share, Type::Named("Vec3".into()))])];
-        assert_eq!(run_with_frozen(&["fn keep(v: Vec3)"], &items), vec!["E0912"]);
+        let items = [pub_fn(
+            "keep",
+            vec![param(
+                "v",
+                AccessConvention::Share,
+                Type::Named("Vec3".into()),
+            )],
+        )];
+        assert_eq!(
+            run_with_frozen(&["fn keep(v: Vec3)"], &items),
+            vec!["E0912"]
+        );
     }
 
     #[test]
     fn new_pub_fn_not_in_contract_is_clean() {
         // Additive: a brand-new public fn is not a break.
-        let items = [pub_fn("brandnew", vec![param("v", AccessConvention::Write, Type::Named("Vec3".into()))])];
+        let items = [pub_fn(
+            "brandnew",
+            vec![param(
+                "v",
+                AccessConvention::Write,
+                Type::Named("Vec3".into()),
+            )],
+        )];
         assert!(run_with_frozen(&["fn scale(v: Vec3)"], &items).is_empty());
     }
 
@@ -233,7 +281,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("jet_api_freeze_empty_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("JET_API_CACHE_DIR", &dir);
-        let items = [pub_fn("scale", vec![param("v", AccessConvention::Write, Type::Named("Vec3".into()))])];
+        let items = [pub_fn(
+            "scale",
+            vec![param(
+                "v",
+                AccessConvention::Write,
+                Type::Named("Vec3".into()),
+            )],
+        )];
         let diags = check_capability_freeze(&items, std::path::Path::new("."));
         std::env::remove_var("JET_API_CACHE_DIR");
         std::fs::remove_dir_all(&dir).ok();

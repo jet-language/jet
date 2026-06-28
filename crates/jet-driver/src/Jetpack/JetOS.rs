@@ -95,7 +95,12 @@ pub fn main(theme: &Theme, verb: Option<&str>, target: Option<&str>, flags: &OsF
 
     let Some(system) = plan.systems.iter().find(|s| s.name == target.host) else {
         let names: Vec<String> = plan.systems.iter().map(|s| s.name.clone()).collect();
-        render(theme, &config_path, &src, &unknown_host(&target.host, &names));
+        render(
+            theme,
+            &config_path,
+            &src,
+            &unknown_host(&target.host, &names),
+        );
         return 2;
     };
 
@@ -147,7 +152,8 @@ fn resolve_config_path(explicit: Option<&Path>) -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    home.join(Syntax::CONFIG_DEFAULT_DIR).join(Syntax::CONFIG_FILE)
+    home.join(Syntax::CONFIG_DEFAULT_DIR)
+        .join(Syntax::CONFIG_FILE)
 }
 
 /// Realize a selected `System` into a generation; `activate` also flips the
@@ -246,22 +252,21 @@ fn realize_one(
 ) -> Option<Store::StoreEntry> {
     theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
     let store_dir = roots.hangar_dir();
-    let fixtures = if flags.offline
-        && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
-    {
-        let fx = Provider::fixtures_from_env(flags.fixtures.clone());
-        if fx.is_none() {
-            theme.error(
-                "offline mode needs fixtures",
-                "`--offline` was set but no fixtures directory was given.",
-                "pass `--fixtures <dir>` or set JETPACK_FIXTURES.",
-            );
-            return None;
-        }
-        fx
-    } else {
-        flags.fixtures.clone()
-    };
+    let fixtures =
+        if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
+            let fx = Provider::fixtures_from_env(flags.fixtures.clone());
+            if fx.is_none() {
+                theme.error(
+                    "offline mode needs fixtures",
+                    "`--offline` was set but no fixtures directory was given.",
+                    "pass `--fixtures <dir>` or set JETPACK_FIXTURES.",
+                );
+                return None;
+            }
+            fx
+        } else {
+            flags.fixtures.clone()
+        };
     let ctx = Provider::Ctx {
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
@@ -271,7 +276,15 @@ fn realize_one(
         Ok(r) => {
             theme.ok(&format!("{} ready", theme.bold(&r.name)));
             theme.detail(&theme.gray(&r.out));
-            match Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin, &r.rlib) {
+            match Store::record(
+                roots,
+                &r.name,
+                &r.version,
+                &r.reference,
+                &r.out,
+                &r.bin,
+                &r.rlib,
+            ) {
                 Ok(entry) => Some(entry),
                 Err(e) => {
                     theme.error(
@@ -329,7 +342,13 @@ fn build_manifest(system: &SystemPlan, realized: &[Store::StoreEntry]) -> String
     let options = system
         .options
         .iter()
-        .map(|o| format!("{{\"key\":{},\"value\":{}}}", quote(&o.key), quote(&o.value)))
+        .map(|o| {
+            format!(
+                "{{\"key\":{},\"value\":{}}}",
+                quote(&o.key),
+                quote(&o.value)
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     format!(
@@ -397,7 +416,12 @@ fn render(theme: &Theme, path: &Path, src: &str, d: &Diagnostic) {
 }
 
 fn os_missing_host(theme: &Theme, raw: &str) -> i32 {
-    render(theme, Path::new(Syntax::CONFIG_FILE), "", &missing_host(raw));
+    render(
+        theme,
+        Path::new(Syntax::CONFIG_FILE),
+        "",
+        &missing_host(raw),
+    );
     2
 }
 

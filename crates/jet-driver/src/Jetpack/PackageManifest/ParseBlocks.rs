@@ -2,7 +2,10 @@
 //! `packages:`, `build:`.
 
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
-use super::{ApiMode, BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry, PackageMeta, Target};
+use super::{
+    ApiMode, BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry,
+    PackageMeta, Target,
+};
 use crate::Jetpack::RefSpec;
 use crate::Syntax;
 
@@ -145,7 +148,10 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
                 let name = k.trim().to_string();
                 let value = v.trim();
                 if let Some(inner) = value.strip_prefix('{') {
-                    let inner = inner.trim_end().strip_suffix('}').unwrap_or(inner.trim_end());
+                    let inner = inner
+                        .trim_end()
+                        .strip_suffix('}')
+                        .unwrap_or(inner.trim_end());
                     let (targets, api) = parse_package_entry_block(&name, inner)?;
                     (name, targets, api)
                 } else {
@@ -199,7 +205,11 @@ fn parse_target(name: &str, value: &str) -> Result<(Target, ApiMode), ManifestEr
     };
     // D-CAP5: only library targets emit capability metadata; `api:` on a non-library
     // target is meaningless and is ignored (never frozen).
-    let api = if kind == Target::Library { api } else { ApiMode::Inferred };
+    let api = if kind == Target::Library {
+        api
+    } else {
+        ApiMode::Inferred
+    };
     Ok((kind, api))
 }
 

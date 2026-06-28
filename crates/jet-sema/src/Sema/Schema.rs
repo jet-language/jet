@@ -13,8 +13,8 @@
 //!
 //! Lives at `.jet/cache/schema/<TypeName>.snapshot` (committed, durable contract).
 
-use crate::AST::StructDef;
 use crate::Syntax;
+use crate::AST::StructDef;
 
 pub const SNAPSHOT_VERSION: u32 = 1;
 
@@ -294,7 +294,10 @@ mod tests {
     fn schema_no_squash_omits_line() {
         let snap = make_snap("Rec", "1.0.0", &[("name", "String")]);
         let text = snap.write();
-        assert!(!text.contains("squashed_before"), "ordinary snapshot must omit the line");
+        assert!(
+            !text.contains("squashed_before"),
+            "ordinary snapshot must omit the line"
+        );
         assert_eq!(SchemaSnapshot::parse(&text).unwrap().squashed_before, None);
     }
 
@@ -303,8 +306,8 @@ mod tests {
     /// what `load_snapshot` expects and the diff pass will silently mis-compare types.
     #[test]
     fn snapshot_from_struct_writes_canonical_type_names() {
-        use crate::AST::{Field, StructDef, Type};
         use crate::Diagnostics::Span;
+        use crate::AST::{Field, StructDef, Type};
         let zero = Span::new(0, 0);
         let s = StructDef {
             is_pub: false,

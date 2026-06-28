@@ -117,8 +117,7 @@ deps: {
 #[test]
 fn manifest_parse_dep_path() {
     let raw = manifest_with_deps("root", "0.1.0", "    helpers: path@../helpers,");
-    let mf =
-        jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("path dep should parse");
+    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("path dep should parse");
     let dep = mf.dependencies.get("helpers").expect("missing helpers dep");
     assert!(matches!(dep, jet::Manifest::DepSpec::Path { path } if path == "../helpers"));
 }
@@ -153,8 +152,7 @@ fn manifest_parse_e1206_missing_required_field() {
 
 #[test]
 fn manifest_parse_e1209_reserved_nonempty() {
-    let raw = min_manifest("myapp", "0.1.0")
-        + "\ndev_deps: {\n    testlib: path@../testlib,\n}\n";
+    let raw = min_manifest("myapp", "0.1.0") + "\ndev_deps: {\n    testlib: path@../testlib,\n}\n";
     let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect_err("non-empty dev_deps should fail E1209");
     assert_eq!(err.code, "E1209");
@@ -169,7 +167,8 @@ fn manifest_toolchain_ok() {
 
 #[test]
 fn manifest_toolchain_e1208_future_version() {
-    let raw = "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n    jet: \">=99.0.0\",\n}\n";
+    let raw =
+        "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n    jet: \">=99.0.0\",\n}\n";
     let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw).unwrap();
     let err = jet::Manifest::check_toolchain(&mf, "pkg.jet").expect_err("E1208");
     assert_eq!(err.code, "E1208");
@@ -182,8 +181,8 @@ fn manifest_toolchain_e1208_future_version() {
 #[test]
 fn manifest_template_plain_parses() {
     let raw = jet::Manifest::new_template("myapp", false);
-    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
-        .expect("plain template should parse");
+    let mf =
+        jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("plain template should parse");
     assert_eq!(mf.package.name, "myapp");
     assert_eq!(mf.package.version, "0.1.0");
     assert!(
@@ -201,8 +200,7 @@ fn manifest_template_annotated_has_dep_comments() {
         raw
     );
     // Must still parse cleanly.
-    jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
-        .expect("annotated template should parse");
+    jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("annotated template should parse");
 }
 
 // ─────────────────────────────────────────────
@@ -497,7 +495,10 @@ fn content_hash_recorded_at_install() {
 
     assert!(entry.is_dir());
     // Hash is a non-empty sha256-prefixed string.
-    assert!(hash.starts_with("sha256-"), "content hash must be sha256-prefixed");
+    assert!(
+        hash.starts_with("sha256-"),
+        "content hash must be sha256-prefixed"
+    );
     // verify_content_hash succeeds with the correct hash.
     jet::Store::verify_content_hash("mylib", &entry, &hash).expect("fresh install must verify");
     let _ = fs::remove_dir_all(&tmp);
@@ -547,9 +548,15 @@ fn lock_file_content_hash_roundtrip() {
         comptime_inputs: vec![],
     };
     let serialized = jet::Lock::write(&lock);
-    assert!(serialized.contains("content-hash = \"sha256-deadbeef\""), "content-hash must appear in lockfile");
+    assert!(
+        serialized.contains("content-hash = \"sha256-deadbeef\""),
+        "content-hash must appear in lockfile"
+    );
     let parsed = jet::Lock::parse(&serialized).expect("must parse back");
-    assert_eq!(parsed.packages[0].content_hash, Some("sha256-deadbeef".into()));
+    assert_eq!(
+        parsed.packages[0].content_hash,
+        Some("sha256-deadbeef".into())
+    );
 }
 
 // ─────────────────────────────────────────────
@@ -1093,13 +1100,19 @@ fn cli_build_sbom_writes_spdx() {
         "jet build --sbom failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(stdout.contains("sbom:"), "build output must announce the SBOM path");
+    assert!(
+        stdout.contains("sbom:"),
+        "build output must announce the SBOM path"
+    );
 
     // The SBOM lands beside the produced binary as <bin>.spdx.
     let spdx = tmp.join("build/hello.spdx");
     assert!(spdx.is_file(), "expected SBOM at {}", spdx.display());
     let body = fs::read_to_string(&spdx).unwrap();
-    assert!(body.starts_with("SPDXVersion: SPDX-2.3\n"), "SBOM must be SPDX 2.3");
+    assert!(
+        body.starts_with("SPDXVersion: SPDX-2.3\n"),
+        "SBOM must be SPDX 2.3"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -1116,7 +1129,11 @@ fn cli_vendor_dir_flag_relocates() {
     fs::create_dir_all(&store).unwrap();
 
     write(&tmp, "greeter/pkg.jet", &min_manifest("greeter", "0.1.0"));
-    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\"; }\n");
+    write(
+        &tmp,
+        "greeter/greeter.jet",
+        "pub fn greet() -> String { return \"hi\"; }\n",
+    );
     write(
         &tmp,
         "pkg.jet",
@@ -1129,9 +1146,18 @@ fn cli_vendor_dir_flag_relocates() {
         "jet vendor --vendor-dir failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(tmp.join("third_party/greeter").is_dir(), "dep must land in the chosen dir");
-    assert!(tmp.join("third_party/manifest.json").is_file(), "vendor manifest must be written");
-    assert!(!tmp.join("vendor").exists(), "default vendor/ must not be created");
+    assert!(
+        tmp.join("third_party/greeter").is_dir(),
+        "dep must land in the chosen dir"
+    );
+    assert!(
+        tmp.join("third_party/manifest.json").is_file(),
+        "vendor manifest must be written"
+    );
+    assert!(
+        !tmp.join("vendor").exists(),
+        "default vendor/ must not be created"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -1210,7 +1236,7 @@ fn cli_end_to_end_new_then_add_path() {
 #[test]
 fn semver_break_e2601() {
     // A minor bump that removes a public API item must produce E2601.
-    use jet::Publish::{ApiItem, BumpKind, diff_public_api, e2601};
+    use jet::Publish::{diff_public_api, e2601, ApiItem, BumpKind};
 
     let old_api = vec![ApiItem {
         kind: "fn".into(),
@@ -1220,15 +1246,20 @@ fn semver_break_e2601() {
     let new_api: Vec<ApiItem> = vec![]; // removed
 
     let changes = diff_public_api(&old_api, &new_api);
-    assert!(!changes.is_empty(), "removed pub fn must be a breaking change");
+    assert!(
+        !changes.is_empty(),
+        "removed pub fn must be a breaking change"
+    );
 
     let diag = e2601("1.2.0", BumpKind::Minor, &changes[0], 2);
     assert_eq!(diag.code, "E2601");
     assert!(diag.what.contains("1.2.0"), "what must name the version");
     assert!(diag.why.contains("minor"), "why must name the bump kind");
     assert!(diag.fix.contains("2.0.0"), "fix must name the next major");
-    assert!(diag.why.contains("parse") || diag.why.contains("removed"),
-        "why must name the broken item or action");
+    assert!(
+        diag.why.contains("parse") || diag.why.contains("removed"),
+        "why must name the broken item or action"
+    );
 }
 
 #[test]
@@ -1280,7 +1311,7 @@ pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
 #[test]
 fn resolver_conflict_e2602() {
     // Two packages requiring incompatible versions of a shared dep → E2602.
-    use jet::Publish::{VersionConstraint, VersionReq, check_conflicts};
+    use jet::Publish::{check_conflicts, VersionConstraint, VersionReq};
     use std::collections::BTreeMap;
 
     let constraints = vec![
@@ -1296,11 +1327,17 @@ fn resolver_conflict_e2602() {
         },
     ];
     let diags = check_conflicts(&constraints, &BTreeMap::new());
-    assert!(!diags.is_empty(), "disjoint major caret ranges must be a conflict");
+    assert!(
+        !diags.is_empty(),
+        "disjoint major caret ranges must be a conflict"
+    );
     assert_eq!(diags[0].code, "E2602");
     let why = &diags[0].why;
     assert!(why.contains("log"), "why must name the conflicting package");
-    assert!(why.contains("web-server") || why.contains("db-client"), "why must name a dependent");
+    assert!(
+        why.contains("web-server") || why.contains("db-client"),
+        "why must name a dependent"
+    );
 }
 
 #[test]
@@ -1313,7 +1350,11 @@ fn vendored_offline_locked_build() {
 
     // Create a simple library.
     write(&tmp, "greeter/pkg.jet", &min_manifest("greeter", "0.1.0"));
-    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\"; }\n");
+    write(
+        &tmp,
+        "greeter/greeter.jet",
+        "pub fn greet() -> String { return \"hi\"; }\n",
+    );
 
     // Project that depends on it.
     write(
@@ -1321,17 +1362,23 @@ fn vendored_offline_locked_build() {
         "pkg.jet",
         &manifest_with_deps("vendored_app", "0.1.0", "    greeter: path@greeter,"),
     );
-    write(&tmp, "main.jet", "use greeter;\nfn main() { print(greeter.greet()); }\n");
+    write(
+        &tmp,
+        "main.jet",
+        "use greeter;\nfn main() { print(greeter.greet()); }\n",
+    );
 
     let entry = tmp.join("main.jet");
     let pack_path = tmp.join("pkg.jet");
 
     // Fetch to create the lock.
     let mf = jet::Manifest::parse(&pack_path, &fs::read_to_string(&pack_path).unwrap()).unwrap();
-    let opts = jet::Fetch::FetchOptions { locked: false, update: false, update_dep: None };
-    let result = with_store(&store, || {
-        jet::Fetch::fetch(&tmp, &mf, None, &opts)
-    });
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+    };
+    let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
     assert!(result.is_ok(), "initial fetch must succeed");
     let (lock, dep_dirs) = result.unwrap();
 
@@ -1340,12 +1387,24 @@ fn vendored_offline_locked_build() {
     let vendor_result = jet::Publish::vendor(&tmp, &lock, &dep_dirs, &vendor_dir);
     assert!(vendor_result.is_ok(), "vendor must succeed");
     let copied = vendor_result.unwrap();
-    assert!(copied.contains(&"greeter".to_string()), "greeter must be vendored");
-    assert!(tmp.join("vendor/greeter").is_dir(), "vendor/greeter must exist");
+    assert!(
+        copied.contains(&"greeter".to_string()),
+        "greeter must be vendored"
+    );
+    assert!(
+        tmp.join("vendor/greeter").is_dir(),
+        "vendor/greeter must exist"
+    );
     // D-SUPPLY1: a vendor manifest records each dep's name/version/fingerprint.
     let manifest = fs::read_to_string(tmp.join("vendor/manifest.json")).unwrap();
-    assert!(manifest.contains("\"name\": \"greeter\""), "manifest must list greeter");
-    assert!(manifest.contains("\"fingerprint\""), "manifest must record fingerprints");
+    assert!(
+        manifest.contains("\"name\": \"greeter\""),
+        "manifest must list greeter"
+    );
+    assert!(
+        manifest.contains("\"fingerprint\""),
+        "manifest must record fingerprints"
+    );
 
     // With the lock present, --locked fetch succeeds (no network needed).
     let lock_text = fs::read_to_string(tmp.join(".jet/lock")).unwrap_or_default();
@@ -1355,13 +1414,16 @@ fn vendored_offline_locked_build() {
     let compile_result = with_store(&store, || {
         jet::compile_with_path("", &entry.to_string_lossy())
     });
-    assert!(compile_result.is_ok(), "vendored project must compile offline");
+    assert!(
+        compile_result.is_ok(),
+        "vendored project must compile offline"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
 
 fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
-    use jet::Lock::{LockFile, LockedPackage, LockSource};
+    use jet::Lock::{LockFile, LockSource, LockedPackage};
     LockFile {
         version: 1,
         packages: vec![LockedPackage {
@@ -1419,7 +1481,7 @@ fn sbom_cyclonedx_golden() {
 
 #[test]
 fn audit_e2603_on_vulnerable_dep() {
-    use jet::Publish::{parse_advisory_db, audit_lockfile};
+    use jet::Publish::{audit_lockfile, parse_advisory_db};
 
     let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
     // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
@@ -1433,7 +1495,10 @@ fn audit_e2603_on_vulnerable_dep() {
     assert!(d.what.contains("JET-2026-SEC-001"));
     assert!(d.what.contains("crypto-lib"));
     assert!(d.what.contains("Timing side-channel"));
-    assert!(d.what.contains("[critical]"), "severity must prefix the message");
+    assert!(
+        d.what.contains("[critical]"),
+        "severity must prefix the message"
+    );
     assert_eq!(matches[0].severity, jet::Publish::Severity::Critical);
 }
 
@@ -1441,7 +1506,7 @@ fn audit_e2603_on_vulnerable_dep() {
 fn audit_non_critical_is_advisory() {
     // D-SUPPLY1: a non-critical advisory still matches but is advisory-only —
     // the severity carried back is below Critical, so `jet audit` exits 0.
-    use jet::Publish::{parse_advisory_db, audit_lockfile, Severity};
+    use jet::Publish::{audit_lockfile, parse_advisory_db, Severity};
 
     let lock = make_test_lock("util-lib", "1.0.0", "sha256-ccdd");
     let db = "JET-2026-INFO-1|util-lib|^1|1.0.2|Minor info leak in debug logs|low\n";
@@ -1464,7 +1529,12 @@ fn e1217_missing_locked_revision() {
     let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
 
     // Empty lock — greeter is declared but not pinned.
-    let empty_lock = LockFile { version: 1, packages: vec![], root_dependencies: vec![], comptime_inputs: Vec::new() };
+    let empty_lock = LockFile {
+        version: 1,
+        packages: vec![],
+        root_dependencies: vec![],
+        comptime_inputs: Vec::new(),
+    };
     let err = verify_all_manifest_deps_locked(&mf, &empty_lock)
         .expect_err("missing locked revision must fail");
     assert_eq!(err.code, "E1217");
@@ -1480,8 +1550,8 @@ fn e1217_missing_locked_revision() {
 #[test]
 fn e1218_breaking_change_under_minor_bump() {
     // D-SUPPLY1 Step 3: a removed public fn under a minor bump is E1218.
-    use jet::Publish::{diff_public_api, e1218, classify_bump, BumpKind, ApiItem};
     use jet::Publish::SemVer::SemVer;
+    use jet::Publish::{classify_bump, diff_public_api, e1218, ApiItem, BumpKind};
 
     let old = vec![ApiItem {
         kind: "fn".into(),
@@ -1492,7 +1562,10 @@ fn e1218_breaking_change_under_minor_bump() {
     let breaking = diff_public_api(&old, &new);
     assert!(!breaking.is_empty());
 
-    let bump = classify_bump(&SemVer::parse("1.0.0").unwrap(), &SemVer::parse("1.1.0").unwrap());
+    let bump = classify_bump(
+        &SemVer::parse("1.0.0").unwrap(),
+        &SemVer::parse("1.1.0").unwrap(),
+    );
     assert_eq!(bump, BumpKind::Minor);
 
     let d = e1218("1.0.0", "1.1.0", bump, &breaking[0], 2);
@@ -1517,7 +1590,10 @@ fn integrity_e2604_on_tampered_store() {
 fn private_registry_from_env() {
     use jet::Publish::parse_registries_from_env;
     let mut env = std::collections::HashMap::new();
-    env.insert("JET_REGISTRY_INTERNAL_URL".into(), "https://registry.acme.corp/jet".into());
+    env.insert(
+        "JET_REGISTRY_INTERNAL_URL".into(),
+        "https://registry.acme.corp/jet".into(),
+    );
     let regs = parse_registries_from_env(&env);
     assert!(!regs.is_empty());
     assert_eq!(regs[0].name, "internal");
@@ -1527,7 +1603,7 @@ fn private_registry_from_env() {
 
 #[test]
 fn pre_publish_gate_blocks_on_build_failure() {
-    use jet::Publish::{PrePublishGate, BumpKind};
+    use jet::Publish::{BumpKind, PrePublishGate};
     let gate = PrePublishGate {
         build_ok: false,
         tests_ok: true,
@@ -1541,7 +1617,7 @@ fn pre_publish_gate_blocks_on_build_failure() {
 
 #[test]
 fn pre_publish_gate_passes_with_no_breaks_and_minor_bump() {
-    use jet::Publish::{PrePublishGate, BumpKind};
+    use jet::Publish::{BumpKind, PrePublishGate};
     let gate = PrePublishGate {
         build_ok: true,
         tests_ok: true,
@@ -1641,7 +1717,11 @@ fn cli_yank_creates_local_marker() {
 
     write(&tmp, "pkg.jet", &min_manifest("mypkg", "2.0.0"));
 
-    let out = jet_cmd(&["yank", "1.5.0", "--message", "regression in parser"], &tmp, &store);
+    let out = jet_cmd(
+        &["yank", "1.5.0", "--message", "regression in parser"],
+        &tmp,
+        &store,
+    );
     assert!(
         out.status.success(),
         "jet yank should exit 0:\n{}",
@@ -1649,17 +1729,36 @@ fn cli_yank_creates_local_marker() {
     );
 
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("mypkg") && stdout.contains("1.5.0"), "yank stdout must name pkg/version:\n{stdout}");
-    assert!(stdout.contains("c56"), "yank must mention c56 upload gate:\n{stdout}");
+    assert!(
+        stdout.contains("mypkg") && stdout.contains("1.5.0"),
+        "yank stdout must name pkg/version:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("c56"),
+        "yank must mention c56 upload gate:\n{stdout}"
+    );
 
     // Marker file must exist.
     let marker = tmp.join(".jet/yank/mypkg-1.5.0.yank");
-    assert!(marker.is_file(), "yank marker file must be written at {}", marker.display());
+    assert!(
+        marker.is_file(),
+        "yank marker file must be written at {}",
+        marker.display()
+    );
 
     let content = fs::read_to_string(&marker).unwrap();
-    assert!(content.contains("package = \"mypkg\""), "marker must record package name");
-    assert!(content.contains("version = \"1.5.0\""), "marker must record version");
-    assert!(content.contains("regression in parser"), "marker must record reason");
+    assert!(
+        content.contains("package = \"mypkg\""),
+        "marker must record package name"
+    );
+    assert!(
+        content.contains("version = \"1.5.0\""),
+        "marker must record version"
+    );
+    assert!(
+        content.contains("regression in parser"),
+        "marker must record reason"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -1693,10 +1792,12 @@ fn cli_yank_requires_version_arg() {
 fn resolver_selects_highest_compatible() {
     // D-RESOLVE1=A: given a list of candidates and constraints, the resolver
     // picks the highest version satisfying all constraints.
-    use jet::Publish::{VersionConstraint, VersionReq, select_highest_compatible};
     use jet::Publish::SemVer::SemVer;
+    use jet::Publish::{select_highest_compatible, VersionConstraint, VersionReq};
 
-    fn sv(s: &str) -> SemVer { SemVer::parse(s).unwrap() }
+    fn sv(s: &str) -> SemVer {
+        SemVer::parse(s).unwrap()
+    }
 
     let candidates = vec![sv("1.0.0"), sv("1.2.0"), sv("1.5.0"), sv("2.0.0")];
 
@@ -1713,7 +1814,11 @@ fn resolver_selects_highest_compatible() {
     };
     let winner = select_highest_compatible("log", &[&c1, &c2], &candidates)
         .expect("compatible constraints with candidates should resolve");
-    assert_eq!(winner.to_string(), "1.5.0", "must pick the highest satisfying candidate");
+    assert_eq!(
+        winner.to_string(),
+        "1.5.0",
+        "must pick the highest satisfying candidate"
+    );
 
     // ^2.0 → 2.0.0 only.
     let c3 = VersionConstraint {
@@ -1734,7 +1839,7 @@ fn resolver_selects_highest_compatible() {
 #[test]
 fn resolver_no_candidates_returns_e2602() {
     // With an empty candidate list and a single constraint, we get E2602.
-    use jet::Publish::{VersionConstraint, VersionReq, select_highest_compatible};
+    use jet::Publish::{select_highest_compatible, VersionConstraint, VersionReq};
 
     let c = VersionConstraint {
         package: "missing".into(),

@@ -48,16 +48,23 @@ fn correct_lifecycle_ok() {
     let src = format!(
         "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
-    assert!(codes(&src).is_empty(), "correct order must compile: {:?}", codes(&src));
+    assert!(
+        codes(&src).is_empty(),
+        "correct order must compile: {:?}",
+        codes(&src)
+    );
 }
 
 /// Calling a `Confirmed`-transition on a still-`Pending` value is E0150.
 #[test]
 fn transition_in_wrong_state_is_error() {
-    let src = format!(
-        "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n"
+    let src =
+        format!("{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n");
+    assert!(
+        codes(&src).contains(&"E0150"),
+        "skipping pay() must be E0150: {:?}",
+        codes(&src)
     );
-    assert!(codes(&src).contains(&"E0150"), "skipping pay() must be E0150: {:?}", codes(&src));
 }
 
 /// Calling a `#State(CheckedIn)` guarded read before checking in is E0150.
@@ -66,7 +73,11 @@ fn guarded_read_in_wrong_state_is_error() {
     let src = format!(
         "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  print(r.room_key())\n}}\n"
     );
-    assert!(codes(&src).contains(&"E0150"), "room_key before check_in must be E0150: {:?}", codes(&src));
+    assert!(
+        codes(&src).contains(&"E0150"),
+        "room_key before check_in must be E0150: {:?}",
+        codes(&src)
+    );
 }
 
 /// Doing every step in order, then the guarded read, is accepted.
@@ -75,7 +86,11 @@ fn guarded_read_after_full_lifecycle_ok() {
     let src = format!(
         "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
-    assert!(!codes(&src).contains(&"E0150"), "full lifecycle then read must be clean: {:?}", codes(&src));
+    assert!(
+        !codes(&src).contains(&"E0150"),
+        "full lifecycle then read must be clean: {:?}",
+        codes(&src)
+    );
 }
 
 /// A program with no typestate markers is entirely unaffected (no false E0150).
@@ -91,7 +106,11 @@ fn main() {
     print(b.get())
 }
 "#;
-    assert!(!codes(src).contains(&"E0150"), "no typestate → no E0150: {:?}", codes(src));
+    assert!(
+        !codes(src).contains(&"E0150"),
+        "no typestate → no E0150: {:?}",
+        codes(src)
+    );
 }
 
 /// D-STATE-DECL: a `#State(X)` marker referencing an undeclared state is E0151.
@@ -116,7 +135,11 @@ fn main() {
     print(b.get())
 }
 "#;
-    assert!(codes(src).contains(&"E0151"), "unknown state must be E0151: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0151"),
+        "unknown state must be E0151: {:?}",
+        codes(src)
+    );
 }
 
 /// D-STATE-DECL: a `#Transition(A -> B)` marker referencing an undeclared to-state is E0151.
@@ -135,7 +158,11 @@ impl Crate {
 
 fn main() { }
 "#;
-    assert!(codes(src).contains(&"E0151"), "undeclared to-state in Transition must be E0151: {:?}", codes(src));
+    assert!(
+        codes(src).contains(&"E0151"),
+        "undeclared to-state in Transition must be E0151: {:?}",
+        codes(src)
+    );
 }
 
 /// D-STATE-DECL: a state declared with no outgoing transition is a dead-end (L0151 lint).
@@ -148,7 +175,11 @@ fn dead_end_state_is_l0151() {
     let src = format!(
         "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
-    assert!(lint_codes(&src).contains(&"L0151"), "dead-end CheckedIn must be L0151: {:?}", lint_codes(&src));
+    assert!(
+        lint_codes(&src).contains(&"L0151"),
+        "dead-end CheckedIn must be L0151: {:?}",
+        lint_codes(&src)
+    );
 }
 
 /// D-STATE-DECL: when every declared state has an outgoing transition, no L0151 fires.
@@ -172,7 +203,14 @@ fn main() {
 }
 "#;
     // Every state has an outgoing transition (Open→Closed, Closed→Open); no dead end.
-    assert!(codes(src).is_empty(), "no errors expected: {:?}", codes(src));
-    assert!(!lint_codes(src).contains(&"L0151"), "no dead-end → no L0151: {:?}", lint_codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "no errors expected: {:?}",
+        codes(src)
+    );
+    assert!(
+        !lint_codes(src).contains(&"L0151"),
+        "no dead-end → no L0151: {:?}",
+        lint_codes(src)
+    );
 }
-

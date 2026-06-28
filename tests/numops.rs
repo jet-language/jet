@@ -11,13 +11,22 @@ fn build_and_run(name: &str, src: &str) -> (i32, String, String) {
     fs::write(&jet_path, src).unwrap();
     let shown = jet_path.to_string_lossy().into_owned();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
     });
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
     let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -44,9 +53,18 @@ fn unsigned_addition_overflow_traps() {
     }
     let src = "fn main() {\n    a: U8 @= 200\n    b: U8 @= 100\n    print(a + b)\n}\n";
     let (code, stdout, stderr) = build_and_run("u8_add_overflow", src);
-    assert_eq!(code, 70, "overflow should trap (exit 70), stdout={stdout:?} stderr={stderr:?}");
-    assert!(stderr.contains("overflow"), "panic should mention overflow: {stderr}");
-    assert!(!stdout.contains("44"), "must not silently wrap to 44: {stdout}");
+    assert_eq!(
+        code, 70,
+        "overflow should trap (exit 70), stdout={stdout:?} stderr={stderr:?}"
+    );
+    assert!(
+        stderr.contains("overflow"),
+        "panic should mention overflow: {stderr}"
+    );
+    assert!(
+        !stdout.contains("44"),
+        "must not silently wrap to 44: {stdout}"
+    );
 }
 
 #[test]
@@ -57,7 +75,10 @@ fn int_multiplication_overflow_traps() {
     // i64::MAX * 2 overflows the default Int.
     let src = "fn main() {\n    big: Int @= 9223372036854775807\n    print(big * 2)\n}\n";
     let (code, _stdout, stderr) = build_and_run("int_mul_overflow", src);
-    assert_eq!(code, 70, "Int multiplication overflow should trap: {stderr}");
+    assert_eq!(
+        code, 70,
+        "Int multiplication overflow should trap: {stderr}"
+    );
 }
 
 #[test]
@@ -84,7 +105,11 @@ fn overflow_opt_ins_do_not_trap() {
     let (code, stdout, stderr) = build_and_run("u8_opt_ins", src);
     assert_eq!(code, 0, "opt-ins must not trap: {stderr}");
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines, ["44", "255", "0"], "wrapping/saturating/checked outputs");
+    assert_eq!(
+        lines,
+        ["44", "255", "0"],
+        "wrapping/saturating/checked outputs"
+    );
 }
 
 #[test]
@@ -100,7 +125,11 @@ fn bit_operators_and_mixed_width_shift() {
     let (code, stdout, stderr) = build_and_run("u8_bitops", src);
     assert_eq!(code, 0, "bit ops should succeed: {stderr}");
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines, ["8", "14", "6", "48", "6"], "bitwise + shift outputs");
+    assert_eq!(
+        lines,
+        ["8", "14", "6", "48", "6"],
+        "bitwise + shift outputs"
+    );
 }
 
 #[test]
@@ -115,5 +144,8 @@ fn over_width_shift_traps_cleanly() {
                fn main() {\n    print(shift_it(4, 200))\n}\n";
     let (code, _stdout, stderr) = build_and_run("u8_overshift", src);
     assert_eq!(code, 70, "over-width shift should trap (exit 70): {stderr}");
-    assert!(stderr.contains("out of range"), "panic should explain the shift: {stderr}");
+    assert!(
+        stderr.contains("out of range"),
+        "panic should explain the shift: {stderr}"
+    );
 }

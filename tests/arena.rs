@@ -38,32 +38,53 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
     std::fs::create_dir_all(&dir0).unwrap();
     let fpath = dir0.join("fixture.jet");
     std::fs::write(&fpath, src).unwrap();
-    let out = jet::compile_with_path(src, &fpath.to_string_lossy())
-        .unwrap_or_else(|d| panic!("front end rejected a should-compile fixture: {:?}",
-            d.iter().map(|x| x.code).collect::<Vec<_>>()));
+    let out = jet::compile_with_path(src, &fpath.to_string_lossy()).unwrap_or_else(|d| {
+        panic!(
+            "front end rejected a should-compile fixture: {:?}",
+            d.iter().map(|x| x.code).collect::<Vec<_>>()
+        )
+    });
     // No `unsafe` may leak outside the vetted prelude helpers (I1 / D-LL1).
     // Strip the vetted `mod jet_mem`, `mod jet_term_unix`, and `mod jet_term_windows`
     // blocks (brace-matched) before checking for `unsafe` in user code.
     fn strip_mod_block(src: &str, marker: &str) -> String {
-        let Some(start) = src.find(marker) else { return src.to_string(); };
+        let Some(start) = src.find(marker) else {
+            return src.to_string();
+        };
         let cfg_start = src[..start].rfind('\n').map(|n| n + 1).unwrap_or(start);
         let bytes = src.as_bytes();
         let (mut depth, mut seen, mut i) = (0usize, false, start);
         let mut end = src.len();
         while i < bytes.len() {
             match bytes[i] {
-                b'{' => { depth += 1; seen = true; }
-                b'}' => { depth -= 1; if seen && depth == 0 { end = i + 1; break; } }
+                b'{' => {
+                    depth += 1;
+                    seen = true;
+                }
+                b'}' => {
+                    depth -= 1;
+                    if seen && depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
                 _ => {}
             }
             i += 1;
         }
-        format!("{}{}", &src[..cfg_start], &src[end..].trim_start_matches('\n'))
+        format!(
+            "{}{}",
+            &src[..cfg_start],
+            &src[end..].trim_start_matches('\n')
+        )
     }
     let s = strip_mod_block(&out.rust, "mod jet_mem");
     let s = strip_mod_block(&s, "mod jet_term_unix {");
     let user = strip_mod_block(&s, "mod jet_term_windows {");
-    assert!(!user.contains("unsafe"), "`unsafe` leaked outside the vetted prelude helpers");
+    assert!(
+        !user.contains("unsafe"),
+        "`unsafe` leaked outside the vetted prelude helpers"
+    );
 
     if Command::new("rustc").arg("--version").output().is_err() {
         eprintln!("note: rustc not found; compiled front end only");
@@ -75,11 +96,16 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
     std::fs::write(&rs, &out.rust).unwrap();
     let c = Command::new("rustc")
         .args(["--edition", "2021"])
-        .arg(&rs).arg("-o").arg(&bin)
-        .output().unwrap();
-    assert!(c.status.success(),
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .unwrap();
+    assert!(
+        c.status.success(),
         "I2 violated: rustc rejected generated code:\n{}",
-        String::from_utf8_lossy(&c.stderr));
+        String::from_utf8_lossy(&c.stderr)
+    );
     let r = Command::new(&bin).output().unwrap();
     Some(String::from_utf8_lossy(&r.stdout).to_string())
 }
@@ -100,7 +126,10 @@ fn main() {
     print(z)
 }
 "#;
-    assert!(error_codes(src).is_empty(), "alloc-and-use should compile clean");
+    assert!(
+        error_codes(src).is_empty(),
+        "alloc-and-use should compile clean"
+    );
     if let Some(out) = build_and_run("ok", src) {
         assert_eq!(out, "42\n100\n7\n");
     }

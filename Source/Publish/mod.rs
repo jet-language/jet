@@ -11,16 +11,15 @@
 //!   - `jet vendor` (copy resolved deps into a `vendor/` tree).
 //!   - Private / mirror registry configuration.
 
-pub mod Advisory;
 mod API;
+pub mod Advisory;
 // ApiFreeze: pure sema types from Sema::ApiFreeze; driver-level write_api_snapshot_for_entry
 // lives in Publish/ApiFreeze.rs which re-exports the pure items and adds the loader call.
 pub mod ApiFreeze;
 // Schema: pure types from Sema::Schema; write_schema_snapshots_for_entry in Publish/Schema.rs.
 pub use crate::Sema::Schema::{
+    load_all_snapshots, load_snapshot, save_snapshot, schema_cache_dir, snapshot_from_struct,
     SchemaSnapshot, SnapshotField, SNAPSHOT_VERSION,
-    snapshot_from_struct, load_snapshot, save_snapshot,
-    schema_cache_dir, load_all_snapshots,
 };
 mod Schema;
 pub use Schema::write_schema_snapshots_for_entry;
@@ -32,13 +31,13 @@ pub mod SemVer;
 mod Vendor;
 
 pub use Advisory::*;
-pub use API::*;
 pub use Diff::*;
 pub use Registry::*;
 pub use Resolve::*;
-pub use SBOM::*;
 pub use SemVer::*;
 pub use Vendor::*;
+pub use API::*;
+pub use SBOM::*;
 
 // ──────────────────────────────────────────────
 // Unit tests
@@ -47,7 +46,7 @@ pub use Vendor::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Lock::{LockFile, LockedPackage, LockSource};
+    use crate::Lock::{LockFile, LockSource, LockedPackage};
     use std::collections::BTreeMap;
 
     fn sv(s: &str) -> SemVer::SemVer {
@@ -225,10 +224,16 @@ mod tests {
     #[test]
     fn version_req_prerelease_rule() {
         // `*` and bare ranges do not match pre-releases…
-        assert!(!VersionReq::parse(">=1.0.0").unwrap().matches(&sv("2.0.0-alpha")));
+        assert!(!VersionReq::parse(">=1.0.0")
+            .unwrap()
+            .matches(&sv("2.0.0-alpha")));
         // …unless a comparator names the same tuple with a pre-release.
-        assert!(VersionReq::parse(">=1.2.3-alpha").unwrap().matches(&sv("1.2.3-beta")));
-        assert!(!VersionReq::parse(">=1.2.3-alpha").unwrap().matches(&sv("1.2.4-beta")));
+        assert!(VersionReq::parse(">=1.2.3-alpha")
+            .unwrap()
+            .matches(&sv("1.2.3-beta")));
+        assert!(!VersionReq::parse(">=1.2.3-alpha")
+            .unwrap()
+            .matches(&sv("1.2.4-beta")));
     }
 
     #[test]
@@ -258,7 +263,10 @@ mod tests {
             },
         ];
         let diags = check_conflicts(&constraints, &BTreeMap::new());
-        assert!(!diags.is_empty(), "disjoint caret ranges should be a conflict");
+        assert!(
+            !diags.is_empty(),
+            "disjoint caret ranges should be a conflict"
+        );
         assert_eq!(diags[0].code, "E2602");
     }
 
@@ -280,7 +288,10 @@ mod tests {
         let mut avail = BTreeMap::new();
         avail.insert("foo".to_string(), vec![sv("1.2.0"), sv("1.3.0")]);
         let diags = check_conflicts(&constraints, &avail);
-        assert!(diags.is_empty(), "compatible ranges with a valid candidate should not conflict");
+        assert!(
+            diags.is_empty(),
+            "compatible ranges with a valid candidate should not conflict"
+        );
     }
 
     #[test]
@@ -343,8 +354,14 @@ mod tests {
     fn spdx_sbom_has_required_fields() {
         let lock = make_lock(vec![make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")]);
         let sbom = emit_spdx(&lock, "myapp", "0.1.0");
-        assert!(sbom.contains("SPDXVersion: SPDX-2.3"), "must have version header");
-        assert!(sbom.contains("PackageName: helpers"), "must list dependency");
+        assert!(
+            sbom.contains("SPDXVersion: SPDX-2.3"),
+            "must have version header"
+        );
+        assert!(
+            sbom.contains("PackageName: helpers"),
+            "must list dependency"
+        );
         assert!(sbom.contains("PackageVersion: 1.0.0"));
         assert!(sbom.contains("SHA256: abcd1234"));
         assert!(sbom.contains("DEPENDS_ON"), "must have relationship");
@@ -450,7 +467,10 @@ mod tests {
     #[test]
     fn registries_from_env() {
         let mut env = std::collections::HashMap::new();
-        env.insert("JET_REGISTRY_PRIVATE_URL".into(), "https://my.company/jet".into());
+        env.insert(
+            "JET_REGISTRY_PRIVATE_URL".into(),
+            "https://my.company/jet".into(),
+        );
         env.insert("JET_REGISTRY_PRIVATE_MIRROR".into(), "true".into());
         let regs = parse_registries_from_env(&env);
         assert!(!regs.is_empty());

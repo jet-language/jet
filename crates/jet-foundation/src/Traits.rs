@@ -1,16 +1,16 @@
 //! Trait registration & metadata, auto-derive checking, and trait codegen.
 
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Generics::{
+    self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type,
+    unify_types, BUILTIN_TRAITS, COMPARABLE, DECODE, ENCODE, EQUATABLE, PRINTABLE, SERIALIZE,
+};
+use crate::Syntax;
+use crate::AST::FuncSig;
 use crate::AST::{
     AccessConvention, EnumDef, Func, ImplDef, Item, StructDef, TraitDef, TraitImplBlock,
     TraitMethodSig, Type, TypeParam,
 };
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::{
-    self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type, unify_types,
-    BUILTIN_TRAITS, COMPARABLE, DECODE, ENCODE, EQUATABLE, PRINTABLE, SERIALIZE,
-};
-use crate::AST::FuncSig;
-use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
@@ -178,13 +178,13 @@ impl TraitRegistry {
             let wire_types: Vec<&Type> = s
                 .fields
                 .iter()
-                .filter(|f| {
-                    !f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_SKIP)
-                })
+                .filter(|f| !f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_SKIP))
                 .map(|f| &f.ty)
                 .collect();
-            self.serde_wire_params
-                .insert(s.name.clone(), wire_param_indices(&s.type_params, &wire_types));
+            self.serde_wire_params.insert(
+                s.name.clone(),
+                wire_param_indices(&s.type_params, &wire_types),
+            );
         }
         for (t, _) in &s.derives {
             self.derives
@@ -311,8 +311,13 @@ impl TraitRegistry {
                             .iter()
                             .map(|p| (p.convention, p.ty.clone()))
                             .collect();
-                        if !sig_matches_trait(&params, &m.return_type, m.is_view_return, sig, &assoc)
-                        {
+                        if !sig_matches_trait(
+                            &params,
+                            &m.return_type,
+                            m.is_view_return,
+                            sig,
+                            &assoc,
+                        ) {
                             diags.push(e0907(trait_name, &m.name, m.name_span));
                         }
                     }
@@ -558,7 +563,8 @@ impl TraitRegistry {
         let mut methods = HashMap::new();
         methods.insert("snapshot".to_string(), snapshot_sig);
         methods.insert("restore".to_string(), restore_sig);
-        self.local_traits.insert(crate::Syntax::TRAIT_ROLLBACK.to_string());
+        self.local_traits
+            .insert(crate::Syntax::TRAIT_ROLLBACK.to_string());
         self.traits.insert(
             crate::Syntax::TRAIT_ROLLBACK.to_string(),
             TraitInfo {

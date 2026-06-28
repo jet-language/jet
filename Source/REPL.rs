@@ -23,9 +23,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt};
 use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::Diagnostics::Diagnostic;
+use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt};
 
 // ── color helpers ──────────────────────────────────────────────────────────
 
@@ -82,7 +82,10 @@ fn yellow(s: &str, color: bool) -> String {
 pub fn e1801(steps: u64) -> Diagnostic {
     Diagnostic::error(
         "E1801",
-        format!("this snippet ran more than {} interpreter steps without finishing", steps),
+        format!(
+            "this snippet ran more than {} interpreter steps without finishing",
+            steps
+        ),
         "the REPL interpreter caps each input to avoid hanging your session; \
          this almost always means a loop that never ends"
             .to_string(),
@@ -101,8 +104,7 @@ pub fn e1802(feature: &str) -> Diagnostic {
         "the REPL is an interpreter for learning Jet; some features — \
          FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler"
             .to_string(),
-        "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler"
-            .to_string(),
+        "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler".to_string(),
         None,
     )
 }
@@ -245,7 +247,8 @@ impl Session {
             CtValue::Enum { .. } => return,
             CtValue::Unit => return,
         };
-        self.binding_srcs.push(format!("{}: {}", name, type_and_val));
+        self.binding_srcs
+            .push(format!("{}: {}", name, type_and_val));
     }
 }
 
@@ -279,7 +282,10 @@ fn collect_moved_names(
 
 /// Return true if a CtValue is scalar (copy semantics, not moved).
 fn ct_value_is_scalar(v: &CtValue) -> bool {
-    matches!(v, CtValue::Int(_) | CtValue::Float(_) | CtValue::Bool(_) | CtValue::Char(_))
+    matches!(
+        v,
+        CtValue::Int(_) | CtValue::Float(_) | CtValue::Bool(_) | CtValue::Char(_)
+    )
 }
 
 fn collect_moved_in_stmt(
@@ -295,7 +301,8 @@ fn collect_moved_in_stmt(
             if let Expr::Ident(name, _) = &b.init {
                 if session_bindings.contains(name.as_str()) {
                     // Only non-scalars are moved.
-                    let is_scalar = scope.get(name.as_str())
+                    let is_scalar = scope
+                        .get(name.as_str())
                         .map(ct_value_is_scalar)
                         .unwrap_or(false);
                     if !is_scalar {
@@ -352,7 +359,8 @@ fn collect_moved_in_callarg(
     if arg.convention == AccessConvention::Move {
         if let Expr::Ident(name, _) = &arg.expr {
             if session_bindings.contains(name.as_str()) {
-                let is_scalar = scope.get(name.as_str())
+                let is_scalar = scope
+                    .get(name.as_str())
                     .map(ct_value_is_scalar)
                     .unwrap_or(false);
                 if !is_scalar {
@@ -390,7 +398,10 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
     let jet_src = if stmt_body.trim().is_empty() {
         format!("{}{}\nfn main() {{}}\n", import_src, item_src)
     } else {
-        format!("{}{}\nfn main() {{\n{}\n}}\n", import_src, item_src, stmt_body)
+        format!(
+            "{}{}\nfn main() {{\n{}\n}}\n",
+            import_src, item_src, stmt_body
+        )
     };
 
     // Write to a temp file.
@@ -405,8 +416,7 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
 
     // Spawn `jet run <temp>` using the current executable. This reuses the
     // full compile+rustc pipeline without duplicating it in the library crate.
-    let jet_bin = std::env::current_exe()
-        .unwrap_or_else(|_| std::path::PathBuf::from("jet"));
+    let jet_bin = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("jet"));
 
     let result = std::process::Command::new(&jet_bin)
         .arg("run")
@@ -446,17 +456,28 @@ fn cmd_run_transcript(session: &Session) -> String {
     let jet_src = if stmt_body.trim().is_empty() {
         format!("{}{}\nfn main() {{}}\n", import_src, item_src)
     } else {
-        format!("{}{}\nfn main() {{\n{}\n}}\n", import_src, item_src, stmt_body)
+        format!(
+            "{}{}\nfn main() {{\n{}\n}}\n",
+            import_src, item_src, stmt_body
+        )
     };
 
     // Parse and interpret the materialized source.
     let (toks, lex_diags) = crate::Lexer::lex(&jet_src);
     if !lex_diags.is_empty() {
-        return format!("error: materialization parse failed: {:?}\n", lex_diags.first().map(|d| &d.what));
+        return format!(
+            "error: materialization parse failed: {:?}\n",
+            lex_diags.first().map(|d| &d.what)
+        );
     }
     let prog = match crate::Parser::parse(&toks) {
         Ok(p) => p,
-        Err(ds) => return format!("error: could not build this value: {}\n", ds.first().map(|d| d.what.as_str()).unwrap_or("?")),
+        Err(ds) => {
+            return format!(
+                "error: could not build this value: {}\n",
+                ds.first().map(|d| d.what.as_str()).unwrap_or("?")
+            )
+        }
     };
     // Find main() and run it through the interpreter with DEV_FUEL_BUDGET.
     let mut func_defs: HashMap<String, Func> = HashMap::new();
@@ -540,7 +561,11 @@ enum InputKind {
     /// One or more Jet statements to evaluate.
     /// The `String` is the source snippet that was parsed into `Vec<Stmt>`,
     /// used by `type_check_stmts` to rebuild a synthetic program.
-    Stmts(Vec<Stmt>, bool /* suppress echo */, String /* check_src */),
+    Stmts(
+        Vec<Stmt>,
+        bool,   /* suppress echo */
+        String, /* check_src */
+    ),
     /// A top-level item declaration to add to the session.
     Item(String /* raw src */),
     /// A `use …;` import line to carry across the session (S16/D-REPL10).
@@ -582,7 +607,10 @@ fn read_input(stdin: &mut impl BufRead, color: bool, prompt: &str) -> Option<Str
     if stdin.read_line(&mut buf).ok()? == 0 {
         return None; // EOF
     }
-    let trimmed = buf.trim_end_matches('\n').trim_end_matches('\r').to_string();
+    let trimmed = buf
+        .trim_end_matches('\n')
+        .trim_end_matches('\r')
+        .to_string();
 
     // D-REPL9: keep reading if brackets are unbalanced.
     let mut bal = bracket_balance(&trimmed);
@@ -700,7 +728,11 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     if let Some(rest) = trimmed.strip_prefix(':') {
         let mut parts = rest.splitn(2, ' ');
         let cmd = parts.next().unwrap_or("").to_string();
-        let arg = parts.next().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        let arg = parts
+            .next()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         return Ok(InputKind::Meta(cmd, arg));
     }
 
@@ -741,9 +773,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
 
     // `;` at end suppresses expression echo (D-REPL16=B).
     // A block ending in `};` is a statement, not a suppressed expression.
-    let suppress = trimmed.ends_with(';')
-        && !looks_like_item(trimmed)
-        && !trimmed.ends_with("};");
+    let suppress = trimmed.ends_with(';') && !looks_like_item(trimmed) && !trimmed.ends_with("};");
 
     // Top-level item?
     if looks_like_item(trimmed) {
@@ -788,16 +818,10 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
             format!("{};", t)
         }
     };
-    let plain_src = format!(
-        "// repl:{}\nfn __repl__() {{\n{}\n}}\n",
-        step, plain_input
-    );
+    let plain_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, plain_input);
     // Echo-sentinel wrapping (D-BIND2: `@=` sigil binding).
     let echo_stmt = format!("__repl_echo__ @= {}", trimmed);
-    let echo_src = format!(
-        "// repl:{}\nfn __repl__() {{\n{}\n}}\n",
-        step, echo_stmt
-    );
+    let echo_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, echo_stmt);
 
     if try_stmt_first {
         // Try plain statement form; if it succeeds, return it.
@@ -938,9 +962,7 @@ fn run_sema_bundle(src: &str) -> Vec<Diagnostic> {
     }
     let path_str = tmp_path.to_string_lossy().to_string();
     let diags = match crate::Loader::load_entry(&path_str) {
-        Ok(mut bundle) => {
-            crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
-        }
+        Ok(mut bundle) => crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check),
         Err(ds) => ds,
     };
     let _ = std::fs::remove_file(&tmp_path);
@@ -1026,7 +1048,10 @@ fn cmd_load(
         }
     };
     let item_count = prog.items.len();
-    let has_main = prog.items.iter().any(|i| matches!(i, Item::Func(f) if f.name == "main"));
+    let has_main = prog
+        .items
+        .iter()
+        .any(|i| matches!(i, Item::Func(f) if f.name == "main"));
 
     // Add each item's source to the session (approximate: use the whole file).
     session.item_srcs.push(src.clone());
@@ -1038,7 +1063,8 @@ fn cmd_load(
     if has_main {
         if let Some(main) = session.func_defs.get("main") {
             let main_clone = main.clone();
-            let funcs: HashMap<String, &Func> = session.func_defs
+            let funcs: HashMap<String, &Func> = session
+                .func_defs
                 .iter()
                 .map(|(k, v)| (k.clone(), v))
                 .collect();
@@ -1086,11 +1112,12 @@ fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
 /// Run an interactive REPL session.
 pub fn run(project_dir: Option<&str>) -> i32 {
     let color = color_on();
-    let base_dir: std::path::PathBuf = project_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-        });
+    let base_dir: std::path::PathBuf =
+        project_dir
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
 
     // D-REPL-BANNER=A
     println!(
@@ -1203,13 +1230,14 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                 // D-REPL8=A: detect which session bindings are moved by this input.
                 let session_binding_names: HashSet<String> =
                     session.scope.keys().cloned().collect();
-                let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+                let newly_moved =
+                    collect_moved_names(&stmts, &session_binding_names, &session.scope);
 
                 // Snapshot keys before execution to detect new bindings.
-                let before_keys: HashSet<String> =
-                    session.scope.keys().cloned().collect();
+                let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
 
-                let funcs: HashMap<String, &Func> = session.func_defs
+                let funcs: HashMap<String, &Func> = session
+                    .func_defs
                     .iter()
                     .map(|(k, v)| (k.clone(), v))
                     .collect();
@@ -1233,7 +1261,9 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                             session.stmt_srcs.push(format!("{};", raw));
                         }
                         // Register any new bindings for sema visibility.
-                        let new_names: Vec<String> = session.scope.keys()
+                        let new_names: Vec<String> = session
+                            .scope
+                            .keys()
                             .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
                             .cloned()
                             .collect();
@@ -1272,13 +1302,7 @@ pub fn run(project_dir: Option<&str>) -> i32 {
 }
 
 /// Handle a `:command` meta-command (D-REPL15=B).
-fn handle_meta(
-    cmd: &str,
-    arg: Option<&str>,
-    session: &mut Session,
-    base_dir: &Path,
-    color: bool,
-) {
+fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &Path, color: bool) {
     match cmd {
         "quit" | "q" | "exit" => {
             println!("bye");
@@ -1328,7 +1352,10 @@ fn handle_meta(
 fn print_help(color: bool) {
     println!("{}", bold("REPL meta-commands", color));
     println!("  {}          end the session", bold(":quit", color));
-    println!("  {}         clear all bindings and start fresh", bold(":reset", color));
+    println!(
+        "  {}         clear all bindings and start fresh",
+        bold(":reset", color)
+    );
     println!(
         "  {}  load a Jet file into the session",
         bold(":load <file.jet>", color)
@@ -1435,7 +1462,10 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                         } else if session.func_defs.contains_key(name) {
                             out.push_str(&format!("{} : fn\n", name));
                         } else {
-                            out.push_str(&format!("note: `{}` isn't defined in this session\n", name));
+                            out.push_str(&format!(
+                                "note: `{}` isn't defined in this session\n",
+                                name
+                            ));
                         }
                     }
                     "run" => {
@@ -1495,12 +1525,13 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                 // D-REPL8=A: detect which session bindings are moved by this input.
                 let session_binding_names: HashSet<String> =
                     session.scope.keys().cloned().collect();
-                let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+                let newly_moved =
+                    collect_moved_names(&stmts, &session_binding_names, &session.scope);
 
-                let before_keys: HashSet<String> =
-                    session.scope.keys().cloned().collect();
+                let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
 
-                let funcs: HashMap<String, &Func> = session.func_defs
+                let funcs: HashMap<String, &Func> = session
+                    .func_defs
                     .iter()
                     .map(|(k, v)| (k.clone(), v))
                     .collect();
@@ -1524,7 +1555,9 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                             session.stmt_srcs.push(format!("{};", raw));
                         }
                         // Register new bindings for sema visibility.
-                        let new_names: Vec<String> = session.scope.keys()
+                        let new_names: Vec<String> = session
+                            .scope
+                            .keys()
                             .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
                             .cloned()
                             .collect();

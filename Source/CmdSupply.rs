@@ -30,7 +30,11 @@ fn git_dirty_files(root: &std::path::Path) -> Option<Vec<String>> {
         .filter(|l| !l.trim().is_empty())
         .map(|l| l.to_string())
         .collect();
-    if dirty.is_empty() { None } else { Some(dirty) }
+    if dirty.is_empty() {
+        None
+    } else {
+        Some(dirty)
+    }
 }
 
 /// `jet publish [--force]` — pre-publish gate + SemVer API diff.
@@ -53,7 +57,10 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!("{}", jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d]));
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
+        );
         exit(ExitCodes::USER_ERROR);
     });
 
@@ -85,7 +92,9 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
                  Uncommitted changes would be silently excluded, making \
                  the published package unreproducible."
             );
-            eprintln!(" Fix: commit or stash all uncommitted changes, then run `jet publish` again.");
+            eprintln!(
+                " Fix: commit or stash all uncommitted changes, then run `jet publish` again."
+            );
             eprintln!("      use `jet publish --force` to bypass with an explicit warning banner.");
             eprintln!();
             eprintln!("  uncommitted changes ({}):", dirty.len());
@@ -112,10 +121,18 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
             .collect();
         if !diags.is_empty() {
             if force {
-                eprintln!("warning: build has {} error(s) — publishing anyway (--force)", diags.len());
+                eprintln!(
+                    "warning: build has {} error(s) — publishing anyway (--force)",
+                    diags.len()
+                );
             } else {
                 eprintln!("error: `jet build` must pass before publishing (D-PKGS4)");
-                report_problems(mode, &entry_str, &fs::read_to_string(&entry_path).unwrap_or_default(), &diags);
+                report_problems(
+                    mode,
+                    &entry_str,
+                    &fs::read_to_string(&entry_path).unwrap_or_default(),
+                    &diags,
+                );
                 eprintln!("\n use `jet publish --force` to bypass this gate with a warning banner");
                 exit(ExitCodes::USER_ERROR);
             }
@@ -162,8 +179,11 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
                 signature: f.signature.clone(),
             })
             .collect();
-        let current_fns: Vec<jet::Publish::ApiItem> =
-            current_api.iter().filter(|i| i.kind == "fn").cloned().collect();
+        let current_fns: Vec<jet::Publish::ApiItem> = current_api
+            .iter()
+            .filter(|i| i.kind == "fn")
+            .cloned()
+            .collect();
         let breaking = jet::Publish::diff_public_api(&old_api, &current_fns);
 
         let bump = match (
@@ -180,9 +200,7 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
                 .unwrap_or(1);
             let diags: Vec<_> = breaking
                 .iter()
-                .map(|c| {
-                    jet::Publish::e1218(&prev.published_version, version, bump, c, next_major)
-                })
+                .map(|c| jet::Publish::e1218(&prev.published_version, version, bump, c, next_major))
                 .collect();
             if force {
                 eprintln!(
@@ -191,7 +209,10 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
                 );
             } else {
                 let raw = String::new();
-                eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags));
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+                );
                 eprintln!(
                     "\nerror: breaking public API change since {} requires a major version bump.",
                     prev.published_version
@@ -250,10 +271,7 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
     }
 
     // Registry upload is deferred (D-PKGS1: hosted registry is ops, not v1).
-    println!(
-        "\nok: `{}` v{} passes the pre-publish gate.",
-        name, version
-    );
+    println!("\nok: `{}` v{} passes the pre-publish gate.", name, version);
     println!(
         "note: registry upload not yet implemented (D-PKGS1 deferred). \
          Commit your package to a git registry and point dependents at it."
@@ -277,16 +295,26 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!("{}", jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d]));
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
+        );
         exit(ExitCodes::USER_ERROR);
     });
 
     // Fetch first so we have the resolved dep dirs.
     let existing_lock = jet::Lock::load(&root);
-    let opts = jet::Fetch::FetchOptions { locked: false, update: false, update_dep: None };
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+    };
     let (lock, dep_dirs) = jet::Fetch::fetch(&root, &mf, existing_lock.as_ref(), &opts)
         .unwrap_or_else(|diags| {
-            eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags));
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+            );
             exit(ExitCodes::USER_ERROR);
         });
 
@@ -295,7 +323,11 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
     let target_dir = match vendor_dir {
         Some(p) => {
             let p = PathBuf::from(p);
-            if p.is_absolute() { p } else { root.join(p) }
+            if p.is_absolute() {
+                p
+            } else {
+                root.join(p)
+            }
         }
         None => root.join("vendor"),
     };
@@ -314,11 +346,17 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
                     println!("vendored: {}", name);
                 }
                 println!("ok: {} dependencies copied to {}/", copied.len(), shown);
-                println!("tip: commit {}/ and use `jet fetch --locked` for reproducible offline builds.", shown);
+                println!(
+                    "tip: commit {}/ and use `jet fetch --locked` for reproducible offline builds.",
+                    shown
+                );
             }
         }
         Err(d) => {
-            eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &[d]));
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &[d])
+            );
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -378,7 +416,10 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     // command exit nonzero (advisory scan). Lower severities inform and exit 0.
     let raw = String::new();
     let diags: Vec<_> = matches.iter().map(|m| m.diagnostic.clone()).collect();
-    eprint!("{}", jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags));
+    eprint!(
+        "{}",
+        jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, &raw, &diags)
+    );
 
     let critical = matches
         .iter()
@@ -415,7 +456,10 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!("{}", jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d]));
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
+        );
         exit(ExitCodes::USER_ERROR);
     });
 
@@ -455,7 +499,10 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
 
     // Validate the version is parseable as SemVer.
     if jet::Publish::SemVer::SemVer::parse(version).is_none() {
-        eprintln!("error: `{}` is not a valid SemVer version (expected major.minor.patch)", version);
+        eprintln!(
+            "error: `{}` is not a valid SemVer version (expected major.minor.patch)",
+            version
+        );
         eprintln!(" Fix: use a version like `1.2.3`.");
         exit(ExitCodes::USER_ERROR);
     }
@@ -472,7 +519,10 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         exit(ExitCodes::USER_ERROR);
     });
     let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!("{}", jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d]));
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
+        );
         exit(ExitCodes::USER_ERROR);
     });
 
@@ -498,7 +548,10 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let reason = message.unwrap_or("no reason given");
     let marker_content = format!(
         "package = \"{}\"\nversion = \"{}\"\nyank_time = {}\nreason = \"{}\"\n",
-        name, version, ts, reason.replace('"', "\\\"")
+        name,
+        version,
+        ts,
+        reason.replace('"', "\\\"")
     );
 
     if let Err(e) = fs::write(&marker_path, &marker_content) {

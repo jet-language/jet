@@ -5,12 +5,12 @@
 //! When a `pkg.jet` is found in the project root (walked upward from entry),
 //! validates the manifest and wires package dep paths into module search (M12.1).
 
-use crate::AST::{ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Lexer;
 use crate::Manifest;
 use crate::Parser;
 use crate::Syntax;
+use crate::AST::{ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,7 +62,10 @@ fn collect_pkg_resolution(raw: &str) -> PkgResolution {
             // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
             // package — it must not shadow `use <pkg>` resolution (e.g. a dep
             // named `c`). Skip it here; CFFI.rs reads it for link flags.
-            if matches!(dep.source, crate::Jetpack::PackageManifest::DepSource::CLib { .. }) {
+            if matches!(
+                dep.source,
+                crate::Jetpack::PackageManifest::DepSource::CLib { .. }
+            ) {
                 continue;
             }
             declared_deps.insert(dep.name.clone());
@@ -549,7 +552,11 @@ fn load_file(
     // current file, then load and register as synthetic imports.
     // Collect the metadata we need before borrowing `modules` mutably below.
     #[derive(Clone)]
-    struct CmMeta { name: String, name_span: crate::Diagnostics::Span, span: crate::Diagnostics::Span }
+    struct CmMeta {
+        name: String,
+        name_span: crate::Diagnostics::Span,
+        span: crate::Diagnostics::Span,
+    }
     let code_module_decls: Vec<CmMeta> = modules[module_idx]
         .items
         .iter()
@@ -681,8 +688,8 @@ pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
 }
 
 pub use crate::Syntax::{
-    normalize_core_module, is_ring_module, is_ring_module_staged,
-    is_legacy_std_import, KNOWN_CORE_MODULES, is_known_core_module, core_modules_list,
+    core_modules_list, is_known_core_module, is_legacy_std_import, is_ring_module,
+    is_ring_module_staged, normalize_core_module, KNOWN_CORE_MODULES,
 };
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

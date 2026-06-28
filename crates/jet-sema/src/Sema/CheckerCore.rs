@@ -1,14 +1,12 @@
 use super::*;
-use crate::AST::{
-    AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch,
-    Expr, ForKind, IfStmt, IndexKind, LValue, Pattern, Stmt, Type,
-};
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-use crate::Generics::{
-    e0905, e0909, generic_depth_exceeded, COMPARABLE,
-};
+use crate::Generics::{e0905, e0909, generic_depth_exceeded, COMPARABLE};
 use crate::Syntax;
+use crate::AST::{
+    AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch, Expr, ForKind, IfStmt,
+    IndexKind, LValue, Pattern, Stmt, Type,
+};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -167,12 +165,14 @@ impl<'a> Checker<'a> {
                 ));
             }
             Type::Apply { name, args } => {
-                let is_core_generic =
-                    matches!(name.as_str(), "Task" | "Channel" | "Sender" | "Ptr"
+                let is_core_generic = matches!(
+                    name.as_str(),
+                    "Task" | "Channel" | "Sender" | "Ptr"
                         // D-COLLBREADTH1=A: Set<T> and Deque<T>.
                         | "Set" | "Deque"
                         // D-REACT1=B: reactive handle types.
-                        | "Signal" | "Derived");
+                        | "Signal" | "Derived"
+                );
                 if !is_core_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
                         "E0119",
@@ -289,7 +289,6 @@ impl<'a> Checker<'a> {
             _ => {}
         }
     }
-
 
     /// Returns true when a diagnostic was emitted (the mismatch is already
     /// reported); callers may add a context-specific error otherwise.
@@ -460,9 +459,8 @@ impl<'a> Checker<'a> {
             // The slice's data lives in the Program AST, which is `&mut Program`
             // at the call site and outlives the Checker.  We only read (no writes)
             // and only during `check_stmt`, so no aliasing issues.
-            let tail = unsafe {
-                std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len)
-            };
+            let tail =
+                unsafe { std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len) };
             if tail.iter().any(|s| stmt_refs_name(s, name)) {
                 return true;
             }
@@ -767,9 +765,7 @@ impl<'a> Checker<'a> {
                                 .and_then(|root| self.lookup(root))
                                 .and_then(|info| match &info.ty {
                                     Type::List(inner) => match inner.as_ref() {
-                                        Type::Named(elem)
-                                            if self.registry.is_columnar(elem) =>
-                                        {
+                                        Type::Named(elem) if self.registry.is_columnar(elem) => {
                                             Some(elem.clone())
                                         }
                                         _ => None,
@@ -809,8 +805,7 @@ impl<'a> Checker<'a> {
                                                 ft.show(),
                                                 vt.show()
                                             ),
-                                            "a field keeps one type for its whole life"
-                                                .to_string(),
+                                            "a field keeps one type for its whole life".to_string(),
                                             type_fix_hint(&ft, vt),
                                             Some(value.span()),
                                         ));
@@ -1103,12 +1098,12 @@ impl<'a> Checker<'a> {
                 // count as initializing after the loop.
                 let saved_u = self.uninit.clone();
                 match kind {
-                ForKind::Range { start, end, step } => {
-                    for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
-                        let t = self.infer(e);
-                        if let Some(t) = t {
-                            if t != Type::Int {
-                                self.diags.push(Diagnostic::error(
+                    ForKind::Range { start, end, step } => {
+                        for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
+                            let t = self.infer(e);
+                            if let Some(t) = t {
+                                if t != Type::Int {
+                                    self.diags.push(Diagnostic::error(
                                         "E0109",
                                         format!(
                                             "the {} of a `for` range must be {}, not {}",
@@ -1121,15 +1116,15 @@ impl<'a> Checker<'a> {
                                         "use Int values for both ends, like `1..10`".to_string(),
                                         Some(e.span()),
                                     ));
+                                }
                             }
                         }
-                    }
-                    if let Some(step) = step {
-                        // S22 (D-SG8): the stride must be a positive Int.
-                        let t = self.infer(step);
-                        if let Some(t) = t {
-                            if t != Type::Int {
-                                self.diags.push(Diagnostic::error(
+                        if let Some(step) = step {
+                            // S22 (D-SG8): the stride must be a positive Int.
+                            let t = self.infer(step);
+                            if let Some(t) = t {
+                                if t != Type::Int {
+                                    self.diags.push(Diagnostic::error(
                                     "E0123",
                                     format!(
                                         "a `for` range `step` must be {}, not {}",
@@ -1141,91 +1136,91 @@ impl<'a> Checker<'a> {
                                     "use an Int step, like `0..10 step 2`".to_string(),
                                     Some(step.span()),
                                 ));
+                                }
+                            }
+                            if let Expr::Int(n, sp, _) = step {
+                                if *n <= 0 {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0123",
+                                        format!("a `for` range `step` must be positive, not {}", n),
+                                        "a zero or negative step would never reach the end (S22)"
+                                            .to_string(),
+                                        "use a step of 1 or more, like `0..10 step 2`".to_string(),
+                                        Some(*sp),
+                                    ));
+                                }
                             }
                         }
-                        if let Expr::Int(n, sp, _) = step {
-                            if *n <= 0 {
+                        self.loop_depth += 1;
+                        self.push_scope();
+                        let vs = *var_span;
+                        let v = var.clone();
+                        if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
+                            self.diags.push(already_defined(&v, vs));
+                        }
+                        self.scopes.last_mut().unwrap().insert(
+                            v,
+                            LocalInfo {
+                                ty: Type::Int,
+                                mutable: false,
+                                param_conv: None,
+                                decl_loop_depth: self.loop_depth,
+                                sendable: true,
+                                task_lint_span: None,
+                                single_use_span: None,
+                                task_has_view_capture: false,
+                            },
+                        );
+                        for s in body.iter_mut() {
+                            self.check_stmt(s);
+                        }
+                        self.pop_scope();
+                        self.loop_depth -= 1;
+                    }
+                    ForKind::In { collection } => {
+                        let coll_ty = self.infer(collection);
+                        let borrowed = collection_root_name(collection);
+                        self.loop_depth += 1;
+                        if let Some(n) = borrowed.clone() {
+                            self.iter_borrowed.insert(n);
+                        }
+                        self.push_scope();
+                        match &coll_ty {
+                            Some(Type::List(inner)) => {
+                                self.declare_loop_var(var.clone(), *var_span, inner);
+                            }
+                            Some(Type::Map { key, value }) => {
+                                if var2.is_none() {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0003",
+                                        "a map needs two loop names: `for key, value in map`"
+                                            .to_string(),
+                                        "maps carry a key and a value on each step".to_string(),
+                                        format!(
+                                            "write `for key, value in {}`",
+                                            if let Expr::Ident(n, _) = &*collection {
+                                                n.clone()
+                                            } else {
+                                                "the_map".to_string()
+                                            }
+                                        ),
+                                        Some(collection.span()),
+                                    ));
+                                } else if let Some((v2, v2s)) = var2.as_ref() {
+                                    self.declare_loop_var(var.clone(), *var_span, key);
+                                    self.declare_loop_var(v2.clone(), *v2s, value);
+                                }
+                            }
+                            // E2-M7: `loop line in handle.lines()` — streaming line iterator.
+                            Some(Type::Named(n)) if n == "FileLines" => {
+                                self.declare_loop_var(var.clone(), *var_span, &Type::String);
+                            }
+                            // D-STDIN1=A: `loop line in io.stdin().lines()` — streaming stdin iterator.
+                            Some(Type::Named(n)) if n == "StdinLines" => {
+                                self.declare_loop_var(var.clone(), *var_span, &Type::String);
+                            }
+                            Some(other) => {
                                 self.diags.push(Diagnostic::error(
-                                    "E0123",
-                                    format!("a `for` range `step` must be positive, not {}", n),
-                                    "a zero or negative step would never reach the end (S22)"
-                                        .to_string(),
-                                    "use a step of 1 or more, like `0..10 step 2`".to_string(),
-                                    Some(*sp),
-                                ));
-                            }
-                        }
-                    }
-                    self.loop_depth += 1;
-                    self.push_scope();
-                    let vs = *var_span;
-                    let v = var.clone();
-                    if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
-                        self.diags.push(already_defined(&v, vs));
-                    }
-                    self.scopes.last_mut().unwrap().insert(
-                        v,
-                        LocalInfo {
-                            ty: Type::Int,
-                            mutable: false,
-                            param_conv: None,
-                            decl_loop_depth: self.loop_depth,
-                            sendable: true,
-                            task_lint_span: None,
-                            single_use_span: None,
-                            task_has_view_capture: false,
-                        },
-                    );
-                    for s in body.iter_mut() {
-                        self.check_stmt(s);
-                    }
-                    self.pop_scope();
-                    self.loop_depth -= 1;
-                }
-                ForKind::In { collection } => {
-                    let coll_ty = self.infer(collection);
-                    let borrowed = collection_root_name(collection);
-                    self.loop_depth += 1;
-                    if let Some(n) = borrowed.clone() {
-                        self.iter_borrowed.insert(n);
-                    }
-                    self.push_scope();
-                    match &coll_ty {
-                        Some(Type::List(inner)) => {
-                            self.declare_loop_var(var.clone(), *var_span, inner);
-                        }
-                        Some(Type::Map { key, value }) => {
-                            if var2.is_none() {
-                                self.diags.push(Diagnostic::error(
-                                    "E0003",
-                                    "a map needs two loop names: `for key, value in map`"
-                                        .to_string(),
-                                    "maps carry a key and a value on each step".to_string(),
-                                    format!(
-                                        "write `for key, value in {}`",
-                                        if let Expr::Ident(n, _) = &*collection {
-                                            n.clone()
-                                        } else {
-                                            "the_map".to_string()
-                                        }
-                                    ),
-                                    Some(collection.span()),
-                                ));
-                            } else if let Some((v2, v2s)) = var2.as_ref() {
-                                self.declare_loop_var(var.clone(), *var_span, key);
-                                self.declare_loop_var(v2.clone(), *v2s, value);
-                            }
-                        }
-                        // E2-M7: `loop line in handle.lines()` — streaming line iterator.
-                        Some(Type::Named(n)) if n == "FileLines" => {
-                            self.declare_loop_var(var.clone(), *var_span, &Type::String);
-                        }
-                        // D-STDIN1=A: `loop line in io.stdin().lines()` — streaming stdin iterator.
-                        Some(Type::Named(n)) if n == "StdinLines" => {
-                            self.declare_loop_var(var.clone(), *var_span, &Type::String);
-                        }
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
                                     "E0109",
                                     format!(
                                         "`for x in` needs a list or map, not {}",
@@ -1235,18 +1230,18 @@ impl<'a> Checker<'a> {
                                     "use a `List`, `Map`, or `s.chars()`".to_string(),
                                     Some(collection.span()),
                                 ));
+                            }
+                            None => {}
                         }
-                        None => {}
+                        for s in body.iter_mut() {
+                            self.check_stmt(s);
+                        }
+                        self.pop_scope();
+                        if let Some(n) = borrowed {
+                            self.iter_borrowed.remove(&n);
+                        }
+                        self.loop_depth -= 1;
                     }
-                    for s in body.iter_mut() {
-                        self.check_stmt(s);
-                    }
-                    self.pop_scope();
-                    if let Some(n) = borrowed {
-                        self.iter_borrowed.remove(&n);
-                    }
-                    self.loop_depth -= 1;
-                }
                 }
                 self.uninit = saved_u;
                 if label.is_some() {
@@ -1291,9 +1286,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Loop {
-                body: inner,
-                label,
-                ..
+                body: inner, label, ..
             } => {
                 if let Some((n, _)) = label {
                     self.loop_labels.push(n.clone());
@@ -1314,8 +1307,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::lint(
                         "L3101",
                         "this `#Unsafe` block has no reason".to_string(),
-                        "every gated region records why it can't break memory safety"
-                            .to_string(),
+                        "every gated region records why it can't break memory safety".to_string(),
                         "add the reason: `#Unsafe(\"why this is safe\") { … }`".to_string(),
                         Some(*span),
                     ));
@@ -1357,7 +1349,12 @@ impl<'a> Checker<'a> {
             // region. Validate the cap names (E0119), open an accumulator so the
             // effects reached inside are tallied, check the body, then seal the
             // region for the post-pass E0741 subset check. A lexical scope.
-            Stmt::Caps { caps, caps_span, body, .. } => {
+            Stmt::Caps {
+                caps,
+                caps_span,
+                body,
+                ..
+            } => {
                 let mut cap_set = crate::Sema::EffectSet::new();
                 let mut bad = false;
                 for (name, span) in caps.iter() {
@@ -1402,7 +1399,14 @@ impl<'a> Checker<'a> {
             // (an effect with no backing capability is E0712 in the post-pass),
             // check the body, then enforce that the handle does not escape (E0711).
             // A lexical scope; erased in codegen (I3).
-            Stmt::Grant { caps, caps_span, binding, binding_span, body, .. } => {
+            Stmt::Grant {
+                caps,
+                caps_span,
+                binding,
+                binding_span,
+                body,
+                ..
+            } => {
                 let mut cap_set = crate::Sema::EffectSet::new();
                 let mut bad = false;
                 for (name, span) in caps.iter() {
@@ -1500,7 +1504,12 @@ impl<'a> Checker<'a> {
             // the body with the transaction depth raised: an irreversible Core
             // effect (Net/Fs/Exec) reached directly in the block is E0746
             // (D-TXN2) at its call site. A lexical scope; erased in codegen (I3).
-            Stmt::Transact { name, name_span, body, .. } => {
+            Stmt::Transact {
+                name,
+                name_span,
+                body,
+                ..
+            } => {
                 self.push_scope();
                 if let (Some(name), Some(name_span)) = (name, name_span) {
                     self.declare_loop_var(
@@ -1514,7 +1523,11 @@ impl<'a> Checker<'a> {
                 self.txn_depth -= 1;
                 self.pop_scope();
             }
-            Stmt::ContextBlock { fields, body, span: _ } => {
+            Stmt::ContextBlock {
+                fields,
+                body,
+                span: _,
+            } => {
                 for (field_name, value_expr, field_span) in fields.iter_mut() {
                     let ty = self.infer(value_expr);
                     match field_name.as_str() {
@@ -1527,7 +1540,10 @@ impl<'a> Checker<'a> {
                                 _ => false,
                             };
                             if !ok {
-                                let got = ty.as_ref().map(|t| t.show()).unwrap_or_else(|| "unknown".to_string());
+                                let got = ty
+                                    .as_ref()
+                                    .map(|t| t.show())
+                                    .unwrap_or_else(|| "unknown".to_string());
                                 self.diags.push(Diagnostic::error(
                                     "E0762",
                                     format!("`allocator` needs an allocator, got {}", got),
@@ -1646,9 +1662,7 @@ impl<'a> Checker<'a> {
         // binding. (Both-consumed → fine; neither → falls through to E0140.)
         let mut diverged: Vec<(String, Span)> = single_use_live
             .into_iter()
-            .filter(|(name, _)| {
-                then_moved.contains_key(name) != else_moved.contains_key(name)
-            })
+            .filter(|(name, _)| then_moved.contains_key(name) != else_moved.contains_key(name))
             .collect();
         diverged.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
         for (name, span) in diverged {
@@ -1670,7 +1684,9 @@ impl<'a> Checker<'a> {
     /// build time via the comptime interpreter (D-CTCORE1 pure path). Any error
     /// (E0951 impurity / E0953 panic / E0956 unsupported) is surfaced as a diagnostic.
     pub(crate) fn check_comptime_block(&mut self, stmt: &mut Stmt) {
-        let Stmt::ComptimeBlock { body, .. } = stmt else { return; };
+        let Stmt::ComptimeBlock { body, .. } = stmt else {
+            return;
+        };
         let globals = self.current_ct_globals();
         if let Err(d) = crate::Comptime::run_block_with_imports(
             body,
@@ -1776,7 +1792,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn check_condition_with_bindings(&mut self, cond: &mut Expr) -> HashMap<String, Type> {
+    pub(crate) fn check_condition_with_bindings(
+        &mut self,
+        cond: &mut Expr,
+    ) -> HashMap<String, Type> {
         match cond {
             Expr::PatternTest {
                 subject,
@@ -1959,8 +1978,8 @@ impl<'a> Checker<'a> {
                 // prove totality, so an `else` (or wildcard) is always required.
                 // `missing_pattern_coverage` returns None for Int/Char (infinite
                 // domain), so we detect this case separately.
-                let open_scalar_no_else = matches!(st, Type::Int | Type::Char)
-                    && else_body.is_none();
+                let open_scalar_no_else =
+                    matches!(st, Type::Int | Type::Char) && else_body.is_none();
                 if open_scalar_no_else {
                     self.diags.push(Diagnostic::error(
                         "E0307",
@@ -1981,7 +2000,8 @@ impl<'a> Checker<'a> {
                         ),
                         Some(span),
                     ));
-                } else if let Some(missing) = missing_pattern_coverage(&st, &covered, self.registry) {
+                } else if let Some(missing) = missing_pattern_coverage(&st, &covered, self.registry)
+                {
                     if else_body.is_none() {
                         let mut diag = Diagnostic::error(
                             "E0307",
@@ -2010,10 +2030,18 @@ impl<'a> Checker<'a> {
         } else if else_body.is_none() {
             self.diags.push(Diagnostic::error(
                 "E0003",
-                format!("this `{}` needs an `{}` arm", Syntax::KW_IF, Syntax::KW_ELSE),
+                format!(
+                    "this `{}` needs an `{}` arm",
+                    Syntax::KW_IF,
+                    Syntax::KW_ELSE
+                ),
                 "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)"
                     .to_string(),
-                format!("add `{} {} {{ ... }}` after the last arm", Syntax::KW_ELSE, Syntax::OP_ARM_ARROW),
+                format!(
+                    "add `{} {} {{ ... }}` after the last arm",
+                    Syntax::KW_ELSE,
+                    Syntax::OP_ARM_ARROW
+                ),
                 Some(span),
             ));
         }
@@ -2072,7 +2100,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn struct_subst(&self, type_name: &str, type_args: &[Type]) -> HashMap<String, Type> {
+    pub(crate) fn struct_subst(
+        &self,
+        type_name: &str,
+        type_args: &[Type],
+    ) -> HashMap<String, Type> {
         let params = self
             .trait_reg
             .struct_params
@@ -2222,7 +2254,8 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0120",
                             format!("`{}` was not moved here, so it cannot be taken (`^`)", n),
-                            "this function has read access only and does not own the value".to_string(),
+                            "this function has read access only and does not own the value"
+                                .to_string(),
                             format!(
                                 "copy it instead: `{} {} {}.clone()`",
                                 b.name,
@@ -2321,8 +2354,14 @@ impl<'a> Checker<'a> {
                 if annot != actual {
                     // D-DIST1/D-DIST3 (E0128): distinct-type coercion is never implicit.
                     let distinct_name = if let Type::Named(n) = &annot {
-                        if self.registry.is_distinct(n) { Some(n.clone()) } else { None }
-                    } else { None };
+                        if self.registry.is_distinct(n) {
+                            Some(n.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     if let Some(dt) = distinct_name {
                         self.diags.push(Diagnostic::error(
                             "E0128",
@@ -2332,18 +2371,18 @@ impl<'a> Checker<'a> {
                             Some(b.init.span()),
                         ));
                     } else {
-                    self.diags.push(Diagnostic::error(
-                        "E0108",
-                        format!(
-                            "`{}` says it holds {}, but the value is {}",
-                            b.name,
-                            annot.show(),
-                            actual.show()
-                        ),
-                        "the type written after `:` must match the value".to_string(),
-                        type_fix_hint(&annot, &actual),
-                        Some(b.init.span()),
-                    ));
+                        self.diags.push(Diagnostic::error(
+                            "E0108",
+                            format!(
+                                "`{}` says it holds {}, but the value is {}",
+                                b.name,
+                                annot.show(),
+                                actual.show()
+                            ),
+                            "the type written after `:` must match the value".to_string(),
+                            type_fix_hint(&annot, &actual),
+                            Some(b.init.span()),
+                        ));
                     }
                 }
                 annot
@@ -2439,7 +2478,10 @@ impl<'a> Checker<'a> {
     /// length is caught here (E0315).
     pub(crate) fn check_destructuring_binding(&mut self, b: &mut Binding) {
         let inferred = self.infer(&mut b.init);
-        let pattern = b.pattern.clone().expect("destructuring binding has a pattern");
+        let pattern = b
+            .pattern
+            .clone()
+            .expect("destructuring binding has a pattern");
         let Some(it) = inferred else {
             // The initializer itself didn't type-check; declare error
             // placeholders so the bound names don't cascade into E0107.
@@ -2475,9 +2517,11 @@ impl<'a> Checker<'a> {
                             type_name,
                             it.show()
                         ),
-                        "destructuring with `{ }` pulls fields out of a struct value"
-                            .to_string(),
-                        format!("destructure a `{}`, or bind the whole value with a name", type_name),
+                        "destructuring with `{ }` pulls fields out of a struct value".to_string(),
+                        format!(
+                            "destructure a `{}`, or bind the whole value with a name",
+                            type_name
+                        ),
                         Some(*type_span),
                     ));
                     for n in pattern.names() {
@@ -2489,10 +2533,7 @@ impl<'a> Checker<'a> {
                 if actual != *type_name {
                     self.diags.push(Diagnostic::error(
                         "E0313",
-                        format!(
-                            "this value is a `{}`, not a `{}`",
-                            actual, type_name
-                        ),
+                        format!("this value is a `{}`, not a `{}`", actual, type_name),
                         "the type named before `{ }` must match the value you destructure"
                             .to_string(),
                         format!("write `{} {{ … }}` to match the value", actual),
@@ -2659,7 +2700,11 @@ impl<'a> Checker<'a> {
     pub(crate) fn declare_bound(&mut self, name: &str, span: Span, ty: Type, mutable: bool) {
         let sendable = self.sendability_problem(&ty, true).is_none();
         let task_lint_span = if is_task_type(&ty) { Some(span) } else { None };
-        let single_use_span = if self.type_is_single_use(&ty) { Some(span) } else { None };
+        let single_use_span = if self.type_is_single_use(&ty) {
+            Some(span)
+        } else {
+            None
+        };
         self.declare(
             name,
             span,
@@ -2698,7 +2743,11 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn unknown_name(&mut self, name: &str, span: Span) {
-        let mut fix = format!("declare it first: `{} {} ...`", name, Syntax::SIGIL_BIND_IMMUT);
+        let mut fix = format!(
+            "declare it first: `{} {} ...`",
+            name,
+            Syntax::SIGIL_BIND_IMMUT
+        );
         let mut best: Option<(String, usize)> = None;
         let candidates: Vec<String> = self
             .scopes
@@ -2723,7 +2772,6 @@ impl<'a> Checker<'a> {
             Some(span),
         ));
     }
-
 }
 
 /// D-UNINIT1: a `#Uninit` binding is restricted to plain-data ("POD") types —

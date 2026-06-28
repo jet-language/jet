@@ -76,7 +76,11 @@ fn main() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "pure calling pure should compile: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "pure calling pure should compile: {:?}",
+        res.err()
+    );
 }
 
 /// `pub pure fn` parses and compiles without error.
@@ -125,8 +129,8 @@ fn main() {
 /// the full `main → a → b` path in the why-line.
 #[test]
 fn transitive_chain_3_levels() {
-    use std::collections::HashMap;
     use jet::AST;
+    use std::collections::HashMap;
 
     let src = r#"
 fn b() {
@@ -147,21 +151,37 @@ fn main() {
     let mut ast_funcs_owned: Vec<(String, AST::Func)> = Vec::new();
     for item in &prog.items {
         if let AST::Item::Func(f) = item {
-            funcs_sig.insert(f.name.clone(), jet::Sema::FuncSig {
-                params: f.params.iter().map(|p| (p.convention.clone(), p.ty.clone())).collect(),
-                return_type: f.return_type.clone(),
-                is_view_return: f.is_view_return,
-                is_extern: false,
-                is_unsafe: f.is_unsafe,
-                is_pure: f.is_pure,
-                is_sanitizer: f.is_sanitizer,
-                param_info: f.params.iter().map(|p| (p.name.clone(), p.default.is_some())).collect(),
-                defaults: f.params.iter().map(|p| p.default.as_ref().map(|d| *d.clone())).collect(),
-            });
+            funcs_sig.insert(
+                f.name.clone(),
+                jet::Sema::FuncSig {
+                    params: f
+                        .params
+                        .iter()
+                        .map(|p| (p.convention.clone(), p.ty.clone()))
+                        .collect(),
+                    return_type: f.return_type.clone(),
+                    is_view_return: f.is_view_return,
+                    is_extern: false,
+                    is_unsafe: f.is_unsafe,
+                    is_pure: f.is_pure,
+                    is_sanitizer: f.is_sanitizer,
+                    param_info: f
+                        .params
+                        .iter()
+                        .map(|p| (p.name.clone(), p.default.is_some()))
+                        .collect(),
+                    defaults: f
+                        .params
+                        .iter()
+                        .map(|p| p.default.as_ref().map(|d| *d.clone()))
+                        .collect(),
+                },
+            );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
         }
     }
-    let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned.iter()
+    let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned
+        .iter()
         .map(|(n, f)| (n.clone(), f))
         .collect();
 
@@ -173,19 +193,21 @@ fn main() {
     let why = &d.why;
     assert!(
         why.contains("main") && why.contains("a") && why.contains("b"),
-        "transitive chain missing from why: {:?}", why
+        "transitive chain missing from why: {:?}",
+        why
     );
     assert!(
         why.contains("→"),
-        "chain separator `→` missing from why: {:?}", why
+        "chain separator `→` missing from why: {:?}",
+        why
     );
 }
 
 /// 2-level transitive: main → helper → print.
 #[test]
 fn transitive_chain_2_levels() {
-    use std::collections::HashMap;
     use jet::AST;
+    use std::collections::HashMap;
 
     let src = r#"
 fn helper() {
@@ -202,21 +224,37 @@ fn main() {
     let mut ast_funcs_owned: Vec<(String, AST::Func)> = Vec::new();
     for item in &prog.items {
         if let AST::Item::Func(f) = item {
-            funcs_sig.insert(f.name.clone(), jet::Sema::FuncSig {
-                params: f.params.iter().map(|p| (p.convention.clone(), p.ty.clone())).collect(),
-                return_type: f.return_type.clone(),
-                is_view_return: f.is_view_return,
-                is_extern: false,
-                is_unsafe: f.is_unsafe,
-                is_pure: f.is_pure,
-                is_sanitizer: f.is_sanitizer,
-                param_info: f.params.iter().map(|p| (p.name.clone(), p.default.is_some())).collect(),
-                defaults: f.params.iter().map(|p| p.default.as_ref().map(|d| *d.clone())).collect(),
-            });
+            funcs_sig.insert(
+                f.name.clone(),
+                jet::Sema::FuncSig {
+                    params: f
+                        .params
+                        .iter()
+                        .map(|p| (p.convention.clone(), p.ty.clone()))
+                        .collect(),
+                    return_type: f.return_type.clone(),
+                    is_view_return: f.is_view_return,
+                    is_extern: false,
+                    is_unsafe: f.is_unsafe,
+                    is_pure: f.is_pure,
+                    is_sanitizer: f.is_sanitizer,
+                    param_info: f
+                        .params
+                        .iter()
+                        .map(|p| (p.name.clone(), p.default.is_some()))
+                        .collect(),
+                    defaults: f
+                        .params
+                        .iter()
+                        .map(|p| p.default.as_ref().map(|d| *d.clone()))
+                        .collect(),
+                },
+            );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
         }
     }
-    let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned.iter()
+    let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned
+        .iter()
         .map(|(n, f)| (n.clone(), f))
         .collect();
 
@@ -225,15 +263,16 @@ fn main() {
     let why = &diags[0].why;
     assert!(
         why.contains("main") && why.contains("helper"),
-        "chain missing in why: {:?}", why
+        "chain missing in why: {:?}",
+        why
     );
 }
 
 /// Pure program with no impure calls must not produce E3401.
 #[test]
 fn transitive_clean_program_no_error() {
-    use std::collections::HashMap;
     use jet::AST;
+    use std::collections::HashMap;
 
     let src = r#"
 #Pure fn square(n: Int) -> Int {
@@ -250,26 +289,46 @@ fn main() {
     let mut ast_funcs_owned: Vec<(String, AST::Func)> = Vec::new();
     for item in &prog.items {
         if let AST::Item::Func(f) = item {
-            funcs_sig.insert(f.name.clone(), jet::Sema::FuncSig {
-                params: f.params.iter().map(|p| (p.convention.clone(), p.ty.clone())).collect(),
-                return_type: f.return_type.clone(),
-                is_view_return: f.is_view_return,
-                is_extern: false,
-                is_unsafe: f.is_unsafe,
-                is_pure: f.is_pure,
-                is_sanitizer: f.is_sanitizer,
-                param_info: f.params.iter().map(|p| (p.name.clone(), p.default.is_some())).collect(),
-                defaults: f.params.iter().map(|p| p.default.as_ref().map(|d| *d.clone())).collect(),
-            });
+            funcs_sig.insert(
+                f.name.clone(),
+                jet::Sema::FuncSig {
+                    params: f
+                        .params
+                        .iter()
+                        .map(|p| (p.convention.clone(), p.ty.clone()))
+                        .collect(),
+                    return_type: f.return_type.clone(),
+                    is_view_return: f.is_view_return,
+                    is_extern: false,
+                    is_unsafe: f.is_unsafe,
+                    is_pure: f.is_pure,
+                    is_sanitizer: f.is_sanitizer,
+                    param_info: f
+                        .params
+                        .iter()
+                        .map(|p| (p.name.clone(), p.default.is_some()))
+                        .collect(),
+                    defaults: f
+                        .params
+                        .iter()
+                        .map(|p| p.default.as_ref().map(|d| *d.clone()))
+                        .collect(),
+                },
+            );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
         }
     }
-    let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned.iter()
+    let ast_funcs: HashMap<String, &AST::Func> = ast_funcs_owned
+        .iter()
         .map(|(n, f)| (n.clone(), f))
         .collect();
 
     let diags = jet::check_pure_program_root("main", &funcs_sig, &ast_funcs);
-    assert!(diags.is_empty(), "expected no diagnostics, got: {:?}", diags);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        diags
+    );
 }
 
 // ── CtValue pretty rendering ──────────────────────────────────────────────────
@@ -297,11 +356,7 @@ fn ctvalue_render_pretty_struct() {
 #[test]
 fn ctvalue_render_pretty_list() {
     use jet::CtValue;
-    let v = CtValue::List(vec![
-        CtValue::Int(1),
-        CtValue::Int(2),
-        CtValue::Int(3),
-    ]);
+    let v = CtValue::List(vec![CtValue::Int(1), CtValue::Int(2), CtValue::Int(3)]);
     let rendered = v.render_pretty();
     assert!(rendered.starts_with('['), "should start with [");
     assert!(rendered.contains("1,"), "missing 1");
@@ -316,10 +371,13 @@ fn ctvalue_render_pretty_nested() {
         type_name: "Report".to_string(),
         fields: vec![
             ("total".to_string(), CtValue::Int(42)),
-            ("items".to_string(), CtValue::List(vec![
-                CtValue::Str("a".to_string()),
-                CtValue::Str("b".to_string()),
-            ])),
+            (
+                "items".to_string(),
+                CtValue::List(vec![
+                    CtValue::Str("a".to_string()),
+                    CtValue::Str("b".to_string()),
+                ]),
+            ),
         ],
     };
     let rendered = v.render_pretty();
@@ -373,7 +431,10 @@ fn store_record_generation() {
         let gen = jet::Store::record_generation();
         assert!(gen >= 1, "generation should be at least 1");
         let gens = jet::Store::list_generations();
-        assert!(!gens.is_empty(), "should have at least one generation recorded");
+        assert!(
+            !gens.is_empty(),
+            "should have at least one generation recorded"
+        );
     });
 }
 

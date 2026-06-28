@@ -3,11 +3,12 @@
 //! Split out of the original `TIR.rs` for maintainability; behavior unchanged.
 
 use super::*;
-use crate::AST::{
-    BinOp, BindPattern, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, IndexKind, Lambda,
-    LambdaBody, LValue, OrFallback, PatSlot, Pattern, Stmt, StrPart, SwitchArm, Type, VariantPayload,
-};
 use crate::Syntax;
+use crate::AST::{
+    BinOp, BindPattern, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, IndexKind, LValue,
+    Lambda, LambdaBody, OrFallback, PatSlot, Pattern, Stmt, StrPart, SwitchArm, Type,
+    VariantPayload,
+};
 use std::collections::HashSet;
 
 /// Conservative structural test: `true` only if `f` is a top-level plain
@@ -498,7 +499,10 @@ pub(crate) fn is_covered_fn_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
         Type::Fn { params, ret, .. } => {
             params.iter().all(|p| is_subset_param_ty(p, cx))
-                && ret.as_ref().map(|r| is_subset_param_ty(r, cx)).unwrap_or(true)
+                && ret
+                    .as_ref()
+                    .map(|r| is_subset_param_ty(r, cx))
+                    .unwrap_or(true)
         }
         _ => false,
     }
@@ -640,7 +644,6 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         || is_covered_foreign_value_ty(ty, cx)
 }
 
-
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
 /// bare `Type::Named(E)` that:
 ///  - is a known enum (`cx.enum_variants` has it), not a struct/trait/foreign/core
@@ -710,7 +713,9 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
             VariantPayload::Single(t, _) => vec![t],
             VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
         };
-        payload_tys.iter().all(|t| enum_payload_ty_covered(t, cx, seen))
+        payload_tys
+            .iter()
+            .all(|t| enum_payload_ty_covered(t, cx, seen))
     });
     seen.remove(name);
     ok
@@ -788,7 +793,8 @@ pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<S
     // concrete type, never a type variable — even a single-uppercase-letter name like
     // `P`. The `is_type_var_name` heuristic only excludes *undeclared* single-letter
     // names (true generic type vars `T`/`U`), so guard it on non-declaration.
-    let is_type_var = crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
+    let is_type_var =
+        crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
         || cx.foreign_types.contains_key(name)
@@ -820,7 +826,11 @@ pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<S
 
 /// The payload of a boxed (recursive) struct field — `Tree` in `child: Tree?`
 /// (`Option<Tree>`) or a bare `Tree`. The payload struct must be constructible.
-pub(crate) fn boxed_field_payload_constructible(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+pub(crate) fn boxed_field_payload_constructible(
+    ty: &Type,
+    cx: &Cx,
+    seen: &mut HashSet<String>,
+) -> bool {
     match ty {
         Type::Option(inner) => boxed_field_payload_constructible(inner, cx, seen),
         Type::Named(n) => struct_lit_constructible(n, cx, seen),
@@ -850,7 +860,8 @@ pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>)
     // out. `cx.struct_fields` only holds user structs declared in this module.
     // A declared user struct is a concrete type, never a type var (see
     // `struct_lit_constructible`): a single-uppercase-letter struct name (`P`) is real.
-    let is_type_var = crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
+    let is_type_var =
+        crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
         || cx.foreign_types.contains_key(name)
@@ -984,9 +995,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 // are total at lowering). The Struct/List destructure forms stay on the
                 // AST path (no live-suite use; can be a later slice).
                 Some(BindPattern::Tuple { elems, .. }) => {
-                    let ok = !b.is_comptime
-                        && !b.uninit
-                        && expr_in_subset(&b.init, cx, locals);
+                    let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
                     for e in elems {
                         locals.insert(e.name.clone());
                     }
@@ -1000,9 +1009,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 // `Some(List(inner))`-only match) is reproduced at lowering. The
                 // fan-out result-list destructure (`41_fan_out` `main`) is exactly this.
                 Some(BindPattern::List { elems, .. }) => {
-                    let ok = !b.is_comptime
-                        && !b.uninit
-                        && expr_in_subset(&b.init, cx, locals);
+                    let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
                     for e in elems {
                         locals.insert(e.name.clone());
                     }
@@ -1016,9 +1023,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 // `cx.struct_fields` at lowering (total — sema proved the pattern
                 // destructures a struct value).
                 Some(BindPattern::Struct { fields, .. }) => {
-                    let ok = !b.is_comptime
-                        && !b.uninit
-                        && expr_in_subset(&b.init, cx, locals);
+                    let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
                     for f in fields {
                         locals.insert(f.name.clone());
                     }
@@ -1060,7 +1065,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             // totally from sema and dispatched at lowering (never re-inferred). An
             // `IndexKind::Unknown` means sema did not resolve it — exclude (the AST
             // path falls back to an env type-inference the TIR must not reproduce).
-            LValue::Index { base, index, kind, .. } => {
+            LValue::Index {
+                base, index, kind, ..
+            } => {
                 !matches!(kind, IndexKind::Unknown)
                     && expr_in_subset(base, cx, locals)
                     && expr_in_subset(index, cx, locals)
@@ -1091,7 +1098,13 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             let mut body_locals = locals.clone();
             body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
         }
-        Stmt::For { var, var2, kind, body, .. } => match kind {
+        Stmt::For {
+            var,
+            var2,
+            kind,
+            body,
+            ..
+        } => match kind {
             // `loop i in start..end [step k]` — start/end/step must be in-subset
             // integer expressions; the loop var `i` is an Int local in the body.
             // The two-binding `key, value` form is map iteration (a collection),
@@ -1282,7 +1295,11 @@ pub(crate) fn forin_method_collection_in_subset(
 ///  - an optional-binding test (`value(b)`/`ok(b)`/`err(b)`) → if-let, subject in-subset,
 ///    the binding `b` in scope. Variant/Or/Range patterns in an `if` condition stay on
 ///    the AST path (conservative — not covered here).
-pub(crate) fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) -> Option<Vec<String>> {
+pub(crate) fn if_cond_in_subset(
+    cond: &Expr,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> Option<Vec<String>> {
     // The `x == null` (`Pattern::Absent`) form: `if {subj}.is_none()`.
     if let Expr::PatternTest {
         subject,
@@ -1313,7 +1330,12 @@ pub(crate) fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) 
         // not yet covered as an if-condition form); `Null` is the `Absent`-style form, but
         // `data == Null` would parse as a variant pattern with no binding (not used in the
         // live suite — excluded here, single-bind only).
-        if let Pattern::Variant { variant, bindings, span: _ } = pattern {
+        if let Pattern::Variant {
+            variant,
+            bindings,
+            span: _,
+        } = pattern
+        {
             if is_json_variant(variant)
                 && bindings.len() == 1
                 && matches!(bindings[0], PatSlot::Bind(_))
@@ -1326,10 +1348,19 @@ pub(crate) fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) 
             // `if k == Key.Char(c)` → `if let JetKey::Char(user_c) = (k).clone() { … }`.
             // Unit variants (`if k == Key.Enter`) → `if let JetKey::Enter = (k).clone()`.
             if is_key_variant(variant) {
-                if bindings.is_empty() || (bindings.len() == 1 && matches!(bindings[0], PatSlot::Bind(_))) {
-                    let names: Vec<String> = bindings.iter().filter_map(|s| {
-                        if let PatSlot::Bind(n) = s { Some(n.clone()) } else { None }
-                    }).collect();
+                if bindings.is_empty()
+                    || (bindings.len() == 1 && matches!(bindings[0], PatSlot::Bind(_)))
+                {
+                    let names: Vec<String> = bindings
+                        .iter()
+                        .filter_map(|s| {
+                            if let PatSlot::Bind(n) = s {
+                                Some(n.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
                     return Some(names);
                 }
             }
@@ -1393,7 +1424,11 @@ pub(crate) fn if_in_subset(ifs: &IfStmt, cx: &Cx, locals: &mut HashSet<String>) 
     for b in &cond_bindings {
         then_locals.insert(b.clone());
     }
-    if !ifs.then_body.iter().all(|s| stmt_in_subset(s, cx, &mut then_locals)) {
+    if !ifs
+        .then_body
+        .iter()
+        .all(|s| stmt_in_subset(s, cx, &mut then_locals))
+    {
         return false;
     }
     match &ifs.else_branch {
@@ -1470,7 +1505,9 @@ pub(crate) fn switch_in_subset(
     // `else`. (Range arms bind nothing.) The subject's type must resolve to an
     // integer/char local so the conditions type-check.
     if else_body.is_some()
-        && arms.iter().all(|a| arm_head_range(cx, &a.cond, subject).is_some())
+        && arms
+            .iter()
+            .all(|a| arm_head_range(cx, &a.cond, subject).is_some())
     {
         // The subject must be a plain in-subset scalar place (an Ident local/param)
         // so `_jet_switch_subject`/the conditions read it directly. Anything more
@@ -1542,17 +1579,20 @@ pub(crate) fn switch_in_subset(
     // emitted range condition type-checks (the same constraint shape B imposes).
     // Conservative: a variant/fallible pattern-test arm in the chain excludes the whole
     // switch (stays on the AST path). The `else` is optional.
-    let has_range = arms.iter().any(|a| arm_head_range(cx, &a.cond, subject).is_some());
-    let subject_is_scalar_ident = matches!(subject, Expr::Ident(name, _) if locals.contains(name));
-    if arms
+    let has_range = arms
         .iter()
-        .all(|a| arm_is_plain_cond(cx, &a.cond, subject) || arm_head_range(cx, &a.cond, subject).is_some())
-        && (!has_range || subject_is_scalar_ident)
+        .any(|a| arm_head_range(cx, &a.cond, subject).is_some());
+    let subject_is_scalar_ident = matches!(subject, Expr::Ident(name, _) if locals.contains(name));
+    if arms.iter().all(|a| {
+        arm_is_plain_cond(cx, &a.cond, subject) || arm_head_range(cx, &a.cond, subject).is_some()
+    }) && (!has_range || subject_is_scalar_ident)
     {
         for a in arms {
             // A range head lowers to a comparison string from `subject_str`; only the
             // PLAIN-cond arms carry a sub-expression that must itself be in-subset.
-            if arm_head_range(cx, &a.cond, subject).is_none() && !expr_in_subset(&a.cond, cx, locals) {
+            if arm_head_range(cx, &a.cond, subject).is_none()
+                && !expr_in_subset(&a.cond, cx, locals)
+            {
                 return false;
             }
             let mut body_locals = locals.clone();
@@ -1601,15 +1641,17 @@ pub(crate) fn arm_is_plain_cond(cx: &Cx, cond: &Expr, subject: &Expr) -> bool {
 /// `Pattern::{Ok,Err,Present,Absent}`, else `None` (a variant/range/comparison arm).
 pub(crate) fn arm_fallible_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
     match cond {
-        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(cx, s, subject) => {
-            match pattern {
-                Pattern::Ok { .. }
-                | Pattern::Err { .. }
-                | Pattern::Present { .. }
-                | Pattern::Absent(_) => Some(pattern.clone()),
-                _ => None,
-            }
-        }
+        Expr::PatternTest {
+            subject: s,
+            pattern,
+            ..
+        } if pattern_subjects_match(cx, s, subject) => match pattern {
+            Pattern::Ok { .. }
+            | Pattern::Err { .. }
+            | Pattern::Present { .. }
+            | Pattern::Absent(_) => Some(pattern.clone()),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -1632,7 +1674,11 @@ pub(crate) fn fallible_pattern_binding(pattern: &Pattern) -> Option<String> {
 /// `None` (they go through the mixed-switch path, shape B).
 pub(crate) fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
     match cond {
-        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(cx, s, subject) => {
+        Expr::PatternTest {
+            subject: s,
+            pattern,
+            ..
+        } if pattern_subjects_match(cx, s, subject) => {
             if matches!(pattern, Pattern::Range { .. }) {
                 return None;
             }
@@ -1668,7 +1714,12 @@ pub(crate) fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> bool {
             .iter()
             // Only plain name-binds, wildcards, and ranges in payload slots are
             // covered (those are the slot kinds the TIR reproduces).
-            .all(|s| matches!(s, PatSlot::Bind(_) | PatSlot::Wildcard | PatSlot::Range { .. })),
+            .all(|s| {
+                matches!(
+                    s,
+                    PatSlot::Bind(_) | PatSlot::Wildcard | PatSlot::Range { .. }
+                )
+            }),
         Pattern::Or(alts, _) => {
             !alts.is_empty() && alts.iter().all(pattern_is_variant_or_orvariant)
         }
@@ -1689,11 +1740,11 @@ pub(crate) fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String>
 /// arm-head range lowering: a `PatternTest` whose pattern is `Pattern::Range`.
 pub(crate) fn arm_head_range(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<(i64, i64)> {
     match cond {
-        Expr::PatternTest { subject: s, pattern: Pattern::Range { lo, hi, .. }, .. }
-            if pattern_subjects_match(cx, s, subject) =>
-        {
-            Some((*lo, *hi))
-        }
+        Expr::PatternTest {
+            subject: s,
+            pattern: Pattern::Range { lo, hi, .. },
+            ..
+        } if pattern_subjects_match(cx, s, subject) => Some((*lo, *hi)),
         _ => None,
     }
 }
@@ -1761,9 +1812,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || ident_is_named_fn_value(name, cx, locals)
         }
         Expr::Unary(_, inner, _) => expr_in_subset(inner, cx, locals),
-        Expr::Binary(_, l, r, _) => {
-            expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals)
-        }
+        Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
         Expr::Call(c) => {
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
             // parses as `Expr::Call { name: "f" }`, NOT `Expr::CallValue`. The AST path
@@ -1841,9 +1890,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                         ..
                     ))
                 ) && c.args.len() == 1
-                    && c.args.iter().all(|a| {
-                        a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
-                    });
+                    && c.args
+                        .iter()
+                        .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
             }
             // Otherwise the callee must be a known *plain* top-level function:
             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
@@ -1861,8 +1910,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // → `lower_one_call_arg` with `conv: None` → plain arg, then `user_<Name>(…)`).
             // Sema validated the single-arg base-typed shape (E2 distinct checks); we admit
             // it when the name is a known distinct type, not shadowed by a local.
-            let is_distinct_ctor = !locals.contains(&c.name)
-                && cx.distinct_types.contains_key(&c.name);
+            let is_distinct_ctor =
+                !locals.contains(&c.name) && cx.distinct_types.contains_key(&c.name);
             // D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
             // `Vec3(x,y,z)` / `Mat3(…)`. Lowers to the prelude `jet_math_<T>_new(…)`.
             let is_math_ctor = !locals.contains(&c.name)
@@ -1894,7 +1943,18 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
             // and codegen never reads `CallArg.label` (`emit_call_args` is purely
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
-            (is_print || is_drop || is_ambient_input || is_require || is_require_eq || is_panic || is_plain_fn || is_distinct_ctor || is_math_ctor || is_extern || is_unqual_inline || is_unqual_file)
+            (is_print
+                || is_drop
+                || is_ambient_input
+                || is_require
+                || is_require_eq
+                || is_panic
+                || is_plain_fn
+                || is_distinct_ctor
+                || is_math_ctor
+                || is_extern
+                || is_unqual_inline
+                || is_unqual_file)
                 && c.args.iter().all(|a| {
                     // c109 Phase 6b: a `Shared<T>` arg auto-cloning the Arc
                     // (`shared_auto_clone`) is COVERED for the plain-fn / distinct-ctor /
@@ -1922,14 +1982,19 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 return false;
             }
             let mut then_locals = locals.clone();
-            if !then_body.iter().all(|s| stmt_in_subset(s, cx, &mut then_locals)) {
+            if !then_body
+                .iter()
+                .all(|s| stmt_in_subset(s, cx, &mut then_locals))
+            {
                 return false;
             }
             if !expr_in_subset(then_value, cx, &then_locals) {
                 return false;
             }
             let mut else_locals = locals.clone();
-            else_body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals))
+            else_body
+                .iter()
+                .all(|s| stmt_in_subset(s, cx, &mut else_locals))
                 && expr_in_subset(else_value, cx, &else_locals)
         }
         // c109 Phase 3: a struct literal `S { f: v, … }`. Covered only when `S`
@@ -2041,18 +2106,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
                 if !locals.contains(enum_name)
                     && enum_is_covered(enum_name, cx)
-                    && cx.variant_owner.get(member).map(String::as_str)
-                        == Some(enum_name.as_str())
+                    && cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
                 {
                     return true;
                 }
                 // c109 Phase 24: the `JSON.Null` unit construction reaches codegen as a
                 // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::Json::Null`,
                 // Expression.rs ~L222). Cover it (the only no-arg JSON variant).
-                if !locals.contains(enum_name)
-                    && is_json_type_name(enum_name)
-                    && member == "Null"
-                {
+                if !locals.contains(enum_name) && is_json_type_name(enum_name) && member == "Null" {
                     return true;
                 }
                 // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
@@ -2097,12 +2158,19 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // only when the named enum is a covered scalar-payload enum and every arg
         // value is itself in-subset (a scalar/Char value — the enum being covered
         // already guarantees the payload *types* are scalar, so no clone/box).
-        Expr::EnumLit { type_name, variant, args, .. } => {
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } => {
             // D-TERM1 (ratified 2026-06-22): `Key` is a core prelude enum, not in
             // the user registry, but is always covered — all payloads are scalar/Char.
             let key_type = crate::Syntax::TYPE_KEY;
             if type_name == key_type {
-                if !is_key_variant(variant) { return false; }
+                if !is_key_variant(variant) {
+                    return false;
+                }
                 return args.iter().all(|a| match a {
                     EnumLitArg::Positional(e) => expr_in_subset(e, cx, locals),
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
@@ -2143,14 +2211,18 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // c109 Phase 5: indexing `coll[i]`. The `IndexKind` must be sema-resolved
         // (not `Unknown`) so the helper dispatch (`jet_index_map`/`jet_index_vec`)
         // is a total fact carried onto the TIR. Base + index must be in-subset.
-        Expr::Index { base, index, kind, .. } => {
+        Expr::Index {
+            base, index, kind, ..
+        } => {
             !matches!(kind, IndexKind::Unknown)
                 && expr_in_subset(base, cx, locals)
                 && expr_in_subset(index, cx, locals)
         }
         // c109 Phase 5: an inclusive copy slice `coll[a..b]` (lists only — the AST
         // path's `jet_slice_vec` is list-specific). Base/start/end must be in-subset.
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice {
+            base, start, end, ..
+        } => {
             expr_in_subset(base, cx, locals)
                 && expr_in_subset(start, cx, locals)
                 && expr_in_subset(end, cx, locals)
@@ -2164,9 +2236,13 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // Everything else (core/stdlib/collection/string/numeric methods, static
         // calls — whose `recv_type` is `None` — fallible/optional, fan-out, …) stays
         // on the AST path.
-        Expr::MethodCall { receiver, method, args, recv_type, .. } => {
-            method_call_in_subset(receiver, method, args, recv_type, cx, locals)
-        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            recv_type,
+            ..
+        } => method_call_in_subset(receiver, method, args, recv_type, cx, locals),
         // D-TAINT1: `#Tainted expr` — the tag is erased; in-subset iff the inner is.
         Expr::Tainted(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: optional constructors `value(x)` / `null`. Covered when the
@@ -2194,9 +2270,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // and the fallback must be in-subset. The Panic fallback form is deferred
         // (its `safe_locals_expr` reproduction is out of subset) — only Value and
         // early-`return` fallbacks are covered.
-        Expr::OrFallback { value, fallback, .. } => {
-            expr_in_subset(value, cx, locals) && orfallback_rhs_in_subset(fallback, cx, locals)
-        }
+        Expr::OrFallback {
+            value, fallback, ..
+        } => expr_in_subset(value, cx, locals) && orfallback_rhs_in_subset(fallback, cx, locals),
         // c109 Phase 8: optional chaining `base?.member`. The `flatten` fact is total
         // (from sema). The base must be in-subset; the member read lowers to a plain
         // `.map`/`.and_then` closure access (no further dispatch).
@@ -2255,15 +2331,17 @@ pub(crate) fn ident_is_named_fn_value(name: &str, cx: &Cx, locals: &HashSet<Stri
 /// `panic_locals` env replica resolved at lowering. The panic message expression must
 /// be in-subset (it is lowered into the rendered panic string). `panic(…)` always takes
 /// exactly one message argument (the parser builds `OrFallback::Panic{args}` from it).
-pub(crate) fn orfallback_rhs_in_subset(fallback: &OrFallback, cx: &Cx, locals: &HashSet<String>) -> bool {
+pub(crate) fn orfallback_rhs_in_subset(
+    fallback: &OrFallback,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
     match fallback {
         OrFallback::Value(e) => expr_in_subset(e, cx, locals),
         OrFallback::Return(None, _) => true,
         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         OrFallback::Panic { args, .. } => {
-            args.len() == 1
-                && args[0].label.is_none()
-                && expr_in_subset(&args[0].expr, cx, locals)
+            args.len() == 1 && args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals)
         }
     }
 }
@@ -2350,9 +2428,7 @@ pub(crate) fn method_call_in_subset(
     // Sema types the handle `Transaction` (`recv_type == Some("Transaction")`).
     // It lowers to a Drop-backed commit guard (a `scope.guard` cousin), so the
     // single arg must be an in-subset literal zero-param lambda.
-    if method == Syntax::TXN_ON_COMMIT
-        && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE)
-    {
+    if method == Syntax::TXN_ON_COMMIT && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE) {
         return args.len() == 1
             && args[0].label.is_none()
             && matches!(&args[0].expr, Expr::Lambda(_))
@@ -2361,9 +2437,7 @@ pub(crate) fn method_call_in_subset(
     // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` — the mirror of
     // `on_commit`, same in-subset shape (a literal zero-param lambda on a handle sema
     // typed `Transaction`).
-    if method == Syntax::TXN_ON_ROLLBACK
-        && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE)
-    {
+    if method == Syntax::TXN_ON_ROLLBACK && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE) {
         return args.len() == 1
             && args[0].label.is_none()
             && matches!(&args[0].expr, Expr::Lambda(_))
@@ -2392,13 +2466,10 @@ pub(crate) fn method_call_in_subset(
     // name. The single payload arg must be in-subset. `JSON.Null` is the no-arg Field
     // form, handled in `expr_in_subset`'s `Field` arm, not here.
     if let Expr::Ident(type_name, _) = receiver {
-        if !locals.contains(type_name)
-            && is_json_type_name(type_name)
-            && is_json_variant(method)
-        {
-            return args.iter().all(|a| {
-                a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
-            });
+        if !locals.contains(type_name) && is_json_type_name(type_name) && is_json_variant(method) {
+            return args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
         }
     }
     // Shape (e) [c109 Phase 10]: a core/stdlib module call `alias.method(args)` where
@@ -2442,9 +2513,9 @@ pub(crate) fn method_call_in_subset(
                         return true;
                     }
                     return core_call_covered(module, method)
-                        && args.iter().all(|a| {
-                            a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
-                        });
+                        && args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                 }
                 // Shape (i) [c109 Phase 14]: a qualified cross-module call
                 // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a
@@ -2480,8 +2551,7 @@ pub(crate) fn method_call_in_subset(
     // `capacity:`/`slots:`/`size:` arg is admitted (a label is allowed HERE — the AST reads
     // `arg(0)` ignoring the label, choosing the ctor by allocator type, not label).
     if alloc_new_type(receiver, method, cx, locals).is_some() {
-        return args.len() <= 1
-            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+        return args.len() <= 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d) [c109 Phase 9]: a built-in collection/string method
     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
@@ -2502,9 +2572,9 @@ pub(crate) fn method_call_in_subset(
     // `recv_type`) to claim builtins first.
     if recv_type.is_none() && is_covered_builtin_name(method, args.len()) {
         return expr_in_subset(receiver, cx, locals)
-            && args.iter().all(|a| {
-                a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
-            });
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d-coll-ctor) [D-COLLBREADTH1=A]: a collection static constructor —
     // `Set.from([...])` or `Deque.new()`. The receiver is a bare type-name ident
@@ -2594,8 +2664,7 @@ pub(crate) fn method_call_in_subset(
     }
     // Shape (d6) [D-HONESTNUM1=A]: a `Measurement<Float>` method.
     // Sema sets `recv_type == Some("Measurement")`.
-    if recv_type.as_deref() == Some("Measurement")
-        && is_measurement_method_name(method, args.len())
+    if recv_type.as_deref() == Some("Measurement") && is_measurement_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -2604,18 +2673,14 @@ pub(crate) fn method_call_in_subset(
     }
     // Shape (d7) [D-PENDING1=B]: a `Loadable<T,E>` method.
     // Sema sets `recv_type == Some("Loadable")`.
-    if recv_type.as_deref() == Some("Loadable")
-        && is_loadable_method_name(method, args.len())
-    {
+    if recv_type.as_deref() == Some("Loadable") && is_loadable_method_name(method, args.len()) {
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    if is_sketch_type(recv_type.as_deref())
-        && is_sketch_method_name(recv_type.as_deref(), method)
-    {
+    if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()
@@ -2624,7 +2689,9 @@ pub(crate) fn method_call_in_subset(
     // Shape (d10) [D-NETDEP1=A / D-HTTPLIB1=A]: an HTTP type method call.
     if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
-            && args.iter().all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d9) [D-TIMEDEPTH1=A]: a civil-time method (Date/DateTime).
     if matches!(recv_type.as_deref(), Some("Date" | "DateTime"))
@@ -2727,16 +2794,16 @@ pub(crate) fn method_call_in_subset(
                 // `cx.enum_variants`; handle it specially before the user-enum path.
                 if type_name == crate::Syntax::TYPE_KEY {
                     return is_key_variant(method)
-                        && args.iter().all(|a| {
-                            a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
-                        });
+                        && args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                 }
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         return enum_is_covered(type_name, cx)
-                            && args.iter().all(|a| {
-                                a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
-                            });
+                            && args
+                                .iter()
+                                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
                 }
             }
@@ -2820,9 +2887,9 @@ pub(crate) fn method_call_in_subset(
     // c109 Phase 23: a call-site LABEL (`r.scale(factor: 0.5)`, D-NARG1) is allowed —
     // labels are sema-validated documentation that never reorder (D-NARG-D4) and codegen
     // never reads `CallArg.label`, so a labeled arg emits identically.
-    args.iter().zip(sig.iter()).all(|(a, (_, _pty))| {
-        expr_in_subset(&a.expr, cx, locals)
-    })
+    args.iter()
+        .zip(sig.iter())
+        .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))
 }
 
 /// c109 Phase 27: is `recv.method(args)` a call THROUGH a fn-typed struct FIELD (not a
@@ -2861,9 +2928,7 @@ pub(crate) fn fn_field_call_in_subset(
     }
     expr_in_subset(receiver, cx, locals)
         && args.iter().all(|a| {
-            a.label.is_none()
-                && !a.flags.shared_auto_clone
-                && expr_in_subset(&a.expr, cx, locals)
+            a.label.is_none() && !a.flags.shared_auto_clone && expr_in_subset(&a.expr, cx, locals)
         })
 }
 
@@ -2926,7 +2991,10 @@ pub(crate) fn static_method_call_in_subset(
             return false;
         }
     }
-    let Some(sig) = cx.method_sigs.get(&(type_name.to_string(), method.to_string())) else {
+    let Some(sig) = cx
+        .method_sigs
+        .get(&(type_name.to_string(), method.to_string()))
+    else {
         return false;
     };
     if args.len() != sig.len() {
@@ -2935,9 +3003,9 @@ pub(crate) fn static_method_call_in_subset(
     // c109 Phase 13: a Fn-typed static-method param routes through the Box-coercion
     // (`lower_one_call_arg`). c109 Phase 23: a call-site LABEL (`Rect.new(width: 4.0)`,
     // D-NARG1) is allowed — labels never reorder (D-NARG-D4) and codegen ignores them.
-    args.iter().zip(sig.iter()).all(|(a, (_, _pty))| {
-        expr_in_subset(&a.expr, cx, locals)
-    })
+    args.iter()
+        .zip(sig.iter())
+        .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))
 }
 
 /// Method names a core/stdlib/builtin/special lowering intercepts *before* the
@@ -3129,14 +3197,19 @@ pub(crate) fn is_measurement_method_name(method: &str, nargs: usize) -> bool {
 pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
-        ("is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded", 0)
-        | ("or_else", 1)
+        (
+            "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded",
+            0
+        ) | ("or_else", 1)
     )
 }
 
 /// D-NETDEP1=A / D-HTTPLIB1=A: is this an HTTP type?
 pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
-    matches!(recv_type, Some("HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp"))
+    matches!(
+        recv_type,
+        Some("HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp")
+    )
 }
 
 /// D-NETDEP1=A / D-HTTPLIB1=A: is `method` valid for this HTTP type?
@@ -3154,15 +3227,32 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
 /// D-TIMEDEPTH1=A: is `method` valid for this civil-time type?
 pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
-        Some("Date") => matches!(method, "year" | "month" | "day" | "add_days" | "add_months" | "diff_days" | "weekday" | "day_of_year" | "to_string"),
-        Some("DateTime") => matches!(method, "hour" | "minute" | "second" | "to_timestamp" | "date" | "to_string"),
+        Some("Date") => matches!(
+            method,
+            "year"
+                | "month"
+                | "day"
+                | "add_days"
+                | "add_months"
+                | "diff_days"
+                | "weekday"
+                | "day_of_year"
+                | "to_string"
+        ),
+        Some("DateTime") => matches!(
+            method,
+            "hour" | "minute" | "second" | "to_timestamp" | "date" | "to_string"
+        ),
         _ => false,
     }
 }
 
 /// D-APPROX1=A: is this a sketch receiver type?
 pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
-    matches!(recv_type, Some("HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"))
+    matches!(
+        recv_type,
+        Some("HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler")
+    )
 }
 
 /// D-APPROX1=A: is `method` a valid method for this sketch type?
@@ -3235,7 +3325,9 @@ pub(crate) fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumeri
 /// c109 Phase 12: TIR-local copy of `conv_rust_target` (Source/Codegen/Expression.rs)
 /// — the Rust type, spelling, and integer `(signed, bits)` (or `None` for a float) a
 /// `to_*` width-conversion method targets. Kept in sync with the AST path.
-pub(crate) fn conv_rust_target_tir(method: &str) -> Option<(&'static str, &'static str, Option<(bool, u8)>)> {
+pub(crate) fn conv_rust_target_tir(
+    method: &str,
+) -> Option<(&'static str, &'static str, Option<(bool, u8)>)> {
     Some(match method {
         "to_i8" => ("i8", "I8", Some((true, 8))),
         "to_i16" => ("i16", "I16", Some((true, 16))),
@@ -3283,10 +3375,25 @@ pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
     nargs == 0
         && matches!(
             method,
-            "is_nan" | "is_infinite" | "is_finite"
-                | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
-                | "to_i8" | "to_i16" | "to_i32" | "to_i64" | "to_int" | "to_u8"
-                | "to_u16" | "to_u32" | "to_u64" | "to_f32" | "to_f64" | "to_float"
+            "is_nan"
+                | "is_infinite"
+                | "is_finite"
+                | "count_ones"
+                | "count_zeros"
+                | "leading_zeros"
+                | "trailing_zeros"
+                | "to_i8"
+                | "to_i16"
+                | "to_i32"
+                | "to_i64"
+                | "to_int"
+                | "to_u8"
+                | "to_u16"
+                | "to_u32"
+                | "to_u64"
+                | "to_f32"
+                | "to_f64"
+                | "to_float"
                 | "to_string"
         )
 }
@@ -3381,14 +3488,15 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         return true;
     }
     // D-PENDING1=B: `L.idle/loading/loaded/failed` → `JetLoadable`. NOT in `core_fixed_sig`.
-    if module == "core.async.loadable"
-        && matches!(method, "idle" | "loading" | "loaded" | "failed")
+    if module == "core.async.loadable" && matches!(method, "idle" | "loading" | "loaded" | "failed")
     {
         return true;
     }
     // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.
-    if matches!(module, "core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir")
-        && method == "new"
+    if matches!(
+        module,
+        "core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir"
+    ) && method == "new"
     {
         return true;
     }
@@ -3400,7 +3508,10 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     }
     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
     if matches!(module, "core.http.client" | "core.http.server")
-        && matches!(method, "get" | "post" | "request" | "mux" | "serve" | "response")
+        && matches!(
+            method,
+            "get" | "post" | "request" | "mux" | "serve" | "response"
+        )
     {
         return true;
     }
@@ -3427,9 +3538,7 @@ pub(crate) fn core_closure_call_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
-    let lambda_arg = |i: usize| {
-        matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals))
-    };
+    let lambda_arg = |i: usize| matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals));
     let no_labels = args.iter().all(|a| a.label.is_none());
     match (module, method) {
         ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
@@ -3677,7 +3786,10 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.async.loadable", "idle") | ("core.async.loadable", "loading") => {
             return Type::Apply {
                 name: "Loadable".to_string(),
-                args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+                args: vec![
+                    Type::Named("Unknown".to_string()),
+                    Type::Named("Unknown".to_string()),
+                ],
             }
         }
         ("core.async.loadable", "loaded") => {
@@ -3685,13 +3797,13 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             return Type::Apply {
                 name: "Loadable".to_string(),
                 args: vec![Type::Int, Type::Named("Unknown".to_string())], // sema refines T
-            }
+            };
         }
         ("core.async.loadable", "failed") => {
             return Type::Apply {
                 name: "Loadable".to_string(),
                 args: vec![Type::Named("Unknown".to_string()), Type::String], // sema refines E
-            }
+            };
         }
         // D-APPROX1=A: sketch constructors → opaque named types.
         ("core.sketch.hll", "new") => return Type::Named("HyperLogLog".to_string()),
@@ -3699,23 +3811,33 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.sketch.cms", "new") => return Type::Named("CountMinSketch".to_string()),
         ("core.sketch.reservoir", "new") => return Type::Named("ReservoirSampler".to_string()),
         // D-TIMEDEPTH1=A: civil-time constructors.
-        ("core.time.date", "new") | ("core.time.date", "today") => return Type::Named("Date".to_string()),
-        ("core.time.date", "parse") => return Type::Result {
-            ok: Box::new(Type::Named("Date".to_string())),
-            err: Box::new(Type::String),
-        },
-        ("core.time.datetime", "from_timestamp") | ("core.time.datetime", "now") => return Type::Named("DateTime".to_string()),
+        ("core.time.date", "new") | ("core.time.date", "today") => {
+            return Type::Named("Date".to_string())
+        }
+        ("core.time.date", "parse") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("Date".to_string())),
+                err: Box::new(Type::String),
+            }
+        }
+        ("core.time.datetime", "from_timestamp") | ("core.time.datetime", "now") => {
+            return Type::Named("DateTime".to_string())
+        }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
-        ("core.http.client", "get") | ("core.http.client", "post") => return Type::Result {
-            ok: Box::new(Type::Named("HttpClientResp".to_string())),
-            err: Box::new(Type::String),
-        },
+        ("core.http.client", "get") | ("core.http.client", "post") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("HttpClientResp".to_string())),
+                err: Box::new(Type::String),
+            }
+        }
         ("core.http.client", "request") => return Type::Named("HttpClientReq".to_string()),
         ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
-        ("core.http.server", "serve") => return Type::Result {
-            ok: Box::new(Type::Tuple(vec![])),
-            err: Box::new(Type::String),
-        },
+        ("core.http.server", "serve") => {
+            return Type::Result {
+                ok: Box::new(Type::Tuple(vec![])),
+                err: Box::new(Type::String),
+            }
+        }
         ("core.http.server", "response") => return Type::Named("HttpSrvResp".to_string()),
         _ => {}
     }
@@ -3727,4 +3849,3 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
 // ---------------------------------------------------------------------------
 // Lowering: AST -> TIR. This is where every fact is resolved ONCE.
 // ---------------------------------------------------------------------------
-

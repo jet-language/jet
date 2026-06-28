@@ -26,10 +26,8 @@
 //! field, a non-local receiver, a loop-carried position), the checker is **silent**
 //! rather than guessing (P1 — beginners never see a spurious error).
 
-use crate::AST::{
-    Call, ElseBranch, Expr, Func, IfStmt, Item, LValue, Stmt,
-};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{Call, ElseBranch, Expr, Func, IfStmt, Item, LValue, Stmt};
 use std::collections::{HashMap, HashSet};
 
 /// Program-wide typestate metadata, collected once before any body is walked.
@@ -95,7 +93,8 @@ impl StateTable {
                 }
                 // D-STATE-DECL: register the bounded state-set for this type.
                 Item::StateDecl(sd) => {
-                    self.declared.insert(sd.type_name.clone(), sd.states.clone());
+                    self.declared
+                        .insert(sd.type_name.clone(), sd.states.clone());
                 }
                 _ => {}
             }
@@ -108,8 +107,7 @@ impl StateTable {
     /// declared states with no outgoing `#Transition(S -> …)` (dead-end states).
     pub fn validate_declarations(&self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         for (type_name, decl_states) in &self.declared {
-            let state_names: HashSet<&str> =
-                decl_states.iter().map(|(n, _)| n.as_str()).collect();
+            let state_names: HashSet<&str> = decl_states.iter().map(|(n, _)| n.as_str()).collect();
 
             // Collect all method markers for this type.
             let mut outgoing: HashSet<String> = HashSet::new();
@@ -129,9 +127,7 @@ impl StateTable {
             // Walk all method markers on this type.
             for item in items {
                 let methods: Vec<&Func> = match item {
-                    Item::Impl(i) if i.type_name == *type_name => {
-                        i.methods.iter().collect()
-                    }
+                    Item::Impl(i) if i.type_name == *type_name => i.methods.iter().collect(),
                     Item::Struct(s) if s.name == *type_name => {
                         let mut ms: Vec<&Func> = s.methods.iter().collect();
                         for block in &s.trait_impls {
@@ -211,7 +207,11 @@ struct StateCtx<'a> {
 
 impl<'a> StateCtx<'a> {
     fn new(tbl: &'a StateTable) -> Self {
-        StateCtx { tbl, states: HashMap::new(), diags: Vec::new() }
+        StateCtx {
+            tbl,
+            states: HashMap::new(),
+            diags: Vec::new(),
+        }
     }
 
     /// If `init` is a constructor call to an entry transition (`Type.ctor()`),
@@ -219,7 +219,9 @@ impl<'a> StateCtx<'a> {
     fn entry_state_of(&self, init: &Expr) -> Option<String> {
         match init {
             // `Type.ctor(…)` parses as a MethodCall with receiver `Ident(Type)`.
-            Expr::MethodCall { receiver, method, .. } => {
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
                 if let Expr::Ident(type_name, _) = receiver.as_ref() {
                     let key = format!("{type_name}::{method}");
                     return self.tbl.entry_ctors.get(&key).cloned();
@@ -270,7 +272,9 @@ impl<'a> StateCtx<'a> {
                     }
                 }
             }
-            Stmt::Assign { target, value, op, .. } => {
+            Stmt::Assign {
+                target, value, op, ..
+            } => {
                 self.check_expr(value);
                 if op.is_none() {
                     if let LValue::Local { name, .. } = target {
@@ -304,7 +308,12 @@ impl<'a> StateCtx<'a> {
                 }
                 self.check_block(body);
             }
-            Stmt::Switch { subject, arms, else_body, .. } => {
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
                 self.check_expr(subject);
                 for a in arms {
                     self.check_expr(&a.cond);
@@ -325,7 +334,12 @@ impl<'a> StateCtx<'a> {
             | Stmt::Live { body, .. } => self.check_block(body),
             // D-CTMARKER1: comptime block erases; walk body conservatively.
             Stmt::ComptimeBlock { body, .. } => self.check_block(body),
-            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
                 self.check_expr(cond);
                 self.check_block(then_body);
                 if let Some(b) = else_body {
@@ -338,10 +352,8 @@ impl<'a> StateCtx<'a> {
                 }
                 self.check_block(body);
             }
-            Stmt::Break(_)
-            | Stmt::Continue(_)
-            | Stmt::BreakLabel(..)
-            | Stmt::ContinueLabel(..) => {}
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
+            }
         }
     }
 
@@ -371,7 +383,12 @@ impl<'a> StateCtx<'a> {
     /// tracked transition. Used to thread `r := r.confirm()` rebinding.
     fn result_state_of(&self, e: &Expr) -> Option<String> {
         match e {
-            Expr::MethodCall { receiver, method, recv_type, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                recv_type,
+                ..
+            } => {
                 let ty = recv_type.as_ref()?;
                 let key = format!("{ty}::{method}");
                 let (_, to) = self.tbl.transitions.get(&key)?;
@@ -400,13 +417,22 @@ impl<'a> StateCtx<'a> {
     /// (a transition call in expression-statement position advances the receiver).
     fn check_expr(&mut self, e: &Expr) {
         match e {
-            Expr::MethodCall { receiver, method, method_span, recv_type, args, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                method_span,
+                recv_type,
+                args,
+                ..
+            } => {
                 self.check_expr(receiver);
                 for a in args {
                     self.check_expr(&a.expr);
                 }
                 let Some(ty) = recv_type else { return };
-                let Expr::Ident(local, _) = receiver.as_ref() else { return };
+                let Expr::Ident(local, _) = receiver.as_ref() else {
+                    return;
+                };
                 let key = format!("{ty}::{method}");
                 let cur = self.states.get(local).cloned();
                 // A require-state guard: receiver must currently be in `req`.
@@ -431,7 +457,10 @@ impl<'a> StateCtx<'a> {
                     _ => None,
                 });
                 let Some(local) = first_local else { return };
-                let span = args.first().map(|a| a.expr.span()).unwrap_or(Span::new(0, 0));
+                let span = args
+                    .first()
+                    .map(|a| a.expr.span())
+                    .unwrap_or(Span::new(0, 0));
                 let cur = self.states.get(&local).cloned();
                 if let Some(req) = self.tbl.fn_requires.get(name) {
                     self.check_state(&local, cur.as_deref(), req, name, name, span);
@@ -467,7 +496,9 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(base);
                 self.check_expr(index);
             }
-            Expr::Slice { base, start, end, .. } => {
+            Expr::Slice {
+                base, start, end, ..
+            } => {
                 self.check_expr(base);
                 self.check_expr(start);
                 self.check_expr(end);
@@ -490,7 +521,14 @@ impl<'a> StateCtx<'a> {
                     self.check_expr(e);
                 }
             }),
-            Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+            Expr::If {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                ..
+            } => {
                 self.check_expr(cond);
                 self.check_block(then_body);
                 self.check_expr(then_value);
@@ -503,7 +541,9 @@ impl<'a> StateCtx<'a> {
             }
             Expr::PatternTest { subject, .. } => self.check_expr(subject),
             Expr::PtrFromAddr { addr, .. } => self.check_expr(addr),
-            Expr::OrFallback { value, fallback, .. } => {
+            Expr::OrFallback {
+                value, fallback, ..
+            } => {
                 self.check_expr(value);
                 match fallback {
                     crate::AST::OrFallback::Value(e) => self.check_expr(e),
@@ -539,8 +579,15 @@ impl<'a> StateCtx<'a> {
     ) {
         if let Some(cur) = cur {
             if cur != required {
-                self.diags
-                    .push(e0150(local, owner, op, required, cur, &self.transition_hint(owner, required), span));
+                self.diags.push(e0150(
+                    local,
+                    owner,
+                    op,
+                    required,
+                    cur,
+                    &self.transition_hint(owner, required),
+                    span,
+                ));
             }
         }
     }
@@ -653,7 +700,9 @@ pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> D
     let fix = if let Some(c) = candidates.first() {
         format!("did you mean `{c}`?  Check the `state {type_name} {{ … }}` block for valid names")
     } else {
-        format!("add `{state}` to the `state {type_name} {{ … }}` declaration, or correct the spelling")
+        format!(
+            "add `{state}` to the `state {type_name} {{ … }}` declaration, or correct the spelling"
+        )
     };
     Diagnostic::error(
         "E0151",
@@ -691,8 +740,12 @@ fn edit_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let (m, n) = (a.len(), b.len());
-    if m == 0 { return n.min(3); }
-    if n == 0 { return m.min(3); }
+    if m == 0 {
+        return n.min(3);
+    }
+    if n == 0 {
+        return m.min(3);
+    }
     let mut row: Vec<usize> = (0..=n).collect();
     for i in 1..=m {
         let mut prev = row[0];
@@ -702,7 +755,9 @@ fn edit_distance(a: &str, b: &str) -> usize {
             let next = (row[j] + 1).min(row[j - 1] + 1).min(prev + cost);
             prev = row[j];
             row[j] = next;
-            if next >= 3 { break; }
+            if next >= 3 {
+                break;
+            }
         }
     }
     row[n]

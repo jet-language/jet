@@ -29,7 +29,9 @@ pub fn hash_sidecar_path(cache_path: &std::path::Path) -> std::path::PathBuf {
 /// Read the stored hash from the sidecar, or `None` if absent / unreadable.
 pub fn read_stored_hash(cache_path: &std::path::Path) -> Option<String> {
     let sidecar = hash_sidecar_path(cache_path);
-    std::fs::read_to_string(sidecar).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(sidecar)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// Write a hash sidecar next to `cache_path`. Returns `Ok(())` on success.
@@ -88,10 +90,7 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
         ));
     }
 
-    let source = format!(
-        "#bindgen module c.{}.__bindgen__ {{\n{}}}\n",
-        lib, lines
-    );
+    let source = format!("#bindgen module c.{}.__bindgen__ {{\n{}}}\n", lib, lines);
     Ok(BindResult {
         source,
         bound,
@@ -304,7 +303,12 @@ fn split_param_type_and_name(raw: &str, idx: usize) -> (String, String) {
 /// Normalise a C type: collapse whitespace, drop qualifiers we ignore.
 fn normalize_type(c: &str) -> String {
     let mut toks: Vec<&str> = c.split_whitespace().collect();
-    toks.retain(|t| !matches!(*t, "const" | "volatile" | "register" | "restrict" | "extern"));
+    toks.retain(|t| {
+        !matches!(
+            *t,
+            "const" | "volatile" | "register" | "restrict" | "extern"
+        )
+    });
     toks.join(" ")
 }
 
@@ -328,13 +332,12 @@ fn map_type(c: &str) -> Option<String> {
         "bool" | "_Bool" => Some("Bool".to_string()),
         "float" | "double" | "long double" => Some("Float".to_string()),
         // Integer family (signedness/width all land on Jet's 64-bit `Int`).
-        "char" | "signed char" | "unsigned char" | "short" | "unsigned short"
-        | "short int" | "unsigned short int" | "int" | "unsigned" | "unsigned int"
-        | "signed" | "signed int" | "long" | "unsigned long" | "long int"
-        | "unsigned long int" | "long long" | "unsigned long long" | "long long int"
-        | "size_t" | "ssize_t" | "ptrdiff_t" | "intptr_t" | "uintptr_t"
-        | "int8_t" | "int16_t" | "int32_t" | "int64_t" | "uint8_t" | "uint16_t"
-        | "uint32_t" | "uint64_t" => Some("Int".to_string()),
+        "char" | "signed char" | "unsigned char" | "short" | "unsigned short" | "short int"
+        | "unsigned short int" | "int" | "unsigned" | "unsigned int" | "signed" | "signed int"
+        | "long" | "unsigned long" | "long int" | "unsigned long int" | "long long"
+        | "unsigned long long" | "long long int" | "size_t" | "ssize_t" | "ptrdiff_t"
+        | "intptr_t" | "uintptr_t" | "int8_t" | "int16_t" | "int32_t" | "int64_t" | "uint8_t"
+        | "uint16_t" | "uint32_t" | "uint64_t" => Some("Int".to_string()),
         _ => None,
     }
 }
@@ -342,7 +345,10 @@ fn map_type(c: &str) -> Option<String> {
 fn is_ident(s: &str) -> bool {
     let s = s.trim();
     !s.is_empty()
-        && s.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false)
+        && s.chars()
+            .next()
+            .map(|c| c.is_ascii_alphabetic() || c == '_')
+            .unwrap_or(false)
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -362,10 +368,16 @@ mod tests {
         "#;
         let r = generate(h, "jetc").unwrap();
         assert!(r.source.contains("#bindgen module c.jetc.__bindgen__ {"));
-        assert!(r.source.contains("fn jetc_add(a: Int, b: Int) -> Int = \"jetc_add\";"));
-        assert!(r.source.contains("fn scale(x: Float, k: Float) -> Float = \"scale\";"));
+        assert!(r
+            .source
+            .contains("fn jetc_add(a: Int, b: Int) -> Int = \"jetc_add\";"));
+        assert!(r
+            .source
+            .contains("fn scale(x: Float, k: Float) -> Float = \"scale\";"));
         assert!(r.source.contains("fn reset() = \"reset\";"));
-        assert!(r.source.contains("fn name_of(id: Int) -> String = \"name_of\";"));
+        assert!(r
+            .source
+            .contains("fn name_of(id: Int) -> String = \"name_of\";"));
         assert!(r.source.contains("fn is_ready() -> Bool = \"is_ready\";"));
         assert_eq!(r.bound.len(), 5);
         assert!(r.skipped.is_empty());
@@ -399,7 +411,9 @@ mod tests {
     #[test]
     fn unnamed_params_get_synthetic_names() {
         let r = generate("int f(int, double);", "m").unwrap();
-        assert!(r.source.contains("fn f(arg0: Int, arg1: Float) -> Int = \"f\";"));
+        assert!(r
+            .source
+            .contains("fn f(arg0: Int, arg1: Float) -> Int = \"f\";"));
     }
 
     // c43: U32/uint32_t boundary — C integers of all widths map to Jet `Int`.

@@ -1,10 +1,7 @@
 use super::*;
-use crate::AST::{
-    AccessConvention,
-    Expr, Type,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{AccessConvention, Expr, Type};
 
 impl<'a> Checker<'a> {
     /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
@@ -20,7 +17,11 @@ impl<'a> Checker<'a> {
         let Some(sig) = self.funcs.get(mangled).cloned() else {
             self.diags.push(Diagnostic::error(
                 "E0608",
-                format!("`{}` is not defined in module `{}`", &mangled[alias.len() + 2..], alias),
+                format!(
+                    "`{}` is not defined in module `{}`",
+                    &mangled[alias.len() + 2..],
+                    alias
+                ),
                 "check the module body for the function you're calling".to_string(),
                 "make sure the function name is spelled correctly".to_string(),
                 Some(alias_span),
@@ -57,7 +58,11 @@ impl<'a> Checker<'a> {
                     args.len()
                 ),
                 "every argument must match a parameter".to_string(),
-                format!("check the definition of `{}` in module `{}`", &mangled[alias.len() + 2..], alias),
+                format!(
+                    "check the definition of `{}` in module `{}`",
+                    &mangled[alias.len() + 2..],
+                    alias
+                ),
                 Some(span),
             ));
         }
@@ -273,7 +278,11 @@ impl<'a> Checker<'a> {
             if t != Type::Int {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!("`{}` needs an Int address, not {}", Syntax::MEM_FROM_ADDR, t.show()),
+                    format!(
+                        "`{}` needs an Int address, not {}",
+                        Syntax::MEM_FROM_ADDR,
+                        t.show()
+                    ),
                     "a pointer is built from a numeric machine address".to_string(),
                     "pass an Int, e.g. from `mem.address_of(x)`".to_string(),
                     Some(addr.span()),
@@ -290,9 +299,14 @@ impl<'a> Checker<'a> {
             format!("`{}` is part of the low-level tier", Syntax::TYPE_PTR),
             format!(
                 "naming `{}`, `{}`, or an allocator needs the discovery gate",
-                Syntax::TYPE_PTR, Syntax::MEM_VOLATILE_READ
+                Syntax::TYPE_PTR,
+                Syntax::MEM_VOLATILE_READ
             ),
-            format!("add `use {};` and call through `{}.…`", Syntax::CORE_MEM_MODULE, alias),
+            format!(
+                "add `use {};` and call through `{}.…`",
+                Syntax::CORE_MEM_MODULE,
+                alias
+            ),
             Some(span),
         )
     }
@@ -302,22 +316,27 @@ impl<'a> Checker<'a> {
     /// encodables qualify; a user type must derive `Encode`.
     fn is_encodable(&self, t: &Type) -> bool {
         match t {
-            Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
-            | Type::IntN { .. } | Type::Float32 => true,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::IntN { .. }
+            | Type::Float32 => true,
             Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_encodable(e),
             Type::FixedList { elem, .. } => self.is_encodable(elem),
             Type::Map { key, value } => matches!(**key, Type::String) && self.is_encodable(value),
-            Type::Named(n) => is_json_type_name(n) || self.trait_reg.implements_trait(n, crate::Generics::ENCODE),
+            Type::Named(n) => {
+                is_json_type_name(n) || self.trait_reg.implements_trait(n, crate::Generics::ENCODE)
+            }
             // D-SERDE9/10: a generic instantiation `Name<args>` is encodable when
             // `Name` derives Encode and every type arg that reaches the wire is
             // itself encodable. Phantom/skip-only params impose no obligation.
-            Type::Apply { name, args } => apply_serde_ok(
-                name,
-                args,
-                self.trait_reg,
-                crate::Generics::ENCODE,
-                &|t| self.is_encodable(t),
-            ),
+            Type::Apply { name, args } => {
+                apply_serde_ok(name, args, self.trait_reg, crate::Generics::ENCODE, &|t| {
+                    self.is_encodable(t)
+                })
+            }
             _ => false,
         }
     }
@@ -327,19 +346,22 @@ impl<'a> Checker<'a> {
     /// `decode`, not the typed path).
     fn is_decodable(&self, t: &Type) -> bool {
         match t {
-            Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
-            | Type::IntN { .. } | Type::Float32 => true,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::IntN { .. }
+            | Type::Float32 => true,
             Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
             Type::FixedList { elem, .. } => self.is_decodable(elem),
             Type::Map { key, value } => matches!(**key, Type::String) && self.is_decodable(value),
             Type::Named(n) => self.trait_reg.implements_trait(n, crate::Generics::DECODE),
-            Type::Apply { name, args } => apply_serde_ok(
-                name,
-                args,
-                self.trait_reg,
-                crate::Generics::DECODE,
-                &|t| self.is_decodable(t),
-            ),
+            Type::Apply { name, args } => {
+                apply_serde_ok(name, args, self.trait_reg, crate::Generics::DECODE, &|t| {
+                    self.is_decodable(t)
+                })
+            }
             _ => false,
         }
     }
@@ -418,7 +440,8 @@ impl<'a> Checker<'a> {
         // D-STDIN1=A / E3401: `pure fn` cannot read from stdin.
         if self.in_pure && self.det_suppress == 0 && is_impure_core(module, name) {
             let api = format!("{}.{}", module_short_name(module), name);
-            self.diags.push(e3401(&self.fn_name.clone(), &api, &[], span));
+            self.diags
+                .push(e3401(&self.fn_name.clone(), &api, &[], span));
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
@@ -430,7 +453,8 @@ impl<'a> Checker<'a> {
         // above, so this catches the remaining effect-carrying Core modules.)
         if self.in_pure && self.det_suppress == 0 && core_effect(module, name).is_some() {
             let api = format!("{}.{}", module_short_name(module), name);
-            self.diags.push(e3401(&self.fn_name.clone(), &api, &[], span));
+            self.diags
+                .push(e3401(&self.fn_name.clone(), &api, &[], span));
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
@@ -494,7 +518,11 @@ impl<'a> Checker<'a> {
                     None => {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`{}` needs a `Ptr<T>`, not {}", Syntax::MEM_VOLATILE_READ, t.show()),
+                            format!(
+                                "`{}` needs a `Ptr<T>`, not {}",
+                                Syntax::MEM_VOLATILE_READ,
+                                t.show()
+                            ),
                             "a volatile read reads through a typed pointer".to_string(),
                             "build a pointer first with `mem.Ptr<T>.from_addr(addr)`".to_string(),
                             Some(arg.expr.span()),
@@ -572,7 +600,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                 }
                 let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
-                    for a in args.iter_mut().skip(1) { self.infer(&mut a.expr); }
+                    for a in args.iter_mut().skip(1) {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 };
                 if !matches!(first, Type::Float | Type::Float32) {
@@ -716,7 +746,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         "`shuffle` edits its list in place".to_string(),
-                        "write access (`~`) is required; the list must be passed with `~`".to_string(),
+                        "write access (`~`) is required; the list must be passed with `~`"
+                            .to_string(),
                         "write `random.shuffle(~xs)`".to_string(),
                         Some(arg.span),
                     ));
@@ -853,16 +884,22 @@ impl<'a> Checker<'a> {
             // D-ROUTE1=A: jet.http.router() → HttpRouter.
             ("jet.http", "router") => {
                 if !args.is_empty() {
-                    self.diags.push(wrong_core_arity("router", 0, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("router", 0, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                 }
                 return Some(Type::Named("HttpRouter".to_string()));
             }
             // D-ROUTE1=A: http.parse(raw_string) → HttpRequest (parses HTTP/1.1 bytes).
             ("jet.http", "parse") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("parse", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("parse", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
@@ -871,8 +908,11 @@ impl<'a> Checker<'a> {
             // D-ROUTE1=A: http.dispatch(router, req) → HttpResponse.
             ("jet.http", "dispatch") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_core_arity("dispatch", 2, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("dispatch", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 let router_ty = self.infer(&mut args[0].expr);
@@ -896,9 +936,13 @@ impl<'a> Checker<'a> {
                         Some(other) => {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
-                                format!("`http.dispatch` needs an HttpRequest, not {}", other.show()),
+                                format!(
+                                    "`http.dispatch` needs an HttpRequest, not {}",
+                                    other.show()
+                                ),
                                 "parse the raw request with `http.parse(raw)`".to_string(),
-                                "write `http.dispatch(router, req)` where `req` is an HttpRequest".to_string(),
+                                "write `http.dispatch(router, req)` where `req` is an HttpRequest"
+                                    .to_string(),
                                 Some(arg.expr.span()),
                             ));
                         }
@@ -911,8 +955,11 @@ impl<'a> Checker<'a> {
             // handler: fn(HttpRequest) -> HttpResponse (lambda) or HttpRouter.
             ("jet.http", "serve") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_core_arity("serve", 2, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("serve", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
@@ -939,7 +986,8 @@ impl<'a> Checker<'a> {
             // guaranteed by Rust's reverse-declaration semantics.
             ("core.scope", "guard") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("guard", 1, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity("guard", 1, args.len(), span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -980,8 +1028,11 @@ impl<'a> Checker<'a> {
             // empty/ambiguous literal via `expected_type`.
             ("jet.reactive", "signal") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("signal", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("signal", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 // If the binding is annotated `Signal<T>`, push `T` as the expected
@@ -1008,15 +1059,22 @@ impl<'a> Checker<'a> {
             // (`.get()`) inside the body subscribes the derived to it.
             ("jet.reactive", "derived") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("derived", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("derived", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 let lam_ty = self.infer(&mut args[0].expr);
                 let elem = match &lam_ty {
                     Some(Type::Fn { params, ret, .. }) => {
                         if !params.is_empty() {
-                            self.diags.push(reactive_lambda_arity("derived", params.len(), args[0].expr.span()));
+                            self.diags.push(reactive_lambda_arity(
+                                "derived",
+                                params.len(),
+                                args[0].expr.span(),
+                            ));
                             return None;
                         }
                         match ret {
@@ -1028,7 +1086,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                     Some(other) => {
-                        self.diags.push(reactive_not_lambda("derived", other, args[0].expr.span()));
+                        self.diags
+                            .push(reactive_not_lambda("derived", other, args[0].expr.span()));
                         return None;
                     }
                     None => return None,
@@ -1046,20 +1105,28 @@ impl<'a> Checker<'a> {
             // unit-returning closure; the call itself yields nothing.
             ("jet.reactive", "effect") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("effect", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("effect", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 let lam_ty = self.infer(&mut args[0].expr);
                 match &lam_ty {
                     Some(Type::Fn { params, .. }) => {
                         if !params.is_empty() {
-                            self.diags.push(reactive_lambda_arity("effect", params.len(), args[0].expr.span()));
+                            self.diags.push(reactive_lambda_arity(
+                                "effect",
+                                params.len(),
+                                args[0].expr.span(),
+                            ));
                             return None;
                         }
                     }
                     Some(other) => {
-                        self.diags.push(reactive_not_lambda("effect", other, args[0].expr.span()));
+                        self.diags
+                            .push(reactive_not_lambda("effect", other, args[0].expr.span()));
                         return None;
                     }
                     None => return None,
@@ -1068,26 +1135,41 @@ impl<'a> Checker<'a> {
             }
             // D-PENDING1=B: Loadable<T,E> constructors — idle/loading/loaded/failed.
             ("core.async.loadable", "idle") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Apply {
                     name: "Loadable".to_string(),
-                    args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+                    args: vec![
+                        Type::Named("Unknown".to_string()),
+                        Type::Named("Unknown".to_string()),
+                    ],
                 });
             }
             ("core.async.loadable", "loading") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Apply {
                     name: "Loadable".to_string(),
-                    args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+                    args: vec![
+                        Type::Named("Unknown".to_string()),
+                        Type::Named("Unknown".to_string()),
+                    ],
                 });
             }
             ("core.async.loadable", "loaded") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("loaded", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("loaded", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
-                let val_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Named("Unknown".to_string()));
+                let val_ty = self
+                    .infer(&mut args[0].expr)
+                    .unwrap_or(Type::Named("Unknown".to_string()));
                 return Some(Type::Apply {
                     name: "Loadable".to_string(),
                     args: vec![val_ty, Type::Named("Unknown".to_string())],
@@ -1095,11 +1177,16 @@ impl<'a> Checker<'a> {
             }
             ("core.async.loadable", "failed") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("failed", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("failed", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
-                let err_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Named("Unknown".to_string()));
+                let err_ty = self
+                    .infer(&mut args[0].expr)
+                    .unwrap_or(Type::Named("Unknown".to_string()));
                 return Some(Type::Apply {
                     name: "Loadable".to_string(),
                     args: vec![Type::Named("Unknown".to_string()), err_ty],
@@ -1108,8 +1195,11 @@ impl<'a> Checker<'a> {
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
             ("core.http.client", "get") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("get", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("get", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("get", 0, &Type::String, &mut args[0]);
@@ -1120,8 +1210,11 @@ impl<'a> Checker<'a> {
             }
             ("core.http.client", "post") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_core_arity("post", 2, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("post", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("post", 0, &Type::String, &mut args[0]);
@@ -1133,8 +1226,11 @@ impl<'a> Checker<'a> {
             }
             ("core.http.client", "request") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_core_arity("request", 2, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("request", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("request", 0, &Type::String, &mut args[0]);
@@ -1142,13 +1238,18 @@ impl<'a> Checker<'a> {
                 return Some(Type::Named("HttpClientReq".to_string()));
             }
             ("core.http.server", "mux") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Named("HttpMux".to_string()));
             }
             ("core.http.server", "serve") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_core_arity("serve", 2, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("serve", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
@@ -1161,8 +1262,11 @@ impl<'a> Checker<'a> {
             }
             ("core.http.server", "response") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_core_arity("response", 2, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("response", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("response", 0, &Type::Int, &mut args[0]);
@@ -1172,8 +1276,11 @@ impl<'a> Checker<'a> {
             // D-TIMEDEPTH1=A: civil-time constructors.
             ("core.time.date", "new") => {
                 if args.len() != 3 {
-                    self.diags.push(wrong_core_arity("new", 3, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("new", 3, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
@@ -1182,13 +1289,18 @@ impl<'a> Checker<'a> {
                 return Some(Type::Named("Date".to_string()));
             }
             ("core.time.date", "today") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Named("Date".to_string()));
             }
             ("core.time.date", "parse") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("parse", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("parse", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
@@ -1199,34 +1311,48 @@ impl<'a> Checker<'a> {
             }
             ("core.time.datetime", "from_timestamp") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("from_timestamp", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("from_timestamp", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("from_timestamp", 0, &Type::Int, &mut args[0]);
                 return Some(Type::Named("DateTime".to_string()));
             }
             ("core.time.datetime", "now") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Named("DateTime".to_string()));
             }
             // D-APPROX1=A: sketch constructors.
             ("core.sketch.hll", "new") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Named("HyperLogLog".to_string()));
             }
             ("core.sketch.tdigest", "new") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Named("TDigest".to_string()));
             }
             ("core.sketch.cms", "new") => {
-                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
                 return Some(Type::Named("CountMinSketch".to_string()));
             }
             ("core.sketch.reservoir", "new") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity("new", 1, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("new", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
@@ -1235,8 +1361,11 @@ impl<'a> Checker<'a> {
             // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
             ("core.science.measurement", "from") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_core_arity("from", 2, args.len(), span));
-                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    self.diags
+                        .push(wrong_core_arity("from", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                     return None;
                 }
                 self.expect_core_arg("from", 0, &Type::Float, &mut args[0]);
@@ -1265,7 +1394,11 @@ impl<'a> Checker<'a> {
             if *conv == AccessConvention::Write && arg.convention != AccessConvention::Write {
                 self.diags.push(Diagnostic::error(
                     "E0202",
-                    format!("argument {} to `{}` requires write access (`~`)", i + 1, name),
+                    format!(
+                        "argument {} to `{}` requires write access (`~`)",
+                        i + 1,
+                        name
+                    ),
                     "this standard library call edits that value in place".to_string(),
                     format!("write `{}value` for this argument", Syntax::SIGIL_MUTATE),
                     Some(arg.span),
@@ -1309,7 +1442,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0304",
                     format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
-                    "the dynamic `Data` value exposes Null/Bool/Int/Float/Text/Array/Object".to_string(),
+                    "the dynamic `Data` value exposes Null/Bool/Int/Float/Text/Array/Object"
+                        .to_string(),
                     fix,
                     Some(span),
                 ));
@@ -1414,7 +1548,10 @@ impl<'a> Checker<'a> {
                                 name
                             ),
                             format!("`{}` stores its own copy of this value", call_name),
-                            format!("write `{} .clone()` to copy explicitly and silence this warning", name),
+                            format!(
+                                "write `{} .clone()` to copy explicitly and silence this warning",
+                                name
+                            ),
                             Some(ispan),
                         ));
                     }
@@ -1422,7 +1559,6 @@ impl<'a> Checker<'a> {
             }
         }
     }
-
 }
 
 pub(crate) fn unit_ty() -> Type {
@@ -1430,11 +1566,20 @@ pub(crate) fn unit_ty() -> Type {
 }
 
 pub(crate) fn u8_ty() -> Type {
-    Type::IntN { signed: false, bits: 8 }
+    Type::IntN {
+        signed: false,
+        bits: 8,
+    }
 }
 
 pub(crate) fn is_u8_ty(ty: &Type) -> bool {
-    matches!(ty, Type::IntN { signed: false, bits: 8 })
+    matches!(
+        ty,
+        Type::IntN {
+            signed: false,
+            bits: 8
+        }
+    )
 }
 
 pub(crate) fn json_ty() -> Type {
@@ -1576,8 +1721,8 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
 pub(crate) fn core_key_pattern_types(variant: &str) -> Option<Vec<Type>> {
     match variant {
         // Unit variants — no payload.
-        "Enter" | "Escape" | "Backspace" | "Tab" | "Delete"
-        | "Up" | "Down" | "Left" | "Right" | "Unknown" => Some(Vec::new()),
+        "Enter" | "Escape" | "Backspace" | "Tab" | "Delete" | "Up" | "Down" | "Left" | "Right"
+        | "Unknown" => Some(Vec::new()),
         // `Key.Char(c)` — one Char payload.
         "Char" => Some(vec![Type::Char]),
         // `Key.Ctrl(c)` — one Char payload (the control character).
@@ -1591,21 +1736,40 @@ pub(crate) fn core_key_pattern_types(variant: &str) -> Option<Vec<Type>> {
 /// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.
 /// Used by `resolve_enum_variants_cloned` so `Key.Char(c)` / `Key.Enter` literals
 /// pass type-checking without `Key` being in the user type registry.
-pub(crate) fn core_key_variants() -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
-    use crate::AST::VariantPayload;
+pub(crate) fn core_key_variants(
+) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut m = std::collections::HashMap::new();
     // Unit variants.
-    for name in &["Enter", "Escape", "Backspace", "Tab", "Delete",
-                  "Up", "Down", "Left", "Right", "Unknown"]
-    {
+    for name in &[
+        "Enter",
+        "Escape",
+        "Backspace",
+        "Tab",
+        "Delete",
+        "Up",
+        "Down",
+        "Left",
+        "Right",
+        "Unknown",
+    ] {
         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
     }
     // Single-payload variants.
-    m.insert("Char".to_string(),  (zero, VariantPayload::Single(Type::Char,  zero)));
-    m.insert("Ctrl".to_string(),  (zero, VariantPayload::Single(Type::Char,  zero)));
-    m.insert("F".to_string(),     (zero, VariantPayload::Single(Type::Int,   zero)));
+    m.insert(
+        "Char".to_string(),
+        (zero, VariantPayload::Single(Type::Char, zero)),
+    );
+    m.insert(
+        "Ctrl".to_string(),
+        (zero, VariantPayload::Single(Type::Char, zero)),
+    );
+    m.insert(
+        "F".to_string(),
+        (zero, VariantPayload::Single(Type::Int, zero)),
+    );
     m
 }
 
@@ -1647,9 +1811,7 @@ pub fn file_handle_method_return(
         },
         "FileWriter" => match method {
             // `.write_line(text)` — writes a line followed by a newline.
-            "write_line" if n_args == 1 => {
-                Some(Some(result_ty(unit.clone(), io.clone())))
-            }
+            "write_line" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
             // `.flush()` — ensure buffered bytes reach disk.
             "flush" if n_args == 0 => Some(Some(result_ty(unit, io))),
             // Wrong direction: reading from a writer.
@@ -1682,7 +1844,10 @@ pub fn file_handle_method_return(
 /// Returns `Some(fields)` when the named type is a prelude struct users can construct.
 pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
     let str_ty = Type::String;
-    let map_ty = Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
+    let map_ty = Type::Map {
+        key: Box::new(Type::String),
+        value: Box::new(Type::String),
+    };
     match type_name {
         "HttpResponse" => Some(vec![
             ("status".to_string(), str_ty.clone()),
@@ -1933,9 +2098,9 @@ pub fn loadable_method_return(
     };
     match method {
         "is_loading" => Some(Some(Type::Bool)),
-        "is_loaded"  => Some(Some(Type::Bool)),
-        "is_failed"  => Some(Some(Type::Bool)),
-        "is_idle"    => Some(Some(Type::Bool)),
+        "is_loaded" => Some(Some(Type::Bool)),
+        "is_failed" => Some(Some(Type::Bool)),
+        "is_idle" => Some(Some(Type::Bool)),
         // loaded() → T? — returns the value if in Loaded state, null otherwise.
         "loaded" => Some(Some(Type::Option(Box::new(val_ty)))),
         // or_else(default: T) → T
@@ -1945,7 +2110,11 @@ pub fn loadable_method_return(
 }
 
 /// D-NETDEP1=A / D-HTTPLIB1=A: method return types for HTTP types.
-pub fn http_type_method_return(ty: &Type, method: &str, _args: &[crate::AST::CallArg]) -> Option<Option<Type>> {
+pub fn http_type_method_return(
+    ty: &Type,
+    method: &str,
+    _args: &[crate::AST::CallArg],
+) -> Option<Option<Type>> {
     let mk = |n: &str| Some(Some(Type::Named(n.to_string())));
     let mk_str = || Some(Some(Type::String));
     let mk_int = || Some(Some(Type::Int));
@@ -1983,11 +2152,17 @@ pub fn http_type_method_return(ty: &Type, method: &str, _args: &[crate::AST::Cal
 }
 
 /// D-TIMEDEPTH1=A: method return types for Date/DateTime.
-pub fn civil_time_method_return(ty: &Type, method: &str, args: &[crate::AST::CallArg]) -> Option<Option<Type>> {
+pub fn civil_time_method_return(
+    ty: &Type,
+    method: &str,
+    args: &[crate::AST::CallArg],
+) -> Option<Option<Type>> {
     let _ = args;
     match ty {
         Type::Named(n) if n == "Date" => match method {
-            "year" | "month" | "day" | "diff_days" | "weekday" | "day_of_year" => Some(Some(Type::Int)),
+            "year" | "month" | "day" | "diff_days" | "weekday" | "day_of_year" => {
+                Some(Some(Type::Int))
+            }
             "add_days" | "add_months" => Some(Some(Type::Named("Date".to_string()))),
             "to_string" => Some(Some(Type::String)),
             _ => None,
@@ -2024,7 +2199,7 @@ pub fn sketch_method_return(
 ) -> Option<Option<Type>> {
     let name = sketch_type_name(ty)?;
     match (name, method) {
-        ("HyperLogLog", "add") => Some(None),   // void
+        ("HyperLogLog", "add") => Some(None), // void
         ("HyperLogLog", "count") => Some(Some(Type::Int)),
         ("TDigest", "add") => Some(None),
         ("TDigest", "quantile") => Some(Some(Type::Float)),
@@ -2048,13 +2223,13 @@ pub fn path_method_return(
     }
     let path = || Type::Named("Path".to_string());
     match method {
-        "join"         => Some(Some(path())),
-        "parent"       => Some(Some(Type::Option(Box::new(path())))),
-        "extension"    => Some(Some(Type::Option(Box::new(Type::String)))),
-        "stem"         => Some(Some(Type::Option(Box::new(Type::String)))),
-        "to_string"    => Some(Some(Type::String)),
+        "join" => Some(Some(path())),
+        "parent" => Some(Some(Type::Option(Box::new(path())))),
+        "extension" => Some(Some(Type::Option(Box::new(Type::String)))),
+        "stem" => Some(Some(Type::Option(Box::new(Type::String)))),
+        "to_string" => Some(Some(Type::String)),
         "write_atomic" => Some(Some(result_ty(unit_ty(), Type::String))),
-        "walk"         => Some(Some(Type::List(Box::new(path())))),
+        "walk" => Some(Some(Type::List(Box::new(path())))),
         _ => None,
     }
 }
@@ -2090,7 +2265,10 @@ pub(crate) fn alloc_method_return(
                     "E0103",
                     format!("`{}.new` takes at most one optional argument", type_name),
                     "the only optional argument is `capacity:` / `slots:` / `size:`".to_string(),
-                    format!("write `mem.{}.new()` or `mem.{}.new(capacity: N)`", type_name, type_name),
+                    format!(
+                        "write `mem.{}.new()` or `mem.{}.new(capacity: N)`",
+                        type_name, type_name
+                    ),
                     Some(span),
                 ));
             }
@@ -2143,10 +2321,7 @@ pub(crate) fn alloc_method_return(
             diags.push(Diagnostic::error(
                 "E0102",
                 format!("`{}` has no method `{}`", type_name, method),
-                format!(
-                    "`{}` supports: `new`, `alloc`, `reset`, `free`",
-                    type_name
-                ),
+                format!("`{}` supports: `new`, `alloc`, `reset`, `free`", type_name),
                 format!("check the method name — valid methods are `alloc`, `reset`, `free`"),
                 Some(span),
             ));
@@ -2162,9 +2337,7 @@ pub(crate) fn e3104(alloc_name: &str, method: &str, span: Span) -> Diagnostic {
         "E3104",
         format!(
             "`{}` was already {}; this value lives in `{}` which is gone",
-            alloc_name,
-            method,
-            alloc_name
+            alloc_name, method, alloc_name
         ),
         format!(
             "calling `{}.{}` invalidated all values allocated in `{}`",
@@ -2212,8 +2385,7 @@ pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3101",
         format!("`{}` can only run inside an `#Unsafe` block", op),
-        "this operation can violate memory safety, so it must sit in an audited region"
-            .to_string(),
+        "this operation can violate memory safety, so it must sit in an audited region".to_string(),
         format!(
             "wrap it: #{}(\"why this is safe\") {{ … }}",
             Syntax::KW_UNSAFE
@@ -2290,7 +2462,10 @@ pub fn core_fixed_sig(
         // D-LSDIR1=A: returns [DirEntry] ({name, path, is_dir}) — full path + type in one step.
         ("core.fs", "list_dir") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::List(Box::new(Type::Named("DirEntry".to_string()))), io_error_ty())),
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("DirEntry".to_string()))),
+                io_error_ty(),
+            )),
         )),
         ("core.fs", "copy" | "rename") => Some((
             vec![(read, Type::String), (read, Type::String)],
@@ -2317,7 +2492,9 @@ pub fn core_fixed_sig(
                 io_error_ty(),
             )),
         )),
-        ("core.math", "sqrt" | "floor" | "ceil") => Some((vec![(read, float.clone())], Some(float))),
+        ("core.math", "sqrt" | "floor" | "ceil") => {
+            Some((vec![(read, float.clone())], Some(float)))
+        }
         ("core.math", "pow") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
@@ -2332,9 +2509,10 @@ pub fn core_fixed_sig(
         // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
         // ambient `random.int(…)` stays E3403.
-        ("core.random", "rng") => {
-            Some((vec![(read, Type::Int)], Some(Type::Named(crate::Syntax::RNG_TYPE.to_string()))))
-        }
+        ("core.random", "rng") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named(crate::Syntax::RNG_TYPE.to_string())),
+        )),
         ("core.time", "now") => Some((vec![], Some(Type::Int))),
         ("core.time", "sleep") => Some((vec![(read, Type::Int)], None)),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
@@ -2342,15 +2520,17 @@ pub fn core_fixed_sig(
         // reproducible `Clock` from a caller-supplied start instant (a pure Int, ms);
         // a `#Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
         // while the ambient `time.now()` stays E3403.
-        ("core.time", "clock") => {
-            Some((vec![(read, Type::Int)], Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))))
-        }
+        ("core.time", "clock") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())),
+        )),
         // D-DET-CAPAPI: `time.ms(n)` / `time.secs(n)` mint a deterministic `Duration`
         // value (pure — no ambient effect, like `time.clock`). The clock advances by
         // one with `clock.wait(d)`; read it back with `duration.millis()`.
-        ("core.time", "ms" | "secs") => {
-            Some((vec![(read, Type::Int)], Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))))
-        }
+        ("core.time", "ms" | "secs") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())),
+        )),
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
         ("core.encoding.json", "parse") => Some((
@@ -2373,7 +2553,10 @@ pub fn core_fixed_sig(
             )),
         )),
         ("core.encoding.csv", "to_string") => Some((
-            vec![(read, Type::List(Box::new(Type::List(Box::new(Type::String)))))],
+            vec![(
+                read,
+                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+            )],
             Some(Type::String),
         )),
         // D-ENC-DYN1=A+ (c152): TOML is a full adapter over the rich `Data` value —
@@ -2382,13 +2565,17 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), json_error_ty())),
         )),
-        ("core.encoding.toml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
+        ("core.encoding.toml", "to_string") => {
+            Some((vec![(read, json.clone())], Some(Type::String)))
+        }
         // D-ENC-YAML1 = A (c152): YAML is a full adapter over the rich `Data` value.
         ("core.encoding.yaml", "parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), json_error_ty())),
         )),
-        ("core.encoding.yaml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
+        ("core.encoding.yaml", "to_string") => {
+            Some((vec![(read, json.clone())], Some(Type::String)))
+        }
         // E2-M7: streaming file handles (D-IO2, files.open / files.create).
         ("core.files", "open" | "append") => Some((
             vec![(read, string.clone())],
@@ -2403,10 +2590,9 @@ pub fn core_fixed_sig(
             vec![(read, string.clone()), (read, string.clone())],
             Some(string),
         )),
-        ("core.path", "parent" | "extension" | "normalize") => Some((
-            vec![(read, Type::String)],
-            Some(Type::String),
-        )),
+        ("core.path", "parent" | "extension" | "normalize") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
         // jet.log: structured JSON logging to stderr (E2-M12, D-OBS3).
         ("jet.log", "info" | "warn" | "error" | "debug") => Some((vec![(read, string)], None)),
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
@@ -2421,10 +2607,7 @@ pub fn core_fixed_sig(
             Some(Type::String),
         )),
         // jet.crypto: vetted hash functions (D-LR3).
-        ("jet.crypto", "sha256") => Some((
-            vec![(read, Type::String)],
-            Some(Type::String),
-        )),
+        ("jet.crypto", "sha256") => Some((vec![(read, Type::String)], Some(Type::String))),
         ("jet.crypto", "sha256_bytes") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
@@ -2432,23 +2615,41 @@ pub fn core_fixed_sig(
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
         ("core.net", "tcp_listen") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("TcpListener".to_string()), Type::String)),
+            Some(result_ty(
+                Type::Named("TcpListener".to_string()),
+                Type::String,
+            )),
         )),
         ("core.net", "tcp_accept") => Some((
-            vec![(AccessConvention::Read, Type::Named("TcpListener".to_string()))],
-            Some(result_ty(Type::Named("TcpStream".to_string()), Type::String)),
+            vec![(
+                AccessConvention::Read,
+                Type::Named("TcpListener".to_string()),
+            )],
+            Some(result_ty(
+                Type::Named("TcpStream".to_string()),
+                Type::String,
+            )),
         )),
         ("core.net", "tcp_connect") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("TcpStream".to_string()), Type::String)),
+            Some(result_ty(
+                Type::Named("TcpStream".to_string()),
+                Type::String,
+            )),
         )),
         ("core.net", "tcp_read") => Some((
-            vec![(AccessConvention::Write, Type::Named("TcpStream".to_string()))],
+            vec![(
+                AccessConvention::Write,
+                Type::Named("TcpStream".to_string()),
+            )],
             Some(result_ty(Type::String, Type::String)),
         )),
         ("core.net", "tcp_write") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::String),
             ],
             Some(result_ty(unit_ty(), Type::String)),
@@ -2459,7 +2660,10 @@ pub fn core_fixed_sig(
         )),
         ("core.net", "set_timeout") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::Int),
             ],
             None,
@@ -2477,12 +2681,18 @@ pub fn core_fixed_sig(
         // GET / HEAD / DELETE requests (no body sent).
         ("jet.http", "get") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("HttpResponse".to_string()), Type::String)),
+            Some(result_ty(
+                Type::Named("HttpResponse".to_string()),
+                Type::String,
+            )),
         )),
         // POST / PUT / PATCH requests (body sent).
         ("jet.http", "post") => Some((
             vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::Named("HttpResponse".to_string()), Type::String)),
+            Some(result_ty(
+                Type::Named("HttpResponse".to_string()),
+                Type::String,
+            )),
         )),
         // serve blocks until the listener is closed; handler is called per request.
         // The handler type is resolved at the call site (lambda / fn pointer).
@@ -2511,13 +2721,14 @@ pub fn core_fixed_sig(
         )),
         ("jet.regex", "find_all" | "split") => Some((
             vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(
-                Type::List(Box::new(Type::String)),
-                Type::String,
-            )),
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
         )),
         ("jet.regex", "replace" | "replace_all") => Some((
-            vec![(read, Type::String), (read, Type::String), (read, Type::String)],
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+            ],
             Some(result_ty(Type::String, Type::String)),
         )),
         // D-DEP-ARCHIVE1=A: jet.archive — gzip compress/decompress via the `flate2` crate FFI bridge.
@@ -2565,45 +2776,67 @@ pub fn core_fixed_sig(
         // open/open_memory return a u64 handle (0 = error).
         ("jet.db", "open") => Some((
             vec![(read, Type::String)],
-            Some(Type::IntN { signed: false, bits: 64 }),
+            Some(Type::IntN {
+                signed: false,
+                bits: 64,
+            }),
         )),
         ("jet.db", "open_memory") => Some((
             vec![],
-            Some(Type::IntN { signed: false, bits: 64 }),
+            Some(Type::IntN {
+                signed: false,
+                bits: 64,
+            }),
         )),
         // close/exec/query_json take the handle by value (u64 is a scalar).
         ("jet.db", "close") => Some((
-            vec![(read, Type::IntN { signed: false, bits: 64 })],
+            vec![(
+                read,
+                Type::IntN {
+                    signed: false,
+                    bits: 64,
+                },
+            )],
             Some(Type::Bool),
         )),
         ("jet.db", "exec") => Some((
             vec![
-                (read, Type::IntN { signed: false, bits: 64 }),
+                (
+                    read,
+                    Type::IntN {
+                        signed: false,
+                        bits: 64,
+                    },
+                ),
                 (read, Type::String),
             ],
             Some(Type::Bool),
         )),
         ("jet.db", "query_json") => Some((
             vec![
-                (read, Type::IntN { signed: false, bits: 64 }),
+                (
+                    read,
+                    Type::IntN {
+                        signed: false,
+                        bits: 64,
+                    },
+                ),
                 (read, Type::String),
             ],
             Some(Type::String),
         )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
         // returns `[Byte] ? String` (invalid input → Err).
-        ("core.encoding.hex", "encode") => Some((
-            vec![(read, list_u8.clone())],
-            Some(Type::String),
-        )),
+        ("core.encoding.hex", "encode") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
         ("core.encoding.hex", "decode") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
         )),
-        ("core.encoding.base64", "encode") => Some((
-            vec![(read, list_u8.clone())],
-            Some(Type::String),
-        )),
+        ("core.encoding.base64", "encode") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
         ("core.encoding.base64", "decode") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
@@ -2682,8 +2915,12 @@ pub(crate) fn args_spec_method_return(
         ("positional", _) => {
             diags.push(Diagnostic::error(
                 "E1303",
-                format!("`positional` expects 2 arguments (name, help), got {}", n_args),
-                "`ArgsSpec.positional(name, help)` registers a required positional argument".to_string(),
+                format!(
+                    "`positional` expects 2 arguments (name, help), got {}",
+                    n_args
+                ),
+                "`ArgsSpec.positional(name, help)` registers a required positional argument"
+                    .to_string(),
                 "pass exactly two strings: the positional name and a help description".to_string(),
                 Some(span),
             ));
@@ -2693,7 +2930,8 @@ pub(crate) fn args_spec_method_return(
             diags.push(Diagnostic::error(
                 "E1304",
                 format!("`parse` expects 1 argument (argv), got {}", n_args),
-                "`ArgsSpec.parse(argv)` parses a `[String]` (from `io.args()`) against the spec".to_string(),
+                "`ArgsSpec.parse(argv)` parses a `[String]` (from `io.args()`) against the spec"
+                    .to_string(),
                 "pass exactly one argument: the argv list, e.g. `io.args()`".to_string(),
                 Some(span),
             ));
@@ -2720,7 +2958,10 @@ pub(crate) fn parsed_args_method_return(
         ("flag", _) => {
             diags.push(Diagnostic::error(
                 "E1301",
-                format!("`ParsedArgs.flag` expects 1 argument (flag name), got {}", n_args),
+                format!(
+                    "`ParsedArgs.flag` expects 1 argument (flag name), got {}",
+                    n_args
+                ),
                 "`parsed.flag(\"verbose\")` returns `true` when `--verbose` was passed".to_string(),
                 "pass exactly one string: the flag name (without leading `--`)".to_string(),
                 Some(span),
@@ -2730,8 +2971,12 @@ pub(crate) fn parsed_args_method_return(
         ("option", _) => {
             diags.push(Diagnostic::error(
                 "E1302",
-                format!("`ParsedArgs.option` expects 1 argument (option name), got {}", n_args),
-                "`parsed.option(\"output\")` returns the value of `--output VALUE`, or `null`".to_string(),
+                format!(
+                    "`ParsedArgs.option` expects 1 argument (option name), got {}",
+                    n_args
+                ),
+                "`parsed.option(\"output\")` returns the value of `--output VALUE`, or `null`"
+                    .to_string(),
                 "pass exactly one string: the option name (without leading `--`)".to_string(),
                 Some(span),
             ));
@@ -2740,8 +2985,12 @@ pub(crate) fn parsed_args_method_return(
         ("positional", _) => {
             diags.push(Diagnostic::error(
                 "E1303",
-                format!("`ParsedArgs.positional` expects 1 argument (index), got {}", n_args),
-                "`parsed.positional(0)` returns the first positional argument, or `null`".to_string(),
+                format!(
+                    "`ParsedArgs.positional` expects 1 argument (index), got {}",
+                    n_args
+                ),
+                "`parsed.positional(0)` returns the first positional argument, or `null`"
+                    .to_string(),
                 "pass exactly one Int: the zero-based positional argument index".to_string(),
                 Some(span),
             ));
@@ -2791,8 +3040,16 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.hex" => &["encode", "decode"],
         "core.encoding.base64" => &["encode", "decode"],
         "core.uuid" => &["v4", "v7"],
-        "core.mem" => &["Ptr", "from_addr", "volatile_read", "address_of",
-                        "Arena", "Bump", "Pool", "Fixed"],
+        "core.mem" => &[
+            "Ptr",
+            "from_addr",
+            "volatile_read",
+            "address_of",
+            "Arena",
+            "Bump",
+            "Pool",
+            "Fixed",
+        ],
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.tasks" => &["spawn", "channel"],
@@ -2807,25 +3064,49 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core" => &[],
         // D-CORENS1: ring packages — `core.*` is the canonical user-facing name;
         // `jet.*` is the legacy / internal dispatch key. Both spellings are accepted.
-        "core.log" | "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id", "setup"],
+        "core.log" | "jet.log" => &[
+            "info",
+            "warn",
+            "error",
+            "debug",
+            "set_level",
+            "set_trace_id",
+            "setup",
+        ],
         "jet.time" => &["now", "format"],
         "core.crypto" | "jet.crypto" => &["sha256", "sha256_bytes"],
         // E2-M10: networking modules.
         "core.net" => &[
-            "tcp_listen", "tcp_accept", "tcp_connect",
-            "tcp_read", "tcp_write", "tcp_local_addr", "tcp_peer_addr", "set_timeout",
+            "tcp_listen",
+            "tcp_accept",
+            "tcp_connect",
+            "tcp_read",
+            "tcp_write",
+            "tcp_local_addr",
+            "tcp_peer_addr",
+            "set_timeout",
             "tcp_reply",
         ],
         "core.http" | "jet.http" => &["get", "post", "serve"],
         // D-REGEX1: linear-time regex ring package.
         "core.regex" | "jet.regex" => &[
-            "is_match", "match", "find", "find_all", "replace", "replace_all", "split",
+            "is_match",
+            "match",
+            "find",
+            "find_all",
+            "replace",
+            "replace_all",
+            "split",
         ],
         // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip + tar.
         "core.archive" | "jet.archive" => &[
-            "gzip_compress", "gzip_decompress",
-            "zip_compress", "zip_decompress",
-            "tar_add", "tar_get", "tar_names_json",
+            "gzip_compress",
+            "gzip_decompress",
+            "zip_compress",
+            "zip_decompress",
+            "tar_add",
+            "tar_get",
+            "tar_names_json",
         ],
         // D-DEP-DB1: SQLite ring package.
         "core.db" | "jet.db" => &["open", "open_memory", "close", "exec", "query_json"],
@@ -2984,7 +3265,9 @@ fn apply_serde_ok(
     }
     match reg.serde_wire_params.get(name) {
         // Local generic Codable type: only the wire-reaching args must be codable.
-        Some(idxs) => idxs.iter().all(|&i| args.get(i).map_or(true, |t| elem_ok(t))),
+        Some(idxs) => idxs
+            .iter()
+            .all(|&i| args.get(i).map_or(true, |t| elem_ok(t))),
         // No recorded wire params (imported/non-generic): trust every arg is fine
         // only if each is codable — be conservative and check them all.
         None => args.iter().all(|t| elem_ok(t)),
@@ -2993,8 +3276,13 @@ fn apply_serde_ok(
 
 fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     match ty {
-        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
-        | Type::IntN { .. } | Type::Float32 => true,
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => true,
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
         Type::Map { key, value } => matches!(**key, Type::String) && is_encodable_ty(value, reg),
@@ -3015,8 +3303,13 @@ fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
 
 fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     match ty {
-        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
-        | Type::IntN { .. } | Type::Float32 => true,
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => true,
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
         Type::Map { key, value } => matches!(**key, Type::String) && is_decodable_ty(value, reg),
@@ -3048,7 +3341,10 @@ fn marker_is_string_literal(m: &crate::AST::Marker) -> bool {
 /// (E2407–E2412). Runs after the trait registry is built so field types resolve. This
 /// keeps generated code rustc-clean (I2): a field with no wire form is caught here, not
 /// by rustc on the emitted `impl`.
-pub(crate) fn validate_serde_items(items: &[crate::AST::Item], reg: &TraitRegistry) -> Vec<Diagnostic> {
+pub(crate) fn validate_serde_items(
+    items: &[crate::AST::Item],
+    reg: &TraitRegistry,
+) -> Vec<Diagnostic> {
     use crate::AST::Item;
     let mut out = Vec::new();
     for item in items {
@@ -3089,7 +3385,10 @@ pub(crate) fn validate_serde_items(items: &[crate::AST::Item], reg: &TraitRegist
         if let Item::Struct(s) = item {
             for f in &s.fields {
                 let skip = f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_SKIP);
-                let flatten = f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_FLATTEN);
+                let flatten = f
+                    .serde_markers
+                    .iter()
+                    .any(|m| m.name == Syntax::ATTR_FLATTEN);
                 for m in &f.serde_markers {
                     // E2407: `#[Rename]` needs a string literal.
                     if m.name == Syntax::ATTR_RENAME && !marker_is_string_literal(m) {
@@ -3188,8 +3487,10 @@ pub(crate) fn reactive_derived_unit(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2912",
         "`reactive.derived` must compute and return a value".to_string(),
-        "a derived value is recomputed from its signals; its lambda has to return the value".to_string(),
-        "return a value from the body, or use `reactive.effect(() => { … })` for a side effect".to_string(),
+        "a derived value is recomputed from its signals; its lambda has to return the value"
+            .to_string(),
+        "return a value from the body, or use `reactive.effect(() => { … })` for a side effect"
+            .to_string(),
         Some(span),
     )
 }

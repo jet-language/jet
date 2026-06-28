@@ -31,7 +31,13 @@ fn build_and_run(name: &str, src: &str) -> (i32, String) {
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
     let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -40,14 +46,19 @@ fn build_and_run(name: &str, src: &str) -> (i32, String) {
         String::from_utf8_lossy(&rustc.stderr)
     );
     let run = Command::new(&bin).output().unwrap();
-    (run.status.code().unwrap_or(0), String::from_utf8_lossy(&run.stdout).into_owned())
+    (
+        run.status.code().unwrap_or(0),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+    )
 }
 
 /// On `?`-failure both fields are restored to their pre-block values via the
 /// custom `restore` method (not a full clone).
 #[test]
 fn rollback_restores_on_failure() {
-    if !have_rustc() { return; }
+    if !have_rustc() {
+        return;
+    }
     let src = r#"
 struct Counter {
     value: Int
@@ -92,7 +103,9 @@ fn main() {
 /// On success the changes are committed: rollback must NOT run.
 #[test]
 fn rollback_not_triggered_on_success() {
-    if !have_rustc() { return; }
+    if !have_rustc() {
+        return;
+    }
     let src = r#"
 struct Counter {
     value: Int
@@ -186,15 +199,25 @@ fn main() {
     // Strip `mod jet_txn { … }` and `mod jet_mem { … }` then verify no `unsafe` remains.
     fn strip_mod(src: &str, name: &str) -> String {
         let marker = format!("mod {name}");
-        let Some(start) = src.find(&marker) else { return src.to_string(); };
+        let Some(start) = src.find(&marker) else {
+            return src.to_string();
+        };
         let bytes = src.as_bytes();
         let (mut depth, mut i, mut end, mut seen) = (0usize, start, src.len(), false);
         while i < bytes.len() {
             match bytes[i] {
-                b'{' => { depth += 1; seen = true; }
+                b'{' => {
+                    depth += 1;
+                    seen = true;
+                }
                 b'}' => {
-                    if seen { depth -= 1; }
-                    if seen && depth == 0 { end = i + 1; break; }
+                    if seen {
+                        depth -= 1;
+                    }
+                    if seen && depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
                 }
                 _ => {}
             }

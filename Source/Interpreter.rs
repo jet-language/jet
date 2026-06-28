@@ -16,8 +16,8 @@
 
 use std::collections::HashMap;
 
-use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt};
 
 // c139: RunOutcome moved to jet-foundation so the jet-jit/ sibling crate
 // can implement JitBackend without a dep cycle. Re-exported here so callers
@@ -269,7 +269,9 @@ fn scan_stmt_for_mut_arg(s: &Stmt) -> Option<Boundary> {
         }
         Stmt::Loop { body, .. } => scan_stmts_for_mut_arg(body),
         Stmt::For { body, .. } => scan_stmts_for_mut_arg(body),
-        Stmt::Switch { arms, else_body, .. } => {
+        Stmt::Switch {
+            arms, else_body, ..
+        } => {
             for a in arms {
                 if let Some(b) = scan_stmts_for_mut_arg(&a.body) {
                     return Some(b);
@@ -315,8 +317,10 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
     };
     // A call arg is a boundary when it is `mut`/`^` on a named variable.
     let arg_boundary = |a: &crate::AST::CallArg| -> Option<Boundary> {
-        if matches!(a.convention, AccessConvention::Write | AccessConvention::Move)
-            && matches!(a.expr, Expr::Ident(..))
+        if matches!(
+            a.convention,
+            AccessConvention::Write | AccessConvention::Move
+        ) && matches!(a.expr, Expr::Ident(..))
         {
             return boundary(a.convention.clone(), a.span);
         }
@@ -358,9 +362,7 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
         | Expr::RawOf(inner, _)
         | Expr::Field(inner, _, _) => expr_mut_arg(inner),
         Expr::Binary(_, l, r, _) => expr_mut_arg(l).or_else(|| expr_mut_arg(r)),
-        Expr::Index { base, index, .. } => {
-            expr_mut_arg(base).or_else(|| expr_mut_arg(index))
-        }
+        Expr::Index { base, index, .. } => expr_mut_arg(base).or_else(|| expr_mut_arg(index)),
         _ => None,
     }
 }
@@ -413,7 +415,9 @@ fn scan_block_for_struct_interp(
                     return Some(found);
                 }
             }
-            Stmt::Switch { arms, else_body, .. } => {
+            Stmt::Switch {
+                arms, else_body, ..
+            } => {
                 for a in arms {
                     if let Some(found) = scan_block_for_struct_interp(&a.body, locals) {
                         return Some(found);
@@ -449,15 +453,15 @@ fn scan_if_for_struct_interp(
 }
 
 fn expr_is_struct_or_enum_lit(e: &Expr) -> bool {
-    matches!(e, Expr::StructLit { .. } | Expr::EnumLit { .. } | Expr::TupleLit(..))
+    matches!(
+        e,
+        Expr::StructLit { .. } | Expr::EnumLit { .. } | Expr::TupleLit(..)
+    )
 }
 
 /// Find a `"{local}"` interpolation of a known struct/enum local anywhere in
 /// `e` (recurses into calls, operators, and nested string parts).
-fn expr_struct_interp(
-    e: &Expr,
-    locals: &std::collections::HashSet<String>,
-) -> Option<Boundary> {
+fn expr_struct_interp(e: &Expr, locals: &std::collections::HashSet<String>) -> Option<Boundary> {
     match e {
         Expr::Str(parts, span) => {
             for p in parts {
@@ -477,11 +481,20 @@ fn expr_struct_interp(
             }
             None
         }
-        Expr::Call(c) => c.args.iter().find_map(|a| expr_struct_interp(&a.expr, locals)),
-        Expr::MethodCall { receiver, args, .. } => expr_struct_interp(receiver, locals)
-            .or_else(|| args.iter().find_map(|a| expr_struct_interp(&a.expr, locals))),
-        Expr::CallValue { callee, args, .. } => expr_struct_interp(callee, locals)
-            .or_else(|| args.iter().find_map(|a| expr_struct_interp(&a.expr, locals))),
+        Expr::Call(c) => c
+            .args
+            .iter()
+            .find_map(|a| expr_struct_interp(&a.expr, locals)),
+        Expr::MethodCall { receiver, args, .. } => {
+            expr_struct_interp(receiver, locals).or_else(|| {
+                args.iter()
+                    .find_map(|a| expr_struct_interp(&a.expr, locals))
+            })
+        }
+        Expr::CallValue { callee, args, .. } => expr_struct_interp(callee, locals).or_else(|| {
+            args.iter()
+                .find_map(|a| expr_struct_interp(&a.expr, locals))
+        }),
         Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)

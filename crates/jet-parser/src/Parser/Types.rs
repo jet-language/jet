@@ -363,13 +363,15 @@ impl<'a> Parser<'a> {
             }
             // D-QUAL4=A: `#Marker Type` — a value-tag prefix on a type. The marker
             // must be a PascalCase ident (not `Pure`/`(` which are fn-effect bounds).
-            TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())) =>
             {
                 self.bump(); // `#`
                 let (marker, _) = self.expect_ident("after `#` in type-tag position")?;
                 let (inner, _) = self.type_()?;
-                Type::Tagged { marker, inner: Box::new(inner) }
+                Type::Tagged {
+                    marker,
+                    inner: Box::new(inner),
+                }
             }
             TokKind::LBracket => {
                 self.bump();
@@ -404,7 +406,10 @@ impl<'a> Parser<'a> {
                         }
                     };
                     self.expect(TokKind::RBracket, "after the size in `[T#N]`")?;
-                    Type::FixedList { elem: Box::new(first), len }
+                    Type::FixedList {
+                        elem: Box::new(first),
+                        len,
+                    }
                 } else {
                     self.expect(TokKind::RBracket, "after the element type in `[T]`")?;
                     Type::List(Box::new(first))
@@ -430,13 +435,34 @@ impl<'a> Parser<'a> {
                     // they stay fully interchangeable; the rest are distinct widths.
                     Syntax::TYPE_I64 => Type::Int,
                     Syntax::TYPE_F64 => Type::Float,
-                    Syntax::TYPE_I8 => Type::IntN { signed: true, bits: 8 },
-                    Syntax::TYPE_I16 => Type::IntN { signed: true, bits: 16 },
-                    Syntax::TYPE_I32 => Type::IntN { signed: true, bits: 32 },
-                    Syntax::TYPE_U8 => Type::IntN { signed: false, bits: 8 },
-                    Syntax::TYPE_U16 => Type::IntN { signed: false, bits: 16 },
-                    Syntax::TYPE_U32 => Type::IntN { signed: false, bits: 32 },
-                    Syntax::TYPE_U64 => Type::IntN { signed: false, bits: 64 },
+                    Syntax::TYPE_I8 => Type::IntN {
+                        signed: true,
+                        bits: 8,
+                    },
+                    Syntax::TYPE_I16 => Type::IntN {
+                        signed: true,
+                        bits: 16,
+                    },
+                    Syntax::TYPE_I32 => Type::IntN {
+                        signed: true,
+                        bits: 32,
+                    },
+                    Syntax::TYPE_U8 => Type::IntN {
+                        signed: false,
+                        bits: 8,
+                    },
+                    Syntax::TYPE_U16 => Type::IntN {
+                        signed: false,
+                        bits: 16,
+                    },
+                    Syntax::TYPE_U32 => Type::IntN {
+                        signed: false,
+                        bits: 32,
+                    },
+                    Syntax::TYPE_U64 => Type::IntN {
+                        signed: false,
+                        bits: 64,
+                    },
                     Syntax::TYPE_F32 => Type::Float32,
                     Syntax::TYPE_BOOL => Type::Bool,
                     Syntax::TYPE_STRING => Type::String,
@@ -638,8 +664,7 @@ impl<'a> Parser<'a> {
             return Err(Diagnostic::error(
                 "E0309",
                 "`??` isn't allowed on a type".to_string(),
-                "an optional value is written `T?` once — there's no optional optional"
-                    .to_string(),
+                "an optional value is written `T?` once — there's no optional optional".to_string(),
                 "use a single `?`, like `Int?`".to_string(),
                 Some(qspan),
             ));
@@ -686,7 +711,11 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        Ok(Type::Fn { params, ret, effect_bound })
+        Ok(Type::Fn {
+            params,
+            ret,
+            effect_bound,
+        })
     }
 
     /// D-EFF2: parse the effect bound on the front of a function type, the cursor
@@ -714,5 +743,4 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::RParen, "to close the callback effect list")?;
         Ok(effects)
     }
-
 }

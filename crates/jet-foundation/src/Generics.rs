@@ -1,8 +1,8 @@
 //! M9 — generic types, traits, and built-in derive policy (S45/S28/S48/S55).
 
-use crate::AST::{TraitMethodSig, Type, TypeParam};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{TraitMethodSig, Type, TypeParam};
 use std::collections::{HashMap, HashSet};
 
 /// Built-in trait names (prelude).
@@ -15,8 +15,7 @@ pub const SERIALIZE: &str = "Serialize";
 pub const ENCODE: &str = "Encode";
 pub const DECODE: &str = "Decode";
 
-pub const BUILTIN_TRAITS: &[&str] =
-    &[PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE];
+pub const BUILTIN_TRAITS: &[&str] = &[PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE];
 
 pub fn is_builtin_trait(name: &str) -> bool {
     BUILTIN_TRAITS.contains(&name)
@@ -62,7 +61,11 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             ok: Box::new(substitute_type(ok, subst)),
             err: Box::new(substitute_type(err, subst)),
         },
-        Type::Fn { params, ret, effect_bound } => Type::Fn {
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+        } => Type::Fn {
             params: params.iter().map(|p| substitute_type(p, subst)).collect(),
             ret: ret.as_ref().map(|r| Box::new(substitute_type(r, subst))),
             // D-EFF2: the callback effect bound is a plain annotation, not a
@@ -116,8 +119,7 @@ pub fn unify_types(
         (Type::List(e1), Type::List(e2)) => unify_types(e1, e2, subst, type_params),
         (Type::Option(e1), Type::Option(e2)) => unify_types(e1, e2, subst, type_params),
         (Type::Result { ok: o1, err: e1 }, Type::Result { ok: o2, err: e2 }) => {
-            unify_types(o1, o2, subst, type_params)
-                && unify_types(e1, e2, subst, type_params)
+            unify_types(o1, o2, subst, type_params) && unify_types(e1, e2, subst, type_params)
         }
         (Type::TraitObject(t1), Type::TraitObject(t2)) if t1 == t2 => true,
         _ => false,
@@ -507,7 +509,11 @@ pub fn rust_extra_jetshow_bounds(params: &[TypeParam]) -> HashMap<String, Vec<St
 /// `ty` mentions anywhere in its structure. A type parameter `T` appears as
 /// `Type::Named("T")`; nested positions (`[T]`, `Map<String, T>`, `Box<T>`, …)
 /// count too.
-pub fn collect_type_param_mentions(ty: &Type, param_names: &HashSet<&str>, out: &mut HashSet<String>) {
+pub fn collect_type_param_mentions(
+    ty: &Type,
+    param_names: &HashSet<&str>,
+    out: &mut HashSet<String>,
+) {
     match ty {
         Type::Named(n) => {
             if param_names.contains(n.as_str()) {

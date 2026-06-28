@@ -21,9 +21,11 @@
 //! `deps:` block of `pkg.jet` (S59/D-CFFI2) takes precedence, else `pkg-config
 //! <lib>`, else E3201.
 
-use crate::AST::{CModule, CModuleKind, ExternFn, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{
+    CModule, CModuleKind, ExternFn, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle,
+};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -95,7 +97,10 @@ fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
 fn e3207(lib: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3207",
-        format!("`#{}` is only allowed in generated cache files", Syntax::ATTR_BINDGEN),
+        format!(
+            "`#{}` is only allowed in generated cache files",
+            Syntax::ATTR_BINDGEN
+        ),
         format!(
             "`{}/{}/{}.{}` is written by `{} bind`; hand-written sources use `#{} module`",
             Syntax::SOURCE_ROOT_DIR,
@@ -107,7 +112,8 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
         ),
         format!(
             "edit your overlay file with `#{} module`, or regenerate the cache with `{} bind`",
-            Syntax::ATTR_EXTERN_MODULE, Syntax::BINARY_NAME,
+            Syntax::ATTR_EXTERN_MODULE,
+            Syntax::BINARY_NAME,
         ),
         Some(span),
     )
@@ -172,7 +178,6 @@ pub fn rustc_link_args(cffi: &CFfi, project_root: &Path) -> Result<Vec<String>, 
     Ok(args)
 }
 
-
 /// Run the whole C-FFI assembly pass over a freshly loaded bundle. Removes
 /// `Item::CModule`s from user files, merges them, appends synthetic modules,
 /// and resolves C `use` forms. Returns the artifacts, or diagnostics.
@@ -208,7 +213,13 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 kept.push(item);
                 continue;
             };
-            let CModule { kind, lib, path_span, functions, .. } = cm;
+            let CModule {
+                kind,
+                lib,
+                path_span,
+                functions,
+                ..
+            } = cm;
             if kind == CModuleKind::Bindgen && !generated {
                 diags.push(e3207(&lib, path_span));
                 continue;
@@ -217,7 +228,10 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 order.push(lib.clone());
                 surfaces.insert(
                     lib.clone(),
-                    LibSurface { bindgen: Vec::new(), overlay: Vec::new() },
+                    LibSurface {
+                        bindgen: Vec::new(),
+                        overlay: Vec::new(),
+                    },
                 );
             }
             let surf = surfaces.get_mut(&lib).unwrap();
@@ -284,7 +298,10 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             items: vec![Item::CModule(merged_module)],
         });
         lib_to_idx.insert(lib.clone(), synth_idx);
-        cffi.libs.push(CLib { lib: lib.clone(), module_idx: synth_idx });
+        cffi.libs.push(CLib {
+            lib: lib.clone(),
+            module_idx: synth_idx,
+        });
     }
 
     if !diags.is_empty() {
@@ -339,7 +356,10 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                         })],
                     });
                     lib_to_idx.insert(lib.clone(), synth_idx);
-                    cffi.libs.push(CLib { lib: lib.clone(), module_idx: synth_idx });
+                    cffi.libs.push(CLib {
+                        lib: lib.clone(),
+                        module_idx: synth_idx,
+                    });
                     synth_idx
                 }
             };
@@ -370,7 +390,8 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
     // Collect libs and, for the header-path `use "x.h"` form, the header path.
     // A single lib can be brought in from multiple modules; first-seen header wins.
     let mut libs: Vec<String> = Vec::new();
-    let mut lib_header: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut lib_header: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
 
     for module in &bundle.modules {
         for imp in &module.imports {
@@ -485,7 +506,13 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             if std::fs::write(&cache_path, &result.source).is_ok() {
                 let _ = crate::CBind::write_bind_hash(&cache_path, &header_src, "");
             }
-            load_cache_source(&result.source, &cache_path, &lib, diags, &mut bundle.modules);
+            load_cache_source(
+                &result.source,
+                &cache_path,
+                &lib,
+                diags,
+                &mut bundle.modules,
+            );
             continue;
         }
 
@@ -546,10 +573,7 @@ fn load_cache_source(
 ///      no `.pc`, e.g. libc); `c@"<path>"` → local dir (`-L`/`-I`/`-l`).
 ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
 ///   3. Else E3201.
-pub fn resolve_link(
-    lib: &str,
-    project_root: &Path,
-) -> Result<LinkFlags, Diagnostic> {
+pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
     if let Some(target) = declared_c_dep(lib, project_root) {
         return clib_link(lib, &target, project_root);
@@ -603,7 +627,10 @@ fn clib_link(lib: &str, target: &str, project_root: &Path) -> Result<LinkFlags, 
         }
         // (b) always-linked libc: a bare `-l <lib>` is the declared intent.
         if ALWAYS_LINKED_LIBC.contains(&lib) {
-            return Ok(LinkFlags { link_names: vec![lib.to_string()], ..Default::default() });
+            return Ok(LinkFlags {
+                link_names: vec![lib.to_string()],
+                ..Default::default()
+            });
         }
         // (c) auto-provision from nixpkgs (attr == link name).
         return provision_from_nixpkgs(lib, lib, project_root);
@@ -624,7 +651,11 @@ const NIXPKGS_TARGET_PREFIX: &str = "nixpkgs:";
 /// Realize `nixpkgs#<attr>` to a store path and build link flags from it.
 /// The store path is cached at `<root>/.jet/clinks/<lib>` so repeat builds skip
 /// the nix call; a stale/missing cached path re-realizes.
-fn provision_from_nixpkgs(lib: &str, attr: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+fn provision_from_nixpkgs(
+    lib: &str,
+    attr: &str,
+    project_root: &Path,
+) -> Result<LinkFlags, Diagnostic> {
     let store = match cached_store_path(lib, project_root) {
         Some(p) => p,
         None => {

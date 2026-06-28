@@ -1,11 +1,8 @@
 use super::*;
-use crate::AST::{
-    BinOp, ElseBranch,
-    Expr, IfStmt, Pattern, Stmt, Type, VariantPayload,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::is_type_var_name;
 use crate::Syntax;
+use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
 /// Find the comparison that distribution (S25) should re-apply: descend the
@@ -112,7 +109,8 @@ pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) 
     Diagnostic::error(
         "E0987",
         format!("no loop labeled `{name}@` is in scope"),
-        "a labeled `break`/`continue` must name an enclosing `name@ loop` (D-LOOPLABEL2)".to_string(),
+        "a labeled `break`/`continue` must name an enclosing `name@ loop` (D-LOOPLABEL2)"
+            .to_string(),
         fix,
         Some(span),
     )
@@ -211,11 +209,19 @@ pub(crate) fn expr_is_same_ident(a: &Expr, name: &str) -> bool {
 
 pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
     match pattern {
-        Pattern::Variant { variant, bindings, .. } => {
+        Pattern::Variant {
+            variant, bindings, ..
+        } => {
             // D-PATR: a Variant with Range slots only partially covers the variant
             // (it matches a subset of payloads), so we don't mark it as fully covered.
-            let has_range = bindings.iter().any(|s| matches!(s, crate::AST::PatSlot::Range { .. }));
-            if has_range { None } else { Some(variant.clone()) }
+            let has_range = bindings
+                .iter()
+                .any(|s| matches!(s, crate::AST::PatSlot::Range { .. }));
+            if has_range {
+                None
+            } else {
+                Some(variant.clone())
+            }
         }
         Pattern::Present { .. } => Some(Syntax::LIT_VALUE.to_string()),
         Pattern::Absent(_) => Some(Syntax::LIT_NULL.to_string()),
@@ -231,7 +237,11 @@ pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
 
 /// Generate compilable switch arm source text for missing variants.
 /// `subj_name` is the variable being switched on (e.g. `"c"` or `"it"` for fallible types).
-pub(crate) fn missing_arms_text(subj_ty: &Type, missing: &[String], subj_name: Option<&str>) -> String {
+pub(crate) fn missing_arms_text(
+    subj_ty: &Type,
+    missing: &[String],
+    subj_name: Option<&str>,
+) -> String {
     let subj = subj_name.unwrap_or("it");
     let arms: Vec<String> = missing
         .iter()
@@ -396,9 +406,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Named(name) if name == "U8" => true,
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
         Type::Apply { args, .. } => args.iter().all(|a| types_comparable(a, registry)),
-        Type::Tuple(fields) => fields
-            .iter()
-            .all(|(_, t)| types_comparable(t, registry)),
+        Type::Tuple(fields) => fields.iter().all(|(_, t)| types_comparable(t, registry)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => types_comparable(elem, registry),
         Type::Tagged { inner, .. } => types_comparable(inner, registry),
@@ -600,4 +608,3 @@ pub(crate) fn private_item(name: &str, span: Span) -> Diagnostic {
         Some(span),
     )
 }
-

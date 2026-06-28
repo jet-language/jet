@@ -1,8 +1,8 @@
 //! JSON-RPC transport over stdio + request/notification dispatch + handlers.
 
-use crate::AST::ProgramBundle;
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Lexer::Token;
+use crate::AST::ProgramBundle;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
@@ -12,11 +12,11 @@ use super::Features::{
     compute_definition, compute_hover, compute_references, compute_rename, encode_semantic_tokens,
     format_inlay_hints,
 };
-use super::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
 use super::Position::{
     byte_span_to_range, full_document_range, lsp_pos_to_offset, range_json, LspPos,
 };
 use super::SymbolDB::{build_symbol_db, InlayHint, SymbolDB};
+use super::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
 
 // ── Document state ────────────────────────────────────────────────────────────
 

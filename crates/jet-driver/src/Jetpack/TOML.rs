@@ -33,9 +33,17 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     /// A `[path]` or `[[path]]` (array-of-tables) header.
-    Header { path: Vec<String>, array: bool, line: usize },
+    Header {
+        path: Vec<String>,
+        array: bool,
+        line: usize,
+    },
     /// A `key = value` assignment; `path` is the (possibly dotted) key.
-    KeyVal { path: Vec<String>, value: Value, line: usize },
+    KeyVal {
+        path: Vec<String>,
+        value: Value,
+        line: usize,
+    },
 }
 
 /// A syntax error: a 1-based line and a specific message.
@@ -49,7 +57,11 @@ pub struct ParseError {
 /// errors. The statement list holds everything that parsed; on error the parser
 /// skips to the next line and continues.
 pub fn parse(raw: &str) -> (Vec<Item>, Vec<ParseError>) {
-    let mut p = Parser { chars: raw.chars().collect(), pos: 0, line: 1 };
+    let mut p = Parser {
+        chars: raw.chars().collect(),
+        pos: 0,
+        line: 1,
+    };
     let mut items = Vec::new();
     let mut errors = Vec::new();
     loop {
@@ -68,7 +80,11 @@ pub fn parse(raw: &str) -> (Vec<Item>, Vec<ParseError>) {
                 // schema layer can suppress cascading errors for the keys that
                 // would have belonged to it.
                 if was_header {
-                    items.push(Item::Header { path: Vec::new(), array: false, line: start_line });
+                    items.push(Item::Header {
+                        path: Vec::new(),
+                        array: false,
+                        line: start_line,
+                    });
                 }
                 p.recover();
             }
@@ -106,7 +122,10 @@ impl Parser {
     }
 
     fn err(&self, message: impl Into<String>) -> ParseError {
-        ParseError { line: self.line, message: message.into() }
+        ParseError {
+            line: self.line,
+            message: message.into(),
+        }
     }
 
     /// Spaces and tabs only (never a newline).
@@ -193,7 +212,10 @@ impl Parser {
             self.bump();
         }
         if path.is_empty() {
-            return Err(ParseError { line, message: "a table header must name a table".into() });
+            return Err(ParseError {
+                line,
+                message: "a table header must name a table".into(),
+            });
         }
         self.finish_line()?;
         Ok(Item::Header { path, array, line })
@@ -268,7 +290,9 @@ impl Parser {
             Some('[') => self.array(),
             Some('{') => self.inline_table(),
             Some('t') | Some('f') => self.boolean(),
-            Some('+') | Some('-') | Some('0'..='9') | Some('i') | Some('n') => self.number_or_datetime(),
+            Some('+') | Some('-') | Some('0'..='9') | Some('i') | Some('n') => {
+                self.number_or_datetime()
+            }
             Some(c) => Err(self.err(format!("`{c}` does not start a valid value"))),
             None => Err(self.err("expected a value")),
         }
@@ -307,7 +331,8 @@ impl Parser {
 
     fn basic_string(&mut self) -> Result<String, ParseError> {
         // Distinguish `"""` multi-line from `"` single-line.
-        if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"') {
+        if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"')
+        {
             return self.multiline_basic_string();
         }
         self.bump(); // opening "
@@ -317,9 +342,7 @@ impl Parser {
                 None | Some('\n') => return Err(self.err("unterminated string")),
                 Some('"') => return Ok(out),
                 Some('\\') => out.push(self.string_escape()?),
-                Some(c) if (c as u32) < 0x20 => {
-                    return Err(self.err("control character in string"))
-                }
+                Some(c) if (c as u32) < 0x20 => return Err(self.err("control character in string")),
                 Some(c) => out.push(c),
             }
         }
@@ -329,7 +352,7 @@ impl Parser {
         self.bump();
         self.bump();
         self.bump(); // opening """
-        // A newline immediately after the opening delimiter is trimmed.
+                     // A newline immediately after the opening delimiter is trimmed.
         if self.peek() == Some('\r') {
             self.bump();
         }
@@ -338,7 +361,10 @@ impl Parser {
         }
         let mut out = String::new();
         loop {
-            if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"') {
+            if self.peek() == Some('"')
+                && self.peek_at(1) == Some('"')
+                && self.peek_at(2) == Some('"')
+            {
                 self.bump();
                 self.bump();
                 self.bump();
@@ -348,12 +374,18 @@ impl Parser {
                 None => return Err(self.err("unterminated multi-line string")),
                 Some('\\') => {
                     // A backslash before a newline trims following whitespace.
-                    if matches!(self.peek(), Some('\n') | Some('\r') | Some(' ') | Some('\t')) {
+                    if matches!(
+                        self.peek(),
+                        Some('\n') | Some('\r') | Some(' ') | Some('\t')
+                    ) {
                         // Line-ending backslash: skip whitespace incl. newlines.
                         let mut sawline = false;
                         let save = self.pos;
                         let saveline = self.line;
-                        while matches!(self.peek(), Some(' ') | Some('\t') | Some('\r') | Some('\n')) {
+                        while matches!(
+                            self.peek(),
+                            Some(' ') | Some('\t') | Some('\r') | Some('\n')
+                        ) {
                             if self.peek() == Some('\n') {
                                 sawline = true;
                             }
@@ -407,7 +439,10 @@ impl Parser {
     }
 
     fn literal_string(&mut self) -> Result<String, ParseError> {
-        if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'') {
+        if self.peek() == Some('\'')
+            && self.peek_at(1) == Some('\'')
+            && self.peek_at(2) == Some('\'')
+        {
             return self.multiline_literal_string();
         }
         self.bump(); // opening '
@@ -433,7 +468,10 @@ impl Parser {
         }
         let mut out = String::new();
         loop {
-            if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'') {
+            if self.peek() == Some('\'')
+                && self.peek_at(1) == Some('\'')
+                && self.peek_at(2) == Some('\'')
+            {
                 self.bump();
                 self.bump();
                 self.bump();
@@ -471,7 +509,9 @@ impl Parser {
                     self.bump();
                     return Ok(Value::Array(items));
                 }
-                Some(c) => return Err(self.err(format!("expected `,` or `]` in array, found `{c}`"))),
+                Some(c) => {
+                    return Err(self.err(format!("expected `,` or `]` in array, found `{c}`")))
+                }
                 None => return Err(self.err("unterminated array")),
             }
         }
@@ -512,7 +552,11 @@ impl Parser {
             match self.bump() {
                 Some(',') => continue,
                 Some('}') => return Ok(Value::InlineTable(entries)),
-                Some(c) => return Err(self.err(format!("expected `,` or `}}` in inline table, found `{c}`"))),
+                Some(c) => {
+                    return Err(
+                        self.err(format!("expected `,` or `}}` in inline table, found `{c}`"))
+                    )
+                }
                 None => return Err(self.err("unterminated inline table")),
             }
         }
@@ -531,11 +575,15 @@ impl Parser {
     fn looks_like_date(&self) -> bool {
         // 4 digits, '-', 2 digits, '-', 2 digits.
         let d = |n: usize| self.peek_at(n).map_or(false, |c| c.is_ascii_digit());
-        d(0) && d(1) && d(2) && d(3)
+        d(0) && d(1)
+            && d(2)
+            && d(3)
             && self.peek_at(4) == Some('-')
-            && d(5) && d(6)
+            && d(5)
+            && d(6)
             && self.peek_at(7) == Some('-')
-            && d(8) && d(9)
+            && d(8)
+            && d(9)
     }
 
     fn looks_like_time(&self) -> bool {
@@ -546,9 +594,7 @@ impl Parser {
     fn datetime(&mut self) -> Result<Value, ParseError> {
         let mut s = String::new();
         // Greedily consume the date/time/offset characters.
-        let is_dt = |c: char| {
-            c.is_ascii_alphanumeric() || matches!(c, '-' | ':' | '.' | '+')
-        };
+        let is_dt = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | ':' | '.' | '+');
         while let Some(c) = self.peek() {
             if is_dt(c) {
                 s.push(c);
@@ -583,7 +629,11 @@ impl Parser {
             let sign = self.bump().unwrap();
             tok.push(sign);
             if self.try_keyword("inf") {
-                return Ok(Value::Float(if sign == '-' { f64::NEG_INFINITY } else { f64::INFINITY }));
+                return Ok(Value::Float(if sign == '-' {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                }));
             }
             if self.try_keyword("nan") {
                 return Ok(Value::Float(f64::NAN));
@@ -614,9 +664,15 @@ impl Parser {
         }
         let clean: String = tok.chars().filter(|c| *c != '_').collect();
         if is_float {
-            clean.parse::<f64>().map(Value::Float).map_err(|_| self.err(format!("invalid number `{tok}`")))
+            clean
+                .parse::<f64>()
+                .map(Value::Float)
+                .map_err(|_| self.err(format!("invalid number `{tok}`")))
         } else {
-            clean.parse::<i64>().map(Value::Integer).map_err(|_| self.err(format!("invalid number `{tok}`")))
+            clean
+                .parse::<i64>()
+                .map(Value::Integer)
+                .map_err(|_| self.err(format!("invalid number `{tok}`")))
         }
     }
 
@@ -712,8 +768,18 @@ mod tests {
     #[test]
     fn arrays_multiline_and_mixed() {
         let items = parse_ok("a = [\n 1,\n 2,\n 3,\n]\nb = [\"x\", \"y\"]\n");
-        assert_eq!(kv(&items, "a"), Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]));
-        assert_eq!(kv(&items, "b"), Value::Array(vec![Value::String("x".into()), Value::String("y".into())]));
+        assert_eq!(
+            kv(&items, "a"),
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3)
+            ])
+        );
+        assert_eq!(
+            kv(&items, "b"),
+            Value::Array(vec![Value::String("x".into()), Value::String("y".into())])
+        );
     }
 
     #[test]
@@ -721,7 +787,10 @@ mod tests {
         let items = parse_ok("pt = { x = 1, y = 2 }\n");
         assert_eq!(
             kv(&items, "pt"),
-            Value::InlineTable(vec![("x".into(), Value::Integer(1)), ("y".into(), Value::Integer(2))])
+            Value::InlineTable(vec![
+                ("x".into(), Value::Integer(1)),
+                ("y".into(), Value::Integer(2))
+            ])
         );
     }
 
@@ -735,17 +804,39 @@ mod tests {
     #[test]
     fn headers_and_arrays_of_tables() {
         let items = parse_ok("[a.b]\nx = 1\n[[srv]]\nip = \"1\"\n[[srv]]\nip = \"2\"\n");
-        assert_eq!(items[0], Item::Header { path: vec!["a".into(), "b".into()], array: false, line: 1 });
-        assert_eq!(items[2], Item::Header { path: vec!["srv".into()], array: true, line: 3 });
+        assert_eq!(
+            items[0],
+            Item::Header {
+                path: vec!["a".into(), "b".into()],
+                array: false,
+                line: 1
+            }
+        );
+        assert_eq!(
+            items[2],
+            Item::Header {
+                path: vec!["srv".into()],
+                array: true,
+                line: 3
+            }
+        );
     }
 
     #[test]
     fn datetimes_kept_raw() {
-        let items = parse_ok("dt = 1979-05-27T07:32:00Z\nd = 1979-05-27\nt = 07:32:00\nls = 1979-05-27 07:32:00\n");
-        assert_eq!(kv(&items, "dt"), Value::Datetime("1979-05-27T07:32:00Z".into()));
+        let items = parse_ok(
+            "dt = 1979-05-27T07:32:00Z\nd = 1979-05-27\nt = 07:32:00\nls = 1979-05-27 07:32:00\n",
+        );
+        assert_eq!(
+            kv(&items, "dt"),
+            Value::Datetime("1979-05-27T07:32:00Z".into())
+        );
         assert_eq!(kv(&items, "d"), Value::Datetime("1979-05-27".into()));
         assert_eq!(kv(&items, "t"), Value::Datetime("07:32:00".into()));
-        assert_eq!(kv(&items, "ls"), Value::Datetime("1979-05-27 07:32:00".into()));
+        assert_eq!(
+            kv(&items, "ls"),
+            Value::Datetime("1979-05-27 07:32:00".into())
+        );
     }
 
     #[test]

@@ -12,7 +12,12 @@ impl<'a> Parser<'a> {
                 "E0003",
                 format!("`{}<…>` takes exactly one element type", Syntax::TYPE_PTR),
                 "a pointer points at a single element type".to_string(),
-                format!("write `{}.{}<Int>.{}(addr)`", alias, Syntax::TYPE_PTR, Syntax::MEM_FROM_ADDR),
+                format!(
+                    "write `{}.{}<Int>.{}(addr)`",
+                    alias,
+                    Syntax::TYPE_PTR,
+                    Syntax::MEM_FROM_ADDR
+                ),
                 Some(self.peek().span),
             ));
         }
@@ -22,13 +27,25 @@ impl<'a> Parser<'a> {
         if method != Syntax::MEM_FROM_ADDR {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("`{}<…>` has no static method `{}`", Syntax::TYPE_PTR, method),
+                format!(
+                    "`{}<…>` has no static method `{}`",
+                    Syntax::TYPE_PTR,
+                    method
+                ),
                 "a typed pointer is built from an address".to_string(),
-                format!("write `{}.{}<Int>.{}(addr)`", alias, Syntax::TYPE_PTR, Syntax::MEM_FROM_ADDR),
+                format!(
+                    "write `{}.{}<Int>.{}(addr)`",
+                    alias,
+                    Syntax::TYPE_PTR,
+                    Syntax::MEM_FROM_ADDR
+                ),
                 Some(method_span),
             ));
         }
-        self.expect(TokKind::LParen, &format!("after `{}`", Syntax::MEM_FROM_ADDR))?;
+        self.expect(
+            TokKind::LParen,
+            &format!("after `{}`", Syntax::MEM_FROM_ADDR),
+        )?;
         let addr = self.expr()?;
         self.expect(TokKind::RParen, "to finish the call")?;
         let end = self.toks[self.pos - 1].span.end;
@@ -49,13 +66,8 @@ impl<'a> Parser<'a> {
         } else {
             self.pos + 1
         };
-        matches!(
-            self.toks.get(i).map(|t| &t.kind),
-            Some(TokKind::Ident(_))
-        ) && matches!(
-            self.toks.get(i + 1).map(|t| &t.kind),
-            Some(TokKind::Colon)
-        )
+        matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_)))
+            && matches!(self.toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Colon))
     }
 
     fn emit_positional_tuple_error(&mut self, span: Span) {
@@ -89,10 +101,7 @@ impl<'a> Parser<'a> {
 
     /// S73: reject `.0` / `.1` field access before `expect_ident`.
     fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
-        if matches!(
-            self.peek().kind,
-            TokKind::Int(_) | TokKind::Float(_)
-        ) {
+        if matches!(self.peek().kind, TokKind::Int(_) | TokKind::Float(_)) {
             let span = self.peek().span;
             self.bump();
             self.emit_numeric_field_error(span);
@@ -156,7 +165,11 @@ impl<'a> Parser<'a> {
                 Some(Span::new(open.start, close.end)),
             ));
         }
-        Ok(Expr::TupleLit(fields, Span::new(open.start, close.end), None))
+        Ok(Expr::TupleLit(
+            fields,
+            Span::new(open.start, close.end),
+            None,
+        ))
     }
 
     fn parse_paren_primary(&mut self, _allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -533,9 +546,7 @@ impl<'a> Parser<'a> {
             // D-DOTCTOR1: `.{ … }` inferred struct literal (type from context).
             // A leading `.` immediately followed by `{` is unambiguous — it is not
             // valid as a field access (no receiver) or any other production.
-            TokKind::Dot if allow_struct_lit
-                && matches!(self.peek2().kind, TokKind::LBrace) =>
-            {
+            TokKind::Dot if allow_struct_lit && matches!(self.peek2().kind, TokKind::LBrace) => {
                 let dot_start = self.bump().span.start; // consume `.`
                 self.struct_lit_inferred(dot_start)
             }
@@ -585,9 +596,7 @@ impl<'a> Parser<'a> {
                     // pointer constructor through a `core.mem` alias. Recognise
                     // the `<…>` here (postfix position) so `<` is read as a
                     // type-arg list, not a comparison.
-                    if member == Syntax::TYPE_PTR
-                        && matches!(self.peek().kind, TokKind::Lt)
-                    {
+                    if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
                         if let Expr::Ident(alias, alias_span) = &expr {
                             let alias = alias.clone();
                             let alias_span = *alias_span;
@@ -703,7 +712,8 @@ impl<'a> Parser<'a> {
                                 "struct construction uses `{}.{}.{{…}}`, not `{}.{} {{…}}`",
                                 alias, type_name, alias, type_name
                             ),
-                            "named construction has a dot before the brace (D-DOTCTOR1)".to_string(),
+                            "named construction has a dot before the brace (D-DOTCTOR1)"
+                                .to_string(),
                             format!("write `{}.{}.{{…}}` instead", alias, type_name),
                             Some(brace_span),
                         ));
@@ -771,7 +781,11 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::RBracket, "to close the fan-out `.[`")?;
         let close = self.toks[self.pos - 1].span;
         let span = Span::new(dot_span.start, close.end);
-        Ok(Expr::FanOut { callee, items, span })
+        Ok(Expr::FanOut {
+            callee,
+            items,
+            span,
+        })
     }
 
     pub(super) fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
@@ -794,7 +808,10 @@ impl<'a> Parser<'a> {
                 "this value can't be assigned to".to_string(),
                 "only a name or an indexed slot like `items[0]` can appear on the left of `=`"
                     .to_string(),
-                format!("use `name {} ...` or `map[key] = ...`", Syntax::SIGIL_BIND_MUT),
+                format!(
+                    "use `name {} ...` or `map[key] = ...`",
+                    Syntax::SIGIL_BIND_MUT
+                ),
                 Some(other.span()),
             )),
         }
@@ -851,7 +868,10 @@ impl<'a> Parser<'a> {
                 // panic.
                 let start = self.bump().span.start; // `#`
                 let span = Span::new(start, self.bump().span.end); // `Todo`
-                return Ok(Expr::Todo { span, expected_type: None });
+                return Ok(Expr::Todo {
+                    span,
+                    expected_type: None,
+                });
             }
             TokKind::Hash
                 if matches!(
@@ -885,7 +905,11 @@ impl<'a> Parser<'a> {
             {
                 let start = self.bump().span.start; // `#`
                 let tok = self.bump(); // the op name
-                let name = if let TokKind::Ident(n) = &tok.kind { n.clone() } else { String::new() };
+                let name = if let TokKind::Ident(n) = &tok.kind {
+                    n.clone()
+                } else {
+                    String::new()
+                };
                 let span = Span::new(start, tok.span.end);
                 return Ok(Expr::ReduceMarker(name, span));
             }
@@ -906,7 +930,10 @@ impl<'a> Parser<'a> {
                     format!("write: #{}", Syntax::KW_TODO),
                     Some(t.span),
                 ));
-                return Ok(Expr::Todo { span: t.span, expected_type: None });
+                return Ok(Expr::Todo {
+                    span: t.span,
+                    expected_type: None,
+                });
             }
             TokKind::Ident(name)
                 if matches!(name.as_str(), Syntax::FOREIGN_THROW | Syntax::FOREIGN_RAISE) =>
@@ -1233,10 +1260,7 @@ impl<'a> Parser<'a> {
                     if matches!(self.peek().kind, TokKind::Star) {
                         let star = self.bump().span;
                         let full = Span::new(span.start, star.end);
-                        return Ok(Expr::Deref(
-                            Box::new(Expr::Ident(type_name, span)),
-                            full,
-                        ));
+                        return Ok(Expr::Deref(Box::new(Expr::Ident(type_name, span)), full));
                     }
                     // D-DOTCTOR1: `Type.{ … }` named construction.
                     if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
@@ -1364,7 +1388,10 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open a struct literal")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             let (field, field_span) = self.expect_ident("for a field name")?;
             let value = if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
@@ -1400,7 +1427,10 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open a struct literal")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             let (field, field_span) = self.expect_ident("for a field name")?;
             let value = if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
@@ -1433,7 +1463,10 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open an inferred struct literal")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
             let (field, field_span) = self.expect_ident("for a field name")?;
             let value = if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
@@ -1515,7 +1548,8 @@ impl<'a> Parser<'a> {
                 if !matches!(self.peek().kind, TokKind::RParen) {
                     loop {
                         // D-PATW: `_` in payload slot = wildcard (ignore field, bind nothing).
-                        let slot = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT) {
+                        let slot = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT)
+                        {
                             self.bump();
                             crate::AST::PatSlot::Wildcard
                         } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
@@ -1531,7 +1565,8 @@ impl<'a> Parser<'a> {
                                 } else {
                                     return Err(Diagnostic::error(
                                         "E0003",
-                                        "expected an integer after `..` in a range pattern".to_string(),
+                                        "expected an integer after `..` in a range pattern"
+                                            .to_string(),
                                         "range patterns need both ends: `lo..hi`".to_string(),
                                         "write `0..100` for an inclusive range".to_string(),
                                         Some(self.peek().span),
@@ -1540,7 +1575,8 @@ impl<'a> Parser<'a> {
                             } else {
                                 return Err(Diagnostic::error(
                                     "E0003",
-                                    "expected `..` after the lower bound of a range pattern".to_string(),
+                                    "expected `..` after the lower bound of a range pattern"
+                                        .to_string(),
                                     "range patterns need `lo..hi` syntax".to_string(),
                                     "write `0..100` for an inclusive range".to_string(),
                                     Some(self.peek().span),
@@ -1571,7 +1607,7 @@ impl<'a> Parser<'a> {
                     let mut alts = vec![base];
                     while matches!(self.peek().kind, TokKind::Pipe) {
                         self.bump(); // consume `|`
-                        // Parse the next alternative (must be a Variant pattern).
+                                     // Parse the next alternative (must be a Variant pattern).
                         if let Some(alt) = self.try_pattern_rhs()? {
                             alts.push(alt);
                         } else {
@@ -1600,7 +1636,8 @@ impl<'a> Parser<'a> {
                 ) =>
             {
                 let dot_span = self.bump().span; // consume `.`
-                let (variant, variant_span) = self.expect_ident("after `.` in a variant pattern")?;
+                let (variant, variant_span) =
+                    self.expect_ident("after `.` in a variant pattern")?;
                 let span_start = dot_span.start;
                 let (bindings, end) = if matches!(self.peek().kind, TokKind::LParen) {
                     self.bump(); // consume `(`
@@ -1773,7 +1810,10 @@ impl<'a> Parser<'a> {
                     match last {
                         Stmt::Expr(e) => e.span().end,
                         Stmt::Return(_, s) => s.end,
-                        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.end,
+                        Stmt::Break(s)
+                        | Stmt::Continue(s)
+                        | Stmt::BreakLabel(_, s)
+                        | Stmt::ContinueLabel(_, s) => s.end,
                         Stmt::If(i) => i.span.end,
                         Stmt::While { span, .. }
                         | Stmt::For { span, .. }
@@ -2018,5 +2058,4 @@ impl<'a> Parser<'a> {
             Some(self.peek().span),
         ));
     }
-
 }

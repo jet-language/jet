@@ -75,7 +75,10 @@ fn run_status() {
 
     println!("published schemas in this project:\n");
     for snap in &snaps {
-        print!("  {} — published {}", snap.type_name, snap.published_version);
+        print!(
+            "  {} — published {}",
+            snap.type_name, snap.published_version
+        );
         if let Some(before) = &snap.squashed_before {
             print!(" (squashed before {})", before);
         }
@@ -85,7 +88,9 @@ fn run_status() {
             println!("      {}: {}", f.name, f.ty);
         }
         if pending.iter().any(|t| t == &snap.type_name) {
-            println!("    pending: a breaking change vs this snapshot — `jet build` would report E0910");
+            println!(
+                "    pending: a breaking change vs this snapshot — `jet build` would report E0910"
+            );
         }
         println!();
     }
@@ -111,7 +116,9 @@ fn pending_breaks(root: &std::path::Path) -> Vec<String> {
             for item in &module.items {
                 if let jet::AST::Item::Struct(s) = item {
                     if s.is_published_schema
-                        && diags.iter().any(|d| d.what.contains(&format!("`{}`", s.name)))
+                        && diags
+                            .iter()
+                            .any(|d| d.what.contains(&format!("`{}`", s.name)))
                     {
                         out.push(s.name.clone());
                     }
@@ -127,7 +134,10 @@ fn pending_breaks(root: &std::path::Path) -> Vec<String> {
 /// `jet schema squash --before <ver>` — re-baseline snapshots to current shape.
 fn run_squash(before: Option<&str>) {
     let Some(before) = before else {
-        eprintln!("error: `jet schema {}` needs `--before <version>`", Syntax::SCHEMA_VERB_SQUASH);
+        eprintln!(
+            "error: `jet schema {}` needs `--before <version>`",
+            Syntax::SCHEMA_VERB_SQUASH
+        );
         eprintln!(
             " Why: squash re-baselines to the current shape and marks migrations before \
              a version as no longer required — so it needs that cutoff version"

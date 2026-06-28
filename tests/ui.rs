@@ -80,8 +80,7 @@ fn ui_snapshots() {
                 .unwrap_or("Unknown")
                 .trim()
                 .to_string();
-            let tmp = std::env::temp_dir()
-                .join(format!("jet_schema_ui_{}", std::process::id()));
+            let tmp = std::env::temp_dir().join(format!("jet_schema_ui_{}", std::process::id()));
             fs::create_dir_all(&tmp).ok();
             fs::write(tmp.join(format!("{}.snapshot", type_name)), &snap_text).ok();
             std::env::set_var("JET_SCHEMA_CACHE_DIR", &tmp);

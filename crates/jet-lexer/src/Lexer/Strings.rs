@@ -4,9 +4,9 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 
+use super::Lexer;
 use super::Scan::lex_raw;
 use super::Tokens::{StrTokPart, TokKind, Token};
-use super::Lexer;
 
 impl<'a> Lexer<'a> {
     /// Lex a string literal: escapes (S20), `{{`/`}}` literal braces (S20),
@@ -288,9 +288,7 @@ impl<'a> Lexer<'a> {
                 }
                 '\\' => {
                     let esc = self.at(k + 1);
-                    if let Some(&(_, decoded)) =
-                        Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc)
-                    {
+                    if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
                         lit.push(decoded);
                     } else {
                         self.diags.push(Diagnostic::error(

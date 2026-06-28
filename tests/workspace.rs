@@ -18,8 +18,8 @@ use std::path::Path;
 #[test]
 fn empty_member_list_is_valid() {
     let src = "module workspace {\n    members: []\n}\n";
-    let plan = WorkspaceFile::evaluate(src, Path::new("/tmp"))
-        .expect("empty member list should be valid");
+    let plan =
+        WorkspaceFile::evaluate(src, Path::new("/tmp")).expect("empty member list should be valid");
     assert!(plan.members.is_empty());
 }
 
@@ -27,8 +27,8 @@ fn empty_member_list_is_valid() {
 fn explicit_path_list_yields_members() {
     // Paths don't need to exist: names fall back to the directory basename.
     let src = "module workspace {\n    members: [\"./packages/hello\", \"./packages/ranker\"]\n}\n";
-    let plan = WorkspaceFile::evaluate(src, Path::new("/tmp"))
-        .expect("explicit path list should succeed");
+    let plan =
+        WorkspaceFile::evaluate(src, Path::new("/tmp")).expect("explicit path list should succeed");
     assert_eq!(plan.members.len(), 2);
     assert_eq!(plan.members[0].name, "hello");
     assert_eq!(plan.members[1].name, "ranker");
@@ -53,8 +53,7 @@ fn e0995_no_workspace_module_fires() {
 #[test]
 fn e0995_fires_on_empty_file() {
     let src = "";
-    let d = WorkspaceFile::evaluate(src, Path::new("/tmp"))
-        .expect_err("empty file must fail");
+    let d = WorkspaceFile::evaluate(src, Path::new("/tmp")).expect_err("empty file must fail");
     assert_eq!(d.code, "E0995");
 }
 
@@ -65,8 +64,8 @@ fn e0995_fires_on_empty_file() {
 #[test]
 fn e0996_members_not_a_list() {
     let src = "module workspace { members: 42 }\n";
-    let d = WorkspaceFile::evaluate(src, Path::new("/tmp"))
-        .expect_err("non-list members must fail");
+    let d =
+        WorkspaceFile::evaluate(src, Path::new("/tmp")).expect_err("non-list members must fail");
     assert_eq!(
         d.code, "E0996",
         "expected E0996, got {} — {:?}",
@@ -78,8 +77,7 @@ fn e0996_members_not_a_list() {
 fn e0996_members_list_with_non_string_element() {
     // A list that contains a non-string element (integer).
     let src = "module workspace { members: [1, 2] }\n";
-    let d = WorkspaceFile::evaluate(src, Path::new("/tmp"))
-        .expect_err("list of ints must fail");
+    let d = WorkspaceFile::evaluate(src, Path::new("/tmp")).expect_err("list of ints must fail");
     assert_eq!(d.code, "E0996");
 }
 
@@ -90,8 +88,8 @@ fn e0996_members_list_with_non_string_element() {
 #[test]
 fn e0997_find_missing_dir() {
     let src = "module workspace { members: find(\"./definitely-no-such-packages\") }\n";
-    let d = WorkspaceFile::evaluate(src, Path::new("/tmp"))
-        .expect_err("find of missing dir must fail");
+    let d =
+        WorkspaceFile::evaluate(src, Path::new("/tmp")).expect_err("find of missing dir must fail");
     assert_eq!(
         d.code, "E0997",
         "expected E0997, got {} — {:?}",
@@ -144,8 +142,8 @@ fn dot_form_not_classified_when_source_is_unknown() {
     use jet::Jetpack::RefSpec::{classify_in, RefError, SourceTable};
 
     let table = SourceTable::empty(); // no sources declared
-    let err = classify_in("unknown.pkg", &table)
-        .expect_err("unknown source in dot form should fail");
+    let err =
+        classify_in("unknown.pkg", &table).expect_err("unknown source in dot form should fail");
     // Falls through to MissingSeparator since no source matched.
     assert!(
         matches!(err, RefError::MissingSeparator(_)),
@@ -159,8 +157,7 @@ fn dot_form_not_classified_when_source_is_unknown() {
 
 #[test]
 fn committed_workspace_example_evaluates() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/workspace");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workspace");
     let src = std::fs::read_to_string(dir.join("workspace.jet"))
         .expect("examples/workspace/workspace.jet must exist (I5)");
     let plan = WorkspaceFile::evaluate(&src, &dir)
@@ -174,7 +171,11 @@ fn committed_workspace_example_evaluates() {
         names.contains(&"ranker"),
         "expected `ranker` member, got: {names:?}"
     );
-    assert_eq!(plan.members.len(), 2, "expected exactly 2 members, got: {names:?}");
+    assert_eq!(
+        plan.members.len(),
+        2,
+        "expected exactly 2 members, got: {names:?}"
+    );
 }
 
 // ──────────────────────────────────────────────

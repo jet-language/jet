@@ -1,8 +1,8 @@
 use crate::Diagnostics::Diagnostic;
 use std::collections::BTreeMap;
 
-use super::API::ApiItem;
 use super::SemVer::BumpKind;
+use super::API::ApiItem;
 
 // ──────────────────────────────────────────────
 // API diff → E2601
@@ -157,7 +157,10 @@ impl PrePublishGate {
         !self.build_ok
             || !self.tests_ok
             || (!self.breaking.is_empty()
-                && matches!(self.bump_kind, BumpKind::Minor | BumpKind::Patch | BumpKind::Same))
+                && matches!(
+                    self.bump_kind,
+                    BumpKind::Minor | BumpKind::Patch | BumpKind::Same
+                ))
     }
 
     /// Build E2601 diagnostics for every breaking change.

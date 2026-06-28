@@ -183,8 +183,15 @@ impl Debugger {
     fn show_stop(&mut self, line: usize, scope: &HashMap<String, CtValue>) {
         if !self.started {
             self.started = true;
-            let func = self.stack.last().map(|f| f.func.clone()).unwrap_or_else(|| "main".to_string());
-            self.emit(&format!("breakpoint hit  {}:{}  in {}()", self.file, line, func));
+            let func = self
+                .stack
+                .last()
+                .map(|f| f.func.clone())
+                .unwrap_or_else(|| "main".to_string());
+            self.emit(&format!(
+                "breakpoint hit  {}:{}  in {}()",
+                self.file, line, func
+            ));
         }
         // A two-line window (prev + current) mirrors the plan's worked example.
         for l in line.saturating_sub(1)..=line {
@@ -354,7 +361,10 @@ impl DebugHook for Debugger {
         // update the current frame (or push it if we just descended).
         self.stack.truncate(depth + 1);
         if self.stack.len() <= depth {
-            self.stack.push(Frame { func: func.to_string(), line });
+            self.stack.push(Frame {
+                func: func.to_string(),
+                line,
+            });
         } else if let Some(top) = self.stack.last_mut() {
             top.func = func.to_string();
             top.line = line;
@@ -534,9 +544,11 @@ pub fn run_debug(file: &str) -> i32 {
 /// the `(jet)` prompt in order and returns the captured transcript (banners,
 /// `locals:` dumps, command echoes, program output, and the final marker).
 pub fn run_session(file: &str, inputs: &[&str]) -> String {
-    let queue: std::collections::VecDeque<String> =
-        inputs.iter().map(|s| s.to_string()).collect();
-    let io = Io::Scripted { inputs: queue, out: String::new() };
+    let queue: std::collections::VecDeque<String> = inputs.iter().map(|s| s.to_string()).collect();
+    let io = Io::Scripted {
+        inputs: queue,
+        out: String::new(),
+    };
     let (_code, captured) = run_with_io(file, io);
     captured
 }

@@ -3,9 +3,9 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::AST::{Call, Expr, OrFallback, TryConvert, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{Call, Expr, OrFallback, TryConvert, Type};
 
 impl<'a> Checker<'a> {
     pub(crate) fn infer_ok(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
@@ -84,7 +84,12 @@ impl<'a> Checker<'a> {
         None
     }
 
-    pub(crate) fn infer_try(&mut self, inner: &mut Box<Expr>, span: Span, convert: &mut TryConvert) -> Option<Type> {
+    pub(crate) fn infer_try(
+        &mut self,
+        inner: &mut Box<Expr>,
+        span: Span,
+        convert: &mut TryConvert,
+    ) -> Option<Type> {
         let inner_ty = self.infer(inner)?;
         match inner_ty {
             Type::Result { ok, err } => {
@@ -94,12 +99,10 @@ impl<'a> Checker<'a> {
                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
                     // only propagates the error; the unwrapped Ok value may have any
                     // type (it is bound by the caller, not returned unchanged).
-                    Type::Result {
-                        err: ret_err,
-                        ..
-                    } if *ret_err == err
-                        || (is_default_error(ret_err)
-                            && matches!(err.as_ref(), Type::String)) =>
+                    Type::Result { err: ret_err, .. }
+                        if *ret_err == err
+                            || (is_default_error(ret_err)
+                                && matches!(err.as_ref(), Type::String)) =>
                     {
                         Some((*ok).clone())
                     }
@@ -117,7 +120,10 @@ impl<'a> Checker<'a> {
                         // S80/D-LIB3: check if the error type implements `Fallible`
                         // and the return error is the default `Error`.
                         if is_default_error(ret_err) {
-                            if self.trait_reg.implements_trait(&err_type_name, Syntax::TRAIT_FALLIBLE) {
+                            if self
+                                .trait_reg
+                                .implements_trait(&err_type_name, Syntax::TRAIT_FALLIBLE)
+                            {
                                 // Mark the Try node for Fallible conversion in codegen.
                                 *convert = TryConvert::Fallible;
                                 return Some((*ok).clone());
@@ -328,10 +334,7 @@ impl<'a> Checker<'a> {
                     (None, Some(e)) => {
                         self.diags.push(Diagnostic::error(
                             "E0405",
-                            format!(
-                                "`{} return` can't return a value here",
-                                Syntax::OP_FALLBACK
-                            ),
+                            format!("`{} return` can't return a value here", Syntax::OP_FALLBACK),
                             "this function returns nothing, so `return` can't carry a value"
                                 .to_string(),
                             "drop the value, or add `-> Type` to the function".to_string(),
@@ -366,5 +369,4 @@ impl<'a> Checker<'a> {
             _ => self.infer(expr),
         }
     }
-
 }

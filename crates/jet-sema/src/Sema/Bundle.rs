@@ -1,12 +1,11 @@
 use super::*;
-use crate::AST::{
-    ConstAttr, ElseBranch, EnumLitArg,
-    Expr, ForKind, Func, IfStmt, ImportKind, Item, LValue, LambdaBody,
-    OrFallback, ProgramBundle, RustConstKind, Stmt, StrPart, Type,
-};
 use crate::Diagnostics::Diagnostic;
-use crate::Traits::TraitRegistry;
 use crate::Syntax;
+use crate::Traits::TraitRegistry;
+use crate::AST::{
+    ConstAttr, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, ImportKind, Item, LValue,
+    LambdaBody, OrFallback, ProgramBundle, RustConstKind, Stmt, StrPart, Type,
+};
 use std::collections::{HashMap, HashSet};
 
 /// D-MOD2: inside an inline `module M { … }`, a call to a sibling function
@@ -39,14 +38,22 @@ pub(crate) fn mangle_inline_sibling_calls(bundle: &mut ProgramBundle) {
     }
 }
 
-pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<String>, modname: &str) {
+pub(crate) fn rewrite_inline_calls_stmts(
+    stmts: &mut [Stmt],
+    siblings: &HashSet<String>,
+    modname: &str,
+) {
     for stmt in stmts {
         match stmt {
             Stmt::Expr(e) => rewrite_inline_calls_expr(e, siblings, modname),
             Stmt::Val(b) => rewrite_inline_calls_expr(&mut b.init, siblings, modname),
             Stmt::Assign { value, .. } => rewrite_inline_calls_expr(value, siblings, modname),
             Stmt::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
-            Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+            Stmt::Return(None, _)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::BreakLabel(..)
+            | Stmt::ContinueLabel(..) => {}
             Stmt::If(ifs) => rewrite_inline_calls_if(ifs, siblings, modname),
             Stmt::While { cond, body, .. } => {
                 rewrite_inline_calls_expr(cond, siblings, modname);
@@ -67,7 +74,12 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
                 }
                 rewrite_inline_calls_stmts(body, siblings, modname);
             }
-            Stmt::Switch { subject, arms, else_body, .. } => {
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
                 rewrite_inline_calls_expr(subject, siblings, modname);
                 for a in arms.iter_mut() {
                     rewrite_inline_calls_expr(&mut a.cond, siblings, modname);
@@ -77,14 +89,26 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
-            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Impure { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Grant { body: inner, .. } | Stmt::Transact { body: inner, .. } | Stmt::AssumeDet { body: inner, .. } => {
+            Stmt::Loop { body: inner, .. }
+            | Stmt::Unsafe { body: inner, .. }
+            | Stmt::Impure { body: inner, .. }
+            | Stmt::Region { body: inner, .. }
+            | Stmt::Caps { body: inner, .. }
+            | Stmt::Grant { body: inner, .. }
+            | Stmt::Transact { body: inner, .. }
+            | Stmt::AssumeDet { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);
             }
             // D-CTMARKER1: rewrite inline calls in comptime block body.
             Stmt::ComptimeBlock { body, .. } => rewrite_inline_calls_stmts(body, siblings, modname),
             // D-WHEN1: rewrite calls in both arms so sibling resolution works
             // regardless of which arm is selected at comptime.
-            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
                 rewrite_inline_calls_expr(cond, siblings, modname);
                 rewrite_inline_calls_stmts(then_body, siblings, modname);
                 if let Some(eb) = else_body {
@@ -116,7 +140,11 @@ pub(crate) fn rewrite_inline_calls_if(ifs: &mut IfStmt, siblings: &HashSet<Strin
     }
 }
 
-pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<String>, modname: &str) {
+pub(crate) fn rewrite_inline_calls_expr(
+    expr: &mut Expr,
+    siblings: &HashSet<String>,
+    modname: &str,
+) {
     match expr {
         Expr::Call(c) => {
             if siblings.contains(&c.name) {
@@ -253,7 +281,12 @@ pub fn check_bundle_allow_impure(bundle: &mut ProgramBundle, mode: CompileMode) 
     check_bundle_opts(bundle, mode, false, true)
 }
 
-pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding: bool, allow_impure: bool) -> Vec<Diagnostic> {
+pub(crate) fn check_bundle_opts(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    freestanding: bool,
+    allow_impure: bool,
+) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
@@ -427,7 +460,9 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         // derive bodies can call helper functions and access TypeInfo. Re-entry (D-CTCODEGEN1=A):
         // emitted fragments go through the full lexer→parser pipeline and are appended as items.
         {
-            let user_derives: Vec<(String, String, Vec<crate::AST::Stmt>)> = module.items.iter()
+            let user_derives: Vec<(String, String, Vec<crate::AST::Stmt>)> = module
+                .items
+                .iter()
                 .filter_map(|i| {
                     if let Item::UserDerive(d) = i {
                         Some((d.trait_name.clone(), d.type_param.clone(), d.body.clone()))
@@ -438,7 +473,13 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 .collect();
 
             if !user_derives.is_empty() {
-                let struct_infos: Vec<(String, Vec<(String, crate::Diagnostics::Span)>, Vec<crate::AST::Field>)> = module.items.iter()
+                let struct_infos: Vec<(
+                    String,
+                    Vec<(String, crate::Diagnostics::Span)>,
+                    Vec<crate::AST::Field>,
+                )> = module
+                    .items
+                    .iter()
                     .filter_map(|i| {
                         if let Item::Struct(s) = i {
                             Some((s.name.clone(), s.derives.clone(), s.fields.clone()))
@@ -448,9 +489,15 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     })
                     .collect();
 
-                let actual_funcs: HashMap<String, &Func> = module.items.iter()
+                let actual_funcs: HashMap<String, &Func> = module
+                    .items
+                    .iter()
                     .filter_map(|i| {
-                        if let Item::Func(f) = i { Some((f.name.clone(), f)) } else { None }
+                        if let Item::Func(f) = i {
+                            Some((f.name.clone(), f))
+                        } else {
+                            None
+                        }
                     })
                     .collect();
 
@@ -477,27 +524,52 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                             ));
                             continue;
                         }
-                        if let Some((_, type_param, body)) = user_derives.iter().find(|(tn, _, _)| tn == derive_name) {
+                        if let Some((_, type_param, body)) =
+                            user_derives.iter().find(|(tn, _, _)| tn == derive_name)
+                        {
                             // Build TypeInfo CtValue for this struct.
-                            let fields_info: Vec<crate::Comptime::CtValue> = fields.iter().map(|f| {
-                                let markers: Vec<crate::Comptime::CtValue> = f.serde_markers.iter()
-                                    .map(|m| crate::Comptime::CtValue::Str(m.name.clone()))
-                                    .collect();
-                                crate::Comptime::CtValue::Struct {
-                                    type_name: "FieldInfo".to_string(),
-                                    fields: vec![
-                                        ("name".to_string(), crate::Comptime::CtValue::Str(f.name.clone())),
-                                        ("ty".to_string(), crate::Comptime::CtValue::Str(f.ty.name())),
-                                        ("markers".to_string(), crate::Comptime::CtValue::List(markers)),
-                                        ("is_pub".to_string(), crate::Comptime::CtValue::Bool(f.is_pub)),
-                                    ],
-                                }
-                            }).collect();
+                            let fields_info: Vec<crate::Comptime::CtValue> = fields
+                                .iter()
+                                .map(|f| {
+                                    let markers: Vec<crate::Comptime::CtValue> = f
+                                        .serde_markers
+                                        .iter()
+                                        .map(|m| crate::Comptime::CtValue::Str(m.name.clone()))
+                                        .collect();
+                                    crate::Comptime::CtValue::Struct {
+                                        type_name: "FieldInfo".to_string(),
+                                        fields: vec![
+                                            (
+                                                "name".to_string(),
+                                                crate::Comptime::CtValue::Str(f.name.clone()),
+                                            ),
+                                            (
+                                                "ty".to_string(),
+                                                crate::Comptime::CtValue::Str(f.ty.name()),
+                                            ),
+                                            (
+                                                "markers".to_string(),
+                                                crate::Comptime::CtValue::List(markers),
+                                            ),
+                                            (
+                                                "is_pub".to_string(),
+                                                crate::Comptime::CtValue::Bool(f.is_pub),
+                                            ),
+                                        ],
+                                    }
+                                })
+                                .collect();
                             let type_info = crate::Comptime::CtValue::Struct {
                                 type_name: "TypeInfo".to_string(),
                                 fields: vec![
-                                    ("name".to_string(), crate::Comptime::CtValue::Str(struct_name.clone())),
-                                    ("fields".to_string(), crate::Comptime::CtValue::List(fields_info)),
+                                    (
+                                        "name".to_string(),
+                                        crate::Comptime::CtValue::Str(struct_name.clone()),
+                                    ),
+                                    (
+                                        "fields".to_string(),
+                                        crate::Comptime::CtValue::List(fields_info),
+                                    ),
                                 ],
                             };
 
@@ -545,7 +617,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                         Item::Func(f) => register_func_item(f, st, &mut diags),
                         Item::Impl(i) => {
                             for m in &i.methods {
-                                st.method_pub.insert((i.type_name.clone(), m.name.clone()), m.is_pub);
+                                st.method_pub
+                                    .insert((i.type_name.clone(), m.name.clone()), m.is_pub);
                             }
                         }
                         _ => {}
@@ -582,9 +655,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         let st = &states[idx];
         for item in &module.items {
             if let Item::Impl(i) = item {
-                if let (Some(trait_name), Some(field_name)) =
-                    (&i.trait_name, &i.delegation_field)
-                {
+                if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
                     if let Some(fields) = st.registry.struct_fields(&i.type_name) {
                         if let Some((_, _, field_ty, _, _)) =
                             fields.iter().find(|(n, _, _, _, _)| n == field_name)
@@ -618,10 +689,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                                     "`impl {}.{} using {}` needs `{}` to have a field named `{}`",
                                     i.type_name, trait_name, field_name, i.type_name, field_name
                                 ),
-                                format!(
-                                    "add `{}: Type` to `struct {}`",
-                                    field_name, i.type_name
-                                ),
+                                format!("add `{}: Type` to `struct {}`", field_name, i.type_name),
                                 Some(i.type_span),
                             ));
                         }
@@ -719,7 +787,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                         diags.push(Diagnostic::error(
                             "E0341",
                             format!("`use jet.{ring}` is the old first-party library spelling"),
-                            "first-party libraries moved to the `core.*` namespace (D-CORENS1)".to_string(),
+                            "first-party libraries moved to the `core.*` namespace (D-CORENS1)"
+                                .to_string(),
                             format!("write `use core.{ring}` instead"),
                             Some(imp.span),
                         ));
@@ -761,7 +830,13 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
     // item onto this module's public surface (`reexports`).
     for (idx, module) in bundle.modules.iter().enumerate() {
         for imp in &module.imports {
-            let ImportKind::Unqualified { module_alias, module_alias_span, items, .. } = &imp.kind else {
+            let ImportKind::Unqualified {
+                module_alias,
+                module_alias_span,
+                items,
+                ..
+            } = &imp.kind
+            else {
                 continue;
             };
             let st = &mut states[idx];
@@ -783,7 +858,10 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                             "E0609",
                             format!("`{}` is private in module `{}`", orig, module_alias),
                             "only `pub` items can be brought into scope with `use`".to_string(),
-                            format!("add `pub` before `fn {}` in module `{}`", orig, module_alias),
+                            format!(
+                                "add `pub` before `fn {}` in module `{}`",
+                                orig, module_alias
+                            ),
                             Some(*module_alias_span),
                         ));
                     } else {
@@ -826,7 +904,11 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 let is_reexport = imp.is_pub;
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let is_pub = states[target_idx].func_pub.get(orig.as_str()).copied().unwrap_or(false);
+                    let is_pub = states[target_idx]
+                        .func_pub
+                        .get(orig.as_str())
+                        .copied()
+                        .unwrap_or(false);
                     let exists = states[target_idx].funcs.contains_key(orig.as_str());
                     if !exists {
                         diags.push(Diagnostic::error(
@@ -845,9 +927,13 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                             Some(*module_alias_span),
                         ));
                     } else {
-                        states[idx].unqualified_file.insert(local.to_string(), (orig.clone(), target_idx));
+                        states[idx]
+                            .unqualified_file
+                            .insert(local.to_string(), (orig.clone(), target_idx));
                         if is_reexport {
-                            states[idx].reexports.insert(local.to_string(), (orig.clone(), target_idx));
+                            states[idx]
+                                .reexports
+                                .insert(local.to_string(), (orig.clone(), target_idx));
                         }
                     }
                 }
@@ -1164,18 +1250,14 @@ pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec
     // L2401: advisory — public fn with a positional Bool parameter.
     if f.is_pub {
         for p in &f.params {
-            if matches!(p.ty, Type::Bool)
-                && p.name != Syntax::KW_SELF
-                && p.default.is_none()
-            {
+            if matches!(p.ty, Type::Bool) && p.name != Syntax::KW_SELF && p.default.is_none() {
                 diags.push(Diagnostic::lint(
                     "L2401",
                     format!(
                         "public function `{}` has a positional `Bool` parameter `{}`",
                         f.name, p.name
                     ),
-                    "positional booleans are easy to transpose at the call site"
-                        .to_string(),
+                    "positional booleans are easy to transpose at the call site".to_string(),
                     format!(
                         "callers can write `{}: true` to make the intent clear (S61 labels)",
                         p.name
@@ -1281,13 +1363,26 @@ pub(crate) fn collect_core_stmts(
                     collect_core_stmts(body, imports, used);
                 }
             }
-            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used),
-            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+            Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used),
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
+            }
             // D-CTMARKER1: collect Core usage from comptime block body.
             Stmt::ComptimeBlock { body, .. } => collect_core_stmts(body, imports, used),
             // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).
-            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
                 collect_core_expr(cond, imports, used);
                 collect_core_stmts(then_body, imports, used);
                 if let Some(eb) = else_body {
@@ -1312,7 +1407,11 @@ pub(crate) fn collect_core_stmts(
     }
 }
 
-pub(crate) fn collect_core_if(ifs: &IfStmt, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+pub(crate) fn collect_core_if(
+    ifs: &IfStmt,
+    imports: &HashMap<String, String>,
+    used: &mut HashSet<String>,
+) {
     collect_core_expr(&ifs.cond, imports, used);
     collect_core_stmts(&ifs.then_body, imports, used);
     match &ifs.else_branch {
@@ -1322,7 +1421,11 @@ pub(crate) fn collect_core_if(ifs: &IfStmt, imports: &HashMap<String, String>, u
     }
 }
 
-pub(crate) fn collect_core_lvalue(lv: &LValue, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+pub(crate) fn collect_core_lvalue(
+    lv: &LValue,
+    imports: &HashMap<String, String>,
+    used: &mut HashSet<String>,
+) {
     match lv {
         LValue::Local { .. } => {}
         LValue::Index { base, index, .. } => {
@@ -1334,7 +1437,11 @@ pub(crate) fn collect_core_lvalue(lv: &LValue, imports: &HashMap<String, String>
     }
 }
 
-pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+pub(crate) fn collect_core_expr(
+    expr: &Expr,
+    imports: &HashMap<String, String>,
+    used: &mut HashSet<String>,
+) {
     // D-SIMD2 / D-LINALG1: a built-in math type used anywhere (constructor, static
     // method, or instance method on a math-typed receiver-by-name) pulls in the
     // CoreLib prelude that defines the `jet_math_*` helpers. Detect it syntactically;
@@ -1646,9 +1753,9 @@ pub(crate) fn check_module_bodies(
                     is_pure: false,
                     is_sanitizer: false,
                     declared_effects: None,
-        effect_via: None,
-        state_requires: None,
-        state_transition: None,
+                    effect_via: None,
+                    state_requires: None,
+                    state_transition: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1683,9 +1790,9 @@ pub(crate) fn check_module_bodies(
                     is_pure: false,
                     is_sanitizer: false,
                     declared_effects: None,
-        effect_via: None,
-        state_requires: None,
-        state_transition: None,
+                    effect_via: None,
+                    state_requires: None,
+                    state_transition: None,
                     body: std::mem::take(&mut b.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1934,4 +2041,3 @@ fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagnostic> {
         Some(span),
     ))
 }
-

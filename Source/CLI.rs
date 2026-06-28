@@ -33,42 +33,186 @@ pub struct CommandSpec {
 /// Every built-in subcommand. Order here is the order shown in the man page and
 /// completions; the greeting picks the `headline` ones.
 pub const COMMANDS: &[CommandSpec] = &[
-    CommandSpec { name: "run", summary: "build, then run a program (or a project)", headline: true },
-    CommandSpec { name: "check", summary: "look for problems, build nothing", headline: true },
-    CommandSpec { name: "test", summary: "compile and run top-level test blocks", headline: true },
-    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", headline: false },
-    CommandSpec { name: "dev", summary: "watch a file and re-run it on every save", headline: false },
-    CommandSpec { name: "serve", summary: "watch a resident program and hot-swap type-stable edits", headline: false },
-    CommandSpec { name: "debug", summary: "step through a program at the Jet source level (D-DBG3)", headline: false },
-    CommandSpec { name: "repl", summary: "interactive REPL — try Jet expressions without a file", headline: false },
-    CommandSpec { name: "new", summary: "create a new project folder", headline: false },
-    CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", headline: false },
-    CommandSpec { name: "fix", summary: "apply all auto-fixable diagnostics in place", headline: false },
-    CommandSpec { name: "explain", summary: "print the offline essay for a diagnostic code", headline: false },
-    CommandSpec { name: "doctor", summary: "diagnose the toolchain and offer fixes", headline: false },
-    CommandSpec { name: "env", summary: "enter the project dev shell", headline: false },
-    CommandSpec { name: "bind", summary: "generate a C binding cache from a header", headline: false },
-    CommandSpec { name: "add", summary: "add a dependency and fetch it", headline: false },
-    CommandSpec { name: "remove", summary: "remove a dependency", headline: false },
-    CommandSpec { name: "fetch", summary: "download and link all dependencies", headline: false },
-    CommandSpec { name: "update", summary: "refresh moving dependency selectors", headline: false },
-    CommandSpec { name: "store", summary: "inspect or verify the package store", headline: false },
-    CommandSpec { name: "gc", summary: "remove unreferenced store entries", headline: false },
-    CommandSpec { name: "publish", summary: "publish the current package to the registry", headline: false },
-    CommandSpec { name: "yank", summary: "mark a published version as yanked (D-VERSION1)", headline: false },
-    CommandSpec { name: "schema", summary: "inspect or re-baseline #PublishedSchema snapshots (status | squash)", headline: false },
-    CommandSpec { name: "vendor", summary: "copy all dependencies into vendor/", headline: false },
-    CommandSpec { name: "audit", summary: "check dependencies against the advisory database", headline: false },
-    CommandSpec { name: "sbom", summary: "emit a software bill of materials from the lockfile", headline: false },
-    CommandSpec { name: "emit", summary: "emit generated output (--rust: print Rust source)", headline: false },
-    CommandSpec { name: "eval", summary: "evaluate a pure Jet program to stable JSON (--pure required)", headline: false },
-    CommandSpec { name: "bench", summary: "benchmark a Jet program with honest stats", headline: false },
-    CommandSpec { name: "completions", summary: "print shell completions (bash | zsh | fish)", headline: false },
-    CommandSpec { name: "man", summary: "print the jet man page (roff)", headline: false },
-    CommandSpec { name: "lsp", summary: "language server (stdio JSON-RPC)", headline: false },
-    CommandSpec { name: "version", summary: "print compiler version", headline: false },
-    CommandSpec { name: "upgrade", summary: "how to download a newer release", headline: false },
-    CommandSpec { name: "help", summary: "print the help text", headline: false },
+    CommandSpec {
+        name: "run",
+        summary: "build, then run a program (or a project)",
+        headline: true,
+    },
+    CommandSpec {
+        name: "check",
+        summary: "look for problems, build nothing",
+        headline: true,
+    },
+    CommandSpec {
+        name: "test",
+        summary: "compile and run top-level test blocks",
+        headline: true,
+    },
+    CommandSpec {
+        name: "build",
+        summary: "compile to a native binary in ./build/",
+        headline: false,
+    },
+    CommandSpec {
+        name: "dev",
+        summary: "watch a file and re-run it on every save",
+        headline: false,
+    },
+    CommandSpec {
+        name: "serve",
+        summary: "watch a resident program and hot-swap type-stable edits",
+        headline: false,
+    },
+    CommandSpec {
+        name: "debug",
+        summary: "step through a program at the Jet source level (D-DBG3)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "repl",
+        summary: "interactive REPL — try Jet expressions without a file",
+        headline: false,
+    },
+    CommandSpec {
+        name: "new",
+        summary: "create a new project folder",
+        headline: false,
+    },
+    CommandSpec {
+        name: "fmt",
+        summary: "rewrite a file to canonical style",
+        headline: false,
+    },
+    CommandSpec {
+        name: "fix",
+        summary: "apply all auto-fixable diagnostics in place",
+        headline: false,
+    },
+    CommandSpec {
+        name: "explain",
+        summary: "print the offline essay for a diagnostic code",
+        headline: false,
+    },
+    CommandSpec {
+        name: "doctor",
+        summary: "diagnose the toolchain and offer fixes",
+        headline: false,
+    },
+    CommandSpec {
+        name: "env",
+        summary: "enter the project dev shell",
+        headline: false,
+    },
+    CommandSpec {
+        name: "bind",
+        summary: "generate a C binding cache from a header",
+        headline: false,
+    },
+    CommandSpec {
+        name: "add",
+        summary: "add a dependency and fetch it",
+        headline: false,
+    },
+    CommandSpec {
+        name: "remove",
+        summary: "remove a dependency",
+        headline: false,
+    },
+    CommandSpec {
+        name: "fetch",
+        summary: "download and link all dependencies",
+        headline: false,
+    },
+    CommandSpec {
+        name: "update",
+        summary: "refresh moving dependency selectors",
+        headline: false,
+    },
+    CommandSpec {
+        name: "store",
+        summary: "inspect or verify the package store",
+        headline: false,
+    },
+    CommandSpec {
+        name: "gc",
+        summary: "remove unreferenced store entries",
+        headline: false,
+    },
+    CommandSpec {
+        name: "publish",
+        summary: "publish the current package to the registry",
+        headline: false,
+    },
+    CommandSpec {
+        name: "yank",
+        summary: "mark a published version as yanked (D-VERSION1)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "schema",
+        summary: "inspect or re-baseline #PublishedSchema snapshots (status | squash)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "vendor",
+        summary: "copy all dependencies into vendor/",
+        headline: false,
+    },
+    CommandSpec {
+        name: "audit",
+        summary: "check dependencies against the advisory database",
+        headline: false,
+    },
+    CommandSpec {
+        name: "sbom",
+        summary: "emit a software bill of materials from the lockfile",
+        headline: false,
+    },
+    CommandSpec {
+        name: "emit",
+        summary: "emit generated output (--rust: print Rust source)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "eval",
+        summary: "evaluate a pure Jet program to stable JSON (--pure required)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "bench",
+        summary: "benchmark a Jet program with honest stats",
+        headline: false,
+    },
+    CommandSpec {
+        name: "completions",
+        summary: "print shell completions (bash | zsh | fish)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "man",
+        summary: "print the jet man page (roff)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "lsp",
+        summary: "language server (stdio JSON-RPC)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "version",
+        summary: "print compiler version",
+        headline: false,
+    },
+    CommandSpec {
+        name: "upgrade",
+        summary: "how to download a newer release",
+        headline: false,
+    },
+    CommandSpec {
+        name: "help",
+        summary: "print the help text",
+        headline: false,
+    },
 ];
 
 /// Every global flag the driver understands. Used to flag-check and to suggest
@@ -164,7 +308,8 @@ fn closest<'a, I: Iterator<Item = &'a str>>(needle: &str, hay: I) -> Option<&'a 
         }
     }
     // Cap: only suggest when reasonably close (allow ~half the word length).
-    best.filter(|(c, d)| *d <= 3 && *d <= c.len()).map(|(c, _)| c)
+    best.filter(|(c, d)| *d <= 3 && *d <= c.len())
+        .map(|(c, _)| c)
 }
 
 // ──────────────────────────────────────────────
@@ -178,11 +323,7 @@ pub fn completions_bash() -> String {
         .map(|c| c.name)
         .collect::<Vec<_>>()
         .join(" ");
-    let flags = FLAGS
-        .iter()
-        .map(|f| f.long)
-        .collect::<Vec<_>>()
-        .join(" ");
+    let flags = FLAGS.iter().map(|f| f.long).collect::<Vec<_>>().join(" ");
     format!(
         "# bash completion for {bin} (generated by `{bin} completions bash`)\n\
 _{bin}() {{\n\
@@ -277,9 +418,15 @@ pub fn man_page(version: &str) -> String {
         ver = version,
     ));
     out.push_str(".SH NAME\n");
-    out.push_str(&format!("{bin} \\- the Jet compiler and project tool\n", bin = BINARY_NAME));
+    out.push_str(&format!(
+        "{bin} \\- the Jet compiler and project tool\n",
+        bin = BINARY_NAME
+    ));
     out.push_str(".SH SYNOPSIS\n");
-    out.push_str(&format!(".B {bin}\n.RI [ command ] \" \" [ args ...]\n", bin = BINARY_NAME));
+    out.push_str(&format!(
+        ".B {bin}\n.RI [ command ] \" \" [ args ...]\n",
+        bin = BINARY_NAME
+    ));
     out.push_str(".SH DESCRIPTION\n");
     out.push_str(&format!(
         "{bin} builds, checks, runs, and tests Jet programs, and manages Jet projects \
@@ -305,7 +452,10 @@ and their dependencies. Output is plain when piped and colored on a terminal.\n"
 }
 
 fn escape_zsh(s: &str) -> String {
-    s.replace('\'', "'\\''").replace(':', "\\:").replace('[', "\\[").replace(']', "\\]")
+    s.replace('\'', "'\\''")
+        .replace(':', "\\:")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
 }
 fn escape_fish(s: &str) -> String {
     s.replace('\'', "\\'")
