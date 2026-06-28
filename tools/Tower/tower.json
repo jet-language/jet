@@ -95,11 +95,15 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "planning",
       "priority": "P2",
       "plan": "arena-allocator-inference",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Activated into sidequest track"
+        },
         {
           "at": "2026-06-22",
           "text": "Plan added 2026-06-22: arena-allocator-inference. No open owner decision blocks the plan; next step is implementation on go."
@@ -122,7 +126,7 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c27",
@@ -868,11 +872,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-IFC1=A implementation plan: (1) add security-label lattice model to sema as a policy layer over existing D-TAINT1 value tags; (2) introduce built-in labels/principals as library values, not new primitive types; (3) parser accepts the ratified label marker form already recorded by D-IFC1; (4) sema propagates labels through assignments, calls, containers, interpolation, and core sinks; (5) add explicit declassify operation with reason string and audit lint; (6) diagnostics for illegal flow and missing declassification; (7) examples for PII to log/db/network sinks plus ui snapshots; (8) docs/spec/spec.md and diagnostics registry updates.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -913,11 +921,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-REFINE1=A implementation plan: (1) represent refinements as named predicate-backed types in sema; (2) parse the ratified refinement declaration surface; (3) build a small facts engine for comparisons, ranges, require checks, and branch narrowing; (4) allow construction only where predicate proof is in scope; (5) erase refinements to base runtime type in codegen; (6) diagnostics for missing proof, invalid predicate, and refinement/base mismatch; (7) examples for PositiveInt, bounded index, and money/unit refinements; (8) ui snapshots + golden tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "D-REFINE1: copied owner questions and answers into the ballot Owner Q&A facet."
@@ -991,11 +1007,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-VERIFY1=A implementation plan: (1) add `require`/`ensure` contract syntax to parser/Syntax.rs; (2) sema type-checks contracts in function context and injects debug/test runtime checks; (3) `jet test` harvests contracts as property-test generators; (4) add `#Verify(forall ... => predicate)` finite-domain marker with compile-time Cartesian enumeration cap; (5) diagnostics for non-finite domains, cap overflow, and failed proof counterexample; (6) codegen erases successful compile-time proofs and emits debug checks for contracts; (7) examples and ui snapshots; (8) docs/spec/diagnostics updates.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "D-VERIFY1: copied owner questions and answers into the ballot Owner Q&A facet."
@@ -1343,11 +1367,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "Explicit discard of a fallible result (D-IGNORERET1=B): add a visible, MANDATORY discard sigil that suppresses the `#MustUse` error for one call, emitting a lint (not an error) pointing at what was dropped. Preserves I1 — the footgun is opt-in and visible; silent Jai-style ignore (option C) rejected.\nGATED on the sigil spelling — ballot D-IGNORERET2 (`!_` vs `!discard` vs `_ = expr`). Once ratified:\nSteps: (1) parser accepts the discard sigil at a call site; (2) sema downgrades #MustUse error -> lint when present, naming the dropped type; (3) W-code + ui snapshot; (4) example. Narrowly about fallible-result discard (multi-return is a separate question).",
+      "plan": "D-IGNORERET2=A implementation plan: (1) register `#Suppress(MustUse)` marker and `.drop(\"reason\")` terminal method in Syntax.rs; (2) parser accepts marker on block/fn and method-chain terminal call; (3) sema recognizes `.drop` only on `#MustUse`/fallible values, requires non-empty string literal reason, and emits a lint rather than hard error; (4) `#Suppress(MustUse)` suppresses within lexical body and records an audit warning; (5) codegen erases discarded value after evaluating side effects; (6) diagnostics + ui snapshots for missing reason, unsupported receiver, and accidental ignore; (7) examples/goldens.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "D-IGNORERET2: added Epoch 6 defer option per owner instruction."
@@ -1546,11 +1574,15 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-STDRUBRIC1=A implementation plan: (1) create docs/spec/stdlib-api-laws.md with naming, fallibility, ownership, allocation, effects, diagnostics, and examples checklist; (2) add a short review template under tools/Tower/docs/plans; (3) audit current Core APIs against the rubric and file follow-up cards for drift; (4) add truthfulness test that referenced rubric file exists; (5) update roadmap/reference links. No parser/codegen changes.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -1616,11 +1648,19 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-FMT1 implementation plan: (1) add formatter AST/style flag preserving author single-line bodies for fn/if/loop/block where already one line; (2) keep width guard so overlong bodies expand deterministically; (3) add fmt tests for single-line fn/if/loop/match arms and nested blocks; (4) ensure comments force expansion; (5) update syntax-decisions implementation note.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Activated into sidequest track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L78). Ratified/accepted — no proceed-ballot; owner greenlights to start."
@@ -1631,7 +1671,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "cbiug0l",
@@ -1773,11 +1813,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "Display vs Debug split (D-DISPLAYDBG1=A): two blessed protocol hooks — Debug auto-derives for any struct/enum (like Rust derive(Debug)); Display requires an explicit impl (no default). Two distinct jobs (I8-safe).\nGATED on the interpolation spelling that selects Debug — ballot D-DISPLAYDBG2 (`{x:?}` vs `{x.debug}` vs `{x!}`). Once ratified:\nSteps: (1) Display + Debug hooks in the blessed-protocol-hooks system; (2) auto-derive Debug; (3) interpolation: default `{}` = Display, the ratified spelling = Debug; (4) examples + goldens + fmt round-trip for the new interpolation selector.",
+      "plan": "D-DISPLAYDBG1 + D-DISPLAYDBG2=A implementation plan: (1) add blessed `Display` and `Debug` protocol hooks; (2) Debug auto-derive for structs/enums with redaction hook support; (3) Display requires explicit impl, no default; (4) string interpolation defaults `{value}` to Display and parses `{value@Debug}` for Debug; (5) sema rejects unknown interpolation selectors; (6) formatter round-trips selector; (7) examples/goldens for user-facing vs debug output; (8) ui snapshots and docs.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "D-DISPLAYDBG2: added Epoch 6 defer option per owner instruction."
@@ -1896,11 +1940,15 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e6",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-FORMALCORE1=C plan: no compiler implementation now. Ready action is documentation-only: (1) create docs/spec/formal-core.md as Epoch-6 placeholder; (2) list existing desugarings already stable (bindings, if arms, option/fallible, loops, markers); (3) mark non-authoritative until Epoch 6; (4) add links from roadmap deferred section.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -2059,11 +2107,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-TTLVAL1=A implementation plan: (1) add `core.time.Expiring<T>` and `core.secrets.Rotting<T>` library types; (2) constructors require Clock/context source and deadline/ttl; (3) methods return `T?` or fallible error when expired; (4) sema lint for expired-value unwrap without check in pure/test-known clock cases; (5) examples for cache TTL and secret rotation; (6) docs/reference update and golden tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -2644,18 +2696,26 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "Named build profiles implementation plan: (1) extend package/workspace metadata parser with `profile <name> { ... }`; (2) define allowed fields: opt level, debug info, small/profile flags, panic mode, features/env; (3) CLI `jet build --profile name` resolves built-ins release/debug/ci plus user profiles; (4) driver threads profile into rustc flags and build cache key; (5) diagnostics for unknown/ambiguous profile; (6) examples and CLI tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Activated into epoch e3 track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L118). Ratified/accepted — no proceed-ballot; owner greenlights to start."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c17iww33",
@@ -2698,18 +2758,26 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "Broader must-use implementation plan: (1) add `#MustUse` marker for types, functions, and methods; (2) sema tracks ignored expression statements beyond fallible/#SingleUse; (3) reuse D-IGNORERET2 `.drop(\"reason\")` and `#Suppress(MustUse)` as the only explicit discard paths; (4) default Core APIs mark task handles, file writes, locks/guards, and transaction handles; (5) lints/errors per severity with W/E codes and snapshots; (6) docs and examples.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Activated into epoch e3 track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L120). Ratified/accepted — no proceed-ballot; owner greenlights to start."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c19ix0cf",
@@ -2719,11 +2787,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-ROLLBACK-TRAIT implementation plan: (1) define `Snapshot`/`Rollback` protocol hooks with associated state type; (2) parser/sema accepts impls once associated-type support is present; (3) transaction engine calls custom snapshot/restore when available, otherwise existing auto snapshot path; (4) diagnostics for irreversible fields without rollback hook; (5) examples for database transaction and in-memory object; (6) golden/ui tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Activated into epoch e3 track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L121). Ratified/accepted — no proceed-ballot; owner greenlights to start."
@@ -2734,7 +2810,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c1aix1yl",
@@ -2777,18 +2853,26 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "Visible uninitialization implementation plan: (1) add `#Uninit name: T` binding form already ratified by D-UNINIT1; (2) parser requires explicit type and no initializer; (3) sema definite-assignment analysis proves every read follows write on all paths; (4) restrict to plain-data/no-drop types unless `#Unsafe` gate; (5) codegen emits MaybeUninit only for proven paths; (6) diagnostics E0421-E0424 + snapshots; (7) examples for buffers and fixed arrays.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Activated into epoch e3 track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L123). Ratified/accepted — no proceed-ballot; owner greenlights to start."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c1cix784",
@@ -2798,11 +2882,19 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "Full CoreLib REPL execution plan: (1) expand interpreter whitelist from pure math/time/random to all side-effect-safe Core modules; (2) route fs/io/env/process calls through REPL capability sandbox prompts/errors; (3) preserve deterministic transcript mode for tests; (4) add REPL fixtures for json/fs/path/regex/http-disabled cases; (5) document unsupported native-only modules with E2203-style message.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Activated into sidequest track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L124). Ratified/accepted — no proceed-ballot; owner greenlights to start."
@@ -2813,7 +2905,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c1dix8nw",
@@ -2856,11 +2948,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e6",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-JETDOC1=B implementation plan: (1) expose semantic graph API from D-SEMINDEX1 to docs generator; (2) `jet doc` walks modules/types/functions/markers/protocol impls and emits stable JSON + HTML/Markdown; (3) include examples/doctests and source links; (4) generate docs for scattered impls/dossiers in stable order; (5) diagnostics for undocumented public API if lint enabled; (6) tests over fixture package.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -3343,11 +3439,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-COROUTINE1=A implementation plan: (1) define coroutine state-machine IR in sema separate from async/await coloring; (2) parser accepts ratified suspend/resume primitives from D-COROUTINE1; (3) sema proves captured values obey move/borrow rules across suspension; (4) codegen emits Rust enum state machine; (5) interop with task runtime via adapter; (6) diagnostics for illegal borrow across suspend; (7) examples and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -3499,11 +3599,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-SELFVER1=A implementation plan: (1) add `core.versioned.Value<T>` carrying version id plus conversion log; (2) schema migration hooks append conversion entries; (3) APIs expose current value, original version, and reversible audit trail; (4) no implicit runtime cost for ordinary values; (5) examples for config/schema migration; (6) serialization tests and docs.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -3629,11 +3733,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-HOLE1=A implementation plan: (1) do not add a hole type; (2) add Option combinators `zip`, `map`, `and_then`, `lift2`, and `lift3` in Core; (3) sema method returns preserve `T?` types and reject ambiguous nested optionals per E0309; (4) examples for sensor/data-pipeline multi-optional arithmetic; (5) docs explaining combinators; (6) golden tests and no new syntax.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "D-HOLE1: added Epoch 6 defer option per owner instruction."
@@ -3654,11 +3766,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-PROVENANCE1=C plan: no Epoch-3 implementation. Ready action: (1) record deferral in roadmap/far-horizon notes; (2) add a design note listing prerequisites D-REPLAY runtime harness, D-TIMETRAVEL1, D-IFC1, debugger DAP; (3) close this card as deferred after docs update. No parser/sema/codegen work.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "D-PROVENANCE1: added Epoch 6 defer option per owner instruction."
@@ -3679,11 +3799,19 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-TIMETRAVEL1=C plan: no per-variable history now. Ready action: (1) record Epoch-6 deferral; (2) document manual history workaround and debugger/replay prerequisites; (3) ensure no active implementation card claims time-travel support. No compiler work.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "D-TIMETRAVEL1: added Epoch 6 defer option per owner instruction."
@@ -3816,11 +3944,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-ASKCODE1=B implementation plan: (1) wait for D-SEMINDEX1 API; (2) implement read-only query engine over symbols, call graph, effects, dataflow facts, and diagnostics; (3) CLI `jet query` with stable JSON output; (4) LSP command for same queries; (5) tests for balance-negative style query over fixture project; (6) docs.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -3903,11 +4035,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-RINGLAYER1=A implementation plan: (1) classify Core modules/helpers as `core`, `alloc`, or `std` layer; (2) infer package minimum layer from imports and emitted helper usage; (3) parse optional package metadata ceiling `layer: core|alloc|std`; (4) sema/driver reject imports/helpers above ceiling or target; (5) include layer in lock/build metadata; (6) diagnostics with import chain; (7) embedded/freestanding examples and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -3936,11 +4072,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "Explicit allocation boundary plan: (1) audit Core APIs that allocate across caller boundaries; (2) add buffer/allocator-taking variants where fixed-memory callers need control; (3) use existing arena/allocator model, no new syntax; (4) add lint for hidden allocation inside `#NoAlloc`/embedded layer contexts once layer inference lands; (5) examples for caller-supplied buffers; (6) docs/rubric updates.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Activated into epoch e3 track"
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L169). Ratified/accepted — no proceed-ballot; owner greenlights to start."
@@ -3951,7 +4095,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-26"
+      "updated": "2026-06-28"
     },
     {
       "id": "c2ciz9y9",
@@ -4009,6 +4153,10 @@
         "c2oizyqs"
       ],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Decision blocker D-A11Y2 added to ballot."
+        },
         {
           "at": "2026-06-28",
           "text": "Planning vetted; implementation blocked on reactive UI stack/backend trait/signal API gates."
@@ -4086,9 +4234,25 @@
       "epoch": "e3",
       "phase": "planning",
       "priority": "P3",
-      "plan": "D-WEBBACKEND1=A: Hybrid JS DOM for views + WASM for logic. Plan status: blocked on multiple sub-decisions. D-WASM1 needed: how does Jet partition code between JS and WASM targets? D-JSBIND1 needed: how do Jet types cross the JS/WASM boundary? D-WEBKIND1 needed: which WASM target first — wasm32-unknown-unknown, wasm32-wasi, or wasm32-wasip2? D-DOMGEN1 needed: does the JS DOM codegen use a thin runtime shim or generate raw DOM calls? Each is a syntax/API design question. Raise D-WASM1 as the first gate — cannot plan further until the partition model is locked. High-level: Jet view functions compile to a JS bundle that issues DOM mutations; pure Jet functions compile to WASM via rustc's wasm32 target. The JS bridge calls WASM via wasm-bindgen equivalent (no external crates — I6).",
+      "plan": "D-WEBBACKEND1=A + D-WASM1=A implementation plan after new ballots resolve: (1) add `Browser` effect to the effect set; (2) partition web build by inferred effects: Browser/DOM code to JS, pure/compute code to WASM; (3) implement module-level `#Target(Wasm|Js)` ceilings and per-function `#Wasm`, `#Js`, `#WasmExport`; (4) implement chosen WASM target from D-WEBKIND1; (5) implement JS/WASM boundary type ABI from D-JSBIND1; (6) implement DOM emission strategy from D-DOMGEN1; (7) driver emits JS bundle, WASM module, and partition manifest; (8) examples/goldens/ui diagnostics.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Decision blocker D-DOMGEN1 added to ballot."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Decision blocker D-WEBKIND1 added to ballot."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Decision blocker D-JSBIND1 added to ballot."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "D-WASM1: copied owner questions and answers into the ballot Owner Q&A facet."
@@ -4136,6 +4300,10 @@
         "c2fizfx3"
       ],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Decision blocker D-NPMTYPE1 added to ballot."
+        },
         {
           "at": "2026-06-28",
           "text": "Planning vetted; JS/npm work blocked on web backend partition decisions; Swift side remains downstream of native backend."
@@ -4514,11 +4682,15 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-MOTION1=A implementation plan: (1) build motion values as derived reactive signals over time; (2) define easing/spring primitives in core.motion; (3) integrate with view renderer so animation invalidates exactly affected views; (4) no imperative frame mutation API; (5) tests with deterministic fake clock; (6) examples for transition/spring/keyframe.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -4862,11 +5034,19 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-REFSTRUCT1=B implementation plan: (1) replace current stored-ref surface with field marker `#Ref(Label) field: T`; (2) remove `use core.mem` gate per owner outcome; (3) parser/Syntax.rs marker registration; (4) sema labels owner relationships and rejects dangling/escaping stored views; (5) formatter migrates/prints marker form; (6) teaching diagnostic for old `ref[label]`; (7) examples/ui snapshots/docs.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
@@ -4883,11 +5063,15 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-TOWERRETIRE1=C implementation plan: (1) inventory Tower v1 files and v2 equivalents; (2) migrate any unique docs/templates/scripts into v2 paths; (3) add archive note for historical v1-only artifacts; (4) delete or freeze v1 entry points; (5) run Tower status tests/manual smoke; (6) document final v2-only workflow.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -4908,11 +5092,19 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-CFFI-SYNTAX-REOPEN=A implementation plan: (1) change C FFI marker spelling from `@extern module` to `#Extern module`; (2) update parser/Syntax.rs and formatter; (3) add teaching diagnostic for old `@extern`; (4) migrate examples/tests/docs; (5) ensure generated C FFI behavior unchanged; (6) ui snapshots and cffi tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
@@ -4929,11 +5121,19 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-LOOP-SURFACE-REOPEN=B implementation plan: (1) extend `loop` parser with semicolon counted header `loop init; cond; step {}`; (2) semicolons remain legal only in this header; (3) sema scopes init variable to loop and type-checks cond Bool/step statement; (4) codegen lowers to while-style loop; (5) formatter preserves compact header; (6) diagnostics for malformed header; (7) examples/tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
@@ -4950,11 +5150,15 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": null,
+      "plan": "D-FALLTHROUGH1=A plan: no implementation of fallthrough. Ready action: (1) add docs note that grouped arms are the only shared-handling path; (2) ensure `fallthrough`/`case`/`switch` teaching diagnostics point at grouped arms; (3) close card after docs/tests confirm no accepted fallthrough syntax.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -4975,11 +5179,19 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-DYNAMIC-TYPE1=B implementation plan: (1) add closed union type AST `A | B | C` in type position; (2) sema treats it as anonymous closed sum with no general `Any`; (3) construction/coercion rules require value fit one member unambiguously; (4) pattern matching over unions exhaustive by member type; (5) codegen emits private enum wrapper or optimized representation; (6) diagnostics for ambiguous member and invalid operations; (7) examples/ui/golden tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
@@ -4996,11 +5208,19 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-ORRETURN-ERG1=B implementation plan: (1) extend `??` fallback grammar to accept `continue` as a control fallback; (2) deprecate `?continue` with teaching diagnostic/formatter rewrite to `?? continue`; (3) confirm `?? return` and `?? break` remain unchanged; (4) sema enforces loop-only continue and compatible fallback types; (5) examples and ui snapshots; (6) update S71/S81 docs.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Implementation-ready plan added from decision sweep."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
@@ -7184,8 +7404,8 @@
         {
           "key": "A",
           "name": "No hole; ship Option.zip/lift2 combinators for multi-absent arithmetic (recommended)",
-          "detail": "A universal absent-propagating value would add a second absence mechanism alongside T? (I8 violation), silently void D-DIST3 distinct-type safety (Hole<Usd> + Hole<Eur> bypasses E0127), and require a D-VECARITH1 exception to wire arithmetic operators. The ergonomic gap for data-pipeline code is real but closable through core library combinators: ship `Option.zip(a, b) -> (A,B)?`, `Option.lift2(f, a, b) -> C?`, and optionally a `with_optional { }` block desugaring T? bindings to short-circuit chains. One combinator call, visible propagation, no hidden flow, no new type.",
-          "code": "// No hole type needed:\nlet price: Float? = lookup(id)\nlet qty:   Float? = lookup_qty(id)\n\n// Option.lift2 combinator (new core library addition, no language change):\nlet total: Float? = Option.lift2(fn(p, q) -> p * q, price, qty)\n\n// or via zip:\nlet total: Float? = price.zip(qty).map(fn((p, q)) -> p * q)"
+          "detail": "A universal absent-propagating value would add a second absence mechanism alongside T? (I8 violation), silently void D-DIST3 distinct-type safety (Hole<Usd> + Hole<Eur> bypasses E0127), and require a D-VECARITH1 exception to wire arithmetic operators. The ergonomic gap for data-pipeline code is real but closable through core library combinators. A combinator is a small function that combines optional values without new syntax: `zip` turns two optionals into one optional pair only when both are present; `map` transforms the present value; `lift2` applies a two-argument function only when both inputs are present and returns `null` otherwise. These keep propagation visible and type-checked.",
+          "code": "price: Float? = lookup_price(id)\nqty: Float? = lookup_qty(id)\n\n// zip: both present -> present pair; either null -> null\ntotal1 @= price.zip(qty).map(fn(pair) -> pair.0 * pair.1)\n\n// lift2: same idea, but no explicit pair\ntotal2 @= Option.lift2(fn(p, q) -> p * q, price, qty)\n\n// result type: Float?"
         },
         {
           "key": "B",
@@ -7218,11 +7438,15 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "research",
       "bestCurrent": "R / pandas: R and pandas propagate `NA` through data operations, excellent for tables but dangerous as a universal language value.",
-      "recommendation": "No universal hole — ship Option.zip/lift2 combinators to close the data-pipeline ergonomic gap without a new type, I8 violation, or D-VECARITH1 conflict (Option A).",
+      "recommendation": "No universal hole. Ship `Option.zip`, `map`, and `lift2` combinators so multi-optional data flows stay concise without adding a second absence mechanism.",
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Owner asked what combinators are; Option A now defines zip/map/lift2 with concrete optional-flow examples."
+        },
         {
           "at": "2026-06-28",
           "text": "Ballot cleanup: rec key fixed, detail deduplicated, naming corrected."
@@ -7235,7 +7459,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-PROVENANCE1",
@@ -7284,7 +7510,7 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "research",
       "bestCurrent": "Taint-tracking systems: Security taint systems track source labels through values, but full provenance on all values is expensive and noisy.",
       "recommendation": "Ship NaN payload tagging in debug builds for the stated story; defer general value provenance graphs to Epoch 6 (Option A). Option A as previously written (defer to D-REPLAY1) is not actionable — D-REPLAY1=A is a compile-time marker only, not a runtime harness.",
@@ -7301,7 +7527,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "C",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-TIMETRAVEL1",
@@ -7350,7 +7578,7 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "research",
       "bestCurrent": "Elm: Elm time-travel debugging works because state updates are messages in a pure architecture.",
       "recommendation": "Extend the Jet debugger's DAP implementation with a `variableHistory` request — no language surface, all platforms (Option A). Option A as previously written (fold into D-REPLAY1) is not actionable: D-REPLAY1=A is a compile-time static annotation; the runtime replay harness is explicitly deferred post-v1.",
@@ -7367,7 +7595,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "C",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-DEADLINE1",
@@ -8993,44 +9223,59 @@
       "id": "D-IGNORERET2",
       "cardId": "c1iqde7",
       "title": "What visible spelling deliberately discards a #MustUse / fallible result?",
-      "gist": "D-IGNORERET1=B ratified that discarding a fallible/`#MustUse` result must be explicit + visible (never silent, I1) and emits a lint pointing at what was dropped. This decides the spelling. Three constraints: (1) impossible to type by accident; (2) obvious in code review; (3) consistent with D-LIN1-DROP=A's `drop(x)` vocabulary for `#SingleUse` discards — the chosen spelling must either unify with that vocabulary or explicitly justify the split. A fourth question the ballot must answer: does the spelling differ between losing a `T ? E` error (higher danger) and ignoring a `#MustUse` non-fallible result (lower danger)?",
+      "gist": "D-IGNORERET1=B requires visible discard. This decides the per-call spelling and the method-chain spelling; scoped suppression is `#Suppress`, not `@suppress`.",
       "explainer": "Owner question answered: the ballot now offers more than three spellings and separates terse sigils from audit-readable words. Adversarial pass on `.ignore(\"reason\")`: method syntax can look like an ordinary user method and reasons can become boilerplate. Patch: sema treats it as a blessed escape only for `#MustUse`/fallible values, requires a non-empty literal reason, emits a lint naming the dropped type, and rejects user-defined `.ignore` from silently intercepting must-use semantics.",
-      "story": "Priya calls a cleanup function that returns a fallible result from a best-effort telemetry flush. She wants reviewers to see that the result is intentionally discarded, not accidentally ignored, and she wants the compiler to keep catching every accidental ignored fallible result elsewhere.",
-      "inWild": "fn shutdown(log: Logger) {\n    log.flush() !_          // explicit discard spelling under decision\n    print(\"done\")\n}\n\nfn unsafe_shutdown(log: Logger) {\n    log.flush()             // still E0402 / must-use diagnostic\n}",
+      "story": "Nora writes a telemetry sink. Individual best-effort calls need an audit reason, but long chains should keep reading left-to-right without hiding the discarded result.",
+      "inWild": "send(event).drop(\"telemetry best effort\")\n\n#Suppress(MustUse) {\n    logger.write(event)\n    metrics.send(event)\n}",
       "detail": "Owner Q: Give me other syntax options that read a little better; potentially ok with A but want multiple options.\nAgent answer: Updated with six options. Best revised rec: .ignore(\"reason\") — attached to the value being dropped, creates an audit trail, sema treats it as a blessed escape requiring a non-empty literal reason.\n\nAdversarial pass (2026-06-28): D-LIN1-DROP=A COHESION: that ratified decision rejected both `x.abandon(\"reason\")` (method+reason, the shape of Option D) and `discard(x,\"reason\")` (vocabulary of Option E) for #SingleUse discard. This ballot proposes both rejected patterns. The design must either unify under `drop(expr,\"reason\")` (Option H) or explicitly document why fallible-result discard warrants a different form than linear-type discard — without that, I8 is bent. POSTFIX !: `!` is currently OP_NOT (prefix unary only); Options A and B introduce it as postfix for the first time — two meanings, opposite positions, same glyph. MISSING EXPERT TIER: per-call annotation is unworkable for fire-and-forget subsystems; Option I (scope-level suppression) belongs in this ballot alongside the per-call spelling.\n\nSprint-readiness sweep: story and inWild filled so the ballot is complete for owner decision.",
       "options": [
         {
           "key": "A",
-          "name": "`drop(expr, \"reason\")` per-call + `@suppress(must_use)` on fn/block for scopes (recommended)",
-          "detail": "Unify with D-LIN1-DROP=A: `drop` is already the single builtin for \"I am explicitly consuming a value the type system tracks.\" Overload it with a required non-empty literal reason argument for #MustUse/fallible discard (outside #Unsafe). Sema requires the literal string; emits W-code lint naming the dropped type; rejects user-defined `drop` intercepting must-use semantics. For fire-and-forget subsystems (logging, telemetry, event buses): a function or block annotation `@suppress(must_use)` suppresses the lint for all calls within that scope — annotate once at the fn boundary instead of per-call. One verb for all deliberate discards; one scope annotation for best-effort subsystems. Register `drop(expr, \"reason\")` as the two-argument form in Source/Syntax.rs alongside the existing BUILTIN_DROP entry. No postfix `!` (avoids the prefix/postfix `!`=OP_NOT collision); no reserved-word `discard` (avoids D-LIN1-DROP=A vocabulary split).",
-          "code": "// Per-call: explicit discard with audit trail\ndrop(write_log(event), \"telemetry best effort\")\n\n// Scope-level: entire fn is fire-and-forget\n@suppress(must_use)\nfn telemetry_sink(event: Event) {\n    write_log(event)    // no per-call drop needed\n    send_metric(event)\n}\n\n// W-code lint on drop without reason:\n// warning[W0201]: #MustUse result of `write_log` dropped\n//   fix: drop(write_log(event), \"reason why this is intentional\")"
+          "name": "Method `.drop(\"reason\")` + `#Suppress` scope (recommended)",
+          "detail": "Keep the ratified visible-discard rule, but make the chain spelling a method-like terminal operator: `expr.drop(\"reason\")`. It reads left-to-right in chains and reuses the existing `drop` vocabulary from D-LIN1-DROP. The scoped form is `#Suppress(MustUse) { ... }` or `#Suppress(MustUse) fn ...`, matching Jet marker casing and the owner correction; no `@suppress` attribute exists.",
+          "code": "send(event)\n    .retry(2)\n    .drop(\"telemetry best effort\")\n\n#Suppress(MustUse) {\n    write_log(event)\n    send_metric(event)\n}"
         },
         {
           "key": "B",
-          "name": "`let _ = expr` — assignment to wildcard",
-          "detail": "Assignment to `_` at statement level is the most familiar pattern (Rust, Haskell, Go). No new syntax. Unresolved: D-PATW=D ratified `_` for ignored payload fields in patterns; `let _ = fallible_fn()` at statement level may already suppress #MustUse — if so, this option is implicitly available now. Downside: no reason slot; audit trail requires convention not enforcement. Requires confirming `_ = expr` is a valid standalone statement in Jet's current parser.",
-          "code": "let _ = write_log(event)\n// or: _ = write_log(event)  // if bare assignment is valid at statement level"
+          "name": "Pipe discard `.then(drop(\"reason\"))`",
+          "detail": "Keep `drop` as the vocabulary but make chaining go through an explicit pipeline/combinator step. This is clear that discard is a terminal action, but it introduces a callback-like wrapper for a common review signal and is noisier than `.drop(...)`.",
+          "code": "send(event)\n    .retry(2)\n    .then(drop(\"telemetry best effort\"))"
         },
         {
           "key": "C",
-          "name": "Defer to Epoch 6",
-          "detail": "D-IGNORERET1=B is ratified with an explicit implementation mandate: parser discard sigil + sema #MustUse lint + W-code + ui snapshot. Choosing defer requires either reopening D-IGNORERET1 to remove the mandate, or accepting that #MustUse results are un-discardable until Epoch 6. Not a cost-free deferral.",
-          "code": "// No sanctioned ignore spelling until Epoch 6\n// #MustUse results cannot be explicitly discarded"
+          "name": "Postfix bang method `.!drop(\"reason\")`",
+          "detail": "Use a visually loud method operator for discards only. Reviewers cannot miss it, and it keeps chaining shape. Downside: `!` already means logical not in Jet; spending it inside method syntax creates another punctuation rule.",
+          "code": "send(event)\n    .retry(2)\n    .!drop(\"telemetry best effort\")"
+        },
+        {
+          "key": "D",
+          "name": "Arrow method operator `-> drop(\"reason\")`",
+          "detail": "A terminal arrow makes the discard look like control flow at the end of a chain. It is visually distinct from ordinary methods, but `->` already carries return/arm meaning; using it in expression chains risks overloading a high-value token.",
+          "code": "send(event)\n    .retry(2)\n    -> drop(\"telemetry best effort\")"
         }
       ],
       "comparisons": [
         {
-          "lang": "Best current",
-          "note": "Rust uses `let _ = expr` to make ignored `must_use` results explicit.",
-          "code": "let _ = fallible();"
+          "lang": "Rust",
+          "note": "Uses `let _ = expr` or `drop(expr)`; no required reason string.",
+          "code": "let _ = write_log(event);"
+        },
+        {
+          "lang": "Jet proposed",
+          "note": "Discard is an audited terminal method or an explicit marker-scoped suppression.",
+          "code": "write_log(event).drop(\"best effort\")\n#Suppress(MustUse) { write_log(event) }"
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "syntax",
       "bestCurrent": "Rust: Rust uses `let _ = expr` to make ignored `must_use` results explicit.",
-      "recommendation": "`drop(expr, \"reason\")` per-call unified with D-LIN1-DROP=A vocabulary, paired with `@suppress(must_use)` for fire-and-forget scopes (Option A). One verb for all deliberate type-system discards.",
+      "recommendation": "Use `.drop(\"reason\")` plus `#Suppress(MustUse)` (Option A): one discard vocabulary, method-chain friendly, and marker casing matches Jet.",
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Owner corrected scoped spelling to `#Suppress` and requested method-chain variants; ballot rebuilt around method discard syntax."
+        },
         {
           "at": "2026-06-28",
           "text": "Ballot cleanup: rec key fixed, detail deduplicated, naming corrected."
@@ -9043,7 +9288,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-DISPLAYDBG2",
@@ -9057,9 +9304,9 @@
       "options": [
         {
           "key": "A",
-          "name": "`{value:Debug}` — PascalCase protocol name after colon (recommended)",
-          "detail": "Inside `{}` interpolation, a `:` followed by a PascalCase protocol name selects the format hook: `{value:Debug}` for Debug, bare `{value}` for Display. No new sigil. Protocol names are PascalCase per D-CASING1 — `Debug` looks exactly like every other Jet protocol/type name. `:` inside `{}` is currently unused in expression context (`:` elsewhere is struct fields, type annotations, and named-arg labels — all in declaration contexts, not string-template mode). Parser is already in a distinct interpolation state when inside `{}`, making `{value:Debug}` syntactically unambiguous. Closed selector set: sema accepts `Debug` (and optionally `Display` for explicit override); unknown names produce a teaching error listing valid selectors. Formatter round-trips `{value:Debug}` exactly; unknown selectors at format time are compile errors, not runtime panics.",
-          "code": "print(\"{user:Debug}\")\nprint(\"{a} vs {b:Debug} and {c}\")  // multiple values; composes cleanly\n\n// sema error on unknown selector:\n// error: unknown format selector `Hex`\n//   valid selectors: Debug, Display\n//   --> src/main.jet:5\n// 5 | print(\"{n:Hex}\")\n//   |         ^^^"
+          "name": "`{value@Debug}` — PascalCase selector suffix (ratified)",
+          "detail": "Inside interpolation, suffix the value expression with `@Debug` to select the Debug hook: `{value@Debug}`. Bare `{value}` remains Display. This honors the owner correction away from `:Debug`, keeps selector casing PascalCase, avoids a format mini-language, and mirrors Jet marker-suffix visual grammar without making `Debug` look like a field or method.",
+          "code": "print(\"{user@Debug}\")\nprint(\"{a} vs {b@Debug} and {c}\")\n\n// unknown selector:\nprint(\"{n@Hex}\")\n// error: unknown format selector `Hex`; valid selectors: Debug, Display"
         },
         {
           "key": "B",
@@ -9082,11 +9329,15 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "syntax",
       "bestCurrent": "Rust: Rust interpolation uses `{}` for Display and `{:?}` for Debug, a compact convention developers already know.",
-      "recommendation": "`{value:Debug}` remains Option A and the recommendation. Per owner request, B and C are now Jet-cohesive alternatives instead of Rust-style `:?` or deferral: `#Debug` prefix and `Debug value` prefix.",
+      "recommendation": "Ratified owner amendment: use `{value@Debug}` for Debug interpolation; bare `{value}` stays Display.",
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Owner ratified A with amendment: use `@Debug` suffix instead of `:Debug`; option text updated."
+        },
         {
           "at": "2026-06-28",
           "text": "Owner kept A but rejected old B/C; ballot now has two new Jet-cohesive selector syntaxes."
@@ -9103,7 +9354,10 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "A",
+      "comment": "use @Debug suffix on the variable instead of :Debug",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-REPLAY2",
@@ -9338,7 +9592,7 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "research",
       "bestCurrent": "Liquid Haskell: Liquid Haskell proves rich predicates with SMT-backed refinements, but the model is expert-only.",
       "recommendation": "Extend `distinct` with `#Invariant(pred)` + pure-Rust Presburger/LIA prover (I6/I8-clean) — no new keyword, delivers D-OOBPROOF1=A (Option A). Construction-only (Option B) leaves D-OOBPROOF1=A blocked with no delivery path.",
@@ -9355,7 +9609,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-VERIFY1",
@@ -9414,7 +9670,7 @@
         }
       ],
       "rec": "A",
-      "status": "open",
+      "status": "ratified",
       "group": "research",
       "bestCurrent": "Dafny: Dafny gives machine-checked pre/postconditions and proofs, but it is a verification language.",
       "recommendation": "`require`/`ensure` contracts as the Epoch 3 foundation + `#Verify(finite-domain)` exhaustive checker for truly provable finite-type cases (Option A). `require`/`ensure` forward-composes into Option C's eventual proof language without redesign.",
@@ -9431,7 +9687,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-BUDGET1",
@@ -9810,7 +10068,7 @@
     {
       "id": "D-WASM1",
       "cardId": "c2fizfx3",
-      "status": "open",
+      "status": "ratified",
       "gist": "Partition inference requires a `Browser` effect (or equivalent named call-graph rule) as its engine — the current D-EFF4 closed set has no such entry. The JS/WASM boundary is bidirectional (WASM→JS exports and JS→WASM callbacks) and interacts with the D-SIGNAL1 reactive graph. Before this decision can be ratified, D-WEBKIND1 (WASM target) and D-JSBIND1 (boundary types) must exist as ballot cards, and the inference engine must be defined precisely enough to snapshot-test.",
       "story": "Priya writes a dashboard. Her chart view responds to clicks in the browser, but CSV export and matrix transforms should run in WASM. She does not want to annotate a hundred helper functions; she wants Jet to send pure compute to WASM and keep browser API code in JS.",
       "inWild": "use core.web\n\nfn render(data: [Point]) -> View {\n    VStack.{\n        children: [\n            Chart(data: data),\n            Button(label: \"Export\", on_click: () => { download(export_csv(data)) }),\n        ],\n    }\n}\n\n#Pure fn export_csv(data: [Point]) -> String {\n    // pure compute: WASM candidate\n    ...\n}",
@@ -9824,9 +10082,9 @@
       "options": [
         {
           "key": "A",
-          "name": "Add `Browser` effect (amend D-EFF4); effects drive partition inference + expert markers validate (recommended)",
-          "detail": "Amend D-EFF4 to add `Browser` as the eleventh built-in effect. Functions calling browser APIs (`use core.web.dom`) carry `Browser` in their inferred effect set; functions without it are WASM candidates. I8-coherent: the effect system is the single mechanism for inference — no parallel ad-hoc call-graph scan. Expert placement override: `#Wasm` (force WASM placement), `#Js` (force JS), `#WasmExport` (visible ABI export marker). Sema validates overrides — a `#Wasm`-pinned function calling a Browser-effect function is a type error. Every build emits a machine-readable partition manifest (`jet build --target web --explain-partition`), snapshot-tested. Markers registered in Syntax.rs with this decision ID. GATES (must be raised as ballots before this card can be implemented): D-WEBKIND1 (which effects are valid in the WASM target — `#Pure` ≠ \"WASM candidate\" since wasm32-wasip2 allows Net/Fs effects) and D-JSBIND1 (boundary types and the JS→WASM callback bridge). Also: D-PLUGIN1=B (WASM Component Model) and this web-backend WASM model are two distinct WASM compile targets; document which one `#WasmExport` addresses.",
-          "code": "use core.web.dom  // functions here carry Browser effect → compiled to JS\n\n// Inference: no annotation needed in normal code\nfn transform(data: [Point]) -> [Point] { ... }  // no Browser → WASM\nfn render(data: [Point]) -> View { ... }          // calls dom.* → JS\n\n// Expert override:\n#Wasm fn compute_heavy(n: Int) -> Int { ... }     // pinned\n#WasmExport fn process(d: [Point]) -> [Point] { ... }  // JS-callable\n\n$ jet build --target web --explain-partition\n// partition.json: { \"wasm\": [\"transform\", \"compute_heavy\"], \"js\": [\"render\"] }"
+          "name": "Infer from `Browser` effect + allow module-level target ceilings (recommended)",
+          "detail": "Amend D-EFF4 with a `Browser` effect and use effects as the default partition engine: browser/DOM APIs imply JS; pure/compute code is WASM-eligible. Add the useful part of B as expert control: a module may declare `#Target(Wasm)` or `#Target(Js)` as a ceiling/default, and sema validates it against the inferred effects. This keeps beginner magic (no required module declarations) and gives large teams auditable module-level placement. Per-function `#Wasm`, `#Js`, and `#WasmExport` remain overrides. GATES: D-WEBKIND1 and D-JSBIND1 still need ballots before implementation.",
+          "code": "use core.web.dom  // carries Browser effect → JS by default\n\n#Target(Wasm)\nmodule compute {\n    fn transform(data: [Point]) -> [Point] { ... }\n}\n\n#Target(Js)\nmodule ui {\n    fn render(data: [Point]) -> View { ... }\n}\n\n#WasmExport fn process(d: [Point]) -> [Point] { ... }"
         },
         {
           "key": "B",
@@ -9850,9 +10108,13 @@
       "title": "For the web backend, how does Jet partition JS DOM code and WASM logic while preserving expert control?",
       "explainer": "Owner question answered: pure inference is not enough for experts. Best shape is inferred default plus explicit markers and a partition report. Compared with Next/SvelteKit, Jet should keep the magic boundary inference but add typed bridge/audit reports. Compared with wasm-bindgen, Jet should require less manual glue and own all diagnostics. Adversarial pass: override markers can create unsound crossings. Patch: sema rejects browser handles in WASM, checks bridgeable types/effects, emits a build manifest, and snapshots boundary diagnostics.",
       "bestCurrent": "SvelteKit / Next.js: Modern web frameworks infer client/server splits from imports and boundaries, minimizing manual export markers.",
-      "recommendation": "Add `Browser` as the eleventh D-EFF4 built-in effect; use it as the partition engine (Option A). I8-coherent: one mechanism (the effect system) drives both inference and expert validation. Gated on raising D-WEBKIND1 and D-JSBIND1 as ballot cards.",
+      "recommendation": "Use effect inference by default plus module-level `#Target` controls (Option A). Pure B makes every beginner choose a target; hybrid A gives magic out of the box and expert visibility where teams need it.",
       "detail": "Owner Q: We must ensure full expert control & auditability. Reconsider this ballot with devil's advocate, make it best in the world.\nAgent answer: Updated. New rec: C, not pure inference. Default is inferred from effects and browser API use; experts can pin #Wasm, #Js, #WasmExport, then inspect `jet build --target web --explain-partition`. Devil's advocate: overrides can create unsound crossings. Patch: sema checks all boundary types/effects, rejects browser handles in WASM, emits a bridge manifest, snapshots boundary diagnostics.\n\nAdversarial pass (2026-06-28): INFERENCE ENGINE GAP: D-EFF4 (ratified) closed the effect vocabulary at ten effects with no Browser/Dom entry; Option C inference has no implementation foundation without amending D-EFF4 or introducing a parallel ad-hoc tracking pass (I8 violation). Option F (add Browser effect) is the I8-coherent path. PURE ≠ WASM: #Pure (empty effect set) ≠ \"WASM candidate\" — wasm32-wasip2 allows Net/Fs effects in WASM; correct inference rule is \"no Browser effect in transitive closure,\" blocked on D-WEBKIND1. CALLBACK BRIDGE MISSING: #WasmExport covers WASM→JS direction only; JS→WASM callbacks are absent from all options, gated on D-JSBIND1. D-PLUGIN1 COHERENCE: D-PLUGIN1=B (WASM Component Model) and this web-backend WASM model are two distinct incompatible WASM compile targets — neither ballot acknowledges the other.",
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Owner asked why not module-level declarations; Option A now includes module-level `#Target` as expert control while keeping inference default."
+        },
         {
           "at": "2026-06-28",
           "text": "Ballot cleanup: rec key fixed, detail deduplicated, naming corrected."
@@ -9865,7 +10127,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-REFLECT1",
@@ -10208,29 +10472,29 @@
     },
     {
       "detail": "",
-      "status": "open",
+      "status": "ratified",
       "created": "2026-06-28",
       "raisedBy": "agent",
       "raisedAt": "2026-06-28",
       "id": "D-REFSTRUCT1",
       "cardId": "c3brefstruct",
       "title": "What is the ratified syntax and access gate for labeled stored-reference fields?",
-      "gist": "Jet already has labeled stored-reference fields in implementation; the owner must ratify or replace the visible syntax and decide whether it belongs behind an expert gate.",
+      "gist": "Stored reference fields let structs carry zero-copy views into owner values; owner selected marker syntax `#Ref(Label)`.",
       "explainer": "The recovered #100 concern is not an unresolved dangling-reference bug. E2-M5 hardened stored refs. The remaining issue is governance: `ref[label] field: T` is user-typeable, documented by diagnostics, and absent from syntax-decisions.md. I7 requires every keyword/sigil to have a decision ID. This ballot either ratifies that syntax, replaces it, or removes it until a better tier-2 stored-reference model exists.",
-      "story": "I am writing a parser that stores a view into an input buffer. The struct needs to say which owner the view is tied to, so the compiler can reject returning a dangling reference and readers can see the relationship.",
-      "inWild": "struct SliceView {\n    ref[input] bytes: [U8]\n}\n\nfn make(input: Buffer) -> SliceView {\n    SliceView.{ bytes: input.bytes() }\n}",
+      "story": "Earl builds a parser over a large input buffer. He wants tokens and slices to point into that buffer without allocating new strings, while the compiler still proves the buffer outlives every view.",
+      "inWild": "use core.mem\n\nstruct TokenView {\n    ref[source] text: String\n}\n\nfn lex(source: SourceBuffer) -> [TokenView] { ... }",
       "options": [
         {
           "key": "A",
           "name": "Ratify `ref[label] field: T` behind `use core.mem` (recommended)",
-          "detail": "The implemented syntax is correct; the only gap is governance. Ratify `ref[label] field: T` as expert-tier syntax requiring `use core.mem`. Safe by default (I1): beginners never see stored-reference vocabulary without opting in. Expert beginners see a clear name-the-owner pattern. Closes I7: add D-REFSTRUCT1 as the decision ID in Source/Syntax.rs for `ref` in field position. E2-M5 safety guarantees (dangling-reference diagnostics) are preserved.",
-          "code": "use core.mem\n\nstruct SliceView {\n    ref[input] bytes: [U8]   // labels the owner relationship\n}\n\nfn make(input: Buffer) -> SliceView {\n    SliceView.{ bytes: input.bytes() }\n}\n// Without `use core.mem`: sema error → teaching message about ref fields"
+          "detail": "Purpose: this is for structs that store a view into another value, e.g. parser tokens pointing into an input buffer, graph edges pointing into arena-owned nodes, or zero-copy packet/header views. The normal Jet memory model lets functions borrow during a call, but v1 intentionally disallows storing/returning references in beginner code. `ref[label] field: T` is the expert-tier opt-in that exposes that power while naming the owner relationship. It does not make unsafe memory possible by itself; sema must still reject dangling/escaping views. Gate it behind `use core.mem` so beginners never encounter stored-reference vocabulary accidentally.",
+          "code": "use core.mem\n\nstruct TokenView {\n    ref[source] text: String   // `text` points into `source`\n}\n\nfn first(source: SourceBuffer) -> TokenView {\n    TokenView.{ text: source.slice(0..3) }\n}\n// sema checks: `source` must outlive the TokenView"
         },
         {
           "key": "B",
-          "name": "Ratify `ref[label] field: T` with no import gate",
-          "detail": "Keep the implemented syntax without gating it on `use core.mem`. Simpler: beginners who write struct fields won't hit a surprising import error. Risk: stored-reference vocabulary enters the beginner surface without an explicit opt-in signal. Only appropriate if the owner decides `ref` in field position is not an expert-tier concept.",
-          "code": "struct NodeView {\n    ref[arena] name: String\n    // no use core.mem required\n}"
+          "name": "`#Ref(Label)` field marker, no import gate (ratified)",
+          "detail": "Stored reference fields use normal Jet marker syntax on the field: `#Ref(arena) name: T`. The label names the owner relationship sema must prove. No `use core.mem` gate is required per owner choice; safety still comes from sema rejecting dangling or escaping views. This gives experts zero-copy stored views that call-time `&`/`~` capabilities cannot express, while avoiding a new bracket keyword form.",
+          "code": "struct TokenView {\n    #Ref(source) text: String\n}\n\nfn first(source: SourceBuffer) -> TokenView {\n    TokenView.{ text: source.slice(0..3) }\n}\n// sema proves `source` outlives the TokenView"
         },
         {
           "key": "C",
@@ -10254,13 +10518,24 @@
       "rec": "A",
       "group": "ownership",
       "bestCurrent": "Rust proves stored references need explicit relationship tracking; Jet should keep that explicit but hide it behind an expert gate.",
-      "recommendation": "Ratify `ref[label] field: T` behind `use core.mem` — expert-gated, I7-compliant, safe by default (Option A). Closes the I7 gap (keyword/sigil must have a decision ID) while keeping stored references off the beginner surface.",
+      "recommendation": "Ratified owner amendment: use `#Ref(Label)` on the field, with no `use core.mem` gate (Option B as amended).",
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Owner amendment applied: stored-ref fields use `#Ref(Label)` syntax."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Owner asked purpose/control question; ballot expanded to explain zero-copy stored views and why call-time capabilities are insufficient."
+        },
         {
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation, rec set to A."
         }
-      ]
+      ],
+      "outcome": "B",
+      "comment": "Use syntax `#Ref(Label)` instead of `ref[label]`; no import gate.",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "detail": "",
@@ -10318,7 +10593,7 @@
     },
     {
       "detail": "",
-      "status": "open",
+      "status": "ratified",
       "created": "2026-06-28",
       "raisedBy": "agent",
       "raisedAt": "2026-06-28",
@@ -10332,9 +10607,9 @@
       "options": [
         {
           "key": "A",
-          "name": "Keep ratified S59/D-CFFI2-SYN (recommended)",
-          "detail": "The ratified C FFI surface (`@bindgen module`, `@extern module`, `use c.<lib> as alias`) is implemented and snapshot-tested. Do not reopen. If discoverability is weak, improve the docs/diagnostic teaching messages pointing from common C idioms to the Jet spelling. Reopening for a minor ergonomic win violates the \"measure twice, cut once\" principle when a correct, tested surface already exists.",
-          "code": "use c.libc as libc\n\n@extern module libc {\n    fn puts(s: *U8) -> Int\n    fn malloc(size: UInt) -> *U8\n}\n\nlibc.puts(\"hello\\0\")"
+          "name": "Keep C FFI, but spell blocks `#Extern module` (ratified)",
+          "detail": "Keep the ratified C FFI model (`use c.<lib> as alias`, generated bindings, same safety gates) but update the marker spelling to Jet-canonical `#Extern module`, per owner comment. This preserves one C-binding mechanism while aligning with PascalCase marker syntax; `@extern` becomes retired teaching syntax.",
+          "code": "use c.libc as libc\n\n#Extern module libc {\n    fn puts(s: *U8) -> Int\n    fn malloc(size: UInt) -> *U8\n}\n\nlibc.puts(\"hello\\0\")"
         },
         {
           "key": "B",
@@ -10359,17 +10634,24 @@
       "rec": "A",
       "group": "ffi",
       "bestCurrent": "Jet ratified surface unless this ballot identifies a stronger beginner-safe, one-path design.",
-      "recommendation": "Keep ratified S59/D-CFFI2-SYN — `@extern module` is implemented, tested, and correct (Option A). No gain from reopening; improve docs if discoverability is weak.",
+      "recommendation": "Ratified owner amendment: keep the existing C FFI model, but spell the binding block `#Extern module`, not `@extern module`.",
       "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Owner ratified A with amendment: use `#Extern` instead of `@extern`; option text updated."
+        },
         {
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation, rec set to A."
         }
-      ]
+      ],
+      "outcome": "A",
+      "comment": "update to use #Extern instead of @extern",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "detail": "",
-      "status": "open",
+      "status": "ratified",
       "created": "2026-06-28",
       "raisedBy": "agent",
       "raisedAt": "2026-06-28",
@@ -10431,7 +10713,9 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation, rec set to A."
         }
-      ]
+      ],
+      "outcome": "B",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "detail": "",
@@ -10488,7 +10772,7 @@
     },
     {
       "detail": "",
-      "status": "open",
+      "status": "ratified",
       "created": "2026-06-28",
       "raisedBy": "agent",
       "raisedAt": "2026-06-28",
@@ -10535,11 +10819,13 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation, rec set to A."
         }
-      ]
+      ],
+      "outcome": "B",
+      "ratifiedAt": "2026-06-28"
     },
     {
       "detail": "",
-      "status": "open",
+      "status": "ratified",
       "created": "2026-06-28",
       "raisedBy": "agent",
       "raisedAt": "2026-06-28",
@@ -10601,7 +10887,259 @@
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation, rec set to A."
         }
-      ]
+      ],
+      "outcome": "B",
+      "ratifiedAt": "2026-06-28"
+    },
+    {
+      "detail": "",
+      "status": "open",
+      "created": "2026-06-28",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-28",
+      "group": "syntax",
+      "bestCurrent": "No ratified decision yet.",
+      "recommendation": "Use a closed ABI-safe subset with generated adapters (Option A).",
+      "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Ballot added because implementation plan had a decision blocker."
+        }
+      ],
+      "id": "D-JSBIND1",
+      "cardId": "c2fizfx3",
+      "title": "What types may cross the JS/WASM boundary?",
+      "gist": "The web backend needs a stable ABI for values crossing between generated JS and WASM.",
+      "story": "Nora builds a dashboard. UI events begin in JS, heavy filtering runs in WASM, and typed results return to the view without losing Jet safety.",
+      "inWild": "#WasmExport fn filter(rows: [Order], q: String) -> [Order] { ... }",
+      "options": [
+        {
+          "key": "A",
+          "name": "Closed ABI subset + generated adapters (recommended)",
+          "detail": "Allow scalars, String, lists/maps of ABI-safe values, and Codable structs/enums. Generate adapters at the boundary; reject closures/resources unless explicitly wrapped. Safe, predictable, and enough for web apps.",
+          "code": "#WasmExport fn filter(rows: [Order], q: String) -> [Order] { ... }"
+        },
+        {
+          "key": "B",
+          "name": "JSON-only boundary",
+          "detail": "Serialize everything through Data/Json. Simple and debuggable, but loses static shape and adds avoidable overhead.",
+          "code": "#WasmExport fn filter(input: Data) -> Data { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Wasm Component Model types",
+          "detail": "Use component-model canonical ABI as the only boundary. Long-term clean, but ties the web backend to that ecosystem immediately.",
+          "code": "#WasmExport fn filter(rows: [Order]) -> [Order]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "wasm-bindgen",
+          "note": "Generates JS glue for a supported type subset.",
+          "code": "#[wasm_bindgen] pub fn f(s: String) -> String"
+        }
+      ],
+      "rec": "A"
+    },
+    {
+      "detail": "",
+      "status": "open",
+      "created": "2026-06-28",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-28",
+      "group": "syntax",
+      "bestCurrent": "No ratified decision yet.",
+      "recommendation": "Start with browser `wasm32-unknown-unknown` plus generated JS loader (Option A).",
+      "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Ballot added because implementation plan had a decision blocker."
+        }
+      ],
+      "id": "D-WEBKIND1",
+      "cardId": "c2fizfx3",
+      "title": "Which WASM target ships first for the web backend?",
+      "gist": "Jet must choose the first WASM target triple/runtime contract for browser builds.",
+      "story": "Hank ships a browser app and needs the generated WASM to load in ordinary browsers with no server-side runtime assumptions.",
+      "inWild": "jet build --target web app.jet",
+      "options": [
+        {
+          "key": "A",
+          "name": "`wasm32-unknown-unknown` browser module (recommended)",
+          "detail": "Emit browser-focused WASM plus generated JS loader. No WASI dependency, smallest browser story, aligns with JS DOM partition.",
+          "code": "jet build --target web  # emits app.wasm + app.js"
+        },
+        {
+          "key": "B",
+          "name": "`wasm32-wasip2` component first",
+          "detail": "Targets component model from day one. Better long-term ABI story, but browsers still need adapters and the DOM bridge remains JS-owned.",
+          "code": "jet build --target web-component"
+        },
+        {
+          "key": "C",
+          "name": "Support both immediately",
+          "detail": "Expose both targets now. More surface and testing matrix before the first web backend proves itself.",
+          "code": "jet build --target web --wasm=browser|component"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust web",
+          "note": "Most browser-first Rust/WASM flows start with wasm32-unknown-unknown plus JS glue.",
+          "code": "cargo build --target wasm32-unknown-unknown"
+        }
+      ],
+      "rec": "A"
+    },
+    {
+      "detail": "",
+      "status": "open",
+      "created": "2026-06-28",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-28",
+      "group": "syntax",
+      "bestCurrent": "No ratified decision yet.",
+      "recommendation": "Use a tiny first-party DOM runtime shim (Option A).",
+      "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Ballot added because implementation plan had a decision blocker."
+        }
+      ],
+      "id": "D-DOMGEN1",
+      "cardId": "c2fizfx3",
+      "title": "How should generated JS issue DOM operations?",
+      "gist": "The web backend needs either a small runtime shim or raw generated DOM calls.",
+      "story": "Betty debugs a Jet web app in browser devtools and wants DOM updates to be inspectable without hiding behavior behind a large framework.",
+      "inWild": "fn view(count: Int) -> View { button.{ label: \"{count}\" } }",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tiny stable DOM runtime shim (recommended)",
+          "detail": "Generate calls into a small first-party JS runtime for create/update/event wiring. Keeps output stable, testable, and small while avoiding repeated raw boilerplate.",
+          "code": "JetDom.button({ label: count, onClick: inc })"
+        },
+        {
+          "key": "B",
+          "name": "Raw DOM calls",
+          "detail": "Emit `document.createElement` and property assignments directly. No runtime shim, but output churns and optimization/diffing logic duplicates.",
+          "code": "let b=document.createElement(\"button\"); b.textContent=count;"
+        },
+        {
+          "key": "C",
+          "name": "Virtual DOM runtime",
+          "detail": "Use a richer runtime with diffing. Familiar model, but larger default and conflicts with Jet aim of minimal hidden runtime.",
+          "code": "JetVDom.render(view(count), root)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Svelte",
+          "note": "Compiles components to imperative DOM operations with a small runtime.",
+          "code": "element.textContent = count"
+        }
+      ],
+      "rec": "A"
+    },
+    {
+      "detail": "",
+      "status": "open",
+      "created": "2026-06-28",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-28",
+      "group": "syntax",
+      "bestCurrent": "No ratified decision yet.",
+      "recommendation": "Use first-party typed Jet stub packages (Option A).",
+      "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Ballot added because implementation plan had a decision blocker."
+        }
+      ],
+      "id": "D-NPMTYPE1",
+      "cardId": "c2giziub",
+      "title": "How are npm package types authored for Jet JS interop?",
+      "gist": "JS/npm interop needs a typed stub story before importing npm packages from Jet.",
+      "story": "Doris imports a charting npm package. She needs typed Jet calls without hand-writing unsafe glue in every project.",
+      "inWild": "use npm.\"chart.js\" as chart",
+      "options": [
+        {
+          "key": "A",
+          "name": "First-party Jet stub packages (recommended)",
+          "detail": "Typed npm bindings are Jet packages maintained like Core wrappers. Safe default, reviewable, and compatible with package manager.",
+          "code": "use npm.chart_js as chart"
+        },
+        {
+          "key": "B",
+          "name": "Read TypeScript declarations directly",
+          "detail": "Parse `.d.ts` files into Jet types. Broad coverage, but TypeScript semantics leak into Jet and diagnostics get worse.",
+          "code": "use npm.\"chart.js\" as chart"
+        },
+        {
+          "key": "C",
+          "name": "Dynamic untyped npm import",
+          "detail": "Allow untyped dynamic JS values. Fastest to reach packages, but violates static safety for ordinary users.",
+          "code": "use npm.\"chart.js\" as chart // Any"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Gleam/Elm",
+          "note": "Prefer typed wrappers around foreign ecosystems.",
+          "code": "external fn ..."
+        }
+      ],
+      "rec": "A"
+    },
+    {
+      "detail": "",
+      "status": "open",
+      "created": "2026-06-28",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-28",
+      "group": "syntax",
+      "bestCurrent": "No ratified decision yet.",
+      "recommendation": "Use a built-in role table plus explicit custom role marker (Option A).",
+      "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Ballot added because implementation plan had a decision blocker."
+        }
+      ],
+      "id": "D-A11Y2",
+      "cardId": "c2dizcmj",
+      "title": "How are component accessibility roles specified?",
+      "gist": "A11y-by-default needs a mapping from Jet components to ARIA/focus/keyboard behavior.",
+      "story": "Walter ships a form. Buttons, dialogs, and menus should be keyboard-correct by default, with explicit review for custom widgets.",
+      "inWild": "Button.{ label: \"Save\", on_click: save }",
+      "options": [
+        {
+          "key": "A",
+          "name": "Built-in role table + explicit custom role marker (recommended)",
+          "detail": "Core components carry fixed a11y behavior; custom components use a typed marker/property for role and keyboard model. Release lint rejects missing role on custom interactive components.",
+          "code": "#Role(Button)\ncomponent IconButton { ... }"
+        },
+        {
+          "key": "B",
+          "name": "Infer roles from names/properties",
+          "detail": "Less ceremony, but name-based inference is fragile and surprising.",
+          "code": "component SaveButton { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Manual ARIA fields only",
+          "detail": "Expose raw ARIA properties and require users to set them. Maximum control, poor beginner safety.",
+          "code": "Element.{ aria_role: \"button\" }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "SwiftUI",
+          "note": "Components have built-in accessibility traits with override APIs.",
+          "code": ".accessibilityAddTraits(.isButton)"
+        }
+      ],
+      "rec": "A"
     }
   ],
   "binder": [
@@ -11369,9 +11907,54 @@
       "by": "owner",
       "kind": "question",
       "text": "Syntax is wrong for scoped block, it should be #Suppress, not @suppress. Also, let's do a method operator -> i need different options for method chaining - update ballot based on A for all options, just with different syntax for method chaining as the variation",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-28T19:49:09.803Z"
+      "status": "answered",
+      "answer": "Updated D-IGNORERET2. Scoped suppression is now `#Suppress(MustUse)`, not `@suppress`. All options keep the same underlying decision (visible audited discard) and vary only the chain spelling: `.drop(\"reason\")`, `.then(drop(\"reason\"))`, `.!drop(\"reason\")`, or `-> drop(\"reason\")`. Recommendation stays the least-new-syntax method form.",
+      "created": "2026-06-28T19:49:09.803Z",
+      "answeredAt": "2026-06-28"
+    },
+    {
+      "id": "qy9u5de",
+      "cardId": "c3brefstruct",
+      "by": "owner",
+      "kind": "question",
+      "text": "I don’t understand what this is actually for? What is the purpose of this? Does this give experts control over things that they couldn’t do otherwise with the jet memory capability model?",
+      "status": "answered",
+      "answer": "This is for storing borrowed views inside structs: parser slices into a source buffer, arena-backed graph/node views, packet/header views, etc. The ordinary Jet capability model controls access during calls; it does not let a struct carry a reference tied to an owner. `ref[label]` gives experts that zero-copy control, with sema still proving the owner outlives the view. I updated D-REFSTRUCT1 to say that plainly.",
+      "created": "2026-06-28T20:27:55.120Z",
+      "answeredAt": "2026-06-28"
+    },
+    {
+      "id": "qzjlkcj",
+      "cardId": "c2fizfx3",
+      "by": "owner",
+      "kind": "question",
+      "text": "Why A not B? Is there a reason not to use B? it seems like it may be helpful to sometimes have the module level declaration",
+      "status": "answered",
+      "answer": "Reason for A over pure B: required module declarations make every beginner learn partitioning before rendering a page. But the module-level control is useful, so I folded it into A: default partitioning comes from `Browser` effect inference, and experts can add `#Target(Wasm)` / `#Target(Js)` at module level with sema validation. D-WASM1 now reflects that hybrid.",
+      "created": "2026-06-28T20:52:08.985Z",
+      "answeredAt": "2026-06-28"
+    },
+    {
+      "id": "q107i8ms",
+      "cardId": "c21iylo3",
+      "by": "owner",
+      "kind": "question",
+      "text": "Explain what the combinators are",
+      "status": "answered",
+      "answer": "Combinators are small library functions that compose `T?` values without new syntax. `zip(a,b)` returns `(A,B)?` only when both are present; `map` transforms the present value; `lift2(f,a,b)` runs `f` only when both inputs are present and otherwise returns `null`. I updated D-HOLE1 with concrete examples.",
+      "created": "2026-06-28T20:52:40.952Z",
+      "answeredAt": "2026-06-28"
+    },
+    {
+      "id": "q11755uu",
+      "cardId": "c2kizq8n",
+      "by": "owner",
+      "kind": "question",
+      "text": "Shouldn’t this use essentially FFI syntax? If not why not?",
+      "status": "answered",
+      "answer": "Marked DSL blocks should not reuse FFI syntax. FFI syntax declares an external ABI/module boundary (`#Extern module`) and is about linking trusted foreign functions. Marked DSL blocks are source-embedded, stdlib-owned parsers/validators (for example SQL text checked by `core.db`) that produce typed Jet values or diagnostics before codegen. They may reuse marker casing (`#Sql { ... }` or whatever a future ballot chooses), but semantically they are not FFI: no foreign symbols, no ABI, no linker, no unsafe boundary. I left the card as stdlib-only future work; if/when activated, it needs a syntax ballot for the exact blessed marker form.",
+      "created": "2026-06-28T21:07:17.348Z",
+      "answeredAt": "2026-06-28"
     }
   ]
 }
