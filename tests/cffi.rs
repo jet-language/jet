@@ -1,6 +1,6 @@
 //! C FFI (S59 / E2-M14) integration + unit tests.
 //!
-//! Phase 1 proves the whole pipeline end to end: a hand-written `@bindgen`
+//! Phase 1 proves the whole pipeline end to end: a hand-written `#Bindgen`
 //! cache fixture + a `use c.<lib>` call site compile to `extern "C"` wrappers
 //! that link against a real C static library (built here with `cc`) and print
 //! deterministic output.
@@ -56,7 +56,7 @@ const char *jetc_greeting(void) { return "hi from C"; }
 }
 
 /// E2-M14: the native `jet bind` backend turns a real C header into a working
-/// `@bindgen` cache that compiles, links against the C library, and runs.
+/// `#Bindgen` cache that compiles, links against the C library, and runs.
 #[test]
 fn jet_bind_native_backend_end_to_end() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
@@ -163,7 +163,7 @@ fn cffi_end_to_end_links_and_runs() {
     // Hand-written bindgen cache fixture (simulates `jet bind` output).
     fs::write(
         cache.join("jetc.jet"),
-        r#"#bindgen module c.jetc.__bindgen__ {
+        r#"#Bindgen module c.jetc.__bindgen__ {
     fn add_ints(a: Int, b: Int) -> Int = "jetc_add_ints";
     fn greeting() -> String = "jetc_greeting";
 }
@@ -238,7 +238,7 @@ fn cffi_string_param_emits_cstring_conversion() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("strlib.jet"),
-        "#bindgen module c.strlib.__bindgen__ { fn slen(s: String) -> Int = \"strlen\"; }\n",
+        "#Bindgen module c.strlib.__bindgen__ { fn slen(s: String) -> Int = \"strlen\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -265,7 +265,7 @@ fn cffi_string_param_emits_cstring_conversion() {
 
 #[test]
 fn cffi_empty_overlay_is_bindgen_only() {
-    // D-CFFI2-SYN-2: an empty `@extern module` adds nothing; the full bindgen
+    // D-CFFI2-SYN-2: an empty `#Extern module` adds nothing; the full bindgen
     // surface stays visible.
     let root = std::env::temp_dir().join(format!("jet_cffi_empty_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -273,14 +273,14 @@ fn cffi_empty_overlay_is_bindgen_only() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("jetc.jet"),
-        "#bindgen module c.jetc.__bindgen__ { fn ping() -> Int = \"jetc_ping\"; }\n",
+        "#Bindgen module c.jetc.__bindgen__ { fn ping() -> Int = \"jetc_ping\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
         r#"use c.jetc as jc;
-#extern module c.jetc { }
+#Extern module c.jetc { }
 fn main() { print(jc.ping()); }
 "#,
     )
@@ -304,14 +304,14 @@ fn cffi_overlay_overrides_bindgen() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("jetc.jet"),
-        "#bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) -> Int = \"gen_add\"; }\n",
+        "#Bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) -> Int = \"gen_add\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
         r#"use c.jetc as jc;
-#extern module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add"; }
+#Extern module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add"; }
 fn main() { print(jc.add(1, 2)); }
 "#,
     )
@@ -337,7 +337,7 @@ fn cffi_header_use_form_lowers_to_lib() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("demo.jet"),
-        "#bindgen module c.demo.__bindgen__ { fn ping() -> Int = \"demo_ping\"; }\n",
+        "#Bindgen module c.demo.__bindgen__ { fn ping() -> Int = \"demo_ping\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");

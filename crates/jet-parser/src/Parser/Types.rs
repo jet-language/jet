@@ -206,7 +206,7 @@ impl<'a> Parser<'a> {
                 format!("`{type_name}[...]` isn't how Jet writes generic types"),
                 "square brackets start collection types like `[Int]` or `[String, Int]`, and collection values like `[1, 2]`"
                     .to_string(),
-                format!("write `{type_name}<...>`, or use `[Int]` for a list type"),
+                "write angle brackets for generic arguments, or use `[Int]` for a list type".to_string(),
                 Some(self.peek().span),
             )),
             other => Err(Diagnostic::error(
@@ -344,7 +344,7 @@ impl<'a> Parser<'a> {
                     "E1107",
                     "the `columnar [T]` per-container layout form is reserved".to_string(),
                     "a per-use columnar override isn't built yet — only the whole-struct form ships".to_string(),
-                    "put `#layout(columnar)` on the `struct` declaration instead".to_string(),
+                    "put `#Layout(columnar)` on the `struct` declaration instead".to_string(),
                     Some(kw_span),
                 ));
             }

@@ -4,24 +4,11 @@
 //
 // Ordinary Jet never needs any of this, and never emits `unsafe`.
 use core.mem
-// `#Unsafe("reason") fn` marks a whole-function contract: callers
-// must wrap the call in their own `#Unsafe` block.
-#Unsafe("reads through a raw pointer; addr must be a live, valid Int")
-fn read_reg(addr: Int) -> Int {
-    p @= mem.Ptr<Int>.from_addr(addr)
-    return mem.volatile_read(p)
-}
 fn main() {
-    // A boxed Int gives us a real, valid address to read back through the
-    // pointer tier — keeping the example self-contained and deterministic.
     cell@ Int = 1337
-    addr @= mem.address_of(cell)
-    #Unsafe("addr is the address of `cell`, a live Int on this stack frame") {
-        p @= mem.Ptr<Int>.from_addr(addr)
-        seen @= mem.volatile_read(p)
-        print(seen)
-        // Calling an `#Unsafe fn` is allowed here because we are inside a block.
-        again @= read_reg(addr)
-        print(again)
+    #Unsafe("`cell` is live on this stack frame and the pointer never escapes") {
+        p@ *Int = *cell
+        print(p.*)
+        print(p.*)
     }
 }

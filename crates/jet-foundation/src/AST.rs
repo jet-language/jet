@@ -631,8 +631,8 @@ pub enum Item {
     /// U3 (unified-ecosystem §4): `module name { … }` — a named, composable
     /// declaration contributing typed values to reserved namespaces.
     Module(ModuleDecl),
-    /// S59 (E2-M14): `@extern module c.<lib> { … }` (user overlay) or
-    /// `@bindgen module c.<lib>.__bindgen__ { … }` (compiler-generated cache).
+    /// S59 (E2-M14): `#Extern module c.<lib> { … }` (user overlay) or
+    /// `#Bindgen module c.<lib>.__bindgen__ { … }` (compiler-generated cache).
     CModule(CModule),
     /// D-MOD1/2 (code module system): `module name;` (file declaration) or
     /// `module name { … }` (inline body). `body = None` means the items live in
@@ -668,16 +668,16 @@ pub struct CodeModule {
 }
 
 /// S59 (E2-M14): which attribute introduced a C FFI module — the user-written
-/// overlay (`@extern`) or the generated cache surface (`@bindgen`).
+/// overlay (`#Extern`) or the generated cache surface (`#Bindgen`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CModuleKind {
-    /// `@extern module c.<lib> { … }` — user overlay, allowed anywhere.
+    /// `#Extern module c.<lib> { … }` — user overlay, allowed anywhere.
     Extern,
-    /// `@bindgen module c.<lib>.__bindgen__ { … }` — generated, cache files only.
+    /// `#Bindgen module c.<lib>.__bindgen__ { … }` — generated, cache files only.
     Bindgen,
 }
 
-/// S59 (E2-M14): one `@extern`/`@bindgen module c.<lib>[.__bindgen__] { … }` block.
+/// S59 (E2-M14): one `#Extern`/`#Bindgen module c.<lib>[.__bindgen__] { … }` block.
 #[derive(Debug, Clone)]
 pub struct CModule {
     pub kind: CModuleKind,

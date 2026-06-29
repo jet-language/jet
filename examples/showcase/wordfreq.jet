@@ -3,6 +3,7 @@
 use core.io as io
 use core.fs as fs
 use core.process as process
+
 fn count_file(path: String, counts: ~[String, Int]) {
     if fs.read(path) == {
         ok(text) -> {
@@ -11,7 +12,7 @@ fn count_file(path: String, counts: ~[String, Int]) {
             loop raw in words {
                 word @= raw.trim().to_lower()
                 if word != "" {
-                    counts[word] = ((counts.get(word) ?? 0) + 1)
+                    counts[word] = (counts.get(word) ?? 0) + 1
                 }
             }
         }
@@ -21,6 +22,7 @@ fn count_file(path: String, counts: ~[String, Int]) {
 
     }
 }
+
 fn count_dir(dir: String, counts: ~[String, Int]) {
     if fs.list_dir(dir) == {
         ok(entries) -> {
@@ -38,6 +40,7 @@ fn count_dir(dir: String, counts: ~[String, Int]) {
 
     }
 }
+
 fn main() {
     args @= io.args()
     target @= args.get(1) ?? ""
@@ -55,7 +58,7 @@ fn main() {
     loop word, n in counts {
         pairs.push((word: word, n: n))
     }
-    pairs.sort_by((p: (n: Int, word: String)) => (-p.n))
+    pairs.sort_by((p: (n: Int, word: String)) => -p.n)
     loop p in pairs {
         print("{p.word}: {p.n}")
     }

@@ -296,7 +296,7 @@ pub fn load_entry_with_overlay(
         comptime_inputs: Vec::new(),
         import_targets,
     };
-    // S59 (E2-M14): fold every `@extern`/`@bindgen module c.<lib>` into merged
+    // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
     bundle.cffi = crate::CFFI::assemble(&mut bundle)?;
     Ok(bundle)

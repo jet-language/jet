@@ -1,15 +1,15 @@
-Error [E3101]: `from_addr` can only run inside an `#Unsafe` block
-  --> tests/ui/lowlevel_e3101.jet:3:10
+Error [E0208]: taking a raw pointer requires `#Unsafe`
+  --> tests/ui/lowlevel_e3101.jet:3:15
     |
-  3 |     p @= mem.Ptr<Int>.from_addr(addr)
-    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: this operation can violate memory safety, so it must sit in an audited region
- Fix: wrap it: #Unsafe("why this is safe") { … }
+  3 |     p@ *Int = *value
+    |               ^^^^^^
+ Why: `*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region
+ Fix: wrap this in `#Unsafe("why this is safe") { … }` — to dereference a pointer use postfix `p.*`
 
-Error [E3101]: `volatile_read` can only run inside an `#Unsafe` block
-  --> tests/ui/lowlevel_e3101.jet:4:16
+Error [E0208]: reading through a raw pointer requires `#Unsafe`
+  --> tests/ui/lowlevel_e3101.jet:4:12
     |
-  4 |     return mem.volatile_read(p)
-    |                ^^^^^^^^^^^^^
- Why: this operation can violate memory safety, so it must sit in an audited region
- Fix: wrap it: #Unsafe("why this is safe") { … }
+  4 |     return p.*
+    |            ^^^
+ Why: `p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region
+ Fix: wrap this in `#Unsafe("why this is safe") { … }`

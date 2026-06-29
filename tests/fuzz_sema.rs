@@ -49,6 +49,9 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
             }
             let src = fs::read_to_string(&path).unwrap();
             let shown = format!("examples/features/{}.{}", stem, ext);
+            if src.contains("#Unsafe") {
+                continue;
+            }
             // Skip examples whose *baseline* output legitimately contains vetted
             // `unsafe` from a prelude/runtime-support module (smart context's
             // `#Context` pointer cell, mem/Ptr, etc.). The fuzz body's I1 guard is

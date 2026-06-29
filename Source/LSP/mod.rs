@@ -153,10 +153,6 @@ mod tests {
             "expected fn in completions"
         );
         assert!(
-            items.iter().any(|i| i.label == "when"),
-            "expected when (KW_SWITCH) in completions"
-        );
-        assert!(
             items.iter().any(|i| i.label == "use"),
             "expected use (KW_USE) in completions"
         );

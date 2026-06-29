@@ -1500,9 +1500,9 @@ impl<'a> Checker<'a> {
                             method,
                             recv_ty.show()
                         ),
-                        "`#layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                        "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
                         format!(
-                            "drop `#layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
+                            "drop `#Layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
                             elem, method
                         ),
                         Some(span),

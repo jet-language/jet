@@ -180,7 +180,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Module(m) => src[..m.name_span.start]
             .rfind(Syntax::KW_MODULE)
             .unwrap_or(m.span.start),
-        // S59: the `@extern`/`@bindgen` attribute precedes the span start.
+        // S59: the `#Extern`/`#Bindgen` marker precedes the span start.
         Item::CModule(cm) => cm.span.start,
         Item::CodeModule(cm) => src[..cm.name_span.start]
             .rfind(Syntax::KW_MODULE)

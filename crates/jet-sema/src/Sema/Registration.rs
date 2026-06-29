@@ -1278,14 +1278,14 @@ pub(crate) fn register_struct(
                 diags.push(Diagnostic::error(
                     "E1104",
                     format!(
-                        "`#layout(c)` struct `{}` has a growable field `{}` ({})",
+                        "`#Layout(c)` struct `{}` has a growable field `{}` ({})",
                         s.name,
                         f.name,
                         f.ty.name()
                     ),
                     "growable types (`[T]`, `Map`, `String`) don't have a stable C layout"
                         .to_string(),
-                    "use a fixed-size array `[T#N]` instead, or remove `#layout(c)`".to_string(),
+                    "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`".to_string(),
                     Some(layout_span),
                 ));
             }

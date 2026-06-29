@@ -17,7 +17,7 @@
 //           syntax-decisions.md but has no shipped evidence (not in canon.jet,
 //           no golden example, no parser/sema support). Verify before relying.
 //
-// `#` in the actual code below (e.g. `#Pure`, `#Unsafe`, `#[Serialize]`,
+// `#` in the actual code below (e.g. `#Pure`, `#Unsafe`, `#[Codable]`,
 // `[T#N]`) is REAL Jet syntax — an attribute/marker sigil — not a comment.
 // Only a full line beginning `# RATIFIED…` is a not-yet-implemented marker.
 //
@@ -135,7 +135,7 @@ fn control() {
         break
     }
 
-    // conditional (replaces `while`)
+    // conditional loop
     n := 10
     loop n > 0 {
         n = n - 1
@@ -323,12 +323,12 @@ impl FileErr.Fallible {
 // }
 
 // # RATIFIED, NOT YET IMPLEMENTED (S81)
-// `?continue` — inside a loop, skip this turn when the value is failed/empty,
+// `?? continue` — inside a loop, skip this turn when the value is failed/empty,
 // else bind the success value. (`KW_QUESTION_CONTINUE` exists in Syntax.rs but
 // has no parser/sema support yet.)
 // fn skip_bad(lines: [String]) {
 //     loop raw in lines {
-//         line @= next(raw)?continue
+//         line @= next(raw)?? continue
 //         print(line)
 //     }
 // }
@@ -362,12 +362,8 @@ impl App.Logger using logger
 impl App.Logger using logger
 //>>> tracked: #33 D-IMPLDOT1
 
-// Built-in derives (S55): auto Printable/Equatable; opt-in Comparable/Serialize.
-// DISPUTED: `#[Serialize]` vs the serde umbrella `#[Codable]` (D-SERDE4) — both
-// spellings appear in syntax-decisions.md. Unresolved fork; see
-// tools/Tower/docs/proposals/syntax-decisions-reconcile.md. Do not treat the
-// serde marker spelling here as settled.
-#[Comparable, Serialize]                        // multi-marker list (D-ATTR2)
+// Built-in derives (S55): auto Printable/Equatable; opt-in Comparable/Codable.
+#[Comparable, Codable]                          // multi-marker list (D-ATTR2/D-SERDE-CANON1)
 struct Score {
     value: Int
 }
@@ -494,7 +490,7 @@ fn map_each(f: fn(Int) -> Int) #(via f) { }   // lever 2: `#(via f)` pass-throug
 //<<< Owner Scoped Capability: Update scoped capability syntax
 // HAVE:
 fn with_fs() {
-    #grant(Fs) { caps ->
+    #Grant(Fs) { caps ->
         // Fs effect authorized only inside this block
     }
 }
@@ -639,14 +635,14 @@ fn price() -> Usd {
 // Layout control (D-SOA1/D-SOA2): whole-struct columnar (struct-of-arrays).
 //<<< Owner Layout Control: Update layout control syntax
 // HAVE:
-#layout(columnar)
+#Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 // WANT:
 #Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 //>>> tracked: #34 D-MARKERCASE1
 
-#layout(C)                                      // C-compatible repr for FFI
+#Layout(C)                                      // C-compatible repr for FFI
 struct CView { a: Int, b: Int }
 
 // Portable SIMD lane types with safe ops + scalar fallback (D-SIMD1).

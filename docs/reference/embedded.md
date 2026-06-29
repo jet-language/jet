@@ -31,7 +31,7 @@ permitted:
 | Allowed | Rejected |
 |---------|---------|
 | `core.math` | `core.fs` |
-| `core.json` | `core.io` |
+| `core.encoding.json` | `core.io` |
 | `core.mem` | `core.net` |
 | `core.random` | `core.tasks` |
 | `core.env` | `core.time` |

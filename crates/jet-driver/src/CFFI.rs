@@ -4,9 +4,9 @@
 //! `extern "C"` shims (I2/I3). This module runs after the loader has read every
 //! `.jet` file and before sema:
 //!
-//! 1. Gather every `@extern module c.<lib>` (overlay) and
-//!    `@bindgen module c.<lib>.__bindgen__` (generated cache) item.
-//! 2. Enforce the location rule: `@bindgen` only in a generated
+//! 1. Gather every `#Extern module c.<lib>` (overlay) and
+//!    `#Bindgen module c.<lib>.__bindgen__` (generated cache) item.
+//! 2. Enforce the location rule: `#Bindgen` only in a generated
 //!    `.jet/bindings/c/<lib>.jet` file (E3207).
 //! 3. Merge per library — **bindgen ∪ overlay, overlay wins** on a clash;
 //!    incompatible signatures are E3205 (D-CFFI2-SYN-4).
@@ -73,7 +73,7 @@ fn synthetic_alias(lib: &str) -> String {
 }
 
 /// True when a file path sits under the generated bindings cache
-/// `.jet/bindings/c/` (D-CBIND7). `@bindgen` is legal only there (E3207).
+/// `.jet/bindings/c/` (D-CBIND7). `#Bindgen` is legal only there (E3207).
 fn is_generated_cache_file(display: &str) -> bool {
     let needle = format!("{}/{}/", Syntax::SOURCE_ROOT_DIR, Syntax::BINDINGS_C_SUBDIR);
     display.replace('\\', "/").contains(&needle)
@@ -93,7 +93,7 @@ fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
         .all(|(x, y)| x.convention == y.convention && x.ty == y.ty)
 }
 
-/// E3207 — `#bindgen` used outside a generated cache file.
+/// E3207 — `#Bindgen` used outside a generated cache file.
 fn e3207(lib: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3207",
@@ -384,7 +384,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
 /// (`use "lib.h" as l`), the bind backend is invoked automatically (D-CBIND2
 /// auto half, E3 deferred piece). When the cache exists, its sidecar `.hash`
 /// file (Phase 3) is checked; a hash mismatch triggers re-bind before loading.
-/// Parsed `@bindgen` modules are appended as ordinary loaded modules so the
+/// Parsed `#Bindgen` modules are appended as ordinary loaded modules so the
 /// main drain/merge pass (step 1) folds them like any other.
 fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
     // Collect libs and, for the header-path `use "x.h"` form, the header path.

@@ -48,11 +48,10 @@ Commit that as "M0 verified" before anything else.
 ## Invariants (violating one = stop and fix)
 
 - **I1** Safe by default, expert tier first-class: all Jet code is memory-safe
-  and type-safe unless the user explicitly opts in. `@unsafe { … }` / `@unsafe fn`
-  (E2-M13/D-LL1) is a real, supported expert tier — not a loophole — gated by
-  user-written, audited (`@audit("…")`) regions. Generated code may contain Rust
-  `unsafe` only inside those gate regions. No `unsafe` in generated code without
-  a corresponding `@unsafe` gate in the source.
+  and type-safe unless the user explicitly opts in. `#Unsafe("reason") { … }` /
+  `#Unsafe("reason") fn` (E2-M13/D-LL1/D-UNSAFE2) is the supported expert tier,
+  gated by user-written audited regions. Generated Rust `unsafe` may appear only
+  inside those gate regions or vetted std/mem internals.
 - **I2** rustc never speaks to users. rustc rejecting generated code is an
   internal compiler error (exit 101, banner in Source/main.rs) and a P0 bug.
 - **I3** Codegen is dumb. All checking lives in sema. Never "try rustc and
@@ -65,8 +64,8 @@ Commit that as "M0 verified" before anything else.
   and modules may use external crates to bootstrap until end of Epoch 3; after
   that, all external deps must be replaced with native Jet/Rust implementations.
   Any new stdlib external dep requires owner approval.
-- **I7** Every user-typeable keyword/sigil lives in Source/Syntax.rs with a
-  decision ID.
+- **I7** Every user-typeable keyword/sigil lives in
+  `crates/jet-foundation/src/Syntax.rs` with a decision ID.
 - **I8** One way to mean it, many ways to write it. There is exactly one
   canonical mechanism for any given semantic job — reject a second feature that
   does the same thing a different way with a great error + the existing path.
@@ -93,7 +92,8 @@ into a decision card — options, a worked per-option example, your recommendati
 reviewed by another agent, and queue it as a decision in Tower (tools/Tower/tower.json) so
 it surfaces in the board's Decide lane; **stop work on that feature** until the
 owner decides. Build something else meanwhile. When the owner ratifies: update
-Source/Syntax.rs / parser, re-bless snapshots, log it in syntax-decisions.md.
+`crates/jet-foundation/src/Syntax.rs` / parser, re-bless snapshots, log it in
+syntax-decisions.md.
 
 See the **tower** skill for the full project-management loop. The owner is
 CEO/CTO; his decisions are the only allowed bottleneck — he never waits on you for a

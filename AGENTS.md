@@ -44,9 +44,9 @@ If the repo has not yet been verified in this checkout:
 
 ## Invariants
 
-- I1: Safe by default, expert tier first-class. `@unsafe { ... }` / `@unsafe fn`
-  is real, supported, audited, and gated. Generated Rust `unsafe` must correspond
-  to a Jet `@unsafe` gate.
+- I1: Safe by default, expert tier first-class. `#Unsafe("reason") { ... }` /
+  `#Unsafe("reason") fn` is real, supported, audited, and gated. Generated Rust
+  `unsafe` must correspond to a Jet `#Unsafe` gate or vetted std/mem internals.
 - I2: rustc never speaks to users. A rustc rejection of generated code is an
   internal compiler error and a P0 bug.
 - I3: Codegen is dumb. All checking lives in sema. Never use "try rustc and see"
@@ -58,8 +58,8 @@ If the repo has not yet been verified in this checkout:
 - I6: Zero external crates in the compiler under `Source/`. Stdlib sub-libraries
   may use external crates only under the current bootstrap policy; new stdlib
   external deps need owner approval.
-- I7: Every user-typeable keyword/sigil lives in `Source/Syntax.rs` with a
-  decision ID.
+- I7: Every user-typeable keyword/sigil lives in
+  `crates/jet-foundation/src/Syntax.rs` with a decision ID.
 - I8: One way to mean it, many ways to write it. Do not add a second semantic
   mechanism for the same job. Keep the default surface small; give experts reach
   through explicit opt-in escape hatches.

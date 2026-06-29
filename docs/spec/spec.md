@@ -32,8 +32,8 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
   E0001. Unary minus is an operator, not part of the literal.
 - `true` and `false` are `Bool` literals.
-- Statements end with `;` (S6 — required, including before `}`). Blocks
-  (`}` of `if`/`loop`/`fn`) don't take one; `if subject { … }` arms do.
+- Source has no visible statement separators. The lexer inserts internal
+  terminators at line ends after statement-ending tokens (S6-R).
 - The lexer recovers from bad characters and keeps going; one run reports
   every lexical error it can.
 
@@ -43,7 +43,7 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
 program  = { func | struct | const } ;
 func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params   = param { "," param } ;
-param    = [ "mut" | "take" ] ident ":" type ;
+param    = ident ":" [ "~" | "^" | "&" ] type ;
 block    = "{" { stmt } "}" ;            // S3: curly braces
 // S6-R: no visible `;` — the lexer inserts a synthetic terminator (NL below)
 // at each line end after a statement-ending token; the grammar stays
@@ -53,7 +53,11 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 stmt     = binding | assign | if | loop
          | "break" NL | "continue" NL | "return" [ expr ] NL
          | expr NL ;
-binding  = ( ident [ ":" type ] | destructure ) ( "::" | ":=" ) expr NL ; // D-BIND1: `::` immutable, `:=` mutable (no keyword)
+binding  = ident "@=" expr NL                 // inferred immutable
+         | ident ":=" expr NL                 // inferred mutable
+         | ident "@" type "=" expr NL         // explicit immutable
+         | ident ":" type "=" expr NL         // explicit mutable
+         | destructure ( "@=" | ":=" ) expr NL ;
 destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -66,17 +70,14 @@ arm-head = value | range | condition ; // bare value ⇒ `subject == value`; ran
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
 loop     = [ "@" ident ] loop-body ;            // D-LABEL1: optional `@name` label
-loop-body= "loop" block                                                  // infinite
-         | "loop" cond block                                             // conditional (was `while`)
-         | "loop" ident "in" expr [ ".." expr [ "step" expr ] ] block ; // iteration (was `for`)
-         // S19-amend: `while` and `for` are teaching errors (E0050/E0051)
+loop-body= "loop" block
+         | "loop" cond block
+         | "loop" ident "in" expr [ ".." expr [ "step" expr ] ] block ;
 break    = "break" [ "@" ident ] NL ;           // D-LABEL1: `break @name` targets a label
 continue = "continue" [ "@" ident ] NL ;        // D-LABEL1: `continue @name`
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
-value-block = "{" { stmt } expr "}" ;                // trailing expr (no `;`) is the block's value
-           // `when` is retired (D-IF1): a teaching error (E0984) pointing at the
-           // multi-arm `if` form above.
+value-block = "{" { stmt } expr "}" ;
 expr     = precedence climbing over:
            "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="
            >  "|"  >  "^"  >  "&"  >  "<<" ">>"
@@ -90,9 +91,9 @@ expr     = precedence climbing over:
   bindings are optional; mismatched annotations are E0108.
 - A program must define `fn main` with no parameters and no return type
   (E0101, E0122); execution starts there. `main` never takes `pub` (S12).
-- `name @= value` is immutable, `name := value` mutable (D-BIND2); assigning
-  to an immutable binding is E0111. The retired `val`/`var` keywords are a
-  teaching error (E0985); the retired `::` sigil is a teaching error (E0991).
+- `name @= value` and `name@ Type = value` are immutable; `name := value` and
+  `name: Type = value` are mutable (D-BIND2/D-BINDEXPLICIT1/D-BIND-CANON1).
+  Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
   `% & | ^ << >>` on `Int` only. `+` on `String` is a teaching error
@@ -100,22 +101,19 @@ expr     = precedence climbing over:
   operators.
 - Comparisons (`== != < > <= >=`) need matching operand types and yield
   `Bool`; `&& || !` operate on `Bool` (E0110).
-- **S25 comparison distribution**: in a `&&`/`||` chain, a plain value on
-  the right re-applies the nearest comparison to its left:
-  `day == "sat" || "sun"` means `day == "sat" || day == "sun"`. The
-  value's type must match what was compared; a plain value with no
-  comparison to its left is an error.
+- `&&` and `||` combine `Bool` expressions only (D-S25-RETIRE1). Value
+  alternatives in arm heads use single `|`.
 - `if`/`else if`/`else` (conditions must be `Bool`); `loop` in three forms:
   `loop { }` (infinite), `loop cond { }` (conditional), `loop x in a..b { }`
   (iterates a through b **inclusive**, S22; S19-amend); `break`/`continue`
-  inside loops only (E0115, S23). `while`/`for` are teaching errors. A loop may
+  inside loops only (E0115, S23). A loop may
   carry an `@name` label (D-LABEL1) — `@outer loop … { }` — and `break @outer` /
   `continue @outer` target it from a nested loop (E0987 names an out-of-scope
   label; E0988 flags a `@name` not followed by `loop`).
-- `if subject { cond -> { ... }; else -> { ... }; }` (S24, folded into `if` by
-  D-IF1; `when` is retired to a teaching error): arms are arbitrary `Bool`
-  conditions tried top to bottom; `else` is mandatory. Lowered to an if/else
-  chain; rustc optimizes it.
+- `if subject == { head -> { ... } else -> { ... } }` (D-IF1/D-IF3) tests arm
+  heads top to bottom. Bare values and ranges compare against the subject;
+  predicate heads are `Bool`; `else` is mandatory unless enum/option
+  exhaustiveness proves coverage.
 - **Range arms (D-RANGE1/D-PATR, c25):** in multi-arm `if`, an arm head that is
   a range `lo..hi` fires when the subject is in that inclusive band (S22) —
   `90..100 -> "A"` desugars to `subject >= 90 && subject <= 100`. The subject
@@ -153,10 +151,9 @@ expr     = precedence climbing over:
 
 Features that exist in the roadmap but not the language yet fail with an
 error naming the milestone (see staged table in docs/spec/syntax-decisions.md).
-A future feature must never die as a generic syntax error. Teaching
-errors (S14, E0008–E0016) recognize foreign spellings — `def`, `let`,
-`set`, `println`, `and`/`or`/`not`, `Text`, `try`, `use`, `match` — and
-name the Jet form.
+A future feature must never die as a generic syntax error. Old Jet and foreign
+syntax teaching is paused until post-Epoch 6 (D-S14-PAUSE); active docs and
+fixtures use canonical syntax only.
 
 ## M2 — ownership (done)
 
@@ -197,7 +194,7 @@ The capability is a prefix sigil on the **type**, not the name. Five sigils; fou
 | `~T` | edit — exclusive mutable access | `x: &mut T` |
 | `^T` | take — ownership moves to callee | `x: T` |
 | `&T` | share — value may escape the call (stored, cached, spawned) | `x: Arc<T>` / retained ref |
-| `*T` | raw pointer (PLANNED — D-CAP9, not yet shipped) | `x: *mut T` |
+| `*T` | raw pointer (D-CAP9) | `x: *mut T` |
 
 ### Placement
 
@@ -304,26 +301,7 @@ error[E0029]: two capability markers on one parameter
    |           ^^ remove one capability marker
 ```
 
-### Migration: `mut` / `take` / `view` → sigils
-
-The old ownership keywords are retired (D-CAP7) — they lex only to fire teaching
-errors **E0056**/**E0057**/**E0058** pointing at the sigils:
-
-| Old spelling | New spelling | Notes |
-|---|---|---|
-| `fn f(mut x: T)` | `fn f(x: ~T)` | sigil moves to type side |
-| `fn f(take x: T)` | `fn f(x: ^T)` | same |
-| `fn f() -> view T` | `fn f() -> &T` | return borrow |
-| `fn f(x: T)` (default read) | `fn f(x: T)` | unchanged — bare `T` stays |
-| `mut self` | `~self` | receiver form |
-| `take self` | `^self` | receiver form |
-
-Call-site:
-
-| Old | New |
-|---|---|
-| `f(take x)` | `f(^x)` |
-| `f(mut x)` (was not a Jet spelling) | `f(~x)` |
+Access capabilities use sigils only: bare `T`, `~T`, `^T`, and `&T`.
 
 ## M3 — data & methods (done)
 
@@ -371,7 +349,8 @@ impl Circle {
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
-  `Printable`/`Equatable`; explicit `@Comparable` / `@Serialize` (S82).
+  `Printable`/`Equatable`; explicit `#[Comparable]`, `#[Codable]`,
+  `#[Encode]`, `#[Decode]`.
 - **Tags (D-QUAL2):** `tag Name;` or `tag Name { }` — a marker qualifier with
   no methods that erases at runtime (codegen emits nothing). Tags are the second
   and only other qualifier kind beside traits; the beginner rule is one
@@ -380,10 +359,10 @@ impl Circle {
   method attachment is expected — `derive`d, or implemented/used as a trait —
   is **E0731** (fix-it: declare it as a `trait`). All tags are PascalCase
   (D-CASING1).
-- **Attributes (S82):** `@Marker` or `@[a, b]` on the line before a
-  declaration; `@Marker { … }` for scoped effects (`@transact`, `#Unsafe`) or
-  in-body config (`@Serialize { rename …; }`). **`#Pure fn`** is a prefix marker
-  (D-CASING1 follow-on); **`comptime`** stays a prefix keyword.
+- **Markers (D-ATTR1/D-ATTR2/D-MARKER-CANON1):** `#Marker` or `#[A, B]` on the
+  line before a declaration. Block markers use PascalCase and parenthesized
+  arguments when arguments exist. `#Pure fn` is a prefix marker; `comptime`
+  stays a prefix keyword.
 - **Build-time embedding (D-CTIO1):** inside a `comptime` binding,
   **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
   and **`embed_bytes("path") -> [U8]`** bakes its raw bytes (binary-safe, no
@@ -493,10 +472,8 @@ header, one statement per line, at most one blank line between top-level
 items, spaces around binary operators, no space before `;`/`,`/call `(`,
 trailing `;` on statements (S6). **Line width is not enforced in v1.**
 
-`//` and `/* … */` comments are preserved and re-attached by source span. When S14
-teaching recovery has already lowered foreign spellings in the AST (`let` →
-`val`, `def` → `fn`, …), fmt prints the canonical form. Real parse errors
-still block fmt.
+`//` and `/* … */` comments are preserved and re-attached by source span. Real
+parse errors still block fmt.
 
 Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 `tests/ui/*.fixed.jet` (`tests/fmt.rs`).
@@ -583,8 +560,8 @@ overlay. (Full spec follows in this section.)
 
 | Layer | Shape |
 |---|---|
-| Autogen | `@bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
-| Overlay | `@extern module c.<lib> { … }` — empty `{ }` = no overrides |
+| Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
+| Overlay | `#Extern module c.<lib> { … }` — empty `{ }` = no overrides |
 | Call site | `use "header.h" as alias` or `use c.<lib> as alias` (one per lib per file) |
 
 Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
@@ -603,17 +580,17 @@ block of `pkg.jet` (`c@system` → pkg-config with a bare `-l <lib>` fallback;
 threaded into the `rustc` link line. By-value scalars/`String`/C-layout
 structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**;
 pointers require `use core.mem` + `#Unsafe` (E2-M13) → **E3202** (registered;
-unreachable until the pointer tier lands). `@bindgen` is legal only inside a
+unreachable until the pointer tier lands). `#Bindgen` is legal only inside a
 generated cache file (**E3207**); users may not name the reserved `__bindgen__`
 segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
 
 `jet bind <header.h> --pkg <lib>` is the manual cache-refresh entry point and
 shares the compile-time auto-bind backend (owner 2026-06-18: native std-only
 implementation, D-CBIND3 superseded). It parses C function prototypes over the
-bindable type subset (scalars, `char*` strings, `void`) and emits a `@bindgen`
+bindable type subset (scalars, `char*` strings, `void`) and emits a `#Bindgen`
 cache; declarations it cannot map are skipped and reported rather than faked
 (I3). **E3208** fires only when the header cannot be read or contains no
-bindable prototypes — the fix is a hand-written `@extern module c.<lib>` overlay
+bindable prototypes — the fix is a hand-written `#Extern module c.<lib>` overlay
 for those declarations. Rust FFI (S50) is unchanged. Diagnostics:
 **E3201–E3208** in diagnostics.md with snapshots (front-end ones under
 `tests/ui/cffi_*`; link-time/gated ones pinned in `tests/cffi.rs`).
@@ -623,7 +600,7 @@ for those declarations. Rust FFI (S50) is unchanged. Diagnostics:
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and
 emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`).
 
-- **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`Ptr<T>`,
+- **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`*T`,
   `mem.volatile_read`, `mem.address_of`, allocators). Naming one of these without
   the import → **E3102**.
 - **Audit gate** — `#Unsafe("reason") { … }` opens the operations that can
@@ -633,11 +610,9 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
   lint **L3101**. `#Unsafe("reason") fn` marks a whole-function contract; its
   body is itself an audited region, and calling it requires an enclosing
   `#Unsafe` block → **E3103**.
-- **Operations** — `mem.Ptr<T>.from_addr(addr)` builds a typed pointer from an
-  `Int` address (`Ptr<T>` lowers to a Rust `*mut T`); `mem.volatile_read(p)`
-  reads through it (lowers to `std::ptr::read_volatile`); `mem.address_of(x)` is
-  inert (a plain address as `Int`) and legal outside a gate. Using a low-level op
-  outside `#Unsafe` → **E3101**.
+- **Operations** — prefix `*x` takes a raw pointer to `x`; postfix `p.*`
+  dereferences it. `mem.address_of(x)` is inert (a plain address as `Int`) and
+  legal outside a gate. Using a low-level op outside `#Unsafe` → **E3101**.
 
 Codegen stays dumb (I3): an `#Unsafe { … }` region lowers straight to a Rust
 `unsafe { … }`, an `#Unsafe fn` to a Rust `unsafe fn`. All gating is decided in
@@ -826,15 +801,15 @@ Full user-facing reference: **docs/reference/core-library.md**.
 
 M10 standard library modules are compiler-known namespaces backed by Rust std
 helpers in the generated prelude. Every first-party module is spelled `core.<name>`
-(owner 2026-06-26, D-CORENS1 — no `jet.*`/`std.*` library namespace):
+(D-CORENS1/D-CORENS-CANON1):
 
 ```
 use core.fs as fs;
-use core.json as json;
+use core.encoding.json as json;
 ```
 
 Implemented modules: `core.fs`, `core.io`, `core.env`, `core.process`,
-`core.math`, `core.random`, `core.time`, `core.json`, and `core.args`. Unknown core modules are
+`core.math`, `core.random`, `core.time`, `core.encoding.json`, and `core.args`. Unknown core modules are
 **E1001**; local modules/import aliases may not shadow reserved first-party
 roots (`core`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
 **E1002**. Selective imports are rejected; keep qualified access through an

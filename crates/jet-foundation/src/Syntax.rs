@@ -195,7 +195,9 @@ pub const CORE_MEM_MODULE: &str = "core.mem";
 /// write-before-read (E0420) and codegen lowers to `MaybeUninit`.
 pub const ATTR_UNINIT: &str = "Uninit";
 
-/// S58 (ratified 2026-06-12): the pointer type — `Ptr<T>`.
+/// S58 / D-CAP9 / D-TYPE-ALIAS-CANON1 (ratified): raw-pointer type is `*T`.
+/// `Ptr<T>` is not live syntax; this string remains only as the internal Rust
+/// dispatch key for legacy TIR/codegen paths until they are renamed to `RawPtr`.
 pub const TYPE_PTR: &str = "Ptr";
 
 /// S58 (ratified 2026-06-12): `mem.Ptr<T>.from_addr(addr)` — typed pointer
@@ -413,10 +415,8 @@ pub const KW_RANGE_STEP: &str = "step";
 pub const KW_BREAK: &str = "break";
 pub const KW_CONTINUE: &str = "continue";
 
-/// S24 / D-IF1 (ratified 2026-06-18): `when` is retired — `if` is the one
-/// branching keyword (`if subject { arm -> body }`). `when` is recognized only
-/// for the E0984 teaching error pointing at `if`.
-pub const KW_SWITCH: &str = "when";
+/// S24 / D-IF1 (ratified 2026-06-18): `if` is the one branching keyword.
+pub const KW_SWITCH: &str = "if";
 
 /// S24 / D-IF1 (ratified): arm arrow inside a multi-arm `if` (same spelling as
 /// return types).
@@ -512,14 +512,10 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 
-/// S51 (ratified M10; amended 2026-06-16): compiler-known **core** library roots.
+/// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.
 pub const CORE_SHORT: &str = "core";
-pub const CORE_CANONICAL_ROOT: &str = "jet";
-pub const CORE_CANONICAL: &str = "jet.core";
-
-/// S51 (amended 2026-06-16): former `std` spellings — teaching errors only (S14).
-pub const LEGACY_STD_SHORT: &str = "std";
-pub const LEGACY_STD_CANONICAL: &str = "jet.std";
+pub const CORE_CANONICAL_ROOT: &str = "core";
+pub const CORE_CANONICAL: &str = "core";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
@@ -534,10 +530,10 @@ pub const KW_RUST: &str = "rust"; // S50
 pub const C_MODULE_ROOT: &str = "c"; // S59
 /// S59: reserved final segment for compiler-generated bindgen modules.
 pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
-/// S59 (S82): attribute on generated C binding modules — `#bindgen module c.….__bindgen__`.
-pub const ATTR_BINDGEN: &str = "bindgen"; // S59
-/// S59 (S82): attribute on user C overlay modules — `#extern module c.…`.
-pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `#extern module`, not `extern rust`
+/// S59 / D-CFFI-CANON1: marker on generated C binding modules — `#Bindgen module`.
+pub const ATTR_BINDGEN: &str = "Bindgen"; // S59 / D-CFFI-CANON1
+/// S59 / D-CFFI-CANON1: marker on user C overlay modules — `#Extern module`.
+pub const ATTR_EXTERN_MODULE: &str = "Extern"; // S59 — `#Extern module`, not `extern rust`
 /// D-UNSAFE2 (retired marker): `#Audit("…")` is the old two-line form;
 /// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
 /// only to emit the E0055 teaching error.
@@ -1444,7 +1440,6 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Control flow (M1, S19, S23, M1/M2)
     KW_IF,
     KW_ELSE,
-    KW_SWITCH,
     KW_LOOP,
     KW_IN,
     KW_BREAK,
@@ -1669,10 +1664,8 @@ pub fn core_modules_list() -> String {
 /// Normalize a module import name to a canonical core-module path, or `None`
 /// if the import is not a core/ring module.
 ///
-/// D-CORENS1: `core.<ring>` is the canonical user-facing spelling. These are
-/// normalized to the internal `jet.<ring>` key so that sema dispatch (which
-/// uses `jet.*` arm keys throughout CheckerCoreLib.rs) does not need to change.
-/// The old `jet.<ring>` spelling fires E0341 in Bundle.rs (before normalize).
+/// D-CORENS-CANON1: `core.<ring>` is the only user-facing spelling. Ring modules
+/// still normalize to the internal `jet.<ring>` key used by sema dispatch.
 pub fn normalize_core_module(name: &str) -> Option<String> {
     if name == CORE_SHORT {
         return Some(CORE_SHORT.to_string());
@@ -1680,22 +1673,12 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
     if name == CORE_CANONICAL {
         return Some(CORE_SHORT.to_string());
     }
-    if let Some(rest) = name.strip_prefix("jet.core.") {
-        return Some(format!("core.{rest}"));
-    }
     // `core.<ring>` → internal `jet.<ring>` key (sema dispatch uses jet.* names).
     if let Some(ring) = name.strip_prefix("core.") {
         if is_ring_module(ring) {
             return Some(format!("jet.{ring}"));
         }
         return Some(format!("core.{ring}"));
-    }
-    // Legacy `jet.<ring>` — still normalized to `jet.<ring>` internal key.
-    // E0341 fires in Bundle.rs before this is called (on the raw import name).
-    if let Some(ring) = name.strip_prefix("jet.") {
-        if is_ring_module(ring) {
-            return Some(format!("jet.{ring}"));
-        }
     }
     None
 }
@@ -1714,10 +1697,7 @@ pub fn is_ring_module_staged(_name: &str) -> bool {
 }
 
 pub fn is_legacy_std_import(name: &str) -> bool {
-    name == LEGACY_STD_SHORT
-        || name.starts_with("std.")
-        || name == LEGACY_STD_CANONICAL
-        || name.starts_with("jet.std.")
+    name == "std" || name.starts_with("std.") || name == "jet.std" || name.starts_with("jet.std.")
 }
 
 /// D-ALLOC1/D-ALLOC-C: allocator opaque types → jet_mem Rust types.

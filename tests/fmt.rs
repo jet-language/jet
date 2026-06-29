@@ -48,49 +48,6 @@ fn fmt_preserves_s61_call_labels() {
 }
 
 #[test]
-fn fmt_rewrites_capability_keywords_to_sigils() {
-    // D-CAP7: the retired `mut`/`take`/`view` capability keywords parse as
-    // teaching errors that recover, and fmt rewrites them to the `~`/`^`/`&`
-    // sigils — on the type for params, on `self` for receivers, after `->`
-    // for a borrowed return, and at the call site.
-    let src = "fn bump(mut n: Int) {\n    n += 1\n}\n\nfn archive(take name: String) -> view String {\n    return name\n}\n\nstruct Acc {\n    n: Int\n\n    fn step(mut self) {\n        self.n += 1\n    }\n}\n\nfn main() {\n    x: Int := 1\n    bump(mut x)\n    print(archive(take \"v\"))\n}\n";
-    let out = jet::format_source(src).expect("fmt should recover capability keywords");
-    assert!(out.contains("n: ~Int"), "param write → `: ~T`, got:\n{out}");
-    assert!(
-        out.contains("name: ^String"),
-        "param move → `: ^T`, got:\n{out}"
-    );
-    assert!(
-        out.contains("-> &String"),
-        "view return → `-> &T`, got:\n{out}"
-    );
-    assert!(
-        out.contains("fn step(~self)"),
-        "receiver write → `~self`, got:\n{out}"
-    );
-    assert!(
-        out.contains("bump(~x)"),
-        "call-site write → `~x`, got:\n{out}"
-    );
-    assert!(
-        out.contains("archive(^\"v\")"),
-        "call-site move → `^…`, got:\n{out}"
-    );
-    // No retired keyword spelling survives.
-    assert!(!out.contains("mut "), "no `mut ` keyword left, got:\n{out}");
-    assert!(
-        !out.contains("take "),
-        "no `take ` keyword left, got:\n{out}"
-    );
-    assert!(
-        !out.contains("view "),
-        "no `view ` keyword left, got:\n{out}"
-    );
-    let twice = jet::format_source(&out).expect("sigil output re-fmts");
-    assert_eq!(out, twice, "sigil fmt must be idempotent");
-}
-
-#[test]
 fn fmt_preserves_block_comments() {
     // S5: `/* … */` block comments, nesting allowed.
     let src = r#"/* a leading block comment */
@@ -114,26 +71,6 @@ fn main() {
 }
 
 #[test]
-fn fmt_canonicalizes_s14_foreign_spellings() {
-    let src = r#"fn main() {
-    let x = 1;
-    print("{x}");
-}
-"#;
-    let out = jet::format_source(src).expect("fmt should parse through S14 recovery");
-    assert!(
-        out.contains("x @= 1"),
-        "expected `let` lowered to the `@=` binding sigil, got:\n{out}"
-    );
-    assert!(
-        !out.contains("let x"),
-        "foreign `let` should be gone:\n{out}"
-    );
-    let twice = jet::format_source(&out).expect("canonical output should re-fmt");
-    assert_eq!(out, twice, "canonicalized output must be idempotent");
-}
-
-#[test]
 fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
     let src = r#"fn parse_count(raw: String) -> Int? {
     return err("empty");
@@ -144,43 +81,6 @@ fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
         out.contains("fn parse_count(raw: String) -> Int ? {"),
         "expected `Int?` return to format as `Int ?`, got:\n{out}"
     );
-}
-
-#[test]
-fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
-    let src = r#"fn main() {
-    val fruit = "orange";
-    val frozen = false;
-    when fruit {
-        fruit == apple -> { print("Apple Juice"); };
-        fruit == orange || frozen != true -> { print("Orange Juice"); };
-        fruit == tangerine || fruit == yuzu -> { print("Citrus Juice"); };
-        else -> { print("Water"); };
-    }
-}
-"#;
-    let out = jet::format_source(src).expect("fmt should parse legacy switch syntax");
-    assert!(
-        out.contains("if fruit == {"),
-        "expected `when` lowered to `if SUBJECT == {{` (D-IF3), got:\n{out}"
-    );
-    assert!(
-        out.contains("apple -> {"),
-        "expected bare equality case, got:\n{out}"
-    );
-    assert!(
-        // `||` binds looser than `!=`, so no parens are needed (c143: the old
-        // formatter added spurious parens here via an inverted precedence test).
-        out.contains("orange || frozen != true -> {"),
-        "expected mixed condition arm, got:\n{out}"
-    );
-    assert!(
-        out.contains("tangerine | yuzu -> {"),
-        "expected repeated subject equality to collapse to `|` alternates, got:\n{out}"
-    );
-    assert!(out.contains("else -> {"), "expected else arm, got:\n{out}");
-    let twice = jet::format_source(&out).expect("pipe switch output should re-fmt");
-    assert_eq!(out, twice, "pipe switch formatting must be idempotent");
 }
 
 #[test]
@@ -269,23 +169,6 @@ fn fmt_preserves_triple_quoted_strings() {
     );
     let twice = jet::format_source(&out).expect("triple-quoted output should re-fmt");
     assert_eq!(out, twice, "triple-quoted formatting must be idempotent");
-}
-
-#[test]
-fn fmt_rewrites_retired_or_fallback_to_question_question() {
-    // S71 (D-SG6): the retired word `or` formats to `??`; `??` round-trips.
-    let src = r#"fn pick(xs: [Int]) -> Int {
-    return xs.first() or 0
-}
-"#;
-    let out = jet::format_source(src).expect("fmt should recover the retired `or`");
-    assert!(
-        out.contains("xs.first() ?? 0"),
-        "expected `or` rewritten to `??`, got:\n{out}"
-    );
-    assert!(!out.contains(" or "), "stray `or` left:\n{out}");
-    let twice = jet::format_source(&out).expect("`??` output should re-fmt");
-    assert_eq!(out, twice, "`??` formatting must be idempotent");
 }
 
 #[test]

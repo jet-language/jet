@@ -1,19 +1,13 @@
-// Showcase 5 — expert low-level tier: #Unsafe + Ptr<T>.
+// Showcase 5 — expert low-level tier: #Unsafe + *T.
 // Everything outside the #Unsafe region is safe Jet; the
 // pointer operations are confined to the explicitly-audited block.
 // C FFI (use c.<lib>) is in tests/cffi.rs; this smoke shows the
 // core.mem tier that underpins it — E2-M13 / D-UNSAFE2.
 use core.mem
-#Unsafe("reads through a raw pointer; addr must be a live, valid Int")
-fn read_int(addr: Int) -> Int {
-    p @= mem.Ptr<Int>.from_addr(addr)
-    return mem.volatile_read(p)
-}
 fn main() {
     cell@ Int = 42
-    addr @= mem.address_of(cell)
-    #Unsafe("addr is the address of `cell`, a live stack Int") {
-        seen @= read_int(addr)
-        print("low-level read: {seen}")
+    #Unsafe("`cell` is live on this stack frame and the pointer never escapes") {
+        p@ *Int = *cell
+        print("low-level read: {p.*}")
     }
 }

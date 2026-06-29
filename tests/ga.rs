@@ -84,8 +84,8 @@ fn ga_all_showcases_front_end_clean() {
         ("http_service.jet", "HTTP service with tasks/channels"),
         // Showcase 3 — library authoring
         ("library.jet", "library: traits, delegation, labels"),
-        // Showcase 5 — expert low-level tier (M13 @unsafe)
-        ("lowlevel.jet", "low-level: @unsafe + Ptr<T>"),
+        // Showcase 5 — expert low-level tier (M13 #Unsafe)
+        ("lowlevel.jet", "low-level: #Unsafe + *T"),
         // Showcase 6 — freestanding / cross-compile smoke (M15)
         ("freestanding.jet", "freestanding smoke"),
     ];

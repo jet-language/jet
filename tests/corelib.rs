@@ -84,16 +84,14 @@ fn build_and_run(
 }
 
 #[test]
-fn canonical_and_short_core_imports_resolve() {
+fn canonical_core_import_resolves() {
     let out = compile_temp(
         "core_imports.jet",
         r#"
 use core.fs as fs
-use jet.core.fs as files
 
 fn main() {
     print(fs.exists("/tmp"))
-    print(files.exists("/tmp"))
 }
 "#,
     );

@@ -67,7 +67,7 @@ interpreter (I2/I3); JIT deferred to Epoch 3 (D-DEV2). Std-only file watching
 
 **E2-M13 — Expert low-level tier (S58)** verified 2026-06-17. `use
 core.mem` discovery gate, `#Unsafe("reason") { … }` / `#Unsafe fn` audit
-gate, `Ptr<T>` (→ `*mut`), `mem.volatile_read`/`address_of`/`from_addr`;
+gate, `*T` (→ `*mut`), `p.*` dereference, and raw address interop;
 diagnostics E3101/E3102/E3103 + lint L3101; the I1 amendment (D-LL1) recorded in
 `architecture.md` (generated `unsafe` only inside user gates; safe Jet emits
 none, enforced by `tests/golden.rs`). Deferred (open ballots): arenas (D-REF2),
@@ -115,7 +115,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **M7** — FFI: `extern rust` inline crate deps.
 - **M8** — closures and lambdas.
 - **M9** — generics and traits; **M9.5** — comptime evaluation and `@embed`.
-- **M10** — Core library: `core.fs`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.json`. Frozen API in `docs/reference/core-library.md`.
+- **M10** — Core library: `core.fs`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.encoding.json`. Frozen API in `docs/reference/core-library.md`.
 - **M11** — tasks and channels (Epoch-2 concurrency work; shipped as part of the v1 arc).
 - **M12** — package manager: `pkg.jet`, `.jet/lock`, content-addressed store (D-PM1…8). M12.1 verified; M12.2 (registry/semver) is Epoch 1 tail.
 - **M13** — LSP: incremental front end, go-to-definition, diagnostics, hover.
@@ -135,12 +135,12 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M6** — library authoring: associated types, error conversion for `?`, argument labels/defaults (S61), trait delegation (S62).
 - **E2-M7** — streaming I/O: file handles, `Reader`/`Writer`, RAII cleanup (S63), `Path`.
 - **E2-M8** — supply chain: `jet publish` (pre-publish gate), `jet vendor`, `jet audit`, SBOM; PubGrub resolver. Registry upload and `jet gc` deferred (D-PKGS1, M12.2).
-- **E2-M9** — first-party library ring: `core.regex`, `core.csv`, `jet.toml`, `core.yaml`, `core.json`, `core.log`, `core.time`, `core.crypto`, `core.archive` (gzip/zip/tar — D-DEP-ARCHIVE1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
+- **E2-M9** — first-party library ring: `core.regex`, `core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`, `core.archive` (gzip/zip/tar — D-DEP-ARCHIVE1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`, plain HTTP). TLS is delivered as the `core.tls` package (separate from the core binary, I6).
 - **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
 - **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.
-- **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `Ptr<T>`, volatile; I1 amendment (D-LL1).
-- **E2-M14** — C FFI: `@bindgen`/`@extern module`, `use c.<lib>`, link discovery.
+- **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `*T`, volatile; I1 amendment (D-LL1).
+- **E2-M14** — C FFI: `#Bindgen`/`#Extern module`, `use c.<lib>`, link discovery.
 - **E2-M15** — cross-compilation + freestanding: `jet build --target`, `--freestanding`, QEMU smoke.
 - **E2-M16** — pure evaluation + layer 3: `#Pure fn`, `jet eval --pure`, package recipes, sandboxed builds.
 - **E2-M17** — Epoch 2 GA: six showcase programs, diagnostics audit, size/perf budgets.

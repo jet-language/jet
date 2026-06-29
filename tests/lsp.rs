@@ -951,7 +951,7 @@ fn c40_is_keyword_retired_words_not_keywords() {
 fn c40_is_keyword_real_keywords_recognized() {
     // The actual Jet keywords must be recognized so rename rejects them.
     // We verify via the LSP rename path using check_document behaviour:
-    // `when` (KW_SWITCH), `use` (KW_USE), `fn` (KW_FN) must be keywords.
+    // `if` (KW_IF), `use` (KW_USE), `fn` (KW_FN) must be keywords.
     // This is a structural test — we check the JET_KEYWORDS table directly
     // via the public API surface (check_document for a rename probe).
     //
@@ -964,7 +964,7 @@ fn c40_is_keyword_real_keywords_recognized() {
     let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
     let uri = "file:///tmp/c40_rename_keyword.jet";
 
-    // `when` is a real keyword (KW_SWITCH = "when"); rename to it must fail.
+    // `if` is a real keyword; rename to it must fail.
     run_transcript(
         source,
         &[
@@ -984,7 +984,7 @@ fn c40_is_keyword_real_keywords_recognized() {
             },
             TranscriptStep::Send {
                 msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"when"}}}}"#,
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"if"}}}}"#,
                     uri
                 ),
                 // Renaming to a keyword must produce an error response

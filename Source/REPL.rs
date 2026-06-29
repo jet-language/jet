@@ -678,8 +678,8 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("extern rust") {
         return Some("`extern rust`");
     }
-    if t.contains("#extern") || t.contains("#bindgen") {
-        return Some("C-FFI (`#extern`/`#bindgen`)");
+    if t.contains("#Extern") || t.contains("#Bindgen") {
+        return Some("C-FFI (`#Extern`/`#Bindgen`)");
     }
     if t.contains("core.tasks") || t.contains("core.channels") {
         return Some("tasks/channels (`core.tasks`)");

@@ -112,7 +112,7 @@ fn showcase_tools_golden() {
             exit_code: None,
             stderr_contains: None,
         },
-        // Showcase 5 — expert low-level tier (M13: @unsafe, Ptr<T>, @audit)
+        // Showcase 5 — expert low-level tier (M13: #Unsafe, *T)
         ShowcaseCase {
             name: "lowlevel",
             tool: "examples/showcase/lowlevel.jet",

@@ -632,9 +632,9 @@ impl<'a> Checker<'a> {
                                             "writing through `[ ]` isn't supported on a columnar list `{}` yet",
                                             Type::List(inner.clone()).show()
                                         ),
-                                        "`#layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred".to_string(),
+                                        "`#Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred".to_string(),
                                         format!(
-                                            "drop `#layout(columnar)` from `{}` to assign through `[ ]`, or rebuild the list with `push`",
+                                            "drop `#Layout(columnar)` from `{}` to assign through `[ ]`, or rebuild the list with `push`",
                                             elem
                                         ),
                                         Some(*span),
@@ -780,9 +780,9 @@ impl<'a> Checker<'a> {
                                         expr_root_ident(ib).unwrap_or("xs"),
                                         field
                                     ),
-                                    "`#layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred".to_string(),
+                                    "`#Layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred".to_string(),
                                     format!(
-                                        "drop `#layout(columnar)` from `{}` to write fields in place, or rebuild the element with `push`",
+                                        "drop `#Layout(columnar)` from `{}` to write fields in place, or rebuild the element with `push`",
                                         elem
                                     ),
                                     Some(*span),

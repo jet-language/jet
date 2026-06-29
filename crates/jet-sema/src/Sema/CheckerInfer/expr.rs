@@ -1200,9 +1200,9 @@ impl<'a> Checker<'a> {
                                 "slicing isn't supported on a columnar list `{}` yet",
                                 Type::List(inner.clone()).show()
                             ),
-                            "`#layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                            "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
                             format!(
-                                "drop `#layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
+                                "drop `#Layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
                                 elem
                             ),
                             Some(span),

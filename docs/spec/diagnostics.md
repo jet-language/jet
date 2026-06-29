@@ -69,58 +69,58 @@ before continuing.
 | E0005 | parse | *retired in M1* (was: variables staged)   |
 | E0006 | parse | *retired in M4* (was: `?` staged)         |
 | E0007 | jet   | integer too large for 64 bits             |
-| E0008 | parse | teaching: `def`/`func` → `fn` (S14)       |
-| E0009 | parse | teaching: `let`/`let mut` → `name @=`/`name :=` |
-| E0010 | parse | teaching: `set` → `name @=`               |
+| E0008 | parse | *retired by D-S14-PAUSE* (was: `def`/`func` teaching) |
+| E0009 | parse | *retired by D-S14-PAUSE* (was: `let`/`let mut` teaching) |
+| E0010 | parse | *retired by D-S14-PAUSE* (was: `set` teaching) |
 | E0011 | sema  | *retired in M10* (was: `println` → `print`) |
-| E0012 | parse | teaching: `and`/`not` → `&&`/`!` |
-| E0013 | parse | teaching: `Text` → `String`               |
-| E0014 | parse | teaching: `try` → `?` (M4 — real feature)   |
-| E0015 | parse | teaching: `import` → `use` (S16, D-S16-USE) |
-| E0016 | parse | teaching: `match` → `if subject { … }` (D-IF1) |
-| E0017 | parse | teaching: `read` → default parameter access (S10) |
-| E0018 | parse | teaching: `write` → `~` sigil (S10, D-CAP7) |
+| E0012 | parse | *retired by D-S14-PAUSE* (was: foreign boolean-word teaching) |
+| E0013 | parse | *retired by D-S14-PAUSE* (was: `Text` teaching) |
+| E0014 | parse | *retired by D-S14-PAUSE* (was: `try` teaching) |
+| E0015 | parse | *retired by D-S14-PAUSE* (was: `import` teaching) |
+| E0016 | parse | *retired by D-S14-PAUSE* (was: `match` teaching) |
+| E0017 | parse | *retired by D-S14-PAUSE* (was: `read` teaching) |
+| E0018 | parse | *retired by D-S14-PAUSE* (was: `write` teaching) |
 | E0019 | parse | *retired in M6* (was: `import` staged; S16 shipped) |
-| E0020 | parse | teaching: `None`/`Some`/… → `null`/`value` (S32) |
-| E0021 | parse | teaching: `class` → `struct` (S29)              |
-| E0022 | parse | teaching: `trait`/`interface` staged → M9 (S28) |
-| E0023 | parse | teaching: `case`/`default` → `if subject { … }` arm syntax (D-IF1) |
-| E0024 | parse | teaching: `catch`/`except` → `or` / `== err` (M4) |
-| E0025 | parse | teaching: `unwrap`/`expect` → `or panic(…)` (M4) |
-| E0026 | parse | teaching: `throw`/`raise` → `err(…)` (M4) |
-| E0027 | parse | teaching: `append` → `push`               |
-| E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
+| E0020 | parse | *retired by D-S14-PAUSE* (was: foreign optional teaching) |
+| E0021 | parse | *retired by D-S14-PAUSE* (was: `class` teaching) |
+| E0022 | parse | *retired by D-S14-PAUSE* (was: `trait`/`interface` teaching) |
+| E0023 | parse | *retired by D-S14-PAUSE* (was: `case`/`default` teaching) |
+| E0024 | parse | *retired by D-S14-PAUSE* (was: `catch`/`except` teaching) |
+| E0025 | parse | *retired by D-S14-PAUSE* (was: `unwrap`/`expect` teaching) |
+| E0026 | parse | *retired by D-S14-PAUSE* (was: `throw`/`raise` teaching) |
+| E0027 | parse | *retired by D-S14-PAUSE* (was: `append` teaching) |
+| E0028 | parse | *retired by D-S14-PAUSE* (was: `Vec`/`dict` teaching) |
 | E0029 | parse | two capability markers on one parameter (D-CAP7) |
-| E0030 | parse | teaching: `as` → `.to_float()` etc.       |
+| E0030 | parse | *retired by D-S14-PAUSE* (was: `as` teaching) |
 | E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
-| E0032 | parse | teaching: `lambda` / `fn(x){…}` → `(x) => …` (S46) |
-| E0033 | parse | teaching: `\|x\| …` Rust pipes → `(x) => …` (S46) |
+| E0032 | parse | *retired by D-S14-PAUSE* (was: lambda teaching) |
+| E0033 | parse | *retired by D-S14-PAUSE* (was: Rust pipe-lambda teaching) |
 | E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
 | E0035 | parse | teaching: `where` clauses → inline bounds |
-| E0036 | parse | teaching: `dyn`/`Box` → trait name in type position |
+| E0036 | parse | *retired by D-S14-PAUSE* (was: `dyn`/`Box` teaching) |
 | E0037 | sema  | teaching: `println!`/`eprintln!` → `print`/`io.eprint` |
-| E0038 | sema  | teaching: `open(`/`File.open` → `fs.read` / `fs.write` |
+| E0038 | sema  | *retired by D-S14-PAUSE* (was: file-open teaching) |
 | E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
 | E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
 | E0041 | sema  | teaching: `Mutex`/`lock` → channels |
 | E0043 | jet   | teaching: `jet install` → `jet fetch` |
-| E0044 | parse | teaching: `switch` → `if subject { … }` (D-IF1) |
-| E0045 | parse | teaching: `or` fallback → `??` (S71, D-SG6) |
+| E0044 | parse | *retired by D-S14-PAUSE* (was: `switch` teaching) |
+| E0045 | parse | *retired by D-S14-PAUSE* (was: `or` fallback teaching) |
 | E0046 | parse | `?.` optional chaining reaches fields, not methods (S71) |
 | E0047 | type | `?.` left side must be optional `T?` (S71, D-SG6) |
 | E0048 | parse | teaching: positional tuples → named members (S73, D-SG7) |
 | E0049 | parse | teaching: `.0` field access → named members (S73, D-SG7) |
-| E0050 | parse | teaching: `while` → `loop cond { }` (S19-amend) |
-| E0051 | parse | teaching: `for x in` → `loop x in` (S19-amend) |
-| E0052 | parse | teaching: bare `test "name" { }` → `#Test("name") { }` (D-CASING1 follow-on) |
-| E0053 | parse | teaching: bare `pure fn` → `#Pure fn` (D-CASING1 follow-on) |
-| E0054 | parse | teaching: bare `todo` → `#Todo` (D-CASING1 follow-on) |
+| E0050 | parse | *retired by D-S14-PAUSE* (was: `while` teaching) |
+| E0051 | parse | *retired by D-S14-PAUSE* (was: `for x in` teaching) |
+| E0052 | parse | *retired by D-S14-PAUSE* (was: bare `test` teaching) |
+| E0053 | parse | *retired by D-S14-PAUSE* (was: bare `pure` teaching) |
+| E0054 | parse | *retired by D-S14-PAUSE* (was: bare `todo` teaching) |
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
 | E0056 | parse | teaching: `mut` capability keyword → `~` sigil (D-CAP7) |
-| E0057 | parse | teaching: `take` capability keyword → `^` sigil (D-CAP7) |
-| E0058 | parse | teaching: `view` return keyword → `&` sigil (D-CAP7) |
+| E0057 | parse | *retired by D-S14-PAUSE* (was: `take` keyword teaching) |
+| E0058 | parse | *retired by D-S14-PAUSE* (was: `view` keyword teaching) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
-| E0984 | parse | teaching: `when` → `if subject { arm -> body }` (D-IF1) |
+| E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | teaching: `val`/`var` keyword → `name @=`/`name :=` sigil (D-BIND2) |
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
 | E0991 | parse | teaching: `::` retired immutable-binding sigil → `@=` (D-BIND2) |
@@ -145,7 +145,7 @@ before continuing.
 | E0987 | sema  | `break name@`/`continue name@` names a loop label not in scope (D-LOOPLABEL2) |
 | E0988 | parse | teaching: old prefix `@name loop` / `break @name` → suffix `name@ loop` / `break name@` (D-LOOPLABEL2) |
 | E0989 | sema  | `comptime if` condition is not a comptime expression (D-WHEN1) |
-| E0990 | parse | `@` used as attribute prefix; teaching error — use `#` (D-ATTR1) |
+| E0990 | parse | *retired by D-MARKER-CANON1* (was: `@` marker-prefix teaching) |
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
@@ -174,7 +174,7 @@ before continuing.
 | E0206 | sema  | `view` return can't point at this value   |
 | E0207 | sema  | multiple unlabeled `ref` fields           |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
-| E0210 | parse | teaching: `Ptr<T>` is the deprecated alias → write `*T` (D-CAP9) |
+| E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
 | L0201 | sema  | implicit `.clone()` at call site — fired only when the value is dead after the call (D-L0201 liveness gate) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | E0301 | sema  | `impl` for unknown type                   |
@@ -201,7 +201,7 @@ before continuing.
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
 | E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
-| E0341 | sema  | teaching: `use jet.<ring>` old ring namespace — use `use core.<ring>` (D-CORENS1) |
+| E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -261,19 +261,19 @@ before continuing.
 | E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
-| E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `#Unsafe("…")` block (D-UNSAFE2) |
-| E3102 | sema  | `core.mem` item (`Ptr`/`volatile_read`/allocator) named without `use core.mem` (S58) |
+| E3101 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer op gate; canonical raw ops use E0208) |
+| E3102 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer discovery gate) |
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
 | E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
 | L3101 | sema  | `#Unsafe` block missing its reason argument — write `#Unsafe("…") { … }` (D-UNSAFE2) |
 | L3102 | sema  | `#Impure` block missing its reason argument — write `#Impure("…") { … }` (D-CTEFFECT1) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
-| E3203 | sema  | non-C-ABI type in `@extern` / `@bindgen` fn signature |
+| E3203 | sema  | non-C-ABI type in `#Extern` / `#Bindgen` fn signature |
 | E3204 | sema  | two C `use` forms for the same lib in one file |
 | E3205 | sema  | overlay symbol clashes with bindgen (incompatible signature) |
 | E3206 | parse | user declared reserved `__bindgen__` segment |
-| E3207 | parse | `@bindgen` outside generated `.jet/bindings/c/` file |
+| E3207 | parse | `#Bindgen` outside generated `.jet/bindings/c/` file |
 | E3208 | jet   | `jet bind` / header translation failed |
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
@@ -311,7 +311,7 @@ before continuing.
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
-| E0954 | parse | teaching: `comptime val`/`comptime var`/`const` → `comptime x = …` |
+| E0954 | parse | *retired by D-S14-PAUSE* (was: two-keyword comptime binding teaching) |
 | E0955 | sema  | `embed_file`/`embed_bytes`: missing / unreadable file (`embed_file` also: not UTF-8) |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
 | E0957 | sema  | `embed_file`/`embed_bytes` path not a literal, absolute, or escaping via `..` |
@@ -615,7 +615,7 @@ output is machine-parseable with `--json`.
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
-Wave-1 ring packages (`core.csv`, `jet.toml`, `core.yaml`, `core.log`, `core.json`, `core.time`, `core.crypto`) are compiler-known modules — no external crates in `src/` (I6). E27xx is the block for M9.
+Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`) are compiler-known modules — no external crates in `src/` (I6). E27xx is the block for M9.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -703,7 +703,7 @@ Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--all
 
 | code | what | why | fix |
 |------|------|-----|-----|
-| E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.fs`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call: `#Impure("reading config") { comptime val x = core.fs.read("…") }`. |
+| E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.fs`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call in `#Impure("reading config") { … }`. |
 | E3411 | `#Impure` gate present but `--allow-impure` was not passed. | The `#Impure` block opts in to ambient I/O, but the build flag is also required so CI can audit builds that touch the host. | Add `--allow-impure` to your `jet build` / `jet run` invocation. |
 | E3412 | `core.net.{method}()` is not available at comptime. | Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect. Other `core.net` methods are not planned for comptime access. | Use `core.net.fetch(url, sha256: "…")` for content-hash-pinned downloads. |
 | E3413 | fetch: sha256 mismatch for `{url}`. | The downloaded content does not hash to the expected `sha256:` value. The pin ensures every machine gets byte-identical content; a mismatch means the URL content changed or the pin is wrong. | Update the `sha256:` argument to match the actual content hash shown in the Why line, or verify the URL points to the correct file. |
@@ -830,12 +830,12 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 |------|------|-----|-----|
 | E3201 | C library `{lib}` was not found. | Jet looked for a `{lib}: c@…` dep in `pkg.jet`, then tried `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: c@system` in `deps:`. |
 | E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58). | Move the call inside `#Unsafe`, or change the type to a C-safe value type. |
-| E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `@extern` / `@bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
+| E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
 | E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.{lib} as alias`, not both. | Remove one line; keep the form that matches your workflow. |
-| E3205 | Overlay `{name}` disagrees with the generated binding. | User `@extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
-| E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `@extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `@extern module c.{lib} { … }`. |
-| E3207 | `@bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `@extern module`. | Edit your overlay file with `@extern module`, or regenerate the cache with `jet bind`. |
-| E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `@extern module c.{lib}`. |
+| E3205 | Overlay `{name}` disagrees with the generated binding. | User `#Extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
+| E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `#Extern module c.{lib} { … }`. |
+| E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `#Extern module`. | Edit your overlay file with `#Extern module`, or regenerate the cache with `jet bind`. |
+| E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `#Extern module c.{lib}`. |
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 

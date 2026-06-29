@@ -1050,8 +1050,8 @@ impl<'a> Parser<'a> {
         self.func_after_fn(is_pub, true, false, false, None, None)
     }
 
-    /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#extern
-    /// module …` or `#bindgen module …`? (Distinguishes from `#static const`,
+    /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
+    /// module …` or `#Bindgen module …`? (Distinguishes from `#static const`,
     /// and from bare `extern rust`.)
     fn at_c_module(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::Hash) {
@@ -1059,20 +1059,24 @@ impl<'a> Parser<'a> {
         }
         let intro_is_c = match &self.peek2().kind {
             TokKind::KwExtern => true,
-            TokKind::Ident(n) => n == Syntax::ATTR_BINDGEN,
+            TokKind::Ident(n) => n == Syntax::ATTR_EXTERN_MODULE || n == Syntax::ATTR_BINDGEN,
             _ => false,
         };
         intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
     }
 
-    /// S59 (E2-M14): parse `#extern module c.<lib> { … }` (overlay) or
-    /// `#bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
+    /// S59 (E2-M14): parse `#Extern module c.<lib> { … }` (overlay) or
+    /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
     /// declarations share the `extern_fn` shape (`fn name(args) -> T = "Sym";`).
     fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
         use crate::AST::CModuleKind;
         let start = self.bump().span; // `#`
         let kind = match &self.peek().kind {
             TokKind::KwExtern => {
+                self.bump();
+                CModuleKind::Extern
+            }
+            TokKind::Ident(n) if n == Syntax::ATTR_EXTERN_MODULE => {
                 self.bump();
                 CModuleKind::Extern
             }
@@ -1089,8 +1093,8 @@ impl<'a> Parser<'a> {
                         Syntax::ATTR_BINDGEN,
                         describe(other)
                     ),
-                    "a C FFI module begins with `#extern module c.<lib>` or `#bindgen module c.<lib>.__bindgen__`".to_string(),
-                    "write: #extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
+                    "a C FFI module begins with `#Extern module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`".to_string(),
+                    "write: #Extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
                     Some(self.peek().span),
                 ));
             }
@@ -1112,8 +1116,8 @@ impl<'a> Parser<'a> {
                 format!(
                     "write: {} module {}.<lib> {{ … }}",
                     match kind {
-                        CModuleKind::Extern => "#extern",
-                        CModuleKind::Bindgen => "#bindgen",
+                        CModuleKind::Extern => "#Extern",
+                        CModuleKind::Bindgen => "#Bindgen",
                     },
                     Syntax::C_MODULE_ROOT
                 ),
@@ -1135,7 +1139,7 @@ impl<'a> Parser<'a> {
                     "E0003",
                     format!("a C FFI module path can't have a `.{}` segment", seg),
                     "the only legal third segment is the reserved `__bindgen__` on a generated cache module".to_string(),
-                    format!("write: #extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
+                    format!("write: #Extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
                     Some(seg_span),
                 ));
             }
@@ -1161,19 +1165,19 @@ impl<'a> Parser<'a> {
                 Some(path_span),
             ));
         }
-        // A `#bindgen` module must carry the `__bindgen__` segment (it is the
+        // A `#Bindgen` module must carry the `__bindgen__` segment (it is the
         // generated surface). Without it the path is malformed.
         if kind == CModuleKind::Bindgen && !has_bindgen_seg {
             return Err(Diagnostic::error(
                 "E0003",
                 format!(
-                    "a `#bindgen` module path must end in `.{}`",
+                    "a `#Bindgen` module path must end in `.{}`",
                     Syntax::C_BINDGEN_SEGMENT
                 ),
-                "the compiler generates `#bindgen module c.<lib>.__bindgen__` cache files"
+                "the compiler generates `#Bindgen module c.<lib>.__bindgen__` cache files"
                     .to_string(),
                 format!(
-                    "write: #bindgen module {}.{}.{} {{ … }}",
+                    "write: #Bindgen module {}.{}.{} {{ … }}",
                     Syntax::C_MODULE_ROOT,
                     lib,
                     Syntax::C_BINDGEN_SEGMENT
