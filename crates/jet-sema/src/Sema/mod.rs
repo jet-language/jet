@@ -11,6 +11,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
 use crate::AST::{AccessConvention, ExternFn, Func, Type, VariantPayload};
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::PathBuf;
 
 /// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.
 pub use crate::AST::FuncSig;
@@ -414,11 +415,18 @@ pub enum CompileMode {
 }
 
 pub(crate) struct ModuleState {
+    /// D-PUBPKG1=A: modules under the same project package/workspace root may
+    /// see `pub(package)` items. Dependency/hangar modules get their own root.
+    package_scope: PathBuf,
     funcs: HashMap<String, FuncSig>,
     func_pub: HashMap<String, bool>,
+    func_pkg_pub: HashMap<String, bool>,
     type_pub: HashMap<String, bool>,
+    type_pkg_pub: HashMap<String, bool>,
     method_pub: HashMap<(String, String), bool>,
+    method_pkg_pub: HashMap<(String, String), bool>,
     field_pub: HashMap<(String, String), bool>,
+    field_pkg_pub: HashMap<(String, String), bool>,
     registry: TypeRegistry,
     structs: HashMap<String, Vec<(Option<String>, Type)>>,
     consts: HashMap<String, Type>,
@@ -460,6 +468,8 @@ pub(crate) struct Checker<'a> {
     /// D-MOD2: pub flags for this module's functions, including inline-module
     /// items mangled as `M__item`. Used to reject `M.private()` from outside.
     func_pub: &'a HashMap<String, bool>,
+    /// D-PUBPKG1=A: package-scoped function visibility flags.
+    func_pkg_pub: &'a HashMap<String, bool>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
     /// name -> span of the use that gave the value away.
@@ -503,6 +513,9 @@ pub(crate) struct Checker<'a> {
     /// determinism check. Zeroed/restored around lambda bodies like `txn_depth`.
     det_suppress: usize,
     in_unsafe: bool,
+    /// D-IGNORERET2=A: true while inside a `#Suppress(MustUse) { … }` block.
+    /// Suppresses E0402 for fallible / #MustUse results dropped as statements.
+    suppress_must_use: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,

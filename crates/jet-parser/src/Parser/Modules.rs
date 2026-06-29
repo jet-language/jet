@@ -131,6 +131,14 @@ impl<'a> Parser<'a> {
     /// D-MOD1/2: parse `[pub] module name ;` or `[pub] module name { items }`.
     /// `is_pub` is true when `pub` was already peeked (but NOT consumed).
     pub(super) fn code_module(&mut self, is_pub: bool) -> Result<CodeModule, Diagnostic> {
+        self.code_module_with_pkg(is_pub, false)
+    }
+
+    pub(super) fn code_module_with_pkg(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+    ) -> Result<CodeModule, Diagnostic> {
         if is_pub {
             self.bump(); // consume `pub`
         }
@@ -143,6 +151,7 @@ impl<'a> Parser<'a> {
                     name,
                     name_span,
                     is_pub,
+                    is_package_pub,
                     body: None,
                     span: Span::new(start.start, end),
                 })
@@ -169,6 +178,7 @@ impl<'a> Parser<'a> {
                     name,
                     name_span,
                     is_pub,
+                    is_package_pub,
                     body: Some(items),
                     span: Span::new(start.start, end),
                 })

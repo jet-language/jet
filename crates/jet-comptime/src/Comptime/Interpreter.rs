@@ -392,6 +392,9 @@ impl<'a> Interp<'a> {
                 self.impure_depth -= 1;
                 result
             }
+            // D-IGNORERET2=A: `#Suppress(MustUse)` is a sema-only gate; it erases
+            // at codegen and is transparent to the comptime interpreter.
+            Stmt::SuppressMustUse { body, .. } => self.exec_block(body, scope),
             // D-REGION1: allocation regions are a runtime/codegen construct; the
             // comptime interpreter has no arenas, so a `region` block is declined.
             Stmt::Region { span, .. } => Err(unsupported("a `region` block", *span)),

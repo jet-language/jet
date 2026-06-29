@@ -423,6 +423,8 @@ pub struct ImportDecl {
     pub span: Span,
     /// D-MOD3/4: true for `pub use alias.Item` re-exports.
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) use …` — package-scoped re-export.
+    pub is_package_pub: bool,
 }
 
 impl ImportDecl {
@@ -662,6 +664,8 @@ pub struct CodeModule {
     pub name: String,
     pub name_span: Span,
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) module …`.
+    pub is_package_pub: bool,
     /// None = file declaration (`module math;`), Some = inline body.
     pub body: Option<Vec<Item>>,
     pub span: Span,
@@ -898,6 +902,8 @@ pub struct TypeParam {
 #[derive(Debug)]
 pub struct TraitDef {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) trait …`.
+    pub is_package_pub: bool,
     pub name: String,
     pub name_span: Span,
     /// D-LIB2: `type Name;` associated type declarations inside the trait body.
@@ -912,6 +918,8 @@ pub struct TraitDef {
 #[derive(Debug)]
 pub struct TagDef {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) tag …`.
+    pub is_package_pub: bool,
     pub name: String,
     pub name_span: Span,
     /// Methods erroneously written in a tag body. Always empty for a well-formed
@@ -927,6 +935,8 @@ pub struct TagDef {
 #[derive(Debug)]
 pub struct StateDecl {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) state …`.
+    pub is_package_pub: bool,
     pub type_name: String,
     pub type_name_span: Span,
     /// Declared state labels in declaration order, with their name spans for diagnostics.
@@ -1028,6 +1038,8 @@ pub struct BenchDef {
 #[derive(Debug, Clone)]
 pub struct Func {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) fn …`.
+    pub is_package_pub: bool,
     pub name: String,
     pub name_span: Span,
     /// S45 (M9): `<T: Bound>` after the function name.
@@ -1125,6 +1137,8 @@ pub struct Marker {
 #[derive(Debug)]
 pub struct StructDef {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) struct …`.
+    pub is_package_pub: bool,
     pub name: String,
     pub name_span: Span,
     /// S45: `<T>` after the struct name.
@@ -1165,6 +1179,8 @@ pub struct StructDef {
 #[derive(Debug)]
 pub struct DistinctDef {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) Name @= distinct Base`.
+    pub is_package_pub: bool,
     /// D-DIST3: whether `#Numeric` marker was present — enables same-type arithmetic.
     pub is_numeric: bool,
     pub name: String,
@@ -1182,6 +1198,8 @@ pub struct DistinctDef {
 #[derive(Debug)]
 pub struct UnitFamilyDef {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) #UnitFamily(…) { … }`.
+    pub is_package_pub: bool,
     /// The family label, e.g. `currency` — documentation only; not a type name.
     pub family: String,
     pub family_span: Span,
@@ -1217,6 +1235,7 @@ impl UnitFamilyDef {
             .iter()
             .map(|(member, span)| DistinctDef {
                 is_pub: self.is_pub,
+                is_package_pub: self.is_package_pub,
                 is_numeric: true,
                 name: Self::type_name(member),
                 name_span: *span,
@@ -1231,6 +1250,8 @@ impl UnitFamilyDef {
 #[derive(Debug)]
 pub struct EnumDef {
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) enum …`.
+    pub is_package_pub: bool,
     pub name: String,
     pub name_span: Span,
     pub type_params: Vec<TypeParam>,
@@ -1297,6 +1318,8 @@ pub struct ImplDef {
 pub struct Field {
     /// S18: visible to other files via `import` when true.
     pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) fieldname: T`.
+    pub is_package_pub: bool,
     pub is_stored_ref: bool,
     pub stored_ref_label: Option<String>,
     pub name: String,
@@ -1415,7 +1438,10 @@ impl BindPattern {
 pub enum OrFallback {
     Value(Box<Expr>),
     Return(Option<Box<Expr>>, Span),
-    Panic { name_span: Span, args: Vec<CallArg> },
+    Panic {
+        name_span: Span,
+        args: Vec<CallArg>,
+    },
     /// D-ORRETURN-ERG1=B: `expr ?? break` — loop-only, sema-gated.
     Break(Span),
     /// D-ORRETURN-ERG1=B: `expr ?? continue` — loop-only, sema-gated.
@@ -1570,6 +1596,14 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-IGNORERET2=A (ratified 2026-06-28): `#Suppress(MustUse) { … }` — a
+    /// lexical scope in which all fallible / `#MustUse` statement results are
+    /// allowed to be silently dropped without `.drop("reason")`.  Erases to a
+    /// plain block at codegen; the gate is enforced entirely in sema (I3).
+    SuppressMustUse {
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation region
     /// `region r { … }`. `name` names the region; arena `view`s allocated
     /// inside may not escape it (E0631). A lexical scope like `loop`/`#Unsafe`,
@@ -1710,6 +1744,7 @@ impl Stmt {
             | Stmt::CountedLoop { span, .. }
             | Stmt::Unsafe { span, .. }
             | Stmt::Impure { span, .. }
+            | Stmt::SuppressMustUse { span, .. }
             | Stmt::Region { span, .. }
             | Stmt::Caps { span, .. }
             | Stmt::Grant { span, .. }

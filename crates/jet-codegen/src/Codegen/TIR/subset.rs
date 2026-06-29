@@ -1083,6 +1083,11 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         },
         Stmt::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         Stmt::Return(None, _) => true,
+        // D-IGNORERET2=A: `.drop("reason")` lowers to an ExprStmt of the receiver;
+        // the method call itself is erased. Covered iff the receiver is in-subset.
+        Stmt::Expr(Expr::MethodCall {
+            receiver, method, ..
+        }) if method == Syntax::METHOD_DROP => expr_in_subset(receiver, cx, locals),
         Stmt::Expr(e) => expr_in_subset(e, cx, locals),
         Stmt::If(ifs) => if_in_subset(ifs, cx, locals),
         // c109 Phase 2: control-flow loops. Each loop body is its own scope; check
@@ -1099,7 +1104,13 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
         }
         // D-LOOP-SEMICOLON1=A: init var is in scope for cond, step, and body.
-        Stmt::CountedLoop { init, cond, step, body, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
             if !expr_in_subset(&init.init, cx, locals) {
                 return false;
             }
@@ -1223,6 +1234,8 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Unsafe { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (I3).
         Stmt::Impure { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen (I3).
+        Stmt::SuppressMustUse { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) lowers to a plain Rust
         // block; the body's `let`s LEAK into the outer scope (the AST shares `&mut env`),
         // so the gate checks the body on the SAME `locals`.

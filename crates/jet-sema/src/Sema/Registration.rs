@@ -673,6 +673,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::Test(t) => {
                 let mut synthetic = crate::AST::Func {
                     is_pub: false,
+                    is_package_pub: false,
                     name: format!("__test_{}", t.name),
                     name_span: t.name_span,
                     type_params: Vec::new(),
@@ -1544,6 +1545,7 @@ pub(crate) fn check_func_body(
     let empty_unqualified: HashMap<String, String> = HashMap::new();
     let empty_unqualified_file: HashMap<String, (String, usize)> = HashMap::new();
     let empty_func_pub: HashMap<String, bool> = HashMap::new();
+    let empty_func_pkg_pub: HashMap<String, bool> = HashMap::new();
     let mut ck = Checker {
         funcs,
         registry,
@@ -1557,6 +1559,7 @@ pub(crate) fn check_func_body(
         unqualified: &empty_unqualified,
         unqualified_file: &empty_unqualified_file,
         func_pub: &empty_func_pub,
+        func_pkg_pub: &empty_func_pkg_pub,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -1574,6 +1577,7 @@ pub(crate) fn check_func_body(
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
+        suppress_must_use: false,
         in_pure: f.is_pure,
         in_comptime: false,
         ret: f.return_type.clone(),
@@ -1667,6 +1671,7 @@ pub(crate) fn check_error_conv_body(
     // Synthesise a pseudo-function to reuse check_func_body.
     let mut synthetic = Func {
         is_pub: false,
+        is_package_pub: false,
         name: format!(
             "__errconv_{}_to_{}",
             ec.from_ty.replace('.', "_"),
@@ -1982,6 +1987,7 @@ pub(crate) fn synthesize_delegation_method(
 
     Func {
         is_pub: false,
+        is_package_pub: false,
         name: sig.name.clone(),
         name_span: sig.name_span,
         type_params: vec![],
@@ -2026,6 +2032,7 @@ pub(crate) fn synthesize_default_method(
 
     Func {
         is_pub: false,
+        is_package_pub: false,
         name: sig.name.clone(),
         name_span: sig.name_span,
         type_params: vec![],

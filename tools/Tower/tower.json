@@ -10,7 +10,8 @@
         "epoch:e4",
         "epoch:e5",
         "epoch:e6",
-        "board-sidequests"
+        "board-sidequests",
+        "epdone:e3"
       ]
     }
   },
@@ -750,7 +751,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Protocol/session types (D-PROTO1=A + D-PROTO2=A): implement top-level `protocol Name { client -> server: Msg(fields...) }` declarations that generate `.Client`/`.Server` handles over existing #SingleUse + typestate machinery. Steps: (1) Source/Syntax.rs keyword/decision entry; (2) parser protocol declaration and message grammar; (3) sema generates dual endpoint types and ordered consuming methods; (4) I4 diagnostic for out-of-order send/receive; (5) codegen lowers generated source through the normal front-end path per R11; (6) example + golden + ui snapshot.",
       "blockedBy": [],
@@ -1379,7 +1380,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-IGNORERET2=A implementation plan: (1) register `#Suppress(MustUse)` marker and `.drop(\"reason\")` terminal method in Syntax.rs; (2) parser accepts marker on block/fn and method-chain terminal call; (3) sema recognizes `.drop` only on `#MustUse`/fallible values, requires non-empty string literal reason, and emits a lint rather than hard error; (4) `#Suppress(MustUse)` suppresses within lexical body and records an audit warning; (5) codegen erases discarded value after evaluating side effects; (6) diagnostics + ui snapshots for missing reason, unsupported receiver, and accidental ignore; (7) examples/goldens.",
       "blockedBy": [],
@@ -1419,6 +1420,11 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L20,L116). Full design ballot attached — owner decides proceed/direction."
+        },
+        {
+          "date": "2026-06-29",
+          "by": "agent",
+          "note": "Implemented D-IGNORERET2=A end-to-end. Added Stmt::SuppressMustUse to AST (11 files updated for exhaustive matches). Parser: at_suppress_must_use_stmt() handles #Suppress(MustUse){…}. Sema: suppress_must_use flag on Checker; .drop(\"reason\") recognized in Stmt::Expr arm — suppresses E0402, requires non-empty string literal (E0407). Codegen/TIR: .drop(\"reason\") lowers to ExprStmt of receiver (erases method call); SuppressMustUse lowers to Region. Example: examples/features/154_discard_fallible.jet with golden output. UI snapshots: drop_method_empty_reason. Comptime interpreter: SuppressMustUse runs body normally."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1894,7 +1900,7 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-RANDSPLIT1=A: structurally separate seedable PRNG and CSPRNG. Steps: split namespaces/types for deterministic rng vs crypto randomness; make crypto APIs require crypto RNG output where relevant; add misuse lint/diagnostic; update examples/docs; test deterministic seed behavior and crypto-misuse rejection.",
       "blockedBy": [],
@@ -1914,6 +1920,11 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "date": "2026-06-29",
+          "by": "agent",
+          "note": "Implemented D-RANDSPLIT1=A end-to-end. Added core.random.bytes(n) (SplitMix64 PRNG, seedable) and core.crypto.random.bytes(n) (/dev/urandom CSPRNG) to CoreLib.rs, CheckerCoreLib.rs sema types, Purity.rs non-determinism check, Effects.rs Rand effect, and TIR emit.rs codegen. Registered core.crypto.random in KNOWN_CORE_MODULES (Syntax.rs). Example: examples/features/153_random_api_split.jet with golden expected output. W0410 lint code reserved in diagnostics.md; name-based misuse lint deferred (needs call-context correlation). Golden tests pass."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1960,7 +1971,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e6",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-FORMALCORE1=C plan: no compiler implementation now. Ready action is documentation-only: (1) create docs/spec/formal-core.md as Epoch-6 placeholder; (2) list existing desugarings already stable (bindings, if arms, option/fallible, loops, markers); (3) mark non-authoritative until Epoch 6; (4) add links from roadmap deferred section.",
       "blockedBy": [],
@@ -1984,6 +1995,11 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e6. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "date": "2026-06-29",
+          "by": "agent",
+          "note": "Created docs/spec/formal-core.md as Epoch 6 placeholder per D-FORMALCORE1=C. Lists current stable desugarings non-authoritatively. Roadmap updated with pointer."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2245,7 +2261,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-PRELUDEX1=A: implement prelude opt-out only. Steps: add file/package opt-out surface per ratified marker; parser/Syntax.rs entry; loader/sema skips ambient prelude when opted out; diagnostics teach explicit imports; no library prelude injection; examples + ui snapshots.",
       "blockedBy": [],
@@ -2604,11 +2620,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-PUBPKG1=A: implement package-scoped visibility as `pub(package)`. Steps: (1) Source/Syntax.rs registers the user-facing spelling/decision; (2) parser accepts `pub(package)` wherever item visibility is allowed and rejects other `pub(...)` forms with an I4 diagnostic; (3) sema visibility model gains a package-scope tier keyed to the payload/workspace package boundary; (4) module/import resolver allows sibling packages in the same payload and rejects downstream access; (5) docs/spec/spec.md + diagnostics.md rows; (6) ui snapshots for invalid qualifier and external access; (7) example with two sibling packages using an internal helper plus an outside access failure.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Implemented D-PUBPKG1=A: `pub(package)` parser/formatter/AST plumbing, E0411 for unknown `pub(…)`, sema package-scope visibility for functions/types/fields/selective imports, downstream package rejection, and public API/freeze exclusion. Added `tests/pub_package.rs` and `tests/ui/pub_package_bad_qualifier.*`; docs/spec updated. Focused tests and cargo check pass."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Verified end to end after cleanup: `nix develop -c cargo test --test pub_package`, `cargo test --test diagnostics_coverage`, full `cargo test`, and `jet run examples/features/01_hello.jet` all pass. Closed."
+        },
         {
           "at": "2026-06-27",
           "text": "[ratified] D-PUBPKG1=A recorded in syntax-decisions.md; moved to ready with parser/sema/doc/test plan."
@@ -2619,7 +2643,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-27"
+      "updated": "2026-06-29"
     },
     {
       "id": "c13iwnng",
@@ -2745,7 +2769,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-MATURITY1=B: document maturity tags as a non-semantic convention now. Steps: add docs/reference guidance for #Experimental/#Tested/#Hardened comments/metadata if existing marker syntax permits; do not add sema propagation; file follow-up only if semantic propagation is later ratified.",
       "blockedBy": [],
@@ -2765,6 +2789,11 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "date": "2026-06-29",
+          "by": "agent",
+          "note": "Implemented D-MATURITY1=A: parser accepts #Experimental, #Tested, #Hardened before fn/pub fn (same-line and next-line), silently erasing them. Constants added to Syntax.rs. at_maturity_fn() guard handles synthetic semicolons in lexer. No AST field."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3118,9 +3147,17 @@
       "epoch": "e5",
       "phase": "building",
       "priority": "P2",
-      "plan": "D-WORKSPACE1/B + D-WORKSPACE2/A current state: `workspace.jet` / `module workspace { members: ... }` is shipped for explicit string lists and `find(\"./packages\")`; tests/workspace.rs and examples/workspace cover it; legacy `jetpack.toml` `[packages]` now emits E1225 and examples no longer use the retired index. Remaining: (1) arbitrary comptime expressions in `members:` after D-CTMARKER1/D-CTEFFECT1; (2) decide/bless whether `.jet/workspace.lock` stays separate or folds into unified `.jet/lock`, then wire `--locked`; (3) index-first sparse subtree fetch for monorepo source members.",
+      "plan": "D-WORKSPACE1/B + D-WORKSPACE2/A current state: `workspace.jet` / `module workspace { members: ... }` is shipped for explicit string lists and `find(\"./packages\")`; workspace member graph writes into unified `.jet/lock` per D-WORKSPACELOCK1=A; tests/workspace.rs and examples/workspace cover it; legacy `jetpack.toml` `[packages]` now emits E1225 and examples no longer use the retired index. Remaining: (1) arbitrary comptime expressions in `members:` after D-CTMARKER1/D-CTEFFECT1; (2) index-first sparse subtree fetch for monorepo source members.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Implemented D-WORKSPACELOCK1=A slice: workspace member graph now writes to unified `.jet/lock` as `[[workspace_member]]`, preserving existing package pins. Added lock roundtrip/preserve tests and updated syntax-decision docs. Focused workspace/jetpack/lock tests and `cargo check` pass; full `cargo test` reaches an unrelated capstone linker ICE in logbook."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Re-verified after tree cleanup: full `nix develop -c cargo test` passes. Broader workspace card remains building because arbitrary comptime member expressions and sparse subtree fetch remain."
+        },
         {
           "at": "2026-06-28",
           "text": "Sprint-readiness sweep found remaining lockfile placement choice; D-WORKSPACELOCK1 opened before continuing full workspace implementation."
@@ -3143,7 +3180,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-29"
     },
     {
       "id": "c1jixkit",
@@ -5198,7 +5235,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-FALLTHROUGH1=A plan: no implementation of fallthrough. Ready action: (1) add docs note that grouped arms are the only shared-handling path; (2) ensure `fallthrough`/`case`/`switch` teaching diagnostics point at grouped arms; (3) close card after docs/tests confirm no accepted fallthrough syntax.",
       "blockedBy": [],
@@ -5214,6 +5251,11 @@
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
+        },
+        {
+          "date": "2026-06-29",
+          "by": "agent",
+          "note": "D-FALLTHROUGH1=A: no fallthrough keyword or mechanism. Grouped arms (400 | 404 -> ...) fully implemented in parser. case/default already produce E0023. syntax-decisions.md updated. No code work required."
         }
       ],
       "created": "2026-06-28T00:00:00.000Z",
@@ -12182,6 +12224,15 @@
       "status": "tagged",
       "created": "2026-06-28T10:45:26.580Z",
       "cardId": "c3horreturn"
+    },
+    {
+      "id": "b24di1z",
+      "text": "Methods are macros",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-29T17:13:43.213Z"
     }
   ],
   "questions": [

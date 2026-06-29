@@ -209,6 +209,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::CountedLoop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
+            | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
@@ -949,6 +950,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Return(Some(e), _) if env.view_return => lower_view_return(e, cx, env),
         Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_expr(e, cx, env))),
         Stmt::Return(None, _) => TStmt::Return(None),
+        // D-IGNORERET2=A: `.drop("reason")` — lower only the receiver (for side effects).
+        // The method call itself is erased; the "reason" string is audit-only.
+        Stmt::Expr(Expr::MethodCall {
+            receiver, method, ..
+        }) if method == Syntax::METHOD_DROP => TStmt::ExprStmt(lower_expr(receiver, cx, env)),
         Stmt::Expr(e) => TStmt::ExprStmt(lower_expr(e, cx, env)),
         Stmt::If(ifs) => lower_if(ifs, cx, env),
         // c109 Phase 2: control-flow loops. Loop bodies are their own scope —
@@ -972,7 +978,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
         }
         // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` three-part counted loop.
-        Stmt::CountedLoop { init, cond, step, body, label, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            label,
+            ..
+        } => {
             // Lower the init binding as a `let mut` local.
             let init_val = lower_expr(&init.init, cx, env);
             let init_ty = init.ty.clone();
@@ -1131,6 +1144,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Unsafe { body, .. } => TStmt::Unsafe(lower_stmts(body, cx, env)),
         // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (comptime-only gate, I3).
         Stmt::Impure { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen.
+        // The sema suppression is a compile-time-only fact (I3).
+        Stmt::SuppressMustUse { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1). The AST emits a plain
         // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
         // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.

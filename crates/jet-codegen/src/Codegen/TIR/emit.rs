@@ -397,7 +397,13 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             out.push_str(&format!("{}}}\n", pad));
         }
         // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` → scoped Rust block.
-        TStmt::CountedLoop { label, init, cond, step, body } => {
+        TStmt::CountedLoop {
+            label,
+            init,
+            cond,
+            step,
+            body,
+        } => {
             // Outer scoping block to contain the init variable.
             out.push_str(&format!("{}{{\n", pad));
             emit_tir_stmt(init, cx, out, indent + 1);
@@ -2280,6 +2286,12 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.random", "float") => format!("{}()", helper("jet_std_random_float")),
         ("core.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
+        // D-RANDSPLIT1=A: PRNG bytes — fast, NOT crypto-safe.
+        ("core.random", "bytes") => format!("{}({})", helper("jet_std_random_bytes"), arg(0)),
+        // D-RANDSPLIT1=A: CSPRNG bytes via /dev/urandom — cryptographically secure.
+        ("core.crypto.random", "bytes") => {
+            format!("{}({})", helper("jet_std_crypto_random_bytes"), arg(0))
+        }
         // D-DET1: deterministic injected RNG capability constructor.
         ("core.random", "rng") => format!("{}({})", helper("jet_std_rng_new"), arg(0)),
         ("core.time", "now") => format!("{}()", helper("jet_std_time_now")),

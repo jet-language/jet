@@ -469,6 +469,7 @@ mod tests {
     fn field(name: &str, ty: Type) -> Field {
         Field {
             is_pub: false,
+            is_package_pub: false,
             is_stored_ref: false,
             stored_ref_label: None,
             name: name.to_string(),
@@ -482,6 +483,7 @@ mod tests {
     fn published_struct(name: &str, fields: Vec<Field>) -> Item {
         Item::Struct(StructDef {
             is_pub: false,
+            is_package_pub: false,
             name: name.to_string(),
             name_span: zero(),
             type_params: vec![],

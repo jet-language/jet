@@ -207,11 +207,9 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     }
     Some(match module {
         "core.fs" | "core.files" => Effect::Fs,
-        "core.net" | "jet.http" | "core.http.client" | "core.http.server" => {
-            Effect::Net
-        }
+        "core.net" | "jet.http" | "core.http.client" | "core.http.server" => Effect::Net,
         "core.time" => Effect::Time,
-        "core.random" => Effect::Rand,
+        "core.random" | "core.crypto.random" => Effect::Rand,
         "core.env" => Effect::Env,
         "core.process" => Effect::Exec,
         "core.io" => Effect::Io,
@@ -702,13 +700,20 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
                     .find_map(|a| expr_handle_escape(&a.cond, handle).or_else(|| block(&a.body)))
             })
             .or_else(|| else_body.as_ref().and_then(|b| block(b))),
-        Stmt::CountedLoop { init, cond, step, body, .. } => expr_handle_escape(&init.init, handle)
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => expr_handle_escape(&init.init, handle)
             .or_else(|| expr_handle_escape(cond, handle))
             .or_else(|| block(body))
             .or_else(|| stmt_handle_escape(step, handle)),
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }

@@ -290,9 +290,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(mods) = self.modules {
             for &idx in self.imports.values() {
-                if mods[idx].type_pub.get(name).copied().unwrap_or(false)
-                    && mods[idx].registry.is_single_use(name)
-                {
+                if self.type_is_pub_in(idx, name) && mods[idx].registry.is_single_use(name) {
                     return true;
                 }
             }

@@ -5,7 +5,7 @@ use crate::Generics::{e0905, e0909, generic_depth_exceeded, COMPARABLE};
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch, Expr, ForKind, IfStmt,
-    IndexKind, LValue, Pattern, Stmt, Type,
+    IndexKind, LValue, Pattern, Stmt, StrPart, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -142,10 +142,10 @@ impl<'a> Checker<'a> {
                 }
                 // Check imported file-module registries for pub types.
                 if let Some(mods) = self.modules {
-                    let found = self.imports.values().any(|&idx| {
-                        mods[idx].registry.contains(n)
-                            && mods[idx].type_pub.get(n).copied().unwrap_or(false)
-                    });
+                    let found = self
+                        .imports
+                        .values()
+                        .any(|&idx| mods[idx].registry.contains(n) && self.type_is_pub_in(idx, n));
                     if found {
                         return;
                     }
@@ -864,15 +864,87 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Expr(expr) => {
+                // D-IGNORERET2=A: `.drop("reason")` is the blessed explicit-discard
+                // terminal. When recognized, infer the *receiver* (for side effects),
+                // validate the reason is a non-empty string literal, and suppress E0402.
+                if let Expr::MethodCall {
+                    receiver,
+                    method,
+                    method_span,
+                    args,
+                    ..
+                } = expr
+                {
+                    if method == Syntax::METHOD_DROP {
+                        let recv_ty = self.infer_fallible_stmt(receiver);
+                        // Validate reason argument — must be a non-empty string literal.
+                        match args.first() {
+                            Some(a) => match &a.expr {
+                                Expr::Str(parts, _)
+                                    if parts.len() == 1
+                                        && matches!(&parts[0], StrPart::Lit(s) if s.is_empty()) =>
+                                {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0407",
+                                        "`.drop()` reason must not be empty".to_string(),
+                                        "the reason documents why this result is intentionally discarded".to_string(),
+                                        "write `.drop(\"why this is fine to ignore\")` with a real explanation".to_string(),
+                                        Some(*method_span),
+                                    ));
+                                }
+                                Expr::Str(parts, _)
+                                    if parts.iter().all(|p| matches!(p, StrPart::Lit(_))) =>
+                                {
+                                    // Non-empty plain string literal — valid.
+                                }
+                                _ => {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0407",
+                                        "`.drop()` requires a string literal reason".to_string(),
+                                        "the reason must be a compile-time string, not a variable"
+                                            .to_string(),
+                                        "write `.drop(\"why this is fine to ignore\")`".to_string(),
+                                        Some(*method_span),
+                                    ));
+                                }
+                            },
+                            None => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0407",
+                                    "`.drop()` requires a reason argument".to_string(),
+                                    "the reason documents why this result is intentionally discarded".to_string(),
+                                    "write `.drop(\"why this is fine to ignore\")`".to_string(),
+                                    Some(*method_span),
+                                ));
+                            }
+                        }
+                        // E0402 is suppressed — that is the entire point of `.drop()`.
+                        // Task drop is still warned (L1101) because `.drop()` on a task
+                        // doesn't actually join it; use `.detach()` for fire-and-forget.
+                        if let Some(ty) = recv_ty {
+                            if is_task_type(&ty) {
+                                self.diags.push(Diagnostic::lint(
+                                    "L1101",
+                                    "a spawned task is dropped without `.join()`".to_string(),
+                                    "`.drop()` discards the task handle — the task may outlive the function".to_string(),
+                                    "use `.detach()` for fire-and-forget, or `.join()` to wait".to_string(),
+                                    Some(expr.span()),
+                                ));
+                            }
+                        }
+                        // Short-circuit: don't fall through to the generic E0402 path.
+                        return;
+                    }
+                }
                 if let Some(ty) = self.infer_fallible_stmt(expr) {
-                    if ty.is_fallible() {
+                    if ty.is_fallible() && !self.suppress_must_use {
                         self.diags.push(Diagnostic::error(
                             "E0402",
                             "this call can fail and nothing checks it".to_string(),
                             "a fallible result can't be ignored — handle it or say failure is impossible"
                                 .to_string(),
                             format!(
-                                "use `{}`, `{}`, or `{} ...` if failure can't happen here",
+                                "use `{}`, `{}`, `{} ...`, or `.drop(\"reason\")` to intentionally discard",
                                 Syntax::OP_TRY_SUFFIX,
                                 Syntax::OP_FALLBACK,
                                 Syntax::BUILTIN_PANIC
@@ -1286,7 +1358,12 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::CountedLoop {
-                init, cond, body, step, label, ..
+                init,
+                cond,
+                body,
+                step,
+                label,
+                ..
             } => {
                 if let Some((n, _)) = label {
                     self.loop_labels.push(n.clone());
@@ -1353,6 +1430,15 @@ impl<'a> Checker<'a> {
                 self.ct_impure_depth += 1;
                 self.check_block(body, true);
                 self.ct_impure_depth -= 1;
+            }
+            // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — any fallible / #MustUse
+            // result dropped as a bare statement within this block is allowed without
+            // an explicit `.drop("reason")` call. Semantically a plain block otherwise.
+            Stmt::SuppressMustUse { body, .. } => {
+                let prev = self.suppress_must_use;
+                self.suppress_must_use = true;
+                self.check_block(body, true);
+                self.suppress_must_use = prev;
             }
             // D-REGION1 (opt B): an explicit `region r { … }`. A fresh lexical
             // scope: arena `view`s allocated inside cannot escape it (the

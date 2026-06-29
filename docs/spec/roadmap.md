@@ -194,6 +194,8 @@ duplicated here:
 - Self-hosting; jetos as a shipped OS product → **post-Epoch-3** research track
   (owner, 2026-06-18); jetos surface syntax is not ratified in Epoch 2/3
 - Comptime layer 3 / user-defined derives (S56) → Epoch 3
+- Formal core / desugaring map → **Epoch 6** (D-FORMALCORE1=C); placeholder at
+  [`docs/spec/formal-core.md`](formal-core.md); enforcement deferred until sema is frozen
 
 When a deferred item is promoted, add a milestone slot in the appropriate epoch
 README and ratify any new syntax in `syntax-decisions.md` before implementation.

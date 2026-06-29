@@ -224,7 +224,13 @@ fn scan_stmt(
                 scan_stmts(eb, caps, method_map, param_types);
             }
         }
-        Stmt::CountedLoop { init, cond, step, body, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
             scan_expr(&init.init, caps, method_map, param_types);
             scan_expr(cond, caps, method_map, param_types);
             scan_stmts(body, caps, method_map, param_types);
@@ -233,6 +239,7 @@ fn scan_stmt(
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }

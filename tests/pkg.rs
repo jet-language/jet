@@ -531,7 +531,7 @@ fn content_hash_mismatch_after_tamper() {
 
 #[test]
 fn lock_file_content_hash_roundtrip() {
-    use jet::Lock::{LockFile, LockSource, LockedPackage};
+    use jet::Lock::{LockFile, LockSource, LockedPackage, LockedWorkspaceMember};
     let pkg = LockedPackage {
         name: "foo".into(),
         version: "1.0.0".into(),
@@ -545,6 +545,10 @@ fn lock_file_content_hash_roundtrip() {
         version: 1,
         packages: vec![pkg],
         root_dependencies: vec!["foo".into()],
+        workspace_members: vec![LockedWorkspaceMember {
+            name: "hello".into(),
+            path: "packages/hello".into(),
+        }],
         comptime_inputs: vec![],
     };
     let serialized = jet::Lock::write(&lock);
@@ -557,6 +561,8 @@ fn lock_file_content_hash_roundtrip() {
         parsed.packages[0].content_hash,
         Some("sha256-deadbeef".into())
     );
+    assert_eq!(parsed.workspace_members[0].name, "hello");
+    assert_eq!(parsed.workspace_members[0].path, "packages/hello");
 }
 
 // ─────────────────────────────────────────────
@@ -1436,6 +1442,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             dependencies: vec![],
         }],
         root_dependencies: vec![name.into()],
+        workspace_members: vec![],
         comptime_inputs: Vec::new(),
     }
 }
@@ -1533,6 +1540,7 @@ fn e1217_missing_locked_revision() {
         version: 1,
         packages: vec![],
         root_dependencies: vec![],
+        workspace_members: vec![],
         comptime_inputs: Vec::new(),
     };
     let err = verify_all_manifest_deps_locked(&mf, &empty_lock)

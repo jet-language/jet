@@ -570,8 +570,7 @@ impl<'a> Parser<'a> {
             // D-ENUMDOT2=A: `.Variant` or `.Variant(args)` in value position.
             // An uppercase ident after `.` with no receiver is a leading-dot enum literal.
             // type_name="" is the unresolved sentinel; sema fills it in via expected_type.
-            TokKind::Dot
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase())) =>
+            TokKind::Dot if matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase())) =>
             {
                 let dot_start = self.bump().span.start; // consume `.`
                 let (variant, variant_span) =
@@ -1876,6 +1875,7 @@ impl<'a> Parser<'a> {
                         Stmt::Loop { span: s, .. } | Stmt::CountedLoop { span: s, .. } => s.end,
                         Stmt::Unsafe { span, .. } => span.end,
                         Stmt::Impure { span, .. } => span.end,
+                        Stmt::SuppressMustUse { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
                         Stmt::Caps { span, .. } => span.end,
                         Stmt::Grant { span, .. } => span.end,

@@ -188,6 +188,10 @@ impl<'a> Resolver<'a> {
             version: Lock::LOCK_VERSION,
             packages,
             root_dependencies: root_deps,
+            workspace_members: self
+                .existing_lock
+                .map(|lock| lock.workspace_members.clone())
+                .unwrap_or_default(),
             comptime_inputs: Vec::new(),
         };
 

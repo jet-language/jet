@@ -323,6 +323,7 @@ mod tests {
             version: 1,
             packages: pkgs,
             root_dependencies: vec![],
+            workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
         }
     }

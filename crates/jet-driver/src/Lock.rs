@@ -58,11 +58,20 @@ pub struct LockFile {
     pub packages: Vec<LockedPackage>,
     /// Root dependency names (direct deps of the workspace root).
     pub root_dependencies: Vec<String>,
+    /// D-WORKSPACELOCK1=A: monorepo workspace members live in this same
+    /// lockfile, not in a separate `.jet/workspace.lock`.
+    pub workspace_members: Vec<LockedWorkspaceMember>,
     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs hashed at compile
     /// time. An entry per `embed_file`/`embed_bytes` call, recording the
     /// relative path and the sha256 of the file bytes. Verifying builds can
     /// detect embedded files that changed since the last clean build.
     pub comptime_inputs: Vec<ComptimeInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedWorkspaceMember {
+    pub name: String,
+    pub path: String,
 }
 
 // ──────────────────────────────────────────────
@@ -127,6 +136,13 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str("dependencies = []\n");
     }
 
+    for member in &lock.workspace_members {
+        out.push('\n');
+        out.push_str("[[workspace_member]]\n");
+        out.push_str(&format!("name = \"{}\"\n", escape_str(&member.name)));
+        out.push_str(&format!("path = \"{}\"\n", escape_str(&member.path)));
+    }
+
     // D-CTEFFECT1 Tier-1: embed inputs.
     for ci in &lock.comptime_inputs {
         out.push('\n');
@@ -150,9 +166,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut version: Option<u32> = None;
     let mut packages: Vec<LockedPackage> = Vec::new();
     let mut root_deps: Vec<String> = Vec::new();
+    let mut workspace_members: Vec<LockedWorkspaceMember> = Vec::new();
     let mut comptime_inputs: Vec<ComptimeInput> = Vec::new();
     let mut current_pkg: Option<PartialPkg> = None;
     let mut current_ci: Option<PartialCi> = None;
+    let mut current_workspace_member: Option<PartialWorkspaceMember> = None;
     let mut in_root = false;
 
     for line in raw.lines() {
@@ -161,6 +179,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             continue;
         }
         if line == "[[comptime_inputs]]" {
+            if let Some(wm) = current_workspace_member.take() {
+                if let Some(m) = wm.finish() {
+                    workspace_members.push(m);
+                }
+            }
             if let Some(ci) = current_ci.take() {
                 if let Some(c) = ci.finish() {
                     comptime_inputs.push(c);
@@ -174,6 +197,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             continue;
         }
         if line == "[[package]]" {
+            if let Some(wm) = current_workspace_member.take() {
+                if let Some(m) = wm.finish() {
+                    workspace_members.push(m);
+                }
+            }
             if let Some(ci) = current_ci.take() {
                 if let Some(c) = ci.finish() {
                     comptime_inputs.push(c);
@@ -186,7 +214,35 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             in_root = false;
             continue;
         }
+        if line == "[[workspace_member]]" {
+            if let Some(ci) = current_ci.take() {
+                if let Some(c) = ci.finish() {
+                    comptime_inputs.push(c);
+                }
+            }
+            if let Some(p) = current_pkg.take() {
+                packages.push(p.finish()?);
+            }
+            if let Some(wm) = current_workspace_member.take() {
+                if let Some(m) = wm.finish() {
+                    workspace_members.push(m);
+                }
+            }
+            current_workspace_member = Some(PartialWorkspaceMember::default());
+            in_root = false;
+            continue;
+        }
         if line == "[root]" {
+            if let Some(ci) = current_ci.take() {
+                if let Some(c) = ci.finish() {
+                    comptime_inputs.push(c);
+                }
+            }
+            if let Some(wm) = current_workspace_member.take() {
+                if let Some(m) = wm.finish() {
+                    workspace_members.push(m);
+                }
+            }
             if let Some(p) = current_pkg.take() {
                 packages.push(p.finish()?);
             }
@@ -222,6 +278,14 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             }
             continue;
         }
+        if let Some(ref mut wm) = current_workspace_member {
+            match key {
+                "name" => wm.name = Some(val.trim_matches('"').to_string()),
+                "path" => wm.path = Some(val.trim_matches('"').to_string()),
+                _ => {}
+            }
+            continue;
+        }
         if let Some(ref mut pkg) = current_pkg {
             match key {
                 "name" => pkg.name = Some(val.trim_matches('"').to_string()),
@@ -241,6 +305,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             comptime_inputs.push(c);
         }
     }
+    if let Some(wm) = current_workspace_member {
+        if let Some(m) = wm.finish() {
+            workspace_members.push(m);
+        }
+    }
     if let Some(p) = current_pkg {
         packages.push(p.finish()?);
     }
@@ -249,6 +318,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         version: version.unwrap_or(0),
         packages,
         root_dependencies: root_deps,
+        workspace_members,
         comptime_inputs,
     })
 }
@@ -275,6 +345,21 @@ impl PartialCi {
         Some(ComptimeInput {
             path: self.path?,
             hash: self.hash?,
+        })
+    }
+}
+
+#[derive(Default)]
+struct PartialWorkspaceMember {
+    name: Option<String>,
+    path: Option<String>,
+}
+
+impl PartialWorkspaceMember {
+    fn finish(self) -> Option<LockedWorkspaceMember> {
+        Some(LockedWorkspaceMember {
+            name: self.name?,
+            path: self.path?,
         })
     }
 }

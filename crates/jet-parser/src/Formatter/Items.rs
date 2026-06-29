@@ -85,9 +85,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_trait(&mut self, t: &crate::AST::TraitDef) {
-        if t.is_pub {
-            self.write("pub ");
-        }
+        self.fmt_pub_qualifier(t.is_pub, t.is_package_pub);
         self.write("trait ");
         self.write(&t.name);
         self.write(" ");
@@ -223,9 +221,13 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_pub(&mut self, is_pub: bool) {
+    fn fmt_pub_qualifier(&mut self, is_pub: bool, is_package_pub: bool) {
         if is_pub {
-            self.write("pub ");
+            if is_package_pub {
+                self.write("pub(package) ");
+            } else {
+                self.write("pub ");
+            }
         }
     }
 
@@ -365,9 +367,9 @@ impl<'a> Fmt<'a> {
             ));
         }
         if top_level {
-            self.fmt_pub(f.is_pub);
+            self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
         } else if f.is_pub {
-            self.write("pub ");
+            self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
         }
         self.write("fn ");
         self.write(&f.name);
@@ -461,7 +463,7 @@ impl<'a> Fmt<'a> {
         // D-REPRC1/D-SOA1: `#layout(…)` sits on its own line before the struct.
         self.fmt_layout(&s.layout);
         if top_level {
-            self.fmt_pub(s.is_pub);
+            self.fmt_pub_qualifier(s.is_pub, s.is_package_pub);
         }
         self.write("struct ");
         self.write(&s.name);
@@ -514,7 +516,7 @@ impl<'a> Fmt<'a> {
             self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
         }
         if top_level {
-            self.fmt_pub(e.is_pub);
+            self.fmt_pub_qualifier(e.is_pub, e.is_package_pub);
         }
         self.write("enum ");
         self.write(&e.name);
@@ -652,9 +654,7 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_import(&mut self, imp: &ImportDecl) {
-        if imp.is_pub {
-            self.write("pub ");
-        }
+        self.fmt_pub_qualifier(imp.is_pub, imp.is_package_pub);
         self.write(Syntax::KW_USE);
         self.write(" ");
         match &imp.kind {
@@ -726,9 +726,7 @@ impl<'a> Fmt<'a> {
             }
             self.write("] ");
         }
-        if field.is_pub {
-            self.write("pub ");
-        }
+        self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
         if field.is_stored_ref {
             self.write("ref");
             if let Some(label) = &field.stored_ref_label {

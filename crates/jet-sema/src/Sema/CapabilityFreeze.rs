@@ -69,7 +69,7 @@ fn check_items(
 ) {
     for item in items {
         match item {
-            Item::Func(f) if f.is_pub => {
+            Item::Func(f) if f.is_pub && !f.is_package_pub => {
                 let Some((frozen_sig, package, version)) = frozen.get(&f.name) else {
                     continue; // not in the frozen contract (new fn — additive, fine)
                 };
@@ -160,6 +160,7 @@ mod tests {
     fn pub_fn(name: &str, params: Vec<Param>) -> Item {
         Item::Func(Func {
             is_pub: true,
+            is_package_pub: false,
             name: name.to_string(),
             name_span: zero(),
             type_params: vec![],

@@ -361,7 +361,10 @@ fn main() {
         "expected `.Blue` preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("leading-dot output should re-fmt");
-    assert_eq!(out, twice, "leading-dot enum literal formatting must be idempotent");
+    assert_eq!(
+        out, twice,
+        "leading-dot enum literal formatting must be idempotent"
+    );
 }
 
 // --- D-FMT1 (revises S44): author-intent single-line brace bodies ---

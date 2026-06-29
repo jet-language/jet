@@ -169,7 +169,7 @@ pub fn snapshot_from_items(items: &[Item], package: &str, version: &str) -> ApiS
 fn collect_pub_fns(items: &[Item], out: &mut Vec<FrozenFn>) {
     for item in items {
         match item {
-            Item::Func(f) if f.is_pub => out.push(FrozenFn {
+            Item::Func(f) if f.is_pub && !f.is_package_pub => out.push(FrozenFn {
                 name: f.name.clone(),
                 signature: fn_signature(f),
             }),
@@ -273,6 +273,7 @@ mod tests {
     fn func(name: &str, is_pub: bool, params: Vec<Param>, ret: Option<Type>) -> Func {
         Func {
             is_pub,
+            is_package_pub: false,
             name: name.to_string(),
             name_span: zero(),
             type_params: vec![],

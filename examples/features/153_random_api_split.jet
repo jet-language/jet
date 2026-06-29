@@ -1,0 +1,23 @@
+// D-RANDSPLIT1=A: separate PRNG (core.random) and CSPRNG (core.crypto.random).
+// core.random.bytes — fast, seedable, NOT cryptographically secure.
+// core.crypto.random.bytes — cryptographically secure (/dev/urandom).
+
+use core.random
+use core.crypto.random as crypto_rand
+
+fn main() {
+  // PRNG bytes: simulation, testing, shuffles.
+  noise @= random.bytes(8)
+  print("prng bytes: {noise.len()}")
+
+  // CSPRNG bytes: tokens, keys, nonces, secrets.
+  token @= crypto_rand.bytes(16)
+  print("crypto bytes: {token.len()}")
+
+  // PRNG is seedable for reproducibility.
+  random.seed(42)
+  a @= random.bytes(4)
+  random.seed(42)
+  b @= random.bytes(4)
+  print("prng reproducible: {a == b}")
+}

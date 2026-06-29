@@ -85,6 +85,53 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-IGNORERET2=A: parse `#Suppress(MustUse) { … }` in statement position.
+    /// Suppresses E0402 for all fallible / `#MustUse` results dropped inside the block.
+    fn at_suppress_must_use_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "expected `#`")?;
+        let _ = self.expect_ident(&format!("`#{}`", Syntax::ATTR_SUPPRESS))?; // "Suppress"
+        self.expect(
+            TokKind::LParen,
+            &format!("after `#{}`", Syntax::ATTR_SUPPRESS),
+        )?;
+        // Require the `MustUse` argument.
+        match &self.peek().kind {
+            TokKind::Ident(n) if n == Syntax::SUPPRESS_MUST_USE => {
+                self.bump();
+            }
+            _ => {
+                let sp = self.peek().span;
+                self.diags.push(Diagnostic::error(
+                    "E0410",
+                    format!(
+                        "`#{}` takes `{}` as its argument",
+                        Syntax::ATTR_SUPPRESS,
+                        Syntax::SUPPRESS_MUST_USE
+                    ),
+                    "only `MustUse` is supported here".to_string(),
+                    format!(
+                        "write `#{}({})` to suppress fallible-result warnings in this scope",
+                        Syntax::ATTR_SUPPRESS,
+                        Syntax::SUPPRESS_MUST_USE
+                    ),
+                    Some(sp),
+                ));
+            }
+        }
+        self.expect(
+            TokKind::RParen,
+            &format!("after `{}`", Syntax::SUPPRESS_MUST_USE),
+        )?;
+        self.expect(TokKind::LBrace, "to open the suppression block")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::SuppressMustUse {
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// D-CTEFFECT1 (ratified 2026-06-25): parse `#Impure("reason") { … }` in
     /// statement position. Mirrors `at_unsafe_stmt`. Missing reason → L3102 in sema.
     fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -328,9 +375,15 @@ impl<'a> Parser<'a> {
             // D-LOOP-SEMICOLON1=A: counted loop `loop i := 0; i < 10; i += 1 { … }`.
             // Detected by `Ident :=` at the start of the header.
             let init = self.sigil_binding()?;
-            self.expect(TokKind::Semi, "after the init in `loop init; cond; step { … }`")?;
+            self.expect(
+                TokKind::Semi,
+                "after the init in `loop init; cond; step { … }`",
+            )?;
             let cond = self.expr_no_struct_lit()?;
-            self.expect(TokKind::Semi, "after the condition in `loop init; cond; step { … }`")?;
+            self.expect(
+                TokKind::Semi,
+                "after the condition in `loop init; cond; step { … }`",
+            )?;
             // Parse the afterthought: an assignment expression (no trailing `;`).
             let step_expr = self.expr()?;
             let step: Stmt = if matches!(self.peek().kind, TokKind::Eq)
@@ -968,6 +1021,10 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_IMPURE) {
                     return self.at_impure_stmt();
                 }
+                // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — suppress E0402 in scope.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SUPPRESS) {
+                    return self.at_suppress_must_use_stmt();
+                }
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
             }
@@ -1459,15 +1516,13 @@ impl<'a> Parser<'a> {
         let save_diags = self.diags.len();
         if let Ok(raw) = self.expr_no_struct_lit() {
             match &raw {
-                Expr::PatternTest { subject: lhs, span, .. }
-                    if Self::same_subject(lhs, subject) =>
-                {
+                Expr::PatternTest {
+                    subject: lhs, span, ..
+                } if Self::same_subject(lhs, subject) => {
                     self.diags.push(Self::redundant_subject_diag(*span));
                     return Ok(raw);
                 }
-                Expr::Binary(BinOp::Eq, lhs, _, span)
-                    if Self::same_subject(lhs, subject) =>
-                {
+                Expr::Binary(BinOp::Eq, lhs, _, span) if Self::same_subject(lhs, subject) => {
                     self.diags.push(Self::redundant_subject_diag(*span));
                     return Ok(raw);
                 }

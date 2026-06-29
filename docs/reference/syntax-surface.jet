@@ -46,18 +46,18 @@
 
 //<<< Owner Bindings: Incorrect explicit binding syntax.
 // HAVE:
-name Immut@ String  = "Jet" // Immutable binding with explicit type annotation.
-name Mut: String  = "Jet" // Mutable binding with explicit type annotation.
+nameImmut@ String  = "Jet" // Immutable binding with explicit type annotation.
+nameMut: String  = "Jet" // Mutable binding with explicit type annotation.
 // WANT:
 nameImmut@ String  = "Jet" // Immutable binding with explicit type annotation.
 nameMut: String  = "Jet" // Mutable binding with explicit type annotation.
 //>>> tracked: #29 D-BINDEXPLICIT1
 
 fn values() {
-     name@ String  = "Jet"          // annotated immutable (S4 + D-BIND2)
+    name@ String  = "Jet"          // annotated immutable (S4 + D-BIND2)
     year @= 2026                   // inferred Int (S11/S42)
     version @= 0.1                 // inferred Float; always prints with `.0` (S21)
-     ready@ Bool  = true            // Bool (S11)
+    ready@ Bool  = true            // Bool (S11)
 
     count := 0                     // mutable (D-BIND1)
     count = count + 3              // reassign (S17)
@@ -70,8 +70,8 @@ fn values() {
 // Default numerics are Int (i64) / Float (f64) (S42).
 // Sized expert/FFI menu (S42, D-SG9): I8 I16 I32 I64 U8 U16 U32 U64 F32 F64.
 fn sized() {
-     small@ U8  = 255
-     wide@ I64  = 9_000_000_000      // `_` digit separators (S67)
+    small@ U8 = 255
+    wide@ I64 = 9_000_000_000      // `_` digit separators (S67)
     mask @= 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
     big @= 6.022e23                 // float exponent (S67)
     // conversions are named methods only — no `as`, no C casts (S42, D-SG9)
@@ -92,7 +92,8 @@ fn sized() {
 // ============================================================================
 // FUNCTIONS & GENERICS
 // ============================================================================
-// `fn name(params) -> Ret { }` (S1/S12). Private by default; `pub` exports (S18).
+// `fn name(params) -> Ret { }` (S1/S12). Private by default; `pub` exports
+// to every consumer; `pub(package)` exports only inside the package boundary.
 
 fn greet(who: String) -> String {
     return "hello, {who}"

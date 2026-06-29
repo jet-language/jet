@@ -27,6 +27,7 @@ impl<'a> Parser<'a> {
                     alias_span,
                     span: Span::new(start.start, end),
                     is_pub: false,
+                    is_package_pub: false,
                 })
             }
             TokKind::Ident(_) => {
@@ -85,6 +86,7 @@ impl<'a> Parser<'a> {
                                 alias_span: first_span,
                                 span: Span::new(start.start, end),
                                 is_pub: false,
+                                is_package_pub: false,
                             })
                         }
                         TokKind::Star => {
@@ -123,6 +125,7 @@ impl<'a> Parser<'a> {
                                     alias_span: item_span,
                                     span: Span::new(start.start, end),
                                     is_pub: false,
+                                    is_package_pub: false,
                                 })
                             } else {
                                 // use core.fs as fs — Module path with dots
@@ -165,6 +168,7 @@ impl<'a> Parser<'a> {
                         alias_span,
                         span: Span::new(start.start, end),
                         is_pub: false,
+                        is_package_pub: false,
                     })
                 }
             }
@@ -242,6 +246,7 @@ impl<'a> Parser<'a> {
             alias_span,
             span: Span::new(start.start, end),
             is_pub: false,
+            is_package_pub: false,
         })
     }
 
@@ -298,6 +303,13 @@ impl<'a> Parser<'a> {
                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
                 // S60 (D-CASING1 follow-on): `#Pure fn name(…)` purity modifier.
+                // D-MATURITY1=B: `#Experimental`/`#Tested`/`#Hardened` before fn/pub fn —
+                // consumed and silently ignored (docs/reference/maturity-tags.md).
+                TokKind::Hash if self.at_maturity_fn() => {
+                    self.bump(); // `#`
+                    self.bump(); // tag name — erase, no AST field
+                    continue; // re-enter item loop; next token is `fn` or `pub`
+                }
                 TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
                 // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
                 TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
@@ -322,72 +334,139 @@ impl<'a> Parser<'a> {
                     self.diags.push(self.foreign_sanitizer_diag(t.span));
                     self.func_with_modifiers(false, true).map(Item::Func)
                 }
-                TokKind::KwPub => match self.peek2().kind {
-                    // D-REPRC1: `pub #layout(c) struct Name { … }`
-                    TokKind::Hash
-                        if {
-                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT)
-                        } =>
-                    {
-                        self.bump(); // consume `pub`
-                        self.layout_struct_def(true).map(Item::Struct)
-                    }
-                    // D-MIGRATE1: `pub #PublishedSchema struct Name { … }`
-                    TokKind::Hash
-                        if {
-                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
-                        } =>
-                    {
-                        self.bump(); // consume `pub`
-                        self.published_schema_struct_def(true).map(Item::Struct)
-                    }
-                    // D-LIN1: `pub #SingleUse struct|enum Name { … }`
-                    TokKind::Hash
-                        if {
-                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE)
-                        } =>
-                    {
-                        self.bump(); // consume `pub`
-                        self.single_use_type_def(true)
-                    }
-                    // D-QUAL3: `pub #UnitFamily(name) { m, … }`
-                    TokKind::Hash
-                        if {
-                            matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
-                        } =>
-                    {
-                        self.bump(); // consume `pub`
-                        self.unit_family_def(true).map(Item::UnitFamily)
-                    }
-                    TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-                    TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
-                    TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-                    TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-                    // D-STATE-DECL: `pub state TypeName { A, B, C }`
-                    TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
-                        self.bump(); // consume `pub`
-                        self.state_decl(true).map(Item::StateDecl)
-                    }
-                    TokKind::KwModule if self.is_code_module_at(2) => {
-                        self.code_module(true).map(Item::CodeModule)
-                    }
-                    TokKind::KwUse => {
-                        self.bump(); // consume `pub`
-                        match self.import_decl() {
-                            Ok(mut imp) => {
-                                imp.is_pub = true;
-                                imports.push(imp);
-                                continue;
+                TokKind::KwPub => {
+                    // D-PUBPKG1=A: `pub(package)` qualifier — peek2 is `(`.
+                    if matches!(self.peek2().kind, TokKind::LParen) {
+                        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+                        // Redispatch on what follows the qualifier.
+                        match self.peek().kind.clone() {
+                            TokKind::KwStruct => self
+                                .struct_def_after_pub_pkg(is_pub, is_package_pub)
+                                .map(Item::Struct),
+                            TokKind::KwEnum => self
+                                .enum_def_after_pub(is_pub, is_package_pub)
+                                .map(Item::Enum),
+                            TokKind::KwTrait => self.trait_def(false).map(|mut td| {
+                                td.is_pub = is_pub;
+                                td.is_package_pub = is_package_pub;
+                                Item::Trait(td)
+                            }),
+                            TokKind::KwTag => self.tag_def(false).map(|mut td| {
+                                td.is_pub = is_pub;
+                                td.is_package_pub = is_package_pub;
+                                Item::Tag(td)
+                            }),
+                            TokKind::KwFn => self
+                                .bump_then_func_after_fn(
+                                    is_pub,
+                                    is_package_pub,
+                                    false,
+                                    false,
+                                    false,
+                                    None,
+                                    None,
+                                )
+                                .map(Item::Func),
+                            TokKind::KwModule if self.is_code_module_at(1) => self
+                                .code_module_with_pkg(is_pub, is_package_pub)
+                                .map(Item::CodeModule),
+                            TokKind::KwUse => match self.import_decl() {
+                                Ok(mut imp) => {
+                                    imp.is_pub = is_pub;
+                                    imp.is_package_pub = is_package_pub;
+                                    imports.push(imp);
+                                    continue;
+                                }
+                                Err(d) => {
+                                    self.diags.push(d);
+                                    self.sync_stmt();
+                                    continue;
+                                }
+                            },
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => self
+                                .state_decl_with_pkg(is_pub, is_package_pub)
+                                .map(Item::StateDecl),
+                            _ => self
+                                .func_after_fn(
+                                    is_pub,
+                                    is_package_pub,
+                                    false,
+                                    false,
+                                    false,
+                                    None,
+                                    None,
+                                )
+                                .map(Item::Func),
+                        }
+                    } else {
+                        match self.peek2().kind {
+                            // D-REPRC1: `pub #layout(c) struct Name { … }`
+                            TokKind::Hash
+                                if {
+                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT)
+                                } =>
+                            {
+                                self.bump(); // consume `pub`
+                                self.layout_struct_def(true).map(Item::Struct)
                             }
-                            Err(d) => {
-                                self.diags.push(d);
-                                self.sync_stmt();
-                                continue;
+                            // D-MIGRATE1: `pub #PublishedSchema struct Name { … }`
+                            TokKind::Hash
+                                if {
+                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
+                                } =>
+                            {
+                                self.bump(); // consume `pub`
+                                self.published_schema_struct_def(true).map(Item::Struct)
                             }
+                            // D-LIN1: `pub #SingleUse struct|enum Name { … }`
+                            TokKind::Hash
+                                if {
+                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE)
+                                } =>
+                            {
+                                self.bump(); // consume `pub`
+                                self.single_use_type_def(true)
+                            }
+                            // D-QUAL3: `pub #UnitFamily(name) { m, … }`
+                            TokKind::Hash
+                                if {
+                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
+                                } =>
+                            {
+                                self.bump(); // consume `pub`
+                                self.unit_family_def(true, false).map(Item::UnitFamily)
+                            }
+                            TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                            TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                            TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                            TokKind::KwTag => self.tag_def(false).map(Item::Tag),
+                            // D-STATE-DECL: `pub state TypeName { A, B, C }`
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
+                                self.bump(); // consume `pub`
+                                self.state_decl(true).map(Item::StateDecl)
+                            }
+                            TokKind::KwModule if self.is_code_module_at(2) => {
+                                self.code_module(true).map(Item::CodeModule)
+                            }
+                            TokKind::KwUse => {
+                                self.bump(); // consume `pub`
+                                match self.import_decl() {
+                                    Ok(mut imp) => {
+                                        imp.is_pub = true;
+                                        imports.push(imp);
+                                        continue;
+                                    }
+                                    Err(d) => {
+                                        self.diags.push(d);
+                                        self.sync_stmt();
+                                        continue;
+                                    }
+                                }
+                            }
+                            _ => self.func().map(Item::Func),
                         }
                     }
-                    _ => self.func().map(Item::Func),
-                },
+                }
                 // S43 (D-CASING1 follow-on): `#Test "name" { … }`.
                 TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
                 // D-BENCH1: `#Bench "name" { … }`.
@@ -412,10 +491,10 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                 TokKind::Hash if self.at_unit_family_def() => {
-                    self.unit_family_def(false).map(Item::UnitFamily)
+                    self.unit_family_def(false, false).map(Item::UnitFamily)
                 }
                 TokKind::Hash if self.at_numeric_distinct_def() => {
-                    self.distinct_def(false).map(Item::Distinct)
+                    self.distinct_def(false, false).map(Item::Distinct)
                 }
                 // D-REPRC1: `#layout(c) struct Name { … }`
                 TokKind::Hash if self.at_layout_struct() => {
@@ -454,7 +533,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwComptime => self.comptime_def().map(Item::Const),
                 TokKind::Ident(_) if self.at_distinct_def() => {
-                    self.distinct_def(false).map(Item::Distinct)
+                    self.distinct_def(false, false).map(Item::Distinct)
                 }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_CLASS => {
                     let t = self.bump();
@@ -538,7 +617,7 @@ impl<'a> Parser<'a> {
                         format!("replace `{}` with `{}`", foreign, Syntax::KW_FN),
                         Some(t.span),
                     ));
-                    self.func_after_fn(false, false, false, false, None, None)
+                    self.func_after_fn(false, false, false, false, false, None, None)
                         .map(Item::Func)
                 }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_IMPORT => {
@@ -703,6 +782,21 @@ impl<'a> Parser<'a> {
             format!("write: #{} (\"name\") {{ ... }}", Syntax::KW_TEST),
             Some(span),
         )
+    }
+
+    /// D-MATURITY1=B: true when the cursor is at a maturity-tag marker before `fn`/`pub`.
+    /// Handles both `#Experimental fn` (same line) and `#Experimental\npub fn` (next line,
+    /// where the lexer inserts a synthetic `;` terminator after the marker).
+    pub(super) fn at_maturity_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n)
+                if n == Syntax::ATTR_EXPERIMENTAL
+                    || n == Syntax::ATTR_TESTED
+                    || n == Syntax::ATTR_HARDENED)
+            && matches!(
+                self.peek3().kind,
+                TokKind::KwFn | TokKind::KwPub | TokKind::Semi | TokKind::Eof
+            )
     }
 
     /// S60 (D-CASING1 follow-on): true when the cursor is at `#Pure fn`/`#Pure pub`.
@@ -1042,12 +1136,9 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
         }
-        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-        if is_pub {
-            self.bump();
-        }
+        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
         self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
-        self.func_after_fn(is_pub, true, false, false, None, None)
+        self.func_after_fn(is_pub, is_package_pub, true, false, false, None, None)
     }
 
     /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
@@ -1331,6 +1422,60 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-PUBPKG1=A: parse an optional `pub` or `pub(package)` qualifier.
+    /// Returns `(is_pub, is_package_pub)`. On `pub(other)` pushes E0411 and returns `(true, false)`.
+    /// Non-failing: never returns Err.
+    fn parse_pub_qualifier(&mut self) -> (bool, bool) {
+        if !matches!(self.peek().kind, TokKind::KwPub) {
+            return (false, false);
+        }
+        self.bump(); // consume `pub`
+        if !matches!(self.peek().kind, TokKind::LParen) {
+            return (true, false);
+        }
+        // pub(…)
+        self.bump(); // consume `(`
+        match self.peek().kind.clone() {
+            TokKind::Ident(ref n) if n == Syntax::PUB_PACKAGE_QUALIFIER => {
+                self.bump(); // consume `package`
+                             // consume `)` — push error if missing but don't abort
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    self.bump();
+                } else {
+                    let sp = self.peek().span;
+                    self.diags.push(Diagnostic::error(
+                        "E0003",
+                        "expected `)` to close `pub(package)`".to_string(),
+                        "write `pub(package)` with no extra content inside the parentheses".to_string(),
+                        "use `pub(package)` to restrict access to sibling packages in the same payload".to_string(),
+                        Some(sp),
+                    ));
+                }
+                (true, true)
+            }
+            _ => {
+                // pub(something_else) — reject
+                let sp = self.peek().span;
+                self.diags.push(Diagnostic::error(
+                    "E0411",
+                    format!("unknown `pub(…)` qualifier — only `pub(package)` is supported"),
+                    "`pub(package)` restricts access to sibling packages in the same payload"
+                        .to_string(),
+                    "write `pub` (public to all) or `pub(package)` (package-scoped)".to_string(),
+                    Some(sp),
+                ));
+                // skip to `)`
+                while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                    self.bump();
+                }
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    self.bump();
+                }
+                (true, false)
+            }
+        }
+    }
+
     /// Parse a function whose purity is already known (the bare-`pure` teaching
     /// path enters here after emitting E0053 and consuming the `pure` word).
     pub(super) fn func_with_purity(&mut self, is_pure: bool) -> Result<Func, Diagnostic> {
@@ -1355,13 +1500,11 @@ impl<'a> Parser<'a> {
         state_requires: Option<(String, Span)>,
         state_transition: Option<crate::AST::StateTransition>,
     ) -> Result<Func, Diagnostic> {
-        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-        if is_pub {
-            self.bump();
-        }
+        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
         self.func_after_fn(
             is_pub,
+            is_package_pub,
             false,
             is_pure,
             is_sanitizer,
@@ -1373,6 +1516,7 @@ impl<'a> Parser<'a> {
     fn func_after_fn(
         &mut self,
         is_pub: bool,
+        is_package_pub: bool,
         is_unsafe: bool,
         is_pure: bool,
         is_sanitizer: bool,
@@ -1425,6 +1569,7 @@ impl<'a> Parser<'a> {
             let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
             return Ok(Func {
                 is_pub,
+                is_package_pub,
                 name,
                 name_span,
                 type_params,
@@ -1445,6 +1590,7 @@ impl<'a> Parser<'a> {
         let body = self.block_stmts();
         Ok(Func {
             is_pub,
+            is_package_pub,
             name,
             name_span,
             type_params,
@@ -1460,6 +1606,28 @@ impl<'a> Parser<'a> {
             state_transition,
             body,
         })
+    }
+
+    fn bump_then_func_after_fn(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+        is_unsafe: bool,
+        is_pure: bool,
+        is_sanitizer: bool,
+        state_requires: Option<(String, Span)>,
+        state_transition: Option<crate::AST::StateTransition>,
+    ) -> Result<Func, Diagnostic> {
+        self.expect_kw(TokKind::KwFn, "to start a function definition")?;
+        self.func_after_fn(
+            is_pub,
+            is_package_pub,
+            is_unsafe,
+            is_pure,
+            is_sanitizer,
+            state_requires,
+            state_transition,
+        )
     }
 
     /// D-EFF1 / D-QUAL1: parse an optional `#(Net, Db)` effect bound. Returns
@@ -1598,14 +1766,11 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
-        let is_pub = if nested {
-            false
+        let (is_pub, is_package_pub) = if nested {
+            (false, false)
         } else {
-            matches!(self.peek().kind, TokKind::KwPub)
+            self.parse_pub_qualifier()
         };
-        if is_pub {
-            self.bump();
-        }
         self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
         let (name, name_span) = self.expect_ident("after `struct`")?;
         let type_params = self.parse_opt_type_params()?;
@@ -1655,6 +1820,7 @@ impl<'a> Parser<'a> {
         self.bump(); // }
         Ok(StructDef {
             is_pub,
+            is_package_pub,
             name,
             name_span,
             type_params,
@@ -1674,21 +1840,22 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn enum_def(&mut self, nested: bool) -> Result<EnumDef, Diagnostic> {
-        let is_pub = if nested {
-            false
+        let (is_pub, is_package_pub) = if nested {
+            (false, false)
         } else {
-            matches!(self.peek().kind, TokKind::KwPub)
+            self.parse_pub_qualifier()
         };
-        if is_pub {
-            self.bump();
-        }
-        self.enum_def_after_pub(is_pub)
+        self.enum_def_after_pub(is_pub, is_package_pub)
     }
 
     /// Parse `enum Name { … }` given that pub/is_pub was already handled. Factors
     /// out the body of `enum_def` (mirrors `struct_def_after_pub`) so the
     /// `#SingleUse enum` path can reuse it.
-    fn enum_def_after_pub(&mut self, is_pub: bool) -> Result<EnumDef, Diagnostic> {
+    fn enum_def_after_pub(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+    ) -> Result<EnumDef, Diagnostic> {
         self.expect_kw(TokKind::KwEnum, "to start an enum definition")?;
         let (name, name_span) = self.expect_ident("after `enum`")?;
         let type_params = self.parse_opt_type_params()?;
@@ -1729,6 +1896,7 @@ impl<'a> Parser<'a> {
         self.bump();
         Ok(EnumDef {
             is_pub,
+            is_package_pub,
             name,
             name_span,
             type_params,
@@ -2107,14 +2275,11 @@ impl<'a> Parser<'a> {
 
     /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
     pub(super) fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
-        let is_pub = if nested {
-            false
+        let (is_pub, is_package_pub) = if nested {
+            (false, false)
         } else {
-            matches!(self.peek().kind, TokKind::KwPub)
+            self.parse_pub_qualifier()
         };
-        if is_pub {
-            self.bump();
-        }
         self.expect_kw(TokKind::KwTrait, "to start a trait definition")?;
         let (name, name_span) = self.expect_ident("after `trait`")?;
         self.expect(TokKind::LBrace, "to open the trait body")?;
@@ -2150,6 +2315,7 @@ impl<'a> Parser<'a> {
         self.bump();
         Ok(TraitDef {
             is_pub,
+            is_package_pub,
             name,
             name_span,
             assoc_types,
@@ -2162,14 +2328,11 @@ impl<'a> Parser<'a> {
     /// method signatures so a stray method doesn't derail the parser); sema
     /// reports each method as E0732.
     pub(super) fn tag_def(&mut self, nested: bool) -> Result<TagDef, Diagnostic> {
-        let is_pub = if nested {
-            false
+        let (is_pub, is_package_pub) = if nested {
+            (false, false)
         } else {
-            matches!(self.peek().kind, TokKind::KwPub)
+            self.parse_pub_qualifier()
         };
-        if is_pub {
-            self.bump();
-        }
         let start = self.peek().span;
         self.expect_kw(TokKind::KwTag, "to start a tag definition")?;
         let (name, name_span) = self.expect_ident("after `tag`")?;
@@ -2200,6 +2363,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(TagDef {
             is_pub,
+            is_package_pub,
             name,
             name_span,
             methods,
@@ -2296,13 +2460,11 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-        if is_pub {
-            self.bump();
-        }
+        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
         self.expect_kw(TokKind::KwFn, "to start a method")?;
         self.func_after_fn(
             is_pub,
+            is_package_pub,
             false,
             is_pure,
             is_sanitizer,
@@ -2312,10 +2474,7 @@ impl<'a> Parser<'a> {
     }
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
-        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-        if is_pub {
-            self.bump();
-        }
+        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
         let mut is_stored_ref = false;
         let mut stored_ref_label = None;
         if matches!(self.peek().kind, TokKind::KwStored) {
@@ -2333,6 +2492,7 @@ impl<'a> Parser<'a> {
         let (ty, ty_span) = self.type_()?;
         Ok(Field {
             is_pub,
+            is_package_pub,
             is_stored_ref,
             stored_ref_label,
             name,
@@ -2453,6 +2613,7 @@ impl<'a> Parser<'a> {
     pub(super) fn distinct_def(
         &mut self,
         is_pub: bool,
+        is_package_pub: bool,
     ) -> Result<crate::AST::DistinctDef, Diagnostic> {
         let start = self.peek().span;
         // optional `#Numeric` attribute
@@ -2565,6 +2726,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::AST::DistinctDef {
             is_pub,
+            is_package_pub,
             is_numeric,
             name,
             name_span,
@@ -2589,6 +2751,7 @@ impl<'a> Parser<'a> {
     pub(super) fn unit_family_def(
         &mut self,
         is_pub: bool,
+        is_package_pub: bool,
     ) -> Result<crate::AST::UnitFamilyDef, Diagnostic> {
         let start = self.peek().span;
         self.expect(TokKind::Hash, "before `UnitFamily`")?;
@@ -2614,6 +2777,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::AST::UnitFamilyDef {
             is_pub,
+            is_package_pub,
             family,
             family_span,
             members,
@@ -2781,7 +2945,7 @@ impl<'a> Parser<'a> {
                 Ok(crate::AST::Item::Struct(def))
             }
             TokKind::KwEnum => {
-                let mut def = self.enum_def_after_pub(want_pub)?;
+                let mut def = self.enum_def_after_pub(want_pub, false)?;
                 def.is_single_use = true;
                 def.single_use_span = Some(attr_span);
                 Ok(crate::AST::Item::Enum(def))
@@ -2846,6 +3010,14 @@ impl<'a> Parser<'a> {
     /// Parse `struct Name { … }` given that pub/is_pub was already handled.
     /// Factors out the body of `struct_def` when the `pub` keyword is already consumed.
     fn struct_def_after_pub(&mut self, is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
+        self.struct_def_after_pub_pkg(is_pub, false)
+    }
+
+    fn struct_def_after_pub_pkg(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+    ) -> Result<crate::AST::StructDef, Diagnostic> {
         self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
         let (name, name_span) = self.expect_ident("after `struct`")?;
         let type_params = self.parse_opt_type_params()?;
@@ -2895,6 +3067,7 @@ impl<'a> Parser<'a> {
         self.bump(); // }
         Ok(crate::AST::StructDef {
             is_pub,
+            is_package_pub,
             name,
             name_span,
             type_params,
@@ -3096,6 +3269,14 @@ impl<'a> Parser<'a> {
     /// The state names are comma-separated PascalCase identifiers. The block may have
     /// a trailing comma; semicolons between names are allowed for formatting flexibility.
     fn state_decl(&mut self, is_pub: bool) -> Result<crate::AST::StateDecl, Diagnostic> {
+        self.state_decl_with_pkg(is_pub, false)
+    }
+
+    fn state_decl_with_pkg(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+    ) -> Result<crate::AST::StateDecl, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // consume `state`
         let (type_name, type_name_span) =
@@ -3118,6 +3299,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::AST::StateDecl {
             is_pub,
+            is_package_pub,
             type_name,
             type_name_span,
             states,

@@ -603,12 +603,17 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
                 collect_stmts(eb, mp, module, db);
             }
         }
-        AST::Stmt::CountedLoop { cond, body, init, .. } => {
+        AST::Stmt::CountedLoop {
+            cond, body, init, ..
+        } => {
             db.defs.push(SymDef {
                 name: init.name.clone(),
                 def_span: init.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Local { mutable: true, ty: None },
+                kind: SymKind::Local {
+                    mutable: true,
+                    ty: None,
+                },
             });
             collect_expr(&init.init, mp, db);
             collect_expr(cond, mp, db);
@@ -650,6 +655,10 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
         }
         // D-TERM1 (ratified 2026-06-22): collect symbols from live block body.
         AST::Stmt::Live { body, .. } => {
+            collect_stmts(body, mp, module, db);
+        }
+        // D-IGNORERET2=A: collect symbols from suppress-must-use block body.
+        AST::Stmt::SuppressMustUse { body, .. } => {
             collect_stmts(body, mp, module, db);
         }
     }

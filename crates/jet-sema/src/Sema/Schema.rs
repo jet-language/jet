@@ -311,12 +311,14 @@ mod tests {
         let zero = Span::new(0, 0);
         let s = StructDef {
             is_pub: false,
+            is_package_pub: false,
             name: "Rec".to_string(),
             name_span: zero,
             type_params: vec![],
             fields: vec![
                 Field {
                     is_pub: false,
+                    is_package_pub: false,
                     is_stored_ref: false,
                     stored_ref_label: None,
                     name: "label".to_string(),
@@ -327,6 +329,7 @@ mod tests {
                 },
                 Field {
                     is_pub: false,
+                    is_package_pub: false,
                     is_stored_ref: false,
                     stored_ref_label: None,
                     name: "count".to_string(),

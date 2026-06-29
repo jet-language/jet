@@ -23,6 +23,10 @@ pub const KW_FN: &str = "fn";
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
+/// D-PUBPKG1=A (ratified): the `pub(package)` visibility qualifier — restricts
+/// access to sibling packages in the same payload/workspace.
+pub const PUB_PACKAGE_QUALIFIER: &str = "package";
+
 /// S2 / D-BIND2 (ratified): immutable binding sigil `name @= expr`
 /// (D-BIND2 = A; replaces `::` from D-BIND1). `@=` is unambiguous in the
 /// lexer because `@` + identifier is always a label or host selector.
@@ -1404,6 +1408,21 @@ pub const RENAME_ALL_PASCAL: &str = "pascal"; // D-SERDE3
 pub const RENAME_ALL_KEBAB: &str = "kebab"; // D-SERDE3
 pub const RENAME_ALL_SCREAMING: &str = "screaming"; // D-SERDE3
 
+// ── Maturity tags (D-MATURITY1=B, ratified 2026-06-28) ──────────────────────
+// Doc-convention markers; parser accepts+ignores them before `fn`/`pub fn`.
+// No sema propagation; no codegen effect. I7: registered here so the LSP and
+// formatter recognise them as valid items.
+pub const ATTR_EXPERIMENTAL: &str = "Experimental"; // D-MATURITY1
+pub const ATTR_TESTED: &str = "Tested"; // D-MATURITY1
+pub const ATTR_HARDENED: &str = "Hardened"; // D-MATURITY1
+
+// ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28) ──────────────────
+// `.drop("reason")` — method-style terminal that silences E0402 for a fallible
+// or #MustUse result.  `#Suppress(MustUse) { … }` is the lexical-scope form.
+pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 (method form; distinct from BUILTIN_DROP fn)
+pub const ATTR_SUPPRESS: &str = "Suppress"; // D-IGNORERET2  #Suppress(MustUse)
+pub const SUPPRESS_MUST_USE: &str = "MustUse"; // D-IGNORERET2  argument of #Suppress
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Canonical keyword/type/builtin tables (c44: single source of truth).
 //
@@ -1607,6 +1626,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // Internal dispatch uses `jet.*` keys via normalize_core_module.
     "core.log",
     "core.crypto",
+    // D-RANDSPLIT1=A: CSPRNG submodule — `core.crypto.random.bytes(n)`.
+    "core.crypto.random",
     // D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
     "core.http",
     // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.

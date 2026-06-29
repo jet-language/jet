@@ -72,6 +72,7 @@ fn snapshot_freezes_resolved_sigils_round_trip() {
     let func = |name: &str, is_pub: bool, params: Vec<Param>| {
         Item::Func(Func {
             is_pub,
+            is_package_pub: false,
             name: name.to_string(),
             name_span: z,
             type_params: vec![],
@@ -126,6 +127,7 @@ fn fingerprint_folds_in_capability_digest() {
     let mk = |conv: AccessConvention| {
         let items = vec![Item::Func(Func {
             is_pub: true,
+            is_package_pub: false,
             name: "scale".into(),
             name_span: z,
             type_params: vec![],

@@ -615,6 +615,7 @@ fn load_file(
             alias_span: cm.name_span,
             span: cm.span,
             is_pub: false,
+            is_package_pub: false,
         };
         modules[module_idx].imports.push(synthetic);
     }

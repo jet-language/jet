@@ -33,7 +33,9 @@ impl<'a> Checker<'a> {
         };
         // D-MOD2/3: a qualified `M.item` call from outside the module reaches only
         // its `pub` items — a bare private item escapes its module otherwise.
-        if !self.func_pub.get(mangled).copied().unwrap_or(false) {
+        if !self.func_pub.get(mangled).copied().unwrap_or(false)
+            && !self.func_pkg_pub.get(mangled).copied().unwrap_or(false)
+        {
             let item = &mangled[alias.len() + 2..];
             self.diags.push(Diagnostic::error(
                 "E0609",
@@ -102,7 +104,9 @@ impl<'a> Checker<'a> {
             return self.infer_import_call(real_idx, &real_name, alias_span, span, args);
         }
         if target.funcs.contains_key(name) {
-            let is_pub = target.func_pub.get(name).copied().unwrap_or(false);
+            let is_pub = target.func_pub.get(name).copied().unwrap_or(false)
+                || (self.same_package_scope(mod_idx)
+                    && target.func_pkg_pub.get(name).copied().unwrap_or(false));
             if !is_pub && mod_idx != self.module_idx {
                 self.diags.push(private_item(name, span));
                 for a in args.iter_mut() {
@@ -195,7 +199,7 @@ impl<'a> Checker<'a> {
             return sig.return_type.clone();
         }
         if target.registry.contains(name) {
-            let is_pub = target.type_pub.get(name).copied().unwrap_or(false);
+            let is_pub = self.type_is_pub_in(mod_idx, name);
             if !is_pub && mod_idx != self.module_idx {
                 self.diags.push(private_item(name, span));
             } else {
@@ -2505,6 +2509,16 @@ pub fn core_fixed_sig(
         }
         ("core.random", "float") => Some((vec![], Some(Type::Float))),
         ("core.random", "seed") => Some((vec![(read, Type::Int)], None)),
+        // D-RANDSPLIT1=A: seedable PRNG bytes — fast, NOT cryptographically secure.
+        // Returns raw `[Int8N]`; for crypto contexts use `core.crypto.random.bytes`.
+        ("core.random", "bytes") => {
+            Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
+        }
+        // D-RANDSPLIT1=A: CSPRNG bytes via /dev/urandom — cryptographically secure.
+        // Use for tokens, keys, nonces, and secrets.
+        ("core.crypto.random", "bytes") => {
+            Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
+        }
         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
         // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
@@ -3022,7 +3036,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "sqrt", "pow", "abs", "min", "max", "floor", "ceil", "round", "pi", "e", "clamp",
         ],
         // D-DET1: `rng` builds a deterministic injected RNG capability.
-        "core.random" => &["int", "float", "pick", "shuffle", "seed", "rng"],
+        // D-RANDSPLIT1=A: `bytes(n)` returns n PRNG bytes — fast, NOT crypto-safe.
+        "core.random" => &["int", "float", "pick", "shuffle", "seed", "rng", "bytes"],
+        // D-RANDSPLIT1=A: CSPRNG namespace — cryptographically secure random bytes.
+        "core.crypto.random" => &["bytes"],
         // D-DET1: `clock` builds a deterministic injected Clock capability.
         // D-DET-CAPAPI: `ms`/`secs` mint a deterministic `Duration` value.
         "core.time" => &["now", "sleep", "start", "clock", "ms", "secs"],

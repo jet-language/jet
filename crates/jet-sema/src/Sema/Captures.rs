@@ -54,7 +54,13 @@ pub(crate) fn walk_stmts_for_const_refs(
             }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
             }
-            Stmt::CountedLoop { init, cond, step, body: inner, .. } => {
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body: inner,
+                ..
+            } => {
                 walk_expr_for_const_refs(&init.init, const_names, taken);
                 walk_expr_for_const_refs(cond, const_names, taken);
                 walk_stmts_for_const_refs(inner, const_names, taken);
@@ -63,6 +69,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             Stmt::Loop { body: inner, .. }
             | Stmt::Unsafe { body: inner, .. }
             | Stmt::Impure { body: inner, .. }
+            | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
             | Stmt::Grant { body: inner, .. }
@@ -388,7 +395,13 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                     .as_ref()
                     .is_some_and(|b| b.iter().any(|s| stmt_refs_name(s, name)))
         }
-        Stmt::CountedLoop { init, cond, step, body, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
             expr_refs_name(&init.init, name)
                 || expr_refs_name(cond, name)
                 || body.iter().any(|s| stmt_refs_name(s, name))
@@ -397,6 +410,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
@@ -506,6 +520,7 @@ pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Optio
         | Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
@@ -794,7 +809,13 @@ pub(crate) fn stmt_collect_captures(
                 block_collect_captures(b, &mut else_bound, read, mut_cap);
             }
         }
-        Stmt::CountedLoop { init, cond, step, body, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
             expr_collect_captures(&init.init, bound, read, mut_cap);
             bound.insert(init.name.clone());
             expr_collect_captures(cond, bound, read, mut_cap);
@@ -805,6 +826,7 @@ pub(crate) fn stmt_collect_captures(
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }

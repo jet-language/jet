@@ -185,6 +185,17 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-IGNORERET2=A: `#Suppress(MustUse) { … }` round-trips verbatim.
+            Stmt::SuppressMustUse { body, .. } => {
+                self.write(&format!(
+                    "#{}({}) {{",
+                    Syntax::ATTR_SUPPRESS,
+                    Syntax::SUPPRESS_MUST_USE
+                ));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-REGION1 (opt B): `region r { … }`.
             Stmt::Region { name, body, .. } => {
                 self.write(&format!("{} {} {{", Syntax::KW_REGION, name));
@@ -471,8 +482,7 @@ impl<'a> Fmt<'a> {
     fn is_all_subject_alts(&self, subject: &Expr, e: &Expr) -> bool {
         match e {
             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
-                self.is_subject_alt_leaf(subject, lhs)
-                    && self.is_subject_alt_leaf(subject, rhs)
+                self.is_subject_alt_leaf(subject, lhs) && self.is_subject_alt_leaf(subject, rhs)
             }
             _ => false,
         }
@@ -482,8 +492,7 @@ impl<'a> Fmt<'a> {
         match e {
             Expr::Binary(BinOp::Eq, lhs, _, _) => self.same_subject(lhs, subject),
             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
-                self.is_subject_alt_leaf(subject, lhs)
-                    && self.is_subject_alt_leaf(subject, rhs)
+                self.is_subject_alt_leaf(subject, lhs) && self.is_subject_alt_leaf(subject, rhs)
             }
             _ => false,
         }

@@ -1,0 +1,18 @@
+// D-IGNORERET2=A: explicit discard of fallible / #MustUse results.
+// `.drop("reason")` is the blessed per-call discard terminal.
+// `#Suppress(MustUse) { … }` suppresses E0402 in lexical scope.
+
+use core.fs as fs
+
+fn main() {
+  // `.drop("reason")` silences E0402 for a fallible result.
+  fs.write("out.txt", "hello").drop("best-effort write, not critical")
+
+  // `#Suppress(MustUse)` suppresses all E0402 in the block.
+  #Suppress(MustUse) {
+    fs.write("a.txt", "x")
+    fs.write("b.txt", "y")
+  }
+
+  print("discard ok")
+}

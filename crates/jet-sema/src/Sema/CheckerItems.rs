@@ -366,9 +366,7 @@ impl<'a> Checker<'a> {
         let mods = self.modules?;
         let mut found = None;
         for (idx, st) in mods.iter().enumerate() {
-            if st.registry.contains(type_name)
-                && st.type_pub.get(type_name).copied().unwrap_or(false)
-            {
+            if st.registry.contains(type_name) && self.type_is_pub_in(idx, type_name) {
                 found = Some(idx);
             }
         }
@@ -397,7 +395,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(mods) = self.modules {
             for &idx in self.imports.values() {
-                if mods[idx].type_pub.get(enum_name).copied().unwrap_or(false)
+                if self.type_is_pub_in(idx, enum_name)
                     && mods[idx].registry.enum_variants(enum_name).is_some()
                 {
                     return true;
@@ -422,7 +420,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(mods) = self.modules {
             for &idx in self.imports.values() {
-                if mods[idx].type_pub.get(enum_name).copied().unwrap_or(false) {
+                if self.type_is_pub_in(idx, enum_name) {
                     if let Some(v) = mods[idx].registry.enum_variants(enum_name) {
                         return Some(v.clone());
                     }
@@ -437,28 +435,48 @@ impl<'a> Checker<'a> {
         None
     }
 
+    pub(crate) fn same_package_scope(&self, owner_mod: usize) -> bool {
+        if owner_mod == self.module_idx {
+            return true;
+        }
+        let Some(mods) = self.modules else {
+            return false;
+        };
+        let (Some(owner), Some(current)) = (mods.get(owner_mod), mods.get(self.module_idx)) else {
+            return false;
+        };
+        owner.package_scope == current.package_scope
+    }
+
     pub(crate) fn field_is_pub_in(&self, owner_mod: usize, type_name: &str, field: &str) -> bool {
         if owner_mod == self.module_idx {
             return true;
         }
-        self.modules
-            .and_then(|mods| mods.get(owner_mod))
-            .and_then(|st| {
-                st.field_pub
-                    .get(&(type_name.to_string(), field.to_string()))
-                    .copied()
-            })
-            .unwrap_or(false)
+        let Some(mods) = self.modules else {
+            return false;
+        };
+        let Some(st) = mods.get(owner_mod) else {
+            return false;
+        };
+        let key = (type_name.to_string(), field.to_string());
+        st.field_pub.get(&key).copied().unwrap_or(false)
+            || (self.same_package_scope(owner_mod)
+                && st.field_pkg_pub.get(&key).copied().unwrap_or(false))
     }
 
     pub(crate) fn type_is_pub_in(&self, owner_mod: usize, type_name: &str) -> bool {
         if owner_mod == self.module_idx {
             return true;
         }
-        self.modules
-            .and_then(|mods| mods.get(owner_mod))
-            .and_then(|st| st.type_pub.get(type_name).copied())
-            .unwrap_or(false)
+        let Some(mods) = self.modules else {
+            return false;
+        };
+        let Some(st) = mods.get(owner_mod) else {
+            return false;
+        };
+        st.type_pub.get(type_name).copied().unwrap_or(false)
+            || (self.same_package_scope(owner_mod)
+                && st.type_pkg_pub.get(type_name).copied().unwrap_or(false))
     }
 
     pub(crate) fn check_struct_lit(

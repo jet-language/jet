@@ -323,7 +323,13 @@ impl<'a> StateCtx<'a> {
                     self.check_block(b);
                 }
             }
-            Stmt::CountedLoop { init, cond, step, body, .. } => {
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
                 self.check_expr(&init.init);
                 self.check_expr(cond);
                 self.check_block(body);
@@ -332,6 +338,7 @@ impl<'a> StateCtx<'a> {
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
+            | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }

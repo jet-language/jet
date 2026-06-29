@@ -7,6 +7,33 @@ use crate::AST::{
     LambdaBody, OrFallback, ProgramBundle, RustConstKind, Stmt, StrPart, Type,
 };
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+fn package_scope_for(path: &Path, project_root: &Path) -> PathBuf {
+    let norm_path = normalize_sem_path(path);
+    let norm_root = normalize_sem_path(project_root);
+    if norm_path.starts_with(&norm_root) {
+        return norm_root;
+    }
+    norm_path
+        .parent()
+        .map(normalize_sem_path)
+        .unwrap_or(norm_path)
+}
+
+fn normalize_sem_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
 
 /// D-MOD2: inside an inline `module M { … }`, a call to a sibling function
 /// `helper(x)` must lower to the mangled `M__helper`. This pre-pass rewrites
@@ -89,7 +116,12 @@ pub(crate) fn rewrite_inline_calls_stmts(
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
-            Stmt::CountedLoop { init, cond, body: inner, .. } => {
+            Stmt::CountedLoop {
+                init,
+                cond,
+                body: inner,
+                ..
+            } => {
                 rewrite_inline_calls_expr(&mut init.init, siblings, modname);
                 rewrite_inline_calls_expr(cond, siblings, modname);
                 rewrite_inline_calls_stmts(inner, siblings, modname);
@@ -97,6 +129,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             Stmt::Loop { body: inner, .. }
             | Stmt::Unsafe { body: inner, .. }
             | Stmt::Impure { body: inner, .. }
+            | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
             | Stmt::Grant { body: inner, .. }
@@ -304,13 +337,20 @@ pub(crate) fn check_bundle_opts(
     // before registration/checking/codegen — they then see resolved conventions, never
     // `Infer`. Deterministic; mutates the AST param conventions in place.
     super::Capability::resolve_capabilities(bundle);
-    let mut states: Vec<ModuleState> = (0..bundle.modules.len())
-        .map(|_| ModuleState {
+    let mut states: Vec<ModuleState> = bundle
+        .modules
+        .iter()
+        .map(|m| ModuleState {
+            package_scope: package_scope_for(&m.path, &bundle.project_root),
             funcs: HashMap::new(),
             func_pub: HashMap::new(),
+            func_pkg_pub: HashMap::new(),
             type_pub: HashMap::new(),
+            type_pkg_pub: HashMap::new(),
             method_pub: HashMap::new(),
+            method_pkg_pub: HashMap::new(),
             field_pub: HashMap::new(),
+            field_pkg_pub: HashMap::new(),
             registry: TypeRegistry {
                 types: HashMap::new(),
             },
@@ -341,22 +381,38 @@ pub(crate) fn check_bundle_opts(
                         &st.funcs,
                         &st.consts,
                     );
-                    st.type_pub.insert(s.name.clone(), s.is_pub);
+                    st.type_pub
+                        .insert(s.name.clone(), s.is_pub && !s.is_package_pub);
+                    st.type_pkg_pub.insert(s.name.clone(), s.is_package_pub);
                     for fld in &s.fields {
-                        st.field_pub
-                            .insert((s.name.clone(), fld.name.clone()), fld.is_pub);
+                        st.field_pub.insert(
+                            (s.name.clone(), fld.name.clone()),
+                            fld.is_pub && !fld.is_package_pub,
+                        );
+                        st.field_pkg_pub
+                            .insert((s.name.clone(), fld.name.clone()), fld.is_package_pub);
                     }
                     for m in &s.methods {
-                        st.method_pub
-                            .insert((s.name.clone(), m.name.clone()), m.is_pub);
+                        st.method_pub.insert(
+                            (s.name.clone(), m.name.clone()),
+                            m.is_pub && !m.is_package_pub,
+                        );
+                        st.method_pkg_pub
+                            .insert((s.name.clone(), m.name.clone()), m.is_package_pub);
                     }
                 }
                 Item::Enum(e) => {
                     register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                    st.type_pub.insert(e.name.clone(), e.is_pub);
+                    st.type_pub
+                        .insert(e.name.clone(), e.is_pub && !e.is_package_pub);
+                    st.type_pkg_pub.insert(e.name.clone(), e.is_package_pub);
                     for m in &e.methods {
-                        st.method_pub
-                            .insert((e.name.clone(), m.name.clone()), m.is_pub);
+                        st.method_pub.insert(
+                            (e.name.clone(), m.name.clone()),
+                            m.is_pub && !m.is_package_pub,
+                        );
+                        st.method_pkg_pub
+                            .insert((e.name.clone(), m.name.clone()), m.is_package_pub);
                     }
                 }
                 Item::Impl(i) => {
@@ -373,8 +429,12 @@ pub(crate) fn check_bundle_opts(
                         ));
                     } else if !i.type_name.contains('.') {
                         for m in &i.methods {
-                            st.method_pub
-                                .insert((i.type_name.clone(), m.name.clone()), m.is_pub);
+                            st.method_pub.insert(
+                                (i.type_name.clone(), m.name.clone()),
+                                m.is_pub && !m.is_package_pub,
+                            );
+                            st.method_pkg_pub
+                                .insert((i.type_name.clone(), m.name.clone()), m.is_package_pub);
                         }
                     }
                 }
@@ -383,14 +443,18 @@ pub(crate) fn check_bundle_opts(
                 }
                 Item::Distinct(d) => {
                     register_distinct(d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                    st.type_pub.insert(d.name.clone(), d.is_pub);
+                    st.type_pub
+                        .insert(d.name.clone(), d.is_pub && !d.is_package_pub);
+                    st.type_pkg_pub.insert(d.name.clone(), d.is_package_pub);
                 }
                 // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
                     for d in uf.distinct_defs() {
                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                        st.type_pub.insert(d.name.clone(), d.is_pub);
+                        st.type_pub
+                            .insert(d.name.clone(), d.is_pub && !d.is_package_pub);
+                        st.type_pkg_pub.insert(d.name.clone(), d.is_package_pub);
                     }
                 }
                 Item::Test(t) => {
@@ -451,7 +515,9 @@ pub(crate) fn check_bundle_opts(
                             if let Item::Func(f) = inner {
                                 let mangled = format!("{}__{}", cm.name, f.name);
                                 st.funcs.insert(mangled.clone(), func_to_sig(f));
-                                st.func_pub.insert(mangled, f.is_pub);
+                                st.func_pub.insert(mangled, f.is_pub && !f.is_package_pub);
+                                st.func_pkg_pub
+                                    .insert(format!("{}__{}", cm.name, f.name), f.is_package_pub);
                             }
                         }
                     }
@@ -862,7 +928,9 @@ pub(crate) fn check_bundle_opts(
                             "make sure the name is spelled correctly".to_string(),
                             Some(*module_alias_span),
                         ));
-                    } else if !st.func_pub.get(&mangled).copied().unwrap_or(false) {
+                    } else if !st.func_pub.get(&mangled).copied().unwrap_or(false)
+                        && !st.func_pkg_pub.get(&mangled).copied().unwrap_or(false)
+                    {
                         diags.push(Diagnostic::error(
                             "E0609",
                             format!("`{}` is private in module `{}`", orig, module_alias),
@@ -913,11 +981,18 @@ pub(crate) fn check_bundle_opts(
                 let is_reexport = imp.is_pub;
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
+                    let same_pkg = states[target_idx].package_scope == states[idx].package_scope;
                     let is_pub = states[target_idx]
                         .func_pub
                         .get(orig.as_str())
                         .copied()
-                        .unwrap_or(false);
+                        .unwrap_or(false)
+                        || (same_pkg
+                            && states[target_idx]
+                                .func_pkg_pub
+                                .get(orig.as_str())
+                                .copied()
+                                .unwrap_or(false));
                     let exists = states[target_idx].funcs.contains_key(orig.as_str());
                     if !exists {
                         diags.push(Diagnostic::error(
@@ -1278,7 +1353,9 @@ pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec
     }
     // D-NARG-D2 (E0126): check defaults don't ref later params.
     check_default_forward_refs(&f.params, &f.name, diags);
-    st.func_pub.insert(f.name.clone(), f.is_pub);
+    st.func_pub
+        .insert(f.name.clone(), f.is_pub && !f.is_package_pub);
+    st.func_pkg_pub.insert(f.name.clone(), f.is_package_pub);
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
 
@@ -1372,7 +1449,13 @@ pub(crate) fn collect_core_stmts(
                     collect_core_stmts(body, imports, used);
                 }
             }
-            Stmt::CountedLoop { init, cond, step, body, .. } => {
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
                 collect_core_expr(&init.init, imports, used);
                 collect_core_expr(cond, imports, used);
                 collect_core_stmts(body, imports, used);
@@ -1381,6 +1464,7 @@ pub(crate) fn collect_core_stmts(
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
+            | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
@@ -1760,6 +1844,7 @@ pub(crate) fn check_module_bodies(
                 }
                 let mut synthetic = Func {
                     is_pub: false,
+                    is_package_pub: false,
                     name: format!("__test_{}", t.name),
                     name_span: t.name_span,
                     type_params: Vec::new(),
@@ -1797,6 +1882,7 @@ pub(crate) fn check_module_bodies(
             Item::Bench(b) if mode == CompileMode::Bench => {
                 let mut synthetic = Func {
                     is_pub: false,
+                    is_package_pub: false,
                     name: format!("__bench_{}", b.name),
                     name_span: b.name_span,
                     type_params: Vec::new(),
@@ -1904,6 +1990,7 @@ pub(crate) fn check_func_body_bundle(
         unqualified: &st.unqualified,
         unqualified_file: &st.unqualified_file,
         func_pub: &st.func_pub,
+        func_pkg_pub: &st.func_pkg_pub,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -1921,6 +2008,7 @@ pub(crate) fn check_func_body_bundle(
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
+        suppress_must_use: false,
         in_pure: f.is_pure,
         in_comptime: false,
         ret: f.return_type.clone(),

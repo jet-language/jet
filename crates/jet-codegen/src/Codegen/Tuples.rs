@@ -276,7 +276,8 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
         | Stmt::ContinueLabel(..)
         | Stmt::Loop { .. }
         | Stmt::Unsafe { .. }
-        | Stmt::Impure { .. } => {}
+        | Stmt::Impure { .. }
+        | Stmt::SuppressMustUse { .. } => {}
         // D-CTX1: collect tuple shapes from context block fields and body.
         Stmt::ContextBlock { fields, body, .. } => {
             for (_, e, _) in fields {

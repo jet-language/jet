@@ -223,8 +223,8 @@ fn find_package_dirs(
     let mut out = Vec::with_capacity(found.len());
     for abs in found {
         let rel = abs.strip_prefix(workspace_root).map(|p| {
-            // Normalise to forward-slash form even on Windows (workspace.lock
-            // stores POSIX paths; the platform join handles them on read).
+            // Normalise to forward-slash form even on Windows; `.jet/lock`
+            // stores POSIX paths and platform joins handle them on read.
             p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/")
         });
         match rel {

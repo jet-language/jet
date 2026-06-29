@@ -718,12 +718,15 @@ items unqualified with `use math.clamp;` or a group `use math.{clamp, lerp};`.
 Wildcards (`use math.*`) are rejected — **E0612**. Unqualified import of an
 undefined item is **E0611**; of an item in a module not in scope, **E0610**.
 
-**Visibility (D-MOD3).** Private by default; `pub` exports. A non-`pub` item is
+**Visibility (D-MOD3, D-PUBPKG1).** Private by default; `pub` exports to every
+consumer; `pub(package)` exports only inside the same payload/workspace package
+boundary and stays hidden from downstream package consumers. A private item is
 unreachable from outside its file or inline module: `math.helper()` where
-`helper` is private is **E0609** (inline) / **E0605** (cross-file). Inline-module
-function bodies are fully type-checked, and a sibling call (`area` → `square`)
-lowers to the module-mangled name (`geo__square`), so private siblings never
-leak into the file's namespace or to rustc.
+`helper` is private is **E0609** (inline) / **E0605** (cross-file). An unknown
+`pub(…)` qualifier is **E0411**. Inline-module function bodies are fully
+type-checked, and a sibling call (`area` → `square`) lowers to the
+module-mangled name (`geo__square`), so private siblings never leak into the
+file's namespace or to rustc.
 
 **Re-export (D-MOD4 — Rust-exact `pub use`).** A directory module's `module.jet`
 exposes a submodule item only by re-exporting it: `pub use wrap.wrap;`. Nothing

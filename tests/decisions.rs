@@ -63,7 +63,8 @@ fn ratified_decisions_enforced() {
     const SURFACE_IN_SYNTAX_RS: &[&str] = &[
         "N1", "N2", "S1", "S2", "S3", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S13", "S16",
         "S17", "S18", "S19", "S20", "S22", "S23", "S24", "S27", "S29", "S30", "S32", "S34", "S35",
-        "S36", "S46", "S55", "S57", "S59", "S75", "S76", "S80", "S82", "S84",
+        "S36", "S46", "S55", "S57", "S59", "S75", "S76", "S80", "S82",
+        "S84",
         // S81 (`?continue`) superseded by D-ORRETURN-CANON1=A — canonical form is `expr ?? continue`
     ];
     for id in SURFACE_IN_SYNTAX_RS {
@@ -77,8 +78,8 @@ fn ratified_decisions_enforced() {
 
     // Structural ratified decisions — enforced by parser/sema/tests, not constants.
     const STRUCTURAL_RATIFIED: &[&str] = &[
-        "S4", "S12", "S14", "S15", "S21", "S31", "S33", "S37", "S38", "S28", "S39", "S40",
-        "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S26", "S55", "S57",
+        "S4", "S12", "S14", "S15", "S21", "S31", "S33", "S37", "S38", "S28", "S39", "S40", "S41",
+        "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S26", "S55", "S57",
     ];
     for id in STRUCTURAL_RATIFIED {
         assert!(

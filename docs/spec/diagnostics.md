@@ -210,6 +210,9 @@ before continuing.
 | E0404 | sema  | `ok`/`err` need a fallible context        |
 | E0405 | sema  | `??` fallback type/`return` mismatch       |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
+| E0407 | sema  | `.drop()` reason missing or invalid (D-IGNORERET2) |
+| E0410 | parse | `#Suppress` unknown argument (D-IGNORERET2) |
+| E0411 | parse | unknown `pub(…)` visibility qualifier — only `pub(package)` exists (D-PUBPKG1) |
 | E0420 | sema  | `#Uninit` binding read before it is given a value (D-UNINIT1) |
 | E0421 | parse | `#Uninit` binding needs a type annotation (D-UNINIT1) |
 | E0422 | parse | `#Uninit` binding cannot have an initializer (D-UNINIT1) |
@@ -361,6 +364,7 @@ before continuing.
 | E1108 | sema  | list method not yet supported on a `#Layout(columnar)` list (D-SOA1) |
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
+| W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
 | E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
 | E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
 | E2303 | sema  | `ref`/`view` crosses a task/channel boundary (E2-M5; emitted as E1102) |

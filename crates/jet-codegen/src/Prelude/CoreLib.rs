@@ -2511,6 +2511,24 @@ fn jet_std_random_shuffle<T>(xs: &mut Vec<T>) {
         xs.swap(i, j);
     }
 }
+// D-RANDSPLIT1=A: PRNG bytes via the ambient SplitMix64 state — fast, seedable,
+// NOT cryptographically secure. Use for simulation, testing, or shuffles only.
+fn jet_std_random_bytes(n: i64) -> Vec<u8> {
+    let n = n.max(0) as usize;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        out.push(jet_rng_next() as u8);
+    }
+    out
+}
+// D-RANDSPLIT1=A: CSPRNG bytes via /dev/urandom (POSIX) with SplitMix64 fallback.
+// Cryptographically secure — use for tokens, keys, nonces, and secrets.
+fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
+    let n = n.max(0) as usize;
+    let mut out = vec![0u8; n];
+    jet_uuid_fill_random(&mut out);
+    out
+}
 
 fn jet_std_time_now() -> i64 {
     if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {

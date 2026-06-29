@@ -263,6 +263,7 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
         version: 1,
         packages: Vec::new(),
         root_dependencies: Vec::new(),
+        workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
     });
 

@@ -105,8 +105,8 @@ fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     Provider::fixtures_from_env(flags.fixtures.clone())
 }
 
-/// Load and evaluate `workspace.jet` from `dir`, emit the workspace lock, and
-/// return the `WorkspacePlan`. Returns `None` when the file is absent. Prints
+/// Load and evaluate `workspace.jet` from `dir`, emit workspace entries into
+/// `.jet/lock`, and return the `WorkspacePlan`. Returns `None` when the file is absent. Prints
 /// the diagnostic to stderr and returns `Err(2)` if the file exists but fails
 /// to evaluate (D-WORKSPACE1=B clean break: workspace.jet is the sole index).
 pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32>> {
