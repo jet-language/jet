@@ -1,0 +1,27 @@
+// D-PROTO1 / D-PROTO2: declare the exchange once; compiler generates ordered
+// Payment.Client / Payment.Server handles over #SingleUse + typestate (E0150
+// on out-of-order send/recv). See tests/ui/protocol_out_of_order.jet.
+
+struct Error {
+    msg: String,
+}
+
+protocol Payment {
+    client -> server: Hello(version: Int)
+    server -> client: Ack(session: Int)
+    client -> server: Charge(cents: Int)
+    server -> client: Receipt(id: Int)
+}
+
+fn drive(h: ^Payment.Client) {
+    h1 @= h.Hello(1) ?? panic("hello failed")
+    h2 @= h1.recv_Ack() ?? panic("ack failed")
+    h3 @= h2.Charge(500) ?? panic("charge failed")
+    h3.recv_Receipt()
+}
+
+fn main() {
+    h @= Payment.Client.client()
+    drive(^h)
+    print("payment complete")
+}

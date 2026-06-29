@@ -424,6 +424,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases
+            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
         }
     }

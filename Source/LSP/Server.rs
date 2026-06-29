@@ -73,7 +73,14 @@ impl Server {
         diags
     }
 
-    fn check_with_bundle(&self, doc: &Document) -> (Vec<Diagnostic>, Option<ProgramBundle>) {
+    fn check_with_bundle(
+        &self,
+        doc: &Document,
+    ) -> (
+        Vec<Diagnostic>,
+        Option<ProgramBundle>,
+        jet_semindex::SemIndexEffectFacts,
+    ) {
         check_document_with_bundle(&doc.path, &doc.text)
     }
 
@@ -534,9 +541,9 @@ fn completion_response(
     let lsp_pos = LspPos { line, character };
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
-    let (_, bundle) = server.check_with_bundle(doc);
+    let (_, bundle, facts) = server.check_with_bundle(doc);
     let db = match bundle {
-        Some(b) => build_symbol_db(&b),
+        Some(b) => build_symbol_db(&b, &facts),
         None => SymbolDB::new(),
     };
 
@@ -566,9 +573,9 @@ fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
     let tokens = server.lex(doc);
-    let (_, bundle) = server.check_with_bundle(doc);
+    let (_, bundle, facts) = server.check_with_bundle(doc);
     let db = match bundle {
-        Some(b) => build_symbol_db(&b),
+        Some(b) => build_symbol_db(&b, &facts),
         None => SymbolDB::new(),
     };
 
@@ -600,9 +607,9 @@ fn definition_response(
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
     let tokens = server.lex(doc);
-    let (_, bundle) = server.check_with_bundle(doc);
+    let (_, bundle, facts) = server.check_with_bundle(doc);
     let db = match bundle {
-        Some(b) => build_symbol_db(&b),
+        Some(b) => build_symbol_db(&b, &facts),
         None => SymbolDB::new(),
     };
 
@@ -654,9 +661,9 @@ fn references_response(
         .unwrap_or(false);
 
     let tokens = server.lex(doc);
-    let (_, bundle) = server.check_with_bundle(doc);
+    let (_, bundle, facts) = server.check_with_bundle(doc);
     let db = match bundle {
-        Some(b) => build_symbol_db(&b),
+        Some(b) => build_symbol_db(&b, &facts),
         None => SymbolDB::new(),
     };
 
@@ -695,9 +702,9 @@ fn rename_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
     let new_name = json_get(params, "newName").and_then(json_str)?;
 
     let tokens = server.lex(doc);
-    let (_, bundle) = server.check_with_bundle(doc);
+    let (_, bundle, facts) = server.check_with_bundle(doc);
     let db = match bundle {
-        Some(b) => build_symbol_db(&b),
+        Some(b) => build_symbol_db(&b, &facts),
         None => SymbolDB::new(),
     };
 
@@ -770,12 +777,12 @@ fn inlay_hint_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
 
-    let (diags, bundle) = server.check_with_bundle(doc);
+    let (diags, bundle, facts) = server.check_with_bundle(doc);
 
     // Build type-annotation hints from the symbol DB.
     let mut hints: Vec<InlayHint> = match bundle {
         Some(b) => {
-            let db = build_symbol_db(&b);
+            let db = build_symbol_db(&b, &facts);
             db.inlay_hints_for(&doc.path).into_iter().cloned().collect()
         }
         None => Vec::new(),

@@ -365,6 +365,15 @@ pub enum TStmt {
         is_map: bool,
         value: TExpr,
     },
+    /// D-SWIZZLE1: write swizzle `v.xy = value` — ordered lane assignments into the
+    /// receiver's backing array. Sema rejects overlapping patterns (E3111).
+    MathSwizzleAssign {
+        base: TExpr,
+        type_name: String,
+        lanes: Vec<u8>,
+        value: TExpr,
+        clone_value: bool,
+    },
     /// c109 Phase 5/22: collection iteration `loop x in coll` / `loop k, v in map`
     /// (`Stmt::For` with `ForKind::In`). The collection's emitted Rust string is
     /// resolved at lowering. `var2` distinguishes the two-binding map form (which
@@ -711,6 +720,13 @@ pub enum TExprKind {
         base: Box<TExpr>,
         index: Box<TExpr>,
         line: u32,
+    },
+    /// D-SWIZZLE1: a read swizzle `v.xyz` on a vector/SIMD lane type. `lanes` holds
+    /// source indices (x=0…w=3); length 1 → scalar, 2..4 → `VecN` constructor.
+    MathSwizzleRead {
+        type_name: String,
+        recv: Box<TExpr>,
+        lanes: Vec<u8>,
     },
     /// c109 Phase 5: an inclusive copy slice `coll[a..b]` (`Expr::Slice`). Lowers
     /// to the `jet_slice_vec` helper. `line` is the source line for the bounds

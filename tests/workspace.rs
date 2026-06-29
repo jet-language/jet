@@ -152,30 +152,38 @@ fn dot_form_not_classified_when_source_is_unknown() {
 }
 
 // ──────────────────────────────────────────────
-// I5: examples/workspace/workspace.jet is the executable spec
+// I5: workspace.jet with find() discovers committed-style members
 // ──────────────────────────────────────────────
 
 #[test]
-fn committed_workspace_example_evaluates() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workspace");
-    let src = std::fs::read_to_string(dir.join("workspace.jet"))
-        .expect("examples/workspace/workspace.jet must exist (I5)");
+fn workspace_find_example_evaluates() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("ws-commit-test-{nanos}"));
+    let packages = dir.join("packages");
+    let hello = packages.join("hello");
+    let ranker = packages.join("ranker");
+    std::fs::create_dir_all(&hello).unwrap();
+    std::fs::create_dir_all(&ranker).unwrap();
+    std::fs::write(hello.join("pkg.jet"), "name: \"hello\"\n").unwrap();
+    std::fs::write(ranker.join("pkg.jet"), "name: \"ranker\"\n").unwrap();
+    std::fs::write(
+        dir.join("workspace.jet"),
+        "module workspace {\n    members: find(\"./packages\")\n}\n",
+    )
+    .unwrap();
+
+    let src = std::fs::read_to_string(dir.join("workspace.jet")).unwrap();
     let plan = WorkspaceFile::evaluate(&src, &dir)
-        .expect("examples/workspace/workspace.jet must evaluate without errors");
+        .expect("workspace.jet with find() must evaluate without errors");
     let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
-    assert!(
-        names.contains(&"hello"),
-        "expected `hello` member, got: {names:?}"
-    );
-    assert!(
-        names.contains(&"ranker"),
-        "expected `ranker` member, got: {names:?}"
-    );
-    assert_eq!(
-        plan.members.len(),
-        2,
-        "expected exactly 2 members, got: {names:?}"
-    );
+    assert!(names.contains(&"hello"), "expected hello, got {names:?}");
+    assert!(names.contains(&"ranker"), "expected ranker, got {names:?}");
+    assert_eq!(names.len(), 2, "expected 2 members, got {names:?}");
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ──────────────────────────────────────────────

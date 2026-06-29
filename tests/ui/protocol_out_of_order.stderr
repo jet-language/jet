@@ -1,0 +1,7 @@
+Error [E0150]: `Charge` needs `Payment.Client` in state `S2`, but `h1` is in state `S1`
+  --> tests/ui/protocol_out_of_order.jet:19:8
+    |
+ 19 |     h1.Charge(500) ?? panic("charge failed")
+    |        ^^^^^^
+ Why: typestate (D-STATE1): `Charge` is only valid in state `S2`; calling it in `S1` is the out-of-order-events bug it prevents
+ Fix: transition it first: call `recv_Ack` to reach `S2`

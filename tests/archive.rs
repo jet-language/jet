@@ -6,7 +6,7 @@
 //! like the FFI golden tests.
 //!
 //! D-BFS1: a separate test exercises the build-from-source path — realizing
-//! the ring package source (stdlibs/jet.archive/) through CoreProvider and
+//! the ring package source (`corelib/jet.archive/`) through CoreProvider and
 //! verifying the rlib artifact lands in the hangar.
 
 use std::fs;
@@ -138,10 +138,10 @@ fn core_provider_compiles_ring_package_to_rlib() {
 
     // Locate the jet.archive ring package from the repo root.
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ring_repo = repo_root.join("stdlibs/jet.archive");
+    let ring_repo = repo_root.join("corelib/jet.archive");
     if !ring_repo.is_dir() {
         eprintln!(
-            "note: stdlibs/jet.archive not found at {}; skipping D-BFS1 test",
+            "note: corelib/jet.archive not found at {}; skipping D-BFS1 test",
             ring_repo.display()
         );
         return;

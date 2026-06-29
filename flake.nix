@@ -89,6 +89,7 @@
             cargo
             rustc
             gcc
+            qemu
             nodejs_22
             nixfmt
             ripgrep

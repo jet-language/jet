@@ -432,29 +432,28 @@ mod tests {
         p
     }
 
-    /// I5: the committed `examples/workspace/workspace.jet` parses + evaluates
-    /// with the expected member names when run against the fixture packages.
+    /// I5: a workspace.jet with find() discovers package members.
     #[test]
     fn committed_workspace_example_evaluates_clean() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/workspace");
-        if !dir.exists() {
-            // Skip when the examples directory hasn't been created yet.
-            return;
-        }
+        let dir = tempdir("ws-example");
+        let packages = dir.join("packages");
+        let hello = packages.join("hello");
+        let ranker = packages.join("ranker");
+        std::fs::create_dir_all(&hello).unwrap();
+        std::fs::create_dir_all(&ranker).unwrap();
+        std::fs::write(hello.join("pkg.jet"), "name: \"hello\"\n").unwrap();
+        std::fs::write(ranker.join("pkg.jet"), "name: \"ranker\"\n").unwrap();
+        std::fs::write(
+            dir.join(crate::Syntax::WORKSPACE_FILE),
+            "module workspace {\n    members: find(\"./packages\")\n}\n",
+        )
+        .unwrap();
+
         let workspace_path = dir.join(crate::Syntax::WORKSPACE_FILE);
-        let src = match std::fs::read_to_string(&workspace_path) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        let plan = evaluate(&src, &dir).expect("example workspace should evaluate clean");
-        assert!(
-            !plan.members.is_empty(),
-            "example workspace must have members"
-        );
+        let src = std::fs::read_to_string(&workspace_path).unwrap();
+        let plan = evaluate(&src, &dir).expect("workspace fixture should evaluate clean");
         let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
-        assert!(
-            names.contains(&"hello"),
-            "expected `hello` member; got: {names:?}"
-        );
+        assert!(names.contains(&"hello"));
+        assert!(names.contains(&"ranker"));
     }
 }

@@ -386,6 +386,9 @@ impl<'a> Parser<'a> {
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => self
                                 .state_decl_with_pkg(is_pub, is_package_pub)
                                 .map(Item::StateDecl),
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
+                                .protocol_decl_with_pkg(is_pub, is_package_pub)
+                                .map(Item::ProtocolDecl),
                             _ => self
                                 .func_after_fn(
                                     is_pub,
@@ -444,6 +447,11 @@ impl<'a> Parser<'a> {
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
                                 self.bump(); // consume `pub`
                                 self.state_decl(true).map(Item::StateDecl)
+                            }
+                            // D-PROTO1/D-PROTO2: `pub protocol Name { … }`
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => {
+                                self.bump(); // consume `pub`
+                                self.protocol_decl(true).map(Item::ProtocolDecl)
                             }
                             TokKind::KwModule if self.is_code_module_at(2) => {
                                 self.code_module(true).map(Item::CodeModule)
@@ -513,6 +521,10 @@ impl<'a> Parser<'a> {
                 // D-STATE-DECL: `state TypeName { A, B, C }`
                 TokKind::Ident(n) if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
                     self.state_decl(false).map(Item::StateDecl)
+                }
+                // D-PROTO1/D-PROTO2: `protocol Name { client -> server: Msg(…) }`
+                TokKind::Ident(n) if n == Syntax::KW_PROTOCOL && self.at_protocol_block() => {
+                    self.protocol_decl(false).map(Item::ProtocolDecl)
                 }
                 // D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive.
                 TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
@@ -1772,7 +1784,7 @@ impl<'a> Parser<'a> {
             self.parse_pub_qualifier()
         };
         self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
-        let (name, name_span) = self.expect_ident("after `struct`")?;
+        let (name, name_span) = self.parse_dotted_type_name("after `struct`")?;
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LBrace, "to open the struct body")?;
         let mut fields = Vec::new();
@@ -1964,32 +1976,28 @@ impl<'a> Parser<'a> {
     /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
     pub(super) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
         self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
-        // D-IMPLDOT1=A: `impl Type.Trait` — the LAST `.Ident` segment belongs to
-        // the trait, not the type path. Parse path segments greedily, but stop
-        // consuming dots when the NEXT `.Ident` is NOT followed by another `.`
-        // (meaning that dot is the trait separator, not a path component).
-        let (type_name, type_span) = {
+        // D-IMPLDOT1=A: trait impl is `impl Type.Trait { … }`. D-PROTO1/D-PROTO2 add
+        // inherent impl on protocol handles `impl Payment.Client { … }` / `.Server`.
+        let (type_name, type_span, mut trait_name, mut trait_span) = {
             let (first, span) = self.expect_ident("after `impl`")?;
-            let mut name = first;
-            // Consume `.Ident` segments only when they're followed by ANOTHER `.`
-            // (path continuation), leaving the final `.Ident` for the trait check.
-            loop {
-                if !matches!(self.peek().kind, TokKind::Dot) {
-                    break;
+            if matches!(self.peek().kind, TokKind::Dot) {
+                self.bump();
+                let (second, second_span) = self.expect_ident("after `.` in `impl`")?;
+                if matches!(self.peek().kind, TokKind::LBrace)
+                    && (second == "Client" || second == "Server")
+                {
+                    (
+                        format!("{first}.{second}"),
+                        span,
+                        None,
+                        None,
+                    )
+                } else {
+                    (first, span, Some(second), Some(second_span))
                 }
-                if !matches!(self.peek2().kind, TokKind::Ident(_)) {
-                    break;
-                }
-                // peek3() is the token after the candidate ident — if it's `.`,
-                // this is a path component; otherwise it's the trait separator.
-                if !matches!(self.peek3().kind, TokKind::Dot) {
-                    break;
-                }
-                self.bump(); // `.`
-                let (part, _) = self.expect_ident("in type path after `impl`")?;
-                name = format!("{name}.{part}");
+            } else {
+                (first, span, None, None)
             }
-            (name, span)
         };
         // Detect `impl Source -> Target { body }` — D-ERR-CONV.
         if matches!(self.peek().kind, TokKind::Arrow) {
@@ -2022,14 +2030,8 @@ impl<'a> Parser<'a> {
                 body_span,
             }));
         }
-        // Normal `impl` path — re-enter parsing without re-consuming `impl` or type name.
-        // D-IMPLDOT1=A: trait separator is `.` (`impl Type.Trait`).
-        // Old `:` form emits a teaching error pointing at the dot form.
-        let (trait_name, trait_span) = if matches!(self.peek().kind, TokKind::Dot) {
-            self.bump();
-            let (t, ts) = self.expect_ident("after `.` in `impl Type.Trait`")?;
-            (Some(t), Some(ts))
-        } else if matches!(self.peek().kind, TokKind::Colon) {
+        // Normal `impl` path — trait_name/trait_span were parsed above.
+        if trait_name.is_none() && matches!(self.peek().kind, TokKind::Colon) {
             // Teaching error: old `impl Type: Trait` form.
             let colon_span = self.peek().span;
             self.diags.push(Diagnostic::error(
@@ -2041,10 +2043,9 @@ impl<'a> Parser<'a> {
             ));
             self.bump(); // consume old `:`
             let (t, ts) = self.expect_ident("after `:` in `impl Type: Trait`")?;
-            (Some(t), Some(ts))
-        } else {
-            (None, None)
-        };
+            trait_name = Some(t);
+            trait_span = Some(ts);
+        }
         // S62: `impl Type.Trait using field_name;` — delegation form.
         if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
             if kw == "using" && trait_name.is_some() {
@@ -3019,7 +3020,7 @@ impl<'a> Parser<'a> {
         is_package_pub: bool,
     ) -> Result<crate::AST::StructDef, Diagnostic> {
         self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
-        let (name, name_span) = self.expect_ident("after `struct`")?;
+        let (name, name_span) = self.parse_dotted_type_name("after `struct`")?;
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LBrace, "to open the struct body")?;
         let mut fields = Vec::new();
@@ -3258,9 +3259,19 @@ impl<'a> Parser<'a> {
 
     /// D-STATE-DECL: true when `state <TypeName> {` is at the cursor (contextual).
     fn at_state_block(&self) -> bool {
-        matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL)
-            && matches!(&self.peek2().kind, TokKind::Ident(_))
-            && matches!(&self.peek3().kind, TokKind::LBrace)
+        if !matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL) {
+            return false;
+        }
+        // `state Reservation {` or `state Payment.Client {` — scan to the `{`.
+        let mut i = self.pos + 1;
+        while i < self.toks.len() {
+            match &self.toks[i].kind {
+                TokKind::LBrace => return true,
+                TokKind::Semi | TokKind::Eof => return false,
+                _ => i += 1,
+            }
+        }
+        false
     }
 
     /// D-STATE-DECL (ratified 2026-06-25, option B): parse
@@ -3280,7 +3291,7 @@ impl<'a> Parser<'a> {
         let start = self.peek().span;
         self.bump(); // consume `state`
         let (type_name, type_name_span) =
-            self.expect_ident("the type name in `state TypeName { … }`")?;
+            self.parse_dotted_type_name("the type name in `state TypeName { … }`")?;
         self.expect(TokKind::LBrace, "to open the state declaration block")?;
         let mut states = Vec::new();
         while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -3305,6 +3316,151 @@ impl<'a> Parser<'a> {
             states,
             span: Span::new(start.start, end),
         })
+    }
+
+    /// D-PROTO1/D-PROTO2: true when `protocol Name {` is at the cursor (contextual).
+    fn at_protocol_block(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_PROTOCOL)
+            && matches!(&self.peek2().kind, TokKind::Ident(_))
+            && matches!(&self.peek3().kind, TokKind::LBrace)
+    }
+
+    /// D-PROTO1/D-PROTO2: parse `[pub] protocol Name { … }`.
+    fn protocol_decl(&mut self, is_pub: bool) -> Result<crate::AST::ProtocolDecl, Diagnostic> {
+        self.protocol_decl_with_pkg(is_pub, false)
+    }
+
+    fn protocol_decl_with_pkg(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+    ) -> Result<crate::AST::ProtocolDecl, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // consume `protocol`
+        let (name, name_span) =
+            self.expect_ident("the protocol name in `protocol Name { … }`")?;
+        self.expect(TokKind::LBrace, "to open the protocol declaration block")?;
+        let mut messages = Vec::new();
+        while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(&self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            messages.push(self.protocol_message()?);
+        }
+        self.expect(TokKind::RBrace, "to close the protocol declaration block")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::ProtocolDecl {
+            is_pub,
+            is_package_pub,
+            name,
+            name_span,
+            messages,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    /// D-PROTO2: parse one message line — `client -> server: Hello(version: Int)`.
+    fn protocol_message(&mut self) -> Result<crate::AST::ProtocolMessage, Diagnostic> {
+        let start = self.peek().span;
+        let (from, _) = self.expect_ident("the sender in `client -> server: Msg(…)`")?;
+        let direction = match from.as_str() {
+            Syntax::PROTO_CLIENT => {
+                self.expect(TokKind::Arrow, "between the endpoints in a protocol message")?;
+                let (to, _) =
+                    self.expect_ident("the receiver in `client -> server: Msg(…)`")?;
+                if to != Syntax::PROTO_SERVER {
+                    return Err(Diagnostic::error(
+                        "E0154",
+                        format!(
+                            "after `{from} ->` expected `{}`, found `{to}`",
+                            Syntax::PROTO_SERVER
+                        ),
+                        "a client-to-server message is written `client -> server: Name(…)`"
+                            .to_string(),
+                        format!(
+                            "write `client -> {}: …`",
+                            Syntax::PROTO_SERVER
+                        ),
+                        Some(self.peek().span),
+                    ));
+                }
+                crate::AST::ProtocolDirection::ClientToServer
+            }
+            Syntax::PROTO_SERVER => {
+                self.expect(TokKind::Arrow, "between the endpoints in a protocol message")?;
+                let (to, _) =
+                    self.expect_ident("the receiver in `server -> client: Msg(…)`")?;
+                if to != Syntax::PROTO_CLIENT {
+                    return Err(Diagnostic::error(
+                        "E0154",
+                        format!(
+                            "after `{from} ->` expected `{}`, found `{to}`",
+                            Syntax::PROTO_CLIENT
+                        ),
+                        "a server-to-client message is written `server -> client: Name(…)`"
+                            .to_string(),
+                        format!(
+                            "write `server -> {}: …`",
+                            Syntax::PROTO_CLIENT
+                        ),
+                        Some(self.peek().span),
+                    ));
+                }
+                crate::AST::ProtocolDirection::ServerToClient
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    "E0154",
+                    format!("protocol messages start with `{}` or `{}`, not `{other}`", Syntax::PROTO_CLIENT, Syntax::PROTO_SERVER),
+                    "each line names who sends and who receives before the message".to_string(),
+                    format!(
+                        "write `client -> {}: …` or `server -> {}: …`",
+                        Syntax::PROTO_SERVER,
+                        Syntax::PROTO_CLIENT
+                    ),
+                    Some(start),
+                ));
+            }
+        };
+        self.expect(TokKind::Colon, "after the endpoint pair in a protocol message")?;
+        let (msg_name, name_span) =
+            self.expect_ident("the message name in a protocol line")?;
+        self.expect(TokKind::LParen, "to open the message payload")?;
+        let fields = self.protocol_message_fields()?;
+        self.expect(TokKind::RParen, "to close the message payload")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::ProtocolMessage {
+            direction,
+            name: msg_name,
+            name_span,
+            fields,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    fn protocol_message_fields(
+        &mut self,
+    ) -> Result<Vec<(String, crate::AST::Type)>, Diagnostic> {
+        let mut fields = Vec::new();
+        if matches!(self.peek().kind, TokKind::RParen) {
+            return Ok(fields);
+        }
+        loop {
+            let (name, _) = self.expect_ident("a field name in a protocol message")?;
+            self.expect(TokKind::Colon, "after each field name in a protocol message")?;
+            let (ty, _) = self.type_()?;
+            fields.push((name, ty));
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        Ok(fields)
     }
 
     /// D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive block.

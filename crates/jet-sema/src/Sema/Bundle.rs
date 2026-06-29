@@ -310,17 +310,25 @@ pub(crate) fn rewrite_inline_calls_expr(
 }
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
+    check_bundle_opts(bundle, mode, false, false).0
+}
+
+/// Like `check_bundle` but also returns effect facts for D-SEMINDEX1.
+pub fn check_bundle_with_effect_facts(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     check_bundle_opts(bundle, mode, false, false)
 }
 
 /// Like `check_bundle` but with extra build options (E2-M15).
 pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    check_bundle_opts(bundle, mode, true, false)
+    check_bundle_opts(bundle, mode, true, false).0
 }
 
 /// Like `check_bundle` but with D-CTEFFECT1 `--allow-impure` flag.
 pub fn check_bundle_allow_impure(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    check_bundle_opts(bundle, mode, false, true)
+    check_bundle_opts(bundle, mode, false, true).0
 }
 
 pub(crate) fn check_bundle_opts(
@@ -328,7 +336,7 @@ pub(crate) fn check_bundle_opts(
     mode: CompileMode,
     freestanding: bool,
     allow_impure: bool,
-) -> Vec<Diagnostic> {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
@@ -368,6 +376,7 @@ pub(crate) fn check_bundle_opts(
         .collect();
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
         let st = &mut states[idx];
         for item in &module.items {
             match item {
@@ -527,6 +536,8 @@ pub(crate) fn check_bundle_opts(
                 Item::Migration(_) => {}
                 // D-STATE-DECL: state-set decls are sema-only (I3); no type to register.
                 Item::StateDecl(_) => {}
+                // D-PROTO1/D-PROTO2: expanded before registration; declaration erases.
+                Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
             }
@@ -1115,6 +1126,7 @@ pub(crate) fn check_bundle_opts(
             | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases
+            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: already expanded above
             }
         }
@@ -1267,7 +1279,13 @@ pub(crate) fn check_bundle_opts(
     }
 
     bundle.used_core = collect_used_core(bundle, &states);
-    diags
+    (
+        diags,
+        super::Effects::SemIndexEffectFacts {
+            summaries: effect_summaries,
+            solved,
+        },
+    )
 }
 
 /// D-TAINT1: run the taint pass over one item's function/method bodies in the
@@ -1394,6 +1412,7 @@ pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) 
                 | Item::ErrorConv(_)
                 | Item::Migration(_) // D-MIGRATE1
                 | Item::StateDecl(_) // D-STATE-DECL: uses no core imports
+                | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: already expanded
             }
         }

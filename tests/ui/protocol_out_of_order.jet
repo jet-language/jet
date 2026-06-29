@@ -1,0 +1,20 @@
+// D-PROTO1/D-PROTO2: out-of-order protocol step is E0150 (typestate on the
+// generated handle). Here Charge is sent before recv_Ack.
+
+struct Error {
+    msg: String,
+}
+
+protocol Payment {
+    client -> server: Hello(version: Int)
+    server -> client: Ack(session: Int)
+    client -> server: Charge(cents: Int)
+    server -> client: Receipt(id: Int)
+}
+
+fn main() {
+    h @= Payment.Client.client()
+    h1 @= h.Hello(1) ?? panic("hello failed")
+    // BUG: Charge before recv_Ack — handle is still in post-Hello state.
+    h1.Charge(500) ?? panic("charge failed")
+}

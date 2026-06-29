@@ -165,6 +165,8 @@ before continuing.
 | E0143 | sema  | `drop` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
+| E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
+| E0154 | parse | protocol message endpoint pair is not `client -> server` or `server -> client` (D-PROTO2) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S -> …)` — a dead-end state (D-STATE-DECL, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`~`) required at call site — write access not granted |
@@ -270,6 +272,8 @@ before continuing.
 | E3102 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer discovery gate) |
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
 | E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
+| E3110 | sema  | invalid swizzle lane on vector/SIMD type (D-SWIZZLE1) |
+| E3111 | sema  | overlapping write swizzle repeats a lane (D-SWIZZLE1) |
 | L3101 | sema  | `#Unsafe` block missing its reason argument — write `#Unsafe("…") { … }` (D-UNSAFE2) |
 | L3102 | sema  | `#Impure` block missing its reason argument — write `#Impure("…") { … }` (D-CTEFFECT1) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
@@ -598,6 +602,8 @@ is fixed).
 | L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line in handle.lines() { … }` to stream line-by-line. Not emitted yet. |
 | E2510 | `#{op}` isn't a reduce operation (or a reduce marker used outside `.reduce`). | A SIMD lane reduction (D-SIMD2) folds the lanes with one of a fixed set of operations, named by a marker so the fold is explicit; only `#Add`/`#Mul`/`#Min`/`#Max` are reduce operations, and the marker is meaningful only as the sole argument to `.reduce(…)`. | Use `v.reduce(#Add)` / `#Mul` / `#Min` / `#Max`, or the named reductions `v.sum()` / `v.product()` / `v.min()` / `v.max()`. |
 | E2511 | operator `{op}` isn't defined between `{lhs}` and `{rhs}`. | Operator overloading is blessed on the closed built-in math family ONLY (D-SIMD2/D-LINALG1): element-wise `+`/`-` (and `/` for lanes), `*` (element-wise, or matrix×vector), and `==`/`!=` — both sides must be the same lane/vector type (or a matrix and its matching vector). | Match the operand types, or use a named method like `.dot()`/`.cross()`/`.matmul()`. |
+| E3110 | lane `{lane}` isn't valid on `{type}`. | Swizzle members name lanes with `x`/`y`/`z`/`w`; each type exposes only its lane count (`Vec2`: x/y, `Vec3`: x/y/z, …). | Use only the lanes defined for `{type}`. |
+| E3111 | write swizzle `{pattern}` repeats a lane on `{type}`. | Each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning (D-SWIZZLE1). | Assign each lane once, e.g. `v.xy = …` instead of `v.xx = …`. |
 
 ## Package supply-chain diagnostics (E2-M8, D-PKGS1–4)
 
@@ -816,6 +822,8 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 |------|------|-----|-----|
 | E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
 | E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
+| E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
+| E0154 | after `{from} ->` expected `{expected}`, found `{to}`. | Protocol messages (D-PROTO2): each line must be `client -> server: Msg(…)` or `server -> client: Msg(…)` — other endpoint pairs are not part of the ratified spelling. | Write `client -> server: …` or `server -> client: …`. |
 | L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state} -> …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state} -> NextState) fn …`, or remove `{state}` from the declaration. |
 
 `check_in` requires a `Confirmed` reservation, but the value is still `Pending`:

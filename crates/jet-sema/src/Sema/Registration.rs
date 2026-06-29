@@ -254,6 +254,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::Migration(_) => {}
             // D-STATE-DECL: state-set declarations are sema-only (I3); no type to register.
             Item::StateDecl(_) => {}
+            Item::ProtocolDecl(_) => {}
             // D-METADERIVE1=A: user-authored derive blocks are expanded below.
             Item::UserDerive(_) => {}
         }
@@ -732,7 +733,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types at registration
             | Item::Bench(_)
             | Item::Migration(_) // D-MIGRATE1
-            | Item::StateDecl(_) // D-STATE-DECL: state-set decls are sema-only (I3)
+            | Item::StateDecl(_) // D-STATE-DECL
+            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: state-set decls are sema-only (I3)
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: expanded in Bundle.rs
         }
     }
@@ -1187,6 +1189,7 @@ pub(crate) fn comptime_context_from_items(
             | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL
+            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: expanded in Bundle.rs
         }
     }
@@ -1646,7 +1649,7 @@ pub(crate) fn check_func_body(
 /// D-EFF1: the key a function is recorded under in the effect-summary map.
 /// `Type::method` for methods (disambiguates same-named methods across types),
 /// the bare name for top-level functions (so bare-call edges resolve).
-pub(crate) fn effect_key(owner_type: Option<&str>, name: &str) -> String {
+pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
     match owner_type {
         Some(t) => format!("{t}::{name}"),
         None => name.to_string(),
@@ -1797,6 +1800,9 @@ pub(crate) fn impl_type_exists(
     imports: &HashMap<String, usize>,
     states: Option<&[ModuleState]>,
 ) -> bool {
+    if registry.contains(type_name) {
+        return true;
+    }
     if let Some((alias, local)) = type_name.rsplit_once('.') {
         let Some(states) = states else {
             return false;
@@ -1806,7 +1812,7 @@ pub(crate) fn impl_type_exists(
         };
         return states[idx].registry.contains(local);
     }
-    registry.contains(type_name)
+    false
 }
 
 pub(crate) fn synthesize_impls(items: &mut Vec<Item>) {

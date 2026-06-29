@@ -61,8 +61,14 @@ fn docs_referenced_examples_exist() {
 
 fn extract_example_paths(text: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let prefixes = ["examples/features/", "examples/showcase/"];
+    let prefixes = ["examples/features/", "examples/canon.jet"];
     for prefix in prefixes {
+        if prefix.ends_with(".jet") {
+            if text.contains(prefix) {
+                out.push(prefix.to_string());
+            }
+            continue;
+        }
         let mut rest = text;
         while let Some(pos) = rest.find(prefix) {
             rest = &rest[pos + prefix.len()..];
@@ -81,35 +87,16 @@ fn extract_example_paths(text: &str) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Check 2: Every showcase file mentioned in the README table exists
+// Check 2: canon.jet exists and compiles
 // ---------------------------------------------------------------------------
 #[test]
-fn readme_showcase_files_exist() {
-    let root = root();
-    let showcase_dir = root.join("examples/showcase");
-
-    let expected = [
-        "jetgrep.jet",
-        "jsonfmt.jet",
-        "wordfreq.jet",
-        "library.jet",
-        "lowlevel.jet",
-        "freestanding.jet",
-        "http_service.jet",
-    ];
-
-    let mut missing: Vec<String> = Vec::new();
-    for name in expected {
-        let p = showcase_dir.join(name);
-        if !p.is_file() {
-            missing.push(name.to_string());
-        }
-    }
-
+fn canon_jet_exists() {
+    let canon = root().join("examples/canon.jet");
+    assert!(canon.is_file(), "examples/canon.jet must exist");
+    let src = fs::read_to_string(&canon).unwrap();
     assert!(
-        missing.is_empty(),
-        "README showcase table references files that do not exist:\n{}",
-        missing.join("\n")
+        jet::compile_with_path(&src, "examples/canon.jet").is_ok(),
+        "examples/canon.jet must pass the front end"
     );
 }
 
@@ -308,6 +295,10 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         "crates/jet-sema/Cargo.toml",
         "crates/jet-codegen/Cargo.toml",
         "crates/jet-driver/Cargo.toml",
+        "crates/jet-semindex/Cargo.toml",
+        "crates/jet-jit/Cargo.toml",
+        // `crates/jet-net` is a bootstrap HTTP helper (D-NETDEP1=A, owner-approved
+        // `ureq`) — not a compiler seam; I6 applies to `Source/` and seam crates only.
     ];
 
     let mut offenders = Vec::new();

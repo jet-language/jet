@@ -558,6 +558,24 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 ));
             }
         }
+        // D-SWIZZLE1: write swizzle — ordered lane stores into the backing array.
+        TStmt::MathSwizzleAssign {
+            base,
+            type_name,
+            lanes,
+            value,
+            clone_value,
+        } => {
+            let b = emit_tir_expr(base, cx);
+            let mut v = emit_tir_expr(value, cx);
+            if *clone_value {
+                v = format!("({v}).clone()");
+            }
+            out.push_str(&format!(
+                "{pad}{}\n",
+                emit_math_swizzle_assign_stmt(&b, type_name, lanes, &v)
+            ));
+        }
         // c109 Phase 5: collection iteration. Mirrors `emit_for_in` for the two
         // plain `.iter()` shapes (method-call collections are excluded by the gate):
         //   single: `for _jet_item in (coll).iter().cloned() { let var = _jet_item; … }`
@@ -1433,6 +1451,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 cx.root_prefix, lane_ty, b, i, cx.file, line
             )
         }
+        // D-SWIZZLE1: read swizzle `v.xyz` → lane extract (+ `VecN` ctor when N>1).
+        TExprKind::MathSwizzleRead {
+            type_name,
+            recv,
+            lanes,
+        } => emit_math_swizzle_read(cx, type_name, recv, lanes),
         // c109 Phase 5: `coll[a..b]` → `jet_slice_vec`. Mirrors the AST `Expr::Slice`.
         TExprKind::Slice {
             base,
@@ -2743,4 +2767,88 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
     }
     body.push_str("_jet_s }");
     body
+}
+
+/// D-SWIZZLE1: render a read swizzle as lane extract(s) and optional `VecN` ctor.
+fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lanes: &[u8]) -> String {
+    let r = emit_tir_expr(recv, cx);
+    if lanes.len() == 1 {
+        return format!("({r}).0[{}]", lanes[0] as usize);
+    }
+    if (type_name == "F32x4" || type_name == "F64x2")
+        && lanes.len()
+            == match type_name {
+                "F32x4" => 4,
+                "F64x2" => 2,
+                _ => 0,
+            }
+    {
+        let comps: Vec<String> = lanes
+            .iter()
+            .map(|&l| format!("({r}).0[{}]", l as usize))
+            .collect();
+        return format!(
+            "{}jet_math_{}_new({})",
+            cx.root_prefix,
+            type_name,
+            comps.join(", ")
+        );
+    }
+    let comps: Vec<String> = lanes
+        .iter()
+        .map(|&l| {
+            let idx = l as usize;
+            if type_name == "F32x4" {
+                format!("({r}).0[{idx}] as f64")
+            } else {
+                format!("({r}).0[{idx}]")
+            }
+        })
+        .collect();
+    let result_ty = match lanes.len() {
+        2 => "Vec2",
+        3 => "Vec3",
+        4 => "Vec4",
+        _ => unreachable!("swizzle lane count 2..=4"),
+    };
+    format!(
+        "{}jet_math_{}_new({})",
+        cx.root_prefix,
+        result_ty,
+        comps.join(", ")
+    )
+}
+
+/// D-SWIZZLE1: render a write swizzle as ordered lane stores.
+fn emit_math_swizzle_assign_stmt(
+    base: &str,
+    type_name: &str,
+    lanes: &[u8],
+    value: &str,
+) -> String {
+    if lanes.len() == 1 {
+        let lane = lanes[0] as usize;
+        let val = if type_name == "F32x4" {
+            format!("({value}) as f32")
+        } else {
+            value.to_string()
+        };
+        return format!("{{ let __jet_v = {val}; ({base}).0[{lane}] = __jet_v; }}");
+    }
+    let writes: Vec<String> = lanes
+        .iter()
+        .enumerate()
+        .map(|(i, &l)| {
+            let lane = l as usize;
+            let comp = if type_name == "F32x4" {
+                format!("(__jet_v).0[{i}] as f32")
+            } else if type_name == "F64x2" && lanes.len() == 2 {
+                format!("(__jet_v).0[{i}]")
+            } else {
+                format!("(__jet_v).0[{i}]")
+            };
+            format!("({base}).0[{lane}] = {comp}")
+        })
+        .collect();
+    format!("{{ let __jet_v = {value}; {}; }}", writes.join("; "))
 }

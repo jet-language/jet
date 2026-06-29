@@ -2847,8 +2847,8 @@ pub(crate) fn method_call_in_subset(
     // user method (in `method_sigs`) that is NOT an enum *variant* (those emit an enum
     // literal, a different lowering) and NOT a builtin/special intercept.
     if recv_type.is_none() {
-        if let Expr::Ident(type_name, _) = receiver {
-            return static_method_call_in_subset(type_name, method, args, cx, locals);
+        if let Some(type_name) = static_call_type_name(receiver, locals) {
+            return static_method_call_in_subset(&type_name, method, args, cx, locals);
         }
         return false;
     }
@@ -2976,6 +2976,43 @@ pub(crate) fn fn_field_call_in_subset(
 ///   - `method` is NOT a builtin/special intercept (`new`, etc.);
 ///   - `(type_name, method)` is a registered user method (`method_sigs`);
 ///   - every arg is in-subset, unlabeled, and not Fn-typed.
+/// D-PROTO1/D-PROTO2: resolve a static-method receiver to a user type name.
+/// `Payment.Client.client()` is `MethodCall(Field(Ident(Payment), Client), …)`.
+pub(crate) fn static_call_type_name_unchecked(receiver: &Expr) -> Option<String> {
+    match receiver {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, leaf, _) => {
+            if let Expr::Ident(prefix, _) = base.as_ref() {
+                if prefix
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase())
+                {
+                    return Some(format!("{prefix}.{leaf}"));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn static_call_type_name(receiver: &Expr, locals: &HashSet<String>) -> Option<String> {
+    let name = static_call_type_name_unchecked(receiver)?;
+    match receiver {
+        Expr::Ident(n, _) if locals.contains(n) => None,
+        Expr::Field(base, _, _) => {
+            if let Expr::Ident(prefix, _) = base.as_ref() {
+                if locals.contains(prefix) {
+                    return None;
+                }
+            }
+            Some(name)
+        }
+        _ => Some(name),
+    }
+}
+
 pub(crate) fn static_method_call_in_subset(
     type_name: &str,
     method: &str,

@@ -381,6 +381,11 @@ pub(crate) fn mangle(name: &str) -> String {
     }
 }
 
+/// Rust identifier for a Jet user type (`Payment.Client` → `user_Payment__Client`).
+pub(crate) fn user_type_rust(name: &str) -> String {
+    format!("user_{}", name.replace('.', "__"))
+}
+
 /// D-TXN-ROLLBACK layer 2: emit the `trait user_Rollback { … }` Rust trait
 /// declaration when any impl block in the program references `Rollback`. Programs
 /// with no `Rollback` impl produce zero output here (byte-identical to before).
@@ -455,6 +460,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
             | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
+            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
         }
     }
@@ -552,6 +558,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
             | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
+            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
         }
     }

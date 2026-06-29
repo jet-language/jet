@@ -27,25 +27,15 @@ nix develop -c cargo test    # golden examples + error snapshots
 
 The language spec lives in [docs/spec/spec.md](docs/spec/spec.md). Ratified syntax decisions are in [docs/spec/syntax-decisions.md](docs/spec/syntax-decisions.md).
 
-## Showcase tools
+## Syntax canon
 
-Seven real programs live in `examples/showcase/`. They are golden-tested like
-`examples/features/` and show what Jet looks like in practice.
-
-| Tool | What it exercises |
-|------|-------------------|
-| [jetgrep](examples/showcase/jetgrep.jet) | `core.fs`, `core.io`, `core.process`, CLI flags, exit codes |
-| [jsonfmt](examples/showcase/jsonfmt.jet) | `core.json`, fallible `T ? E`, stdin/files |
-| [wordfreq](examples/showcase/wordfreq.jet) | `Map`, sorting, directory walk, closures |
-| [library](examples/showcase/library.jet) | library authoring, associated types, error conversion |
-| [lowlevel](examples/showcase/lowlevel.jet) | `#Unsafe("reason")`, `Ptr<T>`, expert low-level tier |
-| [freestanding](examples/showcase/freestanding.jet) | `--freestanding`, no-std cross-compilation |
-| [http_service](examples/showcase/http_service.jet) | HTTP server, blocking TCP networking (plain HTTP) |
+[`examples/canon.jet`](examples/canon.jet) is the compiling syntax showcase — every
+line is ratified and implemented. It is golden-tested (`tests/canon.rs`). Milestone
+feature programs live under [`examples/features/`](examples/features/) with the
+same golden harness (`tests/golden.rs`).
 
 ```bash
-nix develop -c jet run examples/showcase/jetgrep.jet pattern examples/showcase/fixtures/
-nix develop -c jet run examples/showcase/jsonfmt.jet examples/showcase/fixtures/sample.json
-nix develop -c jet run examples/showcase/wordfreq.jet examples/showcase/fixtures/
+nix develop -c jet run examples/canon.jet
 ```
 
 ## Errors that teach
@@ -101,7 +91,8 @@ package; the built-in HTTP client is plain HTTP only.
 | [docs/research/](docs/research/) | Exploratory notes & cross-language idea banks |
 | [tools/Tower/docs/](tools/Tower/docs/) | Project management: milestone plans, ballots, epoch tracking |
 | [examples/features/](examples/features/) | Executable spec — golden-tested feature programs |
-| [examples/showcase/](examples/showcase/) | Seven real programs (jetgrep, jsonfmt, wordfreq, library, lowlevel, freestanding, http_service) |
+| [examples/canon.jet](examples/canon.jet) | Compiling syntax showcase (golden-tested) |
+| [examples/features/](examples/features/) | Milestone feature programs (golden-tested) |
 | [editors/](editors/) | VS Code / Zed extensions + tree-sitter grammar |
 | [tests/ui/](tests/ui/) | Snapshot-pinned diagnostic fixtures |
 | `Source/` | Compiler: lexer → parser → sema → codegen |

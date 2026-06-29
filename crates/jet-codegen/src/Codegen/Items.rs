@@ -79,24 +79,29 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     if derives.is_empty() {
         if repr_c {
             out.push_str(&format!(
-                "#[repr(C)]\npub struct user_{}{} {{\n",
-                s.name, type_params
+                "#[repr(C)]\npub struct {}{} {{\n",
+                user_type_rust(&s.name),
+                type_params
             ));
         } else {
-            out.push_str(&format!("pub struct user_{}{} {{\n", s.name, type_params));
+            out.push_str(&format!(
+                "pub struct {}{} {{\n",
+                user_type_rust(&s.name),
+                type_params
+            ));
         }
     } else if repr_c {
         out.push_str(&format!(
-            "#[repr(C)]\n#[derive({})]\npub struct user_{}{} {{\n",
+            "#[repr(C)]\n#[derive({})]\npub struct {}{} {{\n",
             derives.join(", "),
-            s.name,
+            user_type_rust(&s.name),
             type_params
         ));
     } else {
         out.push_str(&format!(
-            "#[derive({})]\npub struct user_{}{} {{\n",
+            "#[derive({})]\npub struct {}{} {{\n",
             derives.join(", "),
-            s.name,
+            user_type_rust(&s.name),
             type_params
         ));
     }
@@ -142,8 +147,11 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             format!("format!(\"{}({})\", {})", s.name, fmt_fields, show_fields)
         };
         out.push_str(&format!(
-            "impl{} JetShow for user_{}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-            tp_bounds, s.name, tp_plain, show_body
+            "impl{} JetShow for {}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            tp_bounds,
+            user_type_rust(&s.name),
+            tp_plain,
+            show_body
         ));
     } else if lifetimes.is_empty() {
         let show_body = if has_fn_field {
@@ -152,8 +160,9 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             "format!(\"{:?}\", self)".to_string()
         };
         out.push_str(&format!(
-            "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-            s.name, show_body
+            "impl JetShow for {} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            user_type_rust(&s.name),
+            show_body
         ));
     } else {
         let lt = lifetimes
@@ -162,8 +171,10 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
-            "impl<{}> JetShow for user_{}<{}> {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
-            lt, s.name, lt
+            "impl<{}> JetShow for {}<{}> {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
+            lt,
+            user_type_rust(&s.name),
+            lt
         ));
     }
     emit_struct_serde(cx, s, out);
@@ -809,7 +820,12 @@ pub(crate) fn emit_type_impl(
         return;
     }
     let tp = Generics::type_param_rust_list(type_params);
-    out.push_str(&format!("impl{} user_{}{} {{\n", tp, type_name, tp));
+    out.push_str(&format!(
+        "impl{} {}{} {{\n",
+        tp,
+        user_type_rust(type_name),
+        tp
+    ));
     for m in methods {
         emit_method(cx, type_name, m, out, 1);
     }
@@ -825,10 +841,10 @@ pub(crate) fn emit_trait_impl(
 ) {
     let tp = Generics::type_param_rust_list(type_params);
     out.push_str(&format!(
-        "impl{} {} for user_{}{} {{\n",
+        "impl{} {} for {}{} {{\n",
         tp,
         Generics::user_trait_rust(&block.trait_name),
-        type_name,
+        user_type_rust(type_name),
         tp
     ));
     // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
@@ -848,9 +864,9 @@ pub(crate) fn emit_trait_impl(
 pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
     let trait_name = i.trait_name.as_deref().unwrap_or("");
     out.push_str(&format!(
-        "impl {} for user_{} {{\n",
+        "impl {} for {} {{\n",
         Generics::user_trait_rust(trait_name),
-        i.type_name
+        user_type_rust(&i.type_name)
     ));
     // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
     for (name, _, ty) in &i.assoc_type_impls {

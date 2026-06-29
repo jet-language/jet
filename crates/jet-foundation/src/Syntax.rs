@@ -316,6 +316,12 @@ pub const DURATION_TYPE: &str = "Duration";
 pub const SIMD_F32X4_TYPE: &str = "F32x4";
 pub const SIMD_F64X2_TYPE: &str = "F64x2";
 
+/// D-SWIZZLE1 (ratified 2026-06-27): named lane swizzles on vector/SIMD types.
+/// Members `x`/`y`/`z`/`w` name lanes 0..3; patterns like `v.xyz`, `v.yx`, and
+/// write-swizzles `v.xy = Vec2(…)` are blessed field access on `Vec2`/`Vec3`/`Vec4`
+/// and `F32x4`/`F64x2` only (matrices are not swizzleable). Overlapping write
+/// patterns (`v.xx = …`) are diagnosed (E3111); out-of-range lanes (E3110).
+
 /// D-LINALG1 (ratified 2026-06-24): the built-in linear-algebra value types.
 /// Vectors `Vec2`/`Vec3`/`Vec4` and square matrices `Mat3`/`Mat4` (column-major,
 /// `F64` components). Methods `.dot()`/`.cross()` (Vec3 only)/`.matmul()`, plus
@@ -751,6 +757,17 @@ pub const KW_TRANSITION: &str = "Transition";
 /// word `state` stays usable as an ordinary identifier outside a top-level declaration
 /// position (like `migration`). Declaration family sibling of `tag`/`struct`/`enum`.
 pub const KW_STATE_DECL: &str = "state"; // D-STATE-DECL
+
+/// D-PROTO1 / D-PROTO2 (ratified 2026-06-27, options A+A): the session/protocol
+/// declaration contextual keyword — `protocol Name { client -> server: Msg(…) }`.
+/// Declares an ordered request/response exchange once; sema expands it into
+/// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
+/// methods (out-of-order use = E0150). Contextual like `state`/`migration`.
+pub const KW_PROTOCOL: &str = "protocol"; // D-PROTO1, D-PROTO2
+
+/// D-PROTO2: endpoint labels in a protocol message line.
+pub const PROTO_CLIENT: &str = "client"; // D-PROTO2
+pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 
 /// D-STATE1: the entry-transition placeholder — `#Transition(_ -> Pending)` means
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
@@ -1503,6 +1520,10 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_STATE,
     KW_TRANSITION,
     KW_STATE_DECL,
+    // Session/protocol types (D-PROTO1 / D-PROTO2)
+    KW_PROTOCOL,
+    PROTO_CLIENT,
+    PROTO_SERVER,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
     LIT_TRUE,
     LIT_FALSE,

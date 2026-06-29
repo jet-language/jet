@@ -19,6 +19,7 @@ mod CmdCompile;
 mod CmdDevTools;
 mod CmdPkg;
 mod CmdSchema;
+mod CmdSemIndex;
 mod CmdSupply;
 
 use CmdCompile::{run_compile_cmd, run_fix, run_fmt, run_new, run_test, run_test_cov};
@@ -31,6 +32,7 @@ use CmdPkg::{
     run_store_verify, run_update,
 };
 use CmdSchema::run_schema;
+use CmdSemIndex::run_semindex;
 use CmdSupply::{run_audit, run_publish, run_sbom, run_vendor, run_yank};
 
 /// How diagnostics should be presented this run, resolved once from flags +
@@ -441,6 +443,7 @@ fn main() {
                 | "bench"
                 | "repl"
                 | "schema"
+                | "semindex"
         );
     if !known {
         if let Some(bin) = find_external(cmd) {
@@ -484,6 +487,7 @@ fn main() {
             | "sbom"
             | "repl"
             | "schema"
+            | "semindex"
     );
     if !owns_flags {
         check_flags(jet_argv, cmd);
@@ -558,6 +562,12 @@ fn main() {
             // Use the unfiltered argv so `--before` and the verb survive.
             let schema_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_schema(&schema_args);
+            return;
+        }
+        "semindex" => {
+            // D-SEMINDEX1: stable semantic-index JSON smoke surface.
+            let semindex_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_semindex(&semindex_args, mode.json);
             return;
         }
         "audit" => {

@@ -342,7 +342,7 @@ impl Cx {
                 let rust_mod = &self.foreign_types[name.as_str()];
                 format!("{}{}::user_{name}", self.root_prefix, rust_mod)
             }
-            Type::Named(name) => format!("user_{name}"),
+            Type::Named(name) => user_type_rust(name),
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetTask<{}>",
@@ -410,10 +410,11 @@ impl Cx {
             }
             Type::Apply { name, args } => {
                 if args.is_empty() {
-                    format!("user_{name}")
+                    user_type_rust(name)
                 } else {
                     format!(
-                        "user_{name}<{args}>",
+                        "{}<{args}>",
+                        user_type_rust(name),
                         args = args
                             .iter()
                             .map(|a| self.rust_type(a))
@@ -456,7 +457,7 @@ impl Cx {
     }
 
     pub(crate) fn type_prefix(&self, type_name: &str) -> String {
-        format!("user_{}", type_name)
+        user_type_rust(type_name)
     }
 }
 
@@ -693,6 +694,7 @@ pub(crate) fn build_cx_items(
             Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases
+            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());

@@ -153,8 +153,14 @@ impl StateTable {
             }
 
             // L0151: dead-end state — declared but no outgoing transition.
-            for (state, span) in decl_states {
+            // D-PROTO2: protocol handle terminal states are intentional completion points.
+            let protocol_handle = type_name.contains('.')
+                && (type_name.ends_with(".Client") || type_name.ends_with(".Server"));
+            for (i, (state, span)) in decl_states.iter().enumerate() {
                 if !outgoing.contains(state.as_str()) {
+                    if protocol_handle && i + 1 == decl_states.len() {
+                        continue;
+                    }
                     diags.push(l0151(state, type_name, *span));
                 }
             }
@@ -214,19 +220,35 @@ impl<'a> StateCtx<'a> {
         }
     }
 
+    /// Resolve a static-method receiver (`Payment.Client.client()`) to a type name.
+    fn static_method_type_name(receiver: &Expr) -> Option<String> {
+        match receiver {
+            Expr::Ident(name, _) => Some(name.clone()),
+            Expr::Field(base, leaf, _) => {
+                if let Expr::Ident(prefix, _) = base.as_ref() {
+                    if prefix
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_uppercase())
+                    {
+                        return Some(format!("{prefix}.{leaf}"));
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     /// If `init` is a constructor call to an entry transition (`Type.ctor()`),
     /// return the to-state the produced value starts in.
     fn entry_state_of(&self, init: &Expr) -> Option<String> {
         match init {
-            // `Type.ctor(…)` parses as a MethodCall with receiver `Ident(Type)`.
-            Expr::MethodCall {
-                receiver, method, ..
-            } => {
-                if let Expr::Ident(type_name, _) = receiver.as_ref() {
-                    let key = format!("{type_name}::{method}");
-                    return self.tbl.entry_ctors.get(&key).cloned();
-                }
-                None
+            // `Type.ctor(…)` / `Ns.Type.ctor(…)` — static entry transition.
+            Expr::MethodCall { receiver, method, .. } => {
+                let type_name = Self::static_method_type_name(receiver)?;
+                let key = format!("{type_name}::{method}");
+                self.tbl.entry_ctors.get(&key).cloned()
             }
             // A free-function entry transition (`from = None`).
             Expr::Call(Call { name, .. }) => match self.tbl.fn_transitions.get(name) {
@@ -396,6 +418,7 @@ impl<'a> StateCtx<'a> {
     /// tracked transition. Used to thread `r := r.confirm()` rebinding.
     fn result_state_of(&self, e: &Expr) -> Option<String> {
         match e {
+            Expr::OrFallback { value, .. } | Expr::Paren(value, _) => self.result_state_of(value),
             Expr::MethodCall {
                 receiver,
                 method,

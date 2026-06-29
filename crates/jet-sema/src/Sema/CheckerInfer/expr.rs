@@ -1312,6 +1312,37 @@ impl<'a> Checker<'a> {
     /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
     pub(crate) fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
         if let Type::Named(type_name) = t {
+            // D-SWIZZLE1: named lane swizzles on vector/SIMD types (not matrices).
+            if is_swizzleable_math_type(type_name) && !self.registry.contains(type_name) {
+                match parse_swizzle_member(member, type_name) {
+                    SwizzleParse::Ok(lanes) => {
+                        return Some(swizzle_read_type(type_name, lanes.len()));
+                    }
+                    SwizzleParse::InvalidLane { lane } => {
+                        let valid = match math_arity(type_name) {
+                            2 => "x and y",
+                            3 => "x, y, and z",
+                            4 => "x, y, z, and w",
+                            _ => "x/y/z/w",
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E3110",
+                            format!(
+                                "lane `{}` isn't valid on `{}`",
+                                lane, type_name
+                            ),
+                            format!(
+                                "swizzle members name lanes with x/y/z/w — `{}` only has {}",
+                                type_name, valid
+                            ),
+                            format!("use only the lanes defined for `{}`", type_name),
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                    SwizzleParse::NotSwizzle => {}
+                }
+            }
             if let Some(fty) = core_struct_field(type_name, member) {
                 return Some(fty);
             }

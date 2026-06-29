@@ -7,3 +7,4 @@ pub use jet_parser::{
     Collections, Diagnostics, Formatter, Generics, Lexer, Parser, Syntax, Traits, AST, SHA256,
 };
 pub mod Sema;
+pub use Sema::{effect_key, SemIndexEffectFacts};

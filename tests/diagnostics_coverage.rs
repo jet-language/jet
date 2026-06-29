@@ -346,6 +346,12 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // needs a CI matrix with libclang installed. The eprintln! emission site is in CmdDevTools.rs.
     // TODO: add tests/devtools.rs test with a bad header.
     "E3208",
+    // E0153: protocol expansion parse failure — internal compiler error path only
+    // (D-PROTO1); no user-writable fixture triggers a failed fragment re-parse.
+    "E0153",
+    // E0902: orphan trait impl — needs a multi-module ui fixture once external
+    // `impl Module.Type.Trait` spelling is snapshot-tested end-to-end.
+    "E0902",
 ];
 
 /// All exclusions combined.

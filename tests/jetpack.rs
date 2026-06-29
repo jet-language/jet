@@ -47,14 +47,13 @@ impl Drop for Scratch {
     }
 }
 
-/// The committed example fixtures dir.
 fn example_fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures")
 }
 
-/// The committed example project dir (`env.jet` + `jet-pkgs/`).
+/// The committed jetpack project fixture (`env.jet` + `jet-pkgs/`).
 fn example_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project")
 }
 
 /// Write a provider fixture whose `out` points at a real dir we control, so a
@@ -576,7 +575,7 @@ fn core_provider_builds_library_package_without_nix() {
 
 #[test]
 fn committed_example_builds_offline_end_to_end() {
-    // I5: the committed `examples/jetpack/` project is the executable spec for
+    // I5: the committed jetpack project fixture is the executable spec for
     // a real env.jet. `jetpack build` with no ref reads env.jet and realizes
     // everything it declares — nix-backed named sources (`stable:ripgrep`,
     // `unstable:neovim`) resolved from the committed fixtures, plus a
@@ -608,7 +607,7 @@ fn committed_example_builds_offline_end_to_end() {
 
 #[test]
 fn typed_module_example_builds_offline_end_to_end() {
-    // I5: the committed `examples/jetpack-typed/` project is the executable spec
+    // I5: the committed jetpack-typed fixture is the executable spec
     // for the typed `module { … }` env surface (U3/U6/U8) including U4 import-tree
     // discovery. `jetpack build` with no ref evaluates env.jet through `modeval`:
     // the `default` source merges to its pinned nixpkgs upstream,
@@ -617,7 +616,7 @@ fn typed_module_example_builds_offline_end_to_end() {
     // into the same merge. All three realize from the committed fixtures, fully
     // offline. The store lives under a scratch JETPACK_ROOT, so nothing is
     // written back.
-    let typed_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-typed");
+    let typed_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed");
     let root = Scratch::new("typed-e2e");
     let output = jetpack()
         .args(["build", "--no-color", "--offline"])
@@ -729,9 +728,9 @@ fn core_provider_fetches_remote_git_package_from_env() {
 
 // ── gap #4: `jetpack os <verb> [<config-path>]@<host>` (U15/U16) ─────────
 
-/// The committed `examples/jetpack-config/` config dir.
+/// The committed jetpack-config fixture dir.
 fn config_example_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-config")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config")
 }
 
 #[test]
@@ -912,7 +911,7 @@ fn offline_without_fixtures_errors() {
 
 /// The committed multi-package monorepo example dir.
 fn mono_example_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-mono")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-mono")
 }
 
 #[test]

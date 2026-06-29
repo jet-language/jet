@@ -803,6 +803,22 @@ impl<'a> Checker<'a> {
                 return None;
             }
         }
+        // D-PROTO1/D-PROTO2: `Payment.Client.client()` — static call on a dotted
+        // protocol handle type (PascalCase.PascalCase).
+        if let Expr::Field(base, leaf, _) = &**receiver {
+            if let Expr::Ident(prefix, _) = &**base {
+                if prefix
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase())
+                {
+                    let full = format!("{prefix}.{leaf}");
+                    if self.registry.method(&full, method).is_some() {
+                        return self.check_static_method(&full, method, span, args);
+                    }
+                }
+            }
+        }
         // D-ENC1: nested-namespace access — `encoding.json.to_string(x)` where `encoding`
         // is a library alias (`use core.encoding`) and `json` a registered submodule. The
         // method-call receiver is `Field(Ident(alias), leaf)`; resolve to the submodule

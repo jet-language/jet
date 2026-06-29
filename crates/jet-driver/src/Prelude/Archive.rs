@@ -5,7 +5,7 @@
 // (`Source/`) never depends on `flate2`; it only ships this text. Owner-
 // approved I6 bootstrap exception: the `flate2` crate (pure-Rust, with
 // `miniz_oxide` back-end) lives inside the `jet.archive` ring package at
-// `stdlibs/jet.archive/vendor/` and is built from that vendored source.
+// `corelib/jet.archive/vendor/` and is built from that vendored source.
 //
 // D-BFS1: the vendored source is the canonical offline build path. The
 // bridge-crate fallback (cargo fetching from crates.io) is used only when

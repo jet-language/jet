@@ -68,9 +68,9 @@ mod tests {
     #[test]
     fn symbol_db_finds_function() {
         let src = "fn greet(name: String) {\n    print(name);\n}\nfn main() {\n    greet(\"world\");\n}\n";
-        let (_, bundle) = check_document_with_bundle("test.jet", src);
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
-        let db = build_symbol_db(&bundle);
+        let db = build_symbol_db(&bundle, &facts);
         assert!(db.defs.iter().any(|d| d.name == "greet"));
         assert!(db.defs.iter().any(|d| d.name == "main"));
         assert!(db.refs.iter().any(|r| r.name == "greet"));
@@ -80,9 +80,9 @@ mod tests {
     fn hover_returns_function_signature() {
         let src =
             "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn main() { val r = add(1, 2); }\n";
-        let (_, bundle) = check_document_with_bundle("test.jet", src);
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
-        let db = build_symbol_db(&bundle);
+        let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
         // Hover over 'add' at offset 3 (the name span)
         let hover = compute_hover(&db, &toks, src, "test.jet", 3);
@@ -94,9 +94,9 @@ mod tests {
     #[test]
     fn rename_basic_function() {
         let src = "fn greet() {}\nfn main() { greet(); }\n";
-        let (_, bundle) = check_document_with_bundle("test.jet", src);
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
-        let db = build_symbol_db(&bundle);
+        let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
         let spans = compute_rename(&db, &toks, "test.jet", 3, "hello").expect("rename ok");
         assert!(!spans.is_empty());
@@ -106,9 +106,9 @@ mod tests {
     #[test]
     fn rename_rejects_keyword() {
         let src = "fn greet() {}\nfn main() { greet(); }\n";
-        let (_, bundle) = check_document_with_bundle("test.jet", src);
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
-        let db = build_symbol_db(&bundle);
+        let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
         assert!(compute_rename(&db, &toks, "test.jet", 3, "fn").is_err());
     }
@@ -125,9 +125,9 @@ mod tests {
     #[test]
     fn inlay_hints_for_int_literal() {
         let src = "fn main() {\n    val x = 42;\n}\n";
-        let (_, bundle) = check_document_with_bundle("test.jet", src);
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
-        let db = build_symbol_db(&bundle);
+        let db = build_symbol_db(&bundle, &facts);
         let hints = db.inlay_hints_for("test.jet");
         assert!(
             hints.iter().any(|h| h.label.contains("Int")),
@@ -138,9 +138,9 @@ mod tests {
     #[test]
     fn completion_includes_keywords() {
         let src = "fn main() {\n    \n}\n";
-        let (_, bundle) = check_document_with_bundle("test.jet", src);
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
-        let db = build_symbol_db(&bundle);
+        let db = build_symbol_db(&bundle, &facts);
         let items = compute_completions(&db, src, 14, "test.jet");
         // `val` and `var` are retired (FOREIGN_VAL/FOREIGN_VAR); they must not appear.
         assert!(

@@ -153,16 +153,31 @@ pub fn check_file(
     overlay: Option<(&Path, &str)>,
     is_lsp: bool,
 ) -> (Vec<Diagnostic>, Option<crate::AST::ProgramBundle>) {
+    let (diags, bundle, _facts) = check_file_with_effect_facts(file, overlay, is_lsp);
+    (diags, bundle)
+}
+
+/// Like `check_file` but also returns effect facts for D-SEMINDEX1.
+pub fn check_file_with_effect_facts(
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    is_lsp: bool,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
     match crate::Loader::load_entry_with_overlay(file, overlay, is_lsp) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            diags.extend(crate::Sema::check_bundle(
+            let (check_diags, facts) = crate::Sema::check_bundle_with_effect_facts(
                 &mut bundle,
                 crate::Sema::CompileMode::Check,
-            ));
-            (diags, Some(bundle))
+            );
+            diags.extend(check_diags);
+            (diags, Some(bundle), facts)
         }
-        Err(diags) => (diags, None),
+        Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
     }
 }
 

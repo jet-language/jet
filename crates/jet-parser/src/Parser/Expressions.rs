@@ -626,15 +626,25 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     // D-DOTCTOR1: `alias.Type.{ … }` — named construction through
-                    // an import namespace. `expr` at this point is
-                    // `Expr::Field(Ident(alias), type_name)`.
+                    // an import namespace, or `Protocol.Client.{ … }` for a dotted
+                    // local type when the base name is PascalCase (D-PROTO1/D-PROTO2).
                     if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
                         let start = expr.span().start;
                         if let Expr::Field(inner, type_name, _) = &expr {
                             if let Expr::Ident(alias, _) = inner.as_ref() {
                                 let alias = alias.clone();
                                 let type_name = type_name.clone();
-                                expr = self.struct_lit_after_import(alias, type_name, start)?;
+                                if alias
+                                    .chars()
+                                    .next()
+                                    .is_some_and(|c| c.is_ascii_uppercase())
+                                {
+                                    let full = format!("{alias}.{type_name}");
+                                    let span = expr.span();
+                                    expr = self.struct_lit_after_name(full, Vec::new(), span)?;
+                                } else {
+                                    expr = self.struct_lit_after_import(alias, type_name, start)?;
+                                }
                                 continue;
                             }
                         }

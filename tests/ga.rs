@@ -1,21 +1,6 @@
-//! E2-M17 GA checklist — asserts that Epoch 2 is complete at the compiler
-//! level. This test is the enforcement layer for the exit criteria in
-//! docs/plans/epoch-2/m17-epoch2-ga.md.
-//!
-//! What is checked here:
-//!   1. Every E2 diagnostic registered in diagnostics.md has a `jet explain`
-//!      entry (already enforced by cli.rs; duplicated here for M17 traceability).
-//!   2. All 6 D-GA1=B showcase programs exist in examples/showcase/ and are
-//!      front-end-clean (sema accepts them).
-//!   3. Perf/size budgets: every showcase binary must stay under a hard size
-//!      ceiling when built with `--small` (D-GA2=B).
-//!   4. The `nix develop -c cargo test` suite is green (asserted by the CI
-//!      that runs this test file).
-//!
-//! What is NOT checked here (deferred or out of scope):
-//!   - DAP step-through debugger (VS Code extension work, deferred).
-//!   - HTTP service showcase build time (network tests are flaky in CI).
-//!   - jet dev demo (watch loop — not golden-testable).
+//! E2-M17 GA checklist — asserts that Epoch 2 exit criteria still hold at the
+//! compiler level. Showcase programs were retired from `examples/`; milestone
+//! coverage now lives in `examples/features/` (I5 golden tests).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,7 +17,6 @@ fn root() -> PathBuf {
 // ── 1. Every diagnostic code has a jet explain entry ──────────────────────
 
 /// Mirrors the check in cli.rs `every_registered_code_has_an_explain_entry`.
-/// Kept here for M17 traceability.
 #[test]
 fn ga_every_diagnostic_has_explain() {
     let md = fs::read_to_string(root().join("docs/spec/diagnostics.md")).expect("diagnostics.md");
@@ -66,45 +50,32 @@ fn is_code(s: &str) -> bool {
     b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())
 }
 
-// ── 2. All D-GA1=B showcases exist and are front-end clean ────────────────
+// ── 2. Milestone feature examples are front-end clean ─────────────────────
 
-/// D-GA1=B mandates 6 showcases. This test asserts they all exist in
-/// examples/showcase/ and pass the Jet front end (parse + sema).
+/// D-GA1=B milestone coverage now lives under `examples/features/`.
 #[test]
-fn ga_all_showcases_front_end_clean() {
-    // Showcase list — (filename, description).
-    // Showcase 4 (jet dev demo) and C FFI (showcase 5) are separately tested
-    // in tests/dev.rs and tests/cffi.rs respectively; listed for completeness.
-    let showcases: &[(&str, &str)] = &[
-        // Showcase 1 — CLI tools
-        ("jetgrep.jet", "CLI tool: jetgrep"),
-        ("jsonfmt.jet", "CLI tool: jsonfmt"),
-        ("wordfreq.jet", "CLI tool: wordfreq"),
-        // Showcase 2 — HTTP service
-        ("http_service.jet", "HTTP service with tasks/channels"),
-        // Showcase 3 — library authoring
-        ("library.jet", "library: traits, delegation, labels"),
-        // Showcase 5 — expert low-level tier (M13 #Unsafe)
-        ("lowlevel.jet", "low-level: #Unsafe + *T"),
-        // Showcase 6 — freestanding / cross-compile smoke (M15)
-        ("freestanding.jet", "freestanding smoke"),
+fn ga_milestone_features_front_end_clean() {
+    let features: &[(&str, &str)] = &[
+        ("47_library.jet", "library authoring"),
+        ("48_lowlevel.jet", "expert low-level tier"),
+        ("57_http_server.jet", "HTTP service"),
+        ("61_freestanding.jet", "freestanding smoke"),
     ];
 
-    let showcase_dir = root().join("examples/showcase");
-    for (file, desc) in showcases {
-        let path = showcase_dir.join(file);
+    let features_dir = root().join("examples/features");
+    for (file, desc) in features {
+        let path = features_dir.join(file);
         assert!(
             path.is_file(),
-            "M17 GA gate: showcase file missing: {} ({})",
-            path.display(),
-            desc
+            "M17 GA gate: feature example missing: {}",
+            path.display()
         );
         let src =
             fs::read_to_string(&path).unwrap_or_else(|_| panic!("cannot read {}", path.display()));
         let result = jet::compile_with_path(&src, path.to_str().unwrap());
         assert!(
             result.is_ok(),
-            "M17 GA gate: showcase '{}' failed front end:\n{:?}",
+            "M17 GA gate: '{}' failed front end:\n{:?}",
             desc,
             result.err()
         );
@@ -113,13 +84,8 @@ fn ga_all_showcases_front_end_clean() {
 
 // ── 3. Hard size budgets (D-GA2=B) ────────────────────────────────────────
 
-/// D-GA2=B: hard CI perf/size gates. Each showcase binary built with
-/// `--small` must stay under its pinned ceiling.
-///
-/// Ceilings are generous — they catch accidental bloat (core library pulled in
-/// unexpectedly) rather than micro-optimisation regressions.
 #[test]
-fn ga_showcase_size_budgets() {
+fn ga_feature_size_budgets() {
     let jet = jet_bin();
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc || !jet.exists() {
@@ -127,24 +93,18 @@ fn ga_showcase_size_budgets() {
         return;
     }
 
-    // (showcase file, max bytes with --small)
-    // Budgets are 4 MiB per tool; adjust if the core library grows intentionally.
     let budgets: &[(&str, u64)] = &[
-        ("jetgrep.jet", 4_194_304),
-        ("jsonfmt.jet", 4_194_304),
-        ("wordfreq.jet", 4_194_304),
-        ("library.jet", 4_194_304),
-        ("freestanding.jet", 4_194_304),
-        ("lowlevel.jet", 4_194_304),
-        // http_service.jet links tasks/net — skip size gate (varies by platform).
+        ("47_library.jet", 4_194_304),
+        ("48_lowlevel.jet", 4_194_304),
+        ("61_freestanding.jet", 4_194_304),
     ];
 
-    let showcase_dir = root().join("examples/showcase");
+    let features_dir = root().join("examples/features");
     let build_dir = std::env::temp_dir().join(format!("jet_ga_budgets_{}", std::process::id()));
     fs::create_dir_all(build_dir.join("build")).unwrap();
 
     for (file, max_bytes) in budgets {
-        let src = showcase_dir.join(file);
+        let src = features_dir.join(file);
         let stem = Path::new(file).file_stem().unwrap().to_string_lossy();
         let bin = build_dir.join("build").join(stem.as_ref());
 

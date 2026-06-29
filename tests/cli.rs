@@ -558,7 +558,7 @@ fn ext_optional_missing_path_keeps_original_name() {
 fn simple_exec_runs_without_a_manifest() {
     // A single file with a top-level `fn main` and no pkg.jet runs as an
     // executable with zero ceremony (R9 / D-ILE1).
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/simple_exec/main.jet");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/main.jet");
     let out = Command::new(jet()).arg("run").arg(&path).output().unwrap();
     assert_eq!(
         out.status.code(),

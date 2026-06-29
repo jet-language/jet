@@ -654,6 +654,11 @@ pub enum Item {
     /// no outgoing `#Transition` is a dead-end warning (L0151). Declaration family sibling
     /// of `tag`/`struct`/`enum`.
     StateDecl(StateDecl),
+    /// D-PROTO1 / D-PROTO2 (ratified 2026-06-27): `protocol Name { client -> server:
+    /// Msg(…) }` — declares an ordered request/response exchange and expands (R11) into
+    /// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
+    /// methods. Erases as generated items; the declaration itself never reaches codegen.
+    ProtocolDecl(ProtocolDecl),
     /// D-METADERIVE1=A: `derive Trait for T { … }` user-authored derive.
     UserDerive(DeriveDef),
 }
@@ -925,6 +930,37 @@ pub struct TagDef {
     /// Methods erroneously written in a tag body. Always empty for a well-formed
     /// tag; each entry triggers E0732 in sema.
     pub methods: Vec<TraitMethodSig>,
+    pub span: Span,
+}
+
+/// D-PROTO1 / D-PROTO2: one message line inside a `protocol` block —
+/// `client -> server: Hello(version: Int)`.
+#[derive(Debug, Clone)]
+pub enum ProtocolDirection {
+    ClientToServer,
+    ServerToClient,
+}
+
+/// D-PROTO1 / D-PROTO2: one ordered message in a protocol declaration.
+#[derive(Debug, Clone)]
+pub struct ProtocolMessage {
+    pub direction: ProtocolDirection,
+    pub name: String,
+    pub name_span: Span,
+    pub fields: Vec<(String, Type)>,
+    pub span: Span,
+}
+
+/// D-PROTO1 / D-PROTO2: `protocol Name { … }` — the user-facing session-type
+/// declaration. Expanded in sema into generated `#SingleUse` + typestate items (R11).
+#[derive(Debug, Clone)]
+pub struct ProtocolDecl {
+    pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) protocol …`.
+    pub is_package_pub: bool,
+    pub name: String,
+    pub name_span: Span,
+    pub messages: Vec<ProtocolMessage>,
     pub span: Span,
 }
 

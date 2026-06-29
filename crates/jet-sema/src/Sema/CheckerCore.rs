@@ -791,6 +791,36 @@ impl<'a> Checker<'a> {
                             }
                         }
                         let base_ty = self.infer(base);
+                        // D-SWIZZLE1: overlapping write swizzles (`v.xx = …`) are rejected.
+                        if let Some(Type::Named(type_name)) = &base_ty {
+                            if is_swizzleable_math_type(type_name)
+                                && !self.registry.contains(type_name)
+                            {
+                                if let SwizzleParse::Ok(lanes) =
+                                    parse_swizzle_member(field, type_name)
+                                {
+                                    if swizzle_write_overlaps(&lanes) {
+                                        self.diags.push(Diagnostic::error(
+                                            "E3111",
+                                            format!(
+                                                "write swizzle `{}` repeats a lane on `{}`",
+                                                field, type_name
+                                            ),
+                                            "each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning"
+                                                .to_string(),
+                                            format!(
+                                                "assign each lane once, e.g. `{}.xy = …` instead of `{}.{} = …`",
+                                                expr_root_ident(base).unwrap_or("v"),
+                                                expr_root_ident(base).unwrap_or("v"),
+                                                field
+                                            ),
+                                            Some(*span),
+                                        ));
+                                        return;
+                                    }
+                                }
+                            }
+                        }
                         // Validate the field exists and get its type (emits E0302 on a
                         // bad field). The value's type must match the field type (E0108).
                         if let Some(bt) = &base_ty {

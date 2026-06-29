@@ -13,13 +13,17 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
     diags
 }
 
-/// Check one document, also returning the bundle for symbol analysis.
+/// Check one document, also returning the bundle and effect facts for symbol analysis.
 pub fn check_document_with_bundle(
     path: &str,
     text: &str,
-) -> (Vec<Diagnostic>, Option<ProgramBundle>) {
+) -> (
+    Vec<Diagnostic>,
+    Option<ProgramBundle>,
+    jet_semindex::SemIndexEffectFacts,
+) {
     let abs = canonical_path(path);
-    crate::Driver::check_file(path, Some((&abs, text)), true)
+    crate::Driver::check_file_with_effect_facts(path, Some((&abs, text)), true)
 }
 
 /// Apply a single teaching edit to source text (for scripted LSP tests and the

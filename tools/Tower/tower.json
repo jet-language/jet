@@ -10,8 +10,7 @@
         "epoch:e4",
         "epoch:e5",
         "epoch:e6",
-        "board-sidequests",
-        "epoch:e3"
+        "board-sidequests"
       ]
     }
   },
@@ -215,11 +214,15 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e6",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "aarch64-qemu-ci",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Verified: CI workflow installs qemu-user + gcc-aarch64-linux-gnu + rust target; aarch64-qemu-freestanding.sh passes locally. Card closed."
+        },
         {
           "at": "2026-06-28",
           "text": "Fixed CC/CXX env var leak: added `unset CC CXX` before host `cargo build` in tools/ci/aarch64-qemu-freestanding.sh. First full golden run had failed because CC=aarch64-unknown-linux-gnu-gcc leaked into the host build; clean rerun passed. Pending real remote CI to close."
@@ -246,7 +249,7 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-29"
     },
     {
       "id": "c81",
@@ -755,11 +758,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Protocol/session types (D-PROTO1=A + D-PROTO2=A): implement top-level `protocol Name { client -> server: Msg(fields...) }` declarations that generate `.Client`/`.Server` handles over existing #SingleUse + typestate machinery. Steps: (1) Source/Syntax.rs keyword/decision entry; (2) parser protocol declaration and message grammar; (3) sema generates dual endpoint types and ordered consuming methods; (4) I4 diagnostic for out-of-order send/receive; (5) codegen lowers generated source through the normal front-end path per R11; (6) example + golden + ui snapshot.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Implemented D-PROTO1/A + D-PROTO2/A: protocol decl, Client/Server handles, example 156_protocol.jet, ui protocol_out_of_order. Golden green."
+        },
         {
           "at": "2026-06-28",
           "text": "D-PROTO2=A ratified; removed stale declaration-spelling gate. Advanced to ready."
@@ -782,7 +789,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-28",
+      "updated": "2026-06-29",
       "workOrder": 25
     },
     {
@@ -2901,11 +2908,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-SWIZZLE1=A: implement vector member swizzles with reads and writes. Steps: (1) Source/Syntax.rs decision note for lane names x/y/z/w and swizzle members; (2) sema recognizes swizzle field names only on vector/SIMD/linalg lane types, returns the right scalar/vector type, and rejects invalid lanes/lengths; (3) assignment target path supports lvalue swizzles, with a dedicated diagnostic for overlapping writes like `v.xx = ...`; (4) codegen lowers read swizzles to lane extraction/constructor and write swizzles to ordered lane assignments; (5) formatter preserves member syntax; (6) examples for read, reverse, and write swizzle; (7) ui snapshots for invalid lane and overlapping write; (8) golden tests compare outputs against explicit lane operations.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Implemented D-SWIZZLE1=A read+write swizzles; E3110/E3111; example 155_swizzle.jet; fixed user-struct name shadowing (81_layout_c)."
+        },
         {
           "at": "2026-06-27",
           "text": "[ratified] D-SWIZZLE1=A recorded in syntax-decisions.md; ready with read+write swizzle plan."
@@ -2924,7 +2935,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-27",
+      "updated": "2026-06-29",
       "workOrder": 35
     },
     {
@@ -3361,12 +3372,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "workOrder": 1,
       "plan": "semantic-index-api",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Implemented D-SEMINDEX1=A: jet-semindex crate, jet semindex --json, tests/semindex.rs, LSP shares build path."
+        },
         {
           "at": "2026-06-28",
           "text": "Plan semantic-index-api recorded and D-SEMINDEX1=A added to syntax decisions. Advanced to ready."
@@ -3385,7 +3400,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-29"
     },
     {
       "id": "c1pixvu9",
@@ -12298,6 +12313,15 @@
       "tags": [],
       "status": "open",
       "created": "2026-06-29T17:13:43.213Z"
+    },
+    {
+      "id": "b3rbao4",
+      "text": "Add docs for embedded systems & for API/fn maturity tags",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-29T20:09:17.789Z"
     }
   ],
   "questions": [

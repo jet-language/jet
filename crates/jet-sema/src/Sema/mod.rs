@@ -624,6 +624,7 @@ mod Registration;
 pub mod Schema;
 mod SchemaMigration;
 mod State;
+mod Protocol;
 mod Taint;
 
 pub(crate) use Bundle::*;
@@ -643,9 +644,13 @@ pub(crate) use State::{check_items_state, StateTable};
 pub(crate) use CheckerOwnership::{e0141_unconsumed_branch, e0142_aliased, e0143_drop_unaudited};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
-pub use Bundle::{check_bundle, check_bundle_allow_impure, check_bundle_freestanding};
+pub use Bundle::{
+    check_bundle, check_bundle_allow_impure, check_bundle_freestanding,
+    check_bundle_with_effect_facts,
+};
+pub use Effects::SemIndexEffectFacts;
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
-pub use Registration::{check, check_with_mode};
+pub use Registration::{check, check_with_mode, effect_key};
 pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.
 pub use Capability::resolve_capabilities;

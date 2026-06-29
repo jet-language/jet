@@ -280,6 +280,14 @@ pub struct EffectSummary {
     pub callback_obligations: Vec<CallbackObligation>,
 }
 
+/// D-SEMINDEX1: per-function effect summaries and the solved transitive sets,
+/// captured during `check_bundle` for the public semantic-index API.
+#[derive(Debug, Clone, Default)]
+pub struct SemIndexEffectFacts {
+    pub summaries: HashMap<String, EffectSummary>,
+    pub solved: HashMap<String, EffectSet>,
+}
+
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed
 /// to a `#Pure fn(…)` / `#(E) fn(…)` parameter satisfies the declared bound. The
 /// callback's own effect contribution is captured as the delta of the function's

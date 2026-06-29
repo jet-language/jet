@@ -155,6 +155,14 @@ impl<'a> Parser<'a> {
         Ok((name, span))
     }
 
+    /// D-PROTO1/D-PROTO2: parse a type name that may contain `.` (e.g. `Payment.Client`).
+    pub(super) fn parse_dotted_type_name(
+        &mut self,
+        where_: &str,
+    ) -> Result<(String, Span), Diagnostic> {
+        self.parse_type_path(where_)
+    }
+
     /// S73: `(x: Type, y: Type)` in type position after the opening `(`.
     fn parse_tuple_type(&mut self, open: Span) -> Result<Type, Diagnostic> {
         let mut fields = Vec::new();
@@ -629,7 +637,13 @@ impl<'a> Parser<'a> {
                         }
                     }
                     other => {
-                        let name = other.to_string();
+                        let mut name = other.to_string();
+                        while matches!(self.peek().kind, TokKind::Dot) {
+                            self.bump();
+                            let (part, _) =
+                                self.expect_ident("after `.` in a type path")?;
+                            name = format!("{name}.{part}");
+                        }
                         if matches!(self.peek().kind, TokKind::Lt) {
                             self.expect_type_args_open(&name)?;
                             let mut args = Vec::new();

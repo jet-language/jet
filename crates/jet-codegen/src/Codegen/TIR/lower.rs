@@ -930,6 +930,38 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // read path uses — byte-for-byte the AST `LValue::Field` form. Carried as a
             // plain `TStmt::Assign` so the `op` compound form rides the shared emit.
             LValue::Field { base, field, span } => {
+                let base_t = lower_expr(base, cx, env);
+                let swizzle_write = match &base_t.ty {
+                    Type::Named(type_name)
+                        if crate::Sema::is_swizzleable_math_type(type_name)
+                            && !cx.struct_fields.contains_key(type_name) =>
+                    {
+                        match crate::Sema::parse_swizzle_member(field, type_name) {
+                            crate::Sema::SwizzleParse::Ok(lanes) => {
+                                let lanes_u8: Vec<u8> =
+                                    lanes.iter().map(|&i| i as u8).collect();
+                                Some((type_name.clone(), lanes_u8))
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some((type_name, lanes_u8)) = swizzle_write {
+                    let clone_value = if let Expr::Ident(vname, _) = value {
+                        env.is_borrowed(vname)
+                            && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                    } else {
+                        false
+                    };
+                    return TStmt::MathSwizzleAssign {
+                        base: base_t,
+                        type_name,
+                        lanes: lanes_u8,
+                        value: lower_expr(value, cx, env),
+                        clone_value,
+                    };
+                }
                 let field_expr = Expr::Field(base.clone(), field.clone(), *span);
                 let place = emit_tir_expr(&lower_expr(&field_expr, cx, env), cx);
                 // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
@@ -2745,7 +2777,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // — or rustc can't find the type (E0422). A local struct keeps the plain head.
             let head = match cx.foreign_types.get(type_name) {
                 Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
-                None => format!("user_{}", type_name),
+                None => user_type_rust(type_name),
             };
             let rust_type = if type_args.is_empty() {
                 head
@@ -2889,6 +2921,25 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             let recv = lower_expr(receiver, cx, env);
+            if let Type::Named(type_name) = &recv.ty {
+                if crate::Sema::is_swizzleable_math_type(type_name)
+                    && !cx.struct_fields.contains_key(type_name)
+                {
+                    if let crate::Sema::SwizzleParse::Ok(lanes) =
+                        crate::Sema::parse_swizzle_member(member, type_name)
+                    {
+                        let lanes_u8: Vec<u8> = lanes.iter().map(|&i| i as u8).collect();
+                        return TExpr {
+                            ty: crate::Sema::swizzle_read_type(type_name, lanes.len()),
+                            kind: TExprKind::MathSwizzleRead {
+                                type_name: type_name.clone(),
+                                recv: Box::new(recv),
+                                lanes: lanes_u8,
+                            },
+                        };
+                    }
+                }
+            }
             let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
             // A field of a CORE struct (`ProcessResult.code`, `JsonError.message`, …) is
             // emitted by its PLAIN Rust name, never `user_<name>` (the core structs in
@@ -4306,9 +4357,8 @@ pub(crate) fn lower_method_call(
     // ident and `method` is a registered static method. Mirror the AST path
     // (Expression.rs ~L1644): `user_<Type>::user_<method>(args)`.
     if recv_type.is_none() {
-        let Expr::Ident(type_name, _) = receiver else {
-            unreachable!("gate proved static receiver is a type-name ident");
-        };
+        let type_name = static_call_type_name_unchecked(receiver)
+            .expect("gate proved static receiver is a type-name ident");
         // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
         // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
         // `Path` itself (a type-name ident) has no value.
@@ -4370,9 +4420,9 @@ pub(crate) fn lower_method_call(
         }
         // D-SIMD2 / D-LINALG1: a static method on a built-in math type → the prelude
         // free function `{root}jet_math_<T>_<method>(args)`.
-        if crate::Sema::is_math_type(type_name) && !cx.type_names.contains(type_name) {
-            if let Some(ret) = crate::Sema::math_static_return(type_name, method, args.len()) {
-                let bridge = crate::Sema::math_static_arg_ty(type_name, method);
+        if crate::Sema::is_math_type(&type_name) && !cx.type_names.contains(&type_name) {
+            if let Some(ret) = crate::Sema::math_static_return(&type_name, method, args.len()) {
+                let bridge = crate::Sema::math_static_arg_ty(&type_name, method);
                 let targs: Vec<TExpr> = args
                     .iter()
                     .map(|a| {
@@ -4411,13 +4461,13 @@ pub(crate) fn lower_method_call(
             .get(&(type_name.clone(), method.to_string()))
             .cloned()
             .flatten()
-            .map(|t| resolve_self_ty(&t, type_name))
+            .map(|t| resolve_self_ty(&t, &type_name))
             .unwrap_or_else(unit_type);
         return TExpr {
             ty: ret_ty,
             kind: TExprKind::StaticCall {
                 // The AST path uses `cx.type_prefix(type_name)` = `user_<T>`.
-                type_prefix: cx.type_prefix(type_name),
+                type_prefix: cx.type_prefix(&type_name),
                 method_rust: mangle(method),
                 args: targs,
             },

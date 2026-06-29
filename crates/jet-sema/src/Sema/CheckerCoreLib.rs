@@ -1908,6 +1908,76 @@ pub(crate) fn math_arity(name: &str) -> usize {
     }
 }
 
+/// D-SWIZZLE1: built-in vector/SIMD lane types that support `.xyz` member swizzles.
+/// Matrices are not swizzleable.
+pub fn is_swizzleable_math_type(name: &str) -> bool {
+    matches!(name, "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4")
+}
+
+/// Outcome of parsing a swizzle member name (`xy`, `wzyx`, …) on a swizzleable type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SwizzleParse {
+    /// Valid lane indices in write order (x=0, y=1, z=2, w=3).
+    Ok(Vec<usize>),
+    /// A lane letter is out of range for this type (e.g. `.z` on `Vec2`).
+    InvalidLane { lane: char },
+    /// Not a swizzle pattern (wrong chars or length) — fall through to field lookup.
+    NotSwizzle,
+}
+
+/// D-SWIZZLE1: parse `member` as a swizzle on `type_name`. Up to four `x`/`y`/`z`/`w`
+/// letters; each must be in range for the type's lane count.
+pub fn parse_swizzle_member(member: &str, type_name: &str) -> SwizzleParse {
+    if !is_swizzleable_math_type(type_name) || member.is_empty() || member.len() > 4 {
+        return SwizzleParse::NotSwizzle;
+    }
+    let max = math_arity(type_name);
+    let mut lanes = Vec::with_capacity(member.len());
+    for c in member.chars() {
+        let idx = match c {
+            'x' => 0,
+            'y' => 1,
+            'z' => 2,
+            'w' => 3,
+            _ => return SwizzleParse::NotSwizzle,
+        };
+        if idx >= max {
+            return SwizzleParse::InvalidLane { lane: c };
+        }
+        lanes.push(idx);
+    }
+    SwizzleParse::Ok(lanes)
+}
+
+/// D-SWIZZLE1: the type of a read swizzle — one lane → scalar, N lanes → `VecN`
+/// (or the same SIMD lane type when all lanes are selected).
+pub fn swizzle_read_type(type_name: &str, lane_count: usize) -> Type {
+    if lane_count == 1 {
+        return math_scalar_ty(type_name);
+    }
+    if is_simd_lane_type(type_name) && lane_count == math_arity(type_name) {
+        return Type::Named(type_name.to_string());
+    }
+    Type::Named(match lane_count {
+        2 => "Vec2".to_string(),
+        3 => "Vec3".to_string(),
+        4 => "Vec4".to_string(),
+        _ => unreachable!("swizzle lane count 2..=4"),
+    })
+}
+
+/// D-SWIZZLE1: true when a write swizzle names the same source lane twice (`v.xx`).
+pub fn swizzle_write_overlaps(lanes: &[usize]) -> bool {
+    let mut seen = [false; 4];
+    for &lane in lanes {
+        if seen[lane] {
+            return true;
+        }
+        seen[lane] = true;
+    }
+    false
+}
+
 /// D-SIMD2 / D-LINALG1: type-check a positional constructor `T(a, b, …)` for a
 /// built-in math type. The arg types are bound by `expected` so a literal `1.0`
 /// elaborates to the component type (`F32` for `F32x4`). Returns the field types

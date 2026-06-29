@@ -45,3 +45,12 @@ jobs:
 
       - name: Freestanding / cross-target tests
         run: nix develop -c cargo test --test cross
+
+      - name: Install aarch64 cross tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user gcc-aarch64-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: aarch64 freestanding QEMU smoke
+        run: nix develop -c bash tools/ci/aarch64-qemu-freestanding.sh

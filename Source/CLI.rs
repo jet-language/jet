@@ -154,6 +154,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "semindex",
+        summary: "query the stable semantic index for a project entry file",
+        headline: false,
+    },
+    CommandSpec {
         name: "vendor",
         summary: "copy all dependencies into vendor/",
         headline: false,
