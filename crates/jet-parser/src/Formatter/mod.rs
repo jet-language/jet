@@ -299,6 +299,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {
             s.end
         }
+        Stmt::CountedLoop { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Loop {
             body: inner,
             span: s,
@@ -625,7 +626,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {
             s.start
         }
-        Stmt::Loop { span: s, .. } => s.start,
+        Stmt::Loop { span: s, .. } | Stmt::CountedLoop { span: s, .. } => s.start,
         Stmt::Unsafe { span, .. } => span.start,
         Stmt::Impure { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,

@@ -132,6 +132,27 @@ impl<'a> Fmt<'a> {
             Stmt::Continue(_) => self.write("continue"),
             Stmt::BreakLabel(name, _) => self.write(&format!("break {}@", name)),
             Stmt::ContinueLabel(name, _) => self.write(&format!("continue {}@", name)),
+            // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — emit verbatim.
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                label,
+                ..
+            } => {
+                if let Some((n, _)) = label {
+                    self.write(&format!("{}@ ", n));
+                }
+                self.write("loop ");
+                self.fmt_binding(init);
+                self.write("; ");
+                self.fmt_cond(cond);
+                self.write("; ");
+                self.fmt_stmt(step);
+                self.write(" {");
+                self.fmt_body(body);
+            }
             Stmt::Loop {
                 body: inner, label, ..
             } => {

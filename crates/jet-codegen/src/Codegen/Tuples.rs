@@ -218,7 +218,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
         Stmt::Return(Some(e), _) => collect_tuple_shapes_from_expr(e, out),
         Stmt::Return(None, _) => {}
         Stmt::If(i) => collect_tuple_shapes_from_if(i, out),
-        Stmt::While { cond, body, .. } => {
+        Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. } => {
             collect_tuple_shapes_from_expr(cond, out);
             for s in body {
                 collect_tuple_shapes_from_stmt(s, out);

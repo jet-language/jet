@@ -206,6 +206,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             Stmt::While { body, .. }
             | Stmt::For { body, .. }
             | Stmt::Loop { body, .. }
+            | Stmt::CountedLoop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::Region { body, .. }
@@ -967,6 +968,29 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             TStmt::While {
                 label: label_name(label),
                 cond,
+                body: lower_stmts(body, cx, &mut branch),
+            }
+        }
+        // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` three-part counted loop.
+        Stmt::CountedLoop { init, cond, step, body, label, .. } => {
+            // Lower the init binding as a `let mut` local.
+            let init_val = lower_expr(&init.init, cx, env);
+            let init_ty = init.ty.clone();
+            env.bind(&init.name, mangle(&init.name), init_ty);
+            let init_stmt = Box::new(TStmt::Let {
+                name: init.name.clone(),
+                kw: "let mut",
+                ty_clause: String::new(),
+                init: init_val,
+            });
+            let cond = lower_expr(cond, cx, env);
+            let mut branch = clone_env(env);
+            let step = Box::new(lower_stmt(step.as_ref(), cx, &mut branch));
+            TStmt::CountedLoop {
+                label: label_name(label),
+                init: init_stmt,
+                cond,
+                step,
                 body: lower_stmts(body, cx, &mut branch),
             }
         }

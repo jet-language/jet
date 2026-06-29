@@ -95,7 +95,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "arena-allocator-inference",
       "blockedBy": [],
@@ -123,10 +123,14 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Plan vetted 2026-06-29: solid lint-first impl, no open decisions for steps 1–4. Advanced to ready. Future gate (step 5: inferred placement) remains downstream."
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-29"
     },
     {
       "id": "c27",
@@ -1058,7 +1062,7 @@
       "epoch": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "D-REVERSE1=B: core.layout — Cassowary-style incremental LINEAR constraint solver for UI layout. Plan status: blocked on D-LAYOUT1 (API surface ballot). Need decisions on: (A) Constraint syntax — how does user express 'width >= 100' and 'left = other.right + 8'? (B) Variable binding — how are layout variables declared and accessed? (C) Priority levels — Cassowary's required/strong/medium/weak map to what Jet spelling? Raise D-LAYOUT1 ballot before writing code. Prerequisites once D-LAYOUT1 decided: Cassowary solver ported to Rust (no external crate per I6) → wired into core.layout → `@suggest` edits implement the constraint-change API.",
+      "plan": "layout-constraint-solver",
       "blockedBy": [],
       "log": [
         {
@@ -1092,10 +1096,14 @@
         {
           "at": "2026-06-26",
           "text": "Plan roughed out. Blocked on D-LAYOUT1 (constraint syntax + priority API ballot). Raising D-LAYOUT1 decision."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Plan doc written (sidequests/layout-constraint-solver.md). D-LAYOUT-GATES1 raised: both compiler language gates for full option A. Card enters decide lane pending owner gate ratification; Path B (method-only builder) is unblocked if gates declined."
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-29"
     },
     {
       "id": "c0ofhdr",
@@ -4244,9 +4252,9 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "D-WEBBACKEND1=A + D-WASM1=A implementation plan after new ballots resolve: (1) add `Browser` effect to the effect set; (2) partition web build by inferred effects: Browser/DOM code to JS, pure/compute code to WASM; (3) implement module-level `#Target(Wasm|Js)` ceilings and per-function `#Wasm`, `#Js`, `#WasmExport`; (4) implement chosen WASM target from D-WEBKIND1; (5) implement JS/WASM boundary type ABI from D-JSBIND1; (6) implement DOM emission strategy from D-DOMGEN1; (7) driver emits JS bundle, WASM module, and partition manifest; (8) examples/goldens/ui diagnostics.",
+      "plan": "web-backend-wasm",
       "blockedBy": [],
       "log": [
         {
@@ -4296,6 +4304,10 @@
         {
           "at": "2026-06-26",
           "text": "Plan roughed out. Requires D-WASM1 (JS/WASM partition model) before further planning. Raising D-WASM1."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Plan doc written (sidequests/web-backend-wasm.md). All 5 decisions ratified. No new decisions needed. Advanced to ready (implement lane)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -5261,7 +5273,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
@@ -5289,6 +5301,18 @@
         {
           "at": "2026-06-29",
           "text": "Added P0 syntax cleanup ballot card per owner request; reconciliation waits on these choices."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Verified NOT complete: all 11 decision ballots ratified, but (a) D-LOOP-SEMICOLON1=C mandates a follow-up separator ballot (D-LOOP-COUNTED1 raised), and (b) the actual repo-wide purge (strict scope per D-RECONCILE-SCOPE1=A) has not been implemented. Card moves to decide lane pending D-LOOP-COUNTED1; implementation plan needed after separator is chosen."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "D-LOOP-SEMICOLON1 reversed to A (keep semicolons); D-LOOP-COUNTED1 closed as superseded. All decisions now ratified. Card returns to plan lane — implementation (repo-wide purge) still needed."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Canonical syntax reconciliation implementation complete: D-LOOP-SEMICOLON1=A (Stmt::CountedLoop end-to-end, example 100, fmt stability test), D-CORENS-CANON1=A (purged dead aliases), D-S25-RETIRE1=A (previous session), D-ORRETURN-CANON1=A (KW_QUESTION_CONTINUE removed, S81 marked superseded), D-TYPE-ALIAS-CANON1=A (Ptr<T> fixture replaced with *T in ui_lint). syntax_reconciliation + decisions + fmt + golden + corelib + lint_snapshots all green."
         }
       ],
       "created": "2026-06-29T00:00:00.000Z",
@@ -11677,10 +11701,15 @@
         {
           "at": "2026-06-29",
           "text": "Raised from owner request for latest syntax guidance before reconciliation."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Owner reversed to A: semicolons are the canonical separator in loop init; cond; step {} headers."
         }
       ],
-      "outcome": "C",
-      "ratifiedAt": "2026-06-29"
+      "outcome": "A",
+      "ratifiedAt": "2026-06-29",
+      "comment": "Owner reversed outcome C to A: keep semicolons in counted-loop headers, confirming D-LOOP-SURFACE-REOPEN=B."
     },
     {
       "id": "D-S25-RETIRE1",
@@ -11954,6 +11983,119 @@
         {
           "at": "2026-06-29",
           "text": "Raised from owner request for latest syntax guidance before reconciliation."
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-29"
+    },
+    {
+      "id": "D-LOOP-COUNTED1",
+      "cardId": "c3isyntaxreconcile",
+      "title": "Counted loop separator: what replaces semicolons?",
+      "gist": "D-LOOP-SEMICOLON1=C retired semicolons from counted loop headers; pick the replacement separator.",
+      "explainer": "D-LOOP-SEMICOLON1=C kept compact counted loops but deferred the separator choice. The ratified S6-R law bans visible semicolons; we need a different separator for the three-part header (init; condition; afterthought).",
+      "story": "Gerald is porting a tight inner loop from C and wants the three-part form. He knows Jet has no semicolons, so he needs to know exactly what punctuation to type between the init, condition, and step.",
+      "inWild": "// Porting C: for (i = 0; i < n; i++) {\n// Jet three-part form (separator TBD):\nloop i := 0 ??? i < n ??? i += 1 { process(buf[i]) }",
+      "comparisons": [
+        {
+          "lang": "C/Java/JS",
+          "note": "Semicolons in for-loop header",
+          "code": "for (i = 0; i < n; i++) {}"
+        },
+        {
+          "lang": "Go",
+          "note": "Semicolons in for-loop header",
+          "code": "for i := 0; i < n; i++ {}"
+        },
+        {
+          "lang": "Swift",
+          "note": "No three-part for; use while",
+          "code": "var i = 0; while i < n { i += 1 }"
+        }
+      ],
+      "options": [
+        {
+          "key": "A",
+          "name": "Comma separator (recommended)",
+          "detail": "Use commas between the three parts. Commas already appear in function call arguments and tuple construction; reusing them here keeps the punctuation vocabulary small. The header reads left-to-right with natural pauses.",
+          "code": "loop i := 0, i < n, i += 1 { process(buf[i]) }\nloop i := len, i > 0, i -= 1 { drain(q[i]) }"
+        },
+        {
+          "key": "B",
+          "name": "Keyword separators (while/step)",
+          "detail": "Use keywords: . Self-documenting but verbose; adds two reserved words or repurposes existing ones.",
+          "code": "loop i := 0 while i < n step i += 1 { process(buf[i]) }"
+        },
+        {
+          "key": "C",
+          "name": "Retire three-part form entirely",
+          "detail": "Remove the three-part header. All counted loops use range iteration  or manual . Porting C loops requires rewriting them as range loops.",
+          "code": "loop i in 0..n { process(buf[i]) }\n// or:\nloop i in (0..n).step(2) { process(buf[i]) }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "group": "syntax-reconciliation",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-29",
+      "created": "2026-06-29",
+      "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Raised as follow-up to D-LOOP-SEMICOLON1=C (redesign counted loop separator)."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "Closed as superseded — D-LOOP-SEMICOLON1 reversed to A (keep semicolons)."
+        }
+      ],
+      "outcome": "superseded",
+      "comment": "Superseded: D-LOOP-SEMICOLON1 reversed to A — semicolons stay. No separator redesign needed.",
+      "ratifiedAt": "2026-06-29"
+    },
+    {
+      "id": "D-LAYOUT-GATES1",
+      "cardId": "ca3ynsl",
+      "title": "Ratify the two language gates required for D-LAYOUT1 option A?",
+      "gist": "D-LAYOUT1=A needs two compiler extensions: comparison ops that return Constraint on layout types, and axis-typed layout variables in the closed type family.",
+      "explainer": "D-LAYOUT1 ratified option A (typed-axis layout block) conditionally on two compiler language gates. If both gates are ratified here, the full design ships. If either is declined, core.layout falls back to a method-only builder (D-LAYOUT1 option B), which is implementable today without any language change.",
+      "story": "Sandra is building a form layout. She wants to write  and have Jet catch  (cross-axis mix) as a compile error. Both features require the compiler to treat layout variable types specially.",
+      "inWild": "// Full option A (both gates ratified):\nlayout form {\n    label.width  >= 80.px\n    label.right + 16.px == input.left\n    label.width + 16.px + input.width == form.width\n    // label.left >= label.height + 8.px  → E-LAYOUT-AXIS-MISMATCH\n}\n\n// Option B fallback (gates declined):\nfn build_form(s: LayoutSolver) {\n    s.width_gte(label, 80.px)\n    s.align_right(label, 16.px, input)\n}",
+      "comparisons": [
+        {
+          "lang": "Swift AutoLayout",
+          "note": "Uses NSLayoutConstraint builder; no axis safety",
+          "code": "label.widthAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true"
+        },
+        {
+          "lang": "Apple SwiftUI",
+          "note": "frame/padding modifiers; no constraint model",
+          "code": "label.frame(minWidth: 80)"
+        }
+      ],
+      "options": [
+        {
+          "key": "A",
+          "name": "Ratify both gates — ship full typed-axis layout (recommended)",
+          "detail": "GATE 1: comparison operators (>=, ==, <=) may return Constraint (not Bool) when both operands are closed layout variable types (HVar, VVar, LengthVar). Like D-SIMD2's closed-operator blessing, this is limited to the compiler-provided family only. GATE 2: HVar, VVar, LengthVar, Constraint, and LayoutHandle enter the compiler's closed type family (recognized by core_type_known). Both gates are tightly scoped and follow existing precedent (SIMD/D-SIMD2, distinct types/D-DIST2).",
+          "code": "// Axis-typed variables catch mistakes at compile time:\nlayout form {\n    label.width  >= 80.px        // HVar >= LengthVar → Constraint ✓\n    label.right + 16.px == input.left  // axis-safe ✓\n    // label.left >= label.height   → E-LAYOUT-AXIS-MISMATCH ✗\n}"
+        },
+        {
+          "key": "B",
+          "name": "Decline gates — use method-only builder",
+          "detail": "Keep comparison operators Bool-only and keep the closed type family as-is. core.layout ships as a method-only builder (no layout {} block, no axis safety). Implementable today with no language change. Axis errors are runtime conflicts, not compile errors.",
+          "code": "fn build_form(s: LayoutSolver) {\n    s.width_gte(label, 80.px)\n    s.align_right(label, 16.px, input)\n    // cross-axis mix compiles, fails at runtime solver\n}"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-29",
+      "created": "2026-06-29",
+      "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Raised as follow-up to D-LAYOUT1=A (two language gates required to implement full design)."
         }
       ],
       "outcome": "A",

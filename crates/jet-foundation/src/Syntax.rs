@@ -402,6 +402,8 @@ pub const KW_ELSE: &str = "else";
 
 /// S19 (ratified): loop keywords. `loop` is the one true loop keyword.
 /// `in` is a contextual keyword inside `loop x in …`.
+/// D-LOOP-SEMICOLON1=A (ratified 2026-06-29): `loop init; cond; step { }` three-part
+/// counted loop — semicolons are the separators in the header, nowhere else.
 pub const KW_IN: &str = "in";
 
 /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
@@ -1235,13 +1237,6 @@ pub const OP_FAN_OUT: &str = ".[";
 /// is the package version-pin form. No dedicated two-character token in either
 /// case — the parser resolves by position.
 pub const TYPE_FIXED_SIZE_SEP: &str = "#";
-
-/// S81 (ratified 2026-06-16): loop-skip sigil — `?continue` inside a `loop`
-/// iteration propagates a `None` / `Err` result as a continue (skip to next
-/// element). It is the iteration-level analogue of `?` propagation for fallible
-/// loops. Written as a single two-char token `?continue` (the `?` is part of
-/// the keyword, not a standalone operator).
-pub const KW_QUESTION_CONTINUE: &str = "?continue";
 
 /// D-DIST1 (ratified 2026-06-19): `UserId @= distinct Int` — declares a
 /// distinct type (a separate nominal type sharing the base's representation).

@@ -396,6 +396,28 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             emit_tir_stmts(body, cx, out, indent + 1);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` → scoped Rust block.
+        TStmt::CountedLoop { label, init, cond, step, body } => {
+            // Outer scoping block to contain the init variable.
+            out.push_str(&format!("{}{{\n", pad));
+            emit_tir_stmt(init, cx, out, indent + 1);
+            let inner_pad = "    ".repeat(indent + 1);
+            out.push_str(&format!(
+                "{}{}loop {{\n",
+                inner_pad,
+                tir_label_prefix(label),
+            ));
+            let body_pad = "    ".repeat(indent + 2);
+            out.push_str(&format!(
+                "{}if !({}) {{ break; }}\n",
+                body_pad,
+                emit_tir_expr(cond, cx)
+            ));
+            emit_tir_stmts(body, cx, out, indent + 2);
+            emit_tir_stmt(step, cx, out, indent + 2);
+            out.push_str(&format!("{}}}\n", inner_pad));
+            out.push_str(&format!("{}}}\n", pad));
+        }
         TStmt::Range {
             label,
             var,

@@ -1343,14 +1343,8 @@ message-only carrier, keeping `String`-only, a non-fallible `main` as the only
 form, naming the conversion trait **`Error`** (collides with the type), separate
 carrier type names (`Fault`, `Snag`, …).
 
-**S81 — `?continue` loop skip** *(ratified 2026-06-16; milestone pending)*:
-inside a `for`/`while` body, postfix **`?continue`** on a fallible or optional
-value skips to the next iteration when the value is failed/empty and binds the
-success value otherwise — `val line = next()?continue;` reads "take the next
-line, or skip this turn". A loop-scoped sibling of `?` propagation (S7) and
-`??` fallback (S71); legal only inside a loop (outside → teaching error).
-`?break` is **not** added in v1 (write `?? break`). Rejected: deferring the
-feature (owner chose to add it), a method `.or_continue()` form.
+**S81 — `?continue` loop skip** *(ratified 2026-06-16; superseded 2026-06-29 by D-ORRETURN-CANON1=A)*:
+The `?continue` spelling is retired. Canonical form is `expr ?? continue` (see D-ORRETURN-ERG1 / D-ORRETURN-CANON1).
 
 **S82 — Attribute syntax (`@` markers)** *(ratified 2026-06-16; ATTR-SHAPE,
 D-LL2, D-JSON1)*: **`@` not `#`** — declaration markers and scoped effects
@@ -3155,14 +3149,14 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-29 | D-S14-PAUSE | **old/foreign syntax teaching is paused until post-Epoch 6** (A): delete old Jet and other-language teaching fixtures/snapshots/docs now; retired spellings get ordinary syntax errors until a post-Epoch 6 migration-teaching pass explicitly reintroduces targeted diagnostics. **Ratified — cleanup pending.** c154 | owner |
 | 2026-06-29 | D-RECONCILE-SCOPE1 | **syntax reconciliation is a strict repo-wide purge** (A): remove stale/foreign syntax from docs, examples, tests, snapshots, diagnostics, parser recovery, syntax ledgers, comments, and generated teaching fixtures unless explicitly allowlisted. **Ratified — cleanup pending.** c154 | owner |
 | 2026-06-29 | D-CANON-SOURCE1 | **canonical syntax truth is `Syntax.rs` plus the ratified decision log, CI-checked** (A): user-typeable forms live in `Syntax.rs` with decision IDs, mirrored by this log; reconciliation should add forbidden-spelling checks so stale syntax cannot drift back in. **Ratified — cleanup/tooling pending.** c154 | owner |
-| 2026-06-29 | D-S25-RETIRE1 | **retire S25 `||`/`&&` comparison distribution** (A): `||` and `&&` no longer reuse the nearest comparator for bare values. Comparator alternatives are single `|` (`x == 1 | 2` in an arm head, or `1 | 2` under an inferred comparator); `||`/`&&`/`==`/`!=` remain boolean arm condition syntax. **Ratified — syntax reconciliation cleanup pending.** c154 | owner |
+| 2026-06-29 | D-S25-RETIRE1 | **retire S25 `||`/`&&` comparison distribution** (A): `||` and `&&` no longer reuse the nearest comparator for bare values. Comparator alternatives are single `|` (`x == 1 | 2` in an arm head, or `1 | 2` under an inferred comparator); `||`/`&&`/`==`/`!=` remain boolean arm condition syntax. **Ratified — implemented 2026-06-29.** c154 | owner |
 | 2026-06-29 | D-BIND-CANON1 | **binding syntax stays current law** (A): canonical bindings are `name = value`, `name@ Type = value`, and `name: Type = value`; older alternatives are cleanup targets. **Ratified — confirms D-BINDEXPLICIT1 for reconciliation.** c154 | owner |
 | 2026-06-29 | D-MARKER-CANON1 | **all user-typeable `#` markers are PascalCase** (A): argument markers use parens and generated/cache marker spellings are not exempt (`#Test`, `#Unsafe`, `#Extern`, `#Bindgen`, `#Layout`, `#Grant`, `#Context`). **Ratified — cleanup pending.** c154 | owner |
 | 2026-06-29 | D-CFFI-CANON1 | **C FFI marker family is `#Extern` plus `#Bindgen` only** (A): delete `@extern`, `#extern`, `@bindgen`, and `#bindgen` fixtures/usages; generated binding modules use PascalCase too. **Ratified — amends D-CFFI-SYNTAX-REOPEN cleanup details.** c154 | owner |
 | 2026-06-29 | D-RESULT-OPTION-CANON1 | **`T?` always means Optional** (B): fallible types must use spaced `T ? E` / `T ?`; optional return values do not need grouping to avoid fallible parsing. **Ratified — syntax/spec cleanup pending.** c154 | owner |
 | 2026-06-29 | D-ORRETURN-CANON1 | **early-exit fallbacks use the `?? <control>` family only** (A): canonical forms are `expr ?? return`, `expr ?? continue`, and `expr ?? break`; delete `?return`, `?continue`, and `?break` fixtures/usages. **Ratified — confirms D-ORRETURN-ERG1 cleanup.** c154 | owner |
-| 2026-06-29 | D-LOOP-SEMICOLON1 | **counted-loop semicolon header is reopened for separator redesign** (C): keep the need for a compact counted-loop form, but the `loop init; condition; afterthought` semicolon header is not final; choose a non-general-statement-separator design in follow-up before implementation. **Ratified — amends D-LOOP-SURFACE-REOPEN.** c154 | owner |
+| 2026-06-29 | D-LOOP-SEMICOLON1 | **keep semicolons in counted-loop headers** (A — reversed 2026-06-29): the three-part form `loop init; condition; afterthought { }` is canonical, confirming D-LOOP-SURFACE-REOPEN=B. Semicolons are legal only inside this header, not as general statement separators. Prior outcome C (separator redesign) is reverted. **Ratified — implemented 2026-06-29** (`Stmt::CountedLoop`, example 100, fmt stability test). c154 | owner |
 | 2026-06-29 | D-TYPE-ALIAS-CANON1 | **container/pointer types are canonical-only before Epoch 6** (A): use `[T]`, `[K,V]`, and `*T`; delete teaching/fixtures for `List<T>`, `Map<K,V>`, and `Ptr<T>`. **Ratified — cleanup pending.** c154 | owner |
-| 2026-06-29 | D-CORENS-CANON1 | **`core.*` is the only standard namespace spelling** (A): delete `std.*`, `jet.*`, `jet.core`, `core.json`, and old namespace fixtures; no aliases or pre-Epoch-6 teaching diagnostics. **Ratified — strengthens D-CORENS1 cleanup.** c154 | owner |
+| 2026-06-29 | D-CORENS-CANON1 | **`core.*` is the only standard namespace spelling** (A): delete `std.*`, `jet.*`, `jet.core`, `core.json`, and old namespace fixtures; no aliases or pre-Epoch-6 teaching diagnostics. **Ratified — implemented 2026-06-29** (purged dead `core.*`/`jet.*` aliases from CheckerCoreLib, Effects, Purity; corelib test updated). c154 | owner |
 | 2026-06-29 | D-ACRONYM-CANON1 | **standard acronym type names stay full-caps** (A): use `JSON`, `TOML`, `YAML`, `CSV`, `IOError`, and `UTF8Error` style consistently; PascalCase data aliases are rejected for this cleanup. **Ratified — cleanup pending.** c154 | owner |
 | 2026-06-29 | D-SERDE-CANON1 | **serialization vocabulary is `Codable` / `Encode` / `Decode` only** (A): delete `Serialize` and `Deserialize` syntax docs/tests until any post-Epoch-6 compatibility pass. **Ratified — cleanup pending.** c154 | owner |

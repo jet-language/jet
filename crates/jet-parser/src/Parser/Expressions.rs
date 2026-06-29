@@ -1830,7 +1830,7 @@ impl<'a> Parser<'a> {
                         | Stmt::Switch { span, .. } => span.end,
                         Stmt::Val(b) => b.init.span().end,
                         Stmt::Assign { value, .. } => value.span().end,
-                        Stmt::Loop { span: s, .. } => s.end,
+                        Stmt::Loop { span: s, .. } | Stmt::CountedLoop { span: s, .. } => s.end,
                         Stmt::Unsafe { span, .. } => span.end,
                         Stmt::Impure { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,

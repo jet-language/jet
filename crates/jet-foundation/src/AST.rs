@@ -1537,6 +1537,16 @@ pub enum Stmt {
         /// D-LABEL1: optional `@name` loop label (`@outer loop { }`).
         label: Option<(String, Span)>,
     },
+    /// D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — three-part counted loop.
+    /// Lowers to: `{ init; loop cond { body; step } }` in codegen.
+    CountedLoop {
+        init: Binding,
+        cond: Expr,
+        step: Box<Stmt>,
+        body: Vec<Stmt>,
+        span: Span,
+        label: Option<(String, Span)>,
+    },
     /// S58 (E2-M13): `@unsafe { … }` audited region. `audit` carries the
     /// `@audit("…")` reason on the line above, when present (lint L3101 fires
     /// when it is `None`). `body` is the gated statements.
@@ -1693,6 +1703,7 @@ impl Stmt {
             | Stmt::For { span, .. }
             | Stmt::Switch { span, .. }
             | Stmt::Loop { span, .. }
+            | Stmt::CountedLoop { span, .. }
             | Stmt::Unsafe { span, .. }
             | Stmt::Impure { span, .. }
             | Stmt::Region { span, .. }

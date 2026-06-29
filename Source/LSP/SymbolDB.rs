@@ -488,6 +488,7 @@ fn collect_view_return_hints(stmts: &[AST::Stmt], mp: &str, db: &mut SymbolDB) {
             | AST::Stmt::Region { body, .. }
             | AST::Stmt::Transact { body, .. }
             | AST::Stmt::AssumeDet { body, .. }
+            | AST::Stmt::CountedLoop { body, .. }
             | AST::Stmt::Loop { body, .. } => collect_view_return_hints(body, mp, db),
             AST::Stmt::Switch {
                 arms, else_body, ..
@@ -601,6 +602,17 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
             if let Some(eb) = else_body {
                 collect_stmts(eb, mp, module, db);
             }
+        }
+        AST::Stmt::CountedLoop { cond, body, init, .. } => {
+            db.defs.push(SymDef {
+                name: init.name.clone(),
+                def_span: init.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Local { mutable: true, ty: None },
+            });
+            collect_expr(&init.init, mp, db);
+            collect_expr(cond, mp, db);
+            collect_stmts(body, mp, module, db);
         }
         AST::Stmt::Loop { body, .. }
         | AST::Stmt::Unsafe { body, .. }

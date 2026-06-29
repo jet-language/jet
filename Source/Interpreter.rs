@@ -218,7 +218,7 @@ fn scan_stmt_for_unsafe(s: &Stmt) -> Option<Boundary> {
             span: Some(*span),
         }),
         Stmt::If(ifs) => scan_if_for_unsafe(ifs),
-        Stmt::While { body, .. } | Stmt::Loop { body, .. } => scan_stmts_for_unsafe(body),
+        Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::CountedLoop { body, .. } => scan_stmts_for_unsafe(body),
         Stmt::For { body, .. } => scan_stmts_for_unsafe(body),
         Stmt::Switch {
             arms, else_body, ..
@@ -265,6 +265,9 @@ fn scan_stmt_for_mut_arg(s: &Stmt) -> Option<Boundary> {
         Stmt::Return(Some(e), _) => expr_mut_arg(e),
         Stmt::If(ifs) => scan_if_for_mut_arg(ifs),
         Stmt::While { cond, body, .. } => {
+            expr_mut_arg(cond).or_else(|| scan_stmts_for_mut_arg(body))
+        }
+        Stmt::CountedLoop { cond, body, .. } => {
             expr_mut_arg(cond).or_else(|| scan_stmts_for_mut_arg(body))
         }
         Stmt::Loop { body, .. } => scan_stmts_for_mut_arg(body),
@@ -410,7 +413,10 @@ fn scan_block_for_struct_interp(
                     return Some(found);
                 }
             }
-            Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            Stmt::While { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CountedLoop { body, .. } => {
                 if let Some(found) = scan_block_for_struct_interp(body, locals) {
                     return Some(found);
                 }

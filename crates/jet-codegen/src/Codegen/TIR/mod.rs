@@ -293,6 +293,15 @@ pub enum TStmt {
         cond: TExpr,
         body: Vec<TStmt>,
     },
+    /// D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — the three-part counted loop.
+    /// Emitted as `{ let mut init_name = init_val; loop { if !(cond) { break; } body; step; } }`.
+    CountedLoop {
+        label: Option<String>,
+        init: Box<TStmt>,
+        cond: TExpr,
+        step: Box<TStmt>,
+        body: Vec<TStmt>,
+    },
     /// `loop i in start..end [step k]` — a numeric range loop (`ForKind::Range`).
     /// Jet's `..` is inclusive (S22 / D-SG8), so this lowers to `start..=end`,
     /// optionally `.step_by((k) as usize)`. The loop variable `var` is an `Int`

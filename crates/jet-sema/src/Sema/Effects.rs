@@ -201,16 +201,16 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     // deterministic value constructor, so (like `time.clock`) it carries no effect.
     if matches!(
         (module, method),
-        ("core.time" | "jet.time", "clock" | "ms" | "secs") | ("core.random", "rng")
+        ("core.time", "clock" | "ms" | "secs") | ("core.random", "rng")
     ) {
         return None;
     }
     Some(match module {
         "core.fs" | "core.files" => Effect::Fs,
-        "core.net" | "jet.http" | "core.http" | "core.http.client" | "core.http.server" => {
+        "core.net" | "jet.http" | "core.http.client" | "core.http.server" => {
             Effect::Net
         }
-        "core.time" | "jet.time" => Effect::Time,
+        "core.time" => Effect::Time,
         "core.random" => Effect::Rand,
         "core.env" => Effect::Env,
         "core.process" => Effect::Exec,
@@ -681,6 +681,10 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
                     .find_map(|a| expr_handle_escape(&a.cond, handle).or_else(|| block(&a.body)))
             })
             .or_else(|| else_body.as_ref().and_then(|b| block(b))),
+        Stmt::CountedLoop { init, cond, step, body, .. } => expr_handle_escape(&init.init, handle)
+            .or_else(|| expr_handle_escape(cond, handle))
+            .or_else(|| block(body))
+            .or_else(|| stmt_handle_escape(step, handle)),
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }

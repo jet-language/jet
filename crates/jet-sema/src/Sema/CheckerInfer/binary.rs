@@ -8,8 +8,7 @@ use crate::Generics::COMPARABLE;
 use crate::AST::{BinOp, Expr, Pattern, Type};
 
 impl<'a> Checker<'a> {
-    /// Binary operators, including comparison distribution (S25):
-    /// `day == "mon" || "tue"` re-applies the nearest comparison.
+    /// Binary operators and type checking.
     pub(crate) fn infer_binary(
         &mut self,
         op: BinOp,
@@ -38,34 +37,20 @@ impl<'a> Checker<'a> {
             let rt = self.infer(rhs);
             if let Some(rt) = rt {
                 if rt != Type::Bool {
-                    // S25: a plain value re-applies the nearest comparison.
-                    if let Some((subject, cmp_op)) = rightmost_comparison(lhs) {
-                        let rhs_span = rhs.span();
-                        let new_span = Span::new(subject.span().start, rhs_span.end);
-                        let old_rhs = std::mem::replace(rhs.as_mut(), Expr::Bool(false, rhs_span));
-                        **rhs =
-                            Expr::Binary(cmp_op, Box::new(subject), Box::new(old_rhs), new_span);
-                        // Re-check the rebuilt comparison; this reports a
-                        // mismatch (E0109) if the value's type doesn't fit.
-                        self.infer_rebuilt(rhs);
-                    } else {
-                        self.diags.push(Diagnostic::error(
-                            "E0110",
-                            format!(
-                                "the right side of `{}` must be {}, but this is {}",
-                                op.spell(),
-                                Type::Bool.show(),
-                                rt.show()
-                            ),
-                            format!(
-                                "right after a comparison, a plain value repeats it (`x == 1 {} 2` means `x == 1 {} x == 2`, S25) — but there's no comparison before this one",
-                                op.spell(),
-                                op.spell()
-                            ),
-                            "compare the value to something, e.g. `x == 2`".to_string(),
-                            Some(rhs.span()),
-                        ));
-                    }
+                    // D-S25-RETIRE1=A: comparison distribution via `||`/`&&` is gone.
+                    // Each side of `||`/`&&` must be a Bool expression.
+                    self.diags.push(Diagnostic::error(
+                        "E0110",
+                        format!(
+                            "the right side of `{}` must be {}, but this is {}",
+                            op.spell(),
+                            Type::Bool.show(),
+                            rt.show()
+                        ),
+                        "each side of a logic operator must be a yes/no comparison".to_string(),
+                        "write the full comparison, e.g. `x == 2`".to_string(),
+                        Some(rhs.span()),
+                    ));
                 }
             }
             return Some(Type::Bool);
@@ -387,13 +372,6 @@ impl<'a> Checker<'a> {
             }
             BinOp::And | BinOp::Or => unreachable!(),
         }
-    }
-
-    /// Re-infer a node we just built ourselves (S25); it can still report
-    /// a type mismatch, but never duplicates earlier errors because both
-    /// halves were already clean.
-    pub(crate) fn infer_rebuilt(&mut self, e: &mut Expr) {
-        self.infer(e);
     }
 
     pub(crate) fn op_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {

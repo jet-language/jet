@@ -1285,6 +1285,24 @@ impl<'a> Checker<'a> {
                         .push(undefined_loop_label(name, &self.loop_labels, *span));
                 }
             }
+            Stmt::CountedLoop {
+                init, cond, body, step, label, ..
+            } => {
+                if let Some((n, _)) = label {
+                    self.loop_labels.push(n.clone());
+                }
+                self.check_binding(init);
+                self.require_bool(cond, "a counted loop condition");
+                self.loop_depth += 1;
+                let saved_u = self.uninit.clone();
+                self.check_block(body, true);
+                self.check_stmt(step.as_mut());
+                self.uninit = saved_u;
+                self.loop_depth -= 1;
+                if label.is_some() {
+                    self.loop_labels.pop();
+                }
+            }
             Stmt::Loop {
                 body: inner, label, ..
             } => {

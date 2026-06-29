@@ -407,6 +407,12 @@ impl<'a> TaintCtx<'a> {
                     self.check_block(b);
                 }
             }
+            Stmt::CountedLoop { init, cond, step, body, .. } => {
+                self.check_expr(&init.init);
+                self.check_expr(cond);
+                self.check_block(body);
+                self.check_stmt(step);
+            }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }

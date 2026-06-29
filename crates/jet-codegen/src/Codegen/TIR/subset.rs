@@ -1098,6 +1098,21 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             let mut body_locals = locals.clone();
             body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
         }
+        // D-LOOP-SEMICOLON1=A: init var is in scope for cond, step, and body.
+        Stmt::CountedLoop { init, cond, step, body, .. } => {
+            if !expr_in_subset(&init.init, cx, locals) {
+                return false;
+            }
+            let mut inner = locals.clone();
+            inner.insert(init.name.clone());
+            if !expr_in_subset(cond, cx, &inner) {
+                return false;
+            }
+            if !stmt_in_subset(step.as_ref(), cx, &mut inner) {
+                return false;
+            }
+            body.iter().all(|s| stmt_in_subset(s, cx, &mut inner))
+        }
         Stmt::For {
             var,
             var2,

@@ -3062,9 +3062,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
         "core.term" => &["read_key"],
         "core" => &[],
-        // D-CORENS1: ring packages — `core.*` is the canonical user-facing name;
-        // `jet.*` is the legacy / internal dispatch key. Both spellings are accepted.
-        "core.log" | "jet.log" => &[
+        // D-CORENS-CANON1: ring packages normalize to `jet.*` internal key via
+        // normalize_core_module; `core.*` is only the user-facing spelling.
+        "jet.log" => &[
             "info",
             "warn",
             "error",
@@ -3073,8 +3073,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "set_trace_id",
             "setup",
         ],
-        "jet.time" => &["now", "format"],
-        "core.crypto" | "jet.crypto" => &["sha256", "sha256_bytes"],
+        "jet.crypto" => &["sha256", "sha256_bytes"],
         // E2-M10: networking modules.
         "core.net" => &[
             "tcp_listen",
@@ -3087,9 +3086,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "set_timeout",
             "tcp_reply",
         ],
-        "core.http" | "jet.http" => &["get", "post", "serve"],
+        "jet.http" => &["get", "post", "serve"],
         // D-REGEX1: linear-time regex ring package.
-        "core.regex" | "jet.regex" => &[
+        "jet.regex" => &[
             "is_match",
             "match",
             "find",
@@ -3099,7 +3098,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "split",
         ],
         // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip + tar.
-        "core.archive" | "jet.archive" => &[
+        "jet.archive" => &[
             "gzip_compress",
             "gzip_decompress",
             "zip_compress",
@@ -3109,9 +3108,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "tar_names_json",
         ],
         // D-DEP-DB1: SQLite ring package.
-        "core.db" | "jet.db" => &["open", "open_memory", "close", "exec", "query_json"],
+        "jet.db" => &["open", "open_memory", "close", "exec", "query_json"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
-        "core.reactive" | "jet.reactive" => &["signal", "derived", "effect"],
+        "jet.reactive" => &["signal", "derived", "effect"],
         // D-HONESTNUM1=A: Measurement<T> constructor.
         "core.science.measurement" => &["from"],
         // D-PENDING1=B: Loadable<T,E> constructors.
@@ -3139,7 +3138,7 @@ pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
         module,
         "core.fs" | "core.files" | "core.io" | "core.net" | "core.tasks"
-            | "core.process" | "core.time" | "jet.http" | "jet.log" | "jet.time"
+            | "core.process" | "core.time" | "jet.http" | "jet.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"
     )
@@ -3165,7 +3164,7 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
         "core.io" => {
             "Standard I/O requires an OS. Use a platform-specific write routine or build without `--freestanding`."
         }
-        "core.process" | "core.time" | "jet.time" => {
+        "core.process" | "core.time" => {
             "System calls are not available in a freestanding build. Build without `--freestanding`."
         }
         "jet.log" => {

@@ -946,6 +946,24 @@ fn main() {
 }
 
 #[test]
+fn fmt_counted_loop_d_loop_semicolon1_stability() {
+    // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` must survive fmt unchanged.
+    let src = "\
+fn main() {
+    sum := 0
+    loop i := 0; i < 5; i += 1 {
+        sum += i
+    }
+    print(sum)
+}
+";
+    assert_fmt_keeps(src, &["loop i := 0; i < 5; i += 1"], "counted loop header");
+    let once = jet::format_source(src).expect("fmt should accept counted loop");
+    let twice = jet::format_source(&once).expect("second fmt of counted loop must succeed");
+    assert_eq!(once, twice, "counted loop fmt must be idempotent");
+}
+
+#[test]
 fn fmt_selective_import_d_selimport1_stability() {
     // D-SELIMPORT1=A: `use mod.{a, b as c}` must survive fmt unchanged.
     let src = "\

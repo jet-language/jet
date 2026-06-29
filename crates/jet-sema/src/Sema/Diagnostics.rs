@@ -5,18 +5,6 @@ use crate::Syntax;
 use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
-/// Find the comparison that distribution (S25) should re-apply: descend the
-/// right spine of `&&`/`||` chains; clone the comparison's left side.
-pub(crate) fn rightmost_comparison(e: &Expr) -> Option<(Expr, BinOp)> {
-    match e {
-        Expr::Binary(op, _, rhs, _) if matches!(op, BinOp::And | BinOp::Or) => {
-            rightmost_comparison(rhs)
-        }
-        Expr::Binary(op, lhs, _, _) if op.is_comparison() => Some(((**lhs).clone(), *op)),
-        _ => None,
-    }
-}
-
 pub(crate) fn compound_why(op: BinOp) -> String {
     match op {
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {

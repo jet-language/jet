@@ -89,6 +89,11 @@ pub(crate) fn rewrite_inline_calls_stmts(
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
+            Stmt::CountedLoop { init, cond, body: inner, .. } => {
+                rewrite_inline_calls_expr(&mut init.init, siblings, modname);
+                rewrite_inline_calls_expr(cond, siblings, modname);
+                rewrite_inline_calls_stmts(inner, siblings, modname);
+            }
             Stmt::Loop { body: inner, .. }
             | Stmt::Unsafe { body: inner, .. }
             | Stmt::Impure { body: inner, .. }
@@ -1363,6 +1368,12 @@ pub(crate) fn collect_core_stmts(
                 if let Some(body) = else_body {
                     collect_core_stmts(body, imports, used);
                 }
+            }
+            Stmt::CountedLoop { init, cond, step, body, .. } => {
+                collect_core_expr(&init.init, imports, used);
+                collect_core_expr(cond, imports, used);
+                collect_core_stmts(body, imports, used);
+                collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used);
             }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }

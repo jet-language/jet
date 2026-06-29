@@ -323,6 +323,43 @@ impl<'a> Parser<'a> {
             let body = self.block_stmts();
             Ok(Stmt::Loop { body, span, label })
         } else if matches!(&self.peek().kind, TokKind::Ident(_))
+            && matches!(&self.peek2().kind, TokKind::ColonEq)
+        {
+            // D-LOOP-SEMICOLON1=A: counted loop `loop i := 0; i < 10; i += 1 { … }`.
+            // Detected by `Ident :=` at the start of the header.
+            let init = self.sigil_binding()?;
+            self.expect(TokKind::Semi, "after the init in `loop init; cond; step { … }`")?;
+            let cond = self.expr_no_struct_lit()?;
+            self.expect(TokKind::Semi, "after the condition in `loop init; cond; step { … }`")?;
+            // Parse the afterthought: an assignment expression (no trailing `;`).
+            let step_expr = self.expr()?;
+            let step: Stmt = if matches!(self.peek().kind, TokKind::Eq)
+                || self.peek().kind.compound_op().is_some()
+            {
+                let op_tok = self.bump();
+                let op = op_tok.kind.compound_op();
+                let value = self.expr()?;
+                let target = self.expr_to_lvalue(step_expr)?;
+                Stmt::Assign {
+                    target,
+                    op,
+                    op_span: op_tok.span,
+                    value,
+                }
+            } else {
+                Stmt::Expr(step_expr)
+            };
+            self.expect(TokKind::LBrace, "to open the loop body")?;
+            let body = self.block_stmts();
+            Ok(Stmt::CountedLoop {
+                init,
+                cond,
+                step: Box::new(step),
+                body,
+                span,
+                label,
+            })
+        } else if matches!(&self.peek().kind, TokKind::Ident(_))
             && matches!(&self.peek2().kind, TokKind::KwIn | TokKind::Comma)
         {
             // Iteration: loop x in ... { } or loop k, v in ... { }

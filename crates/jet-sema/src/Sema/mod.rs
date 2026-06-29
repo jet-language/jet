@@ -2,8 +2,8 @@
 //! (invariant I3): by the time a Program reaches codegen, it must be
 //! impossible for the generated Rust to fail to compile (invariant I2).
 //!
-//! M1: type inference, mutability, comparison distribution (S25),
-//! definite-return analysis. M2: ownership — moves, call-site `mut`/`take`,
+//! M1: type inference, mutability, definite-return analysis.
+//! M2: ownership — moves, call-site `~`/`^`,
 //! view returns, use-after-move, and borrow rules that keep generated Rust
 //! sound without surfacing Rust concepts to users.
 

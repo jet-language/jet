@@ -344,6 +344,32 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Flow::Normal)
             }
+            // D-LOOP-SEMICOLON1=A: counted loop — evaluate init, then run as while.
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                span,
+                ..
+            } => {
+                let v = self.eval(&init.init, scope)?;
+                scope.insert(init.name.clone(), v);
+                loop {
+                    self.burn(*span)?;
+                    let c = self.eval(cond, scope)?;
+                    if !as_bool(&c, cond.span())? {
+                        break;
+                    }
+                    match self.exec_block(body, scope)? {
+                        Flow::Break => break,
+                        Flow::Continue | Flow::Normal => {}
+                        ret @ Flow::Return(_) => return Ok(ret),
+                    }
+                    self.exec_stmt(step, scope)?;
+                }
+                Ok(Flow::Normal)
+            }
             Stmt::Unsafe { span, .. } => Err(unsupported("an `#Unsafe` block", *span)),
             // D-CTEFFECT1: `#Impure("reason") { … }` — gate for Tier-2 ambient
             // comptime effects. Increments impure_depth around the body so that

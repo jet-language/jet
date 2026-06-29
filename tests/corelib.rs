@@ -537,19 +537,24 @@ fn core_module_items_covers_known_core_modules() {
         }
     }
 
-    // D-CORENS1: ring packages have two spellings: `core.*` (user-facing, in KNOWN_CORE_MODULES)
-    // and `jet.*` (internal dispatch key). The arms cover both via `|` alternation. Build an
-    // expanded `known` that accepts either spelling for ring modules so the check is stable.
+    // D-CORENS-CANON1: ring packages normalize to `jet.*` internal dispatch key via
+    // normalize_core_module; core_module_items only has `jet.*` arms for ring modules.
+    // Translate the KNOWN_CORE_MODULES list so `core.<ring>` → `jet.<ring>` before checking.
     let ring_names = [
-        "log", "time", "crypto", "http", "regex", "reactive", "archive", "db",
+        "log", "crypto", "http", "regex", "reactive", "archive", "db",
     ];
     let known_raw = jet::Loader::KNOWN_CORE_MODULES;
-    let mut known: std::collections::BTreeSet<String> =
-        known_raw.iter().map(|s| s.to_string()).collect();
-    for ring in &ring_names {
-        known.insert(format!("core.{ring}"));
-        known.insert(format!("jet.{ring}"));
-    }
+    let known: std::collections::BTreeSet<String> = known_raw
+        .iter()
+        .map(|s| {
+            if let Some(ring) = s.strip_prefix("core.") {
+                if ring_names.contains(&ring) {
+                    return format!("jet.{ring}");
+                }
+            }
+            s.to_string()
+        })
+        .collect();
 
     let missing_from_items: Vec<&String> =
         known.iter().filter(|m| !items_keys.contains(*m)).collect();

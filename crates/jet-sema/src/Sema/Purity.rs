@@ -100,7 +100,7 @@ pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
 pub(crate) fn is_nondeterministic_core(module: &str, method: &str) -> bool {
     matches!(
         (module, method),
-        ("core.time" | "jet.time", "now" | "sleep" | "start")
+        ("core.time", "now" | "sleep" | "start")
             | ("core.random", "int" | "float" | "pick" | "shuffle" | "seed")
     )
 }
@@ -174,6 +174,20 @@ pub(crate) fn check_pure_stmt(
                 }
             }
             None
+        }
+        Stmt::CountedLoop { init, cond, step, body, .. } => {
+            if let Some(d) = check_pure_expr(&init.init, pure_fn, funcs) {
+                return Some(d);
+            }
+            if let Some(d) = check_pure_expr(cond, pure_fn, funcs) {
+                return Some(d);
+            }
+            for st in body {
+                if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
+                    return Some(d);
+                }
+            }
+            check_pure_stmt(step, pure_fn, funcs)
         }
         Stmt::Loop { body, .. } => {
             for st in body {
@@ -557,6 +571,20 @@ fn check_pure_stmt_with_path(
                 }
             }
             None
+        }
+        Stmt::CountedLoop { init, cond, step, body, .. } => {
+            if let Some(d) = rec!(&init.init) {
+                return Some(d);
+            }
+            if let Some(d) = rec!(cond) {
+                return Some(d);
+            }
+            for st in body {
+                if let Some(d) = rec_s!(st) {
+                    return Some(d);
+                }
+            }
+            rec_s!(step)
         }
         Stmt::Loop { body, .. } => {
             for st in body {
@@ -1051,6 +1079,23 @@ fn walk_stmt_for_calls(
                         return;
                     }
                 }
+            }
+        }
+        Stmt::CountedLoop { init, cond, step, body, .. } => {
+            walk_expr_for_calls(&init.init, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+            if diags.is_empty() {
+                walk_expr_for_calls(cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+            }
+            if diags.is_empty() {
+                for st in body {
+                    walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                    if !diags.is_empty() {
+                        return;
+                    }
+                }
+            }
+            if diags.is_empty() {
+                walk_stmt_for_calls(step, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             }
         }
         Stmt::Loop { body, .. }
