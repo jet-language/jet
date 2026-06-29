@@ -200,6 +200,7 @@ before continuing.
 | E0322 | parse | assignment `=` in `if` condition — did you mean `==`? (D-ASSIGNCOND1) |
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
 | E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
+| E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
@@ -256,6 +257,7 @@ before continuing.
 | E0746 | sema  | an irreversible effect (Net/Fs/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
 | E0747 | sema  | a callback argument exceeds its parameter's effect bound (`#Pure fn(…)` / `#(E) fn(…)`) (D-EFF2) |
 | E0748 | sema  | `#(via f)` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
+| E0749 | sema  | a function reaches an effect it prohibits with `#(!E)` in its own call graph (D-PROP1=A) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
 | E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |

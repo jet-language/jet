@@ -1497,8 +1497,19 @@ impl<'a> Parser<'a> {
         let mut effects = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
+                // D-PROP2=A: `!Effect` is a prohibition — the function (and its
+                // whole reachable call graph) must not use that effect.
+                let prohibited = matches!(self.peek().kind, TokKind::Bang);
+                if prohibited {
+                    self.bump(); // consume `!`
+                }
                 let (name, span) = self.expect_ident("for an effect name")?;
-                effects.push((name, span));
+                let entry = if prohibited {
+                    format!("!{}", name)
+                } else {
+                    name
+                };
+                effects.push((entry, span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }

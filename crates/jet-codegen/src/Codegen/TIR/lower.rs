@@ -3238,6 +3238,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 OrFallback::Panic { name_span, args } => {
                     TOrFallback::Panic(render_panic_stop(name_span, args, cx, env))
                 }
+                OrFallback::Break(_) => TOrFallback::Break,
+                OrFallback::Continue(_) => TOrFallback::Continue,
             };
             TExpr {
                 ty: result_ty,

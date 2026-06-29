@@ -577,6 +577,8 @@ impl<'a> Fmt<'a> {
                 self.fmt_call_args(args);
                 self.write(")");
             }
+            OrFallback::Break(_) => self.write("break"),
+            OrFallback::Continue(_) => self.write("continue"),
         }
     }
 

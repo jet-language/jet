@@ -527,7 +527,40 @@ impl<'a> Checker<'a> {
                 variant,
                 args,
                 span,
-            } => Some(self.check_enum_lit(type_name, variant, args, *span)),
+            } => {
+                if type_name.is_empty() {
+                    // D-ENUMDOT2=A: leading-dot variant — resolve type from expected context.
+                    let resolved = self.expected_type.clone().and_then(|et| {
+                        let name = match &et {
+                            Type::Named(n) => Some(n.clone()),
+                            Type::Option(inner) => match inner.as_ref() {
+                                Type::Named(n) => Some(n.clone()),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        name.filter(|n| self.resolve_enum_variants_cloned(n).is_some())
+                    });
+                    match resolved {
+                        Some(tn) => *type_name = tn,
+                        None => {
+                            self.diags.push(Diagnostic::error(
+                                "E0330",
+                                format!("can't infer the enum type for `.{}`", variant),
+                                "a leading-dot variant needs a known enum type from context"
+                                    .to_string(),
+                                format!(
+                                    "add a type annotation, or write the full form `EnumName.{}`",
+                                    variant
+                                ),
+                                Some(*span),
+                            ));
+                            return None;
+                        }
+                    }
+                }
+                Some(self.check_enum_lit(type_name, variant, args, *span))
+            }
             // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
             // Its type is exactly the inner's type; taint propagation + the E0721
             // sink check run in the dedicated taint pass (Sema/Taint.rs), erased

@@ -286,6 +286,7 @@ impl<'a> Parser<'a> {
                 OrFallback::Value(e) => e.span().end,
                 OrFallback::Return(_, s) => s.end,
                 OrFallback::Panic { name_span, .. } => name_span.end,
+                OrFallback::Break(s) | OrFallback::Continue(s) => s.end,
             };
             let span = Span::new(lhs.span().start, end.max(op_span.end));
             lhs = Expr::OrFallback {
@@ -306,6 +307,13 @@ impl<'a> Parser<'a> {
                 return Ok(OrFallback::Return(Some(Box::new(e)), span));
             }
             return Ok(OrFallback::Return(None, span));
+        }
+        // D-ORRETURN-ERG1=B: `?? break` and `?? continue` unify loop exits under `??`.
+        if matches!(self.peek().kind, TokKind::KwBreak) {
+            return Ok(OrFallback::Break(self.bump().span));
+        }
+        if matches!(self.peek().kind, TokKind::KwContinue) {
+            return Ok(OrFallback::Continue(self.bump().span));
         }
         let e = self.expr_or(allow_struct_lit)?;
         if let Expr::Call(call) = &e {
@@ -558,6 +566,41 @@ impl<'a> Parser<'a> {
             TokKind::Dot if allow_struct_lit && matches!(self.peek2().kind, TokKind::LBrace) => {
                 let dot_start = self.bump().span.start; // consume `.`
                 self.struct_lit_inferred(dot_start)
+            }
+            // D-ENUMDOT2=A: `.Variant` or `.Variant(args)` in value position.
+            // An uppercase ident after `.` with no receiver is a leading-dot enum literal.
+            // type_name="" is the unresolved sentinel; sema fills it in via expected_type.
+            TokKind::Dot
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase())) =>
+            {
+                let dot_start = self.bump().span.start; // consume `.`
+                let (variant, variant_span) =
+                    self.expect_ident("after `.` in a leading-dot enum variant")?;
+                let (args, end) = if matches!(self.peek().kind, TokKind::LParen) {
+                    self.bump(); // consume `(`
+                    let mut args = Vec::new();
+                    if !matches!(self.peek().kind, TokKind::RParen) {
+                        loop {
+                            let e = self.expr()?;
+                            args.push(EnumLitArg::Positional(e));
+                            if matches!(self.peek().kind, TokKind::RParen) {
+                                break;
+                            }
+                            self.expect(TokKind::Comma, "between enum variant arguments")?;
+                        }
+                    }
+                    self.expect(TokKind::RParen, "to close the enum variant arguments")?;
+                    let close_end = self.toks[self.pos - 1].span.end;
+                    (args, close_end)
+                } else {
+                    (Vec::new(), variant_span.end)
+                };
+                Ok(Expr::EnumLit {
+                    type_name: String::new(),
+                    variant,
+                    args,
+                    span: Span::new(dot_start, end),
+                })
             }
             _ => self.expr_postfix(allow_struct_lit),
         }

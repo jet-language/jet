@@ -160,6 +160,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
                         collect_tuple_shapes_from_expr(&a.expr, out);
                     }
                 }
+                OrFallback::Break(_) | OrFallback::Continue(_) => {}
             }
         }
         Expr::If {

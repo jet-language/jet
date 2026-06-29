@@ -211,7 +211,10 @@ pub(crate) fn rewrite_inline_calls_expr(
             match fallback {
                 OrFallback::Value(e) => rewrite_inline_calls_expr(e, siblings, modname),
                 OrFallback::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
-                OrFallback::Return(None, _) | OrFallback::Panic { .. } => {}
+                OrFallback::Return(None, _)
+                | OrFallback::Panic { .. }
+                | OrFallback::Break(_)
+                | OrFallback::Continue(_) => {}
             }
         }
         Expr::PatternTest { subject, .. } => {
@@ -1615,6 +1618,7 @@ pub(crate) fn collect_core_expr(
                         collect_core_expr(&arg.expr, imports, used);
                     }
                 }
+                OrFallback::Break(_) | OrFallback::Continue(_) => {}
             }
         }
         Expr::Lambda(lam) => match &lam.body {
@@ -1958,14 +1962,24 @@ pub(crate) fn check_func_body_bundle(
     }
     // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
     embed_inputs_out.extend(std::mem::take(&mut ck.ct_embed_inputs));
-    // D-EFF1: record this function's effect summary for the whole-program
-    // fixpoint (keyed by bare name / `Type::method`; cross-module effect
-    // propagation is a later slice — intra-module + Core/builtin direct effects
-    // are inferred here).
+    // D-EFF1: record this function's effect summary for the whole-program fixpoint.
+    // D-PROP1=A: a declared positive effect is part of the function's contract —
+    // callers that prohibit that effect must see it transitively even if the body
+    // is currently empty. Seed `direct` with declared positives so solve() propagates them.
+    let mut direct = std::mem::take(&mut ck.fx_direct);
+    if let Some(declared_list) = &f.declared_effects {
+        for (name, _) in declared_list {
+            if !name.starts_with('!') {
+                if let Some(e) = Effect::parse(name.as_str()) {
+                    direct.insert(e);
+                }
+            }
+        }
+    }
     summaries.insert(
         effect_key(owner_type, &f.name),
         EffectSummary {
-            direct: std::mem::take(&mut ck.fx_direct),
+            direct,
             edges: std::mem::take(&mut ck.fx_edges),
             maximal: ck.fx_maximal,
             regions: std::mem::take(&mut ck.fx_regions),

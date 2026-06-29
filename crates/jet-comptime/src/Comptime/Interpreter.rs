@@ -913,6 +913,11 @@ impl<'a> Interp<'a> {
                             };
                             Err(comptime_panic(&msg, *name_span))
                         }
+                        // `?? break` / `?? continue` are runtime loop controls and
+                        // are not evaluable at comptime.
+                        FallbackKind::Break(span) | FallbackKind::Continue(span) => {
+                            Err(unsupported("loop control in `??`", *span))
+                        }
                     }
                 } else {
                     // Value is present/ok — unwrap it.

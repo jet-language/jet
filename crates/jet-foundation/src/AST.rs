@@ -1410,12 +1410,16 @@ impl BindPattern {
     }
 }
 
-/// S35: right-hand side of `expr or …`.
+/// S35/D-ORRETURN-ERG1: right-hand side of `expr ?? …`.
 #[derive(Debug, Clone)]
 pub enum OrFallback {
     Value(Box<Expr>),
     Return(Option<Box<Expr>>, Span),
     Panic { name_span: Span, args: Vec<CallArg> },
+    /// D-ORRETURN-ERG1=B: `expr ?? break` — loop-only, sema-gated.
+    Break(Span),
+    /// D-ORRETURN-ERG1=B: `expr ?? continue` — loop-only, sema-gated.
+    Continue(Span),
 }
 
 impl Pattern {

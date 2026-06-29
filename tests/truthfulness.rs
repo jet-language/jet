@@ -327,6 +327,19 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Check 9: Core spec files referenced by D-STDRUBRIC1 exist (c44)
+// ---------------------------------------------------------------------------
+#[test]
+fn stdlib_api_laws_doc_exists() {
+    let root = root();
+    let path = root.join("docs/spec/stdlib-api-laws.md");
+    assert!(
+        path.is_file(),
+        "docs/spec/stdlib-api-laws.md is missing — required by D-STDRUBRIC1 (c44)"
+    );
+}
+
 fn dependency_lines(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_deps = false;

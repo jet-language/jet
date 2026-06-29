@@ -1,0 +1,40 @@
+// 151 — leading-dot enum variant `.Variant` in value position (D-ENUMDOT2=A).
+// When the enum type is known from context, `.Variant` is a shorthand for `Type.Variant`.
+
+enum Direction {
+    North
+    South
+    East
+    West
+}
+
+enum Shape {
+    Circle(Float)
+    Square(Float)
+}
+
+fn area(s: Shape) -> Float {
+    if s == {
+        .Circle(r)  -> { return 3.14159 * r * r }
+        .Square(w)  -> { return w * w }
+    }
+}
+
+fn label(d: Direction) -> String {
+    if d == {
+        .North -> { return "north" }
+        .South -> { return "south" }
+        .East  -> { return "east" }
+        .West  -> { return "west" }
+    }
+}
+
+fn main() {
+    d: Direction = .North
+    print(label(d))
+    print(label(.South))
+
+    s: Shape = .Circle(3.0)
+    print(area(s))
+    print(area(.Square(4.0)))
+}

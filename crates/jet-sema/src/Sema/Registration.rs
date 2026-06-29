@@ -835,15 +835,26 @@ pub(crate) fn check_effect_boundaries(
         // Validate names and build the declared set; an unknown name is E0119.
         // A bad name leaves the declared set incomplete, so skip the subset
         // check to avoid a misleading E0740 piled on top of the real problem.
+        // D-PROP2=A: names starting with `!` are prohibitions — validated separately.
         let mut declared: EffectSet = EffectSet::new();
+        let mut prohibited: EffectSet = EffectSet::new();
         let mut bad_name = false;
         for (name, span) in declared_list {
-            match Effect::parse(name) {
+            let (is_prohibited, base_name) = if name.starts_with('!') {
+                (true, &name[1..])
+            } else {
+                (false, name.as_str())
+            };
+            match Effect::parse(base_name) {
                 Some(e) => {
-                    declared.insert(e);
+                    if is_prohibited {
+                        prohibited.insert(e);
+                    } else {
+                        declared.insert(e);
+                    }
                 }
                 None => {
-                    diags.push(unknown_effect(name, *span));
+                    diags.push(unknown_effect(base_name, *span));
                     bad_name = true;
                 }
             }
@@ -855,14 +866,31 @@ pub(crate) fn check_effect_boundaries(
             .get(&effect_key(owner, &f.name))
             .cloned()
             .unwrap_or_default();
-        let over: EffectSet = inferred.difference(&declared).copied().collect();
-        if !over.is_empty() {
-            // Point at the signature; name the offending effects.
-            let span = declared_list
-                .first()
-                .map(|(_, s)| *s)
-                .unwrap_or(f.name_span);
-            diags.push(e0740(&f.name, &over, &declared, span));
+        // E0740: only check positive bounds — prohibition-only annotations (`#(!Net)`)
+        // have no upper-bound constraint; only the prohibition check applies.
+        if !declared.is_empty() {
+            let over: EffectSet = inferred.difference(&declared).copied().collect();
+            if !over.is_empty() {
+                let span = declared_list
+                    .first()
+                    .map(|(_, s)| *s)
+                    .unwrap_or(f.name_span);
+                diags.push(e0740(&f.name, &over, &declared, span));
+            }
+        }
+        // D-PROP1=A: check prohibitions — the inferred transitive set must not
+        // contain any prohibited effect. E0749 names the effect and the function.
+        if !prohibited.is_empty() {
+            let reached_prohibited: EffectSet =
+                inferred.intersection(&prohibited).copied().collect();
+            if !reached_prohibited.is_empty() {
+                let span = declared_list
+                    .iter()
+                    .find(|(n, _)| n.starts_with('!'))
+                    .map(|(_, s)| *s)
+                    .unwrap_or(f.name_span);
+                diags.push(e0749(&f.name, &reached_prohibited, span));
+            }
         }
     }
     for item in items {
@@ -1585,12 +1613,23 @@ pub(crate) fn check_func_body(
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, funcs));
     }
-    // D-EFF1: record this function's effect summary for the whole-program
-    // inference fixpoint (keyed by `Type::method` for methods, bare name else).
+    // D-EFF1: record this function's effect summary for the whole-program fixpoint.
+    // D-PROP1=A: seed direct with declared positives so solve() propagates the
+    // contract of functions whose bodies don't yet exercise the declared effect.
+    let mut direct = std::mem::take(&mut ck.fx_direct);
+    if let Some(declared_list) = &f.declared_effects {
+        for (name, _) in declared_list {
+            if !name.starts_with('!') {
+                if let Some(e) = Effect::parse(name.as_str()) {
+                    direct.insert(e);
+                }
+            }
+        }
+    }
     summaries.insert(
         effect_key(owner_type, &f.name),
         EffectSummary {
-            direct: std::mem::take(&mut ck.fx_direct),
+            direct,
             edges: std::mem::take(&mut ck.fx_edges),
             maximal: ck.fx_maximal,
             regions: std::mem::take(&mut ck.fx_regions),

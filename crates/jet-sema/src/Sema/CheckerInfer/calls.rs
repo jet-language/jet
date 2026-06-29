@@ -2428,6 +2428,10 @@ impl<'a> Checker<'a> {
                     // D-SG9: let a fixed-width literal argument adopt the parameter's
                     // width and be range-checked at the literal.
                     self.expected_type = Some(param_ty.clone());
+                } else if matches!(param_ty, Type::Named(_) | Type::Option(_)) {
+                    // D-ENUMDOT2=A: propagate named/optional type so `.Variant` can
+                    // resolve to the correct enum from context.
+                    self.expected_type = Some(param_ty.clone());
                 }
             }
             // D-EFF2 (callback param bound): snapshot the effect accumulator

@@ -1,0 +1,108 @@
+# Stdlib ergonomic laws (D-STDRUBRIC1=A)
+
+Review rubric for all Core/std API additions. Every new function, method, or type
+must pass each law before landing. No exceptions; file a follow-up card for any
+existing drift found during review.
+
+---
+
+## Law 1 — Naming
+
+- Names are plain English words, not abbreviations (`remove`, not `rm`; `length`, not `len`).
+- Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
+- Fallible variants add no suffix; the `?` return type signals fallibility.
+- Constructor sugar uses `Type.{ }` (D-DOTCTOR1); factory functions use `Type.from_*(...)`.
+- Acronyms are PascalCase at word boundaries (`JsonDecoder`, `HttpClient`) — no `JSON`, `HTTP`.
+
+## Law 2 — Fallibility
+
+- A function that can legitimately fail returns `T ? E`; never panics on expected failure.
+- Panics are reserved for programmer error (index out of bounds on a known-size slice).
+- The error type must carry enough context to write a helpful error message without
+  inspecting source code (no opaque integer codes).
+- Use the most specific error type available; `Error` (the Fallible default) is a
+  last resort for heterogeneous error paths.
+
+## Law 3 — Ownership / allocation
+
+- Functions that read a value take a view (`&T`) when possible; ownership transfer must
+  be visible in the signature (`T`, not `&T`).
+- Functions that return a new allocation return by value; they do not write into a
+  caller-supplied buffer unless the API is explicitly a low-allocation path.
+- Mutation is visible: a function that mutates a value takes `&mut T` (or the Jet
+  mutable-borrow equivalent); pure computation takes `&T`.
+- `#SingleUse` types must be documented with the invariant they enforce.
+
+## Law 4 — Effects
+
+- IO effects are declared with the right capability marker (`#Fs`, `#Net`, `#Exec`, etc.).
+- Pure functions carry no effect markers; the compiler enforces this.
+- A function that performs multiple effects lists all of them; no hidden IO.
+- Comptime-evaluable functions satisfy D-CTCORE1's pure-Core whitelist.
+
+## Law 5 — Allocation budget
+
+- Hot-path functions note their allocation profile in a doc comment when non-obvious
+  (e.g. "allocates one Vec per call; prefer the iterator form for large inputs").
+- Streaming/iterator APIs are provided alongside any collect-to-list shorthand.
+- No function silently allocates unboundedly without the caller being able to observe
+  or bound it (no hidden `collect()` inside an apparently O(1) function).
+
+## Law 6 — Diagnostics and fix hints
+
+- Every fallible function that returns `? E` has at least one corresponding UI snapshot
+  showing the error message a user sees when misusing it (I4).
+- Error messages follow the voice and format in `docs/spec/diagnostics.md`:
+  what happened, why it happened, how to fix it.
+- When a type or method is `#MustUse`, the diagnostic names the missed call.
+
+## Law 7 — Examples
+
+- Every new type has at least one runnable example in `examples/features/` with
+  golden-tested expected output (I5).
+- Examples use real-world plausible names (not `foo`, `bar`, `x`).
+- Examples show the happy path first, error handling second.
+
+## Law 8 — One way to mean it (I8)
+
+- Before adding a new API, search for an existing one that covers the same semantic
+  job. If one exists, extend or document it; do not add a second spelling.
+- Convenience shorthand methods are acceptable if they compose existing primitives
+  without adding new capability (e.g. `slice.first()` over `slice[0]?`).
+
+---
+
+## Review template
+
+When submitting a new Core/std API for merge, include this checklist in the PR:
+
+```
+## Stdlib API review
+
+Function/type: `<name>`
+Ratified decision(s): <D-XXX / S-YYY>
+
+- [ ] L1 Naming: plain English, predicate prefixed, PascalCase acronyms
+- [ ] L2 Fallibility: correct return type, panic only on programmer error
+- [ ] L3 Ownership: view vs ownership vs mutation explicit
+- [ ] L4 Effects: all capability markers declared
+- [ ] L5 Allocation: budget documented if non-obvious, streaming form provided
+- [ ] L6 Diagnostics: UI snapshot for error paths
+- [ ] L7 Examples: golden-tested example in examples/features/
+- [ ] L8 One way: no duplicate of existing API
+```
+
+---
+
+## Known drift (follow-up cards)
+
+Items below existed before this rubric and have acknowledged gaps. Each has a
+Tower card tracking the fix; this list is the authoritative inventory.
+
+| Gap | API | Law | Follow-up |
+|-----|-----|-----|-----------|
+| L1 | `core.fs.read` / `core.fs.write` use short names | 1 | c44-follow-1 |
+| L6 | Several `core.math` functions lack UI snapshots for type mismatch | 6 | c44-follow-2 |
+| L7 | `core.json` functions have no standalone golden example | 7 | c44-follow-3 |
+
+*When a gap is resolved, remove the row and close the follow-up card.*

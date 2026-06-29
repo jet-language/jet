@@ -582,6 +582,27 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
     )
 }
 
+/// E0749 (D-PROP1=A): a function's reachable call graph uses a prohibited effect.
+pub fn e0749(fn_name: &str, reached: &EffectSet, span: Span) -> Diagnostic {
+    let list = show_set(reached);
+    Diagnostic::error(
+        "E0749",
+        format!(
+            "`{}` reaches the `{}` effect, which it prohibits with `#(!{})`",
+            fn_name, list, list
+        ),
+        format!(
+            "a `#(!{})` annotation means the function and every callee it can reach must not use `{}`",
+            list, list
+        ),
+        format!(
+            "remove the call that introduces `{}`, or drop the `#(!{})` prohibition",
+            list, list
+        ),
+        Some(span),
+    )
+}
+
 /// D-EFF1: check every `#Caps(…)` region across the program against its
 /// transitive inferred effect set (region.direct ∪ maximal ∪ ⋃ solved[edge]).
 /// An effect used inside a region that its cap list omits is E0741.

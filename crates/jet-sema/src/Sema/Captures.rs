@@ -179,7 +179,10 @@ pub(crate) fn walk_expr_for_const_refs(
             match fallback {
                 OrFallback::Value(e) => walk_expr_for_const_refs(e, const_names, taken),
                 OrFallback::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
-                OrFallback::Return(None, _) | OrFallback::Panic { .. } => {}
+                OrFallback::Return(None, _)
+                | OrFallback::Panic { .. }
+                | OrFallback::Break(_)
+                | OrFallback::Continue(_) => {}
             }
             let _ = is_option;
         }

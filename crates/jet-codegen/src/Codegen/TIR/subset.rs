@@ -2359,6 +2359,7 @@ pub(crate) fn orfallback_rhs_in_subset(
         OrFallback::Panic { args, .. } => {
             args.len() == 1 && args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals)
         }
+        OrFallback::Break(_) | OrFallback::Continue(_) => true,
     }
 }
 

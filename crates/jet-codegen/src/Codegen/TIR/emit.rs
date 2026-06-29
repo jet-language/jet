@@ -2081,6 +2081,8 @@ pub(crate) fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String
         TOrFallback::Return(None) => "return".to_string(),
         TOrFallback::Return(Some(e)) => format!("return {}", emit_tir_expr(e, cx)),
         TOrFallback::Panic(rendered) => rendered.clone(),
+        TOrFallback::Break => "break".to_string(),
+        TOrFallback::Continue => "continue".to_string(),
     }
 }
 

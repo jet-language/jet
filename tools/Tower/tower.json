@@ -5,12 +5,12 @@
     "nextNum": 155,
     "ui": {
       "toggled": [
+        "dec-group:syntax",
+        "dec-group:runtime",
         "epoch:e4",
         "epoch:e5",
-        "board-sidequests",
         "epoch:e6",
-        "dec-group:syntax",
-        "dec-group:runtime"
+        "board-sidequests"
       ]
     }
   },
@@ -680,11 +680,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Whole-graph effect prohibition (D-PROP1=A + D-PROP2=A): parse `!Effect` entries inside the existing `#(...)` effect set, e.g. `#(Io, !Net)`. Steps: (1) Source/Syntax.rs decision note for `!` effect prohibition; (2) parser accepts negated effect names in function effect lists; (3) sema inverts the existing D-EFF1 call-graph propagation and rejects any reachable forbidden effect path; (4) I4 diagnostic naming the effect and callee path; (5) codegen erases the marker; (6) example + golden + ui snapshot.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Done. Parser accepts `!Effect` in `#(...)` lists; sema seeds solve() with declared positive effects so transitive prohibition works even when a callee's body is empty; E0749 fires; tests/ui/effect_prohibition_violated.jet + .stderr blessed; examples/features/152_effect_prohibition.jet + expected/152_effect_prohibition.out added; E0749 in diagnostics.md; D-PROP1/D-PROP2 marked Implemented in syntax-decisions.md. Full suite green (ffi network test pre-existing)."
+        },
         {
           "at": "2026-06-28",
           "text": "D-PROP2=A ratified; removed stale spelling gate. Advanced to ready."
@@ -707,7 +711,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-29"
     },
     {
       "id": "c13wiwj",
@@ -1582,7 +1586,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-STDRUBRIC1=A implementation plan: (1) create docs/spec/stdlib-api-laws.md with naming, fallibility, ownership, allocation, effects, diagnostics, and examples checklist; (2) add a short review template under tools/Tower/docs/plans; (3) audit current Core APIs against the rubric and file follow-up cards for drift; (4) add truthfulness test that referenced rubric file exists; (5) update roadmap/reference links. No parser/codegen changes.",
       "blockedBy": [],
@@ -1606,6 +1610,10 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "[done] D-STDRUBRIC1=A: created docs/spec/stdlib-api-laws.md with 8 laws (naming/fallibility/ownership/effects/allocation/diagnostics/examples/one-way), PR review template, and known-drift table. Truthfulness test #9 (stdlib_api_laws_doc_exists) added. syntax-decisions.md row updated."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -1656,7 +1664,7 @@
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-FMT1 implementation plan: (1) add formatter AST/style flag preserving author single-line bodies for fn/if/loop/block where already one line; (2) keep width guard so overlong bodies expand deterministically; (3) add fmt tests for single-line fn/if/loop/match arms and nested blocks; (4) ensure comments force expansion; (5) update syntax-decisions implementation note.",
       "blockedBy": [],
@@ -1676,6 +1684,10 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "[verified done] D-FMT1 fully implemented: body_inline_eligible/try_inline_body in Formatter/mod.rs, is_simple_stmt gate, MAX_WIDTH=100, comment-expansion logic. 45 fmt tests pass including fmt_preserves_single_line_if, fmt_preserves_single_line_loops_and_fn, fmt_single_line_comment_forces_expand, fmt_single_line_over_width_forces_expand, fmt_single_line_nested_forces_expand. syntax-decisions.md D-FMT1 row current. Nothing left."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -5016,11 +5028,15 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-ENUMDOT2=A implementation plan: (1) parser accepts leading-dot enum variant expressions in value position; (2) sema resolves `.Variant` only when expected enum type is known (annotated binding, return context, argument context, assignment target) and emits a context-needed diagnostic otherwise; (3) keep `Enum.Variant` valid everywhere; (4) codegen lowers to the resolved enum variant; (5) update formatter/spec/syntax-decisions and add ui snapshots for unknown context/wrong variant plus golden examples.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-29",
+          "text": "Implemented D-ENUMDOT2=A end-to-end: parser `expr_unary_inner` produces `EnumLit{type_name:\"\"}` for `.Variant`; sema resolves from `expected_type` (Named/Option) in `Expr::EnumLit` arm; E0330 emitted when no context available; expected_type propagated for Named/Option function params; formatter preserves `.Variant` via empty type_name sentinel; ui snapshot `enum_dot_no_context.stderr`; golden example 151_enum_dot.jet; fmt stability test; syntax-decisions.md updated; all tests green."
+        },
         {
           "at": "2026-06-28",
           "text": "Plan added from sprint-readiness sweep; decisions already ratified."
@@ -5035,7 +5051,7 @@
         }
       ],
       "created": "2026-06-26T00:00:00.000Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-29"
     },
     {
       "id": "cs7vu8u1",
@@ -5240,7 +5256,7 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-ORRETURN-ERG1=B implementation plan: (1) extend `??` fallback grammar to accept `continue` as a control fallback; (2) deprecate `?continue` with teaching diagnostic/formatter rewrite to `?? continue`; (3) confirm `?? return` and `?? break` remain unchanged; (4) sema enforces loop-only continue and compatible fallback types; (5) examples and ui snapshots; (6) update S71/S81 docs.",
       "blockedBy": [],
@@ -5256,6 +5272,10 @@
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
+        },
+        {
+          "at": "2026-06-29",
+          "text": "[done] D-ORRETURN-ERG1=B + D-ORRETURN-CANON1=A implemented: OrFallback::Break/Continue added to AST; parse_or_fallback handles KwBreak/KwContinue; sema loop_depth==0 gate emits E0115; TOrFallback::Break/Continue lowered+emitted as bare break/continue; comptime interpreter returns unsupported; formatter emits break/continue; ui snapshots qq_break_outside_loop + qq_continue_outside_loop; example 150_qq_control.jet + expected/150_qq_control.out; syntax-decisions updated. All tests green."
         }
       ],
       "created": "2026-06-28T00:00:00.000Z",

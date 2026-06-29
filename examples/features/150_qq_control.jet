@@ -1,0 +1,18 @@
+// 150 — `?? break` and `?? continue` (D-ORRETURN-ERG1=B).
+// All fallback exits live under `??`: value fallback, return, break, continue.
+fn main() {
+    lines @= ["42", "bad", "7", "oops", "13"]
+    total := 0
+    loop line in lines {
+        n @= line.to_int() ?? continue
+        total = total + n
+    }
+    print(total)
+
+    // `?? break` exits the loop on first failure.
+    loop line in lines {
+        n @= line.to_int() ?? break
+        total = total + n
+    }
+    print(total)
+}

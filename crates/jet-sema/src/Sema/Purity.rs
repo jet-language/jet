@@ -468,7 +468,7 @@ fn check_pure_expr_with_path(
             use crate::AST::OrFallback as OF;
             match fallback {
                 OF::Value(fe) => rec!(fe),
-                OF::Return(..) | OF::Panic { .. } => None,
+                OF::Return(..) | OF::Panic { .. } | OF::Break(_) | OF::Continue(_) => None,
             }
         }),
         Expr::CallValue { callee, args, .. } => {

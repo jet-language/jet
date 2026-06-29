@@ -864,6 +864,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, db: &mut SymbolDB) {
                         collect_expr(v, mp, db);
                     }
                 }
+                AST::OrFallback::Break(_) | AST::OrFallback::Continue(_) => {}
             }
         }
         AST::Expr::PatternTest { subject, .. } => collect_expr(subject, mp, db),

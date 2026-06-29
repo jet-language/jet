@@ -1147,6 +1147,10 @@ pub enum TOrFallback {
     /// message (which itself may contain lowered sub-expressions) and the locals
     /// snapshot are baked in here.
     Panic(String),
+    /// D-ORRETURN-ERG1=B: `?? break` — loop exit.
+    Break,
+    /// D-ORRETURN-ERG1=B: `?? continue` — loop skip.
+    Continue,
 }
 
 pub enum TStrPart {

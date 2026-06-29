@@ -332,6 +332,38 @@ fn fmt_is_idempotent_on_ui_fixes() {
     }
 }
 
+// --- D-ENUMDOT2=A: leading-dot enum literal stability ---
+
+#[test]
+fn fmt_preserves_leading_dot_enum_lit() {
+    // D-ENUMDOT2=A: `.Variant` (type_name="") round-trips unchanged through fmt.
+    // The formatter emits `"" + "." + variant` = `.Variant`.
+    let src = r#"enum Color {
+    Red
+    Blue
+}
+fn paint(c: Color) {
+    print(c)
+}
+fn main() {
+    c: Color = .Red
+    paint(.Blue)
+    paint(c)
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept leading-dot enum literals");
+    assert!(
+        out.contains(".Red"),
+        "expected `.Red` preserved, got:\n{out}"
+    );
+    assert!(
+        out.contains(".Blue"),
+        "expected `.Blue` preserved, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("leading-dot output should re-fmt");
+    assert_eq!(out, twice, "leading-dot enum literal formatting must be idempotent");
+}
+
 // --- D-FMT1 (revises S44): author-intent single-line brace bodies ---
 //
 // A brace body the author wrote on one line stays one line when it holds one
