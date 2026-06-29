@@ -1,7 +1,7 @@
 use super::*;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-use crate::Generics::{e0905, e0909, generic_depth_exceeded, COMPARABLE};
+use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch, Expr, ForKind, IfStmt,
@@ -137,6 +137,29 @@ impl<'a> Checker<'a> {
                 if self.trait_reg.is_trait_name(n) {
                     return;
                 }
+                if self.registry.is_type_alias(n) {
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!("`{}` is a type alias and needs type arguments", n),
+                        format!(
+                            "write `{}`<{}>",
+                            n,
+                            self.registry
+                                .type_alias(n)
+                                .map(|(params, _)| {
+                                    params
+                                        .iter()
+                                        .map(|p| p.name.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                })
+                                .unwrap_or_default()
+                        ),
+                        format!("instantiate the alias, like `{}`<T>", n),
+                        Some(span),
+                    ));
+                    return;
+                }
                 if self.registry.contains(n) {
                     return;
                 }
@@ -165,6 +188,44 @@ impl<'a> Checker<'a> {
                 ));
             }
             Type::Apply { name, args } => {
+                if let Some((params, target)) = self.registry.type_alias(&name) {
+                    if params.len() != args.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!(
+                                "`{}` expects {} type argument{}, got {}",
+                                name,
+                                params.len(),
+                                if params.len() == 1 { "" } else { "s" },
+                                args.len()
+                            ),
+                            "every generic parameter needs a matching type argument".to_string(),
+                            format!(
+                                "write `{}`<{}>",
+                                name,
+                                params
+                                    .iter()
+                                    .map(|p| p.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            Some(span),
+                        ));
+                    }
+                    for arg in args {
+                        self.check_declared_type(arg, span);
+                    }
+                    let subst: std::collections::HashMap<String, Type> = params
+                        .iter()
+                        .zip(args.iter())
+                        .map(|(p, a)| (p.name.clone(), a.clone()))
+                        .collect();
+                    self.check_declared_type(
+                        &substitute_type(target, &subst),
+                        span,
+                    );
+                    return;
+                }
                 let is_core_generic = matches!(
                     name.as_str(),
                     "Task" | "Channel" | "Sender" | "Ptr"
@@ -893,7 +954,16 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Stmt::Expr(expr) => {
+            Stmt::Expr(_) => {
+                if self.rewrite_anonymous_taskgroup_spawn(stmt) {
+                    if let Stmt::Val(b) = stmt {
+                        self.check_binding(b);
+                    }
+                    return;
+                }
+                let Stmt::Expr(expr) = stmt else {
+                    return;
+                };
                 // D-IGNORERET2=A: `.drop("reason")` is the blessed explicit-discard
                 // terminal. When recognized, infer the *receiver* (for side effects),
                 // validate the reason is a non-empty string literal, and suppress E0402.
@@ -1479,6 +1549,38 @@ impl<'a> Checker<'a> {
             Stmt::Region { body, .. } => {
                 self.check_block(body, true);
             }
+            // D-TASKSCOPE1=A / D-NURSERY1=A: `taskgroup g { … }` — structured task scope.
+            Stmt::TaskGroup {
+                name,
+                name_span,
+                body,
+                ..
+            } => {
+                self.push_scope();
+                self.declare(
+                    name,
+                    *name_span,
+                    LocalInfo {
+                        ty: Type::Named(Syntax::TYPE_TASKGROUP.to_string()),
+                        mutable: false,
+                        param_conv: None,
+                        decl_loop_depth: self.loop_depth,
+                        sendable: true,
+                        task_lint_span: None,
+                        single_use_span: None,
+                        task_has_view_capture: false,
+                    },
+                );
+                self.taskgroup_stack.push(TaskGroupCtx::new(name.clone()));
+                self.check_block(body, false);
+                let join_start = body.len();
+                self.append_taskgroup_auto_joins(body);
+                for s in &mut body[join_start..] {
+                    self.check_stmt(s);
+                }
+                self.taskgroup_stack.pop();
+                self.pop_scope();
+            }
             // D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction
             // region. Validate the cap names (E0119), open an accumulator so the
             // effects reached inside are tallied, check the body, then seal the
@@ -1593,7 +1695,8 @@ impl<'a> Checker<'a> {
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value) { … }`.
             // Type-check each field value: `allocator` must be an allocator
-            // handle type; `logger` must be a logger value. E0762 on mismatch.
+            // handle type; `deadline` must be an Int epoch-ms instant; `logger`
+            // is currently unconstrained. E0762 on mismatch.
             // Q1 = A2: explicit allocator args at call sites override the
             // ambient — no static binding done here, only type validation and
             // block body checking. Q2 = Cβ: restore is per-block (RAII guard).
@@ -1691,6 +1794,21 @@ impl<'a> Checker<'a> {
                             // v1: any value accepted for logger; a future Logger
                             // type will narrow this. No E0762 for logger yet.
                             let _ = ty;
+                        }
+                        crate::Syntax::CTX_FIELD_DEADLINE => {
+                            if !matches!(ty, Some(Type::Int)) {
+                                let got = ty
+                                    .as_ref()
+                                    .map(|t| t.show())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                self.diags.push(Diagnostic::error(
+                                    "E0762",
+                                    format!("`deadline` needs an Int epoch-millis instant, got {}", got),
+                                    "the `deadline` field carries an absolute time budget in milliseconds".to_string(),
+                                    "pass an Int, e.g. `time.now() + 200`".to_string(),
+                                    Some(*field_span),
+                                ));
+                            }
                         }
                         _ => {
                             // Parser already rejected unknown fields (E0761);
@@ -2200,6 +2318,18 @@ impl<'a> Checker<'a> {
                 Type::TraitObject(n)
             }
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
+            Type::Apply { name, args } if self.registry.is_type_alias(&name) => {
+                if let Some((params, target)) = self.registry.type_alias(&name) {
+                    let subst: std::collections::HashMap<String, Type> = params
+                        .iter()
+                        .zip(args.iter().cloned())
+                        .map(|(p, a)| (p.name.clone(), a))
+                        .collect();
+                    let expanded = substitute_type(target, &subst);
+                    return self.resolve_type(expanded);
+                }
+                Type::Apply { name, args }
+            }
             Type::Apply { name, args } => Type::Apply {
                 name,
                 args: args.into_iter().map(|a| self.resolve_type(a)).collect(),
@@ -2558,7 +2688,7 @@ impl<'a> Checker<'a> {
         } else {
             self.sendability_problem(&final_ty, true).is_none()
         };
-        let task_lint_span = if is_task_type(&final_ty) {
+        let task_lint_span = if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
             Some(b.name_span)
         } else {
             None

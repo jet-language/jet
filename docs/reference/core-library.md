@@ -399,7 +399,7 @@ fn main() {
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
 | `now()` | `Int` | Current Unix time in milliseconds |
-| `sleep(millis)` | nothing | Block for about `millis` milliseconds |
+| `sleep(millis)` | nothing | Block for about `millis` milliseconds (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
@@ -625,6 +625,11 @@ fn main() {
 |-----------------|---------|--------------|
 | `tasks.spawn(lambda)` | `Task<T>` | Run a zero-parameter lambda on a new task |
 | `task.join()` | `T` | Wait for the task and consume the task handle |
+| `task.wait()` | `T` | Alias of `.join()` |
+| `task.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
+| `task.resume()` | nothing | Clear paused state on the task control plane |
+| `task.cancel()` | nothing | Request cancellation on the task control plane |
+| `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
 | `tasks.channel<T>()` | `Channel<T>` | Create a typed channel receive half |
 | `ch.sender()` | `Sender<T>` | Create a clonable send half |
 | `sender.send(value)` | nothing | Move one value into the channel |
@@ -634,6 +639,11 @@ Values crossing `spawn` or `send` must be sendable: no `view` borrows, no
 structs containing `ref` fields, no trait values, and no closure values unless
 they are handed over with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
+With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
+`task.wait()` / `ch.receive()`) observe the inherited budget and report runtime
+**E3003** on exceed.
+Current thread-runtime implementation records pause/cancel requests for tracing;
+hard scheduler-level pause/cancel behavior lands with the M:N runtime.
 
 ### `core.regex` — linear-time regular expressions
 

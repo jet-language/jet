@@ -525,6 +525,11 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(inner, Prec::OrFallback);
                 self.write(")");
             }
+            // D-VARIADIC1: spread call argument — emit verbatim from source when possible.
+            Expr::Spread(inner, _) => {
+                self.write("...");
+                self.fmt_expr(inner, Prec::Postfix);
+            }
         }
     }
 

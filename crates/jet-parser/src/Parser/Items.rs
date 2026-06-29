@@ -389,6 +389,10 @@ impl<'a> Parser<'a> {
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
                                 .protocol_decl_with_pkg(is_pub, is_package_pub)
                                 .map(Item::ProtocolDecl),
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => {
+                                self.type_alias_def(is_pub, is_package_pub)
+                                    .map(Item::TypeAlias)
+                            }
                             _ => self
                                 .func_after_fn(
                                     is_pub,
@@ -452,6 +456,10 @@ impl<'a> Parser<'a> {
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => {
                                 self.bump(); // consume `pub`
                                 self.protocol_decl(true).map(Item::ProtocolDecl)
+                            }
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => {
+                                self.bump(); // consume `pub`
+                                self.type_alias_def(true, false).map(Item::TypeAlias)
                             }
                             TokKind::KwModule if self.is_code_module_at(2) => {
                                 self.code_module(true).map(Item::CodeModule)
@@ -525,6 +533,10 @@ impl<'a> Parser<'a> {
                 // D-PROTO1/D-PROTO2: `protocol Name { client -> server: Msg(…) }`
                 TokKind::Ident(n) if n == Syntax::KW_PROTOCOL && self.at_protocol_block() => {
                     self.protocol_decl(false).map(Item::ProtocolDecl)
+                }
+                // D-TYPEALIAS1: `alias Name<T> = …`
+                TokKind::Ident(n) if n == Syntax::KW_ALIAS => {
+                    self.type_alias_def(false, false).map(Item::TypeAlias)
                 }
                 // D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive.
                 TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
@@ -729,6 +741,7 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(TokKind::RParen, "to close the parameter list")?;
+            self.validate_variadic_params(&params);
             self.expect(TokKind::LBrace, "to open the property test body")?;
             let body = self.block_stmts();
             return Ok(crate::AST::TestDef {
@@ -1070,6 +1083,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "to close the parameter list")?;
+        self.validate_variadic_params(&params);
 
         let mut return_type = None;
         let mut is_view_return = false;
@@ -1549,6 +1563,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "to close the parameter list")?;
+        self.validate_variadic_params(&params);
 
         // D-EFF1 / D-QUAL1: an optional `#(Net, Db)` effect bound, between the
         // parameter list and the return arrow. Effect names are validated in
@@ -1727,7 +1742,7 @@ impl<'a> Parser<'a> {
         } else {
             self.expect_ident("for a parameter name")?
         };
-        let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
+        let (ty, ty_span, variadic) = if matches!(self.peek().kind, TokKind::Colon) {
             self.bump();
             // D-CAP7: the capability sigil rides the type side — `name: ~T`/`^T`/`&T`.
             // (Receivers carry it on `self` instead: `~self`, parsed above.)
@@ -1747,10 +1762,18 @@ impl<'a> Parser<'a> {
                 }
                 convention = type_cap;
             }
-            self.type_()?
+            // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
+            if matches!(self.peek().kind, TokKind::DotDotDot) {
+                self.bump();
+                let (t, ts) = self.type_()?;
+                (t, ts, true)
+            } else {
+                let (t, ts) = self.type_()?;
+                (t, ts, false)
+            }
         } else if name == Syntax::KW_SELF {
             // S27: receiver type is the owning struct/enum; sema fills it in.
-            (Type::Named(String::new()), name_span)
+            (Type::Named(String::new()), name_span, false)
         } else {
             return Err(Diagnostic::error(
                 "E0003",
@@ -1767,6 +1790,16 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        if variadic && default.is_some() {
+            self.diags.push(Diagnostic::error(
+                "E1310",
+                format!("variadic parameter `{}` can't have a default value", name),
+                "a `...` rest parameter collects trailing arguments — it can't also be optional"
+                    .to_string(),
+                "remove the `= …` default from the variadic parameter".to_string(),
+                Some(name_span),
+            ));
+        }
         Ok(Param {
             convention,
             name,
@@ -1774,7 +1807,23 @@ impl<'a> Parser<'a> {
             ty,
             ty_span,
             default,
+            variadic,
         })
+    }
+
+    /// D-VARIADIC1: a variadic `...` parameter must be the last one in the list.
+    pub(super) fn validate_variadic_params(&mut self, params: &[Param]) {
+        for (i, p) in params.iter().enumerate() {
+            if p.variadic && i + 1 != params.len() {
+                self.diags.push(Diagnostic::error(
+                    "E1310",
+                    format!("variadic parameter `{}` must be last", p.name),
+                    "a `name: ...T` rest parameter collects every trailing argument, so nothing may follow it".to_string(),
+                    "move `{}` to the end of the parameter list, or remove the `...`".to_string(),
+                    Some(p.name_span),
+                ));
+            }
+        }
     }
 
     pub(super) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
@@ -2388,6 +2437,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "to close the parameter list")?;
+        self.validate_variadic_params(&params);
         // D-EFF3: optional `#(Gpu)` effect bound between params and the arrow.
         let declared_effects = self.parse_opt_effect_annotation()?;
         let mut return_type = None;
@@ -2733,6 +2783,31 @@ impl<'a> Parser<'a> {
             name_span,
             base,
             base_span,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    /// D-TYPEALIAS1: `alias Name<T, E> = T ? E;`
+    pub(super) fn type_alias_def(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+    ) -> Result<crate::AST::TypeAliasDef, Diagnostic> {
+        let start = self.bump().span; // `alias`
+        let (name, name_span) = self.expect_ident("after `alias`")?;
+        let type_params = self.parse_opt_type_params()?;
+        self.expect(TokKind::Eq, "in a type alias declaration")?;
+        let (target, target_span) = self.type_()?;
+        self.expect(TokKind::Semi, "after a type alias declaration")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::TypeAliasDef {
+            is_pub,
+            is_package_pub,
+            name,
+            name_span,
+            type_params,
+            target,
+            target_span,
             span: Span::new(start.start, end),
         })
     }

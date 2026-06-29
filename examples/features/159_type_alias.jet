@@ -1,0 +1,18 @@
+// D-TYPEALIAS1: transparent generic type aliases shorten fallible signatures.
+enum AppError {
+    Empty
+}
+
+alias Parsed<T> = T ? AppError
+
+fn parse_count(raw: String) -> Parsed<Int> {
+    if raw == "" {
+        return err(AppError.Empty)
+    }
+    return ok(42)
+}
+
+fn main() {
+    n @= parse_count("7") ?? 0
+    print(n)
+}

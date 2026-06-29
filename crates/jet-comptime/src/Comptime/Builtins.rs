@@ -321,8 +321,10 @@ pub(super) fn apply_method(
         (CtValue::Struct { type_name, .. }, "reflect") if type_name == "TypeInfo" => {
             Ok(recv.clone())
         }
-        // D-METAREFLECT1=B: `.has_marker(name)` on a FieldInfo struct.
-        (CtValue::Struct { type_name, fields }, "has_marker") if type_name == "FieldInfo" => {
+        // D-METAREFLECT1 / D-REFLECT1: `.has_marker(name)` on reflected member handles.
+        (CtValue::Struct { type_name, fields }, "has_marker")
+            if matches!(type_name.as_str(), "FieldInfo" | "MethodInfo" | "TypeInfo") =>
+        {
             let needle = match args.into_iter().next() {
                 Some(CtValue::Str(s)) => s,
                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),

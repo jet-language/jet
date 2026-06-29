@@ -46,7 +46,32 @@ pub(crate) use emit::*;
 pub(crate) use lower::*;
 pub(crate) use subset::*;
 
-use crate::AST::{AccessConvention, BinOp, Type, UnOp};
+use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp};
+
+/// c139 M1: lower the entry module's plain `main` function for the Cranelift JIT.
+///
+/// Returns `None` when there is no plain top-level `main`, or when `main` is
+/// outside the existing `tir_covers` gate.
+pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
+    let module = bundle.modules.get(bundle.entry)?;
+    let extern_funcs = bundle_extern_funcs(bundle);
+    let cx = build_cx_items(
+        &module.items,
+        &module.source,
+        &module.display,
+        None,
+        &extern_funcs,
+    );
+    for item in &module.items {
+        let Item::Func(f) = item else {
+            continue;
+        };
+        if f.name == "main" && f.type_params.is_empty() && f.params.is_empty() && tir_covers(f, &cx) {
+            return Some(lower_func(f, &cx));
+        }
+    }
+    None
+}
 
 // ---------------------------------------------------------------------------
 // TIR types. Every node carries the facts codegen needs, pre-resolved (totality).
@@ -435,13 +460,12 @@ pub enum TStmt {
     /// lowered on the SAME `LowerEnv`.
     Region(Vec<TStmt>),
     /// c109 Phase 19: a `#Context(field: value) { … }` smart-context block (D-CTX1). Lowers
-    /// to a plain block with one RAII guard per field (in declaration order) BEFORE the
-    /// body: an `allocator` field → `let _ctx_guard_<i> = jet_mem::jet_ctx_push_alloc(&<v>);`
-    /// (a safe fn — the unsafe cast is inside the vetted jet_mem zone, I1 holds); any other
-    /// field (logger) → `let _ctx_logger_<i> = <v>;` (v1 no-op; the value still runs). Each
-    /// `(is_allocator, value)` guard is resolved at lowering. The body leaks like a region.
+    /// to a plain block with one RAII/no-op guard per field (in declaration order)
+    /// BEFORE the body: `allocator`/`deadline` push a dynamic context guard in
+    /// `jet_mem`; `logger` stays a v1 no-op value bind. Each `(field_name, value)`
+    /// pair is resolved at lowering. The body leaks like a region.
     ContextBlock {
-        guards: Vec<(bool, TExpr)>,
+        guards: Vec<(String, TExpr)>,
         body: Vec<TStmt>,
     },
     /// D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input block.
@@ -486,6 +510,12 @@ pub struct TMatchArm {
     pub pattern: String,
     pub guard: Option<String>,
     pub body: Vec<TStmt>,
+}
+
+/// One piece of a D-VARIADIC1 list spread literal — either a single element or `...list`.
+pub enum ListSpreadPart {
+    Elem(TExpr),
+    Spread(TExpr),
 }
 
 /// A lowered expression: a resolved `Type` plus its kind. `ty` is **total** — it
@@ -661,6 +691,8 @@ pub enum TExprKind {
     /// element is lowered as-is (the AST path applies no clone/coercion at the
     /// literal site — `emit_expr` per element).
     ListLit(Vec<TExpr>),
+    /// D-VARIADIC1: `[a, ...xs, b]` — one growable list built via `extend`.
+    ListSpread { parts: Vec<ListSpreadPart> },
     /// D-SOA1: a list literal whose element is a `#layout(columnar)` struct `S`.
     /// Lowers to `user_<S>_columns::from_aos(vec![…])` — the elements build the
     /// array-of-structs, then `from_aos` distributes them across the columns.
@@ -938,6 +970,18 @@ pub enum TExprKind {
     /// Phase 11), so emit only assembles. `kind` selects the bespoke shape.
     CoreClosureCall {
         kind: TCoreClosureKind,
+    },
+    /// D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join every handle, collect results.
+    TaskGroupAll {
+        tasks: Box<TExpr>,
+    },
+    /// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first completed result wins.
+    TaskGroupRace {
+        tasks: Box<TExpr>,
+    },
+    /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result (v1 alias).
+    TaskGroupAny {
+        tasks: Box<TExpr>,
     },
     /// c109 Phase 13: a fn-typed-VALUE form. Either a bare function name used as a
     /// value (`Expr::Ident` resolving to a top-level fn) or a call THROUGH a fn-value
@@ -1422,6 +1466,14 @@ pub enum THandleOp {
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.
     TaskDetach,
+    /// D-COROUTINE1=A: Task control-plane pause request (thread-runtime v1: metadata only).
+    TaskPause,
+    /// D-COROUTINE1=A: Task control-plane resume request (thread-runtime v1: metadata only).
+    TaskResume,
+    /// D-COROUTINE1=A: Task control-plane cancel request (thread-runtime v1: metadata only).
+    TaskCancel,
+    /// D-COROUTINE1=A: Task control-plane trace string.
+    TaskTrace,
     /// c109 Phase 21: Channel `receive()` → `(recv).receive()` → `Result<T, Closed>`.
     ChannelReceive,
     /// c109 Phase 21: Channel `sender()` → `(recv).sender()` → `Sender<T>`.
@@ -2763,11 +2815,16 @@ fn greet() -> String { return input() }
 
     #[test]
     fn concurrency_method_names() {
-        // c109 Phase 21: the Task/Channel/Sender method name+arity set. `join` is the
+        // c109 Phase 21 + D-COROUTINE1=A: the Task/Channel/Sender method name+arity set. `join` is the
         // 0-arg form (the 1-arg list `join(sep)` is a collection builtin, NOT here);
         // `send` is the 1-arg form.
         assert!(is_concurrency_method_name("join", 0));
+        assert!(is_concurrency_method_name("wait", 0));
         assert!(is_concurrency_method_name("detach", 0));
+        assert!(is_concurrency_method_name("pause", 0));
+        assert!(is_concurrency_method_name("resume", 0));
+        assert!(is_concurrency_method_name("cancel", 0));
+        assert!(is_concurrency_method_name("trace", 0));
         assert!(is_concurrency_method_name("receive", 0));
         assert!(is_concurrency_method_name("sender", 0));
         assert!(is_concurrency_method_name("send", 1));

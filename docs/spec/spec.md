@@ -1015,11 +1015,24 @@ data. Two detach-site diagnostics guard unsound cases:
 - **E1103**: the lambda had a different sendability failure at spawn (E1102
   already fired); detaching an unsound task is doubly dangerous.
 
+D-COROUTINE1 keeps coroutine machinery internal and exposes expert control via
+task handles instead of new `coroutine` syntax. `task.wait()` aliases
+`task.join()`. `task.pause()`, `task.resume()`, and `task.cancel()` set
+control-plane state on the handle; `task.trace() -> String` reports
+`paused=...,cancel=...`. In the current thread runtime these are observability
+hooks; scheduler-enforced pause/cancel semantics land with the M:N runtime work.
+
 `tasks.channel<T>() -> Channel<T>` creates a receive half. `ch.sender() ->
 Sender<T>` creates a clonable send half. `sender.send(value)` moves a `T` into
 the channel (`take` semantics for non-copy values), and `ch.receive() -> T or
 Closed` blocks until a value arrives or all senders are gone. Channel payloads
 must be sendable (**E1102**).
+
+D-DEADLINE1 (ratified 2026-06-28): an ambient deadline can be set with
+`#Context(deadline: <Int epoch_ms>) { … }`. Inside that scope, wait/IO points
+observe the inherited budget (task joins, channel receive, `time.sleep`, TCP
+read/write stubs). When the budget is exceeded, runtime report **E3003** is
+emitted in Jet terms and execution exits with the runtime error code.
 
 Teaching errors: **E0040** points `async`/`await` users at `tasks.spawn`;
 **E0041** points `Mutex`/`lock` users at channels.

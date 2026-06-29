@@ -25,6 +25,8 @@ pub(crate) struct Cx {
     /// result type, and `is_numeric` is informational (the arithmetic operator is
     /// chosen by `ast_operand_is_integer`, which returns `None` for a distinct).
     pub(crate) distinct_types: HashMap<String, (Type, bool)>,
+    /// D-TYPEALIAS1: transparent generic alias name -> (params, target).
+    pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
@@ -222,8 +224,63 @@ impl Cx {
         None
     }
 
-    pub(crate) fn rust_type(&self, ty: &Type) -> String {
+    /// D-TYPEALIAS1: expand `alias Name<T> = …` applications to their target type.
+    pub(crate) fn expand_type_aliases(&self, ty: &Type) -> Type {
         match ty {
+            Type::Apply { name, args } if self.type_aliases.contains_key(name) => {
+                let (params, target) = self.type_aliases.get(name).unwrap();
+                let subst: HashMap<String, Type> = params
+                    .iter()
+                    .zip(args.iter())
+                    .map(|(p, a)| (p.name.clone(), a.clone()))
+                    .collect();
+                self.expand_type_aliases(&Generics::substitute_type(target, &subst))
+            }
+            Type::Apply { name, args } => Type::Apply {
+                name: name.clone(),
+                args: args.iter().map(|a| self.expand_type_aliases(a)).collect(),
+            },
+            Type::List(inner) => Type::List(Box::new(self.expand_type_aliases(inner))),
+            Type::Map { key, value } => Type::Map {
+                key: Box::new(self.expand_type_aliases(key)),
+                value: Box::new(self.expand_type_aliases(value)),
+            },
+            Type::Shared(inner) => Type::Shared(Box::new(self.expand_type_aliases(inner))),
+            Type::Option(inner) => Type::Option(Box::new(self.expand_type_aliases(inner))),
+            Type::Result { ok, err } => Type::Result {
+                ok: Box::new(self.expand_type_aliases(ok)),
+                err: Box::new(self.expand_type_aliases(err)),
+            },
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+            } => Type::Fn {
+                params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
+                ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
+                effect_bound: effect_bound.clone(),
+            },
+            Type::Tuple(fields) => Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(n, t)| (n.clone(), Box::new(self.expand_type_aliases(t))))
+                    .collect(),
+            ),
+            Type::Tagged { marker, inner } => Type::Tagged {
+                marker: marker.clone(),
+                inner: Box::new(self.expand_type_aliases(inner)),
+            },
+            Type::FixedList { elem, len } => Type::FixedList {
+                elem: Box::new(self.expand_type_aliases(elem)),
+                len: *len,
+            },
+            other => other.clone(),
+        }
+    }
+
+    pub(crate) fn rust_type(&self, ty: &Type) -> String {
+        let ty = self.expand_type_aliases(ty);
+        match &ty {
             Type::Int => "i64".to_string(),
             Type::Float => "f64".to_string(),
             Type::IntN { signed, bits } => {
@@ -554,6 +611,7 @@ pub(crate) fn build_cx_items(
         consts: HashMap::new(),
         type_names: HashSet::new(),
         distinct_types: HashMap::new(),
+        type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
         enum_variants: HashMap::new(),
@@ -603,14 +661,29 @@ pub(crate) fn build_cx_items(
                             } else {
                                 p.convention
                             };
-                            (conv, p.ty.clone())
+                            let ty = if p.variadic {
+                                Type::List(Box::new(p.ty.clone()))
+                            } else {
+                                p.ty.clone()
+                            };
+                            (conv, ty)
                         })
                         .collect(),
                 );
                 cx.fn_types.insert(
                     f.name.clone(),
                     Type::Fn {
-                        params: f.params.iter().map(|p| p.ty.clone()).collect(),
+                        params: f
+                            .params
+                            .iter()
+                            .map(|p| {
+                                if p.variadic {
+                                    Type::List(Box::new(p.ty.clone()))
+                                } else {
+                                    p.ty.clone()
+                                }
+                            })
+                            .collect(),
                         ret: f.return_type.clone().map(Box::new),
                         effect_bound: None,
                     },
@@ -696,6 +769,12 @@ pub(crate) fn build_cx_items(
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
+            Item::TypeAlias(a) => {
+                cx.type_aliases.insert(
+                    a.name.clone(),
+                    (a.type_params.clone(), a.target.clone()),
+                );
+            }
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());
                 cx.distinct_types

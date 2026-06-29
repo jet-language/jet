@@ -66,6 +66,14 @@ pub(crate) enum TypeDef {
         base: Type,
         is_numeric: bool,
     },
+    /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — transparent
+    /// generic shortcut; expands in sema, erases at codegen.
+    Alias {
+        #[allow(dead_code)]
+        name_span: Span,
+        params: Vec<crate::AST::TypeParam>,
+        target: Type,
+    },
 }
 
 pub(crate) struct TypeRegistry {
@@ -130,6 +138,18 @@ impl TypeRegistry {
         matches!(self.types.get(name), Some(TypeDef::Distinct { .. }))
     }
 
+    /// D-TYPEALIAS1: true when `name` is a registered transparent type alias.
+    pub(crate) fn is_type_alias(&self, name: &str) -> bool {
+        matches!(self.types.get(name), Some(TypeDef::Alias { .. }))
+    }
+
+    pub(crate) fn type_alias(&self, name: &str) -> Option<(&[crate::AST::TypeParam], &Type)> {
+        match self.types.get(name) {
+            Some(TypeDef::Alias { params, target, .. }) => Some((params.as_slice(), target)),
+            _ => None,
+        }
+    }
+
     /// D-LIN1 (ratified 2026-06-21): true when `name` is a `#SingleUse` struct/enum.
     /// Values of such a type must be consumed exactly once and may not be aliased.
     pub(crate) fn is_single_use(&self, name: &str) -> bool {
@@ -192,6 +212,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
 
 fn func_to_sig(f: &Func) -> FuncSig {
     let type_params: HashSet<String> = f.type_params.iter().map(|p| p.name.clone()).collect();
+    let param_variadic: Vec<bool> = f.params.iter().map(|p| p.variadic).collect();
     FuncSig {
         params: f
             .params
@@ -202,7 +223,12 @@ fn func_to_sig(f: &Func) -> FuncSig {
                 } else {
                     p.convention
                 };
-                (conv, p.ty.clone())
+                let ty = if p.variadic {
+                    Type::List(Box::new(p.ty.clone()))
+                } else {
+                    p.ty.clone()
+                };
+                (conv, ty)
             })
             .collect(),
         param_info: f
@@ -215,6 +241,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
             .iter()
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
+        param_variadic,
         return_type: f.return_type.clone(),
         is_view_return: f.is_view_return,
         is_extern: false,
@@ -229,10 +256,18 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         params: ef
             .params
             .iter()
-            .map(|p| (p.convention, p.ty.clone()))
+            .map(|p| {
+                let ty = if p.variadic {
+                    Type::List(Box::new(p.ty.clone()))
+                } else {
+                    p.ty.clone()
+                };
+                (p.convention, ty)
+            })
             .collect(),
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
         defaults: ef.params.iter().map(|_| None).collect(),
+        param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         return_type: ef.return_type.clone(),
         is_view_return: ef.is_view_return,
         is_extern: true,
@@ -603,6 +638,11 @@ pub(crate) struct Checker<'a> {
     /// Each entry is the (ptr, len) of the tail saved before entering a nested
     /// block, so `is_name_live_after` can walk up through all enclosing scopes.
     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
+    /// D-TASKSCOPE1=A: stack of active `taskgroup` scopes (innermost last).
+    taskgroup_stack: Vec<TaskGroupCtx>,
+    /// True while inferring the body passed to `g.task { … }` — suppresses L1101
+    /// (the taskgroup owns the handle until scope exit or an explicit join).
+    in_taskgroup_spawn: bool,
 }
 
 pub mod ApiFreeze;
@@ -615,6 +655,8 @@ mod CheckerCoreLib;
 mod CheckerInfer;
 mod CheckerItems;
 mod CheckerOwnership;
+mod CheckerTaskGroup;
+use CheckerTaskGroup::TaskGroupCtx;
 mod Diagnostics;
 mod Effects;
 mod FFI;

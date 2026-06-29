@@ -203,6 +203,13 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-TASKSCOPE1=A: `taskgroup g { … }`.
+            Stmt::TaskGroup { name, body, .. } => {
+                self.write(&format!("{} {} {{", Syntax::KW_TASKGROUP, name));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
             Stmt::Caps { caps, body, .. } => {
                 let list = caps

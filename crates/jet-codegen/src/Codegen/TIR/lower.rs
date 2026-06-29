@@ -211,6 +211,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Impure { body, .. }
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
+            | Stmt::TaskGroup { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::ContextBlock { body, .. }
@@ -272,17 +273,24 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
-    for p in &f.params {
-        let rust_name = cx.mangle_name(&p.name);
-        // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
-        // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
-        // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
-        // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
-        // its source convention (`Read` → `&user_Stack<T>`, deref'd place `(*user_s)`).
-        let place = param_place_generic(&rust_name, p, &f.type_params);
-        env.bind(&p.name, place, Some(p.ty.clone()));
-        params.push((rust_name, p.ty.clone(), p.convention));
-    }
+        for p in &f.params {
+            let rust_name = cx.mangle_name(&p.name);
+            let param_ty = if p.variadic {
+                Type::List(Box::new(p.ty.clone()))
+            } else {
+                p.ty.clone()
+            };
+            // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
+            // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
+            // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
+            // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
+            // its source convention (`Read` → `&user_Stack<T>`, deref'd place `(*user_s)`).
+            let mut slot_param = p.clone();
+            slot_param.ty = param_ty.clone();
+            let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
+            env.bind(&p.name, place, Some(param_ty.clone()));
+            params.push((rust_name, param_ty, p.convention));
+        }
     let body = lower_stmts(&f.body, cx, &mut env);
     TFunc {
         name: f.name.clone(),
@@ -1183,6 +1191,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
         // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.
         Stmt::Region { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // D-TASKSCOPE1=A: taskgroup erases to a plain block at codegen (I3).
+        Stmt::TaskGroup { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
         // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region` — a plain block with the body lowered
         // on the SAME `&mut env` (its `let`s leak). Effects erase at codegen (I3); reuse the
@@ -1194,17 +1204,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // into a plain `TStmt::Region` — byte-for-byte the `Stmt::Region`/`Stmt::Caps`
         // shape. No runtime grant/revoke value, no `unsafe`.
         Stmt::Grant { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
-        // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1). Resolve each
-        // field into an `(is_allocator, value)` guard at lowering, then lower the body on
+        // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
+        // Resolve each field into a `(field_name, value)` guard at lowering, then lower the body on
         // the SAME `env` (it leaks like a region). Emit reproduces `emit_stmts`'s
         // `Stmt::ContextBlock` arm byte-for-byte.
         Stmt::ContextBlock { fields, body, .. } => {
             let guards = fields
                 .iter()
-                .map(|(name, v, _)| {
-                    let is_alloc = name == Syntax::CTX_FIELD_ALLOCATOR;
-                    (is_alloc, lower_expr(v, cx, env))
-                })
+                .map(|(name, v, _)| (name.clone(), lower_expr(v, cx, env)))
                 .collect();
             TStmt::ContextBlock {
                 guards,
@@ -3022,7 +3029,37 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // is `[E]` with `E` taken from the first element; an empty `[]` has no
         // element to read, so its element type is unresolved (`Int` placeholder),
         // but the emitted `vec![]` is type-inferred by Rust from the binding context.
-        Expr::ListLit(elems, _) => {
+        Expr::ListLit(elems, _span) => {
+            let has_spread = elems
+                .iter()
+                .any(|e| matches!(e, Expr::Spread(..)));
+            if has_spread {
+                let mut parts = Vec::new();
+                for e in elems {
+                    match e {
+                        Expr::Spread(inner, _) => {
+                            parts.push(ListSpreadPart::Spread(lower_expr(inner, cx, env)));
+                        }
+                        other => {
+                            parts.push(ListSpreadPart::Elem(lower_expr(other, cx, env)));
+                        }
+                    }
+                }
+                let elem_ty = parts
+                    .iter()
+                    .find_map(|p| match p {
+                        ListSpreadPart::Elem(t) => Some(t.ty.clone()),
+                        ListSpreadPart::Spread(t) => match &t.ty {
+                            Type::List(inner) => Some((**inner).clone()),
+                            _ => Some(t.ty.clone()),
+                        },
+                    })
+                    .unwrap_or(Type::Int);
+                return TExpr {
+                    ty: Type::List(Box::new(elem_ty)),
+                    kind: TExprKind::ListSpread { parts },
+                };
+            }
             let telems: Vec<TExpr> = elems.iter().map(|e| lower_expr(e, cx, env)).collect();
             let elem_ty = telems.first().map(|e| e.ty.clone()).unwrap_or(Type::Int);
             // D-SOA1: a list of a columnar struct builds via `from_aos`.
@@ -3541,6 +3578,72 @@ pub(crate) fn lower_method_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
+    // D-TASKSCOPE1=A / D-NURSERY1=A: structured taskgroup methods.
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_SPAWN_METHOD
+    {
+        if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
+            let body_ty = lambda_body_ty(lam, cx, env);
+            let spawn_closure = render_spawn_lambda(lam, cx, env);
+            return TExpr {
+                ty: Type::Apply {
+                    name: "Task".to_string(),
+                    args: vec![body_ty],
+                },
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::Spawn { spawn_closure },
+                },
+            };
+        }
+    }
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_ALL_METHOD
+        && args.len() == 1
+    {
+        let tasks = lower_expr(&args[0].expr, cx, env);
+        let elem = match &tasks.ty {
+            Type::List(inner) => (**inner).clone(),
+            _ => unit_type(),
+        };
+        return TExpr {
+            ty: Type::List(Box::new(elem)),
+            kind: TExprKind::TaskGroupAll {
+                tasks: Box::new(tasks),
+            },
+        };
+    }
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_RACE_METHOD
+        && args.len() == 1
+    {
+        let tasks = lower_expr(&args[0].expr, cx, env);
+        let elem = match &tasks.ty {
+            Type::List(inner) => (**inner).clone(),
+            _ => unit_type(),
+        };
+        return TExpr {
+            ty: elem,
+            kind: TExprKind::TaskGroupRace {
+                tasks: Box::new(tasks),
+            },
+        };
+    }
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_ANY_METHOD
+        && args.len() == 1
+    {
+        let tasks = lower_expr(&args[0].expr, cx, env);
+        let elem = match &tasks.ty {
+            Type::List(inner) => (**inner).clone(),
+            _ => unit_type(),
+        };
+        return TExpr {
+            ty: elem,
+            kind: TExprKind::TaskGroupAny {
+                tasks: Box::new(tasks),
+            },
+        };
+    }
     // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
     // The gate proved `recv_type == Some("Transaction")` and a single literal
     // zero-param lambda arg. Lower to `<handle>.on_commit(Box::new(move || { … }))`;
@@ -4164,8 +4267,9 @@ pub(crate) fn lower_method_call(
     // builtin_method_return`'s `Type::Apply` arms (Source/Collections.rs), read off the
     // receiver's already-resolved type `Task<T>`/`Channel<T>`/`Sender<T>` (the LOWERED
     // receiver's `.ty`, total from the binding's annotated/inferred slot — never
-    // re-inferred in emit, I3): `join` → `T`; `detach`/`send` → Unit; `receive` →
-    // `Result<T, Closed>`; `sender` → `Sender<T>`. Args lowered PLAINLY (the AST
+    // re-inferred in emit, I3): `join`/`wait` → `T`; `detach`/`pause`/`resume`/`cancel`/`send`
+    // → Unit; `trace` → `String`; `receive` → `Result<T, Closed>`; `sender` → `Sender<T>`.
+    // Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
         let recv_t = lower_expr(receiver, cx, env);
@@ -4176,8 +4280,12 @@ pub(crate) fn lower_method_call(
         };
         let elem = elem.unwrap_or_else(unit_type);
         let (op, ty) = match method {
-            "join" => (THandleOp::TaskJoin, elem),
+            "join" | "wait" => (THandleOp::TaskJoin, elem),
             "detach" => (THandleOp::TaskDetach, unit_type()),
+            "pause" => (THandleOp::TaskPause, unit_type()),
+            "resume" => (THandleOp::TaskResume, unit_type()),
+            "cancel" => (THandleOp::TaskCancel, unit_type()),
+            "trace" => (THandleOp::TaskTrace, Type::String),
             "receive" => (
                 THandleOp::ChannelReceive,
                 Type::Result {
@@ -4616,10 +4724,21 @@ pub(crate) fn lower_core_closure_call(
     })
 }
 
+/// Last expression-producing statement in a lambda block (mirrors sema tail rules).
+/// Only the **final** statement may be a tail; an earlier `send()`/`call()` followed
+/// by a loop is not a tail expression.
+fn lambda_block_tail<'a>(stmts: &'a [Stmt]) -> Option<(&'a [Stmt], &'a Stmt)> {
+    let last_idx = stmts.len().checked_sub(1)?;
+    let last = &stmts[last_idx];
+    match last {
+        Stmt::Return(Some(_), _) | Stmt::Expr(_) => Some((&stmts[..last_idx], last)),
+        _ => None,
+    }
+}
+
 /// c109 Phase 13: the type of a lambda's body (its return), used for a `spawn`ed
-/// closure's `Task<T>` element type. An expression body's type is the lowered expr's
-/// `ty`; a block body's type is rarely load-bearing in the subset (the Task type is
-/// not read by emit), so a `Unit` placeholder is fine for a block.
+/// closure's `Task<T>` element type. Block bodies use the tail expression/return
+/// (same rule as sema), not `Unit`.
 pub(crate) fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
     match &lam.body {
         LambdaBody::Expr(e) => {
@@ -4631,7 +4750,21 @@ pub(crate) fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
             }
             lower_expr(e, cx, &mut lam_env).ty
         }
-        LambdaBody::Block(_) => unit_type(),
+        LambdaBody::Block(stmts) => {
+            let Some((_, tail)) = lambda_block_tail(stmts) else {
+                return unit_type();
+            };
+            let mut lam_env = clone_env(env);
+            for p in &lam.params {
+                lam_env
+                    .locals
+                    .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
+            }
+            match tail {
+                Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
+                _ => unit_type(),
+            }
+        }
     }
 }
 
@@ -5198,12 +5331,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
         .collect();
     let body = match &lam.body {
         LambdaBody::Expr(e) => emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx),
-        LambdaBody::Block(stmts) => {
-            let lowered = lower_stmts(stmts, cx, &mut lam_env);
-            let mut inner = String::new();
-            emit_tir_stmts(&lowered, cx, &mut inner, 1);
-            format!("{{ {} }}", inner)
-        }
+        LambdaBody::Block(stmts) => render_spawn_block_body(stmts, cx, &mut lam_env),
     };
     let closure = format!("move |{}| {}", params.join(", "), body);
     if prep.is_empty() {
@@ -5211,6 +5339,41 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     } else {
         format!("{{ {} {} }}", prep, closure)
     }
+}
+
+/// Render a spawn-lambda block body: prefix statements keep `;`, the tail
+/// expression is the closure's return value (no trailing `;`).
+fn render_spawn_block_body(stmts: &[Stmt], cx: &Cx, lam_env: &mut LowerEnv) -> String {
+    let Some((prefix, tail)) = lambda_block_tail(stmts) else {
+        let mut inner = String::new();
+        let lowered = lower_stmts(stmts, cx, lam_env);
+        emit_tir_stmts(&lowered, cx, &mut inner, 1);
+        return format!("{{ {} }}", inner);
+    };
+    let mut inner = String::new();
+    if !prefix.is_empty() {
+        let lowered = lower_stmts(prefix, cx, lam_env);
+        emit_tir_stmts(&lowered, cx, &mut inner, 1);
+    }
+    let pad = "    ";
+    match tail {
+        Stmt::Return(Some(e), _) => {
+            inner.push_str(&format!(
+                "{}return {};",
+                pad,
+                emit_tir_expr(&lower_expr(e, cx, lam_env), cx)
+            ));
+        }
+        Stmt::Expr(e) => {
+            inner.push_str(&format!(
+                "{}{}",
+                pad,
+                emit_tir_expr(&lower_expr(e, cx, lam_env), cx)
+            ));
+        }
+        _ => {}
+    }
+    format!("{{ {} }}", inner)
 }
 
 /// c109 Phase 13: render a lambda via the plain `emit_lambda` form (used by

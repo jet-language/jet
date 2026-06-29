@@ -45,6 +45,11 @@ impl<'a> Fmt<'a> {
                 let text = self.src[d.span.start..d.span.end].to_string();
                 self.write(&text);
             }
+            // D-TYPEALIAS1: type alias declarations are emitted verbatim.
+            Item::TypeAlias(a) => {
+                let text = self.src[a.span.start..a.span.end].to_string();
+                self.write(&text);
+            }
             // D-QUAL3: unit-family declarations are emitted verbatim (the sugar
             // surface is preserved; it is not expanded into per-member distincts).
             Item::UnitFamily(uf) => {

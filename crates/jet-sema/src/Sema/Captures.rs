@@ -71,6 +71,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::Impure { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Region { body: inner, .. }
+            | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
             | Stmt::Grant { body: inner, .. }
             | Stmt::Transact { body: inner, .. }
@@ -257,6 +258,7 @@ pub(crate) fn walk_expr_for_const_refs(
             }
         }
         Expr::Paren(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
+        Expr::Spread(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
     }
 }
 
@@ -349,6 +351,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Todo { .. }
         | Expr::ComptimeSplice { .. } => false,
         Expr::Paren(inner, _) => expr_refs_name(inner, name),
+        Expr::Spread(inner, _) => expr_refs_name(inner, name),
     }
 }
 
@@ -412,6 +415,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Impure { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
@@ -522,6 +526,7 @@ pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Optio
         | Stmt::Impure { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
@@ -828,6 +833,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::Impure { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }

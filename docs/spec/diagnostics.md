@@ -201,6 +201,7 @@ before continuing.
 | E0321 | parse | teaching: `impl Type: Trait` old colon separator → `impl Type.Trait` (D-IMPLDOT1) |
 | E0322 | parse | assignment `=` in `if` condition — did you mean `==`? (D-ASSIGNCOND1) |
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
+| E0324 | sema  | type alias without type parameters — use `struct` for a distinct primitive name (D-TYPEALIAS1) |
 | E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
 | E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
@@ -264,10 +265,11 @@ before continuing.
 | E0748 | sema  | `#(via f)` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
 | E0749 | sema  | a function reaches an effect it prohibits with `#(!E)` in its own call graph (D-PROP1=A) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
-| E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
-| E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |
+| E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
+| E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
+| E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
 | E3101 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer op gate; canonical raw ops use E0208) |
 | E3102 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer discovery gate) |
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
@@ -331,6 +333,9 @@ before continuing.
 | E0963 | sema  | positional destructure count ≠ fixed-size list length (S76) |
 | E0964 | sema  | length-changing op (`push`/`pop`/`insert`) on a fixed-size `[T#N]` (S76) |
 | E0965 | sema  | compile-time index out of range on `[T#N]` (S76) |
+| E1310 | parse/sema | variadic parameter not last, or variadic param has a default (D-VARIADIC1) |
+| E1311 | sema  | spread operand is not a list (D-VARIADIC1) |
+| E1312 | sema  | call spread at a callee without a variadic rest parameter (D-VARIADIC1) |
 | E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
 | E0967 | jetpack | §6 merge conflict: a named source or scalar setting got irreconcilable values |
 | E0968 | jetpack | a module `sources:` entry isn't a `provider@target` ref (U6/U8) |
@@ -367,6 +372,7 @@ before continuing.
 | E1107 | sema  | `columnar [T]` per-container layout prefix is reserved (D-SOA2C) |
 | E1108 | sema  | list method not yet supported on a `#Layout(columnar)` list (D-SOA1) |
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
+| E1110 | sema  | `.task { … }` outside a `taskgroup` scope, or on the wrong handle (D-TASKSCOPE1) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
 | E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
@@ -498,6 +504,14 @@ parse error.
 | E0964 | A length-changing method (`push`, `pop`, `insert`, `remove`, `clear`) was called on a fixed-size `[T#N]`. | The length of `[T#N]` is fixed at compile time and cannot change at runtime. | If you need a growable list, bind it with `:=` (e.g. `r := [...]`) so its length can change. |
 | E0965 | A literal index is out of range for a `[T#N]` at compile time. | The valid indexes for `[T#N]` are 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, or check at runtime with a condition. |
 
+## Variadic and spread diagnostics (D-VARIADIC1)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E1310 | A `...` rest parameter is not last, or a variadic parameter has a default value. | A variadic parameter collects every trailing argument, so nothing may follow it; a default would contradict that job. | Move `name: ...T` to the end of the parameter list and remove any `= …` default. |
+| E1311 | A spread operand is not a list. | List spread `[...xs]` and call spread `f(...xs)` expand a list's elements — the operand must be `[T]`. | Spread a list value, or build the list without spread. |
+| E1312 | A call uses spread at a function with no variadic rest parameter. | `f(...xs)` only applies when the callee's final parameter is variadic (`name: ...T`). | Pass arguments individually, or call a function whose last parameter is variadic. |
+
 ## Module evaluation diagnostics (jetpack)
 
 These come from the jetpack module evaluator (`Source/Jetpack/ModuleEval.rs`,
@@ -541,6 +555,7 @@ CLI.
 | E1107 | The per-container layout prefix `columnar [T]` was written in a type. | A per-use columnar override isn't built yet — only the whole-struct form `#Layout(columnar) struct …` ships in v1 (D-SOA2C reserves this spelling). | Put `#Layout(columnar)` on the `struct` declaration instead. |
 | E1108 | A list method (e.g. `.map`, `.filter`, `.sort`, `.pop`, `.remove`, `.get`) was called on a `#Layout(columnar)` list. | v1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled. | Drop `#Layout(columnar)` from the struct to use the full list API, or rewrite the operation with indexing and a loop. |
 | E1109 | A partial columnar annotation `#Layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#Layout(columnar)` to convert the whole struct. |
+| E1110 | `.task { … }` was called outside a `taskgroup` block, or on a handle other than the active taskgroup name. | Structured spawning is scoped: only the handle bound by `taskgroup g { … }` may spawn children, and the taskgroup joins them at scope exit. | Wrap the code in `taskgroup g { … }` and write `g.task { … }` using that same name. |
 | L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
@@ -676,6 +691,7 @@ span is embedded in the message (Jet file + line + function name).
 |------|------|-----|-----|
 | E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. | The program hit a `panic`, `require`, or `require_eq` call that failed, or a bounds/key check triggered at runtime. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; the source line and locals show what values were in play. |
 | E3002 | `error propagated from: {fn} ({file}:{line}) via ?` — an error-return trace entry appended when a `?` re-raises an error. | Each `?` that propagates an error adds a frame, making the full error path visible. | Follow the trace from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
+| E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 
 ## Uninitialized binding diagnostics (D-UNINIT1)
 

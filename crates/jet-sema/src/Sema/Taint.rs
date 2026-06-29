@@ -173,6 +173,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Lambda(_)
             | Expr::ComptimeSplice { .. } => false,
             Expr::Paren(inner, _) => self.is_tainted(inner),
+            Expr::Spread(inner, _) => self.is_tainted(inner),
         }
     }
 
@@ -300,6 +301,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Todo { .. }
             | Expr::ComptimeSplice { .. } => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
+            Expr::Spread(inner, _) => self.check_expr(inner),
         }
     }
 
@@ -424,6 +426,7 @@ impl<'a> TaintCtx<'a> {
             | Stmt::Impure { body, .. }
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
+            | Stmt::TaskGroup { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }

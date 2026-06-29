@@ -609,6 +609,9 @@ pub enum Item {
     /// D-DIST1 (ratified 2026-06-19): `UserId @= distinct Int` — a distinct type
     /// declaration. `distinct`-over-`distinct` base is rejected in sema.
     Distinct(DistinctDef),
+    /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — a transparent
+    /// type alias for generic shortcuts. Erases at codegen (I3).
+    TypeAlias(TypeAliasDef),
     /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(currency) { usd, eur, gbp }` —
     /// a unit family. Sugar: each member mints one `#Numeric` distinct type
     /// (`usd` → `Usd`) erasing to `Float`. Lowers to a `DistinctDef` per member
@@ -1139,6 +1142,8 @@ pub struct Param {
     pub ty_span: Span,
     /// S61: trailing `= expr` default value. Only trailing params may have defaults.
     pub default: Option<Box<Expr>>,
+    /// D-VARIADIC1: `name: ...T` — last parameter only; `ty` is the element type.
+    pub variadic: bool,
 }
 
 /// D-REPRC1 / D-SOA1 (ratified): the variant of `#layout(…)` on a struct.
@@ -1209,6 +1214,20 @@ pub struct StructDef {
     /// re-emits the surface the user actually typed instead of a lowered form.
     /// Empty when the type had no leading `#[…]` list.
     pub type_markers: Vec<Marker>,
+}
+
+/// D-TYPEALIAS1: `alias Name<T, E> = T ? E` — transparent generic type shortcut.
+#[derive(Debug)]
+pub struct TypeAliasDef {
+    pub is_pub: bool,
+    /// D-PUBPKG1=A: true for `pub(package) alias …`.
+    pub is_package_pub: bool,
+    pub name: String,
+    pub name_span: Span,
+    pub type_params: Vec<TypeParam>,
+    pub target: Type,
+    pub target_span: Span,
+    pub span: Span,
 }
 
 /// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name @= distinct Base`.
@@ -1651,6 +1670,15 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-TASKSCOPE1=A / D-NURSERY1=A: `taskgroup g { … }` — a lexical scope that
+    /// owns child tasks. `g.task { … }` spawns; scope exit joins/cancels children.
+    /// Emitted as a plain block at codegen; lifetime is enforced in sema (I3).
+    TaskGroup {
+        name: String,
+        name_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction region. The
     /// `caps` list is the only effects the body (and everything it transitively
     /// calls) may use; an out-of-set effect is E0741. `caps` names are validated
@@ -1711,7 +1739,8 @@ pub enum Stmt {
     /// Swaps named ambient fields for the block's lexical+dynamic extent, then
     /// restores them on all exit paths (return, break, ?, panic unwind) via
     /// a RAII guard. Expert-tier; never surfaced in beginner diagnostics.
-    /// v1 fields: `allocator` (allocator handle), `logger` (logger handle).
+    /// v1 fields: `allocator` (allocator handle), `logger` (logger handle),
+    /// `deadline` (absolute epoch-millis Int budget).
     /// Q1 = A2: an explicit allocator arg at a call site overrides the ambient.
     /// Q2 = Cβ: restore is per-block (on guard Drop).
     ContextBlock {
@@ -1782,6 +1811,7 @@ impl Stmt {
             | Stmt::Impure { span, .. }
             | Stmt::SuppressMustUse { span, .. }
             | Stmt::Region { span, .. }
+            | Stmt::TaskGroup { span, .. }
             | Stmt::Caps { span, .. }
             | Stmt::Grant { span, .. }
             | Stmt::ComptimeIf { span, .. }
@@ -1907,6 +1937,8 @@ pub struct CallArg {
     /// S61: optional `name:` label at the call site. When present, sema checks
     /// that it matches the parameter name at this position.
     pub label: Option<(String, Span)>,
+    /// D-VARIADIC1: `f(...xs)` — expand a list into the remaining parameter slots.
+    pub spread: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2030,6 +2062,8 @@ pub enum Expr {
     Char(char, Span),
     /// S37: `[a, b, c]` or `[]`.
     ListLit(Vec<Expr>, Span),
+    /// D-VARIADIC1: `...expr` inside a list literal — flatten the list's elements in place.
+    Spread(Box<Expr>, Span),
     /// S38: `["k": v]` or `[:]`.
     MapLit(Vec<(Expr, Expr)>, Span),
     /// S39: `xs[i]` or `m[k]`.
@@ -2228,6 +2262,7 @@ impl Expr {
             | Expr::Bool(_, s)
             | Expr::Char(_, s)
             | Expr::ListLit(_, s)
+            | Expr::Spread(_, s)
             | Expr::TupleLit(_, s, _)
             | Expr::MapLit(_, s)
             | Expr::Index { span: s, .. }
@@ -2298,6 +2333,8 @@ pub struct FuncSig {
     pub param_info: Vec<(String, bool)>,
     /// S61: default expressions for parameters that have them, parallel to `params`.
     pub defaults: Vec<Option<Expr>>,
+    /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
+    pub param_variadic: Vec<bool>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

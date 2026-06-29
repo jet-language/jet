@@ -723,6 +723,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Impure { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
@@ -875,6 +876,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Todo { .. }
         | Expr::ComptimeSplice { .. } => None,
         Expr::Paren(inner, _) => expr_handle_escape(inner, handle),
+        Expr::Spread(inner, _) => expr_handle_escape(inner, handle),
     }
 }
 

@@ -506,6 +506,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         Item::CodeModule(_) => {}
         // D-DIST1: distinct types aren't yet indexed for symbols/hover.
         Item::Distinct(_) => {}
+        // D-TYPEALIAS1: type aliases aren't yet indexed for symbols/hover.
+        Item::TypeAlias(_) => {}
         // D-QUAL3: unit families aren't yet indexed for symbols/hover.
         Item::UnitFamily(_) => {}
         // D-ERR-CONV: error conversions aren't yet indexed for symbols/hover.
@@ -563,6 +565,7 @@ fn collect_view_return_hints(stmts: &[AST::Stmt], mp: &str, ctx: &mut WalkCtx<'_
             | AST::Stmt::Caps { body, .. }
             | AST::Stmt::Grant { body, .. }
             | AST::Stmt::Region { body, .. }
+            | AST::Stmt::TaskGroup { body, .. }
             | AST::Stmt::Transact { body, .. }
             | AST::Stmt::AssumeDet { body, .. }
             | AST::Stmt::CountedLoop { body, .. }
@@ -700,6 +703,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::Unsafe { body, .. }
         | AST::Stmt::Impure { body, .. }
         | AST::Stmt::Region { body, .. }
+        | AST::Stmt::TaskGroup { body, .. }
         | AST::Stmt::Caps { body, .. }
         | AST::Stmt::Grant { body, .. }
         | AST::Stmt::Transact { body, .. }
@@ -907,6 +911,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 collect_expr(i, mp, ctx);
             }
         }
+        AST::Expr::Spread(inner, _) => collect_expr(inner, mp, ctx),
         AST::Expr::MapLit(pairs, _) => {
             for (k, v) in pairs {
                 collect_expr(k, mp, ctx);

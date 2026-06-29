@@ -239,6 +239,7 @@ pub(crate) fn check_pure_stmt(
         | Stmt::Impure { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. } => {
@@ -643,6 +644,7 @@ fn check_pure_stmt_with_path(
         | Stmt::Impure { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. } => {
@@ -1129,6 +1131,7 @@ fn walk_stmt_for_calls(
         | Stmt::Impure { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. } => {

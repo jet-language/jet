@@ -186,6 +186,43 @@ fn main() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn deadline_context_exceed_reports_e3003() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping deadline runtime test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_deadline_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, _stdout, stderr) = build_and_run(
+        &dir,
+        "deadline_exceeded",
+        r#"
+use core.time as time
+
+fn main() {
+    #Context(deadline: time.now()) {
+        time.sleep(5)
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 70, "deadline exceed should stop with runtime code 70");
+    assert!(
+        stderr.contains("Error [E3003]"),
+        "deadline exceed should report E3003, got: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("E3003"),
+        "deadline exceed should carry code E3003, got: {stderr:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// SL9 / R10: importing every core module without calling it must not bloat the binary.
 #[test]
 fn importing_all_core_modules_without_calls_stays_hello_world_sized() {

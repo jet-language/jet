@@ -193,13 +193,17 @@ impl<'a> Parser<'a> {
                 &format!("after the field name `{}`", field_name),
             )?;
             // E0761: unknown field name.
-            if field_name != Syntax::CTX_FIELD_ALLOCATOR && field_name != Syntax::CTX_FIELD_LOGGER {
+            if field_name != Syntax::CTX_FIELD_ALLOCATOR
+                && field_name != Syntax::CTX_FIELD_LOGGER
+                && field_name != Syntax::CTX_FIELD_DEADLINE
+            {
                 return Err(Diagnostic::error(
                     "E0761",
                     format!("`{}` isn't a context field", field_name),
-                    "the context bundle holds `allocator` and `logger`".to_string(),
+                    "the context bundle holds `allocator`, `logger`, and `deadline`".to_string(),
                     format!(
-                        "write `#{}(allocator: …)` or `#{}(logger: …)`",
+                        "write `#{}(allocator: …)`, `#{}(logger: …)`, or `#{}(deadline: …)`",
+                        Syntax::CTX_BLOCK,
                         Syntax::CTX_BLOCK,
                         Syntax::CTX_BLOCK
                     ),
@@ -1116,6 +1120,24 @@ impl<'a> Parser<'a> {
                 let body = self.block_stmts();
                 let end = self.toks[self.pos - 1].span.end;
                 return Ok(Stmt::Region {
+                    name,
+                    name_span,
+                    body,
+                    span: Span::new(start.start, end),
+                });
+            }
+            // D-TASKSCOPE1=A: `taskgroup g { … }` — structured task scope.
+            TokKind::Ident(n)
+                if n == Syntax::KW_TASKGROUP
+                    && matches!(&self.peek2().kind, TokKind::Ident(_))
+                    && matches!(self.peek3().kind, TokKind::LBrace) =>
+            {
+                let start = self.bump().span; // `taskgroup`
+                let (name, name_span) = self.expect_ident("for the task group name")?;
+                self.expect(TokKind::LBrace, "after the task group name")?;
+                let body = self.block_stmts();
+                let end = self.toks[self.pos - 1].span.end;
+                return Ok(Stmt::TaskGroup {
                     name,
                     name_span,
                     body,

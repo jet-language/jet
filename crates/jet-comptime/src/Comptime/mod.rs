@@ -19,6 +19,7 @@ mod Diagnostics;
 mod Interpreter;
 mod Methods;
 mod Purity;
+mod Reflect;
 mod Value;
 
 use std::collections::{HashMap, HashSet};
@@ -29,6 +30,7 @@ use crate::AST::Func;
 
 pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
+pub use Reflect::build_struct_type_info;
 pub use Value::CtValue;
 
 use Interpreter::{Interp, DEV_FUEL_BUDGET, FUEL_BUDGET};

@@ -140,6 +140,7 @@ impl<'a> Checker<'a> {
                             span,
                             flags: Default::default(),
                             label: None,
+                            spread: false,
                         });
                     }
                 }

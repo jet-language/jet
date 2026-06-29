@@ -405,22 +405,91 @@ mod jet_std {
     impl super::JetShow for Mat3 { fn jet_show(&self) -> String { format!("Mat3({:?})", self.0) } }
     impl super::JetShow for Mat4 { fn jet_show(&self) -> String { format!("Mat4({:?})", self.0) } }
 
+    #[derive(Default)]
+    struct JetTaskControl {
+        paused: std::sync::atomic::AtomicBool,
+        cancel: std::sync::atomic::AtomicBool,
+    }
+
     pub struct JetTask<T: Send + 'static> {
         handle: Option<std::thread::JoinHandle<T>>,
+        control: std::sync::Arc<JetTaskControl>,
     }
     impl<T: Send + 'static> JetTask<T> {
         pub fn spawn<F: FnOnce() -> T + Send + 'static>(f: F) -> JetTask<T> {
-            JetTask { handle: Some(std::thread::spawn(f)) }
+            let inherited_deadline = super::jet_ctx_deadline_ms();
+            JetTask {
+                handle: Some(std::thread::spawn(move || {
+                    let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
+                    f()
+                })),
+                control: std::sync::Arc::new(JetTaskControl::default()),
+            }
+        }
+        // D-COROUTINE1=A: v1 control-plane hooks over the internal substrate.
+        // The thread runtime records requested state for observability while the
+        // scheduler-grade pause/cancel semantics land in the M:N runtime.
+        pub fn pause(&self) {
+            self.control
+                .paused
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        pub fn resume(&self) {
+            self.control
+                .paused
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+        pub fn cancel(&self) {
+            self.control
+                .cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        pub fn trace(&self) -> String {
+            let paused = self
+                .control
+                .paused
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let cancel = self
+                .control
+                .cancel
+                .load(std::sync::atomic::Ordering::Relaxed);
+            format!("paused={},cancel={}", paused, cancel)
         }
         pub fn join(mut self) -> T {
+            super::jet_deadline_check("task join");
             match self.handle.take().unwrap().join() {
-                Ok(v) => v,
+                Ok(v) => {
+                    super::jet_deadline_check("task join");
+                    v
+                }
                 Err(_) => {
                     eprintln!("panic: a task panicked");
                     std::process::exit(70);
                 }
             }
         }
+    }
+
+    /// D-CONCCOMB1=A: return the first task result; sibling tasks are still joined
+    /// (structured scope — no leaked handles). v1 thread runtime: no pre-join cancel.
+    pub fn jet_task_race<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
+        std::thread::scope(|s| {
+            use std::sync::mpsc;
+            let (tx, rx) = mpsc::sync_channel(1);
+            for task in tasks {
+                let tx = tx.clone();
+                s.spawn(move || {
+                    let _ = tx.send(task.join());
+                });
+            }
+            drop(tx);
+            rx.recv().expect("race: empty task list")
+        })
+    }
+
+    /// D-CONCCOMB1=A: v1 alias — first completed result wins (full Result-aware any later).
+    pub fn jet_task_any<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
+        jet_task_race(tasks)
     }
 
     pub struct JetChannel<T> {
@@ -436,6 +505,19 @@ mod jet_std {
             JetSender { tx: self.tx_keeper.clone() }
         }
         pub fn receive(&self) -> Result<T, Closed> {
+            if let Some(remaining) = super::jet_deadline_remaining_ms() {
+                if remaining <= 0 {
+                    super::jet_deadline_exceeded("channel receive");
+                }
+                let wait = std::time::Duration::from_millis(remaining as u64);
+                return match self.recv.recv_timeout(wait) {
+                    Ok(v) => Ok(v),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        super::jet_deadline_exceeded("channel receive")
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(Closed::Closed),
+                };
+            }
             self.recv.recv().map_err(|_| Closed::Closed)
         }
     }
@@ -2541,8 +2623,62 @@ fn jet_std_time_now() -> i64 {
         .unwrap_or_default()
         .as_millis() as i64
 }
+
+thread_local! {
+    static JET_CTX_DEADLINE_MS: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);
+}
+
+struct JetDeadlineGuard {
+    saved: Option<i64>,
+}
+
+impl Drop for JetDeadlineGuard {
+    fn drop(&mut self) {
+        JET_CTX_DEADLINE_MS.with(|c| c.set(self.saved));
+    }
+}
+
+fn jet_ctx_deadline_ms() -> Option<i64> {
+    JET_CTX_DEADLINE_MS.with(|c| c.get())
+}
+
+fn jet_ctx_push_deadline(deadline_ms: i64) -> JetDeadlineGuard {
+    let saved = JET_CTX_DEADLINE_MS.with(|c| c.get());
+    JET_CTX_DEADLINE_MS.with(|c| c.set(Some(deadline_ms)));
+    JetDeadlineGuard { saved }
+}
+
+fn jet_deadline_remaining_ms() -> Option<i64> {
+    let deadline = jet_ctx_deadline_ms()?;
+    Some(deadline.saturating_sub(jet_std_time_now()))
+}
+
+fn jet_deadline_exceeded(wait_kind: &str) -> ! {
+    eprintln!("Error [E3003]: deadline exceeded while waiting in {wait_kind}");
+    eprintln!("Why: this wait point observed the task context deadline from `#Context(deadline: …)`");
+    eprintln!("Fix: raise the deadline budget or shorten the work before this wait point");
+    std::process::exit(70);
+}
+
+fn jet_deadline_check(wait_kind: &str) {
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        jet_deadline_exceeded(wait_kind);
+    }
+}
+
 fn jet_std_time_sleep(millis: i64) {
-    std::thread::sleep(std::time::Duration::from_millis(millis.max(0) as u64));
+    let want = millis.max(0);
+    if let Some(remaining) = jet_deadline_remaining_ms() {
+        if remaining <= 0 {
+            jet_deadline_exceeded("time sleep");
+        }
+        if want > remaining {
+            std::thread::sleep(std::time::Duration::from_millis(remaining as u64));
+            jet_deadline_exceeded("time sleep");
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(want as u64));
+    jet_deadline_check("time sleep");
 }
 fn jet_std_time_start() -> jet_std::Stopwatch {
     jet_std::Stopwatch { start: std::time::Instant::now() }
@@ -3615,19 +3751,52 @@ fn jet_net_tcp_connect(addr: &String) -> Result<JetTcpStream, String> {
 
 fn jet_net_tcp_read(stream: &mut JetTcpStream) -> Result<String, String> {
     use std::io::Read;
+    if let Some(remaining) = jet_deadline_remaining_ms() {
+        if remaining <= 0 {
+            jet_deadline_exceeded("tcp read");
+        }
+        let _ = stream
+            .inner
+            .set_read_timeout(Some(std::time::Duration::from_millis(remaining as u64)));
+    }
     let mut buf = [0u8; 8192];
     match stream.inner.read(&mut buf) {
         Ok(0) => Ok(String::new()),
-        Ok(n) => String::from_utf8(buf[..n].to_vec())
-            .map_err(|e| format!("tcp read: invalid UTF-8: {}", e)),
-        Err(e) => Err(format!("tcp read failed: {}", e)),
+        Ok(n) => {
+            jet_deadline_check("tcp read");
+            String::from_utf8(buf[..n].to_vec())
+                .map_err(|e| format!("tcp read: invalid UTF-8: {}", e))
+        }
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                jet_deadline_exceeded("tcp read");
+            }
+            Err(format!("tcp read failed: {}", e))
+        }
     }
 }
 
 fn jet_net_tcp_write(stream: &mut JetTcpStream, data: &String) -> Result<(), String> {
     use std::io::Write;
-    stream.inner.write_all(data.as_bytes())
-        .map_err(|e| format!("tcp write failed: {}", e))
+    if let Some(remaining) = jet_deadline_remaining_ms() {
+        if remaining <= 0 {
+            jet_deadline_exceeded("tcp write");
+        }
+        let _ = stream
+            .inner
+            .set_write_timeout(Some(std::time::Duration::from_millis(remaining as u64)));
+    }
+    stream
+        .inner
+        .write_all(data.as_bytes())
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                jet_deadline_exceeded("tcp write");
+            }
+            format!("tcp write failed: {}", e)
+        })?;
+    jet_deadline_check("tcp write");
+    Ok(())
 }
 
 fn jet_net_tcp_local_addr(stream: &JetTcpStream) -> String {

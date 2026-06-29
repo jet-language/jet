@@ -271,6 +271,16 @@ impl<'a> Checker<'a> {
                 None
             }
             Expr::Char(_, _) => Some(Type::Char),
+            Expr::Spread(_, span) => {
+                self.diags.push(Diagnostic::error(
+                    "E1311",
+                    "spread only works inside a list literal or a variadic call".to_string(),
+                    "write `[...xs, y]` to spread into a list, or `f(...xs)` when the callee accepts a rest parameter".to_string(),
+                    "move the spread into `[ … ]` or a variadic call".to_string(),
+                    Some(*span),
+                ));
+                None
+            }
             Expr::ListLit(elems, span) => self.infer_list_lit(elems, *span),
             Expr::TupleLit(fields, span, ty_slot) => {
                 let t = self.infer_tuple_lit(fields, *span);
@@ -708,6 +718,17 @@ impl<'a> Checker<'a> {
             len,
         }) = self.expected_type.clone()
         {
+            if elems.iter().any(|e| matches!(e, Expr::Spread(..))) {
+                self.diags.push(Diagnostic::error(
+                    "E1311",
+                    "list spread can't build a fixed-size `[T#N]` list".to_string(),
+                    "spread expands a growable list — a `[T#N]` has a fixed compile-time length"
+                        .to_string(),
+                    "use a growable `[T]` binding (`@=`/`:=`) instead of `[T#N]`".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
             if elems.len() as u64 != len {
                 self.diags.push(Diagnostic::error(
                     "E0963",
@@ -783,8 +804,31 @@ impl<'a> Checker<'a> {
         }
         let mut elem_types = Vec::new();
         for e in elems.iter_mut() {
-            if let Some(t) = self.infer(e) {
-                elem_types.push(t);
+            match e {
+                Expr::Spread(inner, spread_span) => {
+                    let t = self.infer(inner);
+                    match t {
+                        Some(Type::List(spread_elem)) => {
+                            elem_types.push((*spread_elem).clone());
+                        }
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
+                                "E1311",
+                                format!("spread needs a list, not `{}`", other.name()),
+                                "list spread `[...xs, y]` expands a list's elements in place"
+                                    .to_string(),
+                                "spread a `[T]` value here".to_string(),
+                                Some(*spread_span),
+                            ));
+                        }
+                        None => {}
+                    }
+                }
+                _ => {
+                    if let Some(t) = self.infer(e) {
+                        elem_types.push(t);
+                    }
+                }
             }
         }
         let first = elem_types.first()?.clone();

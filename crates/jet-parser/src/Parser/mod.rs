@@ -508,15 +508,32 @@ mod s61_tests {
         );
     }
 
-    /// S84: a kebab-case module name (`my-host`) joins span-adjacent hyphens into
-    /// one name.
+    /// D-TASKSCOPE1=A: `g.task { … }` parses as a scoped spawn call, not struct lit.
     #[test]
-    fn dashed_module_name_joins() {
-        let p = program("module my-host { }");
-        let m = p.items.iter().find_map(|i| match i {
-            crate::AST::Item::Module(m) => Some(m),
+    fn taskgroup_task_block_parses_as_spawn() {
+        let p = program(
+            "fn main() {\n    taskgroup g {\n        h @= g.task { return 1 }\n    }\n}\n",
+        );
+        let main = p.items.iter().find_map(|i| match i {
+            crate::AST::Item::Func(f) if f.name == "main" => Some(f),
             _ => None,
         });
-        assert_eq!(m.expect("a module").name, "my-host");
+        let body = &main.expect("main").body;
+        let taskgroup = body.iter().find_map(|s| match s {
+            Stmt::TaskGroup { body, .. } => Some(body),
+            _ => None,
+        });
+        let bind = taskgroup.expect("taskgroup").iter().find_map(|s| match s {
+            Stmt::Val(b) => Some(b),
+            _ => None,
+        });
+        match &bind.expect("binding").init {
+            Expr::MethodCall { method, args, .. } => {
+                assert_eq!(method, Syntax::TASKGROUP_SPAWN_METHOD);
+                assert_eq!(args.len(), 1);
+                assert!(matches!(args[0].expr, Expr::Lambda(_)));
+            }
+            other => panic!("expected g.task {{ … }} MethodCall, got {other:?}"),
+        }
     }
 }

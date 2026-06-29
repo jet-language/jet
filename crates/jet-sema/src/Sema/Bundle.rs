@@ -131,6 +131,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Impure { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Region { body: inner, .. }
+            | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
             | Stmt::Grant { body: inner, .. }
             | Stmt::Transact { body: inner, .. }
@@ -306,6 +307,7 @@ pub(crate) fn rewrite_inline_calls_expr(
             }
         }
         Expr::Paren(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+        Expr::Spread(inner, _) => rewrite_inline_calls_expr(inner, siblings, modname),
     }
 }
 
@@ -456,6 +458,12 @@ pub(crate) fn check_bundle_opts(
                         .insert(d.name.clone(), d.is_pub && !d.is_package_pub);
                     st.type_pkg_pub.insert(d.name.clone(), d.is_package_pub);
                 }
+                Item::TypeAlias(a) => {
+                    register_type_alias(a, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+                    st.type_pub
+                        .insert(a.name.clone(), a.is_pub && !a.is_package_pub);
+                    st.type_pkg_pub.insert(a.name.clone(), a.is_package_pub);
+                }
                 // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
@@ -559,16 +567,12 @@ pub(crate) fn check_bundle_opts(
                 .collect();
 
             if !user_derives.is_empty() {
-                let struct_infos: Vec<(
-                    String,
-                    Vec<(String, crate::Diagnostics::Span)>,
-                    Vec<crate::AST::Field>,
-                )> = module
+                let struct_infos: Vec<&crate::AST::StructDef> = module
                     .items
                     .iter()
                     .filter_map(|i| {
                         if let Item::Struct(s) = i {
-                            Some((s.name.clone(), s.derives.clone(), s.fields.clone()))
+                            Some(s)
                         } else {
                             None
                         }
@@ -589,8 +593,8 @@ pub(crate) fn check_bundle_opts(
 
                 let mut new_items: Vec<Item> = Vec::new();
 
-                for (struct_name, derives, fields) in &struct_infos {
-                    for (derive_name, derive_span) in derives {
+                for s in &struct_infos {
+                    for (derive_name, derive_span) in &s.derives {
                         // D-METADERIVE1=A orphan rule: a UserDerive defined and applied
                         // in the same imported module violates the orphan rule (E2711).
                         // Expansion is only allowed in the entry module (idx == 0).
@@ -599,12 +603,12 @@ pub(crate) fn check_bundle_opts(
                                 "E2711",
                                 format!(
                                     "derive orphan rule: `derive {} for T` and `{}` are both in an imported module",
-                                    derive_name, struct_name
+                                    derive_name, s.name
                                 ),
                                 "user-derive expansion can only run in the entry module; both the derive block and the struct are from the same imported file".to_string(),
                                 format!(
                                     "move both `derive {}` and `struct {}` to your entry module; derive expansion only runs there",
-                                    derive_name, struct_name
+                                    derive_name, s.name
                                 ),
                                 None,
                             ));
@@ -613,51 +617,7 @@ pub(crate) fn check_bundle_opts(
                         if let Some((_, type_param, body)) =
                             user_derives.iter().find(|(tn, _, _)| tn == derive_name)
                         {
-                            // Build TypeInfo CtValue for this struct.
-                            let fields_info: Vec<crate::Comptime::CtValue> = fields
-                                .iter()
-                                .map(|f| {
-                                    let markers: Vec<crate::Comptime::CtValue> = f
-                                        .serde_markers
-                                        .iter()
-                                        .map(|m| crate::Comptime::CtValue::Str(m.name.clone()))
-                                        .collect();
-                                    crate::Comptime::CtValue::Struct {
-                                        type_name: "FieldInfo".to_string(),
-                                        fields: vec![
-                                            (
-                                                "name".to_string(),
-                                                crate::Comptime::CtValue::Str(f.name.clone()),
-                                            ),
-                                            (
-                                                "ty".to_string(),
-                                                crate::Comptime::CtValue::Str(f.ty.name()),
-                                            ),
-                                            (
-                                                "markers".to_string(),
-                                                crate::Comptime::CtValue::List(markers),
-                                            ),
-                                            (
-                                                "is_pub".to_string(),
-                                                crate::Comptime::CtValue::Bool(f.is_pub),
-                                            ),
-                                        ],
-                                    }
-                                })
-                                .collect();
-                            let type_info = crate::Comptime::CtValue::Struct {
-                                type_name: "TypeInfo".to_string(),
-                                fields: vec![
-                                    (
-                                        "name".to_string(),
-                                        crate::Comptime::CtValue::Str(struct_name.clone()),
-                                    ),
-                                    (
-                                        "fields".to_string(),
-                                        crate::Comptime::CtValue::List(fields_info),
-                                    ),
-                                ],
-                            };
+                            let type_info = crate::Comptime::build_struct_type_info(s);
 
                             match crate::Comptime::evaluate_derive_body(
                                 body,
@@ -685,7 +645,7 @@ pub(crate) fn check_bundle_opts(
                                     "E2710",
                                     format!(
                                         "`derive {} for T` body failed while expanding `#[{}]` on `{}`",
-                                        derive_name, derive_name, struct_name
+                                        derive_name, derive_name, s.name
                                     ),
                                     inner.what.clone(),
                                     "fix the `derive` body so it generates valid Jet at compile time".to_string(),
@@ -1121,6 +1081,7 @@ pub(crate) fn check_bundle_opts(
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Module(_)
             | Item::Distinct(_)
+            | Item::TypeAlias(_) // D-TYPEALIAS1: erases
             | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
             | Item::CModule(_) | Item::CodeModule(_)
             | Item::ErrorConv(_)
@@ -1407,6 +1368,7 @@ pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) 
                 | Item::ExternRust(_)
                 | Item::Module(_)
                 | Item::Distinct(_)
+                | Item::TypeAlias(_) // D-TYPEALIAS1: erases
                 | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
                 | Item::CModule(_) | Item::CodeModule(_)
                 | Item::ErrorConv(_)
@@ -1485,6 +1447,7 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Impure { body, .. }
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
+            | Stmt::TaskGroup { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
@@ -1588,8 +1551,14 @@ pub(crate) fn collect_core_expr(
             receiver,
             method,
             args,
+            recv_type,
             ..
         } => {
+            if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+                && method == Syntax::TASKGROUP_SPAWN_METHOD
+            {
+                used.insert("core.tasks::spawn".to_string());
+            }
             if matches!(receiver.as_ref(), Expr::Ident(n, _) if is_json_type_name(n)) {
                 used.insert("core::json".to_string());
             }
@@ -1758,6 +1727,7 @@ pub(crate) fn collect_core_expr(
         | Expr::Todo { .. }
         | Expr::ComptimeSplice { .. } => {}
         Expr::Paren(inner, _) => collect_core_expr(inner, imports, used),
+        Expr::Spread(inner, _) => collect_core_expr(inner, imports, used),
     }
 }
 
@@ -2061,6 +2031,8 @@ pub(crate) fn check_func_body_bundle(
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,
         liveness_frames: Vec::new(),
+        taskgroup_stack: Vec::new(),
+        in_taskgroup_spawn: false,
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.

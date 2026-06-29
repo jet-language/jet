@@ -134,6 +134,7 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
         }
         // D-DIST1: distinct types are repr(transparent) over a scalar; treat as C-compatible.
         Some(TypeDef::Distinct { base, .. }) => is_c_abi_type(base, registry),
+        Some(TypeDef::Alias { target, .. }) => is_c_abi_type(target, registry),
         None => false,
     }
 }
@@ -317,6 +318,7 @@ pub(crate) fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
         }
         // D-DIST1: distinct types are repr(transparent) over a scalar; treat as FFI-compatible.
         Some(TypeDef::Distinct { base, .. }) => is_ffi_type(base, registry),
+        Some(TypeDef::Alias { target, .. }) => is_ffi_type(target, registry),
         None => false,
     }
 }

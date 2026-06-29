@@ -527,7 +527,7 @@ impl<'a> Checker<'a> {
                 None
             }
             // D-DIST1: distinct types wrap a scalar; they are always Send.
-            Some(TypeDef::Distinct { .. }) | None => None,
+            Some(TypeDef::Distinct { .. }) | Some(TypeDef::Alias { .. }) | None => None,
         };
         seen.remove(name);
         found

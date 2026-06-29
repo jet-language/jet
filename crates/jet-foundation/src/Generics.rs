@@ -465,6 +465,25 @@ pub fn generic_depth_exceeded(ty: &Type) -> Option<String> {
     }
 }
 
+pub fn e0324(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0324",
+        format!(
+            "a type alias needs type parameters — write `{} Name<T> = …`",
+            Syntax::KW_ALIAS
+        ),
+        format!(
+            "transparent `{}` is only for shortening generic spellings (D-TYPEALIAS1)",
+            Syntax::KW_ALIAS
+        ),
+        format!(
+            "for a distinct type name over a primitive, use `{} Name(BaseType)` instead",
+            Syntax::KW_STRUCT
+        ),
+        Some(span),
+    )
+}
+
 pub fn e0036(keyword: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0036",

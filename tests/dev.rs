@@ -17,6 +17,8 @@ use std::process::Command;
 use std::time::Instant;
 
 use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::JitBackend::{InterpreterBackend, JitBackend};
+use jet_jit::CraneliftBackend;
 
 /// c77: the differential battery covers EVERY `examples/features/*.jet`, not a
 /// hand-curated subset — so the battery can never quietly shrink. Each example
@@ -258,6 +260,55 @@ fn try_anyway_skips_the_boundary_scan() {
         // pre-scan was skipped.
         RunOutcome::Ran { .. } => {}
     }
+}
+
+/// c139 M1: the Cranelift tier-1 backend runs `01_hello.jet` with byte-identical
+/// stdout to the interpreter baseline.
+#[test]
+fn cranelift_backend_matches_hello() {
+    let file = "examples/features/01_hello.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("hello bundle should load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "hello must type-check");
+
+    let expected = match dev_iteration(file, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => {
+            panic!("interpreter baseline must run hello, got diagnostics: {ds:?}")
+        }
+    };
+
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let got = match backend.run(&bundle, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => panic!("cranelift backend did not run hello: {ds:?}"),
+    };
+    assert_eq!(got, expected, "cranelift output drifted from interpreter");
+
+    let src = fs::read_to_string(file).expect("hello source should read");
+    let compiled = jet::compile_with_path(&src, file).expect("hello should compile");
+    let rs = std::env::temp_dir().join("jet_dev_cranelift_hello.rs");
+    let bin = std::env::temp_dir().join("jet_dev_cranelift_hello");
+    fs::write(&rs, &compiled.rust).expect("write compiled rust");
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .expect("run rustc");
+    assert!(
+        rustc.status.success(),
+        "rustc failed compiling hello fixture: {}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = Command::new(&bin).output().expect("run compiled hello");
+    let compiled_stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    assert_eq!(got, compiled_stdout, "cranelift output drifted from AOT binary");
 }
 
 /// The dev iteration surfaces front-end errors identically to batch

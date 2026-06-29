@@ -59,7 +59,12 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // param lowers byte-identically — the only thing the default touches is the call,
     // already handled. No `p.default` exclusion needed.
     for p in &f.params {
-        if !is_subset_param_ty(&p.ty, cx) {
+        let param_ty = if p.variadic {
+            Type::List(Box::new(p.ty.clone()))
+        } else {
+            p.ty.clone()
+        };
+        if !is_subset_param_ty(&param_ty, cx) {
             return false;
         }
     }
@@ -251,31 +256,32 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 /// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Traits, generics,
 /// recursive (boxed) types are still out.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
+    let ty = cx.expand_type_aliases(ty);
     // D-QUAL4=A: tagged types are transparent — strip the marker and check the inner type.
-    if let Type::Tagged { inner, .. } = ty {
+    if let Type::Tagged { inner, .. } = &ty {
         return is_subset_param_ty(inner, cx);
     }
     // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (prelude, not user-registry).
     // It is always cloneable and has scalar/Char payloads only — fully covered.
-    if matches!(ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
+    if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
         return true;
     }
     ty.is_scalar()
-        || matches!(ty, Type::Char | Type::String)
-        || is_type_var_param_ty(ty, cx)
-        || is_covered_trait_object_ty(ty, cx)
-        || is_covered_distinct_ty(ty, cx)
-        || is_covered_tuple_ty(ty, cx)
-        || is_covered_struct_ty(ty, cx)
-        || is_covered_enum_ty(ty, cx)
-        || is_covered_collection_ty(ty, cx)
-        || is_covered_fallible_ty(ty, cx)
-        || is_covered_fn_ty(ty, cx)
-        || is_covered_foreign_value_ty(ty, cx)
-        || is_covered_generic_struct_ty(ty, cx)
-        || is_covered_concurrency_ty(ty, cx)
-        || is_covered_reactive_ty(ty, cx)
-        || is_covered_shared_ty(ty, cx)
+        || matches!(&ty, Type::Char | Type::String)
+        || is_type_var_param_ty(&ty, cx)
+        || is_covered_trait_object_ty(&ty, cx)
+        || is_covered_distinct_ty(&ty, cx)
+        || is_covered_tuple_ty(&ty, cx)
+        || is_covered_struct_ty(&ty, cx)
+        || is_covered_enum_ty(&ty, cx)
+        || is_covered_collection_ty(&ty, cx)
+        || is_covered_fallible_ty(&ty, cx)
+        || is_covered_fn_ty(&ty, cx)
+        || is_covered_foreign_value_ty(&ty, cx)
+        || is_covered_generic_struct_ty(&ty, cx)
+        || is_covered_concurrency_ty(&ty, cx)
+        || is_covered_reactive_ty(&ty, cx)
+        || is_covered_shared_ty(&ty, cx)
 }
 
 /// c109 Phase 6b: a `Shared<T>` (`Type::Shared`) usable as a param/return/local value
@@ -1240,6 +1246,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // block; the body's `let`s LEAK into the outer scope (the AST shares `&mut env`),
         // so the gate checks the body on the SAME `locals`.
         Stmt::Region { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        Stmt::TaskGroup { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1) — a plain block
         // with a per-field guard. Each field value + the body must be in-subset (the body
         // leaks like a region).
@@ -2221,6 +2228,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // type — E0501 — which a covered binding/param/return supplies, so the
         // resulting `vec![]` is type-inferred by Rust from that context.)
         Expr::ListLit(elems, _) => elems.iter().all(|e| expr_in_subset(e, cx, locals)),
+        // D-VARIADIC1: list/call spread — covered when the spread operand is in-subset.
+        Expr::Spread(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). Covered when
         // sema resolved the tuple TYPE (`ty.is_some()` — the canonical field order +
         // struct name come from it; an unresolved `ty` would force the AST's empty-
@@ -2472,6 +2481,27 @@ pub(crate) fn method_call_in_subset(
             && args[0].label.is_none()
             && matches!(&args[0].expr, Expr::Lambda(_))
             && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    // D-TASKSCOPE1=A: `g.task { … }` on a taskgroup handle (scoped spawn).
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_SPAWN_METHOD
+    {
+        return args.len() == 1
+            && args[0].label.is_none()
+            && matches!(&args[0].expr, Expr::Lambda(_))
+            && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    // D-NURSERY1=A: `g.all([…])` — join a list of task handles.
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_ALL_METHOD
+    {
+        return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    // D-CONCCOMB1=A: `g.race([…])` / `g.any([…])` — first completed task wins.
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && (method == Syntax::TASKGROUP_RACE_METHOD || method == Syntax::TASKGROUP_ANY_METHOD)
+    {
+        return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
     // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.
@@ -3228,15 +3258,25 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     // no-arg form never reaches codegen — its AST arm is dead.
 }
 
-/// c109 Phase 21: is `(method, nargs)` a Task/Channel/Sender concurrency method
-/// (`emit_builtin_method`'s `Type::Apply`-receiver arms)? `Task.join()`/`Task.detach()`,
-/// `Channel.receive()`/`Channel.sender()`, `Sender.send(v)`. The arg count disambiguates
+/// c109 Phase 21 + D-COROUTINE1=A: is `(method, nargs)` a Task/Channel/Sender
+/// concurrency method (`emit_builtin_method`'s `Type::Apply`-receiver arms)?
+/// `Task.join()/wait()/detach()/pause()/resume()/cancel()/trace()`,
+/// `Channel.receive()/sender()`, `Sender.send(v)`. The arg count disambiguates
 /// `Task.join()` (0 args) from the list `join(sep)` (1 arg, shape d) and `Sender.send(v)`
 /// (1 arg) — every name+arity here is disjoint from every other covered shape.
 pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
-        ("join", 0) | ("detach", 0) | ("receive", 0) | ("sender", 0) | ("send", 1)
+        ("join", 0)
+            | ("wait", 0)
+            | ("detach", 0)
+            | ("pause", 0)
+            | ("resume", 0)
+            | ("cancel", 0)
+            | ("trace", 0)
+            | ("receive", 0)
+            | ("sender", 0)
+            | ("send", 1)
     )
 }
 

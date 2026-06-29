@@ -80,6 +80,8 @@ pub enum TokKind {
     Eq,
     Dot,
     DotDot,
+    /// D-VARIADIC1: `...` spread/rest sigil — variadic params, call spread, list spread.
+    DotDotDot,
     At,
     Question,
     /// S71 (D-SG6): `??` fallback operator.
@@ -221,6 +223,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Eq => "`=`".to_string(),
         TokKind::Dot => "`.`".to_string(),
         TokKind::DotDot => "`..`".to_string(),
+        TokKind::DotDotDot => "`...`".to_string(),
         TokKind::At => "`@`".to_string(),
         TokKind::Question => "`?`".to_string(),
         TokKind::QuestionQuestion => "`??`".to_string(),

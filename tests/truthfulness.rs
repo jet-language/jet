@@ -296,7 +296,8 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         "crates/jet-codegen/Cargo.toml",
         "crates/jet-driver/Cargo.toml",
         "crates/jet-semindex/Cargo.toml",
-        "crates/jet-jit/Cargo.toml",
+        // `crates/jet-jit` carries owner-approved Cranelift deps (D-JITDEP1 / D-JIT2=A);
+        // I6 applies to compiler `Source/` and seam crates above, not the JIT sibling.
         // `crates/jet-net` is a bootstrap HTTP helper (D-NETDEP1=A, owner-approved
         // `ureq`) — not a compiler seam; I6 applies to `Source/` and seam crates only.
     ];

@@ -42,7 +42,11 @@ impl<'a> Checker<'a> {
             if self.lookup(&p.name).is_some() {
                 self.diags.push(already_defined(&p.name, p.name_span));
             } else {
-                let pty = self.resolve_type(p.ty.clone());
+                let pty = self.resolve_type(if p.variadic {
+                    Type::List(Box::new(p.ty.clone()))
+                } else {
+                    p.ty.clone()
+                });
                 // D-LIN1: a parameter never carries the consume duty. Passing a
                 // `#SingleUse` value to a `^` parameter IS its terminal consumption
                 // (spec: "passed to a take parameter … or returned"), so the `^`
@@ -212,6 +216,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 }
             }
             Item::Distinct(d) => register_distinct(d, &mut registry, &mut diags, &funcs, &consts),
+            Item::TypeAlias(a) => {
+                register_type_alias(a, &mut registry, &mut diags, &funcs, &consts);
+            }
             // D-QUAL3: a unit family lowers to one `#Numeric` distinct type per
             // member, each erasing to `Float` — register them via the same path.
             Item::UnitFamily(uf) => {
@@ -276,16 +283,12 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             .collect();
 
         if !user_derives.is_empty() {
-            let struct_infos: Vec<(
-                String,
-                Vec<(String, crate::Diagnostics::Span)>,
-                Vec<crate::AST::Field>,
-            )> = prog
+            let struct_infos: Vec<&crate::AST::StructDef> = prog
                 .items
                 .iter()
                 .filter_map(|i| {
                     if let Item::Struct(s) = i {
-                        Some((s.name.clone(), s.derives.clone(), s.fields.clone()))
+                        Some(s)
                     } else {
                         None
                     }
@@ -307,56 +310,12 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             let mut new_items: Vec<Item> = Vec::new();
             let project_root = std::env::current_dir().unwrap_or_default();
 
-            for (struct_name, derives, fields) in &struct_infos {
-                for (derive_name, derive_span) in derives {
+            for s in &struct_infos {
+                for (derive_name, derive_span) in &s.derives {
                     if let Some((_, type_param, body)) =
                         user_derives.iter().find(|(tn, _, _)| tn == derive_name)
                     {
-                        // Build TypeInfo CtValue for this struct.
-                        let fields_info: Vec<crate::Comptime::CtValue> = fields
-                            .iter()
-                            .map(|f| {
-                                let markers: Vec<crate::Comptime::CtValue> = f
-                                    .serde_markers
-                                    .iter()
-                                    .map(|m| crate::Comptime::CtValue::Str(m.name.clone()))
-                                    .collect();
-                                crate::Comptime::CtValue::Struct {
-                                    type_name: "FieldInfo".to_string(),
-                                    fields: vec![
-                                        (
-                                            "name".to_string(),
-                                            crate::Comptime::CtValue::Str(f.name.clone()),
-                                        ),
-                                        (
-                                            "ty".to_string(),
-                                            crate::Comptime::CtValue::Str(f.ty.name()),
-                                        ),
-                                        (
-                                            "markers".to_string(),
-                                            crate::Comptime::CtValue::List(markers),
-                                        ),
-                                        (
-                                            "is_pub".to_string(),
-                                            crate::Comptime::CtValue::Bool(f.is_pub),
-                                        ),
-                                    ],
-                                }
-                            })
-                            .collect();
-                        let type_info = crate::Comptime::CtValue::Struct {
-                            type_name: "TypeInfo".to_string(),
-                            fields: vec![
-                                (
-                                    "name".to_string(),
-                                    crate::Comptime::CtValue::Str(struct_name.clone()),
-                                ),
-                                (
-                                    "fields".to_string(),
-                                    crate::Comptime::CtValue::List(fields_info),
-                                ),
-                            ],
-                        };
+                        let type_info = crate::Comptime::build_struct_type_info(s);
 
                         match crate::Comptime::evaluate_derive_body(
                             body,
@@ -382,7 +341,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                                 "E2710",
                                 format!(
                                     "`derive {} for T` body failed while expanding `#[{}]` on `{}`",
-                                    derive_name, derive_name, struct_name
+                                    derive_name, derive_name, s.name
                                 ),
                                 inner.what.clone(),
                                 "fix the `derive` body so it generates valid Jet at compile time"
@@ -730,6 +689,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::CModule(_)
             | Item::CodeModule(_)
             | Item::Distinct(_)
+            | Item::TypeAlias(_) // D-TYPEALIAS1: erases at codegen
             | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types at registration
             | Item::Bench(_)
             | Item::Migration(_) // D-MIGRATE1
@@ -1060,6 +1020,46 @@ pub(crate) fn register_distinct(
     );
 }
 
+/// D-TYPEALIAS1: register `alias Name<T> = …` — generic shortcuts only.
+pub(crate) fn register_type_alias(
+    a: &crate::AST::TypeAliasDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    funcs: &HashMap<String, FuncSig>,
+    consts: &HashMap<String, Type>,
+) {
+    if is_reserved_type(&a.name) {
+        diags.push(Diagnostic::error(
+            "E0106",
+            format!("the name `{}` is built in and can't be redefined", a.name),
+            format!("`{}` is provided by the language itself", a.name),
+            "choose a different name for this type alias".to_string(),
+            Some(a.name_span),
+        ));
+        return;
+    }
+    if name_defined(&a.name, funcs, registry, consts) {
+        diags.push(defined_twice(
+            &a.name,
+            "every type alias needs a unique name",
+            a.name_span,
+        ));
+        return;
+    }
+    if a.type_params.is_empty() {
+        diags.push(crate::Generics::e0324(a.name_span));
+        return;
+    }
+    registry.types.insert(
+        a.name.clone(),
+        TypeDef::Alias {
+            name_span: a.name_span,
+            params: a.type_params.clone(),
+            target: a.target.clone(),
+        },
+    );
+}
+
 /// S57 (M9.5): evaluate every `comptime NAME = expr;` in `items`. Purity and
 /// fuel are enforced by the interpreter (E0951/E0952); panics surface as
 /// E0953. Each result's Jet type is registered in `consts` so references
@@ -1185,6 +1185,7 @@ pub(crate) fn comptime_context_from_items(
             | Item::Module(_)
             | Item::CModule(_) | Item::CodeModule(_)
             | Item::Distinct(_)
+            | Item::TypeAlias(_) // D-TYPEALIAS1: erases at codegen
             | Item::UnitFamily(_) // D-QUAL3: contributes no comptime context
             | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
@@ -1411,7 +1412,7 @@ pub(crate) fn register_type_methods(
         };
         let methods_map = match type_def {
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
-            TypeDef::Distinct { .. } => continue,
+            TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
         };
         for m in methods {
             if field_names.iter().any(|f| f == &m.name) {
@@ -1477,7 +1478,7 @@ pub(crate) fn register_impl_methods(
         };
         let methods_map = match type_def {
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
-            TypeDef::Distinct { .. } => continue,
+            TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
         };
         for m in &i.methods {
             if field_names.iter().any(|f| f == &m.name) {
@@ -1614,6 +1615,8 @@ pub(crate) fn check_func_body(
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,
         liveness_frames: Vec::new(),
+        taskgroup_stack: Vec::new(),
+        in_taskgroup_spawn: false,
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
@@ -1689,6 +1692,7 @@ pub(crate) fn check_error_conv_body(
             ty_span: ec.from_span,
             convention: AccessConvention::Move,
             default: None,
+            variadic: false,
         }],
         return_type: Some(Type::Named(ec.to_ty.clone())),
         is_view_return: false,
@@ -1949,6 +1953,7 @@ pub(crate) fn synthesize_delegation_method(
             span: zero,
             flags: CallArgFlags::default(),
             label: None,
+            spread: false,
         })
         .collect();
 
@@ -1981,6 +1986,7 @@ pub(crate) fn synthesize_delegation_method(
         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
         ty_span: zero,
         default: None,
+        variadic: false,
     };
 
     let mut params = vec![self_param];
@@ -2027,6 +2033,7 @@ pub(crate) fn synthesize_default_method(
         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
         ty_span: zero,
         default: None,
+        variadic: false,
     };
     let mut params = vec![self_param];
     params.extend(

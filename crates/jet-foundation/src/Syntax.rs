@@ -149,6 +149,10 @@ pub const KW_STRUCT: &str = "struct";
 /// S30 (ratified M3): sum-type definition keyword.
 pub const KW_ENUM: &str = "enum";
 
+/// D-TYPEALIAS1 (ratified 2026-06-28): transparent type alias — `alias Name<T> = …`
+/// for generic type shortcuts only (not primitive newtypes).
+pub const KW_ALIAS: &str = "alias";
+
 /// S32 (ratified M3): optional type suffix — `Int?` is “maybe an Int”.
 pub const TYPE_OPTION_SUFFIX: &str = "?";
 
@@ -256,6 +260,9 @@ pub const CORE_ARGS_MODULE: &str = "core.args";
 /// writes `region`.
 pub const KW_REGION: &str = "region";
 
+/// D-TASKSCOPE1=A: structured task group scope — owns child tasks until scope exit.
+pub const KW_TASKGROUP: &str = "taskgroup";
+
 /// D-CTX1 (ratified 2026-06-22, G2): smart-context block marker.
 /// `#context(field: value) { … }` swaps named ambient fields (allocator,
 /// logger) for the lexical+dynamic extent of the block, then restores them.
@@ -263,10 +270,14 @@ pub const KW_REGION: &str = "region";
 /// Expert-tier only (R1): never emitted in beginner-tier diagnostics or docs.
 pub const CTX_BLOCK: &str = "Context";
 
-/// D-CTX1 (ratified 2026-06-22): allowed field names inside `#context(…)`.
+/// D-CTX1 + D-DEADLINE1 (ratified 2026-06-22/2026-06-28): allowed field names
+/// inside `#Context(…)`.
 pub const CTX_FIELD_ALLOCATOR: &str = "allocator";
 /// D-CTX1 (ratified 2026-06-22): logger field (v1 bundle).
 pub const CTX_FIELD_LOGGER: &str = "logger";
+/// D-DEADLINE1 (ratified 2026-06-28): absolute deadline (epoch millis) carried
+/// through wait/IO points in the current task context.
+pub const CTX_FIELD_DEADLINE: &str = "deadline";
 
 /// D-TERM1 (ratified 2026-06-22): terminal direct-input block keyword.
 /// `live { … }` enters un-buffered/no-echo input mode for its body and
@@ -797,6 +808,33 @@ pub const GRANT_ARROW: &str = "->";
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
 
+/// D-TASKSCOPE1=A / D-NURSERY1=A: the sema-only handle type bound by
+/// `taskgroup g { … }`. Erased in codegen (I3); routes `g.task` / `g.all`.
+pub const TYPE_TASKGROUP: &str = "TaskGroup";
+
+/// D-TASKSCOPE1=A: scoped spawn method on a taskgroup handle — `g.task { … }`.
+pub const TASKGROUP_SPAWN_METHOD: &str = "task";
+
+/// D-NURSERY1=A: join every task handle in a list — `g.all([h1, h2])`.
+pub const TASKGROUP_ALL_METHOD: &str = "all";
+
+/// D-CONCCOMB1=A: first completed task wins — `g.race([h1, h2])`.
+pub const TASKGROUP_RACE_METHOD: &str = "race";
+
+/// D-CONCCOMB1=A: first completed result — `g.any([h1, h2])` (v1: same join race).
+pub const TASKGROUP_ANY_METHOD: &str = "any";
+
+/// D-NURSERY1=A: wait for a task result (alias for `.join()` on `Task<T>`).
+pub const METHOD_TASK_WAIT: &str = "wait";
+/// D-COROUTINE1=A: mark a task paused in the control plane.
+pub const METHOD_TASK_PAUSE: &str = "pause";
+/// D-COROUTINE1=A: clear the paused marker in the control plane.
+pub const METHOD_TASK_RESUME: &str = "resume";
+/// D-COROUTINE1=A: request cancellation for a task in the control plane.
+pub const METHOD_TASK_CANCEL: &str = "cancel";
+/// D-COROUTINE1=A: inspect task control-plane state.
+pub const METHOD_TASK_TRACE: &str = "trace";
+
 /// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
 /// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an
@@ -1251,6 +1289,10 @@ pub const OP_NAMED_CTOR: &str = ".{";
 /// immediately followed by `[`). This constant documents the user-visible sigil.
 pub const OP_FAN_OUT: &str = ".[";
 
+/// D-VARIADIC1 (ratified 2026-06-27): spread/rest sigil — `name: ...T` variadic
+/// parameters (last position only), `f(...xs)` call spread, `[...a, x, ...b]` list spread.
+pub const SIGIL_SPREAD: &str = "...";
+
 /// S76 (ratified 2026-06-16): the fixed-size separator in `[T#N]` type
 /// position, e.g. `[Int#3]`. Amended by VERSION-# (2026-06-16): `#` also
 /// introduces pinned version numbers in package references (`pkg#1.2.0`).
@@ -1479,6 +1521,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
     KW_STRUCT,
     KW_ENUM,
+    KW_ALIAS,
     KW_IMPL,
     KW_TRAIT,
     KW_TAG,
@@ -1502,6 +1545,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_UNSAFE,
     KW_IMPURE,
     KW_REGION,
+    KW_TASKGROUP,
     CTX_BLOCK,
     KW_LIVE,
     // Determinism escape (D-DET1): `assume_deterministic { … }`

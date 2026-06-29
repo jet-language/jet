@@ -187,6 +187,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
             .unwrap_or(cm.span.start),
         // D-DIST1: distinct type declarations use their own span.
         Item::Distinct(d) => d.span.start,
+        Item::TypeAlias(a) => a.span.start,
         // D-QUAL3: unit families use their own span.
         Item::UnitFamily(uf) => uf.span.start,
         // D-ERR-CONV: use the from_span (start of `impl Source -> Target {}`).
@@ -265,6 +266,7 @@ fn item_span_end(item: &Item) -> usize {
         Item::CModule(cm) => cm.span.end,
         Item::CodeModule(cm) => cm.span.end,
         Item::Distinct(d) => d.span.end,
+        Item::TypeAlias(a) => a.span.end,
         Item::UnitFamily(uf) => uf.span.end,
         // D-ERR-CONV: body_span.end is after the closing `}`.
         Item::ErrorConv(ec) => ec.body_span.end,
@@ -311,6 +313,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Impure { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::SuppressMustUse { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Region { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::TaskGroup { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Caps { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Grant { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
@@ -634,6 +637,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Impure { span, .. } => span.start,
         Stmt::SuppressMustUse { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,
+        Stmt::TaskGroup { span, .. } => span.start,
         Stmt::Caps { span, .. } => span.start,
         Stmt::Grant { span, .. } => span.start,
         Stmt::ComptimeBlock { span, .. } => span.start,

@@ -362,6 +362,7 @@ impl<'a> StateCtx<'a> {
             | Stmt::Impure { body, .. }
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
+            | Stmt::TaskGroup { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
@@ -599,6 +600,7 @@ impl<'a> StateCtx<'a> {
             | Expr::Lambda(_)
             | Expr::ComptimeSplice { .. } => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
+            Expr::Spread(inner, _) => self.check_expr(inner),
         }
     }
 

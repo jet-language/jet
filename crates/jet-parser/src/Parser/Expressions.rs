@@ -671,7 +671,31 @@ impl<'a> Parser<'a> {
                     } else {
                         Vec::new()
                     };
-                    if matches!(self.peek().kind, TokKind::LParen) {
+                    // D-TASKSCOPE1=A: `g.task { … }` — block body desugars to a
+                    // zero-parameter lambda (same closure shape as `tasks.spawn`).
+                    if member == Syntax::TASKGROUP_SPAWN_METHOD
+                        && matches!(self.peek().kind, TokKind::LBrace)
+                    {
+                        let lam = self.parse_task_body_lambda()?;
+                        let lam_span = lam.span;
+                        expr = Expr::MethodCall {
+                            receiver: Box::new(expr),
+                            method: member.clone(),
+                            method_span: member_span,
+                            type_args,
+                            args: vec![CallArg {
+                                convention: AccessConvention::Read,
+                                expr: Expr::Lambda(lam),
+                                span: lam_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            }],
+                            recv_type: None,
+                            resolved_ret: None,
+                        };
+                        continue;
+                    } else if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
                         if !matches!(self.peek().kind, TokKind::RParen) {
@@ -748,6 +772,30 @@ impl<'a> Parser<'a> {
                     };
                 }
                 TokKind::LBrace => {
+                    // D-TASKSCOPE1=A: `g.task { … }` after `.task` was parsed as a field.
+                    if let Expr::Field(base, member, member_span) = &expr {
+                        if member == Syntax::TASKGROUP_SPAWN_METHOD {
+                            let lam = self.parse_task_body_lambda()?;
+                            let lam_span = lam.span;
+                            expr = Expr::MethodCall {
+                                receiver: base.clone(),
+                                method: member.clone(),
+                                method_span: *member_span,
+                                type_args: Vec::new(),
+                                args: vec![CallArg {
+                                    convention: AccessConvention::Read,
+                                    expr: Expr::Lambda(lam),
+                                    span: lam_span,
+                                    flags: crate::AST::CallArgFlags::default(),
+                                    label: None,
+                                    spread: false,
+                                }],
+                                recv_type: None,
+                                resolved_ret: None,
+                            };
+                            continue;
+                        }
+                    }
                     // In a control-flow header (`for … in expr {`, `if cond {`, …)
                     // the `{` opens the body, never a struct literal — even after a
                     // field chain like `recv.field`. Only treat `expr.Type { … }` as
@@ -1409,7 +1457,7 @@ impl<'a> Parser<'a> {
             let close = self.toks[self.pos - 1].span;
             return Ok(Expr::MapLit(Vec::new(), Span::new(open.start, close.end)));
         }
-        let first = self.expr()?;
+        let first = self.list_elem()?;
         if matches!(self.peek().kind, TokKind::Colon) {
             self.bump();
             let value = self.expr()?;
@@ -1434,11 +1482,22 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::RBracket) {
                 break;
             }
-            elems.push(self.expr()?);
+            elems.push(self.list_elem()?);
         }
         self.expect(TokKind::RBracket, "to close the list literal")?;
         let close = self.toks[self.pos - 1].span;
         Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
+    }
+
+    /// S37 / D-VARIADIC1: one list element — either `expr` or `...expr` spread.
+    fn list_elem(&mut self) -> Result<Expr, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::DotDotDot) {
+            let start = self.bump().span.start;
+            let inner = self.expr()?;
+            let end = inner.span().end;
+            return Ok(Expr::Spread(Box::new(inner), Span::new(start, end)));
+        }
+        self.expr()
     }
 
     fn struct_lit_after_name(
@@ -1887,6 +1946,7 @@ impl<'a> Parser<'a> {
                         Stmt::Impure { span, .. } => span.end,
                         Stmt::SuppressMustUse { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
+                        Stmt::TaskGroup { span, .. } => span.end,
                         Stmt::Caps { span, .. } => span.end,
                         Stmt::Grant { span, .. } => span.end,
                         Stmt::ComptimeBlock { span, .. } => span.end,
@@ -1908,6 +1968,21 @@ impl<'a> Parser<'a> {
             take_names,
             params,
             body,
+            span: Span::new(open.start, end),
+            meta: LambdaMeta::default(),
+        })
+    }
+
+    /// D-TASKSCOPE1=A: `{ stmts }` after `.task` → `() => { stmts }`.
+    fn parse_task_body_lambda(&mut self) -> Result<Lambda, Diagnostic> {
+        let open = self.peek().span;
+        self.expect(TokKind::LBrace, "to open the task body")?;
+        let stmts = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Lambda {
+            take_names: Vec::new(),
+            params: Vec::new(),
+            body: LambdaBody::Block(stmts),
             span: Span::new(open.start, end),
             meta: LambdaMeta::default(),
         })
@@ -1943,6 +2018,13 @@ impl<'a> Parser<'a> {
             c => c,
         };
         let span = self.peek().span;
+        // D-VARIADIC1: `f(...xs)` call spread.
+        let spread = if matches!(self.peek().kind, TokKind::DotDotDot) {
+            self.bump();
+            true
+        } else {
+            false
+        };
         // S61: detect `name: expr` label at call site — an ident followed by `:` that is
         // NOT `::` (a Rust path). We must not consume it yet if it is just a variable name.
         let label = if matches!(self.peek().kind, TokKind::Ident(_))
@@ -1965,6 +2047,7 @@ impl<'a> Parser<'a> {
             span,
             flags: Default::default(),
             label,
+            spread,
         })
     }
 

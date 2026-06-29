@@ -475,7 +475,10 @@ impl<'a> Checker<'a> {
         }
         if let Type::Apply { name, .. } = recv_ty {
             match (name.as_str(), method) {
-                ("Task", "join") => {
+                ("Task", "join") | ("Task", "wait") => {
+                    if let Expr::Ident(name, _) = receiver {
+                        self.mark_taskgroup_spawn_consumed(name);
+                    }
                     self.consume_builtin_receiver(receiver, method);
                     let _ = span;
                     return ret;
@@ -1000,6 +1003,17 @@ impl<'a> Checker<'a> {
         }
         self.borrow_ctx = true;
         let recv_ty = self.infer(receiver)?;
+        if let Type::Named(ref n) = &recv_ty {
+            if n == Syntax::TYPE_TASKGROUP {
+                return self.infer_taskgroup_method(
+                    receiver,
+                    method,
+                    span,
+                    args,
+                    recv_type_out,
+                );
+            }
+        }
         // E0964: length-changing methods are forbidden on a fixed-size [T#N].
         if let Type::FixedList { .. } = &recv_ty {
             if matches!(method, "push" | "pop" | "insert" | "remove" | "clear") {
@@ -1759,7 +1773,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.check_method_args(&type_name, method, &msig, args, span)?;
-        msig.return_type.clone()
+        msig.return_type.clone().map(|t| self.resolve_type(t))
     }
 
     /// Check a call. Returns:
@@ -2354,8 +2368,29 @@ impl<'a> Checker<'a> {
                             span: call.name_span,
                             flags: Default::default(),
                             label: None,
+                            spread: false,
                         });
                     }
+                }
+            }
+        }
+
+        let variadic = sig.param_variadic.last().copied().unwrap_or(false);
+        if variadic {
+            self.normalize_variadic_call(call, &sig);
+        } else if call.args.iter().any(|a| a.spread) {
+            self.diags.push(Diagnostic::error(
+                "E1312",
+                format!("`{}` doesn't accept a spread argument", call.name),
+                "call spread `f(...xs)` only works when the callee has a final `...` rest parameter"
+                    .to_string(),
+                "pass arguments individually, or call a function whose last parameter is variadic"
+                    .to_string(),
+                Some(call.name_span),
+            ));
+            for arg in call.args.iter_mut() {
+                if arg.spread {
+                    self.infer(&mut arg.expr);
                 }
             }
         }
@@ -2729,11 +2764,127 @@ impl<'a> Checker<'a> {
         }
 
         Some(sig.return_type.as_ref().map(|t| {
-            if generic_subst.is_empty() {
+            let t = if generic_subst.is_empty() {
                 t.clone()
             } else {
                 self.trait_reg.instantiate_type(t, &generic_subst)
-            }
+            };
+            self.resolve_type(t)
         }))
+    }
+
+    /// D-VARIADIC1: pack trailing call arguments (and spreads) into the final list
+    /// parameter so codegen sees a normal fixed-arity call.
+    fn normalize_variadic_call(&mut self, call: &mut Call, sig: &crate::AST::FuncSig) {
+        let fixed = sig.params.len().saturating_sub(1);
+        let Some((variadic_conv, variadic_ty)) = sig.params.last().cloned() else {
+            return;
+        };
+        let elem_ty = match &variadic_ty {
+            Type::List(inner) => (**inner).clone(),
+            _ => return,
+        };
+
+        if call.args.len() < fixed {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`{}` expects at least {} argument{}, got {}",
+                    call.name,
+                    fixed,
+                    if fixed == 1 { "" } else { "s" },
+                    call.args.len()
+                ),
+                "every fixed parameter must receive a value before the variadic tail".to_string(),
+                format!("check the definition of `{}`", call.name),
+                Some(call.name_span),
+            ));
+            for arg in call.args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return;
+        }
+
+        let tail = call.args.split_off(fixed);
+        let mut packed_elems: Vec<Expr> = Vec::new();
+        let mut pack_span = call.name_span;
+        for mut arg in tail {
+            if arg.spread {
+                let spread_span = arg.expr.span();
+                let got = self.infer(&mut arg.expr);
+                pack_span = Span::new(pack_span.start, spread_span.end);
+                match got {
+                    Some(Type::List(inner)) => {
+                        if *inner != elem_ty {
+                            self.diags.push(Diagnostic::error(
+                                "E1311",
+                                format!(
+                                    "spread list is `[{}]`, but `{}` expects `[{}]`",
+                                    inner.name(),
+                                    call.name,
+                                    elem_ty.name()
+                                ),
+                                "call spread expands a list into the callee's variadic tail".to_string(),
+                                format!("pass a `[{}]` list, or change the element types", elem_ty.name()),
+                                Some(arg.expr.span()),
+                            ));
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E1311",
+                            format!("spread needs a list, not `{}`", other.name()),
+                            "call spread `f(...xs)` expands a list into the remaining parameter slots".to_string(),
+                            format!("pass a `[{}]` value here", elem_ty.name()),
+                            Some(arg.expr.span()),
+                        ));
+                    }
+                    None => {}
+                }
+                packed_elems.push(Expr::Spread(Box::new(arg.expr), spread_span));
+            } else {
+                let saved = self.expected_type.replace(elem_ty.clone());
+                let got = self.infer(&mut arg.expr);
+                self.expected_type = saved;
+                if let Some(got) = got {
+                    if got != elem_ty {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "variadic argument should be {}, not {}",
+                                elem_ty.show(),
+                                got.show()
+                            ),
+                            "each trailing argument is collected into the rest parameter's list"
+                                .to_string(),
+                            type_fix_hint(&elem_ty, &got),
+                            Some(arg.expr.span()),
+                        ));
+                    }
+                }
+                pack_span = Span::new(pack_span.start, arg.expr.span().end);
+                packed_elems.push(arg.expr);
+            }
+        }
+
+        let packed_expr = if packed_elems.len() == 1 {
+            match packed_elems.pop().unwrap() {
+                Expr::Spread(inner, _span) => *inner,
+                other => other,
+            }
+        } else if packed_elems.is_empty() {
+            Expr::ListLit(Vec::new(), pack_span)
+        } else {
+            Expr::ListLit(packed_elems, pack_span)
+        };
+
+        call.args.push(crate::AST::CallArg {
+            convention: variadic_conv,
+            expr: packed_expr,
+            span: pack_span,
+            flags: Default::default(),
+            label: None,
+            spread: false,
+        });
     }
 }

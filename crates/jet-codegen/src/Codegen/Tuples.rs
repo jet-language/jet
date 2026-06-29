@@ -203,6 +203,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         }
         Expr::PtrFromAddr { addr, .. } => collect_tuple_shapes_from_expr(addr, out),
         Expr::Paren(inner, _) => collect_tuple_shapes_from_expr(inner, out),
+        Expr::Spread(inner, _) => collect_tuple_shapes_from_expr(inner, out),
     }
 }
 
@@ -262,6 +263,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
         // D-REGION1: a region body is real code — collect tuple shapes from it.
         // D-EFF1: a `#Caps` region body is likewise real code.
         Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
@@ -402,7 +404,7 @@ pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(Stri
                 }
             }
             Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
-            | Item::CodeModule(_) | Item::Distinct(_) | Item::UnitFamily(_) | Item::ErrorConv(_)
+            | Item::CodeModule(_) | Item::Distinct(_) | Item::TypeAlias(_) | Item::UnitFamily(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases

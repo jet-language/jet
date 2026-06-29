@@ -775,21 +775,30 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             out.push_str(&format!("{}}}\n", pad));
         }
         // c109 Phase 19: a `#Context(field: value) { … }` block — a plain block with one
-        // RAII guard per field (declaration order) BEFORE the body, byte-for-byte
+        // RAII/no-op guard per field (declaration order) BEFORE the body, byte-for-byte
         // `emit_stmts`'s `Stmt::ContextBlock` arm.
         TStmt::ContextBlock { guards, body } => {
             out.push_str(&format!("{}{{\n", pad));
             let inner = indent + 1;
             let inner_pad = "    ".repeat(inner);
-            for (i, (is_alloc, value)) in guards.iter().enumerate() {
+            for (i, (field_name, value)) in guards.iter().enumerate() {
                 let val = emit_tir_expr(value, cx);
-                if *is_alloc {
-                    out.push_str(&format!(
-                        "{}let _ctx_guard_{} = jet_mem::jet_ctx_push_alloc(&{});\n",
-                        inner_pad, i, val
-                    ));
-                } else {
-                    out.push_str(&format!("{}let _ctx_logger_{} = {};\n", inner_pad, i, val));
+                match field_name.as_str() {
+                    crate::Syntax::CTX_FIELD_ALLOCATOR => {
+                        out.push_str(&format!(
+                            "{}let _ctx_guard_{} = jet_mem::jet_ctx_push_alloc(&{});\n",
+                            inner_pad, i, val
+                        ));
+                    }
+                    crate::Syntax::CTX_FIELD_DEADLINE => {
+                        out.push_str(&format!(
+                            "{}let _ctx_deadline_{} = jet_ctx_push_deadline({});\n",
+                            inner_pad, i, val
+                        ));
+                    }
+                    _ => {
+                        out.push_str(&format!("{}let _ctx_logger_{} = {};\n", inner_pad, i, val));
+                    }
                 }
             }
             emit_tir_stmts(body, cx, out, inner);
@@ -1359,6 +1368,27 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("vec![{}]", parts)
             }
         }
+        TExprKind::ListSpread { parts } => {
+            let mut s = String::from("{ let mut __jet_sp = Vec::new(); ");
+            for part in parts {
+                match part {
+                    ListSpreadPart::Elem(elem) => {
+                        s.push_str(&format!(
+                            "__jet_sp.push(({}).clone()); ",
+                            emit_tir_expr(elem, cx)
+                        ));
+                    }
+                    ListSpreadPart::Spread(list) => {
+                        s.push_str(&format!(
+                            "__jet_sp.extend(({}).clone()); ",
+                            emit_tir_expr(list, cx)
+                        ));
+                    }
+                }
+            }
+            s.push_str("__jet_sp }");
+            s
+        }
         // D-SOA1: a columnar list literal → `user_<S>_columns::from_aos(vec![…])`.
         TExprKind::ColumnarListLit { columns_ty, elems } => {
             let parts = elems
@@ -1797,6 +1827,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::TaskJoin => format!("({}).join()", recv),
                 THandleOp::TaskDetach => format!("{{ let _detach = ({}); }}", recv),
+                THandleOp::TaskPause => format!("({}).pause()", recv),
+                THandleOp::TaskResume => format!("({}).resume()", recv),
+                THandleOp::TaskCancel => format!("({}).cancel()", recv),
+                THandleOp::TaskTrace => format!("({}).trace()", recv),
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
                 THandleOp::ChannelSender => format!("({}).sender()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
@@ -2049,6 +2083,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             }
         },
+        // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
+        TExprKind::TaskGroupAll { tasks } => {
+            let list = emit_tir_expr(tasks, cx);
+            format!(
+                "{{ let mut __jet_all = Vec::new(); for __jet_h in {list} {{ __jet_all.push(__jet_h.join()); }} __jet_all }}"
+            )
+        }
+        TExprKind::TaskGroupRace { tasks } => {
+            let list = emit_tir_expr(tasks, cx);
+            format!("{}jet_std::jet_task_race({list})", cx.root_prefix)
+        }
+        TExprKind::TaskGroupAny { tasks } => {
+            let list = emit_tir_expr(tasks, cx);
+            format!("{}jet_std::jet_task_any({list})", cx.root_prefix)
+        }
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
         // already-rendered `Box::new(move |…| …) as <fn-type>` wrapper; a call through
         // a fn-value emits `({callee})({args})`, byte-for-byte `emit_expr`'s

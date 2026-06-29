@@ -429,9 +429,14 @@ fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 
 fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("join", 0) => Some(args.first().cloned()),
+        ("join", 0) | (Syntax::METHOD_TASK_WAIT, 0) => Some(args.first().cloned()),
         // D-DETACH1: fire-and-forget — consumes the Task handle, returns unit.
-        ("detach", 0) => Some(None),
+        (Syntax::TASK_DETACH, 0) => Some(None),
+        // D-COROUTINE1=A: task handle control-plane hooks over the internal coroutine substrate.
+        (Syntax::METHOD_TASK_PAUSE, 0)
+        | (Syntax::METHOD_TASK_RESUME, 0)
+        | (Syntax::METHOD_TASK_CANCEL, 0) => Some(None),
+        (Syntax::METHOD_TASK_TRACE, 0) => Some(Some(Type::String)),
         _ => None,
     }
 }

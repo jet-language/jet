@@ -422,6 +422,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
+            | Item::TypeAlias(_) // D-TYPEALIAS1: erases
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases

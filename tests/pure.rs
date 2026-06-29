@@ -175,6 +175,7 @@ fn main() {
                         .iter()
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
+                    param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
@@ -248,6 +249,7 @@ fn main() {
                         .iter()
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
+                    param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
@@ -313,6 +315,7 @@ fn main() {
                         .iter()
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
+                    param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));

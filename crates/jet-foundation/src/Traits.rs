@@ -92,6 +92,13 @@ impl TraitRegistry {
                             .insert(t.clone());
                     }
                 }
+                Item::TypeAlias(a) => {
+                    self.local_types.insert(a.name.clone());
+                    if !a.type_params.is_empty() {
+                        self.struct_params
+                            .insert(a.name.clone(), a.type_params.clone());
+                    }
+                }
                 Item::Func(f) => {
                     if !f.type_params.is_empty() {
                         self.fn_params.insert(f.name.clone(), f.type_params.clone());
@@ -523,6 +530,7 @@ impl TraitRegistry {
                 ty_span: dummy,
                 convention: AccessConvention::Read,
                 default: None,
+                variadic: false,
             }],
             return_type: Some(Type::Named("Snapshot".to_string())),
             is_view_return: false,
@@ -543,6 +551,7 @@ impl TraitRegistry {
                     ty_span: dummy,
                     convention: AccessConvention::Write,
                     default: None,
+                    variadic: false,
                 },
                 crate::AST::Param {
                     name: "snap".to_string(),
@@ -551,6 +560,7 @@ impl TraitRegistry {
                     ty_span: dummy,
                     convention: AccessConvention::Move,
                     default: None,
+                    variadic: false,
                 },
             ],
             return_type: None,

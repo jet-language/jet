@@ -1,0 +1,34 @@
+// 130 — D-METAREFLECT1 / D-REFLECT1: rich reflection read API for user derives.
+// Demonstrates `.methods`, `.markers`, field `is_pub`, and `.has_marker(...)`.
+
+derive Summarize for T {
+    info @= T.reflect()
+    tname @= info.name
+    method @= info.methods[0].name
+    pub_field @= info.fields[0].name
+    hidden_pub @= info.fields[1].is_pub
+    has_debug @= info.has_marker("Debug")
+    emit("""
+impl $tname {{
+    fn summary(self) -> String {{
+        return "$tname/$method/$pub_field debug=$has_debug hidden_pub=$hidden_pub"
+    }}
+}}
+""")
+}
+
+#[Summarize]
+#[Debug]
+struct Widget {
+    pub label: String
+    secret: Int
+
+    fn show(self) -> String {
+        return self.label
+    }
+}
+
+fn main() {
+    w @= Widget.{ label: "gear", secret: 1 }
+    print(w.summary())
+}
