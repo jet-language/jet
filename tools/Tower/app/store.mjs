@@ -133,8 +133,11 @@ export function addCard(s, p) {
 export function updateCard(s, id, patch) {
   const c = s.cards.find(x => x.id === id);
   if (!c) return null;
-  for (const k of ['title', 'body', 'kind', 'track', 'epoch', 'phase', 'priority', 'plan', 'blockedBy']) {
-    if (k in patch) c[k] = patch[k];
+  for (const k of ['title', 'body', 'kind', 'track', 'epoch', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder']) {
+    if (k in patch) {
+      if (k === 'workOrder') c[k] = patch[k] == null || patch[k] === '' ? undefined : Number(patch[k]);
+      else c[k] = patch[k];
+    }
   }
   if (patch.logEntry) c.log.unshift({ at: today(), text: patch.logEntry });
   c.updated = today();

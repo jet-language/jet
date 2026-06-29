@@ -65,6 +65,7 @@ function card(c) {
   const node = el(`
     <button class="card p-${c.phase} who-${c.lane.who || 'none'}" data-card="${c.id}">
       <div class="card__top">
+        ${c.workOrder != null ? `<span class="card__order" title="Work order">${c.workOrder}</span>` : ''}
         <span class="card__id">${ticket(c)}</span>
         <span class="card__sq sq-${c.priority}">${c.priority}</span>
         <span class="card__kind">${esc(c.kind)}</span>
@@ -147,6 +148,7 @@ function viewDecisions() {
     const strip = el(`<div class="activate-strip"><div class="activate-strip__h">Also waiting on you — ${toActivate.length} new card${toActivate.length > 1 ? 's' : ''} to greenlight (start work)</div></div>`);
     toActivate.sort(byPrio).forEach(c => {
       const row = el(`<div class="activate-row">
+          ${c.workOrder != null ? `<span class="card__order">${c.workOrder}</span>` : ''}
           <span class="activate-row__id">${ticket(c)}</span><span class="card__sq sq-${c.priority}">${c.priority}</span>
           <span class="activate-row__t">${esc(c.title)}</span>
           <button class="btn btn--sm" data-open>Open</button>
@@ -413,7 +415,7 @@ function renderDispatchGroups(box) {
 
   let any = false;
   for (const L of AGENT_LANES) {
-    const cs = S.cards.filter(c => c.lane.lane === L.lane && match(c)).sort(byPrio);
+    const cs = S.cards.filter(c => c.lane.lane === L.lane && match(c)).sort(byOrderThenPhaseThenPrio);
     if (!cs.length) continue;
     any = true;
     const sec = el(`<div style="margin-bottom:26px">
@@ -422,7 +424,7 @@ function renderDispatchGroups(box) {
     sec.appendChild(grid(cs));
     box.appendChild(sec);
   }
-  const blocked = S.cards.filter(c => c.lane.lane === 'blocked' && match(c)).sort(byPrio);
+  const blocked = S.cards.filter(c => c.lane.lane === 'blocked' && match(c)).sort(byOrderThenPhaseThenPrio);
   if (blocked.length) {
     const sec = el(`<div style="margin-bottom:26px"><div class="lanehead"><span class="lanehead__name">Blocked</span>
         <span class="lanehead__who lane-none">waiting</span><span class="lanehead__blurb">blocked by another card</span>
@@ -433,6 +435,8 @@ function renderDispatchGroups(box) {
 }
 
 const withClass = (node, cls) => { node.classList.add(cls); return node; };
+const orderOf = (c) => c.workOrder == null ? Number.POSITIVE_INFINITY : c.workOrder;
+const byOrderThenPhaseThenPrio = (a, b) => (orderOf(a) - orderOf(b)) || byPhaseThenPrio(a, b);
 
 // ---- board (epochs are the groupings; cards are the work) --------------
 function viewBoard() {
@@ -461,7 +465,7 @@ function viewBoard() {
   }));
 
   // SIDEQUESTS — before epochs, open by default
-  const sqActive = S.cards.filter(c => c.track === 'sidequest' && c.phase !== 'done' && c.phase !== 'frozen').sort(byPhaseThenPrio);
+  const sqActive = S.cards.filter(c => c.track === 'sidequest' && c.phase !== 'done' && c.phase !== 'frozen').sort(byOrderThenPhaseThenPrio);
   const sqDone = S.cards.filter(c => c.track === 'sidequest' && c.phase === 'done');
   v.appendChild(trackSection('board-sidequests', true, { name: 'Sidequests · off-plan work', off: true, count: `${sqActive.length} active` }, (body) => {
     body.appendChild(el(`<div class="track__goal">Real work, not on an epoch. Keep this short to stay on the plan.</div>`));
@@ -474,8 +478,8 @@ function viewBoard() {
   for (const e of [...S.epochs].sort((a, b) => a.order - b.order)) {
     if (e.status === 'arrived') continue;
     const all = S.cards.filter(c => c.epoch === e.id && c.track === 'epoch');
-    const active = all.filter(c => c.phase !== 'done' && c.phase !== 'frozen').sort(byPhaseThenPrio);
-    const doneCards = all.filter(c => c.phase === 'done');
+    const active = all.filter(c => c.phase !== 'done' && c.phase !== 'frozen').sort(byOrderThenPhaseThenPrio);
+    const doneCards = all.filter(c => c.phase === 'done').sort(byOrderThenPhaseThenPrio);
     const pct = all.length ? Math.round(doneCards.length / all.length * 100) : 0;
     v.appendChild(trackSection('epoch:' + e.id, true,
       { num: 'Epoch ' + e.num, name: e.name, status: e.status, statusClass: e.status === 'active' ? 'active' : '', count: `${doneCards.length}/${all.length} done · ${pct}%` },
@@ -511,6 +515,8 @@ function openLegend() {
     <div class="modal__body">
       <div class="modal__h">Left bar on a card = its stage</div>
       <div class="legend">${STAGE_HELP.map(([id, name, desc]) => `<div class="legend__row"><span class="legend__bar" style="background:var(--s-${id})"></span><span class="legend__name">${name}</span><span class="legend__desc">${esc(desc)}</span></div>`).join('')}</div>
+      <div class="modal__h">Work order badge</div>
+      <p class="modal__prose">The small number at the top-left of a card is its <b>work order</b> within its epoch or sidequest track — lower numbers come first. Cards without a number are unscheduled and sort last.</p>
       <div class="modal__h">Glowing red = it needs you</div>
       <p class="modal__prose">A card <b style="color:var(--red-bri)">glows red</b> when the next move is yours — a decision to record or a new card to greenlight. The same red drives the “blocked on you” pill and the focus-mode dots. Green means resolved (a decided/recommended option).</p>
       <div class="modal__h">Priority chips</div>
@@ -575,7 +581,7 @@ function showDetail(id) {
     ? `<button class="btn btn--red" id="cta-activate">Unfreeze — start work</button>`
     : c.phase === 'verify' ? `<button class="btn btn--red" id="cta-done">Mark verified — close</button>` : '';
   m.innerHTML = `<div class="modal__panel">
-    <div class="modal__bar"><span class="modal__id">${ticket(c)}</span><span class="card__sq sq-${c.priority}">${c.priority}</span>
+    <div class="modal__bar">${c.workOrder != null ? `<span class="card__order">${c.workOrder}</span>` : ''}<span class="modal__id">${ticket(c)}</span><span class="card__sq sq-${c.priority}">${c.priority}</span>
       <span class="card__kind" style="color:var(--text-dim)">${esc(c.kind)} · ${phaseLabel(c.phase)} · <span class="card__lane ${c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none'}" style="border:0;background:none;padding:0">${esc(c.lane.label)}</span></span>
       <button class="modal__x" title="Close (Esc)">×</button></div>
     <div class="modal__body">
@@ -588,6 +594,7 @@ function showDetail(id) {
         <div class="fld"><div class="fld__k">Priority</div>${sel('priority', ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
         <div class="fld"><div class="fld__k">Kind</div>${sel('kind', ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
         <div class="fld"><div class="fld__k">Plan</div><input class="fld__v" data-fld="plan" value="${esc(c.plan || '')}" placeholder="—"></div>
+        <div class="fld"><div class="fld__k">Work order</div><input class="fld__v" data-fld="workOrder" type="number" min="1" value="${c.workOrder ?? ''}" placeholder="—"></div>
       </div>
       <div class="modal__h">Description</div>
       <div class="modal__prose" contenteditable="plaintext-only" data-fld="body">${md(c.body)}</div>
@@ -642,7 +649,12 @@ function showDetail(id) {
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
   m.hidden = false; $('#scrim').hidden = false;
 }
-const commit = (id, k, v) => api('card/update', { id, [k]: k === 'plan' && v === '' ? null : v });
+const commit = (id, k, v) => {
+  let val = v;
+  if (k === 'plan' && v === '') val = null;
+  else if (k === 'workOrder') val = v === '' ? null : Number(v);
+  return api('card/update', { id, [k]: val });
+};
 function closeDetail() { openCard = null; $('#detail').hidden = true; $('#scrim').hidden = true; }
 async function newCard() { const c = await api('card/add', { title: 'New card', phase: 'triage', track: 'epoch', epoch: S.meta.currentEpoch }); if (c) showDetail(c.id); }
 
