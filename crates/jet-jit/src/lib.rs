@@ -16,9 +16,9 @@ use jet_codegen::scheduler::{JetSchedulerChannel, JetSchedulerJoin, JetScheduler
 // D-JITDEP1 approved this as a scoped runtime-side exception.
 
 use jet_foundation::{
-    AST::{BinOp, ProgramBundle, Type, UnOp},
     Diagnostics::Diagnostic,
     JitBackend::{JitBackend, RunOutcome},
+    AST::{BinOp, ProgramBundle, Type, UnOp},
 };
 
 use cranelift_codegen::ir::{
@@ -29,8 +29,8 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::Codegen::TIR::{
-    self, JitSpawnCapture, TJitSpawnBody, TJitSpawnLambda, JitProgram, TCallArg, TCoreClosureKind,
-    TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TOrFallback, TStmt, TStrPart,
+    self, JitProgram, JitSpawnCapture, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFunc,
+    TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TOrFallback, TStmt, TStrPart,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -54,7 +54,6 @@ pub(crate) struct JitRuntime {
     channels: Vec<JetSchedulerChannel<i64>>,
     senders: Vec<JetSchedulerSender<i64>>,
     tasks: Vec<Option<JetSchedulerJoin<i64>>>,
-    next_spawn_id: u32,
 }
 
 struct ResidentModule {
@@ -79,8 +78,12 @@ fn jet_trap_overflow(op: &str, line: u32) -> ! {
     with_runtime_mut(|rt| {
         let msg = match op {
             "add" => "this addition overflows the value's type (the result is outside its range)",
-            "sub" => "this subtraction overflows the value's type (the result is outside its range)",
-            "mul" => "this multiplication overflows the value's type (the result is outside its range)",
+            "sub" => {
+                "this subtraction overflows the value's type (the result is outside its range)"
+            }
+            "mul" => {
+                "this multiplication overflows the value's type (the result is outside its range)"
+            }
             "div" => "this division can't be done (dividing by zero, or overflow)",
             _ => "this operation overflows the value's type (the result is outside its range)",
         };
@@ -276,7 +279,11 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
                     && jit_covers_expr(&a.value, callees)
             })
         }
-        TExprKind::CoreCall { module, method, args } => {
+        TExprKind::CoreCall {
+            module,
+            method,
+            args,
+        } => {
             (module == "core.tasks" && method == "channel" && args.is_empty())
                 || jit_covers_expr_list(args, callees)
         }
@@ -348,9 +355,7 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
         TStmt::Let { init, .. } => jit_covers_expr(init, callees),
         TStmt::Assign {
-            value,
-            clone_value,
-            ..
+            value, clone_value, ..
         } => !clone_value && jit_covers_expr(value, callees),
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| jit_covers_expr(e, callees)),
         TStmt::ExprStmt(e) => jit_covers_expr(e, callees),
@@ -373,11 +378,7 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
         TStmt::Loop { label, body } => {
             label.is_none() && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
-        TStmt::While {
-            label,
-            cond,
-            body,
-        } => {
+        TStmt::While { label, cond, body } => {
             label.is_none()
                 && matches!(&cond.ty, Type::Bool)
                 && jit_covers_expr(cond, callees)
@@ -448,17 +449,14 @@ fn jit_covers_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<Stri
 
 fn jit_covers_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program.funcs.iter().any(|f| {
-        f.is_main && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
-    });
+    let main_ok = program
+        .funcs
+        .iter()
+        .any(|f| f.is_main && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
     if !main_ok {
         return false;
     }
-    if !program
-        .funcs
-        .iter()
-        .all(|f| jit_covers_func(f, &names))
-    {
+    if !program.funcs.iter().all(|f| jit_covers_func(f, &names)) {
         return false;
     }
     let spawn_sites = count_spawn_sites(program);
@@ -496,14 +494,11 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
                     count_spawn_sites_stmts(b, n);
                 }
             }
-            TStmt::Loop { body, .. }
-            | TStmt::While { body, .. }
-            | TStmt::Range { body, .. } => count_spawn_sites_stmts(body, n),
+            TStmt::Loop { body, .. } | TStmt::While { body, .. } | TStmt::Range { body, .. } => {
+                count_spawn_sites_stmts(body, n)
+            }
             TStmt::CountedLoop {
-                init,
-                step,
-                body,
-                ..
+                init, step, body, ..
             } => {
                 count_spawn_sites_stmts(std::slice::from_ref(init), n);
                 count_spawn_sites_stmts(std::slice::from_ref(step), n);
@@ -576,11 +571,7 @@ fn jit_covers_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSet<String>) -> 
     {
         return false;
     }
-    if !lam
-        .params
-        .iter()
-        .all(|(_, ty)| jit_value_type(ty))
-    {
+    if !lam.params.iter().all(|(_, ty)| jit_value_type(ty)) {
         return false;
     }
     if !jit_value_type(&lam.ret) {
@@ -730,10 +721,7 @@ impl LowerCtx<'_, '_> {
                 self.vars.insert(TIR::local_place(name), var);
             }
             TStmt::Assign {
-                place,
-                op,
-                value,
-                ..
+                place, op, value, ..
             } => {
                 let var = self
                     .vars
@@ -832,9 +820,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(header);
                 let cond_val = self.lower_expr(cond)?;
-                self.b
-                    .ins()
-                    .brif(cond_val, body_block, &[], exit, &[]);
+                self.b.ins().brif(cond_val, body_block, &[], exit, &[]);
 
                 self.loop_stack.push(LoopTargets {
                     continue_block: header,
@@ -868,9 +854,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(header);
                 let cond_val = self.lower_expr(cond)?;
-                self.b
-                    .ins()
-                    .brif(cond_val, body_block, &[], exit, &[]);
+                self.b.ins().brif(cond_val, body_block, &[], exit, &[]);
 
                 self.loop_stack.push(LoopTargets {
                     continue_block: header,
@@ -914,13 +898,8 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(header);
                 let cur = self.b.use_var(loop_var);
-                let past_end = self
-                    .b
-                    .ins()
-                    .icmp(IntCC::SignedGreaterThan, cur, end_val);
-                self.b
-                    .ins()
-                    .brif(past_end, exit, &[], body_block, &[]);
+                let past_end = self.b.ins().icmp(IntCC::SignedGreaterThan, cur, end_val);
+                self.b.ins().brif(past_end, exit, &[], body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
                     continue_block: step_block,
@@ -1111,7 +1090,11 @@ impl LowerCtx<'_, '_> {
                 Ok(phi)
             }
             TExprKind::Clone(inner) => self.lower_clone(inner),
-            TExprKind::CoreCall { module, method, args } => {
+            TExprKind::CoreCall {
+                module,
+                method,
+                args,
+            } => {
                 if module == "core.tasks" && method == "channel" && args.is_empty() {
                     let host_ref = self
                         .module
@@ -1154,10 +1137,9 @@ impl LowerCtx<'_, '_> {
                 match fallback {
                     TOrFallback::Panic(_) => {
                         let line = self.b.ins().iconst(types::I32, 1);
-                        let host_ref = self.module.declare_func_in_func(
-                            self.host.conc.panic_channel_closed,
-                            self.b.func,
-                        );
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.conc.panic_channel_closed, self.b.func);
                         let call = self.b.ins().call(host_ref, &[line]);
                         let panic_val = self.b.inst_results(call)[0];
                         self.b.ins().jump(merge, &[panic_val]);
@@ -1300,10 +1282,9 @@ impl LowerCtx<'_, '_> {
                 return Err("jit receive status arity".to_string());
             }
             let ch = self.lower_expr(recv)?;
-            let host_ref = self.module.declare_func_in_func(
-                self.host.conc.channel_receive_status,
-                self.b.func,
-            );
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.conc.channel_receive_status, self.b.func);
             let call = self.b.ins().call(host_ref, &[ch]);
             return Ok(self.b.inst_results(call)[0]);
         }
@@ -1420,7 +1401,10 @@ impl LowerCtx<'_, '_> {
                 self.host.print_bool,
                 self.b.ins().iconst(types::I8, if *v { 1 } else { 0 }),
             ),
-            TExprKind::CharLit(v) => (self.host.print_char, self.b.ins().iconst(types::I32, *v as i64)),
+            TExprKind::CharLit(v) => (
+                self.host.print_char,
+                self.b.ins().iconst(types::I32, *v as i64),
+            ),
             TExprKind::StrLit(parts) => {
                 let text = flatten_string(parts)
                     .ok_or_else(|| "jit string interpolation unsupported".to_string())?;
@@ -1456,9 +1440,8 @@ fn spawn_lambda_signature(module: &JITModule, lam: &TJitSpawnLambda) -> Signatur
         sig.params.push(AbiParam::new(types::I64));
     }
     for (_, ty) in &lam.params {
-        sig.params.push(AbiParam::new(
-            clif_ty(ty).unwrap_or(types::I64),
-        ));
+        sig.params
+            .push(AbiParam::new(clif_ty(ty).unwrap_or(types::I64)));
     }
     if clif_ty(&lam.ret).is_some() {
         sig.returns.push(AbiParam::new(types::I64));
@@ -1699,7 +1682,6 @@ fn fresh_runtime() -> JitRuntime {
         channels: Vec::new(),
         senders: Vec::new(),
         tasks: Vec::new(),
-        next_spawn_id: 0,
     }
 }
 
@@ -1784,9 +1766,8 @@ fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, String> {
 fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
     // Rebuild the module (Cranelift rejects redefining `jet_jit_main`) but keep
     // the live runtime heap — the M2 contract.
-    let mut runtime = RESIDENT_RUNTIME.with(|slot| {
-        slot.borrow_mut().take().unwrap_or_else(fresh_runtime)
-    });
+    let mut runtime =
+        RESIDENT_RUNTIME.with(|slot| slot.borrow_mut().take().unwrap_or_else(fresh_runtime));
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     let (mut module, host) = new_jit_module()?;
     let main_id = compile_program(&mut module, &host, program, &mut runtime, None)?;
@@ -1903,9 +1884,10 @@ pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
         );
     };
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program.funcs.iter().any(|f| {
-        f.is_main && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
-    });
+    let main_ok = program
+        .funcs
+        .iter()
+        .any(|f| f.is_main && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
     if !main_ok {
         for f in &program.funcs {
             if f.is_main {
@@ -1939,12 +1921,7 @@ pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
 /// Test hook: how many times resident `main` ran without a clean restart.
 #[doc(hidden)]
 pub fn resident_invocations_for_test() -> u64 {
-    RESIDENT_RUNTIME.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .map(|r| r.invocations)
-            .unwrap_or(0)
-    })
+    RESIDENT_RUNTIME.with(|slot| slot.borrow().as_ref().map(|r| r.invocations).unwrap_or(0))
 }
 
 /// c139 tier-1 JIT backend over the `JitBackend` seam.

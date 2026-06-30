@@ -206,7 +206,18 @@ impl Session {
     /// by a synthetic assignment, so sema reports E0121 ("was given away") if the
     /// current input tries to use them (D-REPL8=A).
     fn binding_stub_name(stub: &str) -> &str {
-        stub.split('@').next().unwrap_or(stub).trim()
+        let before_marker = stub
+            .split_once("#=")
+            .map(|(name, _)| name)
+            .or_else(|| stub.split_once(":=").map(|(name, _)| name))
+            .or_else(|| stub.split_once("@=").map(|(name, _)| name))
+            .or_else(|| stub.split_once("::").map(|(name, _)| name))
+            .unwrap_or(stub);
+        before_marker
+            .split_once(':')
+            .map(|(name, _)| name)
+            .unwrap_or(before_marker)
+            .trim()
     }
 
     fn binding_stubs_src(&self) -> String {
@@ -251,8 +262,7 @@ impl Session {
             CtValue::Enum { .. } => return,
             CtValue::Unit => return,
         };
-        self.binding_srcs
-            .push(format!("{}{}", name, type_and_val));
+        self.binding_srcs.push(format!("{}{}", name, type_and_val));
     }
 }
 
@@ -708,8 +718,9 @@ fn reject_feature(text: &str) -> Option<&'static str> {
 /// `if` covers multi-arm dispatch (former `when`/`switch`); loops are `loop`.
 fn starts_with_stmt_keyword(t: &str) -> bool {
     // A sigil binding contains `#=` or `:=` (D-BIND3). Also accept retired `::` / `@=` (E0991).
-    t.contains("::")
+    t.contains("#=")
         || t.contains("::")
+        || t.contains("@=")
         || t.contains(":=")
         || t.starts_with("return ")
         || t.starts_with("return")
@@ -1594,4 +1605,41 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sigil_binding_is_classified_as_statement() {
+        let kind = classify("t #= s", 1).expect("classify");
+        match kind {
+            InputKind::Stmts(stmts, suppress, check_src) => {
+                assert!(!suppress);
+                assert_eq!(check_src, "t #= s;");
+                assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
+            }
+            _ => panic!("expected statement input"),
+        }
+    }
+
+    #[test]
+    fn sigil_binding_from_string_session_name_marks_move() {
+        let kind = classify("t #= s", 1).expect("classify");
+        let InputKind::Stmts(stmts, _, _) = kind else {
+            panic!("expected statement input");
+        };
+        let mut names = HashSet::new();
+        names.insert("s".to_string());
+        let mut scope = HashMap::new();
+        scope.insert("s".to_string(), CtValue::Str("hello".to_string()));
+        let moved = collect_moved_names(&stmts, &names, &scope);
+        assert!(moved.contains("s"), "moved names: {:?}", moved);
+    }
+
+    #[test]
+    fn typed_binding_stub_name_matches_moved_name() {
+        assert_eq!(Session::binding_stub_name("s: String #= \"\""), "s");
+    }
 }

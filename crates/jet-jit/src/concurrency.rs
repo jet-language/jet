@@ -1,8 +1,6 @@
 //! M4: scheduler-backed task/channel host shims for the Cranelift JIT.
 
-use jet_codegen::scheduler::{
-    jet_scheduler_drain, jet_scheduler_spawn, JetSchedulerChannel, JetSchedulerJoin,
-};
+use jet_codegen::scheduler::{jet_scheduler_spawn, JetSchedulerChannel, JetSchedulerJoin};
 use std::cell::RefCell;
 
 thread_local! {
@@ -35,8 +33,7 @@ pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
 fn trap_panic(msg: &str) -> ! {
     with_runtime_mut(|rt| {
         rt.stderr.push_str(&format!("panic: {msg}\n"));
-        rt.stderr
-            .push_str(&format!("  --> {}:1\n", rt.source_file));
+        rt.stderr.push_str(&format!("  --> {}:1\n", rt.source_file));
     });
     std::process::exit(70);
 }
@@ -110,12 +107,9 @@ extern "C" fn jet_jit_channel_receive(ch: i64, line: u32) -> i64 {
         match chan.receive() {
             Some(v) => v,
             None => {
+                rt.stderr.push_str("panic: channel closed\n");
                 rt.stderr
-                    .push_str("panic: channel closed\n");
-                rt.stderr.push_str(&format!(
-                    "  --> {}:{line}\n",
-                    rt.source_file
-                ));
+                    .push_str(&format!("  --> {}:{line}\n", rt.source_file));
                 std::process::exit(70);
             }
         }
@@ -193,10 +187,6 @@ extern "C" fn jet_jit_task_join(task: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_scheduler_drain() {
-    jet_scheduler_drain();
-}
-
 pub(crate) struct ConcurrencyHostFns {
     pub channel_new: cranelift_module::FuncId,
     pub channel_sender: cranelift_module::FuncId,
@@ -211,17 +201,20 @@ pub(crate) struct ConcurrencyHostFns {
     pub spawn3: cranelift_module::FuncId,
     pub spawn4: cranelift_module::FuncId,
     pub task_join: cranelift_module::FuncId,
-    pub scheduler_drain: cranelift_module::FuncId,
 }
 
-pub(crate) fn register_concurrency_symbols(
-    builder: &mut cranelift_jit::JITBuilder,
-) {
+pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol("jet_jit_channel_new", jet_jit_channel_new as *const u8);
-    builder.symbol("jet_jit_channel_sender", jet_jit_channel_sender as *const u8);
+    builder.symbol(
+        "jet_jit_channel_sender",
+        jet_jit_channel_sender as *const u8,
+    );
     builder.symbol("jet_jit_sender_clone", jet_jit_sender_clone as *const u8);
     builder.symbol("jet_jit_sender_send", jet_jit_sender_send as *const u8);
-    builder.symbol("jet_jit_channel_receive", jet_jit_channel_receive as *const u8);
+    builder.symbol(
+        "jet_jit_channel_receive",
+        jet_jit_channel_receive as *const u8,
+    );
     builder.symbol(
         "jet_jit_channel_receive_status",
         jet_jit_channel_receive_status as *const u8,
@@ -236,7 +229,6 @@ pub(crate) fn register_concurrency_symbols(
     builder.symbol("jet_jit_spawn3", jet_jit_spawn3 as *const u8);
     builder.symbol("jet_jit_spawn4", jet_jit_spawn4 as *const u8);
     builder.symbol("jet_jit_task_join", jet_jit_task_join as *const u8);
-    builder.symbol("jet_jit_scheduler_drain", jet_jit_scheduler_drain as *const u8);
 }
 
 pub(crate) fn declare_concurrency_host_fns(
@@ -246,7 +238,6 @@ pub(crate) fn declare_concurrency_host_fns(
     use cranelift_module::{Linkage, Module};
 
     let cc = module.target_config().default_call_conv;
-    let mut sig_void = Signature::new(cc);
     let mut sig_channel_new = Signature::new(cc);
     sig_channel_new.returns.push(AbiParam::new(types::I64));
     let mut sig_i64 = Signature::new(cc);
@@ -297,6 +288,5 @@ pub(crate) fn declare_concurrency_host_fns(
         spawn3: import("jet_jit_spawn3", &sig_spawn3)?,
         spawn4: import("jet_jit_spawn4", &sig_spawn4)?,
         task_join: import("jet_jit_task_join", &sig_i64)?,
-        scheduler_drain: import("jet_jit_scheduler_drain", &sig_void)?,
     })
 }

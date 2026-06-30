@@ -120,16 +120,25 @@
     {
       "id": "c26",
       "num": 1,
-      "title": "Arena allocator compiler inference (far horizon)",
-      "body": "Compiler infers arena placement.",
+      "title": "Memory/allocation controls push: arenas, ref fields, uninit, buffers, opt-in GC",
+      "body": "Canonical Epoch 3 memory/allocation push. Merges explicit allocation boundaries (#119), visible uninit (#83), opt-in GC (#69), and labeled ref fields (#147) into the arena/allocation inference track. This card owns expert-tier memory controls while preserving safe beginner defaults.",
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
       "phase": "building",
       "priority": "P2",
-      "plan": "arena-allocator-inference",
+      "plan": "Canonical memory/allocation implementation plan. Preserve I1: beginner Jet stays safe; expert controls require explicit syntax/imports/audit where applicable.\n\nBuild order:\n1. Labeled stored references: implement #Ref(Label) field syntax and owner relationship checks; remove stale core.mem gate per owner outcome; migrate old ref[label] diagnostics.\n2. Arena allocator inference: keep current arena plan as base; prove region views cannot escape, reset/free invalidates views, and diagnostics remain Jet-owned.\n3. Explicit allocation boundaries: audit Core APIs that allocate across caller-owned boundaries; add buffer/allocator-taking variants using existing allocator model; add lint for hidden boundary allocation in expert/perf contexts.\n4. Visible uninit: #Uninit binding, explicit type/no initializer parser rules, definite-assignment proof, plain-data restriction, MaybeUninit codegen only after sema proof; E0421-E0424 snapshots.\n5. Opt-in GC library: Gc<T> traced handle as library type for cyclic long-running data, explicit import, no default allocation path change, no sema/codegen primitive unless needed for root tracing.\n\nAcceptance: ui snapshots for dangling/escaping refs, uninit misuse, arena use-after-reset, hidden allocation lint; examples for arena parsing, #Ref owner labels, caller buffers, #Uninit fixed buffers, cyclic Gc graph; golden tests; no generated unsafe outside #Unsafe/std-mem internals.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged cards #119, #83, #69, #147 into this canonical Epoch 3 push. Plan refreshed for single-agent handoff."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 340 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Activated into sidequest track"
@@ -160,7 +169,8 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 340
     },
     {
       "id": "c27",
@@ -296,6 +306,10 @@
       "log": [
         {
           "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 400 after grouped Epoch 3 active cards."
+        },
+        {
+          "at": "2026-06-30",
           "text": "Activated into epoch e3 track"
         },
         {
@@ -328,7 +342,8 @@
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 400
     },
     {
       "id": "c96",
@@ -680,11 +695,20 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "yaml-advanced",
+      "plan": "Merged into #117 (Core library breadth push: DB drivers, YAML, Unicode text, compression, linalg). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #117 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #117 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 37 -> 170 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Replaced broad serde-model pointer with focused yaml-advanced plan for explicit tags/advanced YAML. Advanced to ready."
@@ -703,8 +727,8 @@
         }
       ],
       "created": "2026-06-25T00:00:00Z",
-      "updated": "2026-06-28",
-      "workOrder": 37
+      "updated": "2026-06-30",
+      "workOrder": 170
     },
     {
       "id": "c164",
@@ -783,7 +807,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-29",
+      "updated": "2026-06-30",
       "workOrder": 39
     },
     {
@@ -926,14 +950,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "workOrder": 19,
-      "plan": "Opt-in replay soundness marker (D-REPLAY1=A): a fn marker rejects any reachable un-mockable `#(Time/Rand/Net/Io)` via the same inverse-propagation walk as D-PROP1. Compiler proves replay-soundness statically; the record/replay runtime harness is SEPARATE post-v1 work.\nGATED on the marker name — ballot D-REPLAY2 (rubber-stamp: `#Replayable`). Also reuses c18's inverse-propagation pass, so build AFTER c18 lands (blockedBy c18). Steps once cleared: (1) parser+Syntax.rs marker; (2) sema reuses the D-PROP1 engine to reject un-mockable non-determinism; (3) I4 diagnostic + ui snapshot; (4) example.",
-      "blockedBy": [
-        "c03qi20"
-      ],
+      "workOrder": 330,
+      "plan": "Merged into #25 (Static guarantees push: refinements, contracts, IFC, budgets, bounds, replay soundness). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #25 plan owns this work, diagnostics, examples, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #25 canonical static-guarantees push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 19 -> 330 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-27",
           "text": "Planning only: waits on c18 inverse-propagation engine and D-REPLAY2 marker name before parser work."
@@ -952,7 +983,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-27"
+      "updated": "2026-06-30"
     },
     {
       "id": "c63xl5c",
@@ -962,11 +993,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "D-IFC1=A implementation plan: (1) add security-label lattice model to sema as a policy layer over existing D-TAINT1 value tags; (2) introduce built-in labels/principals as library values, not new primitive types; (3) parser accepts the ratified label marker form already recorded by D-IFC1; (4) sema propagates labels through assignments, calls, containers, interpolation, and core sinks; (5) add explicit declassify operation with reason string and audit lint; (6) diagnostics for illegal flow and missing declassification; (7) examples for PII to log/db/network sinks plus ui snapshots; (8) docs/spec/spec.md and diagnostics registry updates.",
+      "plan": "Merged into #25 (Static guarantees push: refinements, contracts, IFC, budgets, bounds, replay soundness). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #25 plan owns this work, diagnostics, examples, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #25 canonical static-guarantees push; closed duplicate planning card. No independent implementation claimed."
+        },
         {
           "at": "2026-06-29",
           "text": "Vertical slice shipped for D-COROUTINE1 internal-substrate path: Task<T> gained pause/resume/cancel/trace control-plane methods in sema+TIR+prelude runtime; added golden example 157 and docs updates. Full scheduler-enforced pause/cancel semantics remain coupled to the M:N runtime card."
@@ -1005,21 +1041,30 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "c73xs2f",
       "num": 25,
-      "title": "Refinement types (PositiveInt proved > 0)",
-      "body": "[D-REFINE1] Compiler-proved value refinements so PositiveInt is always > 0 without scattered require() checks. Needs a proof/SMT layer that is post-v1; the I8 simplicity ratchet requires a concrete milestone slot + owner sign-off before any work. Preserve, do not decide.",
+      "title": "Static guarantees push: refinements, contracts, IFC, budgets, bounds, replay soundness",
+      "body": "Canonical Epoch 3 sema-proof/policy push. Merges information-flow (#24), budgets (#26), formal verification/contracts (#27), out-of-bounds proof escape (#106), and replay soundness (#23) into refinement types (#25). These features share one facts engine/call graph/policy infrastructure and must not grow separate proof systems.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P3",
-      "plan": "D-REFINE1=A implementation plan: (1) represent refinements as named predicate-backed types in sema; (2) parse the ratified refinement declaration surface; (3) build a small facts engine for comparisons, ranges, require checks, and branch narrowing; (4) allow construction only where predicate proof is in scope; (5) erase refinements to base runtime type in codegen; (6) diagnostics for missing proof, invalid predicate, and refinement/base mismatch; (7) examples for PositiveInt, bounded index, and money/unit refinements; (8) ui snapshots + golden tests.",
+      "plan": "Canonical static-guarantees implementation plan. Build one sema facts/policy engine, then layer features on it. No duplicate proof engines.\n\nBuild order:\n1. Facts core: represent refinements as named predicate-backed types; collect comparison/range/require facts; branch narrowing; loop facts; fixed-list length facts; call pre/postcondition facts.\n2. Contracts: require/ensure syntax and runtime/test checks where ratified; jet test harvests contracts as property/property-test seeds; diagnostics point at the violated contract and caller path.\n3. Bounds proof: default runtime bounds checks stay; elide or expert-escape only where facts prove in-range. Add explicit unsafe/proof escape only if ratified; no silent unchecked indexing.\n4. Information-flow/compliance: security-label lattice as sema policy over values; declassify is explicit and audited; labels propagate through calls, collections, serialization, and task boundaries.\n5. Budgets: #Budget/profile markers feed the same call graph/facts layer; enforce forbidden effects, bounded loops, and budget diagnostics without a second effect system.\n6. Replay soundness: reuse effect/inverse-propagation walk; raise/attach D-REPLAY2 if marker spelling is still missing before parser work; reject reachable Time/Rand/Net/Io unless mockable under replay.\n7. Solver/proof integration: formal proof hooks consume the same facts and contracts; generated obligations must report Jet diagnostics, never prover internals.\n\nAcceptance: ui snapshots for missing refinement proof, failed contract, unsafe/unknown bounds proof, IFC leak, invalid declassify, budget violation, replay-unsound call path; examples/goldens for PositiveInt, safe index, PII declassify, render-frame budget, replayable pure handler, formal proof stub; docs/spec/diagnostics.md codes for each user-facing diagnostic.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged cards #24, #26, #27, #106, #23 into this canonical static-guarantees push. Parent assigned to Epoch 3."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 270 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -1054,7 +1099,8 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30",
+      "workOrder": 270
     },
     {
       "id": "c83xwnq",
@@ -1064,11 +1110,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "D-BUDGET1=B implementation plan: (1) register `#Budget` marker and `budget name { forbid: (...), loops: bounded }` profile surface in Source/Syntax.rs with D-BUDGET1; (2) parser accepts budget profile declarations and function/block markers; (3) sema resolves budget profiles to effect ceilings plus bounded-loop requirement; (4) add E0746 for forbidden transitive effect inside a budget and E0747 for unbounded loop in a budget; (5) codegen erases markers; (6) docs/spec/spec.md, diagnostics registry, ui snapshots, and one example showing a frame budget passing/failing.",
+      "plan": "Merged into #25 (Static guarantees push: refinements, contracts, IFC, budgets, bounds, replay soundness). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #25 plan owns this work, diagnostics, examples, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #25 canonical static-guarantees push; closed duplicate planning card. No independent implementation claimed."
+        },
         {
           "at": "2026-06-28",
           "text": "Plan added from sprint-readiness sweep; decisions already ratified."
@@ -1091,7 +1142,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "c93y9sk",
@@ -1101,11 +1152,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "D-VERIFY1=A implementation plan: (1) add `require`/`ensure` contract syntax to parser/Syntax.rs; (2) sema type-checks contracts in function context and injects debug/test runtime checks; (3) `jet test` harvests contracts as property-test generators; (4) add `#Verify(forall ... => predicate)` finite-domain marker with compile-time Cartesian enumeration cap; (5) diagnostics for non-finite domains, cap overflow, and failed proof counterexample; (6) codegen erases successful compile-time proofs and emits debug checks for contracts; (7) examples and ui snapshots; (8) docs/spec/diagnostics updates.",
+      "plan": "Merged into #25 (Static guarantees push: refinements, contracts, IFC, budgets, bounds, replay soundness). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #25 plan owns this work, diagnostics, examples, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #25 canonical static-guarantees push; closed duplicate planning card. No independent implementation claimed."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -1140,7 +1196,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "ca3ynsl",
@@ -1421,13 +1477,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "plan": "Structured concurrency combinators (D-CONCCOMB1=A): ship race (first wins, losers cancelled), all (wait all, fail-fast on first error), any (first Ok, waits rest) as first-class core combinators over tasks.\nGATED: the task/channel primitives (S53, direction A) are deferred/post-v1 and the memory-capability model review is a prerequisite (S53 2026-06-19 caveat); D-NURSERY1 (structured concurrency) is still open. Semantics are locked by this decision; the BUILD waits on the primitives. blockedBy the concurrency-primitives card. Plan when unblocked: define the three combinators alongside the task primitives; examples + goldens; ensure race cancellation composes with the cancellation model.",
-      "blockedBy": [
-        "c1uiy53e"
-      ],
+      "plan": "Merged into #126 (Concurrency runtime push: Go-scale M:N tasks + structured combinators). This card is closed as duplicate planning scope only; no independent implementation claimed. The canonical #126 plan owns this work and its tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #126 canonical concurrency push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 18 -> 290 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Removed stale decision-id blocker; open D-CONCSELECT1 already controls the lane."
@@ -1462,8 +1525,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.902Z",
-      "updated": "2026-06-28",
-      "workOrder": 18
+      "updated": "2026-06-30",
+      "workOrder": 290
     },
     {
       "id": "c1iqde7",
@@ -1616,17 +1679,26 @@
     {
       "id": "c5irks2",
       "num": 41,
-      "title": "Blessed protocol hooks — complete per-hook coverage (iterator/index/literal-suffix)",
-      "body": "Ideas.md: core syntax delegates to fixed hooks (iterator, index, literal suffix, etc.). Ratified/implemented in pieces; D-EXT1 formalizes the policy. Bundle-risk: individual hooks have different implementation status — this card tracks completing/verifying each blessed hook, not reopening the policy.",
+      "title": "Protocol/representation hooks push: iterator/index/suffix, Display/Debug, rollback",
+      "body": "Canonical Epoch 3 protocol hooks push. Merges Display vs Debug (#51) and rollback hooks (#81) into blessed protocol hooks because all three define compiler-known extension points with user-visible behavior.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "phase": "planning",
       "priority": "P2",
-      "workOrder": 23,
-      "plan": null,
+      "workOrder": 40,
+      "plan": "Canonical protocol/representation hooks implementation plan. Do not add arbitrary traits/macros; add only blessed hooks with one clear semantic job each.\n\nBuild order:\n1. Inventory existing hook machinery and trait/protocol support; document allowed hook set in syntax-decisions/spec before parser/sema work.\n2. Complete iterator/index/literal-suffix protocol hook coverage from #41 with diagnostics for unsupported/misdeclared hooks.\n3. Display/Debug split: Debug auto-derive for structs/enums with redaction support; Display requires explicit impl; interpolation defaults to Display and supports {value@Debug}; sema rejects unknown selectors.\n4. Rollback hooks: Snapshot/Rollback protocols with associated state type; transaction engine uses custom snapshot/restore when present, otherwise existing safe auto path; diagnostics for irreversible fields without hook.\n5. Formatter/docs/examples: hooks round-trip, examples show user-facing display vs debug, custom iterator/index/suffix, transaction rollback.\n\nAcceptance: ui snapshots for bad hook signatures/unknown interpolation selector/rollback gaps; golden examples; no general macro or open-ended operator overload path.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged cards #51, #81 into this canonical Epoch 3 push. Plan refreshed for single-agent handoff."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 23 -> 40 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-29",
           "text": "Activated into epoch e3 track"
@@ -1637,7 +1709,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-29"
+      "updated": "2026-06-30"
     },
     {
       "id": "c6is1ku",
@@ -1948,11 +2020,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "D-DISPLAYDBG1 + D-DISPLAYDBG2=A implementation plan: (1) add blessed `Display` and `Debug` protocol hooks; (2) Debug auto-derive for structs/enums with redaction hook support; (3) Display requires explicit impl, no default; (4) string interpolation defaults `{value}` to Display and parses `{value@Debug}` for Debug; (5) sema rejects unknown interpolation selectors; (6) formatter round-trips selector; (7) examples/goldens for user-facing vs debug output; (8) ui snapshots and docs.",
+      "plan": "Merged into #41 (Protocol/representation hooks push: iterator/index/suffix, Display/Debug, rollback). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #41 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #41 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 250 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -1999,7 +2080,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 250
     },
     {
       "id": "cgiv599",
@@ -2037,7 +2119,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "chiv6zm",
@@ -2188,13 +2270,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "plan": "Decimal money + float-money lint (D-DECIMAL1=A): ship `Decimal` (arbitrary-precision base-10) in core.numeric AND a default-on lint E-FLOATMONEY firing when a variable/field named price/cost/amount/total/fee/balance/tax holds a float (suppressible with an allow-marker for intentional uses).\nThe Decimal TYPE needs a bigint backing — gated on the BigInt decision (card #65, open): blockedBy #65. The LINT is independent and can ship first.\nSteps: (1) [now] E-FLOATMONEY sema lint + I4 code/what/why/fix + ui snapshot + example; (2) [after #65] Decimal arbitrary-precision base-10 (prefer pure-Rust bigint backing per I6) + arithmetic + examples + goldens. One Decimal type only (I8).",
-      "blockedBy": [
-        "ctiw01r"
-      ],
+      "plan": "Merged into #65 (Precise numeric types push: BigInt + Decimal money safety). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #65 plan owns this work, examples, diagnostics, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #65 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 240 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-26",
           "text": "Decision cleared (D-DECIMAL1=A). Lint ships now; Decimal type blockedBy the BigInt decision (#65). Held in planning."
@@ -2209,7 +2298,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 240
     },
     {
       "id": "cmivhwl",
@@ -2252,11 +2342,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "D-TTLVAL1=A implementation plan: (1) add `core.time.Expiring<T>` and `core.secrets.Rotting<T>` library types; (2) constructors require Clock/context source and deadline/ttl; (3) methods return `T?` or fallible error when expired; (4) sema lint for expired-value unwrap without check in pure/test-known clock cases; (5) examples for cache TTL and secret rotation; (6) docs/reference update and golden tests.",
+      "plan": "Merged into #64 (Crypto/secrets push: misuse-resistant envelopes, agility, TTL/rotting secrets). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #64 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #64 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 260 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -2275,7 +2374,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 260
     },
     {
       "id": "coivmgi",
@@ -2314,13 +2414,20 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
-      "plan": "Ownable UI components (D-OWNCOMP1=B): jetpack copies component source into the user's tree (shadcn model) — user owns it immediately, no version lock; patches don't auto-propagate (re-run add / diff manually). Fits I8 (one distribution path) and the ownership ethos.\nGATED: this is downstream of the reactive-ui-stack direction (D-REACTUI1, still open) — the distribution model is meaningless until the components' target stack is known. blockedBy the reactive-ui card. Plan when unblocked: a `jetpack add <component>` that copies source + records provenance; accessible defaults ship in the owned source.",
-      "blockedBy": [
-        "c2qj06uq"
-      ],
+      "plan": "Merged into #134 (Reactive UI stack push: signals, renderer, styles, kit, motion, a11y, native backends). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #134 plan owns this work, examples, diagnostics, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #134 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 410 after grouped Epoch 3 active cards."
+        },
         {
           "at": "2026-06-26",
           "text": "Decision cleared (D-OWNCOMP1=B — copy-in-and-own) but gated on the reactive-ui stack (D-REACTUI1 open). Held in planning."
@@ -2335,7 +2442,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 410
     },
     {
       "id": "cqivq27",
@@ -2396,18 +2504,27 @@
     {
       "id": "csivxv0",
       "num": 64,
-      "title": "Misuse-resistant crypto API (`seal`/`sign` envelope)",
-      "body": "Ideas.md: high-level seal/sign envelope hiding nonce/IV footguns. Crypto primitives exist; envelope API not found. New.",
+      "title": "Crypto/secrets push: misuse-resistant envelopes, agility, TTL/rotting secrets",
+      "body": "Canonical Epoch 3 crypto/secrets push. Merges post-quantum agility (#71) and TTL/rotting secrets (#59) into misuse-resistant crypto envelopes. This card owns safe high-level crypto APIs and secret lifetime controls.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
-      "plan": "Misuse-resistant crypto envelope (D-CRYPTOENV1=A): `crypto.seal`/`crypto.open` (AEAD) + `crypto.sign`/`crypto.verify` (signatures) as the canonical API hiding nonce/IV/mode (libsodium model); raw AES/ChaCha/RSA behind an explicit expert import (I1).\nGATED two ways: (a) the crypto primitive backend is an I6 dep — ballot D-DEP-CRYPTO1 (RustCrypto vs ring vs libsodium); (b) the envelope's CSPRNG must come from the ratified random API — card #52 (Random API) is still open: blockedBy #52. Steps once cleared: seal/open + sign/verify over the chosen backend; raw primitives gated behind expert import; examples + goldens.",
+      "plan": "Canonical crypto/secrets implementation plan. Default API must be misuse-resistant; raw primitives stay expert-only.\n\nBuild order:\n1. Preserve/finish RNG split prerequisite: deterministic PRNG and CSPRNG remain structurally separate.\n2. Envelope API: crypto.seal/open and crypto.sign/verify hide nonce/mode/key details; versioned envelope metadata; clear error types; no raw AES/ChaCha/RSA beginner path.\n3. Algorithm agility: design hybrid-ready envelope metadata and algorithm ids now; do not expose PQ primitive until backend exists; migration tests prove old envelopes still open.\n4. TTL/rotting secrets: core.time.Expiring<T> and core.secrets.Rotting<T>; constructors require clock/context and deadline/ttl; access returns T? or fallible expired error.\n5. Static/lint support: warn/error for expired unwrap in test-known clock cases; reject crypto API misuse that bypasses envelope surface.\n\nAcceptance: examples for seal/open, sign/verify, envelope version migration, expiring cache, rotating secret; golden tests; ui snapshots for wrong RNG/raw primitive misuse/expired unchecked access; docs explain expert escape hatches.",
       "blockedBy": [
         "cgiv599"
       ],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged cards #71, #59 into this canonical Epoch 3 push. Plan refreshed for single-agent handoff."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 200 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
@@ -2426,21 +2543,31 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 200
     },
     {
       "id": "ctiw01r",
       "num": 65,
-      "title": "Arbitrary-precision integers (BigInt)",
-      "body": "Ideas.md: BigInt type. No built-in arbitrary-precision integer found. New/std.",
+      "title": "Precise numeric types push: BigInt + Decimal money safety",
+      "body": "Canonical Epoch 3 precise-numerics push. Merges Decimal money + float-money lint (#57) into BigInt because Decimal depends on arbitrary precision and both share numeric tower/API decisions.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "phase": "ready",
       "priority": "P3",
-      "plan": "D-BIGINT1=A: add explicit Core BigInt. Steps: implement std-only BigInt backing; register core numeric type/methods; parser/sema/codegen support constructors/ops; no Int auto-promotion; examples and overflow/interop tests.",
+      "plan": "Canonical precise numeric implementation plan.\n\nBuild order:\n1. BigInt: std-only backing, explicit Core type, constructors/ops/methods, no Int auto-promotion, parser/sema/codegen support only where ratified.\n2. Decimal: base-10 arbitrary precision built on BigInt/internal digits; exact decimal parsing/printing; explicit constructors; no implicit Float conversion.\n3. Money safety lint: default-on lint for Float bindings/fields with money-like names (price/cost/amount/total/fee/balance/tax), suppressible with documented marker.\n4. Interop: parse/format, comparisons, arithmetic with same precise type only, serialization behavior.\n\nAcceptance: examples for BigInt overflow avoidance, Decimal exact cents, float-money lint; ui snapshots for implicit mixing/rejected auto-promotion; golden tests; docs clarify when to use Int, Float, BigInt, Decimal.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged cards #57 into this canonical Epoch 3 push. Plan refreshed for single-agent handoff."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 230 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "D-BIGINT1=A recorded and implementation plan attached. Advanced to ready."
@@ -2459,7 +2586,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 230
     },
     {
       "id": "cuiw349",
@@ -2469,11 +2597,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "unicode-text",
+      "plan": "Merged into #117 (Core library breadth push: DB drivers, YAML, Unicode text, compression, linalg). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #117 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #117 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 180 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-27",
           "text": "[ratified] D-GRAPHEME1=B recorded in syntax-decisions.md; plan unicode-text added; ready to implement opt-in core.text.unicode package."
@@ -2488,7 +2625,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 180
     },
     {
       "id": "cviw4t7",
@@ -2498,11 +2636,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "compression-codecs",
+      "plan": "Merged into #117 (Core library breadth push: DB drivers, YAML, Unicode text, compression, linalg). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #117 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #117 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 190 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-27",
           "text": "[ratified] D-CODECS1=A recorded in syntax-decisions.md; plan compression-codecs added; ready to implement gzip+zstd."
@@ -2517,7 +2664,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 190
     },
     {
       "id": "cwiw6et",
@@ -2560,11 +2708,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "Opt-in GC library (D-OPTGC1=A): a `gc` stdlib module with a `Gc<T>` traced handle for cyclic heap data. Ownership stays the default; `Gc<T>` is a deliberate expert import; all Jet outside @unsafe stays sound (library type, not a language primitive).\nD-DEP-GC1=A is ratified. Steps: Gc<T> handle + traced collector (root set + tracing) per the chosen backend; examples (cyclic graph) + goldens. Does not touch sema/codegen rules or the default allocation path.",
+      "plan": "Merged into #1 (Memory/allocation controls push: arenas, ref fields, uninit, buffers, opt-in GC). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #1 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #1 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 420 after grouped Epoch 3 active cards."
+        },
         {
           "at": "2026-06-28",
           "text": "Removed stale dependency wording: D-DEP-GC1 is ratified."
@@ -2587,7 +2744,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 420
     },
     {
       "id": "cyiwb6t",
@@ -2597,11 +2755,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
-      "plan": "math-linalg-simd",
+      "plan": "Merged into #117 (Core library breadth push: DB drivers, YAML, Unicode text, compression, linalg). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #117 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #117 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 430 after grouped Epoch 3 active cards."
+        },
         {
           "at": "2026-06-28",
           "text": "Existing math-linalg-simd plan covers the remaining core.linalg work; no open decision on this card. Advanced to ready."
@@ -2620,7 +2787,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 430
     },
     {
       "id": "cziwcnz",
@@ -2630,13 +2798,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "D-PQCRYPTO1=A: add crypto-envelope agility seam now without shipping PQ algorithms. Steps: design versioned envelope metadata, algorithm identifiers, hybrid-ready internal representation, migration docs/tests; no user-visible PQ primitive until backend exists.",
-      "blockedBy": [
-        "csivxv0"
-      ],
+      "plan": "Merged into #64 (Crypto/secrets push: misuse-resistant envelopes, agility, TTL/rotting secrets). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #64 plan owns this work, examples, diagnostics, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #64 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 210 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Corrected blocker to #64 crypto envelope card id."
@@ -2663,7 +2838,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 210
     },
     {
       "id": "c10iwfuc",
@@ -2868,6 +3044,11 @@
       "log": [
         {
           "at": "2026-06-30",
+          "by": "agent",
+          "text": "Green reverify: `TMPDIR=/tmp nix develop -c cargo test` passed; named build profiles remain done."
+        },
+        {
+          "at": "2026-06-30",
           "text": "Verified: cargo test --test cli profile_* (4/4), tree builds; codegen/JIT blockers cleared."
         },
         {
@@ -2946,6 +3127,11 @@
         {
           "at": "2026-06-30",
           "by": "agent",
+          "text": "Green reverify: `TMPDIR=/tmp nix develop -c cargo test` passed; #MustUse remains done."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
           "note": "Implemented D-MUSTUSE1 end-to-end: ATTR_MUST_USE in Syntax.rs; parser for #MustUse on struct/enum/fn/method; sema E0419 via check_ignored_must_use (reuses suppress_must_use + .drop); core ScopeGuard/TransactionGuard types; tests/ui snapshots + crates/jet-sema/tests/must_use.rs (4/4 pass); example 166_must_use.jet; diagnostics.md E0419."
         },
         {
@@ -2962,7 +3148,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
+      "updated": "2026-06-30",
       "workOrder": 33
     },
     {
@@ -2973,11 +3159,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "D-ROLLBACK-TRAIT implementation plan: (1) define `Snapshot`/`Rollback` protocol hooks with associated state type; (2) parser/sema accepts impls once associated-type support is present; (3) transaction engine calls custom snapshot/restore when available, otherwise existing auto snapshot path; (4) diagnostics for irreversible fields without rollback hook; (5) examples for database transaction and in-memory object; (6) golden/ui tests.",
+      "plan": "Merged into #41 (Protocol/representation hooks push: iterator/index/suffix, Display/Debug, rollback). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #41 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #41 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 34 -> 440 after grouped Epoch 3 active cards."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -2996,8 +3191,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
-      "workOrder": 34
+      "updated": "2026-06-30",
+      "workOrder": 440
     },
     {
       "id": "c1aix1yl",
@@ -3045,11 +3240,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
-      "plan": "Visible uninitialization implementation plan: (1) add `#Uninit name: T` binding form already ratified by D-UNINIT1; (2) parser requires explicit type and no initializer; (3) sema definite-assignment analysis proves every read follows write on all paths; (4) restrict to plain-data/no-drop types unless `#Unsafe` gate; (5) codegen emits MaybeUninit only for proven paths; (6) diagnostics E0421-E0424 + snapshots; (7) examples for buffers and fixed arrays.",
+      "plan": "Merged into #1 (Memory/allocation controls push: arenas, ref fields, uninit, buffers, opt-in GC). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #1 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #1 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 36 -> 160 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -3064,8 +3268,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
-      "workOrder": 36
+      "updated": "2026-06-30",
+      "workOrder": 160
     },
     {
       "id": "c1cix784",
@@ -3080,6 +3284,10 @@
       "plan": "Full CoreLib REPL execution plan: (1) expand interpreter whitelist from pure math/time/random to all side-effect-safe Core modules; (2) route fs/io/env/process calls through REPL capability sandbox prompts/errors; (3) preserve deterministic transcript mode for tests; (4) add REPL fixtures for json/fs/path/regex/http-disabled cases; (5) document unsupported native-only modules with E2203-style message.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 450 after grouped Epoch 3 active cards."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -3098,7 +3306,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 450
     },
     {
       "id": "c1dix8nw",
@@ -3340,6 +3549,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 28 -> 60 for Epoch 3 dependency grouping."
+        },
+        {
           "at": "2026-06-28",
           "text": "All decisions ratified; advanced out of deciding."
         },
@@ -3365,8 +3578,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
-      "workOrder": 28
+      "updated": "2026-06-30",
+      "workOrder": 60
     },
     {
       "id": "c1kixm77",
@@ -3382,6 +3595,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 22 -> 30 for Epoch 3 dependency grouping."
+        },
+        {
           "at": "2026-06-29",
           "text": "Activated into epoch e3 track"
         },
@@ -3391,8 +3608,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-29",
-      "workOrder": 22
+      "updated": "2026-06-30",
+      "workOrder": 30
     },
     {
       "id": "c1lixnlk",
@@ -3442,6 +3659,10 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 24 -> 50 for Epoch 3 dependency grouping."
+        },
+        {
           "at": "2026-06-29",
           "text": "Activated into epoch e3 track"
         },
@@ -3451,8 +3672,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-29",
-      "workOrder": 24
+      "updated": "2026-06-30",
+      "workOrder": 50
     },
     {
       "id": "c1nixrpd",
@@ -3515,7 +3736,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-29"
+      "updated": "2026-06-30"
     },
     {
       "id": "c1pixvu9",
@@ -3532,6 +3753,10 @@
         "c1oixt2m"
       ],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 370 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation plan added while blocked on upstream card; no additional owner ballot identified yet."
@@ -3554,7 +3779,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 370
     },
     {
       "id": "c1qixxin",
@@ -3767,7 +3993,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-29",
+      "updated": "2026-06-30",
       "logs": [
         {
           "at": "2026-06-28",
@@ -3784,14 +4010,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "workOrder": 20,
-      "plan": "D-RACEWIN1=A: race/any combinators fold into card #36 (structured concurrency combinators, D-CONCCOMB1=A). The race(tasks) (first to succeed, losers cancelled) and any(tasks) (first to finish) functions are additions to the combinator set already planned in #36. BLOCKED on D-NURSERY1 (card #102 deciding) — both race/any and the nursery scope are part of the same structured-concurrency design; implement together. Once D-NURSERY1 is decided: add race() and any() as module-level functions in core.task alongside the existing task {} spawn. Both cancel losing tasks via the nursery cancellation mechanism.",
-      "blockedBy": [
-        "c1uiy53e"
-      ],
+      "workOrder": 310,
+      "plan": "Merged into #126 (Concurrency runtime push: Go-scale M:N tasks + structured combinators). This card is closed as duplicate planning scope only; no independent implementation claimed. The canonical #126 plan owns this work and its tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #126 canonical concurrency push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 20 -> 310 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L149). Full design ballot attached — owner decides proceed/direction."
@@ -3806,7 +4039,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-27"
+      "updated": "2026-06-30"
     },
     {
       "id": "c1wiy9k9",
@@ -3878,14 +4111,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "workOrder": 21,
-      "plan": "Implementation plan after #25/refinement direction resolves: (1) keep runtime bounds checks as default; (2) add proof-recognized in-range facts from loops, fixed-size lists, and refinement predicates; (3) expose an expert unchecked-index escape only if the proof gate rejects or an explicit unsafe gate is ratified; (4) diagnostics explain why index proof failed and point to safe indexing; (5) tests for proved loop indices, rejected unproved indices, and no hidden unsafe in safe Jet.",
-      "blockedBy": [
-        "c73xs2f"
-      ],
+      "workOrder": 280,
+      "plan": "Merged into #25 (Static guarantees push: refinements, contracts, IFC, budgets, bounds, replay soundness). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #25 plan owns this work, diagnostics, examples, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #25 canonical static-guarantees push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 21 -> 280 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation plan added while blocked on upstream card; no additional owner ballot identified yet."
@@ -3908,7 +4148,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "c1ziyfoo",
@@ -4251,16 +4491,25 @@
     {
       "id": "c29iz43a",
       "num": 117,
-      "title": "General database/sql driver interface (parameterized-only)",
-      "body": "Ideas.md: a general database/sql-style interface, parameterized queries only. SQLite/db work exists (c50/core.db); generic driver interface not found. Partial. Bundle-risk: interface, parameter policy, drivers separable.",
+      "title": "Core library breadth push: DB drivers, YAML, Unicode text, compression, linalg",
+      "body": "Canonical Epoch 3 Core library breadth push. Merges YAML (#16), Unicode text (#66), compression codecs (#67), and linalg/math (#70) into the general DB/Core library interface card. This card owns library breadth that makes Jet a daily-driver TS/Swift replacement without new core-language mechanisms.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
-      "plan": "db-driver-interface",
+      "plan": "Canonical Core library breadth plan. Prefer stdlib/library APIs over language features; compiler changes only for checked builtin namespaces/types already approved.\n\nBuild order:\n1. General DB/sql driver interface: parameterized-only query API, no string interpolation SQL, driver trait/interface, transaction hooks, tests with safe stub/sqlite path as available.\n2. Data formats: finish YAML 1.2 advanced tags/features under core.encoding.yaml; keep JSON/TOML/CSV behavior stable.\n3. Unicode text: opt-in core.text.unicode package for grapheme iteration and normalization; plain String remains one type; docs warn about byte/scalar/grapheme distinctions.\n4. Compression codecs: gzip/zstd/brotli under core.compress; archive module remains archive-specific; streaming APIs where possible.\n5. Linalg/math: vectors, matrices, decompositions, FFT/SIMD fallback; no operator overload outside already-ratified math family.\n\nAcceptance: one example per module with expected output; golden tests; API docs/reference updates; misuse diagnostics where API is safety-critical (SQL parameters, invalid Unicode form, malformed compressed stream); pay-for-what-you-call codegen remains R10.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged cards #16, #66, #67, #70 into this canonical Epoch 3 push. Plan refreshed for single-agent handoff."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 70 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Plan db-driver-interface recorded and D-DBDRIVER1=A added to syntax decisions. Advanced to ready."
@@ -4279,7 +4528,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-06-30",
+      "workOrder": 70
     },
     {
       "id": "c2aiz6vr",
@@ -4331,11 +4581,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "Explicit allocation boundary plan: (1) audit Core APIs that allocate across caller boundaries; (2) add buffer/allocator-taking variants where fixed-memory callers need control; (3) use existing arena/allocator model, no new syntax; (4) add lint for hidden allocation inside `#NoAlloc`/embedded layer contexts once layer inference lands; (5) examples for caller-supplied buffers; (6) docs/rubric updates.",
+      "plan": "Merged into #1 (Memory/allocation controls push: arenas, ref fields, uninit, buffers, opt-in GC). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #1 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #1 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 27 -> 150 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -4354,8 +4613,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
-      "workOrder": 27
+      "updated": "2026-06-30",
+      "workOrder": 150
     },
     {
       "id": "c2ciz9y9",
@@ -4365,14 +4624,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "workOrder": 15,
-      "plan": "D-TYPEDSTYLE1=A implementation plan: after reactive UI/component model lands, define `core.ui.Style` typed property builders using existing unit/color types; add sema-known property tables only if the library API cannot express property/value constraints; reject unknown properties and unit mismatches through normal type errors; add examples for padding/font/color and tests for invalid property/unit use. No new syntax ballot needed unless implementation proves property names require compiler-known magic.",
-      "blockedBy": [
-        "c2qj06uq"
-      ],
+      "workOrder": 110,
+      "plan": "Merged into #134 (Reactive UI stack push: signals, renderer, styles, kit, motion, a11y, native backends). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #134 plan owns this work, examples, diagnostics, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #134 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 15 -> 110 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Sequenced behind reactive UI stack/component model (#134); plan complete, no standalone owner gate."
@@ -4395,7 +4661,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "c2dizcmj",
@@ -4405,16 +4671,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
-      "workOrder": 13,
-      "plan": "D-A11Y1=A: a11y by default in component kit. GATED on D-REACTCORE1 and D-RENDERTGT2 — cannot build until the component model and backend trait are defined. Once unblocked: (1) Every built-in component ships with correct ARIA role, focus management, keyboard nav by default; (2) @no_a11y(reason: Str) opt-out (mandatory justification string); (3) a11y lints = warnings in dev, errors in release builds; (4) raise D-A11Y2 ballot for ARIA role mapping (which Jet component maps to which ARIA role). Raise D-A11Y2 when D-REACTCORE1 is decided.",
-      "blockedBy": [
-        "c2qj06uq",
-        "c2pj04xf",
-        "c2oizyqs"
-      ],
+      "workOrder": 120,
+      "plan": "Merged into #134 (Reactive UI stack push: signals, renderer, styles, kit, motion, a11y, native backends). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #134 plan owns this work, examples, diagnostics, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #134 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 13 -> 120 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-29",
           "text": "D-A11Y2 reopened; owner question answer remains, owner choice still required."
@@ -4453,7 +4724,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-29"
+      "updated": "2026-06-30"
     },
     {
       "id": "c2eizebh",
@@ -4463,14 +4734,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
-      "workOrder": 14,
-      "plan": "D-NATIVEUI1=A + D-NATIVEUI2=B: build AppKit (macOS), Win32/WinUI (Windows), GTK (Linux) native UI wrappers simultaneously. STILL BLOCKED on D-RENDERTGT2 (backend trait API ballot, open) — cannot implement until the Backend trait is defined. Once D-RENDERTGT2 is decided: (1) Define core.ui.Backend trait implementation for each platform in separate modules (core.ui.native.macos, .windows, .linux); (2) Use existing C FFI bridge pattern (emit bridge template text, never add to jet Cargo.toml); (3) Phase 1 scope: Window, Button, Label, TextField, VStack/HStack-equiv on all three; (4) CI: Linux headless via GTK+Xvfb; macOS via GitHub Actions mac runner; Windows via Actions win runner; (5) Examples + goldens per platform. Phase 2 (later): own renderer.",
-      "blockedBy": [
-        "c2pj04xf"
-      ],
+      "workOrder": 130,
+      "plan": "Merged into #134 (Reactive UI stack push: signals, renderer, styles, kit, motion, a11y, native backends). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #134 plan owns this work, examples, diagnostics, and tests.",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #134 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 14 -> 130 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Planning vetted; implementation blocked on D-RENDERTGT2 backend trait API."
@@ -4497,7 +4775,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "c2fizfx3",
@@ -4507,12 +4785,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P0",
       "workOrder": 12,
       "plan": "web-backend-wasm",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified and closed: `TMPDIR=/tmp nix develop -c cargo test` passed, including web_build and web_partition JS/WASM backend coverage."
+        },
         {
           "at": "2026-06-30",
           "text": "P0 re-verified with dev suite green (24/24) after JIT spawn runtime fix; web_build/web_partition/ui/cli pass."
@@ -4588,15 +4871,19 @@
       "body": "Ideas.md: call existing JS/npm and Swift ecosystems from day one. Only C/Rust FFI and package plans exist. New. Bundle-risk: JS/npm vs Swift are separate interop tracks.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e5",
       "phase": "planning",
       "priority": "P0",
-      "workOrder": 17,
+      "workOrder": 140,
       "plan": "D-JSWIFTFFI1=A: JS/npm first (ships with D-WEBBACKEND1 as import npm:\"pkg\"); Swift via C-ABI deferred until D-NATIVEUI1 ships. GATED on D-WEBBACKEND1 implementation and D-WASM1 (partition model). JS interop plan: (1)  syntax in web target files; (2) Codegen emits an npm package.json for the project and wires the import; (3) Type stubs for common npm packages (hand-authored, similar to @types/); (4) raise D-NPMTYPE1 for how npm type stubs are authored and distributed. Swift interop: deferred to D-NATIVEUI1 completion (uses C-ABI bridge via existing C FFI pattern). Raise D-NPMTYPE1 when D-WASM1 is decided.",
       "blockedBy": [
         "c2fizfx3"
       ],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 17 -> 140 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-29",
           "text": "Priority raised to P0 per owner request to work through ratified/high-signal decisions now."
@@ -4627,7 +4914,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-29"
+      "updated": "2026-06-30"
     },
     {
       "id": "c2hizkhl",
@@ -4639,10 +4926,19 @@
       "epoch": "e3",
       "phase": "building",
       "priority": "P1",
-      "workOrder": 5,
+      "workOrder": 10,
       "plan": "jit-cranelift — M4 functional parity with AOT: (1) wire `dev_iteration` through CraneliftBackend by default (D-JIT2; done 2026-06-30); (2) expand CLIF lowering + host runtime for tasks/channels/spawn (scheduler), then structs/enums/collections/Core per `tir_covers`; (3) align `jit_covers` gate with `tir_covers` (try-compile, never silent interpreter fallback for AOT-covered programs); (4) three-way differential battery on full `examples/features/*.jet` set; (5) `jet dev` on `160_scheduler_spawn.jet` and task programs without E2201. Exit: byte-identical stdout vs AOT for every tir-covered example, or named tested gap only.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 5 -> 10 for Epoch 3 dependency grouping."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Advanced within building: JIT M4 spawn/tasks path verified (`tests/dev` 24/24 and full cargo test green). Still building until Cranelift reaches full `tir_covers` parity; no close yet."
+        },
         {
           "at": "2026-06-30",
           "text": "M4 tasks/channels: jit_covers HandleMethod/OrFallback before value-type guard; populate_cx_from_bundle for core_imports; scheduler host shims (channel/sender/spawn0–4/join/drain); spawn lambdas collected in TIR lower; worker threads get ACTIVE_RUNTIME in spawn shims. 32_tasks + 160_scheduler_spawn jit-covered; three-way battery + task_program_runs_via_jit + scheduler_spawn_runs_via_jit green. tir_covers parity still open (structs/collections/Core)."
@@ -4678,17 +4974,26 @@
     {
       "id": "c2iizmyx",
       "num": 126,
-      "title": "Async/await + Go-scale networking runtime (reopen task-only model)",
-      "body": "Ideas.md: a high-concurrency async runtime rather than only blocking tasks. Planned/Reopen via Epoch 3 async-networking.md; the current shipped model teaches against async/await and uses tasks/channels. Bundle-risk: coroutines, async syntax, runtime, Go-scale networking are separate. (Epoch 3 exit criterion: @async runtime, 100k+ connections.)",
+      "title": "Concurrency runtime push: Go-scale M:N tasks + structured combinators",
+      "body": "Canonical Epoch 3 concurrency push. Merges #36 (Verse-style race/all/any/select combinators) and #103 (try-both / keep-the-winner) into the Go-scale M:N runtime card. Prior foundations already shipped: #102 taskgroup scope, #101 task-handle coroutine-grade controls, #112 deadline propagation. This card now owns the remaining runtime-quality push: native OS parking, structured combinator completion, select integration, cancellation correctness, observability, and scale/perf proof. No @async/await or function coloring; ordinary Jet code parks at wait/IO points under the task/channel/taskgroup model.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "phase": "building",
       "priority": "P1",
-      "workOrder": 8,
-      "plan": "D-ASYNCRT1=A: M:N green-thread scheduler under the existing task+channel model. No new user syntax — task { } blocks become green-thread yields; IO calls park the task and resume on readiness. Implementation plan: (1) Add M:N scheduler crate to jet-driver: work-stealing thread pool (N OS threads), green task queue per thread, task-steal-when-idle; (2) Park on IO: integrate io_uring (Linux), kqueue (macOS), IOCP (Windows) via platform-specific glue — syscall-triggered park/wake, no busy-wait; (3) task {} desugars to scheduler.spawn(|| { ... }); (4) Channels (already exist) get wake-on-send for parked receivers; (5) Tests: 100k concurrent echo tasks, benchmark vs sequential; (6) No new user syntax; no function coloring. Related: D-NURSERY1 (card #102) adds the structured scope on top of the scheduler. D-COROUTINE1 (card #101) is partially answered by this: coroutines are the internal substrate, not user primitives.",
+      "workOrder": 20,
+      "plan": "Canonical concurrency implementation plan (D-ASYNCRT1=A, D-MNIO1=A, D-CONCCOMB1=A, D-RACEWIN1=A, D-CONCSELECT1=A). Build one model only: task/channel/taskgroup. No @async/await, no user coroutine primitive, no second race/select mechanism.\n\nAlready shipped foundations to preserve:\n- #102: taskgroup g { ... }, g.task { ... }, wait/join, scope-exit ownership, existing g.all/g.race/g.any vertical slice.\n- #101: task handles expose coroutine-grade controls (pause/resume/cancel/trace); coroutine substrate stays internal.\n- #112: #Context(deadline:) flows through taskgroups and wait points; E3003 owns deadline diagnostics.\n- #126 M1/M2: current scheduler vertical slice, channels/timers/yield hook, 160_scheduler_spawn.\n\nImplementation order for dumb agents:\n1. Inventory current behavior first. Read docs/spec/philosophy.md, syntax-decisions.md entries for D-ASYNCRT1/D-MNIO1/D-NURSERY1/D-TASKSCOPE1/D-CONCCOMB1/D-RACEWIN1/D-CONCSELECT1/D-DEADLINE1/D-COROUTINE1, docs/plans/epoch-3/concurrency-vision.md, Source/Prelude/Scheduler.rs, Source/Interpreter.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, task/channel sema/codegen, and tests for examples 131, 157, 158, 160.\n2. Write missing acceptance tests before code. Add/extend examples/features concurrency examples plus CLI/golden tests for: 100k idle parked tasks or smallest CI-safe equivalent with a scale benchmark guard; channel receive wakes one parked task without busy-wait; taskgroup scope cancels losing race tasks; g.all fail-fast cancels siblings; g.race returns first success and cancels losers; g.any returns first completion including errors; if g.select() arms deregister losers; deadline firing wakes parked I/O/channel/task waits with Jet-owned E3003; detached tasks require explicit expert policy/name.\n3. Replace cooperative-only scheduler gaps with real parker abstraction. Define internal runtime traits, not user syntax: Scheduler, Parker, TimerWheel, IoParker. Start with portable readiness fallback for tests; implement D-MNIO1 native backends behind cfg modules (Linux epoll/io_uring path, macOS/BSD kqueue, Windows IOCP). No external runtime dependency unless owner approves a new dep card.\n4. Route every blocking-looking stdlib wait through the parker. Channel recv/send, timers/sleep, task join/wait, TCP accept/read/write, HTTP client/server waits must park Jet tasks, not OS threads. Real OS-blocking fallback must run on an explicit blocking pool and be observable; never silently block scheduler workers.\n5. Finish structured combinators in taskgroup only. g.all/g.race/g.any/select are methods or scoped operations on the taskgroup; they create no detached work and return/propagate through one cancellation model. Implement D-RACEWIN1 inside g.race; #103 is merged here. Implement D-CONCCOMB1 here; #36 is merged here.\n6. Implement D-CONCSELECT1 exactly as ratified: if-fused select over g.select() arms. Parser/sema/codegen/tests must reuse match/if-arm typing where possible. Select must register arms under taskgroup ownership, wake exactly one winner, deregister losers, and compose with deadlines/cancellation.\n7. Add observability and misuse diagnostics. Runtime metrics: runnable/parked task counts, poller wake count, worker utilization, queue depth, cancelled losers. Diagnostics/lints: forgotten task handle wait, swallowed cancellation, deadline ignored, detached task without policy/name, real blocking call on scheduler worker.\n8. Prove parity and scale. cargo test green; examples 131/157/158/160 still pass; add deterministic scheduler tests with fake clock; add stress tests gated for CI budget; add a benchmark/report target that demonstrates 100k parked connections/tasks when run locally. rustc errors remain ICE-only; all user errors are sema/driver diagnostics.\n\nExit criteria:\n- One coherent public model in docs/spec/spec.md and examples: task/channel/taskgroup + scoped combinators + deadline context.\n- No @async/await surface, no function coloring, no separate user coroutine API.\n- Native parker path exists per platform or has named cfg-tested fallback with honest diagnostic/metric.\n- race/all/any/select cannot leak losing tasks past taskgroup scope.\n- CI-safe tests prove cancellation/deadline/wake correctness; local stress target proves 100k parked tasks/connections target.\n- docs/plans/epoch-3/async-networking.md and concurrency-vision.md match implementation.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged #36 and #103 into this canonical concurrency push. Plan now owns scheduler, native parker, scoped combinators, select, deadlines/cancellation, observability, and scale exit criteria."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 8 -> 20 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-30",
           "text": "M1+M2 vertical slice: Scheduler.rs work-stealing pool, park/wake channels+timers+IO poll hook, deadline-aware yield, example 160_scheduler_spawn (1000 tasks), corelib::scheduler_spawn_1000_tasks green. D-MNIO1 native epoll/io_uring backends remain for 100k-scale exit."
@@ -4724,11 +5029,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-VISDEFAULT1=C + D-VISDEFAULT2=A implementation plan: (1) register `#PubFile` marker and `priv` exception keyword with decision IDs; (2) parser accepts a single file-scope marker before item declarations and `priv` before item visibility; (3) sema flips default export visibility only for that file and rejects conflicting `pub`/`priv` forms; (4) module/import visibility checks honor the flipped default; (5) teaching diagnostics for `private`/section-label variants; (6) docs/spec/syntax-decisions.md/spec.md and ui/golden coverage.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified and closed: `TMPDIR=/tmp nix develop -c cargo test` passed; #PubFile/priv parser, sema, formatter, UI fixtures, and examples remain green."
+        },
         {
           "at": "2026-06-30",
           "text": "Verified: ui snapshots green, 166_pub_file.jet runs, jet-parser pub_file tests pass."
@@ -4993,20 +5303,29 @@
     {
       "id": "c2qj06uq",
       "num": 134,
-      "title": "Reactive UI stack (reactivity → view model → styles → kit → motion)",
-      "body": "Ideas.md: reactivity → view model → typed styles → headless/styled kit → motion/app kit. New/Reopen — depends on whether core reactivity is reconsidered. Bundle-risk: full-stack roadmap combines several layers.",
+      "title": "Reactive UI stack push: signals, renderer, styles, kit, motion, a11y, native backends",
+      "body": "Canonical Epoch 3 UI push. Merges motion (#135), typed styles (#120), accessibility (#121), native app backend (#122), and ownable component kit (#61) into the reactive UI stack. This card owns one layered UI product: core.reactive -> renderer seam -> typed styles -> component kit -> motion -> a11y gates -> native/web/TUI backends. Blocked only on renderer/backend API and signal API decisions already named here.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "phase": "planning",
       "priority": "P2",
-      "workOrder": 11,
-      "plan": "D-REACTUI1=A: layered reactive UI stack. GATE D-REACTCORE1=D now ratified (#Reactive scope marker). D-RENDERTGT1=A ratified (seam defined). STILL BLOCKED on D-RENDERTGT2 (Backend trait API, open) and D-SIGNAL1 (core.reactive surface, to be raised). Once those resolved: build in order — (1) core.reactive (signals/computed/effects, D-SIGNAL1); (2) View model layer on top of core.reactive; (3) core.styles (typed styles, D-TYPEDSTYLE1 deciding — now unblocked since D-REACTCORE1 resolved); (4) Headless + styled component kit; (5) core.motion (D-MOTION1 deciding — now unblocked since D-REACTCORE1+D-REACTUI1 resolved). Each layer gates the next.",
+      "workOrder": 90,
+      "plan": "Canonical UI stack implementation plan. Build as one vertical product, not scattered cards.\n\nGates to clear first: D-RENDERTGT2 Backend trait API and D-SIGNAL1 core.reactive API. Do not implement backend/component/style syntax before those are ratified.\n\nBuild order:\n1. Core reactive primitives: signals, computed values, effects, scheduler integration, deterministic fake-clock tests.\n2. Renderer seam: one Backend trait for DOM/TUI/native/null backends; diff/apply contract; event routing; lifecycle and cleanup.\n3. View model layer over core.reactive; examples compile to a null backend first.\n4. Typed styles: core.ui.Style property builders, units/colors, validation tables only where library types cannot express checks.\n5. Ownable component kit: jetpack copy-in-and-own distribution, no locked framework dependency, component source stays user-owned.\n6. Motion: animation as derived reactive state, springs/easing/keyframes, deterministic clock tests, no imperative frame mutation API.\n7. Accessibility by default: built-in roles/focus/keyboard labels, release-gated a11y diagnostics, examples for keyboard-only flow.\n8. Backends: web/DOM, TUI/null for tests, then native wrappers (AppKit, Win32/WinUI, GTK) behind the same Backend trait.\n\nAcceptance: examples for null backend, web hello, reactive TUI, typed styles, component kit, motion, and a11y; golden output or DOM snapshots where stable; UI diagnostics for invalid style/a11y/backend misuse; docs/spec/spec.md and epoch-3 UI docs match behavior. No card in this cluster should add a second rendering or state model.",
       "blockedBy": [
         "c2pj04xf",
         "c2oizyqs"
       ],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged cards #135, #120, #121, #122, #61 into this canonical Epoch 3 push. Plan refreshed for single-agent handoff."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 11 -> 90 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Planning vetted; implementation blocked on D-RENDERTGT2 backend trait API and D-SIGNAL1 core.reactive API."
@@ -5033,7 +5352,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "c2rj09ov",
@@ -5043,12 +5362,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "workOrder": 16,
-      "plan": "D-MOTION1=A implementation plan: (1) build motion values as derived reactive signals over time; (2) define easing/spring primitives in core.motion; (3) integrate with view renderer so animation invalidates exactly affected views; (4) no imperative frame mutation API; (5) tests with deterministic fake clock; (6) examples for transition/spring/keyframe.",
+      "workOrder": 100,
+      "plan": "Merged into #134 (Reactive UI stack push: signals, renderer, styles, kit, motion, a11y, native backends). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #134 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #134 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: 16 -> 100 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -5079,7 +5407,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28"
+      "updated": "2026-06-30"
     },
     {
       "id": "c2sj0bd9",
@@ -5424,13 +5752,22 @@
     },
     {
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "phase": "ready",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "done",
       "priority": "P2",
-      "plan": "D-REFSTRUCT1=B implementation plan: (1) replace current stored-ref surface with field marker `#Ref(Label) field: T`; (2) remove `use core.mem` gate per owner outcome; (3) parser/Syntax.rs marker registration; (4) sema labels owner relationships and rejects dangling/escaping stored views; (5) formatter migrates/prints marker form; (6) teaching diagnostic for old `ref[label]`; (7) examples/ui snapshots/docs.",
+      "plan": "Merged into #1 (Memory/allocation controls push: arenas, ref fields, uninit, buffers, opt-in GC). Closed as duplicate planning scope only; no independent implementation claimed. Canonical #1 plan owns this work, examples, diagnostics, and tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Merged into #1 canonical Epoch 3 push; closed duplicate planning card. No independent implementation claimed."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 80 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -5445,11 +5782,12 @@
         }
       ],
       "created": "2026-06-28T00:00:00.000Z",
-      "updated": "2026-06-28",
+      "updated": "2026-06-30",
       "id": "c3brefstruct",
       "num": 147,
       "title": "Ratify labeled `ref` field syntax and stored-reference access gates",
-      "body": "Follow-up from #100 / D-REFRELOOK1=E. `ref[label] field: T` is implemented and taught by diagnostics but lacks a syntax-decision/spec entry and tier-2 access-gate ruling. This card exists to close the I7/spec gap before more stored-reference work."
+      "body": "Follow-up from #100 / D-REFRELOOK1=E. `ref[label] field: T` is implemented and taught by diagnostics but lacks a syntax-decision/spec entry and tier-2 access-gate ruling. This card exists to close the I7/spec gap before more stored-reference work.",
+      "workOrder": 80
     },
     {
       "kind": "idea",
@@ -5460,6 +5798,10 @@
       "plan": "D-CFFI-SYNTAX-REOPEN=A implementation plan: (1) change C FFI marker spelling from `@extern module` to `#Extern module`; (2) update parser/Syntax.rs and formatter; (3) add teaching diagnostic for old `@extern`; (4) migrate examples/tests/docs; (5) ensure generated C FFI behavior unchanged; (6) ui snapshots and cffi tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 380 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -5478,7 +5820,8 @@
       "id": "c3dcffireopen",
       "num": 149,
       "title": "Reconsider C FFI syntax (`#Lang_C` idea)",
-      "body": "Tower Ideas binder: Reconsider FFI syntax -> maybe something like `#Lang_C ...?"
+      "body": "Tower Ideas binder: Reconsider FFI syntax -> maybe something like `#Lang_C ...?",
+      "workOrder": 380
     },
     {
       "kind": "idea",
@@ -5489,6 +5832,10 @@
       "plan": "D-LOOP-SURFACE-REOPEN=B implementation plan: (1) extend `loop` parser with semicolon counted header `loop init; cond; step {}`; (2) semicolons remain legal only in this header; (3) sema scopes init variable to loop and type-checks cond Bool/step statement; (4) codegen lowers to while-style loop; (5) formatter preserves compact header; (6) diagnostics for malformed header; (7) examples/tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Work order normalized: unset -> 390 for Epoch 3 dependency grouping."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -5507,7 +5854,8 @@
       "id": "c3eloopreopen",
       "num": 150,
       "title": "Reconsider loop surface (`for` + semicolon headers)",
-      "body": "Tower Ideas binder: Odin style ; argument separator in loops. Uses \"for\" for all loops"
+      "body": "Tower Ideas binder: Odin style ; argument separator in loops. Uses \"for\" for all loops",
+      "workOrder": 390
     },
     {
       "kind": "idea",
@@ -5546,7 +5894,7 @@
     {
       "kind": "idea",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P2",
       "plan": "D-DYNAMIC-TYPE1=B implementation plan: (1) add closed union type AST `A | B | C` in type position; (2) sema treats it as anonymous closed sum with no general `Any`; (3) construction/coercion rules require value fit one member unambiguously; (4) pattern matching over unions exhaustive by member type; (5) codegen emits private enum wrapper or optimized representation; (6) diagnostics for ambiguous member and invalid operations; (7) examples/ui/golden tests.",
@@ -5566,7 +5914,7 @@
         }
       ],
       "created": "2026-06-28T00:00:00.000Z",
-      "updated": "2026-06-28",
+      "updated": "2026-06-30",
       "id": "c3gdynamic",
       "num": 152,
       "title": "Union and dynamic value story (`Any` question)",
@@ -11177,9 +11525,34 @@
       ],
       "comparisons": [
         {
+          "lang": "TypeScript",
+          "note": "`any` is the default escape for JS interop and gradual migration; `unknown` is the safer closed form requiring narrowing before use.",
+          "code": "function handle(x: any) { return x.foo }  // no error\nfunction safe(x: unknown) { return (x as {foo: string}).foo }"
+        },
+        {
+          "lang": "Go",
+          "note": "Pre-generics, `interface{}`/`any` was the only way to write generic containers and JSON boundaries; post-generics it shrank but never disappeared at FFI/JSON edges.",
+          "code": "var m map[string]any\njson.Unmarshal(raw, &m)"
+        },
+        {
+          "lang": "Swift",
+          "note": "`Any`/`AnyObject` for heterogeneous collections and ObjC interop; app code is encouraged toward typed enums/protocols instead.",
+          "code": "let items: [Any] = [1, \"hi\", UIView()]\nlet n = items[0] as? Int"
+        },
+        {
+          "lang": "Rust",
+          "note": "No std `Any` top type for years; `dyn Trait` for open polymorphism, `enum`/`serde_json::Value` for closed/dynamic data. `Box<dyn Any>` exists but is niche (type-id downcasts).",
+          "code": "enum Value { Null, Bool(bool), Number(f64), String(String) }\n// or trait objects: Box<dyn Display>"
+        },
+        {
+          "lang": "Kotlin/Java",
+          "note": "`Any`/`Object` is the root of the class hierarchy — every reference type is implicitly an `Any`, which powers collections and reflection but erases static guarantees.",
+          "code": "val list: List<Any> = listOf(1, \"x\")\nval s = list[1] as String"
+        },
+        {
           "lang": "Jet current design",
-          "note": "Existing ratified decisions are the baseline; reopening needs a clear safety/readability win.",
-          "code": "see docs/spec/syntax-decisions.md"
+          "note": "Dynamic trees via `Data`/`DataTree`; closed sums via enums (+ ratified `A | B` unions); open polymorphism via traits/generics; absence via `T?`; interop stays explicit.",
+          "code": "let tree: Data = json.parse(raw)?\nenum Msg { Ping; Payload(Data) }\nfn f<T: Display>(x: T) { ... }"
         }
       ],
       "rec": "A",
@@ -11190,6 +11563,10 @@
         {
           "at": "2026-06-28",
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation, rec set to A."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Owner question q5lq42z answered: cross-language Any survey, benefits/detriment analysis, devil's advocate pass. Comparisons facet expanded."
         }
       ]
     },
@@ -13265,9 +13642,10 @@
       "by": "owner",
       "kind": "question",
       "text": "What do other languages use any for? What are the legitimate benefits? What specifically is a detriment? Play devil's advocate on your response before you send your reply to me",
-      "status": "open",
-      "answer": "",
-      "created": "2026-06-30T11:59:08.587Z"
+      "status": "answered",
+      "answer": "**What other languages use `Any`/dynamic for (six recurring jobs):**\n\n1. **Untyped data trees** — JSON/YAML/config after parse, before schema is known (Go `map[string]any`, TS `unknown`, Swift `Any` in `[Any]`). This is the most common legitimate use.\n2. **Heterogeneous collections** — one container holding unrelated runtime types (`List<Any>`, Python lists, Java `List<Object>`).\n3. **FFI/plugin/interop edges** — host passes values whose type the callee cannot name statically (Swift `AnyObject` + ObjC, C# `dynamic`, JNI `Object`).\n4. **Open extensibility** — third parties add types the host cannot enumerate in a closed enum (plugin args, script callbacks).\n5. **Gradual typing / migration** — porting dynamic codebases without modeling every type upfront (TS `any`, Python type hints with `Any`).\n6. **Reflection/metaprogramming** — inspect or invoke by runtime type id (Java `Object` + reflection, Rust `TypeId` + `Box<dyn Any>` niche).\n\nLess common in modern systems languages: generic algorithms (solved by monomorphization/traits), optional absence (solved by nullable/Option), closed alternatives (solved by enums/unions).\n\n**Legitimate benefits:**\n- One spellable type at boundaries where static enumeration is impossible or premature.\n- Faster prototyping — skip designing the enum until the shape stabilizes.\n- Uniform container APIs — one list/map type regardless of element type.\n- Interop friction reduction — foreign APIs often arrive untyped.\n- Migration bridge — lets teams port dynamic code incrementally.\n\n**Specific detriments (not vague \"less safe\"):**\n- **Errors move right** — typos and wrong operations become runtime panics/casts instead of compile errors.\n- **Refactoring breaks silently** — rename/find-references cannot track through `Any`; IDE autocomplete is useless on the value.\n- **Performance tax** — boxing, indirection, lost monomorphization/inlining, cache misses on tag checks.\n- **Downcast ceremony without safety gain** — you eventually write `as? Int` / `downcast<T>()` anyway; the type checker just stopped helping earlier.\n- **Second polymorphism path (I8)** — overlaps traits/generics for \"accept many types\" and overlaps `Data`/`enum` for \"hold one of several shapes.\"\n- **Beginner default trap** — if `Any` is easy to reach, it becomes the lazy fix for every type error.\n- **Security/compliance blind spots** — taint/provenance tracking (D-IFC1) is harder when values carry no static label.\n- **Documentation drift** — contracts live in comments/tests instead of signatures.\n\n**Devil's advocate (steel-manning general `Any`):**\n\n1. *\"DataTree isn't enough.\"* Correct for job #1 (trees) but not for job #2–4. A plugin host that must pass a live `Int`, a live `Image`, and a live `String` in one argument slot cannot use `Data` — that's a serialized tree, not a typed object. Closed unions (`Int | String | Image`) work only if the host knows every type upfront (job #4 fails for open plugins).\n2. *\"Every mature language keeps it somewhere.\"* Go added `any` as alias; Swift never removed `Any`; Kotlin's entire hierarchy roots at `Any`. Maybe that signals a real irreducible need, not laziness.\n3. *\"Expert gating (Option C) is zero beginner cost.\"* If `Any` lives only in `core.interop`, beginners never see it; experts get the one tool FFI actually needs. Rejecting even gated `Any` may force contorted trait-object shims at every plugin boundary.\n4. *\"Closed unions (your ratified B) don't replace Any.\"* `Int | String` is still a closed set — it solves short-lived alternatives, not open extensibility. You may need both B *and* a gated C for different jobs.\n5. *\"Teaching diagnostics (Option A) don't implement anything.\"* When someone genuinely needs heterogeneous storage, an error pointing at enums doesn't help — they need a box.\n6. *\"Migration story.\"* Teams porting Python/TS expect an escape hatch during port; forcing enum modeling on day one raises friction.\n\n**Why the devil's advocate still loses for Jet (general `Any` stays rejected):**\n\n- Jobs #1 and #5 are covered: `Data`/`DataTree` + typed `decode<T>` (D-ENC-DYN1, D-SERDE2) for trees; Jet is not targeting gradual typing of legacy dynamic codebases as a primary persona.\n- Job #2 is usually a design smell — if elements share behavior, use a trait bound; if they share shape, use a closed union or enum.\n- Job #3/#4 (open plugin/interop) is the one real gap — but that's Option C (expert-gated boundary `Any`), not general `Any` in application code. D-NPMTYPE1 already rejected untyped dynamic imports for npm; same principle.\n- Job #6 (reflection) is comptime/`Reflect` territory in Jet, not a runtime top type.\n- The ratified split is correct: **B** (`Int | Float | String`) for known short-lived alternatives; **no general Any** in the default surface; revisit **C** only if plugin-target (card #5) proves `Data` + traits cannot cover a concrete FFI case.\n\nBallot comparisons facet updated with TS/Go/Swift/Rust/Kotlin cross-language examples.",
+      "created": "2026-06-30T11:59:08.587Z",
+      "answeredAt": "2026-06-30"
     }
   ]
 }

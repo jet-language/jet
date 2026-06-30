@@ -10,6 +10,28 @@ Epoch 2 GA (E2-M17) is complete; development highlights are in `docs/spec/roadma
 
 ## Pillars
 
+## Canonical Active Pushes
+
+As of 2026-06-30, Tower groups related Epoch 3 work into these canonical parent
+cards. Do not reopen the merged child cards unless the owner explicitly asks for
+separate tracking again.
+
+| Tower | Push | Merged child scope |
+|---|---|---|
+| #125 | JIT tier-1a parity | Cranelift dev-loop JIT must converge toward `tir_covers` parity |
+| #126 | Concurrency runtime | M:N scheduler, native parkers, taskgroup combinators, select, deadlines, cancellation, observability |
+| #134 | Reactive UI stack | signals, renderer, typed styles, component kit, motion, a11y, web/TUI/native backends |
+| #1 | Memory/allocation controls | arenas, labeled `#Ref`, explicit buffers/allocators, `#Uninit`, opt-in GC |
+| #117 | Core library breadth | DB driver interface, YAML, Unicode text, compression, linalg |
+| #64 | Crypto/secrets | misuse-resistant envelopes, algorithm agility, TTL/rotting secrets |
+| #65 | Precise numerics | BigInt, Decimal, float-money lint |
+| #25 | Static guarantees | refinements, contracts, IFC, budgets, bounds proof, replay soundness |
+| #41 | Protocol/representation hooks | iterator/index/suffix hooks, Display/Debug, rollback hooks |
+
+Cards left separate are intentionally separate: syntax reopens (#149/#150),
+module/comptime/plugin surfaces (#91/#92/#94/#5), developer tooling (#84/#97),
+and JIT/debugger successors outside Epoch 3.
+
 | Doc | ID(s) | Summary |
 |---|---|---|
 | [`../sidequests/jit-cranelift.md`](../sidequests/jit-cranelift.md) | D-JITDEP1, D-JIT2 | Cranelift tier-1 JIT over the `JitBackend` seam; hot-swap dev loop |

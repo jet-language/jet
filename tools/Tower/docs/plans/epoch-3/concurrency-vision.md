@@ -1,6 +1,8 @@
 # Epoch 3 Concurrency Vision
 
-**Status:** reconciled 2026-06-28 after owner questions on c101/c102.
+**Status:** canonicalized 2026-06-30. Tower #126 is the single implementation
+push for Go-scale M:N runtime + scoped concurrency combinators; #36 and #103
+are merged into it.
 
 This is the cohesive end-state if the recommended open ballots are ratified.
 Exact surface spelling remains owner-controlled; examples show the intended shape,
@@ -29,16 +31,16 @@ Jet's concurrency model is:
 3. **M:N green threads are the runtime model** (D-ASYNCRT1=A). A Jet task parks
    on I/O, timers, channel waits, cancellation, or deadlines without pinning an
    OS thread.
-4. **Scoped task groups are the default lifetime model** (D-NURSERY1 open, rec
-   A; spelling in D-TASKSCOPE1). A lexical scope owns child tasks. Scope exit
+4. **Scoped task groups are the default lifetime model** (D-NURSERY1/D-TASKSCOPE1
+   ratified and shipped as `taskgroup`). A lexical scope owns child tasks. Scope exit
    joins, cancels, and reports errors.
 5. **Race/all/any are task-scope combinators** (D-CONCCOMB1, D-RACEWIN1=A). They
-   do not create a second spawn mechanism.
-6. **Deadlines flow through task context** (D-DEADLINE1 open, rec A). A parent
+   are implemented under Tower #126, not as separate cards or a second spawn mechanism.
+6. **Deadlines flow through task context** (D-DEADLINE1=A, shipped). A parent
    sets the budget once; I/O and wait points observe it automatically.
-7. **Coroutines stay internal by default** (D-COROUTINE1 open, rec B). The
+7. **Coroutines stay internal by default** (D-COROUTINE1=A). The
    scheduler may be coroutine-based, but users do not learn a second primitive.
-8. **OS readiness is runtime plumbing** (D-MNIO1 open, rec A). Linux
+8. **OS readiness is runtime plumbing** (D-MNIO1=A). Linux
    io_uring/epoll, kqueue, and IOCP sit below the same user code.
 
 ## Beginner Surface
@@ -119,7 +121,7 @@ The combinator set should cover the common cases:
 g.all(tasks)?       // wait for all; fail fast and cancel siblings on error
 g.race(tasks)?      // first success wins; cancel losers
 g.any(tasks)?       // first completed result wins; success or error is visible
-g.select(cases)?    // first channel/timer/I/O event wins; D-CONCSELECT1 open
+if g.select() { ... } // first channel/timer/I/O event wins; D-CONCSELECT1=A
 ```
 
 The important rule is I8: all of these compose over one spawn/lifetime model.

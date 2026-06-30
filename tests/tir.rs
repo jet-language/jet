@@ -555,7 +555,7 @@ fn map_literal_index_insert_and_iteration() {
     }
     let src = "\
 fn main() {
-    counts: [String, Int] = [:]
+    counts: [String, Int] := [:]
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
@@ -1076,7 +1076,7 @@ fn map_builtin_methods() {
     }
     let src = "\
 fn main() {
-    m: [String, Int] = [:]
+    m: [String, Int] := [:]
     m.insert(\"banana\", 3)
     m.insert(\"apple\", 5)
     print(m.len())
@@ -1114,7 +1114,7 @@ fn drop_key(m: [String, Int]) -> Int {
 }
 fn main() {
     print(drop_first([10, 20, 30]))
-    counts: [String, Int] = [:]
+    counts: [String, Int] := [:]
     counts[\"a\"] = 1
     counts[\"b\"] = 2
     print(drop_key(counts))
@@ -2460,7 +2460,7 @@ fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
 fn main() {
 p: Pair<Int> #= make_pair(1, 2)
     print(p.first)
-    st: Stack<Int> = empty_stack()
+    st: Stack<Int> := empty_stack()
     st = push(st, 42)
     print(st.items[0])
 }
@@ -2769,7 +2769,7 @@ s1: Sender<Int> #= ch.sender()
     })
     t1.join()
     t2.join()
-    results: [Int] = []
+    results: [Int] := []
     results.push(ch.receive() ?? panic(\"channel closed\"))
     results.push(ch.receive() ?? panic(\"channel closed\"))
     results.sort()
@@ -2835,7 +2835,7 @@ fn describe(x: Int?) -> String {
     return \"?\"
 }
 fn first_even(xs: [Int]) -> Int {
-    out: [Int] = []
+    out: [Int] := []
     i := 0
     loop i < xs.len() {
         if xs.get(i) == value(v) {
@@ -2846,7 +2846,7 @@ fn first_even(xs: [Int]) -> Int {
     return out.len()
 }
 fn main() {
-    nothing: Int? = null
+    nothing: Int? #= null
     print(describe(value(7)))
     print(describe(nothing))
     print(first_even([1, 2, 3]))
@@ -3032,7 +3032,7 @@ fn main() {
     if data == Object(entries) {
         print(entries.len())
     }
-    obj: [String, Json] = [:]
+    obj: [String, Json] := [:]
     obj[\"name\"] = Json.Text(\"jet\")
     obj[\"ok\"] = Json.Bool(true)
     obj[\"none\"] = Json.Null
@@ -3551,7 +3551,7 @@ fn qualified_io_input_or_return() {
     let src = "\
 use core.io as io
 fn collect() -> [String] {
-    out: [String] = []
+    out: [String] := []
     loop true {
         line #= io.input(\"> \") ?? return out.clone()
         if line == \"\" {
@@ -3713,8 +3713,8 @@ struct Ledger {
     }
 }
 fn main() {
-    data: [Int] = [1, 2, 3]
-    ledger: Ledger = Ledger.{ rows: [] }
+    data: [Int] #= [1, 2, 3]
+    ledger: Ledger := Ledger.{ rows: [] }
     ledger.put_back(data)
     print(ledger.rows[0])
     print(ledger.rows[1])
@@ -3745,7 +3745,7 @@ struct Counter {
     }
 }
 fn main() {
-    c: Counter = Counter.{ n: 0 }
+    c: Counter := Counter.{ n: 0 }
     c.bump()
     c.add(10)
     print(c.n)
@@ -3772,7 +3772,7 @@ struct Counter {
     }
 }
 fn main() {
-    c: Counter = Counter.{ n: 9 }
+    c: Counter := Counter.{ n: 9 }
     c.reset()
     print(c.n)
 }
@@ -3803,7 +3803,7 @@ impl Counter.Bumpable {
     }
 }
 fn main() {
-    c: Counter = Counter.{ n: 0 }
+    c: Counter := Counter.{ n: 0 }
     c.bump()
     c.bump()
     print(c.n)
@@ -4546,7 +4546,7 @@ fn total(ps: [P]) -> Float {
     return s
 }
 fn main() {
-    ps: [P] = [P.{ x: 0.0, mass: 1.0 }, P.{ x: 1.0, mass: 2.0 }]
+    ps: [P] := [P.{ x: 0.0, mass: 1.0 }, P.{ x: 1.0, mass: 2.0 }]
     ps.push(P.{ x: 2.0, mass: 3.0 })
     print(ps.len())
     print(ps[2].x)
@@ -4602,8 +4602,8 @@ struct Pt { a: Int, b: Int }
 #[Codable]
 struct PlainPt { a: Int, b: Int }
 fn main() {
-    cs: [Pt] = [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]
-    ps: [PlainPt] = [PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 }]
+    cs: [Pt] #= [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]
+    ps: [PlainPt] #= [PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 }]
     print(json.to_string(cs) == json.to_string(ps))
     print(json.to_string(cs))
 }
@@ -4681,7 +4681,7 @@ fn user_type_shadows_builtin_math_name() {
     let src = "\
 struct Vec3 { x: Int, y: Int }
 fn main() {
-    v: Vec3 = Vec3.{ x: 3, y: 4 }
+    v: Vec3 #= Vec3.{ x: 3, y: 4 }
     print(v.x)
     print(v.y)
 }

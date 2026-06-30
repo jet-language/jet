@@ -1,6 +1,9 @@
 # Epoch 3 pillar — async networking & Go-scale concurrency
 
-**Status:** owner-ratified direction (2026-06-16, D-NET2). **Epoch 3 pillar.**
+**Status:** canonical implementation push is Tower #126 (updated 2026-06-30).
+It now owns the Go-scale M:N runtime, native parkers, scoped combinators, select,
+deadlines/cancellation integration, observability, and scale proof. Former
+standalone cards #36 and #103 are merged into #126.
 
 ## Goal
 
@@ -28,24 +31,26 @@ same user model.
 ## Likely building blocks
 
 - M:N task scheduler under `task { }` and channels (D-ASYNCRT1=A).
-- Platform readiness backend for task parking (D-MNIO1 open).
-- Structured-concurrency task scope (D-NURSERY1 open; spelling in D-TASKSCOPE1).
-- Task-scope combinators: all/race/any (D-CONCCOMB1, D-RACEWIN1=A).
-- First-ready event selection for channels/timers/I/O (D-CONCSELECT1 open).
-- Deadline propagation through task context (D-DEADLINE1 open).
+- Platform readiness backend for task parking (D-MNIO1=A).
+- Structured-concurrency task scope (`taskgroup`, D-NURSERY1/D-TASKSCOPE1 shipped).
+- Task-scope combinators: all/race/any (D-CONCCOMB1, D-RACEWIN1=A; built under #126).
+- First-ready event selection for channels/timers/I/O (D-CONCSELECT1=A, if-fused select).
+- Deadline propagation through task context (D-DEADLINE1=A, shipped foundation).
 - Expert-visible runtime controls: detached-task audit, scheduler/poller metrics,
   task names, worker/poller tuning, and fairness policy.
 - Integration with `Fallible` + `?` (no callback-colored types in user surface).
 - TLS and DB drivers remain FFI-bridged; async wraps blocking bridges first,
   native async I/O later.
 
-## Open design questions
+## Canonical build notes
 
-- Exact scoped task-group syntax/API (D-TASKSCOPE1).
-- Whether user-facing coroutines exist or remain internal substrate (D-COROUTINE1).
-- Deadline propagation carrier (D-DEADLINE1).
-- OS readiness backend (D-MNIO1).
-- Whether structured `select` joins the combinator set (D-CONCSELECT1).
+- Do not split `race`/`all`/`any`, try-both/keep-winner, select, or cancellation
+  into separate implementation cards. They are one scoped-concurrency push under #126.
+- Do not add `@async`/`await`, function coloring, or a user coroutine primitive.
+  D-ASYNCRT1 and D-COROUTINE1 keep ordinary code + task handles as the one path.
+- Build order: native parker abstraction, stdlib wait-point routing, scoped
+  combinator correctness, if-fused select, observability/misuse diagnostics, then
+  scale/perf proof.
 
 ## Non-goals
 
