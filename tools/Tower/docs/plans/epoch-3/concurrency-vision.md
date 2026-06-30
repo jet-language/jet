@@ -121,7 +121,7 @@ The combinator set should cover the common cases:
 g.all(tasks)?       // wait for all; fail fast and cancel siblings on error
 g.race(tasks)?      // first success wins; cancel losers
 g.any(tasks)?       // first completed result wins; success or error is visible
-if g.select() { ... } // first channel/timer/I/O event wins; D-CONCSELECT1=A
+g.select().recv(ch).after(ms: …).wait()? // first channel/timer/I/O event; D-CONCSELECT1=A
 ```
 
 The important rule is I8: all of these compose over one spawn/lifetime model.

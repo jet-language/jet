@@ -13,11 +13,12 @@ use crate::Lexer::{describe, StrTokPart, TokKind, Token};
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, BindName, BindPattern, Binding, Call, CallArg, CodeModule, ConstAttr,
-    ConstDef, Contribution, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func, IfStmt,
-    ImplDef, Item, LValue, Lambda, LambdaBody, LambdaMeta, LambdaParam, Marker, ModuleDecl,
-    Namespace, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, TagDef,
-    TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp, Variant,
-    VariantField, VariantPayload,
+    ConstDef, Contribution, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func,
+    GenericModuleDef, GenericModuleParam, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
+    LambdaMeta, LambdaParam, Marker, ModuleAliasDef, ModuleArg, ModuleDecl, Namespace, OrFallback,
+    Param, Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, TagDef, TraitDef,
+    TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp, Variant, VariantField,
+    VariantPayload,
 };
 
 mod Expressions;

@@ -393,7 +393,26 @@ impl JetShow for JetReservoirSampler {
     fn jet_show(&self) -> String { format!("ReservoirSampler(n={})", self.0.lock().unwrap().count) }
 }
 
+thread_local! {
+    static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn jet_scheduler_task_panic_enter() {
+    JET_IN_SCHEDULER_TASK.with(|c| c.set(true));
+}
+
+pub fn jet_scheduler_task_panic_leave() {
+    JET_IN_SCHEDULER_TASK.with(|c| c.set(false));
+}
+
+fn jet_scheduler_in_task() -> bool {
+    JET_IN_SCHEDULER_TASK.with(|c| c.get())
+}
+
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+    if jet_scheduler_in_task() {
+        panic!("{} (at {}:{})", msg, file, line);
+    }
     eprintln!("panic: {}", msg);
     eprintln!("  --> {}:{}", file, line);
     std::process::exit(70);
@@ -479,6 +498,9 @@ fn jet_panic_rich(
     eprintln!("   {}| {}{}", pad, " ".repeat(col_offset), caret);
     if !locals.is_empty() {
         eprintln!("locals: {}", locals);
+    }
+    if jet_scheduler_in_task() {
+        panic!("{} (at {}:{})", msg, file, line);
     }
     std::process::exit(70);
 }

@@ -852,7 +852,12 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             ));
             for (i, (cond, body)) in arms.iter().enumerate() {
                 let kw = if i == 0 { "if" } else { "} else if" };
-                out.push_str(&format!("{}{} {} {{\n", inner_pad, kw, cond));
+                out.push_str(&format!(
+                    "{}{} {} {{\n",
+                    inner_pad,
+                    kw,
+                    emit_tir_expr(cond, cx)
+                ));
                 emit_tir_stmts(body, cx, out, indent + 2);
             }
             // The `else`/fallthrough, byte-for-byte `emit_mixed_switch`: with arms and no
@@ -2142,9 +2147,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
         TExprKind::TaskGroupAll { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!(
-                "{{ let mut __jet_all = Vec::new(); for __jet_h in {list} {{ __jet_all.push(__jet_h.join()); }} __jet_all }}"
-            )
+            format!("{}jet_std::jet_task_all({list})", cx.root_prefix)
         }
         TExprKind::TaskGroupRace { tasks } => {
             let list = emit_tir_expr(tasks, cx);
@@ -2153,6 +2156,41 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::TaskGroupAny { tasks } => {
             let list = emit_tir_expr(tasks, cx);
             format!("{}jet_std::jet_task_any({list})", cx.root_prefix)
+        }
+        TExprKind::SelectStart => {
+            format!("{}jet_std::JetSelectBuilder::start()", cx.root_prefix)
+        }
+        TExprKind::SelectRecv { builder, channel } => {
+            let b = emit_tir_expr(builder, cx);
+            let ch = emit_tir_expr(channel, cx);
+            format!("{b}.recv({ch})")
+        }
+        TExprKind::SelectAfter { builder, millis } => {
+            let b = emit_tir_expr(builder, cx);
+            let ms = emit_tir_expr(millis, cx);
+            format!("{b}.after({ms})")
+        }
+        TExprKind::SelectRead { builder, stream } => {
+            let b = emit_tir_expr(builder, cx);
+            let s = emit_tir_expr(stream, cx);
+            format!("{b}.read({s})")
+        }
+        TExprKind::SelectWait { builder } => {
+            let (recvs, afters) = collect_select_arms(builder, cx);
+            let recv_list = if recvs.is_empty() {
+                "&[]".to_string()
+            } else {
+                format!("&[&{}]", recvs.join(", &"))
+            };
+            let after_list = if afters.is_empty() {
+                "&[]".to_string()
+            } else {
+                format!("[{}]", afters.join(", "))
+            };
+            format!(
+                "{}jet_std::jet_select_wait({}, {})",
+                cx.root_prefix, recv_list, after_list
+            )
         }
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
         // already-rendered `Box::new(move |…| …) as <fn-type>` wrapper; a call through
@@ -2921,6 +2959,31 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
     }
     body.push_str("_jet_s }");
     body
+}
+
+/// Walk a lowered select-builder chain and collect channel/timer arm expressions.
+fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec<String>) {
+    let mut recvs = Vec::new();
+    let mut afters = Vec::new();
+    let mut cur = builder;
+    loop {
+        match &cur.kind {
+            TExprKind::SelectStart => break,
+            TExprKind::SelectRecv { builder: inner, channel } => {
+                recvs.push(emit_tir_expr(channel, cx));
+                cur = inner;
+            }
+            TExprKind::SelectAfter { builder: inner, millis } => {
+                afters.push(emit_tir_expr(millis, cx));
+                cur = inner;
+            }
+            TExprKind::SelectRead { builder: inner, .. } => {
+                cur = inner;
+            }
+            _ => break,
+        }
+    }
+    (recvs, afters)
 }
 
 /// D-SWIZZLE1: render a read swizzle as lane extract(s) and optional `VecN` ctor.

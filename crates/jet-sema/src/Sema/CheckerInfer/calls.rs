@@ -1004,9 +1004,18 @@ impl<'a> Checker<'a> {
         }
         self.borrow_ctx = true;
         let recv_ty = self.infer(receiver)?;
-        if let Type::Named(ref n) = &recv_ty {
+        if let Type::Named(ref n) | Type::Apply { name: ref n, .. } = &recv_ty {
             if n == Syntax::TYPE_TASKGROUP {
                 return self.infer_taskgroup_method(
+                    receiver,
+                    method,
+                    span,
+                    args,
+                    recv_type_out,
+                );
+            }
+            if n == Syntax::TYPE_SELECT_BUILDER {
+                return self.infer_select_method(
                     receiver,
                     method,
                     span,

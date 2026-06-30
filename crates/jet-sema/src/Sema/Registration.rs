@@ -291,6 +291,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::ProtocolDecl(_) => {}
             // D-METADERIVE1=A: user-authored derive blocks are expanded below.
             Item::UserDerive(_) => {}
+            // D-GENMOD2=A: templates and aliases are erased before codegen.
+            Item::GenericModule(_) | Item::ModuleAlias(_) => {}
         }
     }
 
@@ -661,6 +663,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 let mut synthetic = crate::AST::Func {
                     is_pub: false,
                     is_package_pub: false,
+                    external_type: None,
                     name: format!("__test_{}", t.name),
                     name_span: t.name_span,
                     type_params: Vec::new(),
@@ -725,8 +728,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::Bench(_)
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL
-            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: state-set decls are sema-only (I3)
-            | Item::UserDerive(_) => {} // D-METADERIVE1=A: expanded in Bundle.rs
+            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: state-set decls are sema-only (I3)
+            | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
+            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
         }
     }
 
@@ -1221,8 +1226,10 @@ pub(crate) fn comptime_context_from_items(
             | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL
-            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2
-            | Item::UserDerive(_) => {} // D-METADERIVE1=A: expanded in Bundle.rs
+            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2
+            | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
+            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
         }
     }
     (funcs, externs, globals)
@@ -1711,6 +1718,7 @@ pub(crate) fn check_error_conv_body(
     let mut synthetic = Func {
         is_pub: false,
         is_package_pub: false,
+        external_type: None,
         name: format!(
             "__errconv_{}_to_{}",
             ec.from_ty.replace('.', "_"),
@@ -2037,6 +2045,7 @@ pub(crate) fn synthesize_delegation_method(
     Func {
         is_pub: false,
         is_package_pub: false,
+        external_type: None,
         name: sig.name.clone(),
         name_span: sig.name_span,
         type_params: vec![],
@@ -2087,6 +2096,7 @@ pub(crate) fn synthesize_default_method(
     Func {
         is_pub: false,
         is_package_pub: false,
+        external_type: None,
         name: sig.name.clone(),
         name_span: sig.name_span,
         type_params: vec![],

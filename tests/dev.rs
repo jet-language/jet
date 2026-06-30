@@ -460,6 +460,130 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
 }
 
+#[test]
+fn jit_coverage_detail_smoke() {
+    for stem in [
+        "06_compound",
+        "07_switch",
+        "10_structs",
+        "11_enums",
+        "04_branches",
+        "131_taskgroup",
+    ] {
+        let file = format!("examples/features/{stem}.jet");
+        let mut bundle = jet::Loader::load_entry(&file).expect("load");
+        jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let detail = jet_jit::jit_covers_bundle_detail(&bundle);
+        let stmts = jet_jit::jit_dump_main_stmts(&bundle);
+        let funcs = jet_jit::jit_program_func_names(&bundle);
+        eprintln!("{stem}: {detail}");
+        if stem == "07_switch" {
+            eprintln!(
+                "  compile: {:?}",
+                jet_jit::try_compile_bundle(&bundle)
+            );
+        }
+        if stem == "131_taskgroup" {
+            let (sites, lams) = jet_jit::jit_spawn_stats(&bundle);
+            eprintln!("  spawn: {sites} sites / {lams} lambdas");
+            eprintln!("  uncovered: {:?}", jet_jit::jit_main_uncovered_detail(&bundle));
+        }
+        eprintln!("  funcs: {}", funcs.join(", "));
+        eprintln!("  main: {}", stmts.join(", "));
+        for c in jet_jit::jit_dump_mixed_switch_conds(&bundle) {
+            eprintln!("  mixed: {c}");
+        }
+        for fn_name in ["show", "next", "label", "describe"] {
+            if let Some(d) = jet_jit::jit_func_coverage_detail(&bundle, fn_name) {
+                eprintln!("  {fn_name}: {d}");
+            }
+        }
+        if let Err(e) = jet_jit::try_compile_bundle(&bundle) {
+            eprintln!("  compile: {e}");
+        }
+    }
+}
+
+/// Audit which type-checked examples are jit-covered (run with `--ignored`).
+#[test]
+#[ignore]
+fn jit_coverage_audit() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut covered = Vec::new();
+    let mut gaps = Vec::new();
+    for entry in fs::read_dir(root.join("examples/features")).expect("read examples") {
+        let entry = entry.expect("entry");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jet") {
+            continue;
+        }
+        let file = path.to_string_lossy();
+        let mut bundle = match jet::Loader::load_entry(&file) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        if !errors.is_empty() {
+            continue;
+        }
+        let stem = path.file_stem().unwrap().to_string_lossy();
+        if jet_jit::jit_covers_bundle(&bundle) {
+            covered.push(stem.to_string());
+        } else {
+            gaps.push(format!(
+                "{stem}: {}",
+                jet_jit::jit_covers_bundle_detail(&bundle)
+            ));
+        }
+    }
+    covered.sort();
+    gaps.sort();
+    eprintln!("jit-covered ({}):", covered.len());
+    for s in &covered {
+        eprintln!("  {s}");
+    }
+    eprintln!("jit gaps ({}):", gaps.len());
+    for g in &gaps {
+        eprintln!("  {g}");
+    }
+}
+
+/// Stems of type-checked examples the JIT claims to cover.
+fn jit_covered_example_stems() -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut stems = Vec::new();
+    for entry in fs::read_dir(root.join("examples/features")).expect("read examples") {
+        let entry = entry.expect("entry");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jet") {
+            continue;
+        }
+        let file = path.to_string_lossy();
+        let mut bundle = match jet::Loader::load_entry(&file) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        if diags
+            .iter()
+            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        {
+            continue;
+        }
+        if jet_jit::jit_covers_bundle(&bundle)
+            && jet_jit::try_compile_bundle(&bundle).is_ok()
+        {
+            stems.push(path.file_stem().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    stems.sort();
+    stems
+}
+
 /// c139 M3+: three-way differential (JIT == interpreter == AOT) on jit-covered examples.
 #[test]
 fn cranelift_three_way_differential_battery() {
@@ -469,16 +593,69 @@ fn cranelift_three_way_differential_battery() {
         return;
     }
 
-    let jit_covered_stems = [
-        "01_hello",
-        "02_functions",
-        "100_counted_loop",
-        "32_tasks",
-        "160_scheduler_spawn",
-    ];
-    for stem in jit_covered_stems {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jit_covered_stems = jit_covered_example_stems();
+    assert!(
+        !jit_covered_stems.is_empty(),
+        "expected at least one jit-covered example"
+    );
+    let mut ran = 0usize;
+    for stem in &jit_covered_stems {
+        let expected = root.join(format!("examples/features/expected/{stem}.out"));
+        if !expected.exists() {
+            continue;
+        }
         assert_cranelift_three_way(&example_path(stem), stem);
+        ran += 1;
     }
+    eprintln!(
+        "three-way battery: {} ran / {} jit-covered (with goldens)",
+        ran,
+        jit_covered_stems.len()
+    );
+    assert!(ran >= 9, "expected battery to grow beyond the M3 seed set");
+}
+
+/// Gate: JIT coverage is a subset of TIR coverage — never claim jit when tir won't lower.
+#[test]
+fn jit_covers_implies_tir_lowers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for entry in fs::read_dir(root.join("examples/features")).expect("read examples") {
+        let entry = entry.expect("entry");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jet") {
+            continue;
+        }
+        let file = path.to_string_lossy();
+        let mut bundle = match jet::Loader::load_entry(&file) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        if diags
+            .iter()
+            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        {
+            continue;
+        }
+        let stem = path.file_stem().unwrap().to_string_lossy();
+        if jet_jit::jit_covers_bundle(&bundle) {
+            assert!(
+                jet_jit::tir_lowers_bundle(&bundle),
+                "`{stem}` is jit-covered but TIR lower_jit_program returned None: {}",
+                jet_jit::tir_lower_fail_reason(&bundle)
+            );
+        }
+    }
+}
+
+/// c139 M3: string interpolation builds the same stdout as the interpreter.
+#[test]
+fn cranelift_covers_string_interpolation() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    n := 7\n    print(\"value {n}\")\n}\n",
+        "str_interp",
+    );
 }
 
 /// c139 M3: checked integer arithmetic with overflow traps.

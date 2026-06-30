@@ -162,6 +162,7 @@ mod tests {
         Item::Func(Func {
             is_pub: true,
             is_package_pub: false,
+            external_type: None,
             name: name.to_string(),
             name_span: zero(),
             type_params: vec![],

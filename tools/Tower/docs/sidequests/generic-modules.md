@@ -1,7 +1,7 @@
 # Generic modules
 
-**Card:** c91 / c1jixkit. **Decision:** D-GENMOD1=A. **Status:** blocked on
-D-GENMOD2.
+**Card:** c91 / c1jixkit. **Decisions:** D-GENMOD1=A, D-GENMOD2=A. **Status:**
+done (2026-06-30).
 
 ## Goal
 
@@ -21,15 +21,14 @@ module Sorted(T: Ord) {
 module SortedInt = Sorted(Int)
 ```
 
-The unresolved piece is how Jet distinguishes type parameters from value
-parameters, and whether instantiation uses parentheses or the existing generic
-bracket family. That is now D-GENMOD2.
+D-GENMOD2=A ratified unified `<…>` parameters: type bounds (`K: Hash`) vs value
+types (`capacity: Int`) in one list; instantiation mirrors declaration
+(`Lru<String, 32>`).
 
-## Build Plan
+## Build Plan (shipped 2026-06-30)
 
-1. Record D-GENMOD1 in `docs/spec/syntax-decisions.md`.
-2. Decide D-GENMOD2 before parser work.
-3. Parser:
+1. Record D-GENMOD1/D-GENMOD2 in `docs/spec/syntax-decisions.md`. ✓
+2. Parser:
    - accept module parameter lists on `module Name(...) { ... }`;
    - accept module instantiation aliases;
    - carry spans on every parameter, argument, and alias target.

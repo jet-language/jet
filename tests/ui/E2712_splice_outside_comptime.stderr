@@ -1,7 +1,7 @@
-Error [E2712]: `$` splice used outside a comptime context
-  --> tests/ui/E2712_splice_outside_comptime.jet:8:11
+Error [E2713]: there is no comptime value named `missing`
+  --> tests/ui/E2712_splice_outside_comptime.jet:5:11
     |
-  8 |     print($x)
-    |           ^^
- Why: `$name` looks up a name in the comptime scope and is only valid inside a `derive` body, `comptime {}` block, or comptime binding
- Fix: remove the `$` prefix, or move this code into a `comptime { ... }` block or a `derive` body
+  5 |     print($missing)
+    |           ^^^^^^^^
+ Why: `$name` splices a value that was computed by a `comptime` binding or `comptime {}` block
+ Fix: define `comptime missing = ...` before using `$missing`

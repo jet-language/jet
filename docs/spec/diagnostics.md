@@ -120,6 +120,7 @@ before continuing.
 | E0057 | parse | *retired by D-S14-PAUSE* (was: `take` keyword teaching) |
 | E0058 | parse | *retired by D-S14-PAUSE* (was: `view` keyword teaching) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
+| E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | teaching: `val`/`var` keyword → `name #=`/`name :=` sigil (D-BIND3) |
 | E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -203,10 +204,12 @@ before continuing.
 | E0322 | parse | assignment `=` in `if` condition — did you mean `==`? (D-ASSIGNCOND1) |
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
 | E0324 | sema  | type alias without type parameters — use `struct` for a distinct primitive name (D-TYPEALIAS1) |
+| E0325 | parse | teaching: external inherent method `~~` connector → `.` (D-EXTMETH1) |
 | E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
 | E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
+| E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -318,6 +321,12 @@ before continuing.
 | E0803 | sema  | calling a value that isn't a function |
 | E0804 | sema  | self-recursive lambda binding |
 | L0801 | sema  | escaping lambda silently cloned a capture (lint) |
+| E0850 | sema  | D-GENMOD2=A: module alias target not found in scope |
+| E0851 | sema  | D-GENMOD2=A: wrong number of type/value arguments to module alias |
+| E0852 | sema  | D-GENMOD2=A: type argument does not satisfy bound |
+| E0853 | sema  | D-GENMOD2=A: value argument has wrong type |
+| E0854 | sema  | D-GENMOD2=A: generic module body contains non-fn item (MVP restriction) |
+| E0855 | sema  | D-GENMOD2=A: circular module alias instantiation |
 | E0901 | sema  | method needs a generic bound |
 | E0902 | sema  | orphan `impl` (neither type nor trait local) |
 | E0903 | sema  | hand-written built-in trait impl staged |
@@ -664,7 +673,8 @@ Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.ti
 | E2702 | Crypto API misuse: {detail}. | A `core.crypto` call would use a key, nonce, or algorithm in an unsafe way — for example, an IV too short or a key length the algorithm doesn't accept. Reserved for future static checks. | Follow the fix named in the error; the `core.crypto` API is intentionally restrictive to surface misuse. |
 | E2710 | `` `derive {Trait} for T` body failed while expanding `#[{Trait}]` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `#[Trait]` marker on the struct that triggered expansion. | Fix the `derive {Trait} for T` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
 | E2711 | Derive orphan rule: `` `derive {Trait} for T` `` and `` `{Type}` `` are both in an imported module. | User-derive expansion can only run in the entry module (D-METADERIVE1=A). Both the `derive` block and the struct it targets must live in the entry file; expansion locked to an imported module produces an `impl` the entry module cannot override or suppress. | Move both `derive {Trait}` and `struct {Type}` to your entry module; derive expansion only runs there. |
-| E2712 | `` `$` splice used outside a comptime context ``. | `$name` looks up a name in the comptime scope (D-CTMARKER1=C) and is only valid inside a `derive` body, `comptime {}` block, or comptime binding. At runtime there is no comptime scope to look up. | Remove the `$` prefix to reference the name as a normal variable, or move the code into a `comptime { … }` block or a `derive` body. |
+| E2712 | *retired by D-CTBLOCKEXPOSE1* (was: `$` splice outside comptime context). | Runtime `$name` splices are allowed when a comptime value is in scope. | Define the value with `comptime name = ...`, or remove the `$` prefix. |
+| E2713 | There is no comptime value named `{name}`. | `$name` splices a value that was computed by a `comptime` binding or `comptime {}` block. | Define `comptime {name} = ...` before using `$name`. |
 | L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `core.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
 
 ## Networking and services diagnostics (E2-M10, D-NET1–3)
@@ -765,6 +775,12 @@ already-freed arena), these track the views themselves.
 |------|------|-----|-----|
 | E0631 | `{view}` cannot be shared — it does not live long enough to {escape}. | `{view}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `.clone()` before it leaves. |
 | E0632 | `{arena}` was {reset/freed} here, so the value `{view}` points into is gone. | `reset`/`free` invalidate every value allocated in the arena; reading the view afterward would read freed memory. | Use the view before `reset`/`free`, or re-`alloc` after to get a fresh value. |
+
+## Dynamic type diagnostics
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0350 | Jet does not have an `Any` type. | A value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Data` for parsed dynamic data. | Replace `Any` with the specific mechanism for this value. |
 
 ## Effect system diagnostics (D-EFF1, D-QUAL1)
 

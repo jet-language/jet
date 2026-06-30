@@ -92,6 +92,18 @@ impl<'a> Fmt<'a> {
                 self.write(&text);
                 self.newline();
             }
+            // D-GENMOD2=A: generic module templates emitted verbatim (non-destructive).
+            Item::GenericModule(gm) => {
+                let text = self.src[gm.span.start..gm.span.end].to_string();
+                self.write(&text);
+                self.newline();
+            }
+            // D-GENMOD2=A: module alias declarations emitted verbatim (non-destructive).
+            Item::ModuleAlias(ma) => {
+                let text = self.src[ma.span.start..ma.span.end].to_string();
+                self.write(&text);
+                self.newline();
+            }
         }
     }
 

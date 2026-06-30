@@ -2,7 +2,15 @@ use core.tasks as tasks
 use core.time as time
 
 fn main() {
-    #Context(deadline: time.now() + 10) {
+    #Context(deadline: time.now() + 20) {
+        slow #= tasks.spawn(() => {
+            time.sleep(10)
+            print("finished")
+        })
+        slow.wait()
+    }   
+    
+    #Context(deadline: time.now() + 20) {
         slow #= tasks.spawn(() => {
             time.sleep(40)
             print("finished")

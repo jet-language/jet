@@ -377,7 +377,7 @@ pub fn run_block_with_imports(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
-) -> Result<(), Diagnostic> {
+) -> Result<HashMap<String, CtValue>, Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
     Purity::check_purity_stmts(stmts, &refs, extern_names)?;
     let mut interp = Interp {
@@ -398,7 +398,8 @@ pub fn run_block_with_imports(
         emitted_fragments: Vec::new(),
     };
     let mut scope = globals.clone();
-    interp.exec_block(stmts, &mut scope).map(|_| ())
+    interp.exec_block(stmts, &mut scope)?;
+    Ok(scope)
 }
 
 /// Owned-function variant used while sema is mutating function bodies for

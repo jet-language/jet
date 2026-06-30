@@ -169,6 +169,7 @@ impl<'a> Checker<'a> {
             let Some(name) = spawn.binding.clone() else {
                 continue;
             };
+            body.push(Stmt::Expr(cancel_call(&name, spawn.span)));
             body.push(Stmt::Expr(join_call(&name, spawn.span)));
             self.moved.insert(name, spawn.span);
         }
@@ -195,13 +196,14 @@ impl<'a> Checker<'a> {
             Syntax::TASKGROUP_ALL_METHOD => self.infer_taskgroup_all(args, span),
             Syntax::TASKGROUP_RACE_METHOD => self.infer_taskgroup_race(args, span),
             Syntax::TASKGROUP_ANY_METHOD => self.infer_taskgroup_any(args, span),
+            Syntax::TASKGROUP_SELECT_METHOD => self.infer_taskgroup_select(args, span),
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`TaskGroup` has no method `{other}`"),
-                    "structured taskgroups support `.task { … }`, `.all([…])`, `.race([…])`, and `.any([…])`"
+                    "structured taskgroups support `.task { … }`, `.all([…])`, `.race([…])`, `.any([…])`, and `.select()`"
                         .to_string(),
-                    "write `g.task { work() }`, `g.all([h1, h2])`, or `g.race([h1, h2])`".to_string(),
+                    "write `g.task { work() }`, `g.all([h1, h2])`, or `g.select().recv(ch).wait()`".to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {
@@ -435,6 +437,267 @@ impl<'a> Checker<'a> {
             self.mark_moved(name.clone(), expr.span());
             self.mark_taskgroup_spawn_consumed(&name);
         }
+    }
+
+    fn infer_taskgroup_select(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
+        if !args.is_empty() {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`.select()` takes no arguments, got {} argument{}",
+                    args.len(),
+                    if args.len() == 1 { "" } else { "s" }
+                ),
+                "scoped select starts an empty fluent builder — add arms with `.recv`, `.read`, or `.after`"
+                    .to_string(),
+                "write `g.select().recv(ch).wait()`".to_string(),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        Some(Type::Apply {
+            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+            args: vec![],
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn infer_select_method(
+        &mut self,
+        receiver: &mut Box<Expr>,
+        method: &str,
+        span: Span,
+        args: &mut Vec<CallArg>,
+        recv_type_out: &mut Option<String>,
+    ) -> Option<Type> {
+        let recv_ty = self.infer(receiver)?;
+        let elem = match &recv_ty {
+            Type::Apply { name, args, .. }
+                if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
+            {
+                Some(args[0].clone())
+            }
+            Type::Named(n) if n == Syntax::TYPE_SELECT_BUILDER => None,
+            _ => None,
+        };
+        *recv_type_out = Some(match &elem {
+            Some(t) => format!("{}<{}>", Syntax::TYPE_SELECT_BUILDER, t.show()),
+            None => Syntax::TYPE_SELECT_BUILDER.to_string(),
+        });
+        match method {
+            Syntax::SELECT_RECV_METHOD => self.infer_select_recv(args, span, elem.as_ref()),
+            Syntax::SELECT_AFTER_METHOD => self.infer_select_after(args, span, elem.as_ref()),
+            Syntax::SELECT_READ_METHOD => self.infer_select_read(args, span, elem.as_ref()),
+            Syntax::SELECT_WAIT_METHOD => self.infer_select_wait(args, span, elem.as_ref()),
+            other => {
+                self.diags.push(Diagnostic::error(
+                    "E0102",
+                    format!("`SelectBuilder` has no method `{other}`"),
+                    "scoped select supports `.recv(ch)`, `.read(stream)`, `.after(ms: …)`, and `.wait()`"
+                        .to_string(),
+                    "write `g.select().recv(ch).wait()`".to_string(),
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                None
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    fn infer_select_recv(
+        &mut self,
+        args: &mut Vec<CallArg>,
+        span: Span,
+        elem: Option<&Type>,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`.recv()` takes one channel, got {} argument{}",
+                    args.len(),
+                    if args.len() == 1 { "" } else { "s" }
+                ),
+                "a select receive arm waits on one typed channel".to_string(),
+                "write `.recv(ch)` where `ch` is a `Channel<T>`".to_string(),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        let ch_ty = self.infer(&mut args[0].expr)?;
+        let inner = match ch_ty {
+            Type::Apply { ref name, ref args, .. } if name == "Channel" && args.len() == 1 => {
+                args[0].clone()
+            }
+            other => {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`.recv()` needs a channel, not {}", other.show()),
+                    "each select receive arm waits on a `Channel<T>`".to_string(),
+                    "write `.recv(ch)` where `ch` came from `tasks.channel()`".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+                return None;
+            }
+        };
+        if let Some(prev) = elem {
+            if prev.show() != inner.show() {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "select receive arms must share one element type, got `{}` and `{}`",
+                        prev.show(),
+                        inner.show()
+                    ),
+                    "every `.recv()` in one select waits on the same `Channel<T>` element type"
+                        .to_string(),
+                    "use channels with the same `T`, or split into separate selects".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+                return None;
+            }
+        }
+        Some(Type::Apply {
+            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+            args: vec![inner],
+        })
+    }
+
+    #[allow(dead_code)]
+    fn infer_select_after(
+        &mut self,
+        args: &mut Vec<CallArg>,
+        span: Span,
+        elem: Option<&Type>,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`.after()` takes one `ms:` duration, got {} argument{}",
+                    args.len(),
+                    if args.len() == 1 { "" } else { "s" }
+                ),
+                "a select timer arm fires after the given milliseconds".to_string(),
+                "write `.after(ms: 100)`".to_string(),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        let ms_ty = self.infer(&mut args[0].expr)?;
+        if !matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32") {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "`.after(ms: …)` needs an integer millisecond count, not {}",
+                    ms_ty.show()
+                ),
+                "timer arms use whole milliseconds".to_string(),
+                "write `.after(ms: 100)`".to_string(),
+                Some(args[0].expr.span()),
+            ));
+        }
+        Some(match elem {
+            Some(t) => Type::Apply {
+                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+                args: vec![t.clone()],
+            },
+            None => Type::Apply {
+                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+                args: vec![],
+            },
+        })
+    }
+
+    #[allow(dead_code)]
+    fn infer_select_read(
+        &mut self,
+        args: &mut Vec<CallArg>,
+        span: Span,
+        elem: Option<&Type>,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`.read()` takes one stream, got {} argument{}",
+                    args.len(),
+                    if args.len() == 1 { "" } else { "s" }
+                ),
+                "a select read arm waits until a TCP stream looks readable".to_string(),
+                "write `.read(conn)` where `conn` is a `TcpStream`".to_string(),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        let _ = self.infer(&mut args[0].expr)?;
+        Some(match elem {
+            Some(t) => Type::Apply {
+                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+                args: vec![t.clone()],
+            },
+            None => Type::Apply {
+                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+                args: vec![],
+            },
+        })
+    }
+
+    #[allow(dead_code)]
+    fn infer_select_wait(
+        &mut self,
+        args: &mut Vec<CallArg>,
+        span: Span,
+        elem: Option<&Type>,
+    ) -> Option<Type> {
+        if !args.is_empty() {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`.wait()` takes no arguments, got {} argument{}",
+                    args.len(),
+                    if args.len() == 1 { "" } else { "s" }
+                ),
+                "`.wait()` blocks until one select arm wins and deregisters the losers".to_string(),
+                "write `g.select().recv(ch).wait()`".to_string(),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        Some(match elem {
+            Some(t) => t.clone(),
+            None => Type::Named("Unit".to_string()),
+        })
+    }
+}
+
+fn cancel_call(name: &str, span: Span) -> Expr {
+    Expr::MethodCall {
+        receiver: Box::new(Expr::Ident(name.to_string(), span)),
+        method: Syntax::METHOD_TASK_CANCEL.to_string(),
+        method_span: span,
+        type_args: Vec::new(),
+        args: Vec::new(),
+        recv_type: None,
+        resolved_ret: None,
     }
 }
 

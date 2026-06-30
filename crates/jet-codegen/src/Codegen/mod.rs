@@ -236,11 +236,31 @@ fn jet_cov_dump() {
 }
 "#;
 const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
-const SCHEDULER_PRELUDE: &str = include_str!("../Prelude/Scheduler.rs");
+const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
 /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+
+/// I1: native scheduler IO uses `unsafe` syscalls; keep them in `jet_codegen::scheduler`
+/// but strip from emitted user Rust so archive/golden programs stay `unsafe`-free.
+fn scheduler_prelude_for_emit() -> &'static str {
+    static STRIPPED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    STRIPPED.get_or_init(|| {
+        const BEGIN: &str = "// jet:scheduler-native-begin";
+        const END: &str = "// jet:scheduler-native-end";
+        let Some(b) = SCHEDULER_PRELUDE_RAW.find(BEGIN) else {
+            return SCHEDULER_PRELUDE_RAW.to_string();
+        };
+        let Some(e) = SCHEDULER_PRELUDE_RAW.find(END) else {
+            return SCHEDULER_PRELUDE_RAW.to_string();
+        };
+        let mut out = String::new();
+        out.push_str(&SCHEDULER_PRELUDE_RAW[..b]);
+        out.push_str(&SCHEDULER_PRELUDE_RAW[e + END.len()..]);
+        out
+    })
+}
 
 /// D-ALLOC2: the `jet_mem` arena helper carries the one vetted lifetime-extension
 /// `unsafe` (D-LL1). It is part of the always-emitted prelude, but a program that
@@ -466,8 +486,10 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
             | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
-            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
+            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
+            | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
+            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
         }
     }
 
@@ -565,8 +587,10 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
             | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
-            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
+            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
+            | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
+            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
         }
     }
 
@@ -793,7 +817,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     out.push_str(MEM_PRELUDE);
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
-        out.push_str(SCHEDULER_PRELUDE);
+        out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
     }
     out.push('\n');
@@ -903,7 +927,7 @@ pub fn emit_bundle_tests_cov(
     }
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
-        out.push_str(SCHEDULER_PRELUDE);
+        out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
     }
     out.push('\n');
@@ -1018,7 +1042,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     }
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
-        out.push_str(SCHEDULER_PRELUDE);
+        out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
     }
     out.push('\n');

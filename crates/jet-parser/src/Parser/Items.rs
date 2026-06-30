@@ -365,7 +365,7 @@ impl<'a> Parser<'a> {
                             if matches!(self.peek().kind, TokKind::KwModule) {
                                 match self.code_module_with_pkg_and_target(false, false, Some(target))
                                 {
-                                    Ok(cm) => items.push(Item::CodeModule(cm)),
+                                    Ok(item) => items.push(item),
                                     Err(d) => {
                                         self.diags.push(d);
                                         self.sync_top();
@@ -499,8 +499,7 @@ impl<'a> Parser<'a> {
                                 )
                                 .map(Item::Func),
                             TokKind::KwModule if self.is_code_module_at(1) => self
-                                .code_module_with_pkg(is_pub, is_package_pub)
-                                .map(Item::CodeModule),
+                                .code_module_with_pkg(is_pub, is_package_pub),
                             TokKind::KwUse => match self.import_decl() {
                                 Ok(mut imp) => {
                                     imp.is_pub = is_pub;
@@ -606,7 +605,7 @@ impl<'a> Parser<'a> {
                                 self.type_alias_def(true, false).map(Item::TypeAlias)
                             }
                             TokKind::KwModule if self.is_code_module_at(2) => {
-                                self.code_module(true).map(Item::CodeModule)
+                                self.code_module(true)
                             }
                             TokKind::KwUse => {
                                 self.bump(); // consume `pub`
@@ -638,7 +637,7 @@ impl<'a> Parser<'a> {
                     self.test_def_after_kw().map(Item::Test)
                 }
                 TokKind::KwModule if self.is_code_module_at(1) => {
-                    self.code_module(false).map(Item::CodeModule)
+                    self.code_module(false)
                 }
                 TokKind::KwModule => self.module_decl().map(Item::Module),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
@@ -649,6 +648,9 @@ impl<'a> Parser<'a> {
                 // D-ATTR2 / D-SERDE: `#[Codable, RenameAll(camel)] struct …`.
                 TokKind::Hash if self.at_marker_list() => self.type_def_with_markers(),
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
+                TokKind::At if self.at_retired_at_c_module() => {
+                    self.retired_at_c_module().map(Item::CModule)
+                }
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                 TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
                 TokKind::Hash if self.at_unit_family_def() => {
@@ -851,7 +853,7 @@ impl<'a> Parser<'a> {
                 }
             };
             match r {
-                Ok(item) => items.push(item),
+                Ok(item) => items.push(Self::normalize_external_method_item(item)),
                 Err(d) => {
                     self.diags.push(d);
                     self.sync_top();
@@ -863,6 +865,27 @@ impl<'a> Parser<'a> {
             items,
             web_target_ceiling,
             pub_file,
+        }
+    }
+
+    fn normalize_external_method_item(item: Item) -> Item {
+        match item {
+            Item::Func(mut f) => {
+                if let Some((type_name, type_span)) = f.external_type.take() {
+                    Item::Impl(ImplDef {
+                        type_name,
+                        type_span,
+                        trait_name: None,
+                        trait_span: None,
+                        methods: vec![f],
+                        delegation_field: None,
+                        assoc_type_impls: Vec::new(),
+                    })
+                } else {
+                    Item::Func(f)
+                }
+            }
+            other => other,
         }
     }
 
@@ -1389,15 +1412,31 @@ impl<'a> Parser<'a> {
     }
 
     /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
-    /// module …` or `#Bindgen module …`? (Distinguishes from `#static const`,
-    /// and from bare `extern rust`.)
+    /// module …` or `#Bindgen module …`? Retired lowercase markers are also
+    /// recognized here so E0060 can recover to the canonical form.
     fn at_c_module(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::Hash) {
             return false;
         }
         let intro_is_c = match &self.peek2().kind {
             TokKind::KwExtern => true,
-            TokKind::Ident(n) => n == Syntax::ATTR_EXTERN_MODULE || n == Syntax::ATTR_BINDGEN,
+            TokKind::Ident(n) => {
+                n == Syntax::ATTR_EXTERN_MODULE
+                    || n == Syntax::ATTR_BINDGEN
+                    || n == Syntax::ATTR_BINDGEN_RETIRED
+            }
+            _ => false,
+        };
+        intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
+    }
+
+    fn at_retired_at_c_module(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::At) {
+            return false;
+        }
+        let intro_is_c = match &self.peek2().kind {
+            TokKind::KwExtern => true,
+            TokKind::Ident(n) => n == Syntax::ATTR_BINDGEN_RETIRED,
             _ => false,
         };
         intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
@@ -1411,7 +1450,12 @@ impl<'a> Parser<'a> {
         let start = self.bump().span; // `#`
         let kind = match &self.peek().kind {
             TokKind::KwExtern => {
-                self.bump();
+                let span = Span::new(start.start, self.bump().span.end);
+                self.diags.push(self.retired_c_module_marker_diag(
+                    "#extern",
+                    "#Extern",
+                    span,
+                ));
                 CModuleKind::Extern
             }
             TokKind::Ident(n) if n == Syntax::ATTR_EXTERN_MODULE => {
@@ -1420,6 +1464,15 @@ impl<'a> Parser<'a> {
             }
             TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN => {
                 self.bump();
+                CModuleKind::Bindgen
+            }
+            TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
+                let span = Span::new(start.start, self.bump().span.end);
+                self.diags.push(self.retired_c_module_marker_diag(
+                    "#bindgen",
+                    "#Bindgen",
+                    span,
+                ));
                 CModuleKind::Bindgen
             }
             other => {
@@ -1437,6 +1490,58 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+        self.c_module_after_kind(start, kind)
+    }
+
+    fn retired_at_c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
+        use crate::AST::CModuleKind;
+        let start = self.bump().span; // `@`
+        let kind = match &self.peek().kind {
+            TokKind::KwExtern => {
+                let span = Span::new(start.start, self.bump().span.end);
+                self.diags.push(self.retired_c_module_marker_diag(
+                    "@extern",
+                    "#Extern",
+                    span,
+                ));
+                CModuleKind::Extern
+            }
+            TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
+                let span = Span::new(start.start, self.bump().span.end);
+                self.diags.push(self.retired_c_module_marker_diag(
+                    "@bindgen",
+                    "#Bindgen",
+                    span,
+                ));
+                CModuleKind::Bindgen
+            }
+            _ => unreachable!("at_retired_at_c_module guards marker spelling"),
+        };
+        self.c_module_after_kind(start, kind)
+    }
+
+    fn retired_c_module_marker_diag(
+        &self,
+        old: &str,
+        new: &str,
+        span: Span,
+    ) -> Diagnostic {
+        Diagnostic::error(
+            "E0060",
+            format!("C FFI modules use `{}`, not `{}`", new, old),
+            "C FFI markers are PascalCase `#` markers so generated and hand-written bindings share one marker family"
+                .to_string(),
+            format!("write `{}` before `module c.<lib>`", new),
+            Some(span),
+        )
+    }
+
+    fn c_module_after_kind(
+        &mut self,
+        start: Span,
+        kind: crate::AST::CModuleKind,
+    ) -> Result<crate::AST::CModule, Diagnostic> {
+        use crate::AST::CModuleKind;
         self.expect_kw(TokKind::KwModule, "to declare a C FFI module")?;
 
         // Parse the dotted module path: `c` `.` `<lib>` [ `.` `__bindgen__` ].
@@ -1799,8 +1904,7 @@ impl<'a> Parser<'a> {
                 )
                 .map(Item::Func),
             TokKind::KwModule if self.is_code_module_at(1) => self
-                .code_module_with_pkg(is_pub, is_package_pub)
-                .map(Item::CodeModule),
+                .code_module_with_pkg(is_pub, is_package_pub),
             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => self
                 .state_decl_with_pkg(is_pub, is_package_pub)
                 .map(Item::StateDecl),
@@ -2129,7 +2233,37 @@ impl<'a> Parser<'a> {
         is_must_use: bool,
         must_use_span: Option<Span>,
     ) -> Result<Func, Diagnostic> {
-        let (name, name_span) = self.expect_ident("after `fn`")?;
+        let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
+        let external_type = if (matches!(self.peek().kind, TokKind::Dot)
+            || matches!(self.peek().kind, TokKind::TildeTilde))
+            && matches!(self.peek2().kind, TokKind::Ident(_))
+            && matches!(self.peek3().kind, TokKind::LParen)
+        {
+            let type_name = name;
+            let type_span = name_span;
+            if matches!(self.peek().kind, TokKind::TildeTilde) {
+                let sep_span = self.peek().span;
+                self.diags.push(Diagnostic::error(
+                    "E0325",
+                    format!(
+                        "external methods attach with `{}`, not `{}`",
+                        Syntax::EXTERNAL_METHOD_CONNECTOR,
+                        Syntax::EXTERNAL_METHOD_CONNECTOR_RETIRED
+                    ),
+                    "the dot connector matches trait impls and ordinary member access".to_string(),
+                    format!("write `fn {}.method(...)`", type_name),
+                    Some(sep_span),
+                ));
+            }
+            self.bump(); // `.` or retired `~~`
+            let (method_name, method_span) =
+                self.expect_ident("after the connector in an external method definition")?;
+            name = method_name;
+            name_span = method_span;
+            Some((type_name, type_span))
+        } else {
+            None
+        };
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LParen, "after the function name")?;
         let mut params = Vec::new();
@@ -2177,6 +2311,7 @@ impl<'a> Parser<'a> {
             return Ok(Func {
                 is_pub,
                 is_package_pub,
+                external_type,
                 name,
                 name_span,
                 type_params,
@@ -2202,6 +2337,7 @@ impl<'a> Parser<'a> {
         Ok(Func {
             is_pub,
             is_package_pub,
+            external_type,
             name,
             name_span,
             type_params,

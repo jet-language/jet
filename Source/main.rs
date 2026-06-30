@@ -19,6 +19,7 @@ mod CmdCompile;
 mod CmdDevTools;
 mod CmdPkg;
 mod CmdSchema;
+mod CmdImpact;
 mod CmdSemIndex;
 mod CmdSupply;
 
@@ -32,6 +33,7 @@ use CmdPkg::{
     run_store_verify, run_update,
 };
 use CmdSchema::run_schema;
+use CmdImpact::run_impact;
 use CmdSemIndex::run_semindex;
 use CmdSupply::{run_audit, run_publish, run_sbom, run_vendor, run_yank};
 
@@ -632,6 +634,7 @@ fn main() {
                 | "repl"
                 | "schema"
                 | "semindex"
+                | "impact"
         );
     if !known {
         if let Some(bin) = find_external(cmd) {
@@ -676,6 +679,7 @@ fn main() {
             | "repl"
             | "schema"
             | "semindex"
+            | "impact"
     );
     if !owns_flags {
         check_flags(jet_argv, cmd);
@@ -756,6 +760,12 @@ fn main() {
             // D-SEMINDEX1: stable semantic-index JSON smoke surface.
             let semindex_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_semindex(&semindex_args, mode.json);
+            return;
+        }
+        "impact" => {
+            // D-IMPACT1: blast-radius queries over the semantic index.
+            let impact_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_impact(&impact_args, mode.json);
             return;
         }
         "audit" => {

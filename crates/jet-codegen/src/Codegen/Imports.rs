@@ -425,8 +425,10 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases
-            | Item::ProtocolDecl(_) => {} // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) => {} // D-METADERIVE1=A: erase (expanded in sema)
+            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
+            | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
+            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
         }
     }
     for item in items {

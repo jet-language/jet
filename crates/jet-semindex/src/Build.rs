@@ -519,6 +519,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         Item::ProtocolDecl(_) => {}
         // D-METADERIVE1=A: user-authored derive blocks aren't indexed (expanded in sema).
         Item::UserDerive(_) => {}
+        // D-GENMOD2=A: templates/aliases aren't indexed (erased).
+        Item::GenericModule(_) | Item::ModuleAlias(_) => {}
     }
 }
 

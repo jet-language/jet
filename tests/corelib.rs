@@ -571,6 +571,130 @@ sender: Sender<Int> #= ch.sender()
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn scheduler_spawn_10000_tasks() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping 10k scheduler spawn test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_scheduler_10k_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "scheduler_spawn_10k",
+        r#"
+use core.tasks as tasks
+
+fn main() {
+ch: Channel<Int> #= tasks.channel()
+sender: Sender<Int> #= ch.sender()
+    loop i in 1..10000 {
+        copy #= sender.clone()
+        tasks.spawn(take(copy) () => {
+            copy.send(1)
+        })
+    }
+    total: Int := 0
+    loop i in 1..10000 {
+        total = (total + (ch.receive() ?? panic("channel closed")))
+    }
+    print(total)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "10k scheduler spawn failed: {stderr}");
+    assert_eq!(stdout, "10000\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+#[ignore = "local 100k parked-task stress; run with --ignored"]
+fn scheduler_spawn_100000_tasks_bench() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping 100k scheduler bench (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_scheduler_100k_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "scheduler_spawn_100k",
+        r#"
+use core.tasks as tasks
+
+fn main() {
+ch: Channel<Int> #= tasks.channel()
+sender: Sender<Int> #= ch.sender()
+    loop i in 1..100000 {
+        copy #= sender.clone()
+        tasks.spawn(take(copy) () => {
+            copy.send(1)
+        })
+    }
+    total: Int := 0
+    loop i in 1..100000 {
+        total = (total + (ch.receive() ?? panic("channel closed")))
+    }
+    print(total)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "100k scheduler bench failed: {stderr}");
+    assert_eq!(stdout, "100000\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn race_cancels_losing_task() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping race cancel test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_race_cancel_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "race_cancel",
+        r#"
+use core.tasks as tasks
+use core.time as time
+
+fn fast_nine() -> Int {
+    return 9
+}
+
+fn slow_one() -> Int {
+    time.sleep(300)
+    return 1
+}
+
+fn main() {
+    taskgroup g {
+        slow #= g.task { slow_one() }
+        fast #= g.task { fast_nine() }
+        winner #= g.race([slow, fast])
+        print(winner)
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "race cancel test failed: {stderr}");
+    assert_eq!(stdout, "9\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// c45 drift-guard: `core_module_items` in Sema/CheckerCoreLib.rs must cover
 /// every module in `Loader::KNOWN_CORE_MODULES` (and no extras).
 ///

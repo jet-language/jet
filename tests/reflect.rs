@@ -28,6 +28,7 @@ fn method(name: &str, is_pub: bool) -> Func {
     Func {
         is_pub,
         is_package_pub: false,
+        external_type: None,
         name: name.to_string(),
         name_span: span(),
         type_params: Vec::new(),

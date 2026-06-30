@@ -682,6 +682,12 @@ pub enum Item {
     ProtocolDecl(ProtocolDecl),
     /// D-METADERIVE1=A: `derive Trait for T { … }` user-authored derive.
     UserDerive(DeriveDef),
+    /// D-GENMOD2=A: `module Name<params> { … }` — a parameterized module template.
+    /// Stores the body as-is; sema expands `ModuleAlias` references before codegen.
+    GenericModule(GenericModuleDef),
+    /// D-GENMOD2=A: `module Alias = Module<args>` — module instantiation alias.
+    /// Expanded to a `CodeModule` by sema before registration and body-checking.
+    ModuleAlias(ModuleAliasDef),
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
@@ -696,6 +702,77 @@ pub struct CodeModule {
     pub body: Option<Vec<Item>>,
     /// D-WASM1: `module name js { … }` / `module name wasm { … }` ceiling override.
     pub web_target: Option<crate::WebPartition::WebBucket>,
+    pub span: Span,
+}
+
+/// D-GENMOD2=A: one parameter of a generic module — `module Lru<K: Hash, capacity: Int>`.
+/// Parse-time heuristic: uppercase-starting name → type param; lowercase-starting → value param.
+#[derive(Debug, Clone)]
+pub enum GenericModuleParam {
+    /// `K: Hash` — a type parameter. Bound is the trait/interface name (may be empty = no bound).
+    TypeParam {
+        name: String,
+        name_span: Span,
+        bound: String,
+    },
+    /// `capacity: Int` — a value parameter with a concrete type annotation.
+    ValueParam {
+        name: String,
+        name_span: Span,
+        ty: Type,
+    },
+}
+
+impl GenericModuleParam {
+    pub fn name(&self) -> &str {
+        match self {
+            GenericModuleParam::TypeParam { name, .. }
+            | GenericModuleParam::ValueParam { name, .. } => name.as_str(),
+        }
+    }
+
+    pub fn name_span(&self) -> Span {
+        match self {
+            GenericModuleParam::TypeParam { name_span, .. }
+            | GenericModuleParam::ValueParam { name_span, .. } => *name_span,
+        }
+    }
+}
+
+/// D-GENMOD2=A: one argument in `module Alias = Module<String, 32>`.
+#[derive(Debug, Clone)]
+pub enum ModuleArg {
+    /// A type argument: `String`, `Int`, `MyType`.
+    Type(Type, Span),
+    /// A value argument: integer/bool literal or other comptime expression.
+    Value(Expr, Span),
+}
+
+/// D-GENMOD2=A: `module Name<params> { body }` — a parameterized module template.
+/// Stores the body as a template. Sema expands `ModuleAlias` referencing this into
+/// a `CodeModule` before the main checking pass. Never reaches codegen directly.
+#[derive(Debug)]
+pub struct GenericModuleDef {
+    pub name: String,
+    pub name_span: Span,
+    pub is_pub: bool,
+    pub is_package_pub: bool,
+    pub params: Vec<GenericModuleParam>,
+    pub body: Vec<Item>,
+    pub span: Span,
+}
+
+/// D-GENMOD2=A: `module Alias = Module<args>` — module instantiation alias.
+/// Expanded to a `CodeModule` by sema before registration and codegen.
+#[derive(Debug)]
+pub struct ModuleAliasDef {
+    pub name: String,
+    pub name_span: Span,
+    pub is_pub: bool,
+    pub is_package_pub: bool,
+    pub target: String,
+    pub target_span: Span,
+    pub args: Vec<ModuleArg>,
     pub span: Span,
 }
 
@@ -1099,6 +1176,10 @@ pub struct Func {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) fn …`.
     pub is_package_pub: bool,
+    /// D-EXTMETH1=B: top-level `fn Type.method(...)` before parser normalization.
+    /// The parser turns this into an inherent `ImplDef`; all later stages should
+    /// see `None`.
+    pub external_type: Option<(String, Span)>,
     pub name: String,
     pub name_span: Span,
     /// S45 (M9): `<T: Bound>` after the function name.
@@ -2290,6 +2371,7 @@ pub enum Expr {
     ComptimeSplice {
         name: String,
         span: Span,
+        value: Option<CtValue>,
     },
     /// D-FMTPARENS1=A: explicit author grouping parentheses `(expr)`.
     /// Transparent to type-checking and codegen; formatter always emits the parens.

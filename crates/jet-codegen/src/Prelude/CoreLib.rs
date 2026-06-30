@@ -459,26 +459,93 @@ mod jet_std {
         }
     }
 
-    /// D-CONCCOMB1=A: return the first task result; sibling tasks are still joined
-    /// (structured scope — no leaked handles). v1 thread runtime: no pre-join cancel.
-    pub fn jet_task_race<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
-        std::thread::scope(|s| {
-            use std::sync::mpsc;
-            let (tx, rx) = mpsc::sync_channel(1);
-            for task in tasks {
-                let tx = tx.clone();
-                s.spawn(move || {
-                    let _ = tx.send(task.join());
-                });
-            }
-            drop(tx);
-            rx.recv().expect("race: empty task list")
-        })
+    /// D-CONCCOMB1=A: join every handle; fail fast and cancel siblings on error.
+    pub fn jet_task_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> Vec<T> {
+        let entries: Vec<_> = tasks
+            .into_iter()
+            .map(|mut t| {
+                (
+                    t.handle.take().expect("all: task already joined"),
+                    t.control,
+                )
+            })
+            .collect();
+        super::jet_scheduler_all(entries)
     }
 
-    /// D-CONCCOMB1=A: v1 alias — first completed result wins (full Result-aware any later).
+    /// D-CONCCOMB1=A + D-RACEWIN1: first successful result; cancel siblings via scheduler.
+    pub fn jet_task_race<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
+        let entries: Vec<_> = tasks
+            .into_iter()
+            .map(|mut t| {
+                (
+                    t.handle.take().expect("race: task already joined"),
+                    t.control,
+                )
+            })
+            .collect();
+        super::jet_scheduler_race(entries)
+    }
+
+    /// D-CONCCOMB1=A: first completed result (success or failure path — v1 propagates panic).
     pub fn jet_task_any<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
-        jet_task_race(tasks)
+        let entries: Vec<_> = tasks
+            .into_iter()
+            .map(|mut t| {
+                (
+                    t.handle.take().expect("any: task already joined"),
+                    t.control,
+                )
+            })
+            .collect();
+        super::jet_scheduler_any(entries)
+    }
+
+    /// D-CONCSELECT1=A: fluent select builder accumulated at compile time, executed at `.wait()`.
+    pub struct JetSelectBuilder<T: Send + 'static> {
+        recvs: Vec<JetChannel<T>>,
+        after_ms: Vec<i64>,
+    }
+
+    impl<T: Send + 'static> JetSelectBuilder<T> {
+        pub fn start() -> JetSelectBuilder<T> {
+            JetSelectBuilder {
+                recvs: Vec::new(),
+                after_ms: Vec::new(),
+            }
+        }
+        pub fn recv(mut self, ch: JetChannel<T>) -> JetSelectBuilder<T> {
+            self.recvs.push(ch);
+            self
+        }
+        pub fn after(mut self, ms: i64) -> JetSelectBuilder<T> {
+            self.after_ms.push(ms);
+            self
+        }
+        pub fn read(self, _stream: super::JetTcpStream) -> JetSelectBuilder<T> {
+            self
+        }
+        pub fn wait(self) -> T {
+            let recv_refs: Vec<&JetChannel<T>> = self.recvs.iter().collect();
+            jet_select_wait(&recv_refs, &self.after_ms)
+        }
+    }
+
+    /// D-CONCSELECT1=A: multiplex channel/timer arms registered by `g.select()`.
+    pub fn jet_select_wait<T: Send + 'static>(recvs: &[&JetChannel<T>], after_ms: &[i64]) -> T {
+        let inners: Vec<_> = recvs.iter().map(|c| c.inner.select_inner()).collect();
+        let timers: Vec<u64> = after_ms.iter().map(|ms| (*ms).max(0) as u64).collect();
+        match super::jet_scheduler_select(inners, timers) {
+            super::JetSelectOutcome::Recv { value, .. } => value,
+            super::JetSelectOutcome::After { .. } => {
+                eprintln!("panic: select timer arm has no receive value");
+                std::process::exit(70);
+            }
+            super::JetSelectOutcome::Closed => {
+                eprintln!("panic: select closed");
+                std::process::exit(70);
+            }
+        }
     }
 
     pub struct JetChannel<T> {

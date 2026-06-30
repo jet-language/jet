@@ -1599,6 +1599,56 @@ pub(crate) fn lower_switch(
     lower_enum_match(subject, arms, else_body, cx, env)
 }
 
+/// D-IF3: `subject >= lo && subject <= hi` as a lowered bool expression.
+fn range_inclusive_cond(
+    subject: &Expr,
+    lo: i64,
+    hi: i64,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let lo_e = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::IntLit(lo, None),
+    };
+    let hi_e = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::IntLit(hi, None),
+    };
+    let lhs_ge = lower_expr(subject, cx, env);
+    let lhs_le = lower_expr(subject, cx, env);
+    let ge = TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::Binary {
+            op: BinOp::Ge,
+            overflow: false,
+            line: 0,
+            lhs: Box::new(lhs_ge),
+            rhs: Box::new(lo_e),
+        },
+    };
+    let le = TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::Binary {
+            op: BinOp::Le,
+            overflow: false,
+            line: 0,
+            lhs: Box::new(lhs_le),
+            rhs: Box::new(hi_e),
+        },
+    };
+    TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::Binary {
+            op: BinOp::And,
+            overflow: false,
+            line: 0,
+            lhs: Box::new(ge),
+            rhs: Box::new(le),
+        },
+    }
+}
+
 /// c109 Phase 15: lower a MIXED comparison/Bool `when` switch (shape D) to a
 /// `TStmt::MixedSwitch`, reproducing `emit_mixed_switch` (Source/Codegen/Statement.rs).
 /// The subject is bound once to `_jet_switch_subject = &(subject)` (emitted for parity);
@@ -1611,23 +1661,19 @@ pub(crate) fn lower_mixed_switch(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TStmt {
-    // The subject's emitted string, used once for the `_jet_switch_subject` borrow —
-    // exactly as `emit_mixed_switch` re-emits `emit_expr(subject)`.
-    let subject_str = emit_tir_expr(&lower_expr(subject, cx, env), cx);
+    let subject_expr = lower_expr(subject, cx, env);
+    let subject_str = emit_tir_expr(&subject_expr, cx);
     let mut tarms = Vec::new();
     for arm in arms {
-        // D-IF3: a range head (`400..499 ->`) becomes `subject >= lo && subject <= hi`,
-        // reusing the subject's emitted form; a plain comparison/Bool head →
-        // `emit_switch_arm_cond`'s `emit_expr(cond)`.
-        let cond_str = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
-            format!("{0} >= {1} && {0} <= {2}", subject_str, lo, hi)
+        let cond_expr = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
+            range_inclusive_cond(subject, lo, hi, cx, env)
         } else {
-            emit_tir_expr(&lower_expr(&arm.cond, cx, env), cx)
+            lower_expr(&arm.cond, cx, env)
         };
         // The arm body uses the SHARED `&mut env` in `emit_mixed_switch` (leaks).
         let mut branch = clone_env(env);
         let body = lower_stmts(&arm.body, cx, &mut branch);
-        tarms.push((cond_str, body));
+        tarms.push((cond_expr, body));
     }
     let else_lowered = else_body.as_ref().map(|body| {
         let mut branch = clone_env(env);
@@ -2256,6 +2302,17 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Local(env.place_of(name)),
             }
         }
+        Expr::ComptimeSplice {
+            value: Some(value),
+            ..
+        } => TExpr {
+            ty: value.jet_type(),
+            kind: TExprKind::ConstInline(value.serialize()),
+        },
+        Expr::ComptimeSplice { .. } => TExpr {
+            ty: Type::Int,
+            kind: TExprKind::ConstInline("Default::default()".to_string()),
+        },
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
         // AST path (`emit_expr`'s `Expr::CallValue`) emits `({callee})({args})` with the
         // args lowered PLAINLY (it passes `None` to `emit_call_args` → no convention/
@@ -3605,12 +3662,26 @@ pub(crate) fn lower_method_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
+    // D-NURSERY1/A: from `[Task<T>]` list type extract `T` (the joined result type).
+    fn taskgroup_result_elem(tasks: &TExpr) -> Type {
+        match &tasks.ty {
+            Type::List(inner) => match inner.as_ref() {
+                Type::Apply { name, args, .. } if name == "Task" && args.len() == 1 => {
+                    args[0].clone()
+                }
+                other => (*other).clone(),
+            },
+            _ => unit_type(),
+        }
+    }
     // D-TASKSCOPE1=A / D-NURSERY1=A: structured taskgroup methods.
     if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
         && method == Syntax::TASKGROUP_SPAWN_METHOD
     {
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             let body_ty = lambda_body_ty(lam, cx, env);
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             let spawn_closure = render_spawn_lambda(lam, cx, env);
             return TExpr {
                 ty: Type::Apply {
@@ -3628,10 +3699,7 @@ pub(crate) fn lower_method_call(
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
-        let elem = match &tasks.ty {
-            Type::List(inner) => (**inner).clone(),
-            _ => unit_type(),
-        };
+        let elem = taskgroup_result_elem(&tasks);
         return TExpr {
             ty: Type::List(Box::new(elem)),
             kind: TExprKind::TaskGroupAll {
@@ -3644,10 +3712,7 @@ pub(crate) fn lower_method_call(
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
-        let elem = match &tasks.ty {
-            Type::List(inner) => (**inner).clone(),
-            _ => unit_type(),
-        };
+        let elem = taskgroup_result_elem(&tasks);
         return TExpr {
             ty: elem,
             kind: TExprKind::TaskGroupRace {
@@ -3660,16 +3725,91 @@ pub(crate) fn lower_method_call(
         && args.len() == 1
     {
         let tasks = lower_expr(&args[0].expr, cx, env);
-        let elem = match &tasks.ty {
-            Type::List(inner) => (**inner).clone(),
-            _ => unit_type(),
-        };
+        let elem = taskgroup_result_elem(&tasks);
         return TExpr {
             ty: elem,
             kind: TExprKind::TaskGroupAny {
                 tasks: Box::new(tasks),
             },
         };
+    }
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_SELECT_METHOD
+        && args.is_empty()
+    {
+        return TExpr {
+            ty: Type::Apply {
+                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+                args: vec![],
+            },
+            kind: TExprKind::SelectStart,
+        };
+    }
+    if recv_type
+        .as_deref()
+        .is_some_and(|rt| rt == Syntax::TYPE_SELECT_BUILDER || rt.starts_with("SelectBuilder<"))
+    {
+        let builder = lower_expr(receiver, cx, env);
+        match method {
+            Syntax::SELECT_RECV_METHOD if args.len() == 1 => {
+                let channel = lower_expr(&args[0].expr, cx, env);
+                let elem = match &builder.ty {
+                    Type::Apply { name, args, .. }
+                        if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
+                    {
+                        args[0].clone()
+                    }
+                    _ => unit_type(),
+                };
+                return TExpr {
+                    ty: Type::Apply {
+                        name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+                        args: vec![elem],
+                    },
+                    kind: TExprKind::SelectRecv {
+                        builder: Box::new(builder),
+                        channel: Box::new(channel),
+                    },
+                };
+            }
+            Syntax::SELECT_AFTER_METHOD if args.len() == 1 => {
+                let millis = lower_expr(&args[0].expr, cx, env);
+                return TExpr {
+                    ty: builder.ty.clone(),
+                    kind: TExprKind::SelectAfter {
+                        builder: Box::new(builder),
+                        millis: Box::new(millis),
+                    },
+                };
+            }
+            Syntax::SELECT_READ_METHOD if args.len() == 1 => {
+                let stream = lower_expr(&args[0].expr, cx, env);
+                return TExpr {
+                    ty: builder.ty.clone(),
+                    kind: TExprKind::SelectRead {
+                        builder: Box::new(builder),
+                        stream: Box::new(stream),
+                    },
+                };
+            }
+            Syntax::SELECT_WAIT_METHOD if args.is_empty() => {
+                let ret = match &builder.ty {
+                    Type::Apply { name, args, .. }
+                        if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
+                    {
+                        args[0].clone()
+                    }
+                    _ => unit_type(),
+                };
+                return TExpr {
+                    ty: ret,
+                    kind: TExprKind::SelectWait {
+                        builder: Box::new(builder),
+                    },
+                };
+            }
+            _ => {}
+        }
     }
     // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
     // The gate proved `recv_type == Some("Transaction")` and a single literal

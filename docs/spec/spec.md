@@ -336,7 +336,9 @@ impl Circle {
   the receiver as `~self`" fix. Calling a `~self` method needs a changeable
   receiver binding (`:=`/`~`), enforced at the call site by E0202.
 - Invoke with **`c.area()`** (not `area(c)`).
-- Methods may live **inside** the type **or** in **`impl Type { }`** — same rules either way.
+- Methods may live **inside** the type, in **`impl Type { }`**, or as a top-level
+  external inherent method **`fn Type.method(self, ...) { }`** (D-EXTMETH1) —
+  same rules either way. The type must be defined in the current source module.
 - Static methods omit `self` (e.g. `Circle.unit()`).
 - **Named constructors (D-CTOR1):** multiple construction shapes = multiple
   distinctly-named no-`self` statics returning the type (`Point.cartesian`,
@@ -741,9 +743,45 @@ the real function's borrow/move conventions preserved.
 
 Examples: `examples/features/42_inline_module`, `43_module_file`,
 `44_module_dir`, `45_module_use_unqualified`, `46_module_use_group`,
-`47_module_reexport`, `48_module_file_use`, `49_module_inline_sibling`. UI
+`47_module_reexport`, `48_module_file_use`, `49_module_inline_sibling`,
+`170_generic_modules`. UI
 fixtures: `tests/ui/module_{missing,private,unknown_namespace,wildcard,
-inline_private,inline_type_error}`.
+inline_private,inline_type_error}`, `genmod_{unknown_target,wrong_arg_count,non_fn_item}`.
+
+### Generic modules (D-GENMOD1, D-GENMOD2; done 2026-06-30)
+
+A **generic module** is a module template parameterized by types and/or compile-time
+values. Instantiating it produces a normal inline `CodeModule` with specialized
+exported functions.
+
+**Template form (D-GENMOD2=A):**
+
+```jet
+module Cache<K> {
+    pub fn key_of(k: K) -> String { … }
+}
+```
+
+Type parameters use PascalCase names with an optional bound (`K: Hash`).
+Value parameters use lowercase names with a type annotation (`capacity: Int`).
+Both live in one `<…>` list.
+
+**Instantiation alias:**
+
+```jet
+module IntCache = Cache<Int>
+```
+
+The alias expands before sema registration into a concrete module; calls use the
+usual mangled name (`IntCache__key_of(…)`). Templates and aliases are erased
+before codegen.
+
+**MVP restrictions:** generic module bodies may contain only `fn` items today.
+Structs, enums, or constants inside a template are **E0854** at instantiation
+time. Type arguments substitute into function signatures only (not bodies).
+Unknown template **E0850**; wrong argument count **E0851**. Value-param bound
+checking, cycle detection, and cross-file templates are follow-ups (E0852–E0855
+staged).
 
 ## M6 phase 4 — `--small` + LSP v0 (done)
 
@@ -956,6 +994,11 @@ typed `Json`, `toml.parse` is typed `Toml`, …), but it is one structure with o
 walker and one accessor set. Integral numbers decode to `.Int`, fractional to
 `.Float`; objects keep their fields. The four adapters are full serde equivalents:
 
+Jet has no general `Any` top type (D-DYNAMIC-TYPE1=A). Use the precise shape for
+the job: an enum for a closed set of variants, generics or traits for
+abstraction, `T?` for absence, and `Data` for parsed dynamic input. Writing
+`Any` in type position is **E0350**.
+
 - **JSON** — full RFC 8259 (D-PARSE-1): exponents and the strict number grammar,
   every escape including `\uXXXX` with surrogate-pair combining; rejects invalid
   escapes, lone surrogates, and raw control characters with a line + message.
@@ -1041,6 +1084,40 @@ emitted in Jet terms and execution exits with the runtime error code.
 
 Teaching errors: **E0040** points `async`/`await` users at `tasks.spawn`;
 **E0041** points `Mutex`/`lock` users at channels.
+
+### Taskgroups and structured combinators (D-TASKSCOPE1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-06-30)
+
+Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside
+`taskgroup g { … }`, `g.task { … } -> Task<T>` spawns a child owned by the
+group. Unjoined handles at scope exit are cancelled and joined before the block
+returns.
+
+Combinators are methods on the group handle only (no detached work):
+
+- `g.all([t1, t2, …]) -> List[T]` — every task must succeed; fail-fast cancels
+  siblings and exits with `panic: a task panicked` (example `169_all_failfast.jet`).
+- `g.race([t1, t2, …]) -> T` — first **successful** result wins; losers are
+  cancelled (D-RACEWIN1; example `167_race_cancel.jet`).
+- `g.any([t1, t2, …]) -> T` — first **completion** wins, including errors.
+- `g.select()` — fluent scoped multiplex (D-CONCSELECT1=A):
+
+```jet
+winner #= g.select().recv(ch1).recv(ch2).after(ms).wait()?
+```
+
+`.recv(channel)` registers a channel arm; `.after(ms)` a timer arm; `.read(stream)`
+is reserved for stream I/O (stub until networking lands). `.wait()` blocks until
+one arm wins, deregisters losers, and returns the received value. Example:
+`168_select_channel.jet`.
+
+The M:N scheduler (D-ASYNCRT1=A) parks tasks at channel/timer/IO waits instead
+of blocking OS threads. Native I/O pollers: Linux `epoll`, macOS/BSD `kqueue`,
+Windows IOCP path falls back to portable poll with an honest metric until IOCP
+lands. Task-local Jet traps unwind into the scheduler so sibling combinators can
+report `panic: a task panicked` instead of exiting the whole process early.
+
+Scale tests: `scheduler_spawn_10000_tasks` in CI; `scheduler_spawn_100000_tasks_bench`
+is `#[ignore]` for local 100k stress.
 
 ## Modules — `module name { … }` (U3, unified-ecosystem §4–5; parser, Stage 1a)
 

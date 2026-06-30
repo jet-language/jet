@@ -129,6 +129,10 @@ impl<'a> Checker<'a> {
         }
         match ty {
             Type::Named(n) => {
+                if n == "Any" {
+                    self.diags.push(no_any_type(span));
+                    return;
+                }
                 if core_type_known(n) {
                     return;
                 }
@@ -189,6 +193,13 @@ impl<'a> Checker<'a> {
                 ));
             }
             Type::Apply { name, args } => {
+                if name == "Any" {
+                    self.diags.push(no_any_type(span));
+                    for arg in args {
+                        self.check_declared_type(arg, span);
+                    }
+                    return;
+                }
                 if let Some((params, target)) = self.registry.type_alias(&name) {
                     if params.len() != args.len() {
                         self.diags.push(Diagnostic::error(
@@ -1957,7 +1968,7 @@ impl<'a> Checker<'a> {
             return;
         };
         let globals = self.current_ct_globals();
-        if let Err(d) = crate::Comptime::run_block_with_imports(
+        match crate::Comptime::run_block_with_imports(
             body,
             self.ct_funcs,
             self.ct_externs,
@@ -1965,7 +1976,13 @@ impl<'a> Checker<'a> {
             &globals,
             self.core_imports,
         ) {
-            self.diags.push(d);
+            Ok(scope) => {
+                let current = self.ct_scopes.last_mut().unwrap();
+                for (name, value) in scope {
+                    current.insert(name, value);
+                }
+            }
+            Err(d) => self.diags.push(d),
         }
     }
 
@@ -3065,4 +3082,14 @@ pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
         Type::FixedList { elem, .. } => is_pod_uninit_type(elem),
         _ => false,
     }
+}
+
+fn no_any_type(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0350",
+        "Jet does not have an `Any` type".to_string(),
+        "a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Data` for parsed dynamic data".to_string(),
+        "replace `Any` with the specific mechanism for this value".to_string(),
+        Some(span),
+    )
 }

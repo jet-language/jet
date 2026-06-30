@@ -34,7 +34,7 @@ same user model.
 - Platform readiness backend for task parking (D-MNIO1=A).
 - Structured-concurrency task scope (`taskgroup`, D-NURSERY1/D-TASKSCOPE1 shipped).
 - Task-scope combinators: all/race/any (D-CONCCOMB1, D-RACEWIN1=A; built under #126).
-- First-ready event selection for channels/timers/I/O (D-CONCSELECT1=A, if-fused select).
+- First-ready event selection for channels/timers/I/O (D-CONCSELECT1=A, fluent `g.select().recv(...).after(...).wait()?`).
 - Deadline propagation through task context (D-DEADLINE1=A, shipped foundation).
 - Expert-visible runtime controls: detached-task audit, scheduler/poller metrics,
   task names, worker/poller tuning, and fairness policy.

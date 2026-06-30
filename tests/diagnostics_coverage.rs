@@ -583,6 +583,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E2413", // retired (D-SERDE12): generic #[Codable] is first-class; no gate
         "E2701", // E2-M9 (ring library) — staged
         "E2702", // E2-M9 — staged
+        "E2712", // retired by D-CTBLOCKEXPOSE1; runtime `$name` now uses E2713 only on missing comptime value
         "E2801", // E2-M10 (networking) — staged
         "E2802", // E2-M10 — staged
         "E2803", // E2-M10 — staged
@@ -598,6 +599,9 @@ fn registered_unimplemented_codes_are_expected() {
         "L2901", // E2-M11 — staged
         "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
         "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed
+        "E0852", // D-GENMOD2=A: type argument bound check — staged (MVP skips bound checking)
+        "E0853", // D-GENMOD2=A: value argument type mismatch — staged (MVP skips value params)
+        "E0855", // D-GENMOD2=A: circular alias — staged (MVP has no cycle detection)
     ];
 
     let expected: BTreeSet<String> = EXPECTED_SPEC_AHEAD_OF_IMPL

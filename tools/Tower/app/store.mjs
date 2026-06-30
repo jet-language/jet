@@ -198,7 +198,8 @@ function advanceClearedCard(s, cardId) {
 
 // Owner leaves a note/question on a card; an agent answers it.
 export function addQuestion(s, p) {
-  const q = { id: newId('q'), cardId: p.cardId, by: p.by || 'owner', kind: p.kind || 'question',
+  const q = { id: newId('q'), cardId: p.cardId, decisionId: p.decisionId || null,
+    by: p.by || 'owner', kind: p.kind || 'question',
     text: p.text || '', status: 'open', answer: '', created: now() };
   s.questions.push(q);
   return q;

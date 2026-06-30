@@ -3,8 +3,9 @@ use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    ConstAttr, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, ImportKind, Item, LValue,
-    LambdaBody, OrFallback, ProgramBundle, RustConstKind, Stmt, StrPart, Type,
+    CodeModule, ConstAttr, ElseBranch, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
+    GenericModuleParam, IfStmt, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg,
+    OrFallback, Param, ProgramBundle, RustConstKind, Stmt, StrPart, Type,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -41,6 +42,275 @@ fn normalize_sem_path(path: &Path) -> PathBuf {
 /// Only callee names are rewritten (the unambiguous case); a sibling referenced
 /// as a value resolves through normal name lookup and yields a clean Jet error
 /// rather than leaking to rustc.
+// ---------------------------------------------------------------------------
+// D-GENMOD2=A: generic module expansion (R11 pre-pass)
+// ---------------------------------------------------------------------------
+//
+// `module StringCache32 = Lru<String, 32>` expands into a synthetic
+// `CodeModule` with the same body as the generic template, with every
+// TypeParam name substituted by the supplied type arg. The original
+// GenericModule/ModuleAlias items are then erased. This runs before
+// `mangle_inline_sibling_calls` so the expanded body is visible to that pass.
+
+/// Substitute every occurrence of `param_name` in `ty` with `replacement`.
+fn substitute_type(ty: Type, param_name: &str, replacement: &Type) -> Type {
+    match ty {
+        Type::Named(ref n) if n == param_name => replacement.clone(),
+        Type::Named(_) => ty,
+        Type::List(inner) => {
+            Type::List(Box::new(substitute_type(*inner, param_name, replacement)))
+        }
+        Type::Map { key, value } => Type::Map {
+            key: Box::new(substitute_type(*key, param_name, replacement)),
+            value: Box::new(substitute_type(*value, param_name, replacement)),
+        },
+        Type::Shared(inner) => {
+            Type::Shared(Box::new(substitute_type(*inner, param_name, replacement)))
+        }
+        Type::Option(inner) => {
+            Type::Option(Box::new(substitute_type(*inner, param_name, replacement)))
+        }
+        Type::Result { ok, err } => Type::Result {
+            ok: Box::new(substitute_type(*ok, param_name, replacement)),
+            err: Box::new(substitute_type(*err, param_name, replacement)),
+        },
+        Type::Fn { params, ret, effect_bound } => Type::Fn {
+            params: params.into_iter().map(|t| substitute_type(t, param_name, replacement)).collect(),
+            ret: ret.map(|r| Box::new(substitute_type(*r, param_name, replacement))),
+            effect_bound,
+        },
+        Type::Apply { name, args } => Type::Apply {
+            name,
+            args: args.into_iter().map(|t| substitute_type(t, param_name, replacement)).collect(),
+        },
+        Type::Tuple(parts) => Type::Tuple(
+            parts.into_iter().map(|(n, t)| (n, Box::new(substitute_type(*t, param_name, replacement)))).collect()
+        ),
+        Type::FixedList { elem, len } => Type::FixedList {
+            elem: Box::new(substitute_type(*elem, param_name, replacement)),
+            len,
+        },
+        Type::Tagged { marker, inner } => Type::Tagged {
+            marker,
+            inner: Box::new(substitute_type(*inner, param_name, replacement)),
+        },
+        // Primitives and opaque variants carry no nested Type.
+        other => other,
+    }
+}
+
+fn substitute_type_in_param(mut p: Param, param_name: &str, replacement: &Type) -> Param {
+    p.ty = substitute_type(p.ty, param_name, replacement);
+    p
+}
+
+fn substitute_type_in_func(mut f: Func, param_name: &str, replacement: &Type) -> Func {
+    f.params = f
+        .params
+        .into_iter()
+        .map(|p| substitute_type_in_param(p, param_name, replacement))
+        .collect();
+    if let Some(ret) = f.return_type {
+        f.return_type = Some(substitute_type(ret, param_name, replacement));
+    }
+    // Body stmt-level substitution is not done here — the sema checker resolves
+    // type names from declarations, so only signature types need substitution.
+    f
+}
+
+fn apply_type_args_to_func(f: Func, params: &[GenericModuleParam], args: &[ModuleArg]) -> Func {
+    let mut out = f;
+    for (param, arg) in params.iter().zip(args.iter()) {
+        match (param, arg) {
+            (GenericModuleParam::TypeParam { name, .. }, ModuleArg::Type(ty, _)) => {
+                out = substitute_type_in_func(out, name, ty);
+            }
+            _ => {} // value params are left as-is for now (would need const-eval)
+        }
+    }
+    out
+}
+
+/// A cloned-and-filtered view of a generic module template.
+/// `non_fn_kinds` records item kinds that were dropped (non-Func),
+/// so E0854 can fire at alias-expansion time.
+struct TemplateInfo {
+    def: GenericModuleDef,
+    non_fn_kinds: Vec<&'static str>,
+}
+
+fn expand_alias(
+    alias: &ModuleAliasDef,
+    templates: &std::collections::HashMap<String, TemplateInfo>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<CodeModule> {
+    let info = match templates.get(&alias.target) {
+        Some(t) => t,
+        None => {
+            diags.push(Diagnostic::error(
+                "E0850",
+                format!(
+                    "generic module `{}` not found in this scope",
+                    alias.target
+                ),
+                "check the module template name and make sure it is defined in the same file"
+                    .to_string(),
+                format!(
+                    "example: `module {} = MyTemplate<String>`",
+                    alias.name
+                ),
+                Some(alias.target_span),
+            ));
+            return None;
+        }
+    };
+    let template = &info.def;
+    if alias.args.len() != template.params.len() {
+        diags.push(Diagnostic::error(
+            "E0851",
+            format!(
+                "module alias `{}` passes {} argument(s) but `{}` expects {}",
+                alias.name,
+                alias.args.len(),
+                alias.target,
+                template.params.len(),
+            ),
+            "the number of type/value arguments must match the template parameter list".to_string(),
+            format!(
+                "example: `module {} = {}<{}>` with {} arg(s)",
+                alias.name,
+                alias.target,
+                template.params.iter().map(|p| match p {
+                    GenericModuleParam::TypeParam { name, .. } => name.as_str(),
+                    GenericModuleParam::ValueParam { name, .. } => name.as_str(),
+                }).collect::<Vec<_>>().join(", "),
+                template.params.len(),
+            ),
+            Some(alias.span),
+        ));
+        return None;
+    }
+    // Emit E0854 for each non-Func item kind that was in the original template.
+    for kind in &info.non_fn_kinds {
+        diags.push(Diagnostic::error(
+            "E0854",
+            format!(
+                "generic module `{}` contains a `{}` item, which cannot be instantiated yet",
+                template.name, kind
+            ),
+            "generic module bodies currently support only `fn` items".to_string(),
+            "move structs/enums outside the generic module and pass them as type params"
+                .to_string(),
+            Some(alias.span),
+        ));
+    }
+    if !info.non_fn_kinds.is_empty() {
+        return None;
+    }
+    // Substitute type args into each function signature in the template body.
+    let body: Vec<Item> = template
+        .body
+        .iter()
+        .filter_map(|item| {
+            if let Item::Func(f) = item {
+                let expanded =
+                    apply_type_args_to_func(f.clone(), &template.params, &alias.args);
+                Some(Item::Func(expanded))
+            } else {
+                None // already reported above
+            }
+        })
+        .collect();
+    Some(CodeModule {
+        name: alias.name.clone(),
+        name_span: alias.name_span,
+        is_pub: alias.is_pub,
+        is_package_pub: alias.is_package_pub,
+        body: Some(body),
+        web_target: None,
+        span: alias.span,
+    })
+}
+
+/// D-GENMOD2=A: expand every `ModuleAlias` in each module's item list into a
+/// concrete `CodeModule` using the corresponding `GenericModule` template.
+/// Templates and aliases are removed from the item list after expansion.
+pub(crate) fn expand_generic_module_aliases(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
+    for module in bundle.modules.iter_mut() {
+        // Collect templates by name, recording non-Func item kinds for E0854.
+        let templates: std::collections::HashMap<String, TemplateInfo> = module
+            .items
+            .iter()
+            .filter_map(|i| {
+                if let Item::GenericModule(gm) = i {
+                    let mut non_fn_kinds: Vec<&'static str> = Vec::new();
+                    let fn_items: Vec<Item> = gm
+                        .body
+                        .iter()
+                        .filter_map(|item| match item {
+                            Item::Func(f) => Some(Item::Func(f.clone())),
+                            Item::Struct(_) => {
+                                non_fn_kinds.push("struct");
+                                None
+                            }
+                            Item::Enum(_) => {
+                                non_fn_kinds.push("enum");
+                                None
+                            }
+                            Item::Const(_) => {
+                                non_fn_kinds.push("const");
+                                None
+                            }
+                            _ => {
+                                non_fn_kinds.push("item");
+                                None
+                            }
+                        })
+                        .collect();
+                    Some((
+                        gm.name.clone(),
+                        TemplateInfo {
+                            def: GenericModuleDef {
+                                name: gm.name.clone(),
+                                name_span: gm.name_span,
+                                is_pub: gm.is_pub,
+                                is_package_pub: gm.is_package_pub,
+                                params: gm.params.clone(),
+                                body: fn_items,
+                                span: gm.span,
+                            },
+                            non_fn_kinds,
+                        },
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Expand aliases into CodeModules, collect separately.
+        let mut expansions: Vec<(usize, CodeModule)> = Vec::new();
+        for (idx, item) in module.items.iter().enumerate() {
+            if let Item::ModuleAlias(alias) = item {
+                if let Some(cm) = expand_alias(alias, &templates, diags) {
+                    expansions.push((idx, cm));
+                }
+            }
+        }
+
+        // Replace/erase: iterate in reverse to preserve indices.
+        // For each alias, replace it with the expanded CodeModule.
+        // GenericModule items are erased (replaced with nothing).
+        // We need to:
+        // 1. Replace each ModuleAlias with its CodeModule expansion (collected above)
+        // 2. Remove all GenericModule items
+        for (idx, cm) in expansions {
+            module.items[idx] = Item::CodeModule(cm);
+        }
+        module.items.retain(|i| !matches!(i, Item::GenericModule(_)));
+    }
+}
+
 pub(crate) fn mangle_inline_sibling_calls(bundle: &mut ProgramBundle) {
     for module in bundle.modules.iter_mut() {
         for item in module.items.iter_mut() {
@@ -341,6 +611,9 @@ pub(crate) fn check_bundle_opts(
     allow_impure: bool,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
+    // D-GENMOD2=A: expand module aliases into concrete CodeModules before any
+    // sibling-call mangling or registration sees the items.
+    expand_generic_module_aliases(bundle, &mut diags);
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
@@ -549,6 +822,8 @@ pub(crate) fn check_bundle_opts(
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
+                // D-GENMOD2=A: templates/aliases already expanded; erase.
+                Item::GenericModule(_) | Item::ModuleAlias(_) => {}
             }
         }
         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so
@@ -1125,7 +1400,9 @@ pub(crate) fn check_bundle_opts(
             | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) => {} // D-METADERIVE1=A: already expanded above
+            | Item::UserDerive(_) // D-METADERIVE1=A: already expanded above
+            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
             }
         }
         for item in &mut module.items {
@@ -1421,7 +1698,9 @@ pub(crate) fn collect_used_core(
                 | Item::Migration(_) // D-MIGRATE1
                 | Item::StateDecl(_) // D-STATE-DECL: uses no core imports
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) => {} // D-METADERIVE1=A: already expanded
+            | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
+            | Item::GenericModule(_) // D-GENMOD2=A: template — erases
+            | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
             }
         }
     }
@@ -1989,6 +2268,7 @@ pub(crate) fn check_module_bodies(
                 let mut synthetic = Func {
                     is_pub: false,
                     is_package_pub: false,
+                    external_type: None,
                     name: format!("__test_{}", t.name),
                     name_span: t.name_span,
                     type_params: Vec::new(),
@@ -2031,6 +2311,7 @@ pub(crate) fn check_module_bodies(
                 let mut synthetic = Func {
                     is_pub: false,
                     is_package_pub: false,
+                    external_type: None,
                     name: format!("__bench_{}", b.name),
                     name_span: b.name_span,
                     type_params: Vec::new(),

@@ -674,13 +674,19 @@ impl<'a> Checker<'a> {
             } => self.infer_fan_out(callee, items, *span),
             // D-CTMARKER1=C: `$name` comptime splice. Valid only in comptime contexts;
             // the Comptime interpreter resolves the value. In runtime code: E2712.
-            Expr::ComptimeSplice { name: _, span } => {
+            Expr::ComptimeSplice { name, span, value } => {
                 if !self.in_comptime {
+                    let globals = self.current_ct_globals();
+                    if let Some(v) = globals.get(name).cloned() {
+                        let ty = v.jet_type();
+                        *value = Some(v);
+                        return Some(ty);
+                    }
                     self.diags.push(Diagnostic::error(
-                        "E2712",
-                        "`$` splice used outside a comptime context".to_string(),
-                        "`$name` looks up a name in the comptime scope and is only valid inside a `derive` body, `comptime {}` block, or comptime binding".to_string(),
-                        "remove the `$` prefix, or move this code into a `comptime { ... }` block or a `derive` body".to_string(),
+                        "E2713",
+                        format!("there is no comptime value named `{}`", name),
+                        "`$name` splices a value that was computed by a `comptime` binding or `comptime {}` block".to_string(),
+                        format!("define `comptime {name} = ...` before using `${name}`"),
                         Some(*span),
                     ));
                 }

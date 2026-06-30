@@ -1,7 +1,12 @@
 //! M4: scheduler-backed task/channel host shims for the Cranelift JIT.
 
-use jet_codegen::scheduler::{jet_scheduler_spawn, JetSchedulerChannel, JetSchedulerJoin};
+use jet_codegen::scheduler::{
+    jet_scheduler_all, jet_scheduler_any, jet_scheduler_race,
+    jet_scheduler_select_int_channels, jet_scheduler_spawn_with_control, JetSchedulerChannel,
+    JetSchedulerJoin, JetTaskControl,
+};
 use std::cell::RefCell;
+use std::sync::Arc;
 
 thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
@@ -126,12 +131,42 @@ type SpawnFn2 = extern "C" fn(i64, i64) -> i64;
 type SpawnFn3 = extern "C" fn(i64, i64, i64) -> i64;
 type SpawnFn4 = extern "C" fn(i64, i64, i64, i64) -> i64;
 
-fn store_task(join: JetSchedulerJoin<i64>) -> i64 {
+fn store_task(join: JetSchedulerJoin<i64>, control: Arc<JetTaskControl>) -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.tasks.len() as i64;
         rt.tasks.push(Some(join));
+        rt.task_controls.push(control);
         id
     })
+}
+
+fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
+    rt.lists
+        .get(list as usize)
+        .expect("jit task combinator: bad list handle")
+        .clone()
+}
+
+fn store_i64_list(rt: &mut super::JitRuntime, values: Vec<i64>) -> i64 {
+    let id = rt.lists.len() as i64;
+    rt.lists.push(values);
+    id
+}
+
+fn take_task_entries(
+    rt: &mut super::JitRuntime,
+    ids: &[i64],
+) -> Vec<(JetSchedulerJoin<i64>, Arc<JetTaskControl>)> {
+    ids.iter()
+        .map(|&id| {
+            let idx = id as usize;
+            let join = rt.tasks[idx]
+                .take()
+                .expect("jit task combinator: task already joined");
+            let control = rt.task_controls[idx].clone();
+            (join, control)
+        })
+        .collect()
 }
 
 fn active_runtime_ptr() -> Option<*mut super::JitRuntime> {
@@ -139,51 +174,106 @@ fn active_runtime_ptr() -> Option<*mut super::JitRuntime> {
 }
 
 /// Run JIT spawn body on a pool worker with the spawner's runtime heap wired up.
-fn spawn_with_runtime<F>(f: F) -> JetSchedulerJoin<i64>
+fn spawn_with_runtime<F>(f: F) -> i64
 where
     F: FnOnce() -> i64 + Send + 'static,
 {
     let rt_ptr = active_runtime_ptr().expect("jit spawn without active runtime");
     let rt_addr = rt_ptr as usize;
-    jet_scheduler_spawn(move || {
-        // SAFETY: `rt_ptr` is the resident heap for this JIT invocation; workers
-        // only touch mutex-backed channel state and indexed sender slots.
-        let rt_ptr = rt_addr as *mut super::JitRuntime;
-        set_active_runtime(Some(rt_ptr));
-        let out = f();
-        set_active_runtime(None);
-        out
-    })
+    let control = JetTaskControl::new();
+    let join = jet_scheduler_spawn_with_control(
+        move || {
+            // SAFETY: `rt_ptr` is the resident heap for this JIT invocation; workers
+            // only touch mutex-backed channel state and indexed sender slots.
+            let rt_ptr = rt_addr as *mut super::JitRuntime;
+            set_active_runtime(Some(rt_ptr));
+            let out = f();
+            set_active_runtime(None);
+            out
+        },
+        control.clone(),
+    );
+    store_task(join, control)
 }
 
 extern "C" fn jet_jit_spawn0(f: SpawnFn0) -> i64 {
-    store_task(spawn_with_runtime(move || f()))
+    spawn_with_runtime(move || f())
 }
 
 extern "C" fn jet_jit_spawn1(f: SpawnFn1, c0: i64) -> i64 {
-    store_task(spawn_with_runtime(move || f(c0)))
+    spawn_with_runtime(move || f(c0))
 }
 
 extern "C" fn jet_jit_spawn2(f: SpawnFn2, c0: i64, c1: i64) -> i64 {
-    store_task(spawn_with_runtime(move || f(c0, c1)))
+    spawn_with_runtime(move || f(c0, c1))
 }
 
 extern "C" fn jet_jit_spawn3(f: SpawnFn3, c0: i64, c1: i64, c2: i64) -> i64 {
-    store_task(spawn_with_runtime(move || f(c0, c1, c2)))
+    spawn_with_runtime(move || f(c0, c1, c2))
 }
 
 extern "C" fn jet_jit_spawn4(f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
-    store_task(spawn_with_runtime(move || f(c0, c1, c2, c3)))
+    spawn_with_runtime(move || f(c0, c1, c2, c3))
+}
+
+extern "C" fn jet_jit_task_cancel(task: i64) {
+    with_runtime_mut(|rt| {
+        rt.task_controls[task as usize].cancel();
+    });
 }
 
 extern "C" fn jet_jit_task_join(task: i64) -> i64 {
     with_runtime_mut(|rt| {
-        let slot = rt
-            .tasks
-            .get_mut(task as usize)
-            .expect("jit task join: bad handle");
-        let join = slot.take().expect("jit task join: already joined");
+        let join = rt.tasks[task as usize]
+            .take()
+            .expect("jit task join: already joined");
         join.join()
+    })
+}
+
+/// D-NURSERY1=A: `g.all([h1, h2, …])` — returns a new `[Int]` list handle.
+extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let ids = task_ids_from_list(rt, task_list);
+        let entries = take_task_entries(rt, &ids);
+        store_i64_list(rt, jet_scheduler_all(entries))
+    })
+}
+
+/// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first successful result.
+extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let ids = task_ids_from_list(rt, task_list);
+        let entries = take_task_entries(rt, &ids);
+        jet_scheduler_race(entries)
+    })
+}
+
+/// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result.
+extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let ids = task_ids_from_list(rt, task_list);
+        let entries = take_task_entries(rt, &ids);
+        jet_scheduler_any(entries)
+    })
+}
+
+/// D-CONCSELECT1=A: `g.select().recv(…).wait()` — multiplex channel/timer arms.
+extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let ch_ids = task_ids_from_list(rt, recv_list);
+        let after_ids = task_ids_from_list(rt, after_list);
+        let channels: Vec<JetSchedulerChannel<i64>> = ch_ids
+            .iter()
+            .map(|&id| {
+                rt.channels
+                    .get(id as usize)
+                    .expect("jit select: bad channel handle")
+                    .clone()
+            })
+            .collect();
+        let timers: Vec<u64> = after_ids.iter().map(|&ms| (ms.max(0)) as u64).collect();
+        jet_scheduler_select_int_channels(&channels, timers)
     })
 }
 
@@ -201,6 +291,11 @@ pub(crate) struct ConcurrencyHostFns {
     pub spawn3: cranelift_module::FuncId,
     pub spawn4: cranelift_module::FuncId,
     pub task_join: cranelift_module::FuncId,
+    pub task_cancel: cranelift_module::FuncId,
+    pub task_all: cranelift_module::FuncId,
+    pub task_race: cranelift_module::FuncId,
+    pub task_any: cranelift_module::FuncId,
+    pub select_wait: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -229,6 +324,11 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_spawn3", jet_jit_spawn3 as *const u8);
     builder.symbol("jet_jit_spawn4", jet_jit_spawn4 as *const u8);
     builder.symbol("jet_jit_task_join", jet_jit_task_join as *const u8);
+    builder.symbol("jet_jit_task_cancel", jet_jit_task_cancel as *const u8);
+    builder.symbol("jet_jit_task_all", jet_jit_task_all as *const u8);
+    builder.symbol("jet_jit_task_race", jet_jit_task_race as *const u8);
+    builder.symbol("jet_jit_task_any", jet_jit_task_any as *const u8);
+    builder.symbol("jet_jit_select_wait", jet_jit_select_wait as *const u8);
 }
 
 pub(crate) fn declare_concurrency_host_fns(
@@ -259,6 +359,9 @@ pub(crate) fn declare_concurrency_host_fns(
     sig_spawn0.params.push(AbiParam::new(types::I64));
     sig_spawn0.returns.push(AbiParam::new(types::I64));
 
+    let mut sig_void_i64 = Signature::new(cc);
+    sig_void_i64.params.push(AbiParam::new(types::I64));
+
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
             .declare_function(name, Linkage::Import, sig)
@@ -288,5 +391,10 @@ pub(crate) fn declare_concurrency_host_fns(
         spawn3: import("jet_jit_spawn3", &sig_spawn3)?,
         spawn4: import("jet_jit_spawn4", &sig_spawn4)?,
         task_join: import("jet_jit_task_join", &sig_i64)?,
+        task_cancel: import("jet_jit_task_cancel", &sig_void_i64)?,
+        task_all: import("jet_jit_task_all", &sig_i64)?,
+        task_race: import("jet_jit_task_race", &sig_i64)?,
+        task_any: import("jet_jit_task_any", &sig_i64)?,
+        select_wait: import("jet_jit_select_wait", &sig_i64_i64)?,
     })
 }

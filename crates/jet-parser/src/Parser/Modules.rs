@@ -87,6 +87,10 @@ impl<'a> Parser<'a> {
         let next = &self.toks[scan.min(self.toks.len() - 1)];
         match &next.kind {
             TokKind::Semi => true, // `module name;` — always a code module
+            // D-GENMOD2=A: `module Name<params> { … }` — generic module template.
+            TokKind::Lt => true,
+            // D-GENMOD2=A: `module Alias = Module<args>` — module alias.
+            TokKind::Eq => true,
             TokKind::LBrace => {
                 // Peek inside the `{` at scan+1
                 let inside = &self.toks[(scan + 1).min(self.toks.len() - 1)];
@@ -128,9 +132,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-MOD1/2: parse `[pub] module name ;` or `[pub] module name { items }`.
-    /// `is_pub` is true when `pub` was already peeked (but NOT consumed).
-    pub(super) fn code_module(&mut self, is_pub: bool) -> Result<CodeModule, Diagnostic> {
+    /// D-MOD1/2: parse `[pub] module name ;` or `[pub] module name { items }`,
+    /// or D-GENMOD2=A generic/alias forms. Returns an `Item` (CodeModule,
+    /// GenericModule, or ModuleAlias) so all callers share one return type.
+    pub(super) fn code_module(&mut self, is_pub: bool) -> Result<Item, Diagnostic> {
         self.code_module_with_pkg(is_pub, false)
     }
 
@@ -138,7 +143,7 @@ impl<'a> Parser<'a> {
         &mut self,
         is_pub: bool,
         is_package_pub: bool,
-    ) -> Result<CodeModule, Diagnostic> {
+    ) -> Result<Item, Diagnostic> {
         let web_target = if self.at_web_target() {
             Some(self.parse_web_target_marker()?)
         } else {
@@ -152,16 +157,24 @@ impl<'a> Parser<'a> {
         is_pub: bool,
         is_package_pub: bool,
         web_target: Option<crate::Syntax::WebBucket>,
-    ) -> Result<CodeModule, Diagnostic> {
+    ) -> Result<Item, Diagnostic> {
         if is_pub {
             self.bump(); // consume `pub`
         }
         let start = self.bump().span; // consume `module`
         let (name, name_span) = self.expect_ident("for the code module name")?;
         match &self.peek().kind {
+            // D-GENMOD2=A: `module Name<params> { body }` — generic module template
+            TokKind::Lt => {
+                self.finish_generic_module(name, name_span, is_pub, is_package_pub, start)
+            }
+            // D-GENMOD2=A: `module Alias = Target<args>` — module alias
+            TokKind::Eq => {
+                self.finish_module_alias(name, name_span, is_pub, is_package_pub, start)
+            }
             TokKind::Semi => {
                 let end = self.bump().span.end; // consume `;`
-                Ok(CodeModule {
+                Ok(Item::CodeModule(CodeModule {
                     name,
                     name_span,
                     is_pub,
@@ -169,7 +182,7 @@ impl<'a> Parser<'a> {
                     body: None,
                     web_target,
                     span: Span::new(start.start, end),
-                })
+                }))
             }
             TokKind::LBrace => {
                 self.bump(); // consume `{`
@@ -189,7 +202,7 @@ impl<'a> Parser<'a> {
                 }
                 let end = self.peek().span.end;
                 self.expect(TokKind::RBrace, "to close the module body")?;
-                Ok(CodeModule {
+                Ok(Item::CodeModule(CodeModule {
                     name,
                     name_span,
                     is_pub,
@@ -197,7 +210,7 @@ impl<'a> Parser<'a> {
                     body: Some(items),
                     web_target,
                     span: Span::new(start.start, end),
-                })
+                }))
             }
             other => Err(Diagnostic::error(
                 "E0003",
@@ -212,6 +225,131 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             )),
         }
+    }
+
+    /// D-GENMOD2=A: finish parsing `module Name<params> { body }` after the name.
+    fn finish_generic_module(
+        &mut self,
+        name: String,
+        name_span: Span,
+        is_pub: bool,
+        is_package_pub: bool,
+        start: Span,
+    ) -> Result<Item, Diagnostic> {
+        self.bump(); // consume `<`
+        let mut params = Vec::new();
+        while !matches!(self.peek().kind, TokKind::Gt | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                continue;
+            }
+            let (pname, pname_span) = self.expect_ident("for a generic module parameter name")?;
+            // Disambiguate type vs value param by whether there's a bound annotation.
+            // Heuristic: uppercase-starting name → type param (D-CASING1), lowercase → value param.
+            // Either way, optional `: Bound/Type` follows.
+            if pname.chars().next().map_or(false, |c| c.is_uppercase()) {
+                // Type param: `K: Hash` or just `K`
+                let bound = if matches!(self.peek().kind, TokKind::Colon) {
+                    self.bump(); // consume `:`
+                    let (b, _) = self.expect_ident("for the type bound")?;
+                    b
+                } else {
+                    String::new()
+                };
+                params.push(GenericModuleParam::TypeParam {
+                    name: pname,
+                    name_span: pname_span,
+                    bound,
+                });
+            } else {
+                // Value param: `capacity: Int`
+                self.expect(TokKind::Colon, "after a value parameter name")?;
+                let (ty, _) = self.type_()?;
+                params.push(GenericModuleParam::ValueParam {
+                    name: pname,
+                    name_span: pname_span,
+                    ty,
+                });
+            }
+        }
+        self.expect(TokKind::Gt, "to close the generic module parameter list")?;
+        self.expect(TokKind::LBrace, "to open the generic module body")?;
+        let mut body = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            match self.top_level_item_in_code_module() {
+                Ok(item) => body.push(item),
+                Err(d) => {
+                    self.diags.push(d);
+                    self.sync_top();
+                }
+            }
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RBrace, "to close the generic module body")?;
+        Ok(Item::GenericModule(GenericModuleDef {
+            name,
+            name_span,
+            is_pub,
+            is_package_pub,
+            params,
+            body,
+            span: Span::new(start.start, end),
+        }))
+    }
+
+    /// D-GENMOD2=A: finish parsing `module Alias = Target<args>` after the name.
+    fn finish_module_alias(
+        &mut self,
+        name: String,
+        name_span: Span,
+        is_pub: bool,
+        is_package_pub: bool,
+        start: Span,
+    ) -> Result<Item, Diagnostic> {
+        self.bump(); // consume `=`
+        let (target, target_span) = self.expect_ident("for the target module name")?;
+        let mut args = Vec::new();
+        if matches!(self.peek().kind, TokKind::Lt) {
+            self.bump(); // consume `<`
+            while !matches!(self.peek().kind, TokKind::Gt | TokKind::Eof) {
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    continue;
+                }
+                let arg_start = self.peek().span;
+                // Try integer literal first (value arg), then type
+                match &self.peek().kind {
+                    TokKind::Int(_) => {
+                        let expr = self.expr()?;
+                        args.push(ModuleArg::Value(expr, arg_start));
+                    }
+                    _ => {
+                        let (ty, _) = self.type_()?;
+                        args.push(ModuleArg::Type(ty, arg_start));
+                    }
+                }
+            }
+            self.expect(TokKind::Gt, "to close the module alias argument list")?;
+        }
+        let end = self.peek().span.end;
+        // Consume optional trailing `;`
+        if matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        Ok(Item::ModuleAlias(ModuleAliasDef {
+            name,
+            name_span,
+            is_pub,
+            is_package_pub,
+            target,
+            target_span,
+            args,
+            span: Span::new(start.start, end),
+        }))
     }
 
     /// Parse one top-level item inside an inline `module name { … }` body.

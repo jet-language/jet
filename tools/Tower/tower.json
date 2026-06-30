@@ -183,10 +183,12 @@
       "phase": "deciding",
       "priority": "P2",
       "plan": "Plan: tools/Tower/docs/sidequests/generic-modules.md. D-GENMOD1=A approves generic modules. D-GENMOD2 is now open for the exact type-parameter/value-parameter/instantiation spelling; do not implement parser/Syntax.rs until that owner-facing surface is ratified.",
-      "blockedBy": [
-        "c1jixkit"
-      ],
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Unblocked: c91/D-GENMOD2 shipped."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation blocked by c91/D-GENMOD2 open spelling decision; do not implement generic-module parser work until owner decides."
@@ -298,7 +300,7 @@
       "body": "Build the plugin target backend + loader (reserved by D-TGT2). Until then `plugin` is a reserved manifest keyword that errors with no-backend.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e5",
       "phase": "planning",
       "priority": "P2",
       "plan": "plugin-target",
@@ -353,7 +355,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "publish-registry-ux",
       "blockedBy": [],
@@ -1051,7 +1053,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Canonical static-guarantees implementation plan. Build one sema facts/policy engine, then layer features on it. No duplicate proof engines.\n\nBuild order:\n1. Facts core: represent refinements as named predicate-backed types; collect comparison/range/require facts; branch narrowing; loop facts; fixed-list length facts; call pre/postcondition facts.\n2. Contracts: require/ensure syntax and runtime/test checks where ratified; jet test harvests contracts as property/property-test seeds; diagnostics point at the violated contract and caller path.\n3. Bounds proof: default runtime bounds checks stay; elide or expert-escape only where facts prove in-range. Add explicit unsafe/proof escape only if ratified; no silent unchecked indexing.\n4. Information-flow/compliance: security-label lattice as sema policy over values; declassify is explicit and audited; labels propagate through calls, collections, serialization, and task boundaries.\n5. Budgets: #Budget/profile markers feed the same call graph/facts layer; enforce forbidden effects, bounded loops, and budget diagnostics without a second effect system.\n6. Replay soundness: reuse effect/inverse-propagation walk; raise/attach D-REPLAY2 if marker spelling is still missing before parser work; reject reachable Time/Rand/Net/Io unless mockable under replay.\n7. Solver/proof integration: formal proof hooks consume the same facts and contracts; generated obligations must report Jet diagnostics, never prover internals.\n\nAcceptance: ui snapshots for missing refinement proof, failed contract, unsafe/unknown bounds proof, IFC leak, invalid declassify, budget violation, replay-unsound call path; examples/goldens for PositiveInt, safe index, PII declassify, render-frame budget, replayable pure handler, formal proof stub; docs/spec/diagnostics.md codes for each user-facing diagnostic.",
       "blockedBy": [],
@@ -1585,7 +1587,7 @@
       ],
       "created": "2026-06-26T21:10:13.903Z",
       "updated": "2026-06-28",
-      "workOrder": 50
+      "workOrder": 4
     },
     {
       "id": "c2iqs6m",
@@ -1684,12 +1686,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "workOrder": 40,
-      "plan": "Canonical protocol/representation hooks implementation plan. Do not add arbitrary traits/macros; add only blessed hooks with one clear semantic job each.\n\nBuild order:\n1. Inventory existing hook machinery and trait/protocol support; document allowed hook set in syntax-decisions/spec before parser/sema work.\n2. Complete iterator/index/literal-suffix protocol hook coverage from #41 with diagnostics for unsupported/misdeclared hooks.\n3. Display/Debug split: Debug auto-derive for structs/enums with redaction support; Display requires explicit impl; interpolation defaults to Display and supports {value@Debug}; sema rejects unknown selectors.\n4. Rollback hooks: Snapshot/Rollback protocols with associated state type; transaction engine uses custom snapshot/restore when present, otherwise existing safe auto path; diagnostics for irreversible fields without hook.\n5. Formatter/docs/examples: hooks round-trip, examples show user-facing display vs debug, custom iterator/index/suffix, transaction rollback.\n\nAcceptance: ui snapshots for bad hook signatures/unknown interpolation selector/rollback gaps; golden examples; no general macro or open-ended operator overload path.",
+      "plan": "tools/Tower/docs/plans/epoch-3/protocol-repr-hooks.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Owner Q&A: dual-tier Iterator/Index ballots (beginner .each/.get + expert protocol hooks); unit construction via px.{100} dot-constructor. Tower focus mode now scopes questions per decisionId."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -1706,6 +1717,11 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L37). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Plan vetted. Rollback hooks and D-ITER1 adapters DONE. Display/Debug split needs 2 ballots. Iterator/index/suffix need 3 ballots likely resolving to defer. -> deciding."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -2512,9 +2528,7 @@
       "phase": "ready",
       "priority": "P2",
       "plan": "Canonical crypto/secrets implementation plan. Default API must be misuse-resistant; raw primitives stay expert-only.\n\nBuild order:\n1. Preserve/finish RNG split prerequisite: deterministic PRNG and CSPRNG remain structurally separate.\n2. Envelope API: crypto.seal/open and crypto.sign/verify hide nonce/mode/key details; versioned envelope metadata; clear error types; no raw AES/ChaCha/RSA beginner path.\n3. Algorithm agility: design hybrid-ready envelope metadata and algorithm ids now; do not expose PQ primitive until backend exists; migration tests prove old envelopes still open.\n4. TTL/rotting secrets: core.time.Expiring<T> and core.secrets.Rotting<T>; constructors require clock/context and deadline/ttl; access returns T? or fallible expired error.\n5. Static/lint support: warn/error for expired unwrap in test-known clock cases; reject crypto API misuse that bypasses envelope surface.\n\nAcceptance: examples for seal/open, sign/verify, envelope version migration, expiring cache, rotating secret; golden tests; ui snapshots for wrong RNG/raw primitive misuse/expired unchecked access; docs explain expert escape hatches.",
-      "blockedBy": [
-        "cgiv599"
-      ],
+      "blockedBy": [],
       "log": [
         {
           "at": "2026-06-30",
@@ -2540,6 +2554,11 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Cleared stale blockedBy entries — all listed blockers are done cards."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3543,11 +3562,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "Plan: tools/Tower/docs/sidequests/generic-modules.md. D-GENMOD1=A approves generic modules. D-GENMOD2 is now open for the exact type-parameter/value-parameter/instantiation spelling; do not implement parser/Syntax.rs until that owner-facing surface is ratified.",
+      "plan": "Plan: tools/Tower/docs/sidequests/generic-modules.md. D-GENMOD1=A + D-GENMOD2=A shipped: parser/sema expansion, E0850–E0854, example 170_generic_modules.jet, ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified done: parser `module Name<params> { … }` + `module Alias = Target<args>`; sema `expand_generic_module_aliases`; E0850–E0854 ui snapshots; example 170_generic_modules.jet golden; full cargo test green; syntax-decisions + spec.md updated."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: 28 -> 60 for Epoch 3 dependency grouping."
@@ -3589,11 +3613,20 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "plan": null,
+      "plan": "tools/Tower/docs/plans/epoch-3/external-inherent-methods.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented D-EXTMETH1: parser accepts top-level `fn Type.method`, normalizes to inherent impls, retired `~~` emits E0325, diagnostics/docs/examples added, and verification passed (`cargo check`, UI snapshots, golden with workspace TMPDIR, hello smoke)."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: 22 -> 30 for Epoch 3 dependency grouping."
@@ -3605,6 +3638,16 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L133). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Plan written to tools/Tower/docs/plans/epoch-3/external-inherent-methods.md. Raised D-EXTMETH1 — external inherent method spelling. Card → deciding. No implementation until D-EXTMETH1 ratified."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "D-EXTMETH1=B ratified: fn Point.dist(self) — dot connector for external inherent methods, mirrors D-IMPLDOT1. → ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3653,11 +3696,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "plan": null,
+      "plan": "tools/Tower/docs/plans/epoch-3/splice-comptime-block.md",
+      "workOrder": 4,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented runtime splice bridge: comptime block bindings merge into sema comptime scope; runtime `$name` type-checks and lowers as serialized literal; E2713 covers missing comptime names; example 125 updated and green."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: 24 -> 50 for Epoch 3 dependency grouping."
@@ -3669,11 +3722,21 @@
         {
           "at": "2026-06-26",
           "text": "Carded from Ideas.md sweep (L135). Ratified/accepted — no proceed-ballot; owner greenlights to start."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Plan written. Parser+sema+interpreter already wired for comptime-context. Runtime bridge missing. Raised D-CTBLOCKEXPOSE1 on exposure model. → deciding."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "D-CTBLOCKEXPOSE1=A ratified: block-local comptime bindings leak into enclosing scope; $NAME splices into runtime. → ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
       "updated": "2026-06-30",
-      "workOrder": 50
+      "workOrder": 4
     },
     {
       "id": "c1nixrpd",
@@ -3746,13 +3809,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
-      "plan": "Implementation plan after #96 semantic-index API: (1) build impact query over call graph, type references, imports, and protocol/serde edges; (2) CLI `jet impact <symbol>` plus JSON output for CI; (3) LSP command surfaces same graph; (4) tests on fixture projects for downstream call/type blast radius; (5) keep analysis read-only and deterministic.",
-      "blockedBy": [
-        "c1oixt2m"
-      ],
+      "plan": "Implementation plan after #96 semantic-index API: (1) build impact query over call graph, type references, imports, and protocol/serde edges; (2) CLI `jet impact <symbol>` plus JSON output for CI; (3) LSP command surfaces same graph; (4) tests on fixture projects for downstream call/type blast radius; (5) keep analysis read-only and deterministic.\n\nVetted 2026-06-30: jet-semindex (#96) provides SemIndex with call_sites/references_to/lookup. D-IMPACT1=A ratified. Build: jet-impact crate (query engine + transitive closure), CLI jet impact <symbol> [--json] [--depth=N], LSP command, fixture tests. No owner-facing syntax. Ready to implement.",
+      "workOrder": 5,
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented D-IMPACT1=A: jet-impact crate with transitive caller/callee closure; `jet impact <file> <symbol> [--json] [--depth=N]`; LSP workspace/executeCommand jet.impact; tests/impact.rs green."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: unset -> 370 for Epoch 3 dependency grouping."
@@ -3776,11 +3843,21 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e3. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Cleared stale blockedBy entries — all listed blockers are done cards."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Plan vetted. jet-semindex API confirmed. D-IMPACT1=A ratified. No decisions needed. → ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
       "updated": "2026-06-30",
-      "workOrder": 370
+      "workOrder": 5
     },
     {
       "id": "c1qixxin",
@@ -4924,12 +5001,32 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "workOrder": 10,
       "plan": "jit-cranelift — M4 functional parity with AOT: (1) wire `dev_iteration` through CraneliftBackend by default (D-JIT2; done 2026-06-30); (2) expand CLIF lowering + host runtime for tasks/channels/spawn (scheduler), then structs/enums/collections/Core per `tir_covers`; (3) align `jit_covers` gate with `tir_covers` (try-compile, never silent interpreter fallback for AOT-covered programs); (4) three-way differential battery on full `examples/features/*.jet` set; (5) `jet dev` on `160_scheduler_spawn.jet` and task programs without E2201. Exit: byte-identical stdout vs AOT for every tir-covered example, or named tested gap only.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified done: D-CONCSELECT1 JIT (`g.select().recv().wait()` CLIF + host shim); 63 jit-covered examples; three-way battery 33/33 (goldens); concurrency slice 131/167/168/169 + 160 on JIT; jit_covers_implies_tir_lowers + tests/dev 27/27 + full cargo test green; 124 remaining gaps named in `jit_coverage_audit` (--ignored) per plan exit (tier-0 fallback, never silent wrong answer). Version 1.0.0."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "M6 close-out slice: taskgroup g.all/g.race/g.any + TaskCancel JIT host shims; TIR spawn-lambda registration for g.task; taskgroup result elem type fix; render_float {:?} matches AOT JetShow; Scheduler portable_poll cfg guard (deny unreachable). Three-way battery 31/32 (131_taskgroup in); jit_covers 62/187 typechecked; gate jit_covers_implies_tir_lowers green; tests/dev 27/27. Phase stays building: jit≪tir (~33%), 30 jit-covered fail CLIF compile, full cargo test blocked on archive I1 unsafe (FFI WIP). Named gap: 169_all_failfast missing golden; 10_structs Point.unit() static method OK in Run/JIT — comptime eval of static methods still separate milestone."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "M5 lists: collections.rs host shims + CLIF lowering (ListLit/Index/Slice/BuiltinMethod/IndexAssign/ForIn/?? get). Struct/enum lowering scaffold. Three-way battery 8→9 (+15_lists). tests/dev 26/26 + corelib 14/14 green. Still building: taskgroup/combinators not jit-covered; tir_covers parity (~15/184 examples); 10_structs blocked on comptime static method."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "M3 widen: string interpolation (`{expr}` in StrLit) via str_begin/push_* host shims; fixed if-branch return dead-flag (no jump into filled block). jit_covers + CLIF lowering for interp; 03_values, 05_fizzbuzz, 37_if_expression added to three-way differential battery (8 examples total). tests/dev 26/26 + full cargo test green. Still building: structs/enums/collections/Core toward tir_covers parity."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: 5 -> 10 for Epoch 3 dependency grouping."
@@ -4979,12 +5076,27 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "workOrder": 20,
       "plan": "Canonical concurrency implementation plan (D-ASYNCRT1=A, D-MNIO1=A, D-CONCCOMB1=A, D-RACEWIN1=A, D-CONCSELECT1=A). Build one model only: task/channel/taskgroup. No @async/await, no user coroutine primitive, no second race/select mechanism.\n\nAlready shipped foundations to preserve:\n- #102: taskgroup g { ... }, g.task { ... }, wait/join, scope-exit ownership, existing g.all/g.race/g.any vertical slice.\n- #101: task handles expose coroutine-grade controls (pause/resume/cancel/trace); coroutine substrate stays internal.\n- #112: #Context(deadline:) flows through taskgroups and wait points; E3003 owns deadline diagnostics.\n- #126 M1/M2: current scheduler vertical slice, channels/timers/yield hook, 160_scheduler_spawn.\n\nImplementation order for dumb agents:\n1. Inventory current behavior first. Read docs/spec/philosophy.md, syntax-decisions.md entries for D-ASYNCRT1/D-MNIO1/D-NURSERY1/D-TASKSCOPE1/D-CONCCOMB1/D-RACEWIN1/D-CONCSELECT1/D-DEADLINE1/D-COROUTINE1, docs/plans/epoch-3/concurrency-vision.md, Source/Prelude/Scheduler.rs, Source/Interpreter.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, task/channel sema/codegen, and tests for examples 131, 157, 158, 160.\n2. Write missing acceptance tests before code. Add/extend examples/features concurrency examples plus CLI/golden tests for: 100k idle parked tasks or smallest CI-safe equivalent with a scale benchmark guard; channel receive wakes one parked task without busy-wait; taskgroup scope cancels losing race tasks; g.all fail-fast cancels siblings; g.race returns first success and cancels losers; g.any returns first completion including errors; if g.select() arms deregister losers; deadline firing wakes parked I/O/channel/task waits with Jet-owned E3003; detached tasks require explicit expert policy/name.\n3. Replace cooperative-only scheduler gaps with real parker abstraction. Define internal runtime traits, not user syntax: Scheduler, Parker, TimerWheel, IoParker. Start with portable readiness fallback for tests; implement D-MNIO1 native backends behind cfg modules (Linux epoll/io_uring path, macOS/BSD kqueue, Windows IOCP). No external runtime dependency unless owner approves a new dep card.\n4. Route every blocking-looking stdlib wait through the parker. Channel recv/send, timers/sleep, task join/wait, TCP accept/read/write, HTTP client/server waits must park Jet tasks, not OS threads. Real OS-blocking fallback must run on an explicit blocking pool and be observable; never silently block scheduler workers.\n5. Finish structured combinators in taskgroup only. g.all/g.race/g.any/select are methods or scoped operations on the taskgroup; they create no detached work and return/propagate through one cancellation model. Implement D-RACEWIN1 inside g.race; #103 is merged here. Implement D-CONCCOMB1 here; #36 is merged here.\n6. Implement D-CONCSELECT1 exactly as ratified: if-fused select over g.select() arms. Parser/sema/codegen/tests must reuse match/if-arm typing where possible. Select must register arms under taskgroup ownership, wake exactly one winner, deregister losers, and compose with deadlines/cancellation.\n7. Add observability and misuse diagnostics. Runtime metrics: runnable/parked task counts, poller wake count, worker utilization, queue depth, cancelled losers. Diagnostics/lints: forgotten task handle wait, swallowed cancellation, deadline ignored, detached task without policy/name, real blocking call on scheduler worker.\n8. Prove parity and scale. cargo test green; examples 131/157/158/160 still pass; add deterministic scheduler tests with fake clock; add stress tests gated for CI budget; add a benchmark/report target that demonstrates 100k parked connections/tasks when run locally. rustc errors remain ICE-only; all user errors are sema/driver diagnostics.\n\nExit criteria:\n- One coherent public model in docs/spec/spec.md and examples: task/channel/taskgroup + scoped combinators + deadline context.\n- No @async/await surface, no function coloring, no separate user coroutine API.\n- Native parker path exists per platform or has named cfg-tested fallback with honest diagnostic/metric.\n- race/all/any/select cannot leak losing tasks past taskgroup scope.\n- CI-safe tests prove cancellation/deadline/wake correctness; local stress target proves 100k parked tasks/connections target.\n- docs/plans/epoch-3/async-networking.md and concurrency-vision.md match implementation.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified done: 157_task_controls golden restored (cancel-after-resume no longer blocks completed task body); examples_compile_and_run + corelib race_cancels/10k + 167/168/169 goldens; full cargo test green; exit criteria from plan met."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verify follow-up: fixed join-after-cancel on completed tasks (157_task_controls golden); spawn honors pause-at-entry; completed Value sent even if cancel flag set post-run. examples_compile_and_run green."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Exit criteria met: D-CONCSELECT1 fluent stack; 167/168/169 examples + goldens; corelib race_cancels + 10k CI + 100k #[ignore]; task-local panic→scheduler unwind (silent hook); epoll/kqueue native in jet_codegen + portable stripped embed (I1); scope-exit cancel+join; docs/spec + syntax-decisions updated; nix develop -c cargo test green."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -5012,14 +5124,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30",
-      "logs": [
-        {
-          "at": "2026-06-28",
-          "by": "agent",
-          "text": "Ballot tightened around best-in-class goal: native backends are recommended for performance ceiling, observability, and no foreign event-loop dependency."
-        }
-      ]
+      "updated": "2026-06-30"
     },
     {
       "id": "c2jizomr",
@@ -5308,15 +5413,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "workOrder": 90,
-      "plan": "Canonical UI stack implementation plan. Build as one vertical product, not scattered cards.\n\nGates to clear first: D-RENDERTGT2 Backend trait API and D-SIGNAL1 core.reactive API. Do not implement backend/component/style syntax before those are ratified.\n\nBuild order:\n1. Core reactive primitives: signals, computed values, effects, scheduler integration, deterministic fake-clock tests.\n2. Renderer seam: one Backend trait for DOM/TUI/native/null backends; diff/apply contract; event routing; lifecycle and cleanup.\n3. View model layer over core.reactive; examples compile to a null backend first.\n4. Typed styles: core.ui.Style property builders, units/colors, validation tables only where library types cannot express checks.\n5. Ownable component kit: jetpack copy-in-and-own distribution, no locked framework dependency, component source stays user-owned.\n6. Motion: animation as derived reactive state, springs/easing/keyframes, deterministic clock tests, no imperative frame mutation API.\n7. Accessibility by default: built-in roles/focus/keyboard labels, release-gated a11y diagnostics, examples for keyboard-only flow.\n8. Backends: web/DOM, TUI/null for tests, then native wrappers (AppKit, Win32/WinUI, GTK) behind the same Backend trait.\n\nAcceptance: examples for null backend, web hello, reactive TUI, typed styles, component kit, motion, and a11y; golden output or DOM snapshots where stable; UI diagnostics for invalid style/a11y/backend misuse; docs/spec/spec.md and epoch-3 UI docs match behavior. No card in this cluster should add a second rendering or state model.",
-      "blockedBy": [
-        "c2pj04xf",
-        "c2oizyqs"
-      ],
+      "plan": "tools/Tower/docs/plans/epoch-3/reactive-ui-stack.md",
+      "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -5349,6 +5455,21 @@
         {
           "at": "2026-06-27",
           "text": "D-REACTCORE1=D resolved — primary gate cleared. Plan updated. Remaining gates: D-RENDERTGT2 (Backend trait) and D-SIGNAL1 (core.reactive API). D-TYPEDSTYLE1 and D-MOTION1 now have their upstream gates cleared — owner can decide them."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Cleared stale blockedBy entries — all listed blockers are done cards."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Plan vetted. Primary gates (D-REACTCORE1, D-RENDERTGT2, D-SIGNAL1) all ratified+implemented. Phases 1 (computed alias) and 7 (web DOM) buildable now. Phases 2-6 need 4 new ballots: D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-A11YGATE1. → deciding."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "All gate decisions ratified: D-UITREE1=A (typed constructors), D-STYLESHAPE1=A (flat Style record), D-MOTIONTIME1=A (injectable Clock), D-A11YGATE1=B (jet lint --a11y). → ready."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -5793,11 +5914,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-CFFI-SYNTAX-REOPEN=A implementation plan: (1) change C FFI marker spelling from `@extern module` to `#Extern module`; (2) update parser/Syntax.rs and formatter; (3) add teaching diagnostic for old `@extern`; (4) migrate examples/tests/docs; (5) ensure generated C FFI behavior unchanged; (6) ui snapshots and cffi tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented D-CFFI-SYNTAX-REOPEN=A: `#Extern` / `#Bindgen` markers; retired `@extern` / `#extern` emit E0060; ui snapshots cffi_retired_*; cffi tests green."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: unset -> 380 for Epoch 3 dependency grouping."
@@ -5821,17 +5947,22 @@
       "num": 149,
       "title": "Reconsider C FFI syntax (`#Lang_C` idea)",
       "body": "Tower Ideas binder: Reconsider FFI syntax -> maybe something like `#Lang_C ...?",
-      "workOrder": 380
+      "workOrder": 2
     },
     {
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-LOOP-SURFACE-REOPEN=B implementation plan: (1) extend `loop` parser with semicolon counted header `loop init; cond; step {}`; (2) semicolons remain legal only in this header; (3) sema scopes init variable to loop and type-checks cond Bool/step statement; (4) codegen lowers to while-style loop; (5) formatter preserves compact header; (6) diagnostics for malformed header; (7) examples/tests.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "D-LOOP-SURFACE-REOPEN=B already shipped via D-LOOP-SEMICOLON1 (`loop init; cond; step {}`); syntax-decisions.md updated; no additional parser work required."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: unset -> 390 for Epoch 3 dependency grouping."
@@ -5855,7 +5986,7 @@
       "num": 150,
       "title": "Reconsider loop surface (`for` + semicolon headers)",
       "body": "Tower Ideas binder: Odin style ; argument separator in loops. Uses \"for\" for all loops",
-      "workOrder": 390
+      "workOrder": 3
     },
     {
       "kind": "idea",
@@ -5893,13 +6024,18 @@
     },
     {
       "kind": "idea",
-      "track": "sidequest",
+      "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
-      "plan": "D-DYNAMIC-TYPE1=B implementation plan: (1) add closed union type AST `A | B | C` in type position; (2) sema treats it as anonymous closed sum with no general `Any`; (3) construction/coercion rules require value fit one member unambiguously; (4) pattern matching over unions exhaustive by member type; (5) codegen emits private enum wrapper or optimized representation; (6) diagnostics for ambiguous member and invalid operations; (7) examples/ui/golden tests.",
+      "plan": "D-DYNAMIC-TYPE1=A implementation plan: no general Any type. (1) Add sema diagnostic E0350 \"No Any type — use the right tool\" that triggers when code uses patterns matching \"hold anything\" intent (untyped fields, var:Any annotations if typed, or missing-type patterns); E0350 lists: enum/union for known variants, generics for abstraction, T? for absence, DataTree/Value for dynamic parsing; (2) update docs/spec to document why no Any + correct alternatives per use case; (3) add ui snapshot for E0350; (4) example showing the alternatives.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented D-DYNAMIC-TYPE1=A: E0350 teaching diagnostic for Any type; docs/spec entry; ui snapshot no_any_type; example 171_no_any_alternatives.jet green."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -5911,6 +6047,11 @@
         {
           "at": "2026-06-28",
           "text": "Carded from Tower Ideas binder during sprint-readiness sweep. Full decision ballot attached."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Plan corrected: D-DYNAMIC-TYPE1=A (not B) was ratified. Task is teaching diagnostic E0350 + docs, not closed union syntax (that would be option B)."
         }
       ],
       "created": "2026-06-28T00:00:00.000Z",
@@ -5918,7 +6059,8 @@
       "id": "c3gdynamic",
       "num": 152,
       "title": "Union and dynamic value story (`Any` question)",
-      "body": "Tower Ideas binder: What does union type look like in jet? Do we have an any type? If not how do we serve those needs? How can we streamline/simplify"
+      "body": "Tower Ideas binder: What does union type look like in jet? Do we have an any type? If not how do we serve those needs? How can we streamline/simplify",
+      "workOrder": 1
     },
     {
       "kind": "idea",
@@ -11492,7 +11634,7 @@
     },
     {
       "detail": "",
-      "status": "open",
+      "status": "ratified",
       "created": "2026-06-28",
       "raisedBy": "agent",
       "raisedAt": "2026-06-28",
@@ -11568,7 +11710,9 @@
           "at": "2026-06-30",
           "text": "Owner question q5lq42z answered: cross-language Any survey, benefits/detriment analysis, devil's advocate pass. Comparisons facet expanded."
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30"
     },
     {
       "detail": "",
@@ -12762,6 +12906,360 @@
       ],
       "outcome": "A",
       "ratifiedAt": "2026-06-29"
+    },
+    {
+      "id": "D-EXTMETH1",
+      "cardId": "c1kixm77",
+      "status": "ratified",
+      "title": "External inherent method spelling",
+      "gist": "Pick the syntax for adding methods to a type outside its definition block.",
+      "story": "Betty is writing a geometry library. She defines Point in geometry/types.jet and wants to add a dist() method in geometry/ops.jet without reopening the original file. What does she write?",
+      "inWild": "// geometry/types.jet\nstruct Point { x: Float; y: Float; }\n\n// geometry/ops.jet  (different file — wants to add dist here)\n// ???",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep S83 ~~: fn Point~~dist(self, other: Point)",
+          "detail": "S83 ratified ~~ for ALL external defs. D-IMPLDOT1 retired it for trait-impls only. Keeping it here means two external connectors exist: ~~ for inherent methods, . for trait impls. Single unusual token users must memorize.",
+          "code": "// geometry/ops.jet\nfn Point~~dist(self, other: Point) -> Float {\n    return ((self.x - other.x) ** 2.0 + (self.y - other.y) ** 2.0).sqrt()\n}\n\n// call site — unchanged\nd #= p.dist(q)"
+        },
+        {
+          "key": "B",
+          "name": "fn Point.dist(self, other: Point) — mirrors D-IMPLDOT1 (recommended)",
+          "detail": "Uses the same . connector D-IMPLDOT1 chose for impl Point.Trait. One external-attach connector for everything: inherent methods, trait impls, forwarding. fn keyword + PascalCase type name prevents any ambiguity with a call (p.dist()) — a call cannot have a capital first segment.",
+          "code": "// geometry/ops.jet\nfn Point.dist(self, other: Point) -> Float {\n    return ((self.x - other.x) ** 2.0 + (self.y - other.y) ** 2.0).sqrt()\n}\n\n// associated function (no self) — same spelling\nfn Point.origin() -> Point { return Point.{ x: 0.0, y: 0.0 } }\n\n// call site — unchanged\nd   #= p.dist(q)\norg #= Point.origin()\n\n// wrong module (orphan rule) — compile error\nfn Vec.shuffle(self) { ... }\n// E-EXTMETH-ORPHAN: cannot add inherent method to Vec — it is not defined in this module"
+        },
+        {
+          "key": "C",
+          "name": "extend Point { fn dist(self, other: Point) }",
+          "detail": "Groups methods in a named block like Swift extension or Kotlin companion. Clear at a glance. Adds a second block keyword beside impl — users must now pick between extend Type {} and impl Type.Trait {}, two block forms that look similar.",
+          "code": "// geometry/ops.jet\nextend Point {\n    fn dist(self, other: Point) -> Float {\n        return ((self.x - other.x) ** 2.0 + (self.y - other.y) ** 2.0).sqrt()\n    }\n    fn origin() -> Point { return Point.{ x: 0.0, y: 0.0 } }\n}\n\n// call site — unchanged\nd #= p.dist(q)"
+        },
+        {
+          "key": "D",
+          "name": "No external inherent methods — trait impls only",
+          "detail": "Conflicts with ratified philosophy.md which explicitly says inline and external are two entry points of one feature. Not recommended.",
+          "code": "// blocked — users must define all methods in the struct body or use a trait"
+        }
+      ],
+      "rec": "B",
+      "outcome": "B",
+      "ratifiedAt": "2026-06-30",
+      "comparisons": "Rust:       impl Point { fn dist(&self, o: &Point) -> f64 { ... } }\nSwift:      extension Point { func dist(_ o: Point) -> Double { ... } }\nKotlin:     fun Point.dist(o: Point): Double { ... }          // dot in fn name\nC#:         static class PointExt { static double Dist(this Point self, Point o) {} }\nTypeScript: Point.prototype.dist = function(o) { ... }       // prototype patch"
+    },
+    {
+      "id": "D-CTBLOCKEXPOSE1",
+      "cardId": "c1mixqcn",
+      "status": "ratified",
+      "title": "How comptime block exposes values for runtime splice",
+      "gist": "Does a comptime {} block expose its computed values to runtime code via $name?",
+      "story": "Earl is building a tiny VM. He wants to compute an opcode dispatch table size at compile time inside a comptime {} block, then use that constant in runtime code — checked at the call site — via a $TABLE_SIZE splice.",
+      "inWild": "fn setup_vm() {\n    comptime {\n        comptime OPCOUNT = 64          // computed at build time\n        comptime TABLE_SIZE = OPCOUNT * 8  // also build time\n    }\n    table: [Byte] = [0; $TABLE_SIZE]   // splice into runtime — does this work?\n    print(\"VM table: {$OPCOUNT} ops, {$TABLE_SIZE} bytes\")\n}",
+      "options": [
+        {
+          "key": "A",
+          "name": "Block-local comptime bindings leak into the enclosing scope (recommended)",
+          "detail": "Consistent with how comptime if already works (D-WHEN1): bindings defined in comptime if arms are visible after. The block is erased at codegen; only the serialized literals from $name splices appear in output. Scope leak is bounded to comptime bindings declared directly in the block body.",
+          "code": "fn setup_vm() {\n    comptime {\n        comptime OPCOUNT    = 64\n        comptime TABLE_SIZE = OPCOUNT * 8\n    }\n    // Both now in scope as compile-time constants:\n    table #= [Byte](size: $TABLE_SIZE, fill: 0)\n    print(\"VM table: {$OPCOUNT} ops, {$TABLE_SIZE} bytes\")\n    // Output: VM table: 64 ops, 512 bytes\n}\n\n// Error — $name used without any comptime binding:\nfn broken() {\n    print($OPCOUNT)   // E2713: no comptime value named OPCOUNT in scope\n}"
+        },
+        {
+          "key": "B",
+          "name": "Explicit expose NAME inside block marks which values escape",
+          "detail": "Most explicit about what crosses the build/runtime boundary. Introduces a second way to declare visibility inside a block (alongside comptime NAME).",
+          "code": "fn setup_vm() {\n    comptime {\n        comptime OPCOUNT    = 64\n        comptime TABLE_SIZE = OPCOUNT * 8\n        expose TABLE_SIZE   // only this one escapes\n        expose OPCOUNT\n    }\n    table #= [Byte](size: $TABLE_SIZE, fill: 0)\n    // OPCOUNT not exposed — compile error:\n}"
+        },
+        {
+          "key": "C",
+          "name": "$name stays comptime-only; block exposes nothing",
+          "detail": "Conservative — comptime {} remains a build-time assertion/side-effect block only. $name keeps working inside derive bodies and comptime binding RHS but not in runtime code. The feature is mostly already shipped.",
+          "code": "fn setup_vm() {\n    comptime {\n        comptime OPCOUNT = 64\n        // block verified at build time but scope discarded\n    }\n    // $OPCOUNT here → E2712: $ splice used outside comptime context\n    // must use top-level: comptime TABLE_SIZE = 512\n    comptime TABLE_SIZE = 512\n    table #= [Byte](size: $TABLE_SIZE, fill: 0)  // this still works\n}"
+        }
+      ],
+      "rec": "A",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30",
+      "comparisons": "Zig:       comptime { const N = 64; }  // comptime vars always accessible in enclosing scope\nRust:      const N: usize = 64;          // top-level const, no block scoping\nC++:       constexpr int N = 64;         // same — top-level\nNim:       const N {.compileTime.} = 64  // pragma-gated but still top-level\nD:         enum N = 64;                  // compile-time constant, no block"
+    },
+    {
+      "id": "D-UITREE1",
+      "cardId": "c2qj06uq",
+      "status": "ratified",
+      "title": "UI tree node shape: typed enum vs dynamic record",
+      "gist": "Should UI view-model nodes be a typed enum (Text, Box, Button) or a dynamic tagged record?",
+      "story": "Dorothy is building a to-do app. She needs text labels, containers, buttons, and input fields. She wants the compiler to catch a typo in a node kind at build time, not at runtime.",
+      "inWild": "fn todo_view(items: [TodoItem]) -> ui.View {\n    return ui.box(children: [\n        ui.text(\"To-Do List\", style: header_style),\n        ui.box(children: items.map(fn(item) {\n            ui.box(children: [\n                ui.text(item.title),\n                ui.button(\"Done\", on_click: fn() { mark_done(item.id) })\n            ])\n        }))\n    ])\n}",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed constructors: ui.text(), ui.box(), ui.button() (recommended)",
+          "detail": "Each node kind is a distinct constructor. The compiler knows statically that ui.button() produces a button node and ui.text() produces a text node. No stringly-typed fields, no runtime kind-check. Consistent with closed-type direction.",
+          "code": "// Constructors:\nfn todo_view(items: [TodoItem]) -> ui.View {\n    ui.box(children: [\n        ui.text(\"To-Do List\"),\n        ui.button(\"Add Item\", on_click: add_item),\n    ])\n}\n\n// Compile error:\nui.textt(\"typo\")  // E: no function textt in core.ui\n\n// Exhaustive match on node kind:\nwhen node {\n    ui.Text { content } => render_text(content)\n    ui.Box  { children } => render_box(children)\n    ui.Button { label, on_click } => render_button(label, on_click)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Dynamic tagged record: ui.node({ kind: \"text\", content: \"...\" })",
+          "detail": "A single ui.node() function accepts a record with a \"kind\" string field. Flexible for dynamic node creation but kind typos are runtime errors. Inconsistent with Jet's static-safety direction.",
+          "code": "fn todo_view(items: [TodoItem]) -> ui.View {\n    ui.node({ kind: \"box\", children: [\n        ui.node({ kind: \"text\", content: \"To-Do List\" }),\n        ui.node({ kind: \"button\", label: \"Add\", on_click: add_item }),\n    ]})\n}\n\n// Runtime crash, not compile error:\nui.node({ kind: \"textt\", content: \"typo\" })  // crashes at render time"
+        }
+      ],
+      "rec": "A",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30",
+      "comparisons": "SwiftUI:      Text(\"hello\") / VStack { ... } / Button(\"ok\") {}  — typed constructors, each is a distinct type\nFlutter:      Text(\"hello\") / Column(children:[...]) / ElevatedButton(...)  — same pattern\nReact JSX:    <Text>hello</Text> / <View> / <Pressable>  — tagged strings compiled to typed calls\nHTML:         <div> / <span> / <button>  — string tags, no compile-time kind checking\nAndroid XML:  android:layout_width=\"match_parent\"  — string attributes"
+    },
+    {
+      "id": "D-STYLESHAPE1",
+      "cardId": "c2qj06uq",
+      "status": "ratified",
+      "title": "Style API shape: flat record vs builder chain",
+      "gist": "Should ui.Style be a flat value record or a builder-method chain?",
+      "story": "Walter is styling a submit button: red background, white text, 12px padding, 80px wide. He wants to define the style as a reusable constant and pass it to multiple buttons.",
+      "inWild": "// Walter wants to define this once and reuse:\nSUBMIT_STYLE #= /* ??? */\n\nfn checkout_page() -> ui.View {\n    ui.box(children: [\n        ui.button(\"Submit Order\", style: SUBMIT_STYLE),\n        ui.button(\"Cancel\",       style: SUBMIT_STYLE),\n    ])\n}",
+      "options": [
+        {
+          "key": "A",
+          "name": "Flat value record: Style { color: rgb(255,0,0), width: px(80) } (recommended)",
+          "detail": "Style is a pure value — comparable, hashable, passable as a constant. Consistent with Jet's value semantics: no mutable builder state, no object identity, no method chain side effects. A partial style (only some fields set) uses default values for the rest.",
+          "code": "// Define once, reuse:\nSUBMIT_STYLE #= Style {\n    background: rgb(220, 38, 38),\n    color:      rgb(255, 255, 255),\n    padding:    px(12),\n    width:      px(80),\n}\n\nfn checkout_page() -> ui.View {\n    ui.box(children: [\n        ui.button(\"Submit Order\", style: SUBMIT_STYLE),\n        ui.button(\"Cancel\",       style: SUBMIT_STYLE),\n    ])\n}\n\n// Derive / extend a style:\nDANGER_STYLE #= Style { ...SUBMIT_STYLE, background: rgb(185, 28, 28) }"
+        },
+        {
+          "key": "B",
+          "name": "Builder chain: Style.new().color(rgb(255,0,0)).width(px(80))",
+          "detail": "Familiar from many UI frameworks but introduces mutable builder state. A Style mid-chain is not a value — you cannot store it, compare it, or pass it without calling a terminating method. Inconsistent with Jet's value-oriented surface.",
+          "code": "// Not easily reusable as a constant:\nSUBMIT_STYLE #= Style.new()\n    .background(rgb(220, 38, 38))\n    .color(rgb(255, 255, 255))\n    .padding(px(12))\n    .width(px(80))\n    .build()   // or is this the value? when is it a value?"
+        }
+      ],
+      "rec": "A",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30",
+      "comparisons": "SwiftUI:     Text(\"hi\").foregroundColor(.red).frame(width: 80)  — builder chain on the node, not style\nFlutter:     TextStyle(color: Colors.red, fontSize: 16)              — flat struct\nCSS:         { background: red; width: 80px; padding: 12px }        — flat key-value\nTailwind:    \"bg-red-500 text-white p-3 w-20\"                       — string class list\nReact:       {{ backgroundColor: 'red', width: 80, padding: 12 }}   — plain object\nSwiftUI (StyleSheet): not idiomatic — styles via modifiers on views"
+    },
+    {
+      "id": "D-MOTIONTIME1",
+      "cardId": "c2qj06uq",
+      "status": "ratified",
+      "title": "Motion timing: injectable Clock vs global time signal",
+      "gist": "Does core.motion.spring() take a Clock capability parameter, or does it read a global time signal?",
+      "story": "Doris is building a loading spinner that animates with a spring. She needs to write a unit test that asserts the spinner reaches its target position after 300ms — without waiting 300 real milliseconds.",
+      "inWild": "// Doris wants to test animation deterministically:\nfn test_spinner_settles() {\n    clock  #= FakeClock.new()\n    target #= reactive.signal(0.0)\n    pos    #= core.motion.spring(target, /* clock? */, stiffness: 200.0, damping: 20.0)\n\n    target.set(1.0)\n    clock.advance(300)          // simulate 300ms\n    assert(pos.get() >= 0.99)  // settled?\n}",
+      "options": [
+        {
+          "key": "A",
+          "name": "Injectable Clock: spring(target, clock, stiffness, damping) (recommended)",
+          "detail": "Clock is passed in explicitly. Tests inject FakeClock.new() and call clock.advance(ms) for deterministic results. Production code passes the real system clock. Consistent with D-DET1 (all time/randomness is injectable). Flutter uses the same pattern (TickerProvider).",
+          "code": "// Production:\nclock #= core.clock()         // real system clock\npos   #= core.motion.spring(target_sig, clock, stiffness: 200.0, damping: 20.0)\n\n// Test (deterministic — no real time passes):\nfn test_spinner_settles() {\n    clock  #= FakeClock.new()\n    target #= reactive.signal(0.0)\n    pos    #= core.motion.spring(target, clock, stiffness: 200.0, damping: 20.0)\n    target.set(1.0)\n    clock.advance(300)\n    assert(pos.get() >= 0.99)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Global time signal: core.motion.time_signal() read internally",
+          "detail": "Motion reads a module-level time signal automatically. Simpler call site but tests must stub the global, which requires framework-level mocking support (jest.useFakeTimers equivalent). Less consistent with D-DET1.",
+          "code": "// Production — simpler call:\npos #= core.motion.spring(target_sig, stiffness: 200.0, damping: 20.0)\n\n// Test — must stub global (not yet a concept in Jet):\nfn test_spinner_settles() {\n    core.motion.use_fake_time()   // ??? how does this work?\n    target #= reactive.signal(0.0)\n    pos    #= core.motion.spring(target, stiffness: 200.0, damping: 20.0)\n    core.motion.advance_time(300) // ??? global mutation\n    assert(pos.get() >= 0.99)\n}"
+        }
+      ],
+      "rec": "A",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30",
+      "comparisons": "React Spring:   useSpring({ from: {x:0}, to: {x:1} })          — global RAF/time; not testable without mocking\nFramer Motion:  useAnimate(), animate(el, {x:1}, {duration:0.3}) — global time; testing needs jest fake timers\nSwiftUI:        withAnimation(.spring()) { state = 1 }           — global CADisplayLink; XCTest uses waitFor\nGSAP:           gsap.to(el, {x:1, ease:\"elastic.out\"})          — global ticker; test with gsap.ticker.tick()\nFlutter:        AnimationController(vsync: this, duration: ...)  — vsync injected via TickerProvider (close to option A)"
+    },
+    {
+      "id": "D-A11YGATE1",
+      "cardId": "c2qj06uq",
+      "status": "ratified",
+      "title": "A11y diagnostic gating mechanism",
+      "gist": "How are accessibility diagnostics triggered — automatic on --release, explicit jet lint --a11y, or per-file #A11yStrict?",
+      "story": "Hank's team ships a web app. He wants his CI to catch missing ARIA roles and unlabeled buttons before they reach users. But he doesn't want beginners running jet build to see a wall of a11y warnings on their first hello-world.",
+      "inWild": "// Hank's team has this component:\nfn nav_bar() -> ui.View {\n    ui.box(children: [\n        ui.button(\"X\"),     // unlabeled — screen reader says \"button\" with no context\n        ui.text(\"Home\"),    // clickable text — missing role\n    ])\n}\n// Should this produce a diagnostic? When?",
+      "options": [
+        {
+          "key": "A",
+          "name": "--release build flag enables a11y lints automatically",
+          "detail": "Hank runs jet build --release for production and a11y lints fire automatically. But a beginner who runs jet build --release for their first deployed app also sees a wall of a11y errors on components they didn't write. Surprise on first real build.",
+          "code": "jet build --release\n# output includes:\n# W2930: button \"X\" has no accessible label (E2930)\n# W2931: ui.text used as interactive element without role (E2931)\n# 2 accessibility warnings — use --no-a11y to suppress\n\njet build              # no a11y lints (dev builds)\njet build --release    # a11y lints fire automatically"
+        },
+        {
+          "key": "B",
+          "name": "jet lint --a11y explicit separate step (recommended)",
+          "detail": "A11y linting is an explicit step Hank adds to CI. It never surprises beginners. Consistent with existing lint profile pattern — same as running jet lint --unused or jet lint --style.",
+          "code": "# CI pipeline (Hank adds this step):\njet lint --a11y\n\n# output:\n# src/nav.jet:3: W2930: button \"X\" has no accessible label\n# src/nav.jet:4: W2931: interactive text missing role\n# 2 accessibility issues\n\n# Beginner dev loop:\njet build     # no a11y lints — not surprised\njet run       # no a11y lints\njet lint      # base lints only\njet lint --a11y  # only when explicitly requested"
+        },
+        {
+          "key": "C",
+          "name": "#A11yStrict file-level opt-in marker",
+          "detail": "Files with #A11yStrict at the top get a11y lints; others don't. Hank can enforce it on specific modules. Very granular but obscure — beginners don't know to add it, and it requires discipline across a large team.",
+          "code": "// src/nav.jet\n#A11yStrict\n\nfn nav_bar() -> ui.View {\n    ui.box(children: [\n        ui.button(\"X\"),   // E2930: missing accessible label (because #A11yStrict)\n    ])\n}\n\n// src/main.jet — no #A11yStrict\nfn main() {\n    ui.button(\"X\")  // no error — not opted in\n}"
+        }
+      ],
+      "rec": "B",
+      "outcome": "B",
+      "ratifiedAt": "2026-06-30",
+      "comparisons": "ESLint a11y:    eslint --rule jsx-a11y/...  explicit plugin; CI adds --rule flags\naxe-core:       separate npm run a11y  — entirely separate tool run\nLighthouse:     CI step: lighthouse --only-categories=accessibility\nSwiftUI:        XCUIAccessibilityAudit  — explicit test call in test suite\nAndroid:        AccessibilityScanner    — separate IDE plugin, not build-time"
+    },
+    {
+      "id": "D-DISPLAY-SHAPE",
+      "cardId": "c5irks2",
+      "status": "ratified",
+      "title": "Method name inside impl Type.Display",
+      "gist": "What is the method name inside impl Type.Display { }?",
+      "story": "Doris is building a Color type for a design tool. She wants Color to print as \"rgb(255, 0, 128)\" when used in string interpolation. She writes impl Color.Display { } — what method name goes inside?",
+      "options": [
+        {
+          "key": "A",
+          "name": "fn display(self) -> String (recommended)",
+          "detail": "Method name matches the trait name exactly. No collision with any existing Jet built-in. Reads like the trait. Consistent with how fn restore matches the Rollback trait.",
+          "code": "impl Color.Display {\n    fn display(self) -> String {\n        return \"rgb({self.r}, {self.g}, {self.b})\"\n    }\n}\n\npalette #= Color.{ r: 255, g: 0, b: 128 }\nprint(\"{palette}\")          // calls display() → \"rgb(255, 0, 128)\"\nprint(\"{palette@Debug}\")    // calls auto-derived debug → Color { r: 255, g: 0, b: 128 }"
+        },
+        {
+          "key": "B",
+          "name": "fn to_string(self) -> String",
+          "detail": "Familiar from Rust/Java/Kotlin/Swift. But to_string is a common name users already write as helpers on their own types — high collision risk. Also implies conversion, not display.",
+          "code": "impl Color.Display {\n    fn to_string(self) -> String {\n        return \"rgb({self.r}, {self.g}, {self.b})\"\n    }\n}\n\n// Collision — user already has:\nimpl Color {\n    fn to_string(self) -> String { \"Color({self.r})\" }  // conflicts"
+        },
+        {
+          "key": "C",
+          "name": "fn format(self) -> String",
+          "detail": "Evokes string formatting but in most languages \"format\" means formatting with arguments/patterns. A zero-argument fn format reads as if it takes a format string.",
+          "code": "impl Color.Display {\n    fn format(self) -> String {\n        return \"rgb({self.r}, {self.g}, {self.b})\"\n    }\n}\n// Confusing: \"format\" implies format(pattern: String) in most contexts"
+        }
+      ],
+      "rec": "A",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30",
+      "inWild": "struct Color { r: Int; g: Int; b: Int; }\n\nimpl Color.Display {\n    fn ???(self) -> String {\n        return \"rgb({self.r}, {self.g}, {self.b})\"\n    }\n}\n\npalette #= Color.{ r: 255, g: 0, b: 128 }\nprint(\"Selected: {palette}\")   // calls ???",
+      "comparisons": "Rust:       impl fmt::Display for Color { fn fmt(&self, f: &mut Formatter) -> fmt::Result }\nSwift:      var description: String { \"rgb(...)\" }   // CustomStringConvertible\nPython:     def __str__(self) -> str\nJava:       public String toString()\nKotlin:     override fun toString(): String\nGo:         func (c Color) String() string"
+    },
+    {
+      "id": "D-DEBUG-REDACT",
+      "cardId": "c5irks2",
+      "status": "ratified",
+      "title": "Field-level marker to exclude a field from Debug auto-derive output",
+      "gist": "What marker hides a sensitive field from Debug auto-derive output?",
+      "story": "Walter's User struct has a password_hash and a stripe_token. He never wants these in debug output, log files, or error messages. Debug auto-derives for all structs. What annotation hides a specific field?",
+      "options": [
+        {
+          "key": "A",
+          "name": "#[Redact] field marker (recommended)",
+          "detail": "General-purpose privacy marker. Not just for Debug — signals that this field contains sensitive data across all serialization, logging, and display contexts. PascalCase per D-CASING1. A single marker teaches one concept: \"this field is sensitive.\"",
+          "code": "struct User {\n    id:            Int\n    email:         String\n    #[Redact]\n    password_hash: String\n    #[Redact]\n    stripe_token:  String\n}\n\nprint(\"{user@Debug}\")\n// User { id: 42, email: \"w@example.com\", password_hash: \"[redacted]\", stripe_token: \"[redacted]\" }\n\n// Also affects JSON serialization and display:\nprint(\"{user}\")  // E0915 unless impl User.Display — forces explicit choice"
+        },
+        {
+          "key": "B",
+          "name": "#[Debug.skip] field marker",
+          "detail": "Scoped specifically to Debug output. Clear intent but introduces a new dotted-name marker form not used anywhere else in Jet. Also, a developer might want a field to be skipped in JSON too — they would then need both #[Debug.skip] and a separate serialization marker.",
+          "code": "struct User {\n    id:            Int\n    email:         String\n    #[Debug.skip]\n    password_hash: String   // hidden from Debug but still in JSON?\n    #[Debug.skip]\n    stripe_token:  String\n}"
+        },
+        {
+          "key": "C",
+          "name": "No v1 field exclusion — implement Display manually to filter",
+          "detail": "Conservative. Users who need redaction override impl Type.Display themselves. No new marker. But Debug still leaks the field — you cannot hide a field from auto-derived Debug without a language mechanism.",
+          "code": "// No annotation — must implement Display AND lose Debug safety:\nimpl User.Display {\n    fn display(self) -> String {\n        return \"User({self.id}, {self.email})\"  // manually omit sensitive fields\n    }\n}\n// But {user@Debug} STILL prints password_hash — no way to prevent it"
+        }
+      ],
+      "rec": "A",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30",
+      "inWild": "struct User {\n    id:            Int\n    email:         String\n    password_hash: String  // should NEVER appear in {user@Debug}\n    stripe_token:  String  // same\n}\n\n// Without protection:\nprint(\"{user@Debug}\")\n// User { id: 42, email: \"w@example.com\", password_hash: \"$2b$12$abc...\", stripe_token: \"sk_live_xyz\" }\n// ^^^ leaked to logs — bad",
+      "comparisons": "Rust:           #[allow(dead_code)]  — doesn't hide from Debug\n                derive(Debug) with manual impl — only way to hide\n                serde:          #[serde(skip)] / #[serde(skip_serializing)]\nPython:         override __repr__ manually — no field-level annotation\nSwift:          no field-level skip; override debugDescription manually\nJava:           @JsonIgnore (Jackson) — serialization only, not debug\nGo:             omitempty tag — JSON only"
+    },
+    {
+      "id": "D-ITER-HOOK",
+      "cardId": "c5irks2",
+      "status": "ratified",
+      "title": "User-type for-loop iterable hook: beginner .each/.to_list + expert Iterable protocol",
+      "gist": "Beginners iterate custom collections with .each(fn) or .to_list() — no protocol required. Experts who want `for x in mytype` without copying implement Iterable + Iterator.",
+      "story": "Betty built a BTree<T> for sorted data. As a beginner she writes `bt.each(fn(val) { print(val) })` or `for val in bt.to_list()` and it just works. When she needs zero-copy in-order walks, she adds `impl BTree.Iterable` and `for val in bt` becomes native.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Beginner .each/.to_list defaults + expert Iterable hook (recommended)",
+          "detail": "Two tiers, one path. Default: any collection exposes `.each(fn(T))` for callback iteration and `.to_list() -> [T]` when a list is needed — no trait impl, no syntax surprise. Expert opt-in: `impl Type.Iterable { fn iter(self) -> Cursor }` plus `impl Cursor.Iterator { fn next(~self) -> T? }` enables `for x in mytype` without allocating a copy. Built-in `[T]`/`Map` keep `for` natively. Custom types without the protocol never silently copy — callers choose `.each` or `.to_list()` explicitly. Matches Jet's beginner-magic / expert-control split.",
+          "code": "// Beginner — always works, no protocol:\nbt.each(fn(val) { print(val) })\nfor val in bt.to_list() { print(val) }   // copies when you need a list\n\n// Expert — zero-copy for-in when you implement the hook:\nstruct BTreeIter { tree: ~BTree; idx: Int }\n\nimpl BTreeIter.Iterator {\n    fn next(~self) -> Int? { /* advance */ }\n}\nimpl BTree.Iterable {\n    fn iter(self) -> BTreeIter { return BTreeIter.{ tree: ~self, idx: 0 } }\n}\n\nfor val in bt { print(val) }   // no copy — uses Iterable\nfor a in bt { for b in bt { } } // two independent cursors"
+        },
+        {
+          "key": "B",
+          "name": "impl Type.Iterator only — type is its own cursor",
+          "detail": "Single protocol on the collection. Simpler surface but fuses collection and cursor — two simultaneous `for` loops over the same value break (shared mutable state). Rejected for the expert tier when Iterable+Iterator is the safe pattern.",
+          "code": "impl BTree.Iterator {\n    fn next(~self) -> Int? { /* mutates bt */ }\n}\nfor val in bt { print(val) }\n// for a in bt { for b in bt { } }  // BROKEN — shared cursor"
+        },
+        {
+          "key": "C",
+          "name": "Defer v1 — .to_list() / .each() only, no for-in hook",
+          "detail": "No iterable protocol in v1. Forces copies or manual `.each` forever. Rejected now that the dual-tier design gives beginners ergonomics without obligating experts to implement anything.",
+          "code": "for val in bt.to_list() { print(val) }   // only path\nbt.each(fn(val) { print(val) })"
+        }
+      ],
+      "rec": "A",
+      "recommendation": "Beginner `.each`/`.to_list()` out of the box; expert `impl Iterable` + `Iterator` unlocks zero-copy `for x in mytype` (Option A).",
+      "inWild": "bt #= BTree.new()\nbt.insert(30); bt.insert(10); bt.insert(20)\n\n// Betty starts here:\nbt.each(fn(val) { print(val) })          // 10, 20, 30\n\n// Later, zero-copy:\nfor val in bt { print(val) }             // after impl Iterable",
+      "comparisons": "Rust:       IntoIterator + Iterator — two traits; beginners use .iter()/.into_iter()\nPython:     __iter__ + __next__ — experts implement; beginners use list()\nSwift:      Sequence + IteratorProtocol — same split\nKotlin:     Iterable + Iterator — for-in requires Iterable\nJet (A):    .each/.to_list() without protocol; for-in with Iterable opt-in",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30"
+    },
+    {
+      "id": "D-INDEX-HOOK",
+      "cardId": "c5irks2",
+      "status": "ratified",
+      "title": "User-type square-bracket indexing: beginner .get/.set + expert Index hook",
+      "gist": "Built-in List/Map keep `m[k]` out of the box. Custom types use `.get(k)` / `.set(k, v)` by default; experts who want bracket syntax implement Index (+ optional IndexMut).",
+      "story": "Earl built a SparseMatrix. Beginners call `m.get(3, 7)` and `m.set(3, 7, 42.0)` — explicit, always works. When he wants `m[3, 7]` sugar, he adds `impl SparseMatrix.Index` and bracket syntax lights up.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Beginner .get/.set defaults + expert Index hook (recommended)",
+          "detail": "Built-in `[T]` and `Map` keep native `xs[i]` / `map[k]` with no impl. User-defined types without a protocol use named `.get(k) -> V?` and `.set(k, v)` — clear, fallible, no magic. Expert opt-in: `impl Type.Index { fn get(self, k: K) -> V? }` enables `mytype[k]`; optional `impl Type.IndexMut { fn set(~self, k: K, v: V) }` enables `mytype[k] = v`. D-SIMD2's closed built-in `[]` rule stays; only user types with an explicit impl gain brackets.",
+          "code": "// Beginner — always works:\nval #= m.get(3, 7)      // Float?\nm.set(3, 7, 42.0)\n\n// Expert — bracket sugar after impl:\nimpl SparseMatrix.Index {\n    fn get(self, k: (Int, Int)) -> Float? { /* ... */ }\n}\nimpl SparseMatrix.IndexMut {\n    fn set(~self, k: (Int, Int), v: Float) { /* ... */ }\n}\n\nval #= m[(3, 7)]\nm[(3, 7)] = 99.0"
+        },
+        {
+          "key": "B",
+          "name": "impl Type.Index + IndexMut required for all indexing",
+          "detail": "Even built-ins would route through protocols — too much ceremony for beginners. Rejected: List/Map already have blessed `[]` and should not require impl blocks.",
+          "code": "// Would force impl on every collection type — rejected"
+        },
+        {
+          "key": "C",
+          "name": "Defer — .get/.set only forever",
+          "detail": "No bracket hook for user types. Rejected now that the dual-tier design keeps beginners on explicit methods while experts get brackets when they want them.",
+          "code": "val #= m.get(3, 7)\nm.set(3, 7, 42.0)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": "Built-in `[]` for List/Map; `.get`/`.set` for custom types by default; expert `impl Index` unlocks `mytype[k]` (Option A).",
+      "inWild": "m #= SparseMatrix.new(1000, 1000)\nm.set(3, 7, 99.0)\n\n// Earl starts:\nval #= m.get(3, 7)\n\n// Later:\nval #= m[(3, 7)]   // after impl Index",
+      "comparisons": "Rust:       Index/IndexMut traits — opt-in for user types; Vec has built-in []\nPython:     __getitem__/__setitem__ — always protocol-based\nSwift:      subscript — explicit on each type\nKotlin:     operator get/set — opt-in\nJet (A):    built-in [] for List/Map; .get/.set default; Index opt-in for experts",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30"
+    },
+    {
+      "id": "D-LITSUFFIX-SCOPE",
+      "cardId": "c5irks2",
+      "status": "ratified",
+      "title": "Unit construction: dot-constructor spelling, not a literal-suffix hook",
+      "gist": "No new literal-suffix protocol. #UnitFamily unit types construct with dot-construction like every other Jet value: `px.{100}`, `Em.{1.5}`.",
+      "story": "Hank wants typed lengths in UI styles. He should write `width: px.{100}` — same dot-constructor family as `Point.{x: 3, y: 4}` — not CSS `100px` suffixes and not a hidden coercion protocol.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dot-constructor on unit types — no literal-suffix hook (recommended)",
+          "detail": "Close the literal-suffix hook item. D-QUAL3 #UnitFamily already provides typed units. Construction uses the ratified dot-constructor form (D-DOTCTOR1): `px.{100}`, `Em.{1.5}`, `Pct.{50}` when the target type is known from context (`width: Px = px.{100}`). No grammar suffix, no `from_int_literal` coercion protocol, no second mechanism. Consistent with struct/enum construction everywhere else in Jet.",
+          "code": "// Style record — dot-constructor on unit types:\nSUBMIT_STYLE #= Style {\n    width:  px.{80},\n    height: px.{32},\n    padding: px.{12},\n}\n\n// Standalone:\nmargin #= px.{16}\n\n// Rejected spellings:\n// width: 100px     — Tier-4 grammar suffix (D-EXT1 declined)\n// width: px(100)   — function call, not constructor family\n// width: Px = 100  — implicit coercion (Option B)"
+        },
+        {
+          "key": "B",
+          "name": "Bless fn from_int_literal(n: Int) -> T coercion protocol",
+          "detail": "Context-driven implicit coercion: bare `100` routes to different unit constructors depending on inferred type. Fights I8 (one path) and hides which conversion ran. Rejected in favor of explicit `px.{100}`.",
+          "code": "impl Px.IntLiteral {\n    fn from_int_literal(n: Int) -> Px { return Px.{ val: n } }\n}\nwidth: Px = 100   // implicit — which unit? ambiguous at call sites"
+        },
+        {
+          "key": "C",
+          "name": "CSS-style grammar suffix `100px`",
+          "detail": "Tier-4 grammar extension. D-EXT1 already rejected user-defined literal suffixes. Would be a second construction path beside dot-constructors.",
+          "code": "width #= 100px   // rejected — not Jet's constructor family"
+        }
+      ],
+      "rec": "A",
+      "recommendation": "Unit values construct with dot-construction `px.{100}`; remove literal-suffix hook from card #41 (Option A).",
+      "inWild": "fn panel() -> ui.View {\n    return ui.box(style: Style {\n        width:  px.{320},\n        height: px.{48},\n        gap:    px.{8},\n    }, children: [])\n}",
+      "comparisons": "Jet structs:  Point.{x: 3.0, y: 4.0}  — same dot-constructor family\nJet enums:    Color.Red / .Variant     — leading dot\nCSS:          width: 100px            — rejected suffix grammar\nKotlin:       100.px                   — extension property, not constructor\nRust:         Px::new(100)             — function, not dot-constructor",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30"
     }
   ],
   "binder": [
@@ -12860,6 +13358,33 @@
       "tags": [],
       "status": "open",
       "created": "2026-06-30T12:05:52.026Z"
+    },
+    {
+      "id": "b0a44x4",
+      "text": "130_reflect.jet shows the following for multiple markers #[Summarize] #[Debug], but a single marker should be #Debug, multiple markers should be #[Debug, Summarize], or with \"method\" type markers, something like #[Test(\"this is a test\"), Debug, Summarize]",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T15:41:42.220Z"
+    },
+    {
+      "id": "b1mqzxr",
+      "text": "Support pre & post increment operators --x, ++x, x++, x--",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T16:44:56.071Z"
+    },
+    {
+      "id": "b2o7ofc",
+      "text": "jet ? as sugar for jet help, empty jet command enter repl, jet with just file name runs file if possible",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T16:56:22.364Z"
     }
   ],
   "questions": [
@@ -13645,6 +14170,42 @@
       "status": "answered",
       "answer": "**What other languages use `Any`/dynamic for (six recurring jobs):**\n\n1. **Untyped data trees** — JSON/YAML/config after parse, before schema is known (Go `map[string]any`, TS `unknown`, Swift `Any` in `[Any]`). This is the most common legitimate use.\n2. **Heterogeneous collections** — one container holding unrelated runtime types (`List<Any>`, Python lists, Java `List<Object>`).\n3. **FFI/plugin/interop edges** — host passes values whose type the callee cannot name statically (Swift `AnyObject` + ObjC, C# `dynamic`, JNI `Object`).\n4. **Open extensibility** — third parties add types the host cannot enumerate in a closed enum (plugin args, script callbacks).\n5. **Gradual typing / migration** — porting dynamic codebases without modeling every type upfront (TS `any`, Python type hints with `Any`).\n6. **Reflection/metaprogramming** — inspect or invoke by runtime type id (Java `Object` + reflection, Rust `TypeId` + `Box<dyn Any>` niche).\n\nLess common in modern systems languages: generic algorithms (solved by monomorphization/traits), optional absence (solved by nullable/Option), closed alternatives (solved by enums/unions).\n\n**Legitimate benefits:**\n- One spellable type at boundaries where static enumeration is impossible or premature.\n- Faster prototyping — skip designing the enum until the shape stabilizes.\n- Uniform container APIs — one list/map type regardless of element type.\n- Interop friction reduction — foreign APIs often arrive untyped.\n- Migration bridge — lets teams port dynamic code incrementally.\n\n**Specific detriments (not vague \"less safe\"):**\n- **Errors move right** — typos and wrong operations become runtime panics/casts instead of compile errors.\n- **Refactoring breaks silently** — rename/find-references cannot track through `Any`; IDE autocomplete is useless on the value.\n- **Performance tax** — boxing, indirection, lost monomorphization/inlining, cache misses on tag checks.\n- **Downcast ceremony without safety gain** — you eventually write `as? Int` / `downcast<T>()` anyway; the type checker just stopped helping earlier.\n- **Second polymorphism path (I8)** — overlaps traits/generics for \"accept many types\" and overlaps `Data`/`enum` for \"hold one of several shapes.\"\n- **Beginner default trap** — if `Any` is easy to reach, it becomes the lazy fix for every type error.\n- **Security/compliance blind spots** — taint/provenance tracking (D-IFC1) is harder when values carry no static label.\n- **Documentation drift** — contracts live in comments/tests instead of signatures.\n\n**Devil's advocate (steel-manning general `Any`):**\n\n1. *\"DataTree isn't enough.\"* Correct for job #1 (trees) but not for job #2–4. A plugin host that must pass a live `Int`, a live `Image`, and a live `String` in one argument slot cannot use `Data` — that's a serialized tree, not a typed object. Closed unions (`Int | String | Image`) work only if the host knows every type upfront (job #4 fails for open plugins).\n2. *\"Every mature language keeps it somewhere.\"* Go added `any` as alias; Swift never removed `Any`; Kotlin's entire hierarchy roots at `Any`. Maybe that signals a real irreducible need, not laziness.\n3. *\"Expert gating (Option C) is zero beginner cost.\"* If `Any` lives only in `core.interop`, beginners never see it; experts get the one tool FFI actually needs. Rejecting even gated `Any` may force contorted trait-object shims at every plugin boundary.\n4. *\"Closed unions (your ratified B) don't replace Any.\"* `Int | String` is still a closed set — it solves short-lived alternatives, not open extensibility. You may need both B *and* a gated C for different jobs.\n5. *\"Teaching diagnostics (Option A) don't implement anything.\"* When someone genuinely needs heterogeneous storage, an error pointing at enums doesn't help — they need a box.\n6. *\"Migration story.\"* Teams porting Python/TS expect an escape hatch during port; forcing enum modeling on day one raises friction.\n\n**Why the devil's advocate still loses for Jet (general `Any` stays rejected):**\n\n- Jobs #1 and #5 are covered: `Data`/`DataTree` + typed `decode<T>` (D-ENC-DYN1, D-SERDE2) for trees; Jet is not targeting gradual typing of legacy dynamic codebases as a primary persona.\n- Job #2 is usually a design smell — if elements share behavior, use a trait bound; if they share shape, use a closed union or enum.\n- Job #3/#4 (open plugin/interop) is the one real gap — but that's Option C (expert-gated boundary `Any`), not general `Any` in application code. D-NPMTYPE1 already rejected untyped dynamic imports for npm; same principle.\n- Job #6 (reflection) is comptime/`Reflect` territory in Jet, not a runtime top type.\n- The ratified split is correct: **B** (`Int | Float | String`) for known short-lived alternatives; **no general Any** in the default surface; revisit **C** only if plugin-target (card #5) proves `Data` + traits cannot cover a concrete FFI case.\n\nBallot comparisons facet updated with TS/Go/Swift/Rust/Kotlin cross-language examples.",
       "created": "2026-06-30T11:59:08.587Z",
+      "answeredAt": "2026-06-30"
+    },
+    {
+      "id": "q089rqy",
+      "cardId": "c5irks2",
+      "decisionId": "D-ITER-HOOK",
+      "by": "owner",
+      "kind": "question",
+      "text": "Why cant we have both option b and c -> c works out of the box but experts can implement b if they want it? Is that a reasonable proposal?",
+      "status": "answered",
+      "answer": "Yes — that's exactly Option A now on D-ITER-HOOK and D-INDEX-HOOK. Beginners get `.each`/`.to_list()` (iterator) and `.get`/`.set` (index) with zero protocol ceremony. Experts who want `for x in mytype` or `mytype[k]` opt in by implementing Iterable/Iterator or Index/IndexMut. Same dual-tier pattern on both ballots; recommendation moved from defer (C) to hybrid (A).",
+      "created": "2026-06-30T17:32:36.943Z",
+      "answeredAt": "2026-06-30"
+    },
+    {
+      "id": "q1d2hed",
+      "cardId": "c5irks2",
+      "decisionId": "D-LITSUFFIX-SCOPE",
+      "by": "owner",
+      "kind": "question",
+      "text": "Shouldnt this work like other constructors? like `width: Px.{100}`",
+      "status": "answered",
+      "answer": "Yes. Updated D-LITSUFFIX-SCOPE Option A: unit types use the ratified dot-constructor family — `px.{100}`, `Em.{1.5}` — same rule as `Point.{x: 3, y: 4}`. No `px(100)` helper, no `Px.from(100)`, no `100px` grammar suffix, no implicit coercion protocol. Literal-suffix hook removed from card #41; construction is just #UnitFamily + dot-constructor.",
+      "created": "2026-06-30T17:35:46.210Z",
+      "answeredAt": "2026-06-30"
+    },
+    {
+      "id": "qindexhybrid",
+      "cardId": "c5irks2",
+      "decisionId": "D-INDEX-HOOK",
+      "by": "owner",
+      "kind": "question",
+      "text": "Same as iterator ballot: .get/.set out of the box for beginners, expert Index impl for bracket syntax.",
+      "status": "answered",
+      "answer": "Applied. D-INDEX-HOOK Option A is now the dual-tier design: List/Map keep native `[]`; custom types default to `.get`/`.set`; `impl Index` (+ optional `IndexMut`) unlocks `mytype[k]` when an expert wants it.",
+      "created": "2026-06-30T18:00:00.000Z",
       "answeredAt": "2026-06-30"
     }
   ]

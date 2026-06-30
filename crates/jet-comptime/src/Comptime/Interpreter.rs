@@ -847,7 +847,7 @@ impl<'a> Interp<'a> {
                 span,
             } => self.eval_fan_out(callee, items, *span, scope),
             // D-CTMARKER1=C: `$name` outside an emit() string — look up in scope like Ident.
-            Expr::ComptimeSplice { name, span } => scope
+            Expr::ComptimeSplice { name, span, .. } => scope
                 .get(name)
                 .cloned()
                 .ok_or_else(|| unsupported(&format!("the name `{}`", name), *span)),

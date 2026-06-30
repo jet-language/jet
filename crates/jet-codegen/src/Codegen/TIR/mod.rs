@@ -78,6 +78,12 @@ pub struct JitProgram {
     pub funcs: Vec<TFunc>,
     /// c139 M4: spawn lambda bodies in program traversal order (parallel to spawn sites in TIR).
     pub spawn_lambdas: Vec<TJitSpawnLambda>,
+    /// M5: mangled field names per struct type (field order).
+    pub struct_fields: std::collections::HashMap<String, Vec<String>>,
+    /// M5: field types parallel to `struct_fields` order.
+    pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
+    /// M5: mangled variant names per enum type (discriminant order).
+    pub enum_variants: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// c139 M3: every lowered function the JIT may compile from the entry module.
@@ -115,26 +121,74 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let mut have_main = false;
     cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
-        let Item::Func(f) = item else {
-            continue;
-        };
-        if !f.type_params.is_empty() || !tir_covers(f, &cx) {
-            continue;
+        match item {
+            Item::Func(f) => {
+                if !f.type_params.is_empty() || !tir_covers(f, &cx) {
+                    continue;
+                }
+                let lowered = lower_func(f, &cx);
+                if f.name == "main" && f.params.is_empty() {
+                    have_main = true;
+                }
+                funcs.push(lowered);
+            }
+            Item::Struct(s) => {
+                if !s.type_params.is_empty() {
+                    continue;
+                }
+                for m in &s.methods {
+                    if !tir_covers_method(m, &s.name, &cx) {
+                        continue;
+                    }
+                    let mut lowered = lower_method(m, &s.name, &cx);
+                    lowered.name = format!("{}::{}", s.name, m.name);
+                    funcs.push(lowered);
+                }
+            }
+            _ => {}
         }
-        let lowered = lower_func(f, &cx);
-        if f.name == "main" && f.params.is_empty() {
-            have_main = true;
-        }
-        funcs.push(lowered);
     }
     if !have_main {
         return None;
     }
     let spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+    let mut struct_fields = std::collections::HashMap::new();
+    let mut struct_field_types = std::collections::HashMap::new();
+    let mut enum_variants = std::collections::HashMap::new();
+    for item in &module.items {
+        match item {
+            Item::Struct(s) if s.type_params.is_empty() => {
+                struct_fields.insert(
+                    s.name.clone(),
+                    s.fields
+                        .iter()
+                        .map(|f| format!("user_{}", f.name))
+                        .collect(),
+                );
+                struct_field_types.insert(
+                    s.name.clone(),
+                    s.fields.iter().map(|f| f.ty.clone()).collect(),
+                );
+            }
+            Item::Enum(e) if e.type_params.is_empty() => {
+                enum_variants.insert(
+                    e.name.clone(),
+                    e.variants
+                        .iter()
+                        .map(|v| format!("user_{}", v.name))
+                        .collect(),
+                );
+            }
+            _ => {}
+        }
+    }
     Some(JitProgram {
         source_file: module.display.clone(),
         funcs,
         spawn_lambdas,
+        struct_fields,
+        struct_field_types,
+        enum_variants,
     })
 }
 
@@ -565,7 +619,7 @@ pub enum TStmt {
     /// (emit makes no decision). `else_body` is the optional `else` arm.
     MixedSwitch {
         subject_str: String,
-        arms: Vec<(String, Vec<TStmt>)>,
+        arms: Vec<(TExpr, Vec<TStmt>)>,
         else_body: Option<Vec<TStmt>>,
     },
     /// c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`, S58,
@@ -1107,6 +1161,27 @@ pub enum TExprKind {
     /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result (v1 alias).
     TaskGroupAny {
         tasks: Box<TExpr>,
+    },
+    /// D-CONCSELECT1=A: `g.select()` — start a scoped fluent select builder.
+    SelectStart,
+    /// D-CONCSELECT1=A: `.recv(ch)` on a select builder.
+    SelectRecv {
+        builder: Box<TExpr>,
+        channel: Box<TExpr>,
+    },
+    /// D-CONCSELECT1=A: `.after(ms: …)` on a select builder.
+    SelectAfter {
+        builder: Box<TExpr>,
+        millis: Box<TExpr>,
+    },
+    /// D-CONCSELECT1=A: `.read(stream)` on a select builder.
+    SelectRead {
+        builder: Box<TExpr>,
+        stream: Box<TExpr>,
+    },
+    /// D-CONCSELECT1=A: `.wait()` — multiplex until one arm wins.
+    SelectWait {
+        builder: Box<TExpr>,
     },
     /// c109 Phase 13: a fn-typed-VALUE form. Either a bare function name used as a
     /// value (`Expr::Ident` resolving to a top-level fn) or a call THROUGH a fn-value

@@ -181,6 +181,12 @@ pub const KW_SELF: &str = "self";
 /// S27 (ratified M3): external method block — `impl Type { ... }`.
 pub const KW_IMPL: &str = "impl";
 
+/// D-EXTMETH1=B (ratified): external inherent methods attach with dot:
+/// `fn Type.method(self)`. S83's earlier `~~` connector is retired and exists
+/// only for E0325 teaching diagnostics.
+pub const EXTERNAL_METHOD_CONNECTOR: &str = ".";
+pub const EXTERNAL_METHOD_CONNECTOR_RETIRED: &str = "~~";
+
 /// M2: compile-time constant (emits Rust `const` or `static`).
 pub const KW_CONST: &str = "const";
 
@@ -607,6 +613,10 @@ pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
 pub const ATTR_BINDGEN: &str = "Bindgen"; // S59 / D-CFFI-CANON1
 /// S59 / D-CFFI-CANON1: marker on user C overlay modules — `#Extern module`.
 pub const ATTR_EXTERN_MODULE: &str = "Extern"; // S59 — `#Extern module`, not `extern rust`
+/// D-CFFI-SYNTAX-REOPEN / D-CFFI-CANON1: retired C FFI marker spellings,
+/// recognized only for E0060 teaching diagnostics.
+pub const ATTR_BINDGEN_RETIRED: &str = "bindgen";
+pub const ATTR_EXTERN_MODULE_RETIRED: &str = "extern";
 /// D-UNSAFE2 (retired marker): `#Audit("…")` is the old two-line form;
 /// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
 /// only to emit the E0055 teaching error.
@@ -874,6 +884,24 @@ pub const TASKGROUP_RACE_METHOD: &str = "race";
 /// D-CONCCOMB1=A: first completed result — `g.any([h1, h2])` (v1: same join race).
 pub const TASKGROUP_ANY_METHOD: &str = "any";
 
+/// D-CONCSELECT1=A: fluent scoped select — `g.select().recv(...).after(...).wait()?`.
+pub const TASKGROUP_SELECT_METHOD: &str = "select";
+
+/// D-CONCSELECT1=A: sema/codegen builder type for chained select arms.
+pub const TYPE_SELECT_BUILDER: &str = "SelectBuilder";
+
+/// D-CONCSELECT1=A: register a channel receive arm on a select builder.
+pub const SELECT_RECV_METHOD: &str = "recv";
+
+/// D-CONCSELECT1=A: register a timer arm — `.after(ms: N)`.
+pub const SELECT_AFTER_METHOD: &str = "after";
+
+/// D-CONCSELECT1=A: register a readable I/O arm — `.read(stream)`.
+pub const SELECT_READ_METHOD: &str = "read";
+
+/// D-CONCSELECT1=A: block until one arm wins — `.wait()`.
+pub const SELECT_WAIT_METHOD: &str = "wait";
+
 /// D-NURSERY1=A: wait for a task result (alias for `.join()` on `Task<T>`).
 pub const METHOD_TASK_WAIT: &str = "wait";
 /// D-COROUTINE1=A: mark a task paused in the control plane.
@@ -1090,6 +1118,14 @@ pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
 
 /// U3 (ratified 2026-06-16): module declaration keyword — `module name { … }`.
 pub const KW_MODULE: &str = "module";
+
+/// D-GENMOD2=A (ratified 2026-06-28): generic module parameter list uses `<…>`.
+/// Type params: `K: Hash` (name starts uppercase; bound is a trait).
+/// Value params: `capacity: Int` (name starts lowercase; annotation is a concrete type).
+/// Instantiation: `module Alias = Module<TypeArg, value_arg>`.
+/// Reuses existing `<`/`>` angle-bracket tokens (no new sigil, I7 satisfied).
+pub const GENMOD_OPEN: &str = "<"; // reuses OP_LT
+pub const GENMOD_CLOSE: &str = ">"; // reuses OP_GT
 
 /// U3 (ratified 2026-06-16): a leading underscore on a module name disables it
 /// (`module _name { … }` is not discovered or merged). One char, reversible.

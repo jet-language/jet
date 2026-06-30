@@ -177,5 +177,5 @@ tools/Tower/docs/plans/jetpack-jetos/README.md; jetos is Phase 2 on top of jetpa
 beginners, expert control accessible behind explicit opt-in. The north star
 is a jack-of-all-trades, master-of-ALL language — no reason to reach for
 another language for any workload. One mechanical path per operation, but
-structural flexibility in how code is arranged (inline vs. external `::` 
-definitions). See open decision S83 for the `::` external definition syntax.
+structural flexibility in how code is arranged (inline vs. external definitions).
+External inherent methods use `fn Type.method(self)` (D-EXTMETH1).

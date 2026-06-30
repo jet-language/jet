@@ -255,7 +255,7 @@ function renderFocus() {
   const dots = focusIds.map((id, i) => {
     return `<span class="dot${i === focusIdx ? ' cur' : ''}${pick[id] ? ' picked' : ''}" data-i="${i}" title="${esc(id)}"></span>`;
   }).join('');
-  const qs = c ? c.questions : [];
+  const qs = c ? c.questions.filter(q => q.decisionId === d.id) : [];
 
   f.innerHTML = `
     <div class="focustop">
@@ -282,7 +282,7 @@ function renderFocus() {
         ${chosen ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}
         <button class="btn btn--ghost btn--sm" id="f-ask">${askOpen ? 'Close' : '✎ Ask a question'}</button>
       </div>
-      ${askOpen ? `<div class="askbox"><div class="askbox__h">Ask the agent — saved to the card, no decision recorded</div>
+      ${askOpen ? `<div class="askbox"><div class="askbox__h">Ask the agent about <b>${esc(d.id)}</b> only — saved to this ballot, not the whole card</div>
         <textarea id="f-askt" placeholder="e.g. add a comparison to Elixir, or rework option B around streaming…"></textarea>
         <button class="btn btn--amber btn--sm" id="f-asksend">Send to agent</button></div>` : ''}
       ${qs.length ? `<div class="fqs">${qs.map(q => `<div class="qrow"><div class="qrow__top"><span class="qrow__by ${q.by === 'agent' ? 'agent' : ''}">${esc(q.by)}</span><span class="qrow__kind">${esc(q.kind)}</span><span class="qrow__status ${q.status}">${esc(q.status)}</span></div><div class="qrow__text">${esc(q.text)}</div>${q.answer ? `<div class="qrow__ans"><b>agent</b> ${esc(q.answer)}</div>` : ''}</div>`).join('')}</div>` : ''}
@@ -318,7 +318,7 @@ function renderFocus() {
   $('#f-ask', f).onclick = () => { askOpen = !askOpen; renderFocus(); };
   $('#f-asksend', f)?.addEventListener('click', async () => {
     const t = $('#f-askt', f).value.trim(); if (!t || !c) return; askOpen = false;
-    await api('question/add', { cardId: c.id, text: t, kind: 'question' });
+    await api('question/add', { cardId: c.id, decisionId: d.id, text: t, kind: 'question' });
   });
   $('#f-record', f)?.addEventListener('click', recordFocusBatch);
   f.hidden = false;
@@ -404,7 +404,7 @@ function renderDispatchGroups(box) {
     openQ.forEach(qq => {
       const c = cardById(qq.cardId);
       const row = el(`<div class="qrow"><div class="qrow__top"><span class="qrow__by">owner</span><span class="qrow__kind">${esc(qq.kind)}</span>
-          <span class="qrow__status">open</span></div>
+          <span class="qrow__status">open</span>${qq.decisionId ? `<span class="qrow__kind">${esc(qq.decisionId)}</span>` : ''}</div>
           <div class="qrow__text">${esc(qq.text)}</div>
           <div class="qrow__ans"><b>card ${c ? ticket(c) : '—'}</b> · ${c ? esc(c.title).slice(0, 60) : ''} — <a href="#" data-open style="color:var(--red-bright)">open</a></div></div>`);
       $('[data-open]', row).addEventListener('click', (e) => { e.preventDefault(); showDetail(qq.cardId); });
@@ -626,7 +626,7 @@ function showDetail(id) {
   const qb = $('#modal-q', m);
   c.questions.forEach(q => {
     const row = el(`<div class="qrow"><div class="qrow__top"><span class="qrow__by ${q.by === 'agent' ? 'agent' : ''}">${esc(q.by)}</span>
-        <span class="qrow__kind">${esc(q.kind)}</span><span class="qrow__status ${q.status}">${esc(q.status)}</span></div>
+        <span class="qrow__kind">${esc(q.kind)}</span><span class="qrow__status ${q.status}">${esc(q.status)}</span>${q.decisionId ? `<span class="qrow__kind">${esc(q.decisionId)}</span>` : ''}</div>
         <div class="qrow__text">${esc(q.text)}</div>
         ${q.answer ? `<div class="qrow__ans"><b>agent</b> ${esc(q.answer)}</div>` : ''}</div>`);
     qb.appendChild(row);

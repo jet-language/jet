@@ -234,6 +234,7 @@ fn handle_request(
         "textDocument/rename" => rename_response(server, params, id),
         "textDocument/semanticTokens/full" => semantic_tokens_response(server, params, id),
         "textDocument/inlayHint" => inlay_hint_response(server, params, id),
+        "workspace/executeCommand" => execute_command_response(server, params, id),
         _ => Some(response(id, "null")),
     };
     if let Some(t0) = started {
@@ -310,7 +311,10 @@ fn initialize_response(id: &JsonValue) -> String {
       },
       "full": true
     },
-    "inlayHintProvider": true
+    "inlayHintProvider": true,
+    "executeCommandProvider": {
+      "commands": ["jet.impact"]
+    }
   },
   "serverInfo": { "name": "jet", "version": "0.2.0" }
 }"#;
@@ -631,6 +635,71 @@ fn definition_response(
         }
         None => Some(response(id, "null")),
     }
+}
+
+fn execute_command_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let command = json_get(params, "command").and_then(json_str)?;
+    if command != "jet.impact" {
+        return Some(error_response(id, -32601, "unknown executeCommand"));
+    }
+    let args = match json_get(params, "arguments") {
+        Some(JsonValue::Array(arr)) => arr,
+        _ => {
+            return Some(error_response(
+                id,
+                -32602,
+                "jet.impact expects arguments [uri, symbol, depth?]",
+            ));
+        }
+    };
+    let uri = args.first().and_then(|v| match v {
+        JsonValue::String(s) => Some(s.as_str()),
+        _ => None,
+    });
+    let symbol = args.get(1).and_then(|v| match v {
+        JsonValue::String(s) => Some(s.as_str()),
+        _ => None,
+    });
+    let depth = args
+        .get(2)
+        .and_then(json_int)
+        .map(|n| n as usize)
+        .unwrap_or(3)
+        .max(1);
+
+    let (uri, symbol) = match (uri, symbol) {
+        (Some(u), Some(s)) => (u, s),
+        _ => {
+            return Some(error_response(
+                id,
+                -32602,
+                "jet.impact expects arguments [uri, symbol, depth?]",
+            ));
+        }
+    };
+
+    let doc = match server.docs.get(uri) {
+        Some(d) => d,
+        None => {
+            return Some(error_response(id, -32602, "document not open in LSP session"));
+        }
+    };
+
+    let (_, bundle, facts) = server.check_with_bundle(doc);
+    let db = match bundle {
+        Some(b) => build_symbol_db(&b, &facts),
+        None => {
+            return Some(error_response(id, -32603, "document did not check cleanly"));
+        }
+    };
+
+    let report = jet_impact::ImpactReport::analyze(&db.index, symbol, depth);
+    Some(response(id, &report.to_json()))
 }
 
 fn references_response(

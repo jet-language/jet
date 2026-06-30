@@ -159,6 +159,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "impact",
+        summary: "report blast radius for a symbol (callers, references, callees)",
+        headline: false,
+    },
+    CommandSpec {
         name: "vendor",
         summary: "copy all dependencies into vendor/",
         headline: false,

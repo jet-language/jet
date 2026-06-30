@@ -1827,6 +1827,7 @@ pub(crate) fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<
 pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
     match e {
         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => true,
+        Expr::ComptimeSplice { value, .. } => value.is_some(),
         Expr::Str(parts, _) => parts.iter().all(|p| match p {
             StrPart::Lit(_) => true,
             StrPart::Interp(e) => expr_in_subset(e, cx, locals),
@@ -2503,6 +2504,27 @@ pub(crate) fn method_call_in_subset(
         && (method == Syntax::TASKGROUP_RACE_METHOD || method == Syntax::TASKGROUP_ANY_METHOD)
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    // D-CONCSELECT1=A: fluent scoped select on taskgroups.
+    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
+        && method == Syntax::TASKGROUP_SELECT_METHOD
+    {
+        return args.is_empty();
+    }
+    if recv_type
+        .as_deref()
+        .is_some_and(|rt| rt == Syntax::TYPE_SELECT_BUILDER || rt.starts_with("SelectBuilder<"))
+    {
+        match method {
+            Syntax::SELECT_RECV_METHOD | Syntax::SELECT_READ_METHOD => {
+                return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+            }
+            Syntax::SELECT_AFTER_METHOD => {
+                return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+            }
+            Syntax::SELECT_WAIT_METHOD => return args.is_empty(),
+            _ => {}
+        }
     }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
     // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.

@@ -1432,7 +1432,11 @@ impl<'a> Parser<'a> {
                 let dollar_span = self.bump().span;
                 let (name, name_span) = self.expect_ident("after `$` in a comptime splice")?;
                 let full = Span::new(dollar_span.start, name_span.end);
-                Ok(Expr::ComptimeSplice { name, span: full })
+                Ok(Expr::ComptimeSplice {
+                    name,
+                    span: full,
+                    value: None,
+                })
             }
             other => Err(Diagnostic::error(
                 "E0003",

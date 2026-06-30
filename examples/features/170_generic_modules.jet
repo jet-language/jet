@@ -1,0 +1,24 @@
+// D-GENMOD2=A: generic module templates and aliases (card #91).
+//
+// A generic module is a module template parameterised by types and values.
+// `module Cache<K>` defines the template; `module IntCache = Cache<Int>`
+// instantiates it, producing a concrete module with all type params resolved.
+
+module Cache<K> {
+    pub fn key_of(k: K) -> String {
+        return "key"
+    }
+
+    pub fn describe() -> String {
+        return "generic cache"
+    }
+}
+
+module IntCache = Cache<Int>
+
+fn main() {
+    k #= IntCache__key_of(42)
+    d #= IntCache__describe()
+    print(k)
+    print(d)
+}
