@@ -36,7 +36,7 @@ fn consumed_once_compiles() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     release(^db)
 }
 "#,
@@ -50,11 +50,11 @@ fn returned_value_is_consumed() {
     let codes = err_codes(
         r#"
 fn make() -> Lock {
-    db @= acquire("db")
+    db #= acquire("db")
     return db
 }
 fn main() {
-    held @= make()
+    held #= make()
     release(^held)
 }
 "#,
@@ -71,8 +71,8 @@ fn hold(lock: ^Lock) -> Lock {
     return lock
 }
 fn main() {
-    db @= acquire("db")
-    held @= hold(^db)
+    db #= acquire("db")
+    held #= hold(^db)
     release(^held)
 }
 "#,
@@ -90,7 +90,7 @@ fn dropped_is_e0140() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
 }
 "#,
     );
@@ -107,8 +107,8 @@ fn one_branch_is_e0141() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
-    early @= true
+    db #= acquire("db")
+    early #= true
     if early {
         release(^db)
     }
@@ -134,8 +134,8 @@ fn both_branches_consume_is_clean() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
-    early @= true
+    db #= acquire("db")
+    early #= true
     if early {
         release(^db)
     } else {
@@ -157,7 +157,7 @@ fn used_twice_is_e0121() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     release(^db)
     release(^db)
 }
@@ -179,7 +179,7 @@ fn peek(lock: Lock) {
     print(lock.resource)
 }
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     peek(db)
     release(^db)
 }
@@ -201,7 +201,7 @@ fn drop_inside_unsafe_block_satisfies_single_use() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     #Unsafe("the resource is already gone; nothing to release") {
         drop(db)
     }
@@ -223,7 +223,7 @@ fn drop_inside_unsafe_fn_satisfies_single_use() {
         r#"
 #Unsafe("voids a freshly-acquired lock whose resource is already gone")
 fn void_one() {
-    db @= acquire("db")
+    db #= acquire("db")
     drop(db)
 }
 fn main() {
@@ -247,7 +247,7 @@ fn drop_outside_unsafe_is_e0143() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     drop(db)
 }
 "#,
@@ -271,7 +271,7 @@ fn reuse_after_drop_is_e0121() {
     let codes = err_codes(
         r#"
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     #Unsafe("done with it") {
         drop(db)
     }
@@ -295,9 +295,9 @@ fn drop(n: Int) -> Int {
     return n + 1
 }
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     release(^db)
-    x @= drop(41)
+    x #= drop(41)
     print("{x}")
 }
 "#,
@@ -313,7 +313,7 @@ fn main() {
 #[test]
 fn drop_erases_no_unsafe_in_codegen() {
     let src = format!(
-        "{}\nfn main() {{ db @= acquire(\"db\"); #Unsafe(\"gone\") {{ drop(db) }} }}\n",
+        "{}\nfn main() {{ db #= acquire(\"db\"); #Unsafe(\"gone\") {{ drop(db) }} }}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");
@@ -338,7 +338,7 @@ fn close(t: ^Ticket) {
     print("closed")
 }
 fn main() {
-    t @= make()
+    t #= make()
 }
 "#;
     let codes = codes_of(src);
@@ -354,7 +354,7 @@ fn main() {
 #[test]
 fn tag_erases_in_codegen() {
     let src = format!(
-        "{}\nfn main() {{ db @= acquire(\"db\"); release(^db) }}\n",
+        "{}\nfn main() {{ db #= acquire(\"db\"); release(^db) }}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");

@@ -57,8 +57,29 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     if cx.coverage && !tir.is_main {
         out.push_str(&format!("    jet_cov({});\n", tir.line));
     }
-    emit_tir_stmts(&tir.body, cx, out, 1);
+    if tir.is_reactive {
+        emit_reactive_wrapped_body(&tir.body, cx, out, 1);
+    } else {
+        emit_tir_stmts(&tir.body, cx, out, 1);
+    }
     out.push_str("}\n\n");
+}
+
+fn emit_reactive_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
+    let pad = "    ".repeat(indent);
+    let inner = indent + 1;
+    out.push_str(&format!(
+        "{}{}jet_std::jet_reactive_effect({});\n",
+        pad,
+        cx.root_prefix,
+        render_reactive_tir_closure(body, cx, inner)
+    ));
+}
+
+fn render_reactive_tir_closure(body: &[TStmt], cx: &Cx, indent: usize) -> String {
+    let mut inner = String::new();
+    emit_tir_stmts(body, cx, &mut inner, indent);
+    format!("move || {{ {} }}", inner)
 }
 
 /// c109 Phase 7: an inherent method, emitted INSIDE an `impl user_<T> { … }` block
@@ -111,7 +132,11 @@ pub(crate) fn emit_tir_method(
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
     }
-    emit_tir_stmts(&tir.body, cx, out, indent + 1);
+    if tir.is_reactive {
+        emit_reactive_wrapped_body(&tir.body, cx, out, indent + 1);
+    } else {
+        emit_tir_stmts(&tir.body, cx, out, indent + 1);
+    }
     out.push_str(&format!("{pad}}}\n"));
 }
 
@@ -715,6 +740,13 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             ));
             emit_tir_stmts(body, cx, out, inner);
             out.push_str(&format!("{}}}\n", pad));
+        }
+        // D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
+        TStmt::Reactive { closure } => {
+            out.push_str(&format!(
+                "{}{}jet_std::jet_reactive_effect({});\n",
+                pad, cx.root_prefix, closure
+            ));
         }
         TStmt::Region(body) => {
             out.push_str(&format!("{}{{\n", pad));
@@ -1853,6 +1885,27 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
+                // D-RENDERTGT2=A (c133 M1): NullBackend measure/layout/paint/on_event/commands.
+                THandleOp::UiBackendMethod { method } => match method.as_str() {
+                    "measure" => format!(
+                        "({}).measure_node(({}).clone(), ({}).clone())",
+                        recv,
+                        a(0),
+                        a(1)
+                    ),
+                    "layout" => format!(
+                        "({}).layout_node(({}).clone(), ({}).clone())",
+                        recv,
+                        a(0),
+                        a(1)
+                    ),
+                    "paint" => format!("({}).paint_node(({}).clone())", recv, a(0)),
+                    "on_event" => format!("({}).dispatch_event(({}).clone())", recv, a(0)),
+                    "commands" => format!("({}).paint_commands()", recv),
+                    "frame_lines" => format!("({}).frame_lines()", recv),
+                    "render_count" => format!("({}).render_count()", recv),
+                    _ => format!("({}).{}()", recv, method),
+                },
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client method call.
                 // "body"/"header" dispatch by arity: 0-arg=response accessor, 1-arg=request builder.
                 THandleOp::HttpClientMethod { kind, method } => {
@@ -2081,6 +2134,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "{}jet_std::jet_reactive_effect({})",
                     cx.root_prefix, closure
                 )
+            }
+            TCoreClosureKind::UiReactiveRender { closure } => {
+                format!("{}jet_ui_reactive_render({})", cx.root_prefix, closure)
             }
         },
         // D-TASKSCOPE1=A: `g.all([h1, h2, …])` — join each handle in list order.
@@ -2628,17 +2684,17 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        // D-DEP-ARCHIVE1=A: jet.archive — gzip compress/decompress via the FFI bridge crate.
+        // D-DEP-ARCHIVE1=A: core.archive — gzip compress/decompress via the FFI bridge crate.
         // Arguments are `[U8]` (Vec<u8>); bridge functions take `&[u8]` (auto-coerce from &Vec<u8>).
-        ("jet.archive", "gzip_compress") => {
+        ("core.archive", "gzip_compress") => {
             format!("{}(&({}))", regex_fn("jet_archive_gzip_compress"), arg(0))
         }
-        ("jet.archive", "gzip_decompress") => {
+        ("core.archive", "gzip_decompress") => {
             format!("{}(&({}))", regex_fn("jet_archive_gzip_decompress"), arg(0))
         }
-        // D-DEP-ARCHIVE1=A: jet.archive — zip compress/decompress via the `zip` crate FFI bridge.
+        // D-DEP-ARCHIVE1=A: core.archive — zip compress/decompress via the `zip` crate FFI bridge.
         // zip_compress takes (&str, &[u8]); zip_decompress takes &[u8].
-        ("jet.archive", "zip_compress") => {
+        ("core.archive", "zip_compress") => {
             format!(
                 "{}(&({}), &({}))",
                 regex_fn("jet_archive_zip_compress"),
@@ -2646,12 +2702,12 @@ pub(crate) fn emit_tir_core_call(
                 arg(1)
             )
         }
-        ("jet.archive", "zip_decompress") => {
+        ("core.archive", "zip_decompress") => {
             format!("{}(&({}))", regex_fn("jet_archive_zip_decompress"), arg(0))
         }
         // D-DEP-ARCHIVE1=A: tar_add / tar_get / tar_names_json via the FFI bridge.
         // All three take &[u8] / &str args (non-scalar → borrow); none take scalars.
-        ("jet.archive", "tar_add") => {
+        ("core.archive", "tar_add") => {
             format!(
                 "{}(&({}), &({}), &({}))",
                 regex_fn("jet_archive_tar_add"),
@@ -2660,7 +2716,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(2)
             )
         }
-        ("jet.archive", "tar_get") => {
+        ("core.archive", "tar_get") => {
             format!(
                 "{}(&({}), &({}))",
                 regex_fn("jet_archive_tar_get"),
@@ -2668,7 +2724,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(1)
             )
         }
-        ("jet.archive", "tar_names_json") => {
+        ("core.archive", "tar_names_json") => {
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
         }
         // D-DEP-DB1: jet.db — SQLite via the FFI bridge crate.
@@ -2712,6 +2768,55 @@ pub(crate) fn emit_tir_core_call(
         // D-ADAPTFID1=A: adaptive fidelity signal — global atomic f32.
         ("core.perf", "fidelity") => format!("jet_perf_fidelity()"),
         ("core.perf", "set_fidelity") => format!("jet_perf_set_fidelity({})", arg(0)),
+        // D-RENDERTGT2=A (c133 M1): UI backend seam constructors.
+        ("core.ui", "null_backend") => format!("{}jet_ui_null()", cx.root_prefix),
+        ("core.ui", "tui_backend") => format!("{}jet_ui_tui()", cx.root_prefix),
+        ("core.ui", "point") => format!(
+            "{}jet_ui_point({}, {})",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
+        ("core.ui", "size") => format!(
+            "{}jet_ui_size({}, {})",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
+        ("core.ui", "rect") => format!(
+            "{}jet_ui_rect({}, {}, {}, {})",
+            cx.root_prefix,
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.ui", "constraint") => format!(
+            "{}jet_ui_constraint({}, {}, {}, {})",
+            cx.root_prefix,
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.ui", "node") => format!(
+            "{}jet_ui_node(&({}), {}, {})",
+            cx.root_prefix,
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.ui", "key_event") => format!(
+            "{}jet_ui_key_event(&({}))",
+            cx.root_prefix,
+            arg(0)
+        ),
+        ("core.ui", "resize_event") => format!(
+            "{}jet_ui_resize_event({}, {})",
+            cx.root_prefix,
+            arg(0),
+            arg(1)
+        ),
         // D-APPROX1=A: sketch constructors.
         ("core.sketch.hll", "new") => format!("JetHyperLogLog::new()"),
         ("core.sketch.tdigest", "new") => format!("JetTDigest::new()"),

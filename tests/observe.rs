@@ -336,11 +336,11 @@ fn parse_age(raw: String) -> Int ? ParseError {
     return ok(42)
 }
 fn load(raw: String) -> Int ? ParseError {
-    n @= parse_age(raw)?
+    n #= parse_age(raw)?
     return ok((n * 2))
 }
 fn double(raw: String) -> Int ? ParseError {
-    n @= load(raw)?
+    n #= load(raw)?
     return ok((n * 2))
 }
 fn main() {

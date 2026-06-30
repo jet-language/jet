@@ -8,7 +8,7 @@ fn consume(s: ^String) {
 }
 
 fn main() {
-    msg: String @= "hello"
+msg: String #= "hello"
     consume(msg)
 }
 "#;
@@ -44,7 +44,7 @@ fn consume(item: ^NoClone) {
 }
 
 fn main() {
-    msg: String @= "hi"
+msg: String #= "hi"
     consume(msg)
 }
 "#;
@@ -80,7 +80,7 @@ fn main() {
 fn view_return_local_text_is_error() {
     let src = r#"
 fn bad() -> &String {
-    msg: String @= "ok"
+msg: String #= "ok"
     return msg
 }
 
@@ -188,7 +188,7 @@ fn consume(s: ^String) {
 }
 
 fn main() {
-    msg: String @= "hello"
+msg: String #= "hello"
     consume(msg)
     print(msg)
 }
@@ -212,7 +212,7 @@ fn consume(s: ^String) {
 }
 
 fn main() {
-    msg: String @= "hello"
+msg: String #= "hello"
     consume(msg)
 }
 "#;
@@ -227,7 +227,7 @@ fn main() {
 fn deref_outside_unsafe_is_error() {
     let src = r#"
 fn main() {
-    x: Int @= 1
+x: Int #= 1
     print(*x)
 }
 "#;
@@ -250,7 +250,7 @@ fn consume(s: ^String) {
 fn maybe(b: Bool) -> Bool { return b }
 
 fn main() {
-    msg: String @= "hello"
+msg: String #= "hello"
     if maybe(true) {
         consume(msg)
     }
@@ -277,7 +277,7 @@ fn consume(s: ^String) {
 fn maybe(b: Bool) -> Bool { return b }
 
 fn main() {
-    msg: String @= "hello"
+msg: String #= "hello"
     if maybe(true) {
         consume(msg)
     }

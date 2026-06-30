@@ -233,12 +233,16 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_pub_qualifier(&mut self, is_pub: bool, is_package_pub: bool) {
-        if is_pub {
-            if is_package_pub {
-                self.write("pub(package) ");
-            } else {
-                self.write("pub ");
+        if is_package_pub {
+            self.write("pub(package) ");
+            return;
+        }
+        if self.pub_file {
+            if !is_pub {
+                self.write("priv ");
             }
+        } else if is_pub {
+            self.write("pub ");
         }
     }
 
@@ -353,6 +357,10 @@ impl<'a> Fmt<'a> {
             self.write(&format!("#{}", Syntax::KW_UNSAFE));
             self.newline();
         }
+        // D-REACTCORE1: `#Reactive fn` marker precedes `pub`/`fn`.
+        if f.is_reactive {
+            self.write(&format!("#{} ", Syntax::KW_REACTIVE));
+        }
         // S60 (D-CASING1 follow-on): `#Pure` marker precedes `pub`/`fn`.
         if f.is_pure {
             self.write(&format!("#{} ", Syntax::KW_PURE));
@@ -360,6 +368,10 @@ impl<'a> Fmt<'a> {
         // D-TAINT1: the `#Sanitizer` taint-strip modifier precedes `pub`/`fn`.
         if f.is_sanitizer {
             self.write(&format!("#{} ", Syntax::KW_SANITIZER));
+        }
+        // D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method precedes `pub`/`fn`.
+        if f.is_must_use {
+            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
         }
         // D-STATE1: typestate markers precede `pub`/`fn`. `#State(S)` is the
         // require-state guard; `#Transition(From -> To)` is the transition (the
@@ -467,6 +479,10 @@ impl<'a> Fmt<'a> {
         if s.is_single_use {
             self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
         }
+        // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`struct`, on the same line.
+        if s.is_must_use {
+            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
+        }
         // D-MIGRATE1: `#PublishedSchema` precedes `pub`/`struct`, on the same line.
         if s.is_published_schema {
             self.write(&format!("#{} ", Syntax::ATTR_PUBLISHED_SCHEMA));
@@ -525,6 +541,10 @@ impl<'a> Fmt<'a> {
         // D-LIN1: `#SingleUse` precedes `pub`/`enum`, on the same line.
         if e.is_single_use {
             self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
+        }
+        // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`enum`, on the same line.
+        if e.is_must_use {
+            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
         }
         if top_level {
             self.fmt_pub_qualifier(e.is_pub, e.is_package_pub);

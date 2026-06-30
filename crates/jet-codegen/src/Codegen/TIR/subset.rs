@@ -327,7 +327,7 @@ pub(crate) fn is_covered_reactive_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    matches!(name.as_str(), "Signal" | "Derived")
+    matches!(name.as_str(), "Signal" | "Derived" | "Computed")
         && args.len() == 1
         && is_subset_param_ty(&args[0], cx)
 }
@@ -369,7 +369,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
         .all(|a| is_type_var_param_ty(a, cx) || is_subset_param_ty(a, cx))
 }
 
-/// c109 Phase 23: a DISTINCT type (`UserId @= distinct Int`, D-DIST1) usable as a
+/// c109 Phase 23: a DISTINCT type (`UserId #= distinct Int`, D-DIST1) usable as a
 /// param/return/local *value* type. A distinct type renders via `cx.rust_type` to its
 /// newtype `user_<Name>` (the `Type::Named` fallthrough in Context.rs), and the emitted
 /// `#[repr(transparent)]` newtype is `Copy` iff its base is (sema/codegen derive set) —
@@ -986,13 +986,13 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
 pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
     match s {
         Stmt::Val(b) => {
-            // c109 Phase 19: an `arena_view` binding (`x @= arena.alloc(v)` / `x ::
+            // c109 Phase 19: an `arena_view` binding (`x #= arena.alloc(v)` / `x #=
             // arena.alloc(v)`) IS covered — it lowers to a plain `let <x> = <init>;` (no
             // type, no mut) with a deref'd slot, exactly as `emit_let`'s `arena_view`
             // branch (the init is a covered `arena.alloc(v)` handle call). The escape/
             // use-after-reset rules (E0631/E0632) are enforced entirely in sema.
             match &b.pattern {
-                // c109 Phase 23: a TUPLE-destructuring binding `(a, b) @= <init>` (S74,
+                // c109 Phase 23: a TUPLE-destructuring binding `(a, b) #= <init>` (S74,
                 // `BindPattern::Tuple`). The AST `emit_stmt` borrows the init into a temp,
                 // then binds each name from `(tmp).user_<canonical-field>.clone()` (pairing
                 // elems to the type's canonical fields BY POSITION). Covered when the init
@@ -1007,7 +1007,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     }
                     ok
                 }
-                // c109 Phase 26: a LIST-destructuring binding `[a, b, c] @= <init>` (S74,
+                // c109 Phase 26: a LIST-destructuring binding `[a, b, c] #= <init>` (S74,
                 // `BindPattern::List`). The AST `emit_stmt` borrows the init into a temp,
                 // then binds each name via `jet_unpack_vec(tmp, want, i, file, line)`
                 // (a runtime bounds-checked element move). Covered when the init is
@@ -1021,7 +1021,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     }
                     ok
                 }
-                // c109: a STRUCT-destructuring binding `Type { x, y } @= <init>`
+                // c109: a STRUCT-destructuring binding `Type { x, y } #= <init>`
                 // (S74, `BindPattern::Struct`). The AST `emit_stmt` borrows the init
                 // into a temp, then binds each field via `(tmp).user_<field>.clone()`
                 // (the pattern's field name is both the bound local and the read).
@@ -1240,6 +1240,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Unsafe { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (I3).
         Stmt::Impure { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        Stmt::Reactive { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen (I3).
         Stmt::SuppressMustUse { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) lowers to a plain Rust
@@ -2714,7 +2715,7 @@ pub(crate) fn method_call_in_subset(
     // Sema sets `recv_type == Some("Signal"|"Derived")` (CheckerInfer's reactive arm), so
     // these are keyed on recv_type — NOT the bare name (`get`/0 would alias a list `get`).
     // `Signal.get()`/`Derived.get()` → `(recv).get()`; `Signal.set(v)` → `(recv).set(v)`.
-    if matches!(recv_type.as_deref(), Some("Signal") | Some("Derived"))
+    if matches!(recv_type.as_deref(), Some("Signal") | Some("Derived") | Some("Computed"))
         && is_reactive_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
@@ -2734,6 +2735,15 @@ pub(crate) fn method_call_in_subset(
     // Shape (d7) [D-PENDING1=B]: a `Loadable<T,E>` method.
     // Sema sets `recv_type == Some("Loadable")`.
     if recv_type.as_deref() == Some("Loadable") && is_loadable_method_name(method, args.len()) {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
+    // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
+    if matches!(recv_type.as_deref(), Some("NullBackend" | "TuiBackend"))
+        && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
+    {
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()
@@ -3311,6 +3321,20 @@ pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
     )
 }
 
+/// D-RENDERTGT2=A (c133 M1/M2): is `(backend, method, nargs)` a UI backend method?
+pub(crate) fn is_ui_backend_method_name(
+    backend: Option<&str>,
+    method: &str,
+    nargs: usize,
+) -> bool {
+    match (backend, method, nargs) {
+        (_, "measure", 2) | (_, "layout", 2) | (_, "paint", 1) | (_, "on_event", 1) => true,
+        (Some("NullBackend"), "commands", 0) => true,
+        (Some("TuiBackend"), "frame_lines" | "render_count", 0) => true,
+        _ => false,
+    }
+}
+
 /// D-NETDEP1=A / D-HTTPLIB1=A: is this an HTTP type?
 pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
     matches!(
@@ -3656,9 +3680,13 @@ pub(crate) fn core_closure_call_in_subset(
                 && lambda_arg(1)
         }
         ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
-        // D-REACT1=B: `reactive.derived(<lambda>)` / `reactive.effect(<lambda>)` —
+        // D-REACT1=B / D-SIGNAL1: `reactive.derived/computed/effect(<lambda>)` —
         // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).
-        ("jet.reactive", "derived" | "effect") => args.len() == 1 && no_labels && lambda_arg(0),
+        ("jet.reactive", "derived" | "computed" | "effect") => {
+            args.len() == 1 && no_labels && lambda_arg(0)
+        }
+        // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(<lambda>)`.
+        ("core.ui", "reactive_render") => args.len() == 1 && no_labels && lambda_arg(0),
         _ => false,
     }
 }

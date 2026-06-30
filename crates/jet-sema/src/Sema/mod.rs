@@ -30,6 +30,8 @@ pub(crate) struct MethodSig {
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
+    /// D-MUSTUSE1 (c18iwxqx): `#MustUse` method — return cannot be silently ignored (E0419).
+    pub(crate) must_use: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +45,8 @@ pub(crate) enum TypeDef {
         /// Values of this type must be consumed exactly once (E0140/E0141) and
         /// may not be aliased (E0142).
         single_use: bool,
+        /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `struct`.
+        must_use: bool,
         /// D-SOA1 / D-SOA2A=C: `#layout(columnar)` was present. A `[S]` of this
         /// struct is stored struct-of-arrays; sema gates the list-op surface to
         /// the v1-supported subset (E1108) and codegen lowers it columnar.
@@ -56,6 +60,8 @@ pub(crate) enum TypeDef {
         methods: HashMap<String, MethodSig>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `enum`.
         single_use: bool,
+        /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `enum`.
+        must_use: bool,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
     /// a base type. No implicit coercion either direction (E0128). Arithmetic
@@ -165,6 +171,20 @@ impl TypeRegistry {
         )
     }
 
+    /// D-MUSTUSE1 (c18iwxqx): true when `name` is a `#MustUse` struct/enum.
+    pub(crate) fn is_must_use(&self, name: &str) -> bool {
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Struct {
+                must_use: true,
+                ..
+            }) | Some(TypeDef::Enum {
+                must_use: true,
+                ..
+            })
+        )
+    }
+
     /// D-DIST1: the base type of a distinct type (None if `name` is not distinct).
     pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {
         match self.types.get(name) {
@@ -207,6 +227,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
         defaults: non_self_params
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
+        must_use: f.is_must_use,
     }
 }
 
@@ -248,6 +269,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
         is_sanitizer: f.is_sanitizer,
+        is_must_use: f.is_must_use,
     }
 }
 
@@ -274,6 +296,7 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         is_unsafe: false,
         is_pure: false,      // extern functions are always considered impure
         is_sanitizer: false, // extern functions can't be sanitizers
+        is_must_use: false,
     }
 }
 
@@ -392,7 +415,7 @@ pub(crate) struct LocalInfo {
 }
 
 /// D-ALLOC2 (ratified 2026-06-21): bookkeeping for an arena-`view` binding —
-/// what `x :: arena.alloc(v)` produced. The view points into `arena`'s storage
+/// what `x #= arena.alloc(v)` produced. The view points into `arena`'s storage
 /// and is valid only inside the region (the lexical scope of the `arena`
 /// binding, or an explicit `region`); the checker forbids it escaping (E0631)
 /// or being used after `arena` is `reset`/`free`d (E0632).
@@ -549,7 +572,7 @@ pub(crate) struct Checker<'a> {
     det_suppress: usize,
     in_unsafe: bool,
     /// D-IGNORERET2=A: true while inside a `#Suppress(MustUse) { … }` block.
-    /// Suppresses E0402 for fallible / #MustUse results dropped as statements.
+    /// Suppresses E0402 / E0419 for fallible / `#MustUse` results dropped as statements.
     suppress_must_use: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
@@ -570,7 +593,7 @@ pub(crate) struct Checker<'a> {
     /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
     freed_allocators: HashMap<String, String>,
     /// D-ALLOC2 (ratified 2026-06-21): arena-`view` bindings in scope — a binding
-    /// `x :: arena.alloc(v)` holds a scope-bound view into `arena`. Maps the view
+    /// `x #= arena.alloc(v)` holds a scope-bound view into `arena`. Maps the view
     /// name → which arena it points into (for E0631 escape / E0632 use-after-reset).
     arena_views: HashMap<String, ArenaViewInfo>,
     /// D-UNINIT1 (ratified 2026-06-21): `#Uninit` bindings not yet definitely
@@ -668,6 +691,7 @@ mod SchemaMigration;
 mod State;
 mod Protocol;
 mod Taint;
+mod WebPartition;
 
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;
@@ -681,9 +705,7 @@ pub(crate) use FFI::*;
 // D-STATE1: typestate pass — wrong-state operation (E0150).
 pub(crate) use State::{check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
-// `e0140_unconsumed` is referenced only within that module; the other two fire
-// from CheckerCore (E0141) and CheckerInfer (E0142).
-pub(crate) use CheckerOwnership::{e0141_unconsumed_branch, e0142_aliased, e0143_drop_unaudited};
+pub(crate) use WebPartition::check_web_partition;
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{
@@ -698,3 +720,12 @@ pub use FFI::{e3202, e3301, e3302, e3303};
 pub use Capability::resolve_capabilities;
 pub use CapabilityFreeze::check_capability_freeze;
 pub use SchemaMigration::check_schema_migrations;
+
+/// D-REACTCORE1: free variable reads in a statement block (for reactive-scope capture cloning).
+pub fn block_free_var_reads(stmts: &[crate::AST::Stmt]) -> HashSet<String> {
+    let mut bound = HashSet::new();
+    let mut read = HashSet::new();
+    let mut mut_cap = HashSet::new();
+    Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap);
+    read
+}

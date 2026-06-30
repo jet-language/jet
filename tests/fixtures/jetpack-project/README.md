@@ -33,7 +33,7 @@ $ JETPACK_FIXTURES=fixtures jetpack build --offline
            ▸ /nix/store/…-neovim-0.10.2
   jetpack  resolving mine:hello …
   jetpack  hello ready ✓
-           ▸ …/store/hello-…           (core · no Nix)
+           ▸ …/store/hello-…           (core � no Nix)
   jetpack  built 3 package(s).
 ```
 

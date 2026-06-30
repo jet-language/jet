@@ -4,36 +4,36 @@
 use core.regex as re
 
 fn main() {
-    text @= "order 42 shipped to zip 90210"
+    text #= "order 42 shipped to zip 90210"
 
     // is_match: does the pattern occur at all?
-    has_digits @= re.is_match("\\d+", text) ?? panic("bad pattern")
+    has_digits #= re.is_match("\\d+", text) ?? panic("bad pattern")
     print(has_digits)
 
     // find: the first matched substring (an optional — `null` if no match).
-    first @= re.find("\\d+", text) ?? panic("bad pattern")
+    first #= re.find("\\d+", text) ?? panic("bad pattern")
     if first == value(n) {
         print(n)
     }
 
     // find_all: every match, left to right.
-    nums @= re.find_all("\\d+", text) ?? panic("bad pattern")
+    nums #= re.find_all("\\d+", text) ?? panic("bad pattern")
     print(nums.len())
 
     // match + capture groups: group(0) is the whole match, group(n) the n-th group.
-    m @= re.match("(\\d+) shipped", text) ?? panic("bad pattern")
+    m #= re.match("(\\d+) shipped", text) ?? panic("bad pattern")
     if m == value(mat) {
-        whole @= mat.group(0) ?? "none"
-        first_group @= mat.group(1) ?? "none"
+        whole #= mat.group(0) ?? "none"
+        first_group #= mat.group(1) ?? "none"
         print(whole)
         print(first_group)
     }
 
     // replace_all: rewrite every match.
-    masked @= re.replace_all("\\d+", text, "#") ?? panic("bad pattern")
+    masked #= re.replace_all("\\d+", text, "#") ?? panic("bad pattern")
     print(masked)
 
     // split on whitespace runs.
-    words @= re.split("\\s+", text) ?? panic("bad pattern")
+    words #= re.split("\\s+", text) ?? panic("bad pattern")
     print(words.len())
 }

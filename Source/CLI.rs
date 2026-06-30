@@ -255,6 +255,10 @@ pub const FLAGS: &[FlagSpec] = &[
     // D-CTEFFECT1: comptime effect tier gate.
     FlagSpec { long: "--allow-impure", help: "with build/run: allow Tier-2 ambient comptime effects inside #Impure gates (D-CTEFFECT1)" },
     FlagSpec { long: "--target", help: "with build: cross-compile for a rustc target triple (E2-M15)" },
+    FlagSpec {
+        long: "--explain-partition",
+        help: "with build --target=web: print the JS/WASM partition report (D-WASM1)",
+    },
     // E2-M11 flags.
     FlagSpec { long: "--capabilities-json", help: "with build: emit capability summary as JSON (D-TOOL5)" },
     FlagSpec { long: "--update-snapshots", help: "with test: update snapshot golden files (D-TOOL4)" },

@@ -6,4 +6,14 @@ pub use jet_sema::{
     AST, SHA256,
 };
 pub mod Codegen;
+/// D-ASYNCRT1=A: M:N scheduler substrate for jet-jit host shims.
+pub mod scheduler {
+    fn jet_deadline_remaining_ms() -> Option<i64> {
+        None
+    }
+    fn jet_deadline_exceeded(_kind: &str) -> ! {
+        std::process::exit(70);
+    }
+    include!("Prelude/Scheduler.rs");
+}
 // Prelude/ contains include_str-embedded text files, not Rust modules.

@@ -315,6 +315,8 @@ mod tests {
             source: LockSource::Path("/tmp/placeholder".into()),
             locked: None,
             dependencies: vec![],
+            layer: None,
+            inferred_layer: None,
         }
     }
 

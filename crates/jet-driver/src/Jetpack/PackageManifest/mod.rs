@@ -81,13 +81,26 @@ impl BuildOptimize {
     }
 }
 
+/// D-BUILDPROFILE1: `panic:` mode for a build profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuildPanic {
+    #[default]
+    Unwind,
+    Abort,
+}
+
 /// D-BUILDPROFILE1: one named build profile declared in `pkg.jet`'s `build { }` block.
-/// Written as `name: Build.{ optimize: <level> }`. Blessed names `release`/`debug`
-/// have built-in defaults; user-defined names extend that.
+/// Written as `name: Build.{ optimize: <level>, … }`. Blessed names `release`/`debug`/`ci`
+/// have built-in defaults; entries here override or extend them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildProfileDef {
     pub name: String,
     pub optimize: BuildOptimize,
+    pub debug_info: bool,
+    pub small: bool,
+    pub panic: Option<BuildPanic>,
+    pub features: Vec<String>,
+    pub env: Vec<(String, String)>,
 }
 
 /// Payload identity (the `payload: { … }` block, U10 — was `package:`).
@@ -101,6 +114,8 @@ pub struct PackageMeta {
     pub repository: Option<String>,
     /// Toolchain constraint, e.g. `jet: ">=1.0.0"` (E1208).
     pub jet_constraint: Option<String>,
+    /// D-RINGLAYER1=A: optional runtime-layer ceiling (`core` / `alloc` / `std`).
+    pub layer: Option<crate::Syntax::RuntimeLayer>,
 }
 
 /// The realize axis for a package (U10): `library` is imported for code;
@@ -238,6 +253,8 @@ pub enum ManifestError {
     /// D-BUILDPROFILE1: a `build { }` profile entry is malformed — missing the
     /// `Build.{ optimize: … }` value shape or has an unknown optimize level.
     BadBuildProfile { name: String, reason: &'static str },
+    /// D-RINGLAYER1=A: `layer:` in `payload` is not `core`, `alloc`, or `std`.
+    BadLayer { value: String },
 }
 
 /// Top-level keys reserved for a future Jet feature; using them non-empty
@@ -1004,5 +1021,58 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
         assert!(!file_declares_module("module hellostuff { }", "hello"));
         assert!(file_declares_module("module hello { }", "hello"));
         assert!(file_declares_module("module hello\n{}", "hello"));
+    }
+
+    // ── D-BUILDPROFILE1: build { } profiles ──
+
+    #[test]
+    fn parses_build_profiles_block() {
+        let src = r#"
+payload: { name: "p", version: "0.1.0" }
+build: {
+    release: Build.{ optimize: full },
+    debug: { optimize: none, debug_info: true },
+    ci: Build.{ optimize: basic, debug_info: true, panic: abort },
+    fast: Build.{ optimize: full, features: [ "fast_path" ] },
+}
+"#;
+        let m = parse(src).unwrap();
+        assert_eq!(m.build_profiles.len(), 4);
+        assert_eq!(m.build_profiles[0].name, "release");
+        assert_eq!(m.build_profiles[0].optimize, BuildOptimize::Full);
+        assert_eq!(m.build_profiles[1].name, "debug");
+        assert!(m.build_profiles[1].debug_info);
+        assert_eq!(m.build_profiles[2].panic, Some(BuildPanic::Abort));
+        assert_eq!(m.build_profiles[3].features, vec!["fast_path".to_string()]);
+    }
+
+    #[test]
+    fn build_profile_duplicate_name_errors() {
+        let src = r#"
+payload: { name: "p", version: "0.1.0" }
+build: {
+    fast: Build.{ optimize: full },
+    fast: Build.{ optimize: basic },
+}
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::BadBuildProfile { ref name, ref reason }
+                if name == "fast" && reason.contains("duplicate")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn build_profile_unknown_field_errors() {
+        let src = r#"
+payload: { name: "p", version: "0.1.0" }
+build: { fast: Build.{ optimize: full, bogus: true } }
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::BadBuildProfile { ref name, .. } if name == "fast"),
+            "{err:?}"
+        );
     }
 }

@@ -5,14 +5,14 @@ use core.db as db
 
 fn main() {
     // Open an in-memory database (no file, no cleanup needed).
-    h @= db.open_memory()
+    h #= db.open_memory()
 
     // DDL and DML both go through exec; returns true on success.
     db.exec(h, "CREATE TABLE greet (msg TEXT)")
     db.exec(h, "INSERT INTO greet VALUES ('hello, jet.db!')")
 
     // query_json returns a JSON array of row objects.
-    rows @= db.query_json(h, "SELECT msg FROM greet")
+    rows #= db.query_json(h, "SELECT msg FROM greet")
     print(rows)
 
     db.close(h)

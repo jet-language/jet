@@ -72,6 +72,33 @@ impl<'a> Checker<'a> {
         // like an `#Unsafe { … }` block — its reason is the audit note. Mark the
         // whole body unsafe so `drop(x)` of a `#SingleUse` value is permitted
         // (and any other unsafe-gated operation is reachable directly).
+        if f.is_reactive {
+            if f.is_pure {
+                self.diags.push(Diagnostic::error(
+                    "E2914",
+                    "`#Reactive fn` can't also be `#Pure fn`".to_string(),
+                    "a reactive effect re-runs when signals change, so it is not a pure function"
+                        .to_string(),
+                    "drop `#Pure` or use `reactive.effect` inside a plain `fn`".to_string(),
+                    Some(f.name_span),
+                ));
+            }
+            if f
+                .return_type
+                .as_ref()
+                .is_some_and(|t| !matches!(t, Type::Named(n) if n == "Unit"))
+            {
+                self.diags.push(Diagnostic::error(
+                    "E2914",
+                    "`#Reactive fn` must not return a value".to_string(),
+                    "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)"
+                        .to_string(),
+                    "drop the return type, or use `#Reactive { … }` inside a plain `fn`"
+                        .to_string(),
+                    Some(f.name_span),
+                ));
+            }
+        }
         let prev_unsafe = self.in_unsafe;
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
         self.check_block(&mut f.body, false);
@@ -642,11 +669,15 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
+                    is_reactive: false,
                     is_sanitizer: false,
                     declared_effects: None,
         effect_via: None,
         state_requires: None,
-        state_transition: None,
+            state_transition: None,
+            web_marker: None,
+            is_must_use: false,
+            must_use_span: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body(
@@ -1292,6 +1323,7 @@ pub(crate) fn register_struct(
             fields,
             methods: HashMap::new(),
             single_use: s.is_single_use,
+            must_use: s.is_must_use,
             columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
         },
     );
@@ -1392,6 +1424,7 @@ pub(crate) fn register_enum(
             variant_order,
             methods: HashMap::new(),
             single_use: e.is_single_use,
+            must_use: e.is_must_use,
         },
     );
 }
@@ -1698,11 +1731,15 @@ pub(crate) fn check_error_conv_body(
         is_view_return: false,
         is_unsafe: false,
         is_pure: false,
+        is_reactive: false,
+        is_must_use: false,
+        must_use_span: None,
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
         state_requires: None,
-        state_transition: None,
+            state_transition: None,
+            web_marker: None,
         body: std::mem::take(&mut ec.body),
     };
     let d = check_func_body(
@@ -2008,11 +2045,15 @@ pub(crate) fn synthesize_delegation_method(
         is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
+        is_reactive: false,
+        is_must_use: false,
+        must_use_span: None,
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
         state_requires: None,
-        state_transition: None,
+            state_transition: None,
+            web_marker: None,
         body: vec![body_stmt],
     }
 }
@@ -2054,11 +2095,15 @@ pub(crate) fn synthesize_default_method(
         is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
+        is_reactive: false,
+        is_must_use: false,
+        must_use_span: None,
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
         state_requires: None,
-        state_transition: None,
+            state_transition: None,
+            web_marker: None,
         body: body.to_vec(),
     }
 }

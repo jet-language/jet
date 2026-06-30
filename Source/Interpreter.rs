@@ -570,9 +570,13 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
 /// One iteration of the `jet dev` watch loop, factored out so it can be
 /// golden-tested without the long-running file watcher (the outer loop is a
 /// thin shell around this). Loads + checks the file exactly like batch
-/// compilation (D-DEV: identical diagnostics), then either runs it in the
-/// interpreter or explains the boundary.
-pub fn dev_iteration(file: &str, try_anyway: bool) -> RunOutcome {
+/// compilation (D-DEV: identical diagnostics), then runs via the selected
+/// backend.
+///
+/// `use_interpreter` — D-JIT2=A: when false (default for `jet dev`), the
+/// Cranelift tier-1 backend wraps the interpreter; when true (`--interpret`),
+/// tier-0 interpreter only.
+pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
     match crate::Loader::load_entry_with_overlay(file, None, false) {
         Ok(mut bundle) => {
             let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
@@ -583,13 +587,25 @@ pub fn dev_iteration(file: &str, try_anyway: bool) -> RunOutcome {
             if !errors.is_empty() {
                 return RunOutcome::Problems(errors);
             }
-            // c77: route execution through the `JitBackend` seam so the live
-            // dev path exercises it (not dead code). Tier-0 = the interpreter.
-            use crate::JitBackend::{InterpreterBackend, JitBackend};
-            let mut backend = InterpreterBackend::new();
-            backend.run(&bundle, try_anyway)
+            dev_run_bundle(&bundle, try_anyway, use_interpreter)
         }
         Err(diags) => RunOutcome::Problems(diags),
+    }
+}
+
+/// Run an already-checked bundle through the dev backend seam.
+pub fn dev_run_bundle(
+    bundle: &ProgramBundle,
+    try_anyway: bool,
+    use_interpreter: bool,
+) -> RunOutcome {
+    use crate::JitBackend::{InterpreterBackend, JitBackend};
+    if use_interpreter {
+        let mut backend = InterpreterBackend::new();
+        backend.run(bundle, try_anyway)
+    } else {
+        let mut backend = jet_jit::CraneliftBackend::new(InterpreterBackend::new());
+        backend.run(bundle, try_anyway)
     }
 }
 
@@ -627,8 +643,39 @@ mod tests {
 
     #[test]
     fn task_spawn_is_resident() {
-        let src = "use core.tasks as tasks\nfn job() -> Int {\n    return 1\n}\nfn main() {\n    h @= tasks.spawn(() => job())\n    print(h.join())\n}\n";
+        let src = "use core.tasks as tasks\nfn job() -> Int {\n    return 1\n}\nfn main() {\n    h #= tasks.spawn(() => job())\n    print(h.join())\n}\n";
         let b = bundle_from(src, "spawn");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
+    }
+
+    #[test]
+    fn jit_covers_task_examples() {
+        for file in [
+            "examples/features/32_tasks.jet",
+            "examples/features/160_scheduler_spawn.jet",
+        ] {
+            let mut bundle =
+                crate::Loader::load_entry(file).unwrap_or_else(|_| panic!("load {file}"));
+            let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+            assert!(
+                diags
+                    .iter()
+                    .all(|d| !matches!(d.severity, crate::Diagnostics::Severity::Error)),
+                "{file} must type-check"
+            );
+            let detail = jet_jit::jit_covers_bundle_detail(&bundle);
+            if !detail.is_empty() {
+                eprintln!("{file}: {detail}");
+                if file.contains("160") {
+                    for line in jet_jit::jit_dump_main_stmts(&bundle) {
+                        eprintln!("  {line}");
+                    }
+                }
+            }
+            assert!(
+                detail.is_empty(),
+                "{file} must be jit-covered: {detail}"
+            );
+        }
     }
 }

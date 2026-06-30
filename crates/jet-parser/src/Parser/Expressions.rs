@@ -58,7 +58,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// S73: `( name : … )` — named tuple literal or type, not grouping.
+    /// S73: `( name #= … )` — named tuple literal or type, not grouping.
     /// When `lparen_consumed` is true, `self.pos` is already on the first member name.
     pub(super) fn looks_like_named_tuple(&self, lparen_consumed: bool) -> bool {
         let i = if lparen_consumed {
@@ -1164,6 +1164,7 @@ impl<'a> Parser<'a> {
                                 type_generic_chain: Vec::new(),
                                 type_generic_truncated: false,
                                 arm_head_term: false,
+                                pub_file_default: false,
                             };
                             let e = sub.expr()?;
                             if !sub.diags.is_empty() {
@@ -1944,6 +1945,7 @@ impl<'a> Parser<'a> {
                         Stmt::Loop { span: s, .. } | Stmt::CountedLoop { span: s, .. } => s.end,
                         Stmt::Unsafe { span, .. } => span.end,
                         Stmt::Impure { span, .. } => span.end,
+                        Stmt::Reactive { span, .. } => span.end,
                         Stmt::SuppressMustUse { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
                         Stmt::TaskGroup { span, .. } => span.end,

@@ -1,7 +1,7 @@
-// jet.archive ring package implementation (D-DEP-ARCHIVE1=A, D-BFS1).
+// core.archive ring package implementation (D-DEP-ARCHIVE1=A, D-BFS1).
 //
-// This is the canonical Rust source for the jet.archive module.
-// During `jetpack build jet.archive`, CoreProvider::realize() compiles this
+// This is the canonical Rust source for the core.archive module.
+// During `jetpack build core.archive`, CoreProvider::realize() compiles this
 // crate to an rlib and caches it in the hangar (D-BFS1).
 //
 // For `jet build` / `jet run`, the same functions are also available through

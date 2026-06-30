@@ -2,12 +2,12 @@
 // Demonstrates `.methods`, `.markers`, field `is_pub`, and `.has_marker(...)`.
 
 derive Summarize for T {
-    info @= T.reflect()
-    tname @= info.name
-    method @= info.methods[0].name
-    pub_field @= info.fields[0].name
-    hidden_pub @= info.fields[1].is_pub
-    has_debug @= info.has_marker("Debug")
+    info #= T.reflect()
+    tname #= info.name
+    method #= info.methods[0].name
+    pub_field #= info.fields[0].name
+    hidden_pub #= info.fields[1].is_pub
+    has_debug #= info.has_marker("Debug")
     emit("""
 impl $tname {{
     fn summary(self) -> String {{
@@ -29,6 +29,6 @@ struct Widget {
 }
 
 fn main() {
-    w @= Widget.{ label: "gear", secret: 1 }
+    w #= Widget.{ label: "gear", secret: 1 }
     print(w.summary())
 }

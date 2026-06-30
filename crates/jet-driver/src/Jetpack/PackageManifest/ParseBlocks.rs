@@ -2,6 +2,7 @@
 //! `packages:`, `build:`.
 
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
+use std::collections::HashSet;
 use super::{
     ApiMode, BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry,
     PackageMeta, Target,
@@ -29,6 +30,16 @@ pub(super) fn parse_package(body: &str) -> Result<PackageMeta, ManifestError> {
             "description" => meta.description = Some(v),
             "repository" => meta.repository = Some(v),
             "jet" => meta.jet_constraint = Some(v),
+            "layer" => {
+                let raw = value.trim().trim_matches('"');
+                meta.layer = Some(
+                    crate::Syntax::RuntimeLayer::parse_manifest(raw).ok_or_else(|| {
+                        ManifestError::BadLayer {
+                            value: raw.to_string(),
+                        }
+                    })?,
+                );
+            }
             // Unknown keys are tolerated for forward-compat; the wired loader
             // will turn unknown keys into an E-coded diagnostic.
             _ => {}
@@ -274,13 +285,20 @@ fn parse_package_entry_block(
 }
 
 /// D-BUILDPROFILE1: parse the `build: { … }` body. Each entry is either:
-///   `name: Build.{ optimize: <level> }`  (full dot-ctor form)
-///   `name: { optimize: <level> }`        (shorthand — Build type is inferred)
-/// Both forms extract the `optimize:` field. Unknown fields inside `Build.{ … }`
-/// are tolerated for forward-compat (future `targets:` field etc.).
+///   `name: Build.{ optimize: <level>, … }`  (full dot-ctor form)
+///   `name: { optimize: <level>, … }`        (shorthand — Build type is inferred)
+/// Both forms extract profile fields. Unknown fields inside `Build.{ … }` are
+/// rejected so typos surface at parse time.
 pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
     let mut profiles = Vec::new();
+    let mut seen = HashSet::new();
     for (name, value) in key_value_entries(body) {
+        if !seen.insert(name.clone()) {
+            return Err(ManifestError::BadBuildProfile {
+                name: name.clone(),
+                reason: "duplicate profile name in `build { }`",
+            });
+        }
         let value = value.trim();
         // Strip optional `Build.` prefix (D-BUILDPROFILE1: `Build.{ … }` form).
         let inner_block = if let Some(rest) = value.strip_prefix(Syntax::BUILD_CTOR) {
@@ -295,17 +313,58 @@ pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
         } else {
             return Err(ManifestError::BadBuildProfile {
                 name: name.clone(),
-                reason: "expected `Build.{ optimize: none|basic|full }` or `{ optimize: none|basic|full }`",
+                reason: "expected `Build.{ optimize: none|basic|full, … }` or `{ optimize: none|basic|full, … }`",
             });
         };
         let inner = inner_block.unwrap_or("");
         let mut optimize_val: Option<String> = None;
+        let mut debug_info = false;
+        let mut small = false;
+        let mut panic = None;
+        let mut features = Vec::new();
+        let mut env = Vec::new();
         for (key, val) in key_value_entries(inner) {
             if key == Syntax::BUILD_FIELD_OPTIMIZE {
                 optimize_val = Some(unquote(&val));
+            } else if key == Syntax::BUILD_FIELD_DEBUG_INFO {
+                debug_info = parse_bool(&name, &val)?;
+            } else if key == Syntax::BUILD_FIELD_SMALL {
+                small = parse_bool(&name, &val)?;
+            } else if key == Syntax::BUILD_FIELD_PANIC {
+                let val = unquote(&val);
+                panic = Some(match val.as_str() {
+                    s if s == Syntax::BUILD_PANIC_ABORT => super::BuildPanic::Abort,
+                    s if s == Syntax::BUILD_PANIC_UNWIND => super::BuildPanic::Unwind,
+                    _ => {
+                        return Err(ManifestError::BadBuildProfile {
+                            name: name.clone(),
+                            reason: "unknown `panic:` value — use `abort` or `unwind`",
+                        });
+                    }
+                });
+            } else if key == Syntax::BUILD_FIELD_FEATURES {
+                features = parse_string_list(&val).map_err(|_| ManifestError::BadBuildProfile {
+                    name: name.clone(),
+                    reason: "expected `features: [ \"name\", … ]`",
+                })?;
+            } else if key == Syntax::BUILD_FIELD_ENV {
+                let body = val
+                    .strip_prefix('{')
+                    .and_then(|s| s.strip_suffix('}'))
+                    .map(|s| s.trim())
+                    .ok_or_else(|| ManifestError::BadBuildProfile {
+                        name: name.clone(),
+                        reason: "expected `env: { KEY: \"value\", … }`",
+                    })?;
+                for (k, v) in key_value_entries(body) {
+                    env.push((k, unquote(&v)));
+                }
+            } else {
+                return Err(ManifestError::BadBuildProfile {
+                    name: name.clone(),
+                    reason: "unknown field in `Build.{ … }` — allowed: optimize, debug_info, small, panic, features, env",
+                });
             }
-            // Other fields (e.g. future `targets:`) are tolerated and ignored
-            // so forward-compat is maintained.
         }
         let optimize = match optimize_val.as_deref() {
             Some(s) if s == Syntax::BUILD_OPTIMIZE_NONE => BuildOptimize::None,
@@ -328,9 +387,45 @@ pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
                 });
             }
         };
-        profiles.push(BuildProfileDef { name, optimize });
+        profiles.push(BuildProfileDef {
+            name,
+            optimize,
+            debug_info,
+            small,
+            panic,
+            features,
+            env,
+        });
     }
     Ok(profiles)
+}
+
+fn parse_bool(profile: &str, value: &str) -> Result<bool, ManifestError> {
+    match value.trim() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(ManifestError::BadBuildProfile {
+            name: profile.to_string(),
+            reason: "expected `true` or `false`",
+        }),
+    }
+}
+
+fn parse_string_list(value: &str) -> Result<Vec<String>, ()> {
+    let inner = value
+        .trim()
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .ok_or(())?;
+    let mut out = Vec::new();
+    for entry in top_level_commas(inner) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        out.push(unquote(entry));
+    }
+    Ok(out)
 }
 
 /// Parse a `[ library, executable { entry: "…" }, … ]` target list. The package's

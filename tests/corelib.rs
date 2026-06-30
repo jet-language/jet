@@ -139,7 +139,7 @@ fn io_input_reads_a_line_from_stdin() {
 use core.io as io
 
 fn main() {
-    name @= io.input("name? ") ?? panic("read failed")
+    name #= io.input("name? ") ?? panic("read failed")
     print("hello, {name}")
 }
 "#,
@@ -308,7 +308,7 @@ fn json_decode_lenient_surfaces_coercions() {
         r#"
 use core.encoding.json as json
 fn main() {
-    data @= json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
+    data #= json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
             print(n + 1)
@@ -338,7 +338,7 @@ fn main() {
         r#"
 use core.encoding.json as json
 fn main() {
-    data @= json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
+    data #= json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
             print(n)
@@ -363,7 +363,7 @@ fn main() {
         r#"
 use core.encoding.json as json
 fn main() {
-    data @= json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
+    data #= json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
             print(n)
@@ -427,8 +427,8 @@ fn json_parser_is_rfc8259_complete() {
         r#"
 use core.encoding.json as json
 fn main() {
-    raw @= "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
-    data @= json.parse(raw) ?? panic("bad json")
+    raw #= "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
+    data #= json.parse(raw) ?? panic("bad json")
     print(json.to_string(data))
 }
 "#,
@@ -508,15 +508,15 @@ fn channel_stress_1000_messages() {
 use core.tasks as tasks
 
 fn main() {
-    ch: Channel<Int> @= tasks.channel()
-    sender @= ch.sender()
-    producer @= tasks.spawn(take(sender) () => {
+ch: Channel<Int> : tasks.channel()
+sender: Sender<Int> : ch.sender()
+    producer #= tasks.spawn(take(sender) () => {
         loop i in 1..1000 {
             sender.send(i)
         }
     })
     producer.join()
-    total := 0
+    total: Int = 0
     loop i in 1..1000 {
         total = total + (ch.receive() ?? panic("channel closed"))
     }
@@ -528,6 +528,46 @@ fn main() {
     );
     assert_eq!(code, 0, "channel stress failed: {stderr}");
     assert_eq!(stdout, "500500\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn scheduler_spawn_1000_tasks() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping scheduler spawn test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_scheduler_spawn_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "scheduler_spawn",
+        r#"
+use core.tasks as tasks
+
+fn main() {
+ch: Channel<Int> #= tasks.channel()
+sender: Sender<Int> #= ch.sender()
+    loop i in 1..1000 {
+        copy #= sender.clone()
+        tasks.spawn(take(copy) () => {
+            copy.send(1)
+        })
+    }
+    total: Int := 0
+    loop i in 1..1000 {
+        total = (total + (ch.receive() ?? panic("channel closed")))
+    }
+    print(total)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "scheduler spawn stress failed: {stderr}");
+    assert_eq!(stdout, "1000\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -574,12 +614,9 @@ fn core_module_items_covers_known_core_modules() {
         }
     }
 
-    // D-CORENS-CANON1: ring packages normalize to `jet.*` internal dispatch key via
-    // normalize_core_module; core_module_items only has `jet.*` arms for ring modules.
-    // Translate the KNOWN_CORE_MODULES list so `core.<ring>` → `jet.<ring>` before checking.
-    let ring_names = [
-        "log", "crypto", "http", "regex", "reactive", "archive", "db",
-    ];
+    // D-CORENS-CANON1: most ring packages still normalize to legacy `jet.*`
+    // internal dispatch keys. `core.archive` is already canonical end-to-end.
+    let ring_names = ["log", "crypto", "http", "regex", "reactive", "db"];
     let known_raw = jet::Loader::KNOWN_CORE_MODULES;
     let known: std::collections::BTreeSet<String> = known_raw
         .iter()
@@ -693,13 +730,13 @@ struct Id<K> {
 }
 
 fn main() {
-    wi @= Wrap<Int>.{ value: 7 }
+    wi #= Wrap<Int>.{ value: 7 }
     print(json.to_string(wi))
-    back @= json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
+    back #= json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
-    id @= Id<Wrap<Int>>.{ raw: 9, marker: null }
+    id #= Id<Wrap<Int>>.{ raw: 9, marker: null }
     print(json.to_string(id))
-    rid @= json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    rid #= json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
 }
 "#,
@@ -736,8 +773,8 @@ struct Server { host: String  port: Int }
 #[Codable]
 struct Config { title: String  server: Server  ports: [Int] }
 fn main() {
-    raw @= "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
-    cfg @= toml.decode<Config>(raw) ?? panic("bad toml")
+    raw #= "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
+    cfg #= toml.decode<Config>(raw) ?? panic("bad toml")
     print(cfg.title)
     print(cfg.server.host)
     print(cfg.server.port)
@@ -761,8 +798,8 @@ fn main() {
         r#"
 use core.encoding.toml as toml
 fn main() {
-    raw @= "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n"
-    d @= toml.parse(raw) ?? panic("bad")
+    raw #= "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n"
+    d #= toml.parse(raw) ?? panic("bad")
     print(toml.to_string(d))
 }
 "#,
@@ -799,8 +836,8 @@ struct Service { name: String  port: Int }
 #[Codable]
 struct Config { app: String  services: [Service] }
 fn main() {
-    raw @= "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
-    cfg @= yaml.decode<Config>(raw) ?? panic("bad yaml")
+    raw #= "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
+    cfg #= yaml.decode<Config>(raw) ?? panic("bad yaml")
     print(cfg.app)
     print(cfg.services.len())
     print(cfg.services[0].name)
@@ -820,8 +857,8 @@ fn main() {
         r#"
 use core.encoding.yaml as yaml
 fn main() {
-    raw @= "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
-    d @= yaml.parse(raw) ?? panic("bad yaml")
+    raw #= "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
+    d #= yaml.parse(raw) ?? panic("bad yaml")
     if d == Object(top) {
         if top["flowlist"] == Array(xs) {
             print(xs.len())

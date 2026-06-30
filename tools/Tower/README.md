@@ -12,10 +12,10 @@ Only two lanes ever block **you**:
 - **Activate** — a triaged card waiting for you to pull it into a track.
 
 The rest are an agent's, inert, or hidden:
-- **Plan** (build a plan + raise the decisions it needs) · **Implement** ·
-  **Building** · **Verify** (a claimed-done card, verified 100% before it closes).
-- **Blocked** (by another card) · **Frozen** (never touched until you activate it)
-  · **Done** (verified — hidden behind collapsed groups).
+- **Plan** (build a plan + raise the decisions it needs) � **Implement** �
+  **Building** � **Verify** (a claimed-done card, verified 100% before it closes).
+- **Blocked** (by another card) � **Frozen** (never touched until you activate it)
+  � **Done** (verified — hidden behind collapsed groups).
 
 Stages: Triage → Deciding → Planning → Ready → Building → Verify → Done, + Frozen.
 A card with an open decision shows as **Decide** no matter its stage — so a build

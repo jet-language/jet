@@ -139,6 +139,20 @@ impl<'a> Parser<'a> {
         is_pub: bool,
         is_package_pub: bool,
     ) -> Result<CodeModule, Diagnostic> {
+        let web_target = if self.at_web_target() {
+            Some(self.parse_web_target_marker()?)
+        } else {
+            None
+        };
+        self.code_module_with_pkg_and_target(is_pub, is_package_pub, web_target)
+    }
+
+    pub(super) fn code_module_with_pkg_and_target(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+        web_target: Option<crate::Syntax::WebBucket>,
+    ) -> Result<CodeModule, Diagnostic> {
         if is_pub {
             self.bump(); // consume `pub`
         }
@@ -153,6 +167,7 @@ impl<'a> Parser<'a> {
                     is_pub,
                     is_package_pub,
                     body: None,
+                    web_target,
                     span: Span::new(start.start, end),
                 })
             }
@@ -180,6 +195,7 @@ impl<'a> Parser<'a> {
                     is_pub,
                     is_package_pub,
                     body: Some(items),
+                    web_target,
                     span: Span::new(start.start, end),
                 })
             }
@@ -206,14 +222,27 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
             // D-TAINT1: `#Sanitizer fn` inside a module body.
             TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
+            // D-MUSTUSE1: `#MustUse fn` inside a module body.
+            TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
             // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` in a module.
             TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
                 self.func().map(Item::Func)
             }
+            // D-REACTCORE1: `#Reactive fn` inside a module body.
+            TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
+            // D-WASM1=A: `#Wasm` / `#Js` / `#WasmExport fn` inside a module body.
+            TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
             // D-ATTR2 / D-SERDE: `#[Codable] struct …` inside a module body.
             TokKind::Hash if matches!(self.peek2().kind, TokKind::LBracket) => {
                 self.type_def_with_markers()
             }
+            TokKind::KwPriv => match self.peek2().kind {
+                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                TokKind::KwTag => self.tag_def(false).map(Item::Tag),
+                _ => self.func().map(Item::Func),
+            },
             TokKind::KwPub => match self.peek2().kind {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),

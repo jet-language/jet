@@ -58,6 +58,7 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         at_line_start: true,
         indent: 0,
         pending_blank: false,
+        pub_file: prog.pub_file,
     };
     let mut first = true;
     for imp in &prog.imports {
@@ -68,6 +69,14 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         f.emit_leading(imp.span.start);
         f.fmt_import(imp);
         f.emit_trailing(imp.span.end);
+    }
+    if prog.pub_file {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
+        f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
+        f.newline();
     }
     for item in &prog.items {
         if !first {
@@ -99,6 +108,8 @@ struct Fmt<'a> {
     at_line_start: bool,
     indent: usize,
     pending_blank: bool,
+    /// D-VISDEFAULT2=A: file uses `#PubFile` public-by-default visibility.
+    pub_file: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -311,6 +322,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         } => inner.last().map(stmt_end).unwrap_or(s.end),
         Stmt::Unsafe { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Impure { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::Reactive { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::SuppressMustUse { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Region { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::TaskGroup { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
@@ -635,6 +647,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Loop { span: s, .. } | Stmt::CountedLoop { span: s, .. } => s.start,
         Stmt::Unsafe { span, .. } => span.start,
         Stmt::Impure { span, .. } => span.start,
+        Stmt::Reactive { span, .. } => span.start,
         Stmt::SuppressMustUse { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,
         Stmt::TaskGroup { span, .. } => span.start,

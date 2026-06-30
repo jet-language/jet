@@ -48,18 +48,18 @@ A beginner server should look synchronous and still scale:
 ```jet
 fn handle(conn: net.Conn) -> () ? NetError {
     loop {
-        msg @= conn.read_text()?        // parks this Jet task
-        reply @= route(msg)?
+        msg #= conn.read_text()?        // parks this Jet task
+        reply #= route(msg)?
         conn.write_text(reply)?         // parks again if socket is not ready
     }
 }
 
 fn main() -> () ? NetError {
-    listener @= net.listen(":8080")?
+    listener #= net.listen(":8080")?
 
     taskgroup g {
         loop {
-            conn @= listener.accept()?  // one OS poller, not one OS thread
+            conn #= listener.accept()?  // one OS poller, not one OS thread
             g.task { handle(conn) }
         }
     }
@@ -79,13 +79,13 @@ that can pause. It should reject the part they dislike: colored call graphs.
 ```jet
 fn profile(id: UserId) -> Profile ? ServiceError {
     taskgroup g {
-        user_h @= g.task { users.fetch(id) }
-        bill_h @= g.task { billing.fetch(id) }
-        flag_h @= g.task { flags.fetch(id) }
+        user_h #= g.task { users.fetch(id) }
+        bill_h #= g.task { billing.fetch(id) }
+        flag_h #= g.task { flags.fetch(id) }
 
-        user @= user_h.wait()?
-        bill @= bill_h.wait()?
-        flag @= flag_h.wait()?
+        user #= user_h.wait()?
+        bill #= bill_h.wait()?
+        flag #= flag_h.wait()?
 
         Profile.{ user, bill, flag }
     }
@@ -133,11 +133,11 @@ Deadlines are inherited through context so users cannot forget to pass them:
 fn handle_request(req: Request) -> Response ? ServiceError {
     #Context(deadline: time.after(ms: 200)) {
         taskgroup g {
-            data_h @= g.task { db.fetch(req.id) }
-            auth_h @= g.task { auth.check(req.token) }
+            data_h #= g.task { db.fetch(req.id) }
+            auth_h #= g.task { auth.check(req.token) }
 
-            data @= data_h.wait()?   // observes the 200 ms deadline
-            auth @= auth_h.wait()?   // same inherited deadline
+            data #= data_h.wait()?   // observes the 200 ms deadline
+            auth #= auth_h.wait()?   // same inherited deadline
             render(data, auth)
         }
     }
@@ -159,8 +159,8 @@ fn pipeline(input: Channel<Request>, output: Channel<Response>) -> () ? Error {
         repeat workers.count {
             g.task {
                 loop {
-                    req @= input.recv()?      // parks until work arrives
-                    res @= process(req)?
+                    req #= input.recv()?      // parks until work arrives
+                    res #= process(req)?
                     output.send(res)?         // parks when capacity is full
                 }
             }

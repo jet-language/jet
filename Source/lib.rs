@@ -90,19 +90,19 @@ fn compile_bundle_path(
     file: &str,
     mode: Sema::CompileMode,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, mode, false, false)
+    compile_bundle_path_opts(file, mode, false, false, false)
 }
 
 /// Like `compile_with_path` but with `--freestanding` mode (E2-M15).
 /// Rejects OS-dependent std APIs (E3301) and emits `panic = "abort"` hint.
 pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, false)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, false, false)
 }
 
 /// Like `compile_with_path` but with `--allow-impure` (D-CTEFFECT1).
 /// Enables Tier-2 ambient comptime effects inside `#Impure` gates.
 pub fn compile_allow_impure(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true, false)
 }
 
 fn compile_bundle_path_opts(
@@ -110,8 +110,91 @@ fn compile_bundle_path_opts(
     mode: Sema::CompileMode,
     freestanding: bool,
     allow_impure: bool,
+    web_target: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_opts(file, mode, freestanding, allow_impure)
+    Driver::compile_bundle_path_opts(file, mode, freestanding, allow_impure, web_target)
+}
+
+/// Like `compile_with_path` but for `jet build --target=web` (D-WEBBACKEND1 M2).
+pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, false, true)
+}
+
+/// In-memory web-target compile (used by integration tests).
+pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    let (toks, lex_diags) = Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Err(lex_diags);
+    }
+    let mut prog = Parser::parse(&toks)?;
+    let mut bundle = AST::ProgramBundle {
+        entry: 0,
+        project_root: std::path::PathBuf::from("."),
+        modules: vec![AST::LoadedModule {
+            path: std::path::PathBuf::from(file),
+            display: file.to_string(),
+            alias: "main".to_string(),
+            imports: std::mem::take(&mut prog.imports),
+            items: std::mem::take(&mut prog.items),
+            source: src.to_string(),
+            web_target_ceiling: prog.web_target_ceiling,
+            pub_file: prog.pub_file,
+        }],
+        parse_teaching: Vec::new(),
+        used_core: std::collections::HashSet::new(),
+        cffi: CFFI::CFfi::default(),
+        comptime_inputs: Vec::new(),
+        import_targets: std::collections::HashMap::new(),
+        layer_ceiling: None,
+        inferred_layer: Syntax::RuntimeLayer::Core,
+        web_partitions: std::collections::HashMap::new(),
+        web_partition_enforced: true,
+        web_partition_report: None,
+    };
+    bundle.cffi = match CFFI::assemble(&mut bundle) {
+        Ok(c) => c,
+        Err(diags) => return Err(diags),
+    };
+    let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Run);
+    let mut errors = Vec::new();
+    let mut lints = Vec::new();
+    for d in diags {
+        match d.severity {
+            Diagnostics::Severity::Error => errors.push(d),
+            Diagnostics::Severity::Lint => lints.push(d),
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let ffi = match FFI::prepare(&bundle) {
+        Ok(link) => link,
+        Err(ffi_diags) => return Err(ffi_diags),
+    };
+    let rust = Codegen::emit_bundle(&bundle, Sema::CompileMode::Run, ffi.as_ref());
+    let web = Some(Codegen::emit_web(
+        &bundle,
+        Sema::CompileMode::Run,
+        ffi.as_ref(),
+    ));
+    let capabilities = Capabilities::from_sema(
+        &bundle.used_core,
+        bundle_uses_unsafe(&bundle),
+        ffi.is_some() || bundle.cffi.links_c(),
+    );
+    let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
+    Ok(CompileOutput {
+        rust,
+        lints,
+        ffi,
+        clinks: Vec::new(),
+        capabilities,
+        comptime_inputs,
+        web,
+        web_partition_report: bundle.web_partition_report.clone(),
+        inferred_layer: bundle.inferred_layer,
+        layer_ceiling: bundle.layer_ceiling,
+    })
 }
 
 /// Resolve native C-library link args for a built program (S59 / E2-M14),

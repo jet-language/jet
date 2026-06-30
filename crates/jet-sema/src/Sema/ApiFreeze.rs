@@ -267,6 +267,7 @@ mod tests {
             ty,
             ty_span: zero(),
             default: None,
+            variadic: false,
         }
     }
 
@@ -282,11 +283,15 @@ mod tests {
             is_view_return: false,
             is_unsafe: false,
             is_pure: false,
+            is_reactive: false,
             is_sanitizer: false,
             declared_effects: None,
             effect_via: None,
             state_requires: None,
             state_transition: None,
+            web_marker: None,
+            is_must_use: false,
+            must_use_span: None,
             body: vec![],
         }
     }

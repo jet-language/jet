@@ -33,14 +33,14 @@ fn release(lock: ^Lock) {
 }
 
 fn main() {
-    db @= acquire("db")
+    db #= acquire("db")
     // ... use the locked resource ...
     release(^db)
 
     // The duty travels with the value: handing it to another function that
     // returns it just moves the duty along.
-    cache @= acquire("cache")
-    held @= hold(^cache)
+    cache #= acquire("cache")
+    held #= hold(^cache)
     release(^held)
 }
 

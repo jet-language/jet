@@ -190,6 +190,8 @@ pub struct PackageMeta {
     pub description: Option<String>,
     pub license: Option<String>,
     pub repository: Option<String>,
+    /// D-RINGLAYER1=A: optional runtime-layer ceiling from `layer:` in `payload`.
+    pub layer: Option<crate::Syntax::RuntimeLayer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -368,6 +370,15 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadBuildProfile { name, reason } => {
             e1206(&file, &format!("build profile `{name}`: {reason}"))
         }
+        ManifestError::BadLayer { value } => e1206(
+            &file,
+            &format!(
+                "`layer` must be `{}`, `{}`, or `{}`, not `{value}`",
+                Syntax::RuntimeLayer::CORE,
+                Syntax::RuntimeLayer::ALLOC,
+                Syntax::RuntimeLayer::STD,
+            ),
+        ),
     }
 }
 
@@ -499,9 +510,10 @@ pub fn e1219(name: &str, defined: &[String]) -> Diagnostic {
         format!("unknown build profile `{name}`"),
         note,
         format!(
-            "use `--release` for `--profile={}`, `--profile={}` for a debug build, or add `{name}: Build.{{ optimize: full }}` to the `build {{ }}` block in `{}`",
+            "use `--release` for `--profile={}`, `--profile={}` for a debug build, `--profile={}` for CI, or add `{name}: Build.{{ optimize: full }}` to the `build {{ }}` block in `{}`",
             Syntax::BUILD_PROFILE_RELEASE,
             Syntax::BUILD_PROFILE_DEBUG,
+            Syntax::BUILD_PROFILE_CI,
             Syntax::PAYLOAD_FILE,
         ),
         None,

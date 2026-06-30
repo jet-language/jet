@@ -14,7 +14,7 @@ run `./scripts/gen_errors.sh` after changing snapshots.
 | [E0108](E0108.md) | binding type mismatch |
 | [E0109](E0109.md) | operator type mismatch |
 | [E0110](E0110.md) | condition not `Bool` |
-| [E0111](E0111.md) | assign to an `@=` binding |
+| [E0111](E0111.md) | assign to an `#=` binding |
 | [E0119](E0119.md) | unknown type |
 | [E0120](E0120.md) | returning a borrowed value |
 

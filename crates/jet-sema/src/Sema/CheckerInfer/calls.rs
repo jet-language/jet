@@ -3,6 +3,7 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
+use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0901, e0904};
@@ -1330,6 +1331,18 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
+            // D-RENDERTGT2=A (c133 M1/M2): UI backend measure/layout/paint/on_event.
+            if handle_ty == "NullBackend" || handle_ty == "TuiBackend" {
+                if let Some(ret) =
+                    ui_backend_method_return(handle_ty, method, args.len(), span, &mut self.diags)
+                {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    *recv_type_out = Some(handle_ty.to_string());
+                    return ret;
+                }
+            }
         }
         // D-DET1: methods on the deterministic injected Clock/Rng capability (and
         // Stopwatch). Reading time/randomness THROUGH the handle is reproducible.
@@ -1366,7 +1379,7 @@ impl<'a> Checker<'a> {
         // routes the call to the reactive-method shape (keyed on recv_type, not the
         // bare method name — `get`/0 would otherwise alias a list `get`).
         if let Type::Apply { name, .. } = &recv_ty {
-            if matches!(name.as_str(), "Signal" | "Derived") {
+            if matches!(name.as_str(), "Signal" | "Derived" | "Computed") {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
                 {

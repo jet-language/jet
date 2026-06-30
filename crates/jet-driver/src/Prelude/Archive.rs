@@ -1,15 +1,15 @@
-// jet.archive runtime (D-DEP-ARCHIVE1) — gzip compress / decompress.
+// core.archive runtime (D-DEP-ARCHIVE1) — gzip compress / decompress.
 //
 // This file is emitted verbatim into the hidden FFI bridge crate (see
-// Source/FFI.rs) when a Jet program uses `jet.archive`. The compiler crate
+// Source/FFI.rs) when a Jet program uses `core.archive`. The compiler crate
 // (`Source/`) never depends on `flate2`; it only ships this text. Owner-
 // approved I6 bootstrap exception: the `flate2` crate (pure-Rust, with
-// `miniz_oxide` back-end) lives inside the `jet.archive` ring package at
-// `corelib/jet.archive/vendor/` and is built from that vendored source.
+// `miniz_oxide` back-end) lives inside the `core.archive` ring package at
+// `corelib/core.archive/vendor/` and is built from that vendored source.
 //
 // D-BFS1: the vendored source is the canonical offline build path. The
 // bridge-crate fallback (cargo fetching from crates.io) is used only when
-// `jetpack build jet.archive` has not pre-populated the hangar.
+// `jetpack build core.archive` has not pre-populated the hangar.
 
 /// Compress `data` with gzip (RFC 1952). Returns the compressed bytes.
 /// Compression is always successful on valid input.

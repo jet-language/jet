@@ -38,7 +38,7 @@ decision in both a prose entry and a log row.
    correctly — delete the block, point to the canon line.
 
 4. **Supersession history re-derived inline at length.** The binding-sigil saga
-   (`::`→`@=`), capability words→sigils, `when`→`if` dispatch, struct-ctor dot-prefix,
+   (`::`→`::`), capability words→sigils, `when`→`if` dispatch, struct-ctor dot-prefix,
    manifest-filename churn each re-explain the dead spelling across 2-4 entries. Compress
    into one **superseded-spelling ledger** table; entries keep only the live decision +
    one pointer.
@@ -62,7 +62,7 @@ These present non-compiling syntax as current. Unique content survives in canon.
 syntax-surface.jet (verified line refs below).
 
 - **line 109-128 (S19, loops)**: examples use `val line = read_line();`, `var n = 10;`,
-  visible `;`, `for … in` in the prose. All retired (`@=`/`:=`, no `;`, `for`→`loop`).
+  visible `;`, `for … in` in the prose. All retired (`#=`/`:=`, no `;`, `for`→`loop`).
   — survives in **canon.jet 162-167** (`loop i in 1..5`) + **syntax-surface.jet 107-138**
   (infinite / conditional / `step` / labeled). Keep the "one keyword, header picks mode"
   rule sentence; drop the block.
@@ -84,7 +84,7 @@ syntax-surface.jet (verified line refs below).
   (`loop e in fruits { print("{e.key}: {e.value}") }`). S66's actual *decision* (capitalized
   acronyms `JSON`/`IOError`/`U8`) is unrelated to the example and must be kept as one line.
 - **line 666-675 (S57, comptime binding)**: `comptime x = f();` with `;`. The `=` is
-  correct here (comptime keeps `=`, not `@=`); only the `;` is stale.
+  correct here (comptime keeps `=`, not `::`); only the `;` is stale.
   — survives in **syntax-surface.jet 491** (`comptime TABLE = build_table()`).
 - **line 1356-1382 (S82, attribute syntax)**: the `@`-marker table + worked block use `@`
   (reversed to `#` by D-ATTR1), `mut Player` (retired to `~Player`), and `;`. Entire S82
@@ -102,7 +102,7 @@ the scattered inline history with one table; each live entry keeps only its curr
 
 | Concept | Dead → live spelling | Entries carrying the history |
 |---|---|---|
-| Immutable binding | `val` → `::` → `@=` | S2 (47-58), D-BIND1 (1650-1657), D-BIND2 (2431-2436) |
+| Immutable binding | `val` → `::` → `::` | S2 (47-58), D-BIND1 (1650-1657), D-BIND2 (2431-2436) |
 | Mutable binding / reassign | `var` → `:=` / `=` | S2, S17 (243-246), D-BIND1 |
 | Access capability | `mut`/`take`/`view` → `~`/`^`/`&` | S10 (73-80), D-CAP1 (1810-1818), D-CAP7 (1853-1928) |
 | Multi-way dispatch | `switch` → `when` → `if … == { }` | S24 (151-179), D-SG1 ref, S68 (1094-1126), D-IF1 (1680-1693), D-IF3 (2598) |

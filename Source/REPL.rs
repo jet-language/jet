@@ -205,17 +205,21 @@ impl Session {
     /// Bindings moved in prior inputs are re-declared then immediately consumed
     /// by a synthetic assignment, so sema reports E0121 ("was given away") if the
     /// current input tries to use them (D-REPL8=A).
+    fn binding_stub_name(stub: &str) -> &str {
+        stub.split('@').next().unwrap_or(stub).trim()
+    }
+
     fn binding_stubs_src(&self) -> String {
         let mut lines: Vec<String> = Vec::new();
         for stub in &self.binding_srcs {
-            let name = stub.split(':').next().unwrap_or("").trim();
+            let name = Self::binding_stub_name(stub);
             if self.moved_names.contains(name) {
                 // Re-declare, then synthetically consume so sema sees it moved.
                 lines.push(stub.clone());
-                // `__moved_<name>__ @= name` — a binding whose init is `name`
+                // `__moved_<name>__ #= name` — a binding whose init is `name`
                 // (a non-scalar Ident). Sema's `note_move_if_direct_ident` marks
                 // `name` as moved immediately after this declaration.
-                lines.push(format!("__moved_{}__ @= {};", name, name));
+                lines.push(format!("__moved_{}__ #= {};", name, name));
             } else {
                 lines.push(stub.clone());
             }
@@ -226,17 +230,17 @@ impl Session {
     /// Register a val binding for sema visibility after it was evaluated.
     /// `name` and `val` come from the interpreter scope.
     pub fn record_binding(&mut self, name: &str, v: &CtValue) {
-        // Generate a synthetic `name: Type @= zero_val` for sema (D-BIND2).
+        // Generate a synthetic `name: Type #= zero_val` for sema (D-BIND3).
         // We use a zero/default value of the right type so sema accepts it.
         let type_and_val = match v {
-            CtValue::Int(_) => "Int @= 0",
-            CtValue::Float(_) => "Float @= 0.0",
-            CtValue::Bool(_) => "Bool @= false",
-            CtValue::Char(_) => "Char @= 'a'",
-            CtValue::Str(_) => "String @= \"\"",
-            CtValue::Bytes(_) => "[U8] @= []",
-            CtValue::List(_) => "List<Int> @= []",
-            CtValue::Map(_) => "Map<String, Int> @= [:]",
+            CtValue::Int(_) => ": Int #= 0",
+            CtValue::Float(_) => ": Float #= 0.0",
+            CtValue::Bool(_) => ": Bool #= false",
+            CtValue::Char(_) => ": Char #= 'a'",
+            CtValue::Str(_) => ": String #= \"\"",
+            CtValue::Bytes(_) => ": [U8] #= []",
+            CtValue::List(_) => ": List<Int> #= []",
+            CtValue::Map(_) => ": Map<String, Int> #= [:]",
             CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
             CtValue::ResOk(_) | CtValue::ResErr(_) => return, // skip Result for now
             CtValue::Struct { .. } => {
@@ -248,7 +252,7 @@ impl Session {
             CtValue::Unit => return,
         };
         self.binding_srcs
-            .push(format!("{}: {}", name, type_and_val));
+            .push(format!("{}{}", name, type_and_val));
     }
 }
 
@@ -257,7 +261,7 @@ impl Session {
 /// Scan the successfully-parsed stmts for names that were moved from the
 /// session's current bindings. A move occurs when:
 ///
-/// 1. `val t = s` (or `t :: s`) — the init is a bare identifier that names a
+/// 1. `val t = s` (or `t #= s`) — the init is a bare identifier that names a
 ///    session binding of non-scalar type. Sema's `note_move_if_direct_ident`
 ///    marks non-scalar bindings moved at this point.
 /// 2. A call argument uses `take name` convention — `CallArg::convention == Move`
@@ -700,11 +704,11 @@ fn reject_feature(text: &str) -> Option<&'static str> {
 }
 
 /// Detect whether text is a statement (vs. a bare expression to echo).
-/// D-BIND2: a sigil binding (`name @= v` / `name := v`) is a statement; D-IF1:
+/// D-BIND2: a sigil binding (`name #= v` / `name := v`) is a statement; D-IF1:
 /// `if` covers multi-arm dispatch (former `when`/`switch`); loops are `loop`.
 fn starts_with_stmt_keyword(t: &str) -> bool {
-    // A sigil binding contains `@=` or `:=` (D-BIND2). Also accept retired `::` (E0991).
-    t.contains("@=")
+    // A sigil binding contains `#=` or `:=` (D-BIND3). Also accept retired `::` / `@=` (E0991).
+    t.contains("::")
         || t.contains("::")
         || t.contains(":=")
         || t.starts_with("return ")
@@ -819,8 +823,8 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         }
     };
     let plain_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, plain_input);
-    // Echo-sentinel wrapping (D-BIND2: `@=` sigil binding).
-    let echo_stmt = format!("__repl_echo__ @= {}", trimmed);
+    // Echo-sentinel wrapping (D-BIND3: `#=` sigil binding).
+    let echo_stmt = format!("__repl_echo__ #= {}", trimmed);
     let echo_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, echo_stmt);
 
     if try_stmt_first {

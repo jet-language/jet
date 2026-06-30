@@ -27,13 +27,13 @@ use core.io as io
 use core.env as env
 
 fn main() {
-    args @= io.args()
+    args #= io.args()
     if args.len() < 2 {
         io.eprint("usage: greet <name>")
         return
     }
-    name @= args.get(1) ?? return
-    greeting @= env.get("GREETING") ?? "hello"
+    name #= args.get(1) ?? return
+    greeting #= env.get("GREETING") ?? "hello"
     fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return
     print(fs.read("/tmp/greet.txt") ?? return)
 }
@@ -82,8 +82,8 @@ result — with `?`, `??`, or a pattern test:
 use core.fs as fs
 
 fn main() {
-    text @= fs.read("data.txt") ?? return   // stop on error
-    upper @= text.to_upper()
+    text #= fs.read("data.txt") ?? return   // stop on error
+    upper #= text.to_upper()
     fs.write("out.txt", upper) ?? panic("couldn't save")  // bug if this fails
 }
 ```
@@ -113,13 +113,13 @@ Whole-file helpers only (streaming I/O added in E2-M7). Paths are plain
 use core.fs as fs
 
 fn main() {
-    path @= "/tmp/notes.txt"
+    path #= "/tmp/notes.txt"
     fs.write(path, "hello\n") ?? return
     fs.append(path, "world\n") ?? return
     print(fs.read(path) ?? return)        // "hello\nworld\n"
     print(fs.exists(path))                // true
     print(fs.is_dir("/tmp"))              // true
-    names @= fs.list_dir("/tmp") ?? return
+    names #= fs.list_dir("/tmp") ?? return
     print(names.len())
 }
 ```
@@ -148,8 +148,8 @@ fn main() {
 use core.io as io
 
 fn main() {
-    args @= io.args()                    // [String]; index 0 is the program name
-    name @= io.input("your name? ") ?? return  // reads one line, strips newline
+    args #= io.args()                    // [String]; index 0 is the program name
+    name #= io.input("your name? ") ?? return  // reads one line, strips newline
     print("hi, {name}")
     io.eprint("(log) done")                 // like print, but to stderr
 }
@@ -178,10 +178,10 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 use core.env as env
 
 fn main() {
-    home @= env.home_dir()               // String? — may be null
-    mode @= env.get("MODE") ?? "dev"     // String? from the environment
+    home #= env.home_dir()               // String? — may be null
+    mode #= env.get("MODE") ?? "dev"     // String? from the environment
     env.set("MODE", "prod")              // set for child processes
-    here @= env.current_dir() ?? return  // current working directory
+    here #= env.current_dir() ?? return  // current working directory
     print(home ?? "(no home)")
     print(mode)
     print(here)
@@ -203,7 +203,7 @@ fn main() {
 use core.process as process
 
 fn main() {
-    result @= process.run(["echo", "hi"]) ?? return
+    result #= process.run(["echo", "hi"]) ?? return
     print(result.code)       // exit code as Int
     print(result.output)     // stdout as String
     print(result.errors)     // stderr as String
@@ -259,15 +259,15 @@ column-major. Operators `+`/`-` are element-wise, `*` is element-wise on vectors
 
 ```jet
 fn main() {
-    a@ Vec3=  Vec3(1.0, 2.0, 3.0)
-    b@ Vec3=  Vec3(4.0, 5.0, 6.0)
-    sum@ Vec3=  a + b
+a: Vec3 #= Vec3(1.0, 2.0, 3.0)
+b: Vec3 #= Vec3(4.0, 5.0, 6.0)
+sum: Vec3 #= a + b
     print(a.dot(b))                 // 32.0
     print(a.cross(b).to_array())    // [-3.0, 6.0, -3.0]
     print(Vec3(0.0, 3.0, 4.0).length())   // 5.0
 
-    scale@ Mat3=  Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-    out@ Vec3=  scale * Vec3(1.0, 2.0, 3.0)
+scale: Mat3 #= Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+out: Vec3 #= scale * Vec3(1.0, 2.0, 3.0)
     print(out.to_array())           // [2.0, 4.0, 6.0]
 }
 ```
@@ -297,9 +297,9 @@ portable-SIMD backend can replace it later behind the same surface.
 
 ```jet
 fn main() {
-    v@ F32x4=  F32x4(1.0, 2.0, 3.0, 4.0)
-    w@ F32x4=  F32x4(10.0, 20.0, 30.0, 40.0)
-    s@ F32x4=  v + w
+v: F32x4 #= F32x4(1.0, 2.0, 3.0, 4.0)
+w: F32x4 #= F32x4(10.0, 20.0, 30.0, 40.0)
+s: F32x4 #= v + w
     print(s.to_array())             // [11.0, 22.0, 33.0, 44.0]
     print(v[2])                     // 3.0
     print(v.sum())                  // 10.0
@@ -329,7 +329,7 @@ fn main() {
     random.seed(42)                         // make the sequence repeatable
     print(random.int(1, 6))                 // inclusive range (like dice)
     print(random.float())                   // 0.0 .. 1.0
-    items @= [10, 20, 30]
+    items #= [10, 20, 30]
     print(random.pick(items))               // one item, or null if list empty
     random.shuffle(mut items)               // shuffle in place
     print(items)
@@ -387,9 +387,9 @@ formatting (use `core.time` for calendars).
 use core.time as time
 
 fn main() {
-    started @= time.now()                // milliseconds since 1970-01-01 UTC
+    started #= time.now()                // milliseconds since 1970-01-01 UTC
     time.sleep(100)                      // pause ~100 ms (blocking)
-    sw @= time.start()                   // Stopwatch
+    sw #= time.start()                   // Stopwatch
     time.sleep(50)
     print(sw.elapsed_millis())           // at least 50
     print(time.now() - started)
@@ -420,7 +420,7 @@ result is reproducible:
     return clock.now()             // current value in ms; pure read
 }
 fn main() {
-    c @= time.clock(1000)          // a Clock starting at 1000 ms
+    c #= time.clock(1000)          // a Clock starting at 1000 ms
     print(at(c))                   // 1000, on every machine
 }
 ```
@@ -464,8 +464,8 @@ Every format speaks the same two verbs: `parse` (text → value) and `to_string`
 use core.encoding
 
 fn main() {
-    raw @= "{\"name\":\"jet\",\"ok\":true,\"n\":1.5}"
-    data @= encoding.json.parse(raw) ?? return
+    raw #= "{\"name\":\"jet\",\"ok\":true,\"n\":1.5}"
+    data #= encoding.json.parse(raw) ?? return
     print(encoding.json.to_string(data))           // compact one line
     print(encoding.json.to_string_pretty(data))    // indented
 
@@ -514,11 +514,11 @@ struct Order {
 }
 
 fn main() {
-    o @= Order { id: 7, who: "Ada", items: ["pen", "ink"], note: null }
+    o #= Order { id: 7, who: "Ada", items: ["pen", "ink"], note: null }
     print(json.to_string(o))               // {"id":7,"customer":"Ada","items":["pen","ink"]}
 
-    raw @= "{{\"id\":9,\"customer\":\"Bo\",\"items\":[\"ink\"],\"note\":\"rush\"}}"
-    back @= json.decode<Order>(raw) ?? panic("bad order")   // typed decode
+    raw #= "{{\"id\":9,\"customer\":\"Bo\",\"items\":[\"ink\"],\"note\":\"rush\"}}"
+    back #= json.decode<Order>(raw) ?? panic("bad order")   // typed decode
     print(back.who)                        // Bo
 }
 ```
@@ -530,13 +530,13 @@ order is preserved.
 **Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? DecodeError` for
 json/toml/yaml, and `[T] ? DecodeError` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
-expected type (`cfg@ Config=  json.decode(text)`). Bare `json.decode(text)` with no
+cfg: Config #= json.decode(text)`). Bare `json.decode(text)` with no
 target stays the lenient dynamic `JSON` (above). `DecodeError` carries a field `path`
 and a `reason`; compose it with `??`.
 
 ```jet
-raw @= "item,qty\npen,3\nink,5"
-sales @= csv.decode<Sale>(raw) ?? panic("bad csv")   // [Sale]
+raw #= "item,qty\npen,3\nink,5"
+sales #= csv.decode<Sale>(raw) ?? panic("bad csv")   // [Sale]
 print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}]
 ```
 
@@ -597,10 +597,10 @@ fn sum_range(first: Int, last: Int) -> Int {
 }
 
 fn main() {
-    a @= tasks.spawn(() => sum_range(1, 25))
-    b @= tasks.spawn(() => sum_range(26, 50))
-    c @= tasks.spawn(() => sum_range(51, 75))
-    d @= tasks.spawn(() => sum_range(76, 100))
+    a #= tasks.spawn(() => sum_range(1, 25))
+    b #= tasks.spawn(() => sum_range(26, 50))
+    c #= tasks.spawn(() => sum_range(51, 75))
+    d #= tasks.spawn(() => sum_range(76, 100))
     print(a.join() + b.join() + c.join() + d.join())
 }
 ```
@@ -611,9 +611,9 @@ Channels carry one type:
 use core.tasks as tasks
 
 fn main() {
-    ch@ Channel<Int>=  tasks.channel()
-    sender @= ch.sender()
-    task @= tasks.spawn(take(sender) () => {
+ch: Channel<Int> #= tasks.channel()
+    sender #= ch.sender()
+    task #= tasks.spawn(take(sender) () => {
         sender.send(42)
     })
     task.join()
@@ -662,10 +662,10 @@ range).
 use core.regex as re
 
 fn main() {
-    text @= "order 42 shipped"
+    text #= "order 42 shipped"
     print(re.is_match("\\d+", text) ?? panic("bad pattern"))   // true
 
-    m @= re.match("(\\d+) shipped", text) ?? panic("bad pattern")
+    m #= re.match("(\\d+) shipped", text) ?? panic("bad pattern")
     if m == value(mat) {
         print(mat.group(0) ?? "")   // 42 shipped
         print(mat.group(1) ?? "")   // 42
@@ -704,11 +704,14 @@ explicit reactive values:
 - **signal** — a mutable reactive source. `reactive.signal(initial)` infers `T`
   from the initial value and returns a `Signal<T>`. Read with `.get()`, update
   with `.set(v)`.
-- **derived** — a value recomputed from the signals it reads.
-  `reactive.derived(() => expr)` returns a `Derived<T>` whose `.get()` reflects
-  the latest computation.
+- **derived** / **computed** — a value recomputed from the signals it reads.
+  `reactive.derived(() => expr)` returns a `Derived<T>`; `reactive.computed` is
+  the D-SIGNAL1 canonical alias (type name `Computed<T>`). `.get()` reflects the
+  latest computation.
 - **effect** — a side effect. `reactive.effect(() => { … })` runs the body now,
-  and again whenever a signal it read changes.
+  and again whenever a signal it read changes. **`#Reactive { … }`** (D-REACTCORE1)
+  is sugar for the same scope — the compiler lowers it to `jet_reactive_effect`.
+  **`#Reactive fn`** wraps the whole function body the same way (unit return only).
 
 Dependency tracking is **explicit-by-read**: any `.get()` evaluated inside a
 derived or effect body subscribes that derived/effect to the signal. A `.set(v)`
@@ -718,9 +721,9 @@ re-runs every subscriber.
 use core.reactive as reactive
 
 fn main() {
-    price @= reactive.signal(100)
-    qty @= reactive.signal(2)
-    total @= reactive.derived(() => (price.get() * qty.get()))
+    price #= reactive.signal(100)
+    qty #= reactive.signal(2)
+    total #= reactive.derived(() => (price.get() * qty.get()))
     print(total.get())                       // 200
 
     reactive.effect(() => print(total.get()))  // prints 200 now
@@ -733,8 +736,10 @@ fn main() {
 | Call | Returns | Does |
 |------|---------|------|
 | `reactive.signal(initial)` | `Signal<T>` | a mutable reactive source holding `T` |
-| `reactive.derived(() => expr)` | `Derived<T>` | a value recomputed from the signals it reads |
+| `reactive.derived(() => expr)` | `Derived<T>` / `Computed<T>` | a value recomputed from the signals it reads |
+| `reactive.computed(() => expr)` | `Computed<T>` | canonical alias for `derived` (D-SIGNAL1) |
 | `reactive.effect(() => { … })` | — | a side effect re-run when a read signal changes |
+| `#Reactive { … }` | — | explicit reactive effect scope (lowers like `reactive.effect`) |
 | `sig.get()` / `der.get()` | `T` | read the current value (and subscribe, inside a derived/effect) |
 | `sig.set(v)` | — | write a new value and re-run subscribers |
 
@@ -756,13 +761,13 @@ many values into one buffer and frees them all at once.
 use core.mem
 
 fn main() {
-    arena @= mem.Arena.new()             // or .new(capacity: 4096)
-    x @= arena.alloc(42)                 // x is a *view* into the arena
-    y @= arena.alloc("hi")
+    arena #= mem.Arena.new()             // or .new(capacity: 4096)
+    x #= arena.alloc(42)                 // x is a *view* into the arena
+    y #= arena.alloc("hi")
     print(x)
     print(y)
     arena.reset()                        // frees everything; buffer reused
-    z @= arena.alloc(7)
+    z #= arena.alloc(7)
     print(z)
 }
 ```
@@ -786,10 +791,10 @@ use core.mem
 
 fn main() {
     region scratch {
-        a @= mem.Arena.new()
-        b @= mem.Bump.new()
-        first @= a.alloc(1)
-        second @= b.alloc(2)
+        a #= mem.Arena.new()
+        b #= mem.Bump.new()
+        first #= a.alloc(1)
+        second #= b.alloc(2)
         print(first)
         print(second)
     }                                    // both arenas freed here
@@ -814,8 +819,8 @@ the same `Int ? ParseError` result `Int.parse` does, so handle it with `?`/`??`.
 
 ```jet
 fn main() {
-    n @= "42".to_int() ?? -1                 // 42
-    bad @= "oops".to_int() ?? -1             // -1 (parse failed → fallback)
+    n #= "42".to_int() ?? -1                 // 42
+    bad #= "oops".to_int() ?? -1             // -1 (parse failed → fallback)
     print(n + bad)
 
     loop line in "first\nsecond".lines() {   // ["first", "second"]
@@ -838,11 +843,11 @@ error (**E1003**).
 
 ```jet
 fn main() {
-    b@ U8=  255
+b: U8 #= 255
     print(b.to_int())                       // 255 as Int
-    n @= 42.to_u8() ?? return              // checked conversion
-    bytes @= "hi".bytes()                  // [U8]
-    text @= String.from_bytes(bytes) ?? return
+    n #= 42.to_u8() ?? return              // checked conversion
+    bytes #= "hi".bytes()                  // [U8]
+    text #= String.from_bytes(bytes) ?? return
     print(text)
 }
 ```
@@ -866,8 +871,8 @@ silently wrapping. Opt a single op out at the use site:
 
 ```jet
 fn main() {
-    hi@ U8=  200
-    lo@ U8=  100
+hi: U8 #= 200
+lo: U8 #= 100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
     print(saturating(hi + lo))          // 255  — clamps to the type's range
     print(checked(hi + lo) ?? 0)        // 0    — checked(…) -> T?, null on overflow
@@ -921,7 +926,7 @@ shift count past the type's width traps (no leaked Rust panic).
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
 | `import core.fs` | `use core.fs` (teaching error E0015) |
-| `val x = …` / `var x = …` | `x @= …` (immutable) / `x := …` (mutable) |
+| `val x = …` / `var x = …` | `x #= …` (immutable) / `x := …` (mutable) |
 
 ---
 

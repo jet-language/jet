@@ -1,0 +1,28 @@
+// D-MUSTUSE1 (c18iwxqx): `#MustUse` on types, functions, and methods.
+// Explicit discard reuses D-IGNORERET2 `.drop("reason")` and `#Suppress(MustUse)`.
+
+#MustUse struct Token {
+    id: Int
+}
+
+#MustUse fn mint(id: Int) -> Token {
+    return Token.{ id: id }
+}
+
+use core.scope as scope
+
+fn main() {
+    t := mint(7)
+    print(t.id)
+
+    mint(99).drop("best-effort mint for metrics")
+
+    #Suppress(MustUse) {
+        mint(1)
+        mint(2)
+    }
+
+    _g := scope.guard(() => { print("cleanup") })
+
+    print("must-use ok")
+}

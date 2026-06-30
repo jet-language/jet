@@ -6,8 +6,8 @@ use core.scope as scope
 enum Fail { Bad }
 
 fn with_guards(succeed: Bool) -> Int ? Fail {
-    _g1 @= scope.guard(() => { print("guard 1 runs") })
-    _g2 @= scope.guard(() => { print("guard 2 runs") })
+    _g1 #= scope.guard(() => { print("guard 1 runs") })
+    _g2 #= scope.guard(() => { print("guard 2 runs") })
     if succeed {
         return ok(42)
     }
@@ -15,14 +15,14 @@ fn with_guards(succeed: Bool) -> Int ? Fail {
 }
 
 fn question_path() -> Int ? Fail {
-    _cleanup @= scope.guard(() => { print("cleanup before ?") })
-    n @= with_guards(false)?
+    _cleanup #= scope.guard(() => { print("cleanup before ?") })
+    n #= with_guards(false)?
     return ok(n)
 }
 
 fn main() {
-    r1 @= with_guards(true) ?? 0
+    r1 #= with_guards(true) ?? 0
     print(r1)
-    r2 @= question_path() ?? -1
+    r2 #= question_path() ?? -1
     print(r2)
 }

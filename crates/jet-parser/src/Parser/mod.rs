@@ -52,6 +52,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
         arm_head_term: false,
+        pub_file_default: false,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -76,6 +77,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
         arm_head_term: false,
+        pub_file_default: false,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -153,6 +155,14 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0320"
             | "E0992"
             | "E0994"
+            | "E0412"
+            | "E0413"
+            | "E0414"
+            | "E0415"
+            | "E0416"
+            | "E0417"
+            | "E0418"
+            | "E0998"
     )
 }
 
@@ -179,6 +189,8 @@ struct Parser<'a> {
     /// D-MATCHARM1: when true, `expr_bitor` stops before consuming a top-level `|`
     /// so the arm-head parser can treat `|` as value-alternation.
     arm_head_term: bool,
+    /// D-VISDEFAULT2=A: when true, top-level items default to public unless `priv`.
+    pub_file_default: bool,
 }
 
 fn too_deep(span: Span) -> Diagnostic {
@@ -490,7 +502,7 @@ mod s61_tests {
     fn spaced_minus_is_subtraction() {
         // Also a single-line-block regression guard (S6-R Go-rule part 2: a
         // terminator may be omitted before the closing `}`).
-        let p = program("fn main() { d @= 5 - 3 }");
+        let p = program("fn main() { d #= 5 - 3 }");
         let func = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) => Some(f),
             _ => None,
@@ -512,7 +524,7 @@ mod s61_tests {
     #[test]
     fn taskgroup_task_block_parses_as_spawn() {
         let p = program(
-            "fn main() {\n    taskgroup g {\n        h @= g.task { return 1 }\n    }\n}\n",
+            "fn main() {\n    taskgroup g {\n        h #= g.task { return 1 }\n    }\n}\n",
         );
         let main = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "main" => Some(f),
@@ -535,5 +547,62 @@ mod s61_tests {
             }
             other => panic!("expected g.task {{ … }} MethodCall, got {other:?}"),
         }
+    }
+
+    /// D-VISDEFAULT2=A: `#PubFile` flips default top-level visibility; `priv` opts out.
+    #[test]
+    fn pub_file_marker_sets_default_visibility() {
+        let src = r#"#PubFile
+
+fn greet() -> String {
+    return "hi"
+}
+
+priv fn secret() -> Int {
+    return 0
+}
+
+fn main() {
+    return
+}"#;
+        let p = program(src);
+        assert!(p.pub_file);
+        let mut funcs: Vec<_> = p.items.iter().filter_map(|i| match i {
+            crate::AST::Item::Func(f) => Some(f),
+            _ => None,
+        }).collect();
+        funcs.sort_by_key(|f| f.name.as_str());
+        let greet = funcs.iter().find(|f| f.name == "greet").expect("greet");
+        let secret = funcs.iter().find(|f| f.name == "secret").expect("secret");
+        let main = funcs.iter().find(|f| f.name == "main").expect("main");
+        assert!(greet.is_pub);
+        assert!(!secret.is_pub);
+        assert!(main.is_pub);
+    }
+
+    #[test]
+    fn pub_file_section_label_emits_e0415() {
+        let src = "#PubFile\n\npriv:\nfn main() { return }\n";
+        let (toks, errs) = lex(src);
+        assert!(errs.is_empty(), "lex errors: {errs:?}");
+        let toks = crate::Lexer::without_comments(&toks);
+        let mut p = Parser {
+            toks: &toks,
+            pos: 0,
+            diags: Vec::new(),
+            pending_type_gt: false,
+            depth: 0,
+            type_generic_depth: 0,
+            type_generic_chain: Vec::new(),
+            type_generic_truncated: false,
+            arm_head_term: false,
+            pub_file_default: false,
+        };
+        let _prog = p.program();
+        assert!(
+            p.diags.iter().any(|d| d.code == "E0415"),
+            "expected E0415, got {:?}",
+            p.diags
+        );
     }
 }

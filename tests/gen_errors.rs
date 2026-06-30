@@ -170,6 +170,9 @@ const PREFERRED_UI: &[(&str, &str)] = &[
     ("E0111", "tests/ui/assign_to_val.jet"),
     ("E0119", "tests/ui/unknown_type.jet"),
     ("E0120", "tests/ui/return_borrowed_param.jet"),
+    ("E-WEB-ABI-TYPE", "tests/ui/web_abi_type.jet"),
+    ("E-WEB-CROSS-PARTITION", "tests/ui/web_cross_partition.jet"),
+    ("E-WEB-TARGET-BROWSER", "tests/ui/web_target_browser.jet"),
 ];
 
 fn load_preferred_diag(root: &Path, code: &str, jet_rel: &str) -> ParsedDiag {

@@ -48,29 +48,150 @@ pub(crate) use subset::*;
 
 use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp};
 
-/// c139 M1: lower the entry module's plain `main` function for the Cranelift JIT.
+/// c139 M4: lowered spawn-lambda body for Cranelift JIT (captures as explicit params).
+pub struct TJitSpawnLambda {
+    pub params: Vec<(String, Type)>,
+    pub captures: Vec<JitSpawnCapture>,
+    pub body: TJitSpawnBody,
+    pub ret: Type,
+}
+
+pub struct JitSpawnCapture {
+    pub name: String,
+    pub ty: Type,
+    pub clone_at_spawn: bool,
+}
+
+pub enum TJitSpawnBody {
+    Expr(Box<TExpr>),
+    Block {
+        prefix: Vec<TStmt>,
+        tail: Option<Box<TExpr>>,
+    },
+}
+
+/// c139 M3: every lowered function the JIT may compile from the entry module.
+pub struct JitProgram {
+    /// Display path of the entry module (for overflow trap messages).
+    pub source_file: String,
+    /// All top-level `tir_covers` functions in the entry module, including `main`.
+    pub funcs: Vec<TFunc>,
+    /// c139 M4: spawn lambda bodies in program traversal order (parallel to spawn sites in TIR).
+    pub spawn_lambdas: Vec<TJitSpawnLambda>,
+}
+
+/// c139 M3: every lowered function the JIT may compile from the entry module.
 ///
 /// Returns `None` when there is no plain top-level `main`, or when `main` is
 /// outside the existing `tir_covers` gate.
 pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
+    lower_jit_program(bundle).map(|p| {
+        p.funcs
+            .into_iter()
+            .find(|f| f.is_main)
+            .expect("lower_jit_program always includes main")
+    })
+}
+
+/// Rust local place for JIT variable lookup (`user_x`, or `main`).
+pub fn local_place(name: &str) -> String {
+    super::mangle(name)
+}
+
+/// c139 M3: lower every `tir_covers` top-level function in the entry module so the
+/// JIT can compile multi-function programs (calls between covered helpers).
+pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let module = bundle.modules.get(bundle.entry)?;
     let extern_funcs = bundle_extern_funcs(bundle);
-    let cx = build_cx_items(
+    let mut cx = build_cx_items(
         &module.items,
         &module.source,
         &module.display,
         None,
         &extern_funcs,
     );
+    populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+    let mut funcs = Vec::new();
+    let mut have_main = false;
+    cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
         let Item::Func(f) = item else {
             continue;
         };
-        if f.name == "main" && f.type_params.is_empty() && f.params.is_empty() && tir_covers(f, &cx) {
-            return Some(lower_func(f, &cx));
+        if !f.type_params.is_empty() || !tir_covers(f, &cx) {
+            continue;
+        }
+        let lowered = lower_func(f, &cx);
+        if f.name == "main" && f.params.is_empty() {
+            have_main = true;
+        }
+        funcs.push(lowered);
+    }
+    if !have_main {
+        return None;
+    }
+    let spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+    Some(JitProgram {
+        source_file: module.display.clone(),
+        funcs,
+        spawn_lambdas,
+    })
+}
+
+/// Test hook: why `lower_jit_program` returned `None`.
+#[doc(hidden)]
+pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
+    let Some(module) = bundle.modules.get(bundle.entry) else {
+        return "missing entry module".to_string();
+    };
+    let extern_funcs = bundle_extern_funcs(bundle);
+    let mut cx = build_cx_items(
+        &module.items,
+        &module.source,
+        &module.display,
+        None,
+        &extern_funcs,
+    );
+    populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+    let mut saw_main = false;
+    let mut main_tir = false;
+    for item in &module.items {
+        let Item::Func(f) = item else {
+            continue;
+        };
+        if f.name == "main" && f.params.is_empty() {
+            saw_main = true;
+            main_tir = tir_covers(f, &cx);
         }
     }
-    None
+    if !saw_main {
+        return "no plain main".to_string();
+    }
+    if !main_tir {
+        let mut locals: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for item in &module.items {
+            let Item::Func(f) = item else {
+                continue;
+            };
+            if f.name != "main" {
+                continue;
+            }
+            for (i, stmt) in f.body.iter().enumerate() {
+                let mut probe = locals.clone();
+                if !subset::stmt_in_subset(stmt, &cx, &mut probe) {
+                    if let crate::AST::Stmt::Val(b) = stmt {
+                        if !subset::expr_in_subset(&b.init, &cx, &locals) {
+                            return format!("main stmt {i} init outside tir_covers");
+                        }
+                    }
+                    return format!("main stmt {i} outside tir_covers");
+                }
+                let _ = subset::stmt_in_subset(stmt, &cx, &mut locals);
+            }
+        }
+        return "main outside tir_covers".to_string();
+    }
+    "unknown".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +229,8 @@ pub struct TFunc {
     /// ever emitted without that source gate. Applies to `TopLevel`/`Method`; a trait
     /// method carries its own `is_unsafe` on `TFuncKind::TraitMethod`.
     pub is_unsafe: bool,
+    /// D-REACTCORE1: `#Reactive fn` — the body is emitted inside `jet_reactive_effect`.
+    pub is_reactive: bool,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
@@ -216,7 +339,7 @@ pub enum TStmt {
         ty_clause: String,
         init: TExpr,
     },
-    /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) @= <init>` (S74,
+    /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) #= <init>` (S74,
     /// `BindPattern::Tuple`). Reproduces `emit_stmt`'s destructure form byte-for-byte:
     /// a `let {tmp} = &({init});` temp (borrowed — never moves out of a shared ref, I2),
     /// then one `let[ mut] {elem_rust} = ({tmp}).{field_rust}.clone();` per element,
@@ -230,7 +353,7 @@ pub enum TStmt {
         /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
         binds: Vec<(String, String)>,
     },
-    /// c109: a STRUCT-destructuring binding `Type { x, y } @= <init>` (S74,
+    /// c109: a STRUCT-destructuring binding `Type { x, y } #= <init>` (S74,
     /// `BindPattern::Struct`). Reproduces `emit_stmt`'s `BindPattern::Struct` arm
     /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
     /// `let[ mut] {field_rust} = ({tmp}).{field_rust}.clone();` per bound field
@@ -244,7 +367,7 @@ pub enum TStmt {
         /// `field_rust_name` per bound field, source order.
         fields: Vec<String>,
     },
-    /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] @= <init>` (S74,
+    /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] #= <init>` (S74,
     /// `BindPattern::List`). Reproduces `emit_stmt`'s `BindPattern::List` arm
     /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
     /// `let[ mut] {elem_rust} = jet_unpack_vec({tmp}, {want}, {i}, {file:?}, {line});`
@@ -453,6 +576,8 @@ pub enum TStmt {
     /// The body's `let`s LEAK into the outer scope (the AST shares `&mut env`), so the
     /// body is lowered on the SAME `LowerEnv` (not a cloned scope).
     Unsafe(Vec<TStmt>),
+    /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
+    Reactive { closure: String },
     /// c109 Phase 19: an explicit `region r { … }` (D-REGION1 opt B). Lowers to a plain
     /// Rust block `{ … }` — a lexical scope. The region's escape bound (E0631) and arena
     /// drop ordering (S63 RAII) are enforced entirely in sema; codegen is dumb (I3). The
@@ -1063,6 +1188,8 @@ pub enum TCoreClosureKind {
     ReactiveDerived { closure: String },
     /// D-REACT1=B: `reactive.effect(<lambda>)` → `{root}jet_std::jet_reactive_effect(<closure>)`.
     ReactiveEffect { closure: String },
+    /// D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
+    UiReactiveRender { closure: String },
 }
 
 /// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
@@ -1570,6 +1697,8 @@ pub enum THandleOp {
     PathWriteAtomic,
     /// D-PATHFS1: `path.walk()` → `{root}jet_path_walk(&(recv))` → `Vec<JetPath>`.
     PathWalk,
+    /// D-RENDERTGT2=A (c133 M1): NullBackend measure/layout/paint/on_event/commands.
+    UiBackendMethod { method: String },
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -1662,6 +1791,8 @@ mod tests {
                 imports: std::mem::take(&mut prog.imports),
                 items: std::mem::take(&mut prog.items),
                 source: src.to_string(),
+                web_target_ceiling: prog.web_target_ceiling,
+                pub_file: prog.pub_file,
             }],
             parse_teaching: Vec::new(),
             used_core: std::collections::HashSet::new(),
@@ -1876,7 +2007,7 @@ fn make(n: String) -> Person {
         // (E0422) before; the fix prefixes the foreign module.
         let src = "\
 fn mk() {
-    n @= Note.{ text: \"hi\" }
+    n #= Note.{ text: \"hi\" }
     print(n.text)
 }
 ";
@@ -1887,7 +2018,7 @@ fn mk() {
     fn covers_unsafe_fn_with_ptr_ops() {
         // c109 Phase 18: a `#Unsafe fn` (S58) is covered — it lowers to `unsafe fn`, and
         // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
-        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) -> Int {\n p @= mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) -> Int {\n p #= mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
         assert!(covers_with_mem(src, "read_reg"));
     }
 
@@ -1895,7 +2026,7 @@ fn mk() {
     fn covers_unsafe_block_and_address_of() {
         // c109 Phase 18: a `#Unsafe("…") { … }` audited region + `mem.address_of` (the
         // inert address cast, legal outside unsafe) are covered.
-        let src = "use core.mem\nfn main() {\n cell: Int @= 7\n addr @= mem.address_of(cell)\n #Unsafe(\"live\") {\n p @= mem.Ptr<Int>.from_addr(addr)\n seen @= mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
+        let src = "use core.mem\nfn main() {\n cell: Int #= 7\n addr #= mem.address_of(cell)\n #Unsafe(\"live\") {\n p #= mem.Ptr<Int>.from_addr(addr)\n seen #= mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
         assert!(covers_with_mem(src, "main"));
     }
 
@@ -1952,7 +2083,7 @@ fn mk() {
     #[test]
     fn rejects_method_call_in_body() {
         // A method call (`.bumped()`) is not a covered construct.
-        let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x @= C.{ n: 1 }\n return x.bumped()\n}\n";
+        let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x #= C.{ n: 1 }\n return x.bumped()\n}\n";
         assert!(!covers(src, "caller"));
     }
 
@@ -2018,13 +2149,13 @@ fn mk() {
 
     #[test]
     fn covers_infinite_loop_with_break() {
-        let src = "fn f() {\n x @= 0\n loop {\n x = (x + 1)\n if (x > 3) {\n break\n }\n }\n print(x)\n}\n";
+        let src = "fn f() {\n x #= 0\n loop {\n x = (x + 1)\n if (x > 3) {\n break\n }\n }\n print(x)\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_while_form() {
-        let src = "fn f() {\n x @= 0\n loop (x < 3) {\n x = (x + 1)\n }\n print(x)\n}\n";
+        let src = "fn f() {\n x #= 0\n loop (x < 3) {\n x = (x + 1)\n }\n print(x)\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -2087,7 +2218,7 @@ fn mk() {
     #[test]
     fn covers_enum_local_and_literal_in_main() {
         // An enum-typed local bound from a literal, passed to a covered helper.
-        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start @= Light.Red\n print(label(start))\n}\n";
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start #= Light.Red\n print(label(start))\n}\n";
         assert!(covers(src, "main"));
     }
 
@@ -2426,7 +2557,7 @@ fn mk() {
         // scalar-payload *error enum* literal is `Bad.Code(1)`, which parses as a
         // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
         // proven end-to-end by `tests/tir.rs::fallible_try_and_or_fallback`.)
-        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return err(\"bad\")\n }\n return ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n @= f(x)?\n return ok((n + 1))\n}\n";
+        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return err(\"bad\")\n }\n return ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n #= f(x)?\n return ok((n + 1))\n}\n";
         assert!(covers(src, "f"));
         assert!(covers(src, "g"));
     }
@@ -2681,7 +2812,7 @@ fn build() -> Rect { return Rect.new(4, 3) }
         // `input` fn). It composes with the `??` value fallback (Phase 8).
         let src = "\
 fn greet() -> String {
-    name @= input() ?? \"world\"
+    name #= input() ?? \"world\"
     return \"hi {name}\"
 }
 ";
@@ -2721,9 +2852,9 @@ fn greet() -> String { return input() }
         // c109: a single-uppercase-letter DECLARED struct name (`P`) is a concrete
         // type, not a type variable — the `is_type_var_name` heuristic is now guarded
         // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
-        // `P{x} @= p` struct-destructure are both covered; the fn routes through TIR.
+        // `P{x} #= p` struct-destructure are both covered; the fn routes through TIR.
         assert!(covers(
-            "struct P { x: Int }\nfn f() { p @= P.{x: 1}\n#Caps(Io) { P.{x} @= p\nprint(x) } }",
+            "struct P { x: Int }\nfn f() { p #= P.{x: 1}\n#Caps(Io) { P.{x} #= p\nprint(x) } }",
             "f"
         ));
     }
@@ -2744,21 +2875,21 @@ fn greet() -> String { return input() }
 
     #[test]
     fn covers_list_destructure() {
-        // c109 Phase 26: a list-destructuring binding `[a, b, c] @= <init>` (S74) routes
+        // c109 Phase 26: a list-destructuring binding `[a, b, c] #= <init>` (S74) routes
         // when the init is in-subset — the fan-out result destructure (`41_fan_out`).
         assert!(covers(
-            "fn f() { xs @= [1, 2, 3]\n[a, b, c] @= xs\nprint(a) }",
+            "fn f() { xs #= [1, 2, 3]\n[a, b, c] #= xs\nprint(a) }",
             "f"
         ));
     }
 
     #[test]
     fn covers_struct_destructure() {
-        // c109: a struct-destructuring binding `Type { x, y } @= <init>` (S74) routes
+        // c109: a struct-destructuring binding `Type { x, y } #= <init>` (S74) routes
         // when the init is in-subset — the AST `BindPattern::Struct` arm is covered
         // byte-for-byte (per-field type from `cx.struct_fields`).
         assert!(covers(
-            "struct Point { x: Int, y: Int }\nfn f() { p @= Point.{ x: 1, y: 2 }\nPoint.{ x, y } @= p\nprint(x + y) }",
+            "struct Point { x: Int, y: Int }\nfn f() { p #= Point.{ x: 1, y: 2 }\nPoint.{ x, y } #= p\nprint(x + y) }",
             "f"
         ));
     }
@@ -2766,12 +2897,12 @@ fn greet() -> String { return input() }
     #[test]
     fn covers_named_fn_value_binding() {
         // c109 Phase 27: a bare top-level fn name bound to a local as a VALUE
-        // (`double_fn @= double`). The init `Ident("double")` resolves to a `Type::Fn`
+        // (`double_fn #= double`). The init `Ident("double")` resolves to a `Type::Fn`
         // value (`emit_named_fn_value`), in-subset via `ident_is_named_fn_value`. (This
         // binding-site coercion was already wired in lowering; the live-suite `24_callbacks`
         // never routed only because the struct fn-field / fn-field-call were uncovered.)
         assert!(covers(
-            "fn dbl(x: Int) -> Int { return (x * 2) }\nfn f() { g @= dbl\nprint(g(3)) }",
+            "fn dbl(x: Int) -> Int { return (x * 2) }\nfn f() { g #= dbl\nprint(g(3)) }",
             "f"
         ));
     }
@@ -2954,9 +3085,9 @@ fn consume(ch: Channel<Int>) -> Int {
     fn covers_distinct_value_type_and_ctor() {
         // c109 Phase 23: a distinct param type + `.raw()` + the `Name(x)` constructor are
         // covered. The build_cx-only helper registers the distinct in `distinct_types`.
-        let src = "UserId @= distinct Int;\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
+        let src = "UserId #= distinct Int;\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
         assert!(covers(src, "greet"));
-        let src2 = "UserId @= distinct Int;\nfn mk() -> UserId {\n return UserId(42)\n}\n";
+        let src2 = "UserId #= distinct Int;\nfn mk() -> UserId {\n return UserId(42)\n}\n";
         assert!(covers(src2, "mk"));
     }
 
@@ -2998,7 +3129,7 @@ fn consume(ch: Channel<Int>) -> Int {
         let cx = build_cx(&prog, cx_src, "t.jet");
         let locals = HashSet::new();
         let lam = |body: &str| -> Vec<crate::AST::CallArg> {
-            let s = format!("fn g() {{ x @= scope.guard({})\n}}\n", body);
+            let s = format!("fn g() {{ x #= scope.guard({})\n}}\n", body);
             let (t, _) = crate::Lexer::lex(&s);
             let p = crate::Parser::parse(&t).expect("parse lam");
             // Pull the single call arg from the guard call.
@@ -3344,7 +3475,7 @@ struct Tree {
     child: Tree?
 }
 fn build() {
-    root @= Tree.{ value: 1, child: value(Tree.{ value: 2, child: null }) }
+    root #= Tree.{ value: 1, child: value(Tree.{ value: 2, child: null }) }
     print(root.value)
 }
 ";
@@ -3363,7 +3494,7 @@ struct Tree {
     child: Tree?
 }
 fn first_child(t: Tree) -> Int {
-    kid: Tree? @= t.child
+    kid: Tree? #= t.child
     if kid == {
         value(c) -> {
             return c.value
@@ -3380,7 +3511,7 @@ fn first_child(t: Tree) -> Int {
 
     #[test]
     fn covers_owning_nonscalar_field_read_clone() {
-        // c109: an owning field read of a NON-SCALAR field (`s @= p.name`, `name:
+        // c109: an owning field read of a NON-SCALAR field (`s #= p.name`, `name:
         // String`) — sema rewrites the read to `(p.name).clone()` (a `MethodCall`
         // clone shape). With the single-uppercase-letter struct name `P` now treated
         // as a concrete declared type (not a type var), the whole `main` routes
@@ -3391,9 +3522,9 @@ struct P {
 }
 
 fn main() {
-    p @= P.{ name: "x" }
-    s @= p.name
-    t @= p.name
+    p #= P.{ name: "x" }
+    s #= p.name
+    t #= p.name
     print(s)
     print(t)
 }
@@ -3500,7 +3631,7 @@ enum Wrapper {
     None
 }
 fn main() {
-    w @= Wrapper.Some(42)
+    w #= Wrapper.Some(42)
     if w == Some(_) {
         print(\"has value\")
     }

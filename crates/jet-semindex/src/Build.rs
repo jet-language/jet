@@ -702,6 +702,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::Loop { body, .. }
         | AST::Stmt::Unsafe { body, .. }
         | AST::Stmt::Impure { body, .. }
+        | AST::Stmt::Reactive { body, .. }
         | AST::Stmt::Region { body, .. }
         | AST::Stmt::TaskGroup { body, .. }
         | AST::Stmt::Caps { body, .. }
@@ -804,18 +805,23 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
         },
     });
     if let Some(t) = &ty {
-        let kw = if b.mutable { "var" } else { "val" };
+        let text = if b.mutable {
+            format!("`{}`: {} (mutable)", b.name, t.name())
+        } else {
+            format!("`{}`: {} (immutable)", b.name, t.name())
+        };
         ctx.db.hover.push(HoverEntry {
             span: b.name_span,
             module_path: mp.to_string(),
-            text: format!("`{}`: {} ({})", b.name, t.name(), kw),
+            text,
         });
         // Inlay hint: only when user omitted the annotation (sema filled it in)
         if !has_explicit {
+            let label = format!(": {}", t.name());
             ctx.db.inlay.push(InlayHint {
                 span: b.name_span,
                 module_path: mp.to_string(),
-                label: format!(": {}", t.name()),
+                label,
             });
         }
     }

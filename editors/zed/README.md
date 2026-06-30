@@ -61,7 +61,7 @@ nix develop -c cargo test --test lsp
 ```
 
 In Zed, open a file with `let x = 1;` — expect **E0009** with a quick-fix
-to `val x = 1;`.
+to `x #= 1` or `x := 1`.
 
 ## Grammar note
 

@@ -23,7 +23,7 @@ fn parse_pipe_switch_arms_as_subject_tests() {
     // to each (`orange || mango` ≡ `fruit == orange || fruit == mango`).
     let src = r#"
 fn main() {
-    fruit @= "orange"
+    fruit #= "orange"
     if fruit == {
         apple -> { print("Apple Juice") }
         orange || mango -> { print("Orange Juice") }
@@ -93,7 +93,7 @@ fn use_collections(items: [String], counts: [String, Int]) {}
 
 #[test]
 fn parse_numeric_field_emits_e0049() {
-    let src = "fn main() { x @= p.0 }";
+    let src = "fn main() { x #= p.0 }";
     let (toks, _) = jet::Lexer::lex(src);
     let (_prog, diags) = jet::Parser::parse_for_check(&toks).expect("recoverable parse");
     assert!(

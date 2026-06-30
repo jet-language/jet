@@ -69,6 +69,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             Stmt::Loop { body: inner, .. }
             | Stmt::Unsafe { body: inner, .. }
             | Stmt::Impure { body: inner, .. }
+            | Stmt::Reactive { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
@@ -413,6 +414,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -524,6 +526,7 @@ pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Optio
         | Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -831,6 +834,7 @@ pub(crate) fn stmt_collect_captures(
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }

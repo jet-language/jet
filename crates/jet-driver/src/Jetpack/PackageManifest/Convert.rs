@@ -72,6 +72,7 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
             description: pm.package.description.clone(),
             license: pm.package.license.clone(),
             repository: pm.package.repository.clone(),
+            layer: pm.package.layer,
         },
         dependencies,
         dependencies_rust: BTreeMap::new(),

@@ -62,9 +62,9 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
 /// program has no `extern rust` declarations and does not use `jet.regex`,
-/// `jet.archive`, or `jet.db`.
+/// `core.archive`, or `jet.db`.
 ///
-/// `jet.regex` (D-REGEX1), `jet.archive` (D-DEP-ARCHIVE1), and `jet.db`
+/// `jet.regex` (D-REGEX1), `core.archive` (D-DEP-ARCHIVE1), and `jet.db`
 /// (D-DEP-DB1) are delivered through this same hidden-cargo bridge: when a
 /// program imports any of them, the bridge crate gains the matching dependency
 /// and a hand-written runtime (`Source/Prelude/Regex.rs`,
@@ -82,7 +82,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
     let needs_archive = bundle
         .used_core
         .iter()
-        .any(|u| u == "jet.archive" || u.starts_with("jet.archive::"));
+        .any(|u| u == "core.archive" || u.starts_with("core.archive::"));
     let needs_db = bundle
         .used_core
         .iter()
@@ -110,15 +110,15 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
 /// never in the compiler's Cargo.toml (I6).
 pub const REGEX_CRATE_SPEC: (&str, &str) = ("regex", "1");
 
-/// The `flate2` crate version that backs `jet.archive` gzip (D-DEP-ARCHIVE1).
+/// The `flate2` crate version that backs `core.archive` gzip (D-DEP-ARCHIVE1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const ARCHIVE_CRATE_SPEC: (&str, &str) = ("flate2", "1");
 
-/// The `zip` crate version that backs `jet.archive` zip (D-DEP-ARCHIVE1).
+/// The `zip` crate version that backs `core.archive` zip (D-DEP-ARCHIVE1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const ZIP_CRATE_SPEC: (&str, &str) = ("zip", "2");
 
-/// The `tar` crate version that backs `jet.archive` tar (D-DEP-ARCHIVE1).
+/// The `tar` crate version that backs `core.archive` tar (D-DEP-ARCHIVE1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
 
@@ -148,7 +148,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
 /// used. This is the only code that touches the `regex` crate.
 const REGEX_RUNTIME: &str = include_str!("Prelude/Regex.rs");
 
-/// Hand-written archive runtime emitted into the bridge crate when `jet.archive`
+/// Hand-written archive runtime emitted into the bridge crate when `core.archive`
 /// is used. This is the only code that touches the `flate2`, `zip`, and `tar` crates.
 const ARCHIVE_RUNTIME: &str = include_str!("Prelude/Archive.rs");
 

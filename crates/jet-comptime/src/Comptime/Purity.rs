@@ -198,6 +198,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::SuppressMustUse { body, .. }
+        | Stmt::Reactive { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Caps { body, .. }

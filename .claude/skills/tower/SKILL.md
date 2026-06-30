@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows, so he never has to retype the context.
+description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only Epoch 3 + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows, so he never has to retype the context.
 ---
 
 # Tower — act on the board
@@ -31,10 +31,55 @@ and never touch `frozen`.** Your lanes are:
 Plus: any **open question** (`questions[]` with `status:"open"`) is the owner
 asking you something on a card — answer it.
 
+## Scope & work order — Epoch 3 burndown
+
+When the owner asks to work the board, burn down Epoch 3, or continue the
+milestone, **stay inside two sections only** until both are empty:
+
+1. **Epoch 3** — `track:"epoch"` + `epoch:"e3"` + agent lane (`planning` /
+   `ready` / `building` / `verify`). This is the on-plan Epoch 3 section in Tower.
+2. **Sidequests** — `track:"sidequest"` + agent lane. Off-plan work the board
+   surfaces above the epoch list.
+
+**Do not pick up work outside this scope** unless the owner explicitly redirects:
+
+- Other epochs (`e4`, `e5`, `e6`, …) — even if `ready` or `building`.
+- Epoch cards assigned to a non-`e3` epoch.
+- `frozen` cards (owner-only until activated).
+- `decide` / `activate` lanes (owner-only).
+- New cards, binder hygiene, or doc-only sweeps that expand scope.
+
+**Exit criterion for the burndown:** both sections show no active agent-lane
+cards — every in-scope card is `done` or `frozen` (frozen only when genuinely
+parked; do not freeze to avoid finishing work).
+
+### How to pick the next card
+
+Sort the in-scope agent queue by **`workOrder` ascending** (lowest number first).
+Tower UI uses the same sort (`app/ui/tower.js` → `orderOf` / `byOrderThenPhaseThenPrio`).
+Within the same `workOrder`, prefer **`building`** (continue in-flight) over
+**`verify`** (close claimed work) over **`implement`** / **`ready`** (start new)
+over **`planning`** (write/vet plan). Respect `blockedBy` — skip blocked cards
+and surface the blocker; do not invent spellings to bypass a gate.
+
+If a card has no `workOrder`, treat it as last — after all numbered cards in
+that section. Prefer setting `workOrder` when you activate or advance a card so
+the board stays honest.
+
+### Session loop
+
+1. `node tools/Tower/Tower.mjs status` (or read `tower.json`) — count active
+   **e3** + **sidequest** agent cards.
+2. Pick the lowest `workOrder` unblocked card; finish a vertical slice; log it;
+   move phase forward only on real verification.
+3. Repeat until both sections are empty, then report burndown complete and list
+   anything still in owner lanes (`decide`, `activate`) or blocked on ratification.
+
 ## Steps
 
 1. **Read** `tools/Tower/tower.json` (or run `node Tower.mjs status` and read the
-   AGENT sections). Build three work-lists:
+   AGENT sections). Build work-lists **scoped to Epoch 3 + sidequests** (see
+   above). Within that scope:
    - Ratified decisions (`status:"ratified"`) whose card is in `ready`/`building`
      and whose work isn't done — implement to the chosen `outcome`.
    - Cards in `plan` / `implement` / `building` / `verify` (lane logic in `laneOf`).
@@ -130,7 +175,10 @@ Ratifying into `syntax-decisions.md` is step one of several, not the whole job:
 
 ## Rules
 
-- Parallelise independent cards with sub-agents (sonnet for impl, opus for hard
+- **Burndown scope:** Epoch 3 epoch-track + sidequest track only; sort by
+  `workOrder`; do not wander into e4+ or frozen/decide/activate unless the owner
+  says otherwise. Keep going until both sections have no active agent cards.
+- Parallelise independent in-scope cards with sub-agents (sonnet for impl, opus
   type-system/design calls); give each enough context to act without re-reading the
   whole board. One layer deep, no nested spawns. No git worktrees unless the owner asks.
 - Don't invent owner-facing syntax — raise it as a `decision` and leave the card `deciding`.

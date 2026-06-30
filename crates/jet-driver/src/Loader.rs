@@ -121,6 +121,7 @@ pub fn load_entry_with_overlay(
         .parent()
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
+    let mut layer_ceiling = None;
     let (project_root, pkg_dep_dirs, pkg_resolution) = if let Some(manifest_dir) =
         find_manifest_root(&entry_dir)
     {
@@ -130,6 +131,7 @@ pub fn load_entry_with_overlay(
         match Manifest::parse(&pack_path, &raw) {
             Err(d) => return Err(vec![d]),
             Ok(mf) => {
+                layer_ceiling = mf.package.layer;
                 // Check toolchain constraint (E1208).
                 if let Err(d) = Manifest::check_toolchain(&mf, &pack_path.display().to_string()) {
                     return Err(vec![d]);
@@ -295,6 +297,11 @@ pub fn load_entry_with_overlay(
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
         import_targets,
+        layer_ceiling,
+        inferred_layer: Syntax::RuntimeLayer::Core,
+        web_partitions: HashMap::new(),
+        web_partition_enforced: false,
+        web_partition_report: None,
     };
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
@@ -498,6 +505,8 @@ fn load_file(
         alias,
         imports: imports.clone(),
         items: prog.items,
+        web_target_ceiling: prog.web_target_ceiling,
+        pub_file: prog.pub_file,
     });
 
     for imp in &imports {

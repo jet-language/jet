@@ -1,4 +1,5 @@
 use super::*;
+use crate::Sema::CheckerOwnership::e0141_unconsumed_branch;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
@@ -811,7 +812,7 @@ impl<'a> Checker<'a> {
                     }
                     // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place
                     // must be a CHANGEABLE place: a `mut self` receiver, or a `:=`/`mut`
-                    // local. A non-`mut` `self` (shared-read receiver) or a `@=`/shared
+                    // local. A non-`mut` `self` (shared-read receiver) or a `#=`/shared
                     // binding is E0205, pointed at the assignment, with a "write the
                     // receiver as `mut self`" / "make it changeable" fix (owner Q1).
                     LValue::Field { base, field, span } => {
@@ -1051,6 +1052,8 @@ impl<'a> Checker<'a> {
                             ),
                             Some(expr.span()),
                         ));
+                    } else if !self.suppress_must_use {
+                        self.check_ignored_must_use(expr, &ty, expr.span());
                     }
                     if is_task_type(&ty) {
                         self.diags.push(Diagnostic::lint(
@@ -1530,6 +1533,20 @@ impl<'a> Checker<'a> {
                 self.ct_impure_depth += 1;
                 self.check_block(body, true);
                 self.ct_impure_depth -= 1;
+            }
+            // D-REACTCORE1: `#Reactive { … }` — a reactive effect scope.
+            Stmt::Reactive { body, span } => {
+                if self.in_comptime {
+                    self.diags.push(Diagnostic::error(
+                        "E2914",
+                        "`#Reactive` can't run at comptime".to_string(),
+                        "reactive effects subscribe to runtime signals and re-run when they change (D-REACTCORE1)"
+                            .to_string(),
+                        "move `#Reactive { … }` out of the `comptime` block".to_string(),
+                        Some(*span),
+                    ));
+                }
+                self.check_block(body, true);
             }
             // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — any fallible / #MustUse
             // result dropped as a bare statement within this block is allowed without
@@ -2694,18 +2711,18 @@ impl<'a> Checker<'a> {
             None
         };
         // D-LIN1: a binding that owns a `#SingleUse` value carries the duty to
-        // consume it exactly once. The duty transfers on `y @= x` (the move marks
+        // consume it exactly once. The duty transfers on `y #= x` (the move marks
         // `x` consumed via `note_move_if_direct_ident`; `y` now owns it).
         let single_use_span = if self.type_is_single_use(&final_ty) {
             Some(b.name_span)
         } else {
             None
         };
-        // D-ALLOC2: `x :: arena.alloc(v)` makes `x` a scope-bound view into
+        // D-ALLOC2: `x #= arena.alloc(v)` makes `x` a scope-bound view into
         // `arena`. Record it so E0631 (escape) / E0632 (use-after-reset) can
         // fire, and flag the binding for codegen (it lowers to a `&mut T`, read
         // through a deref). E0631: a binding whose *initializer is itself a view
-        // name* (`y :: x`) would move the view to a new — possibly
+        // name* (`y #= x`) would move the view to a new — possibly
         // longer-lived — binding; reject it (views are non-reassignable
         // non-escaping locals, I8).
         if let Some(arena) = self.arena_alloc_source(&b.init) {

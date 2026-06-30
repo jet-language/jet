@@ -27,7 +27,7 @@ Consequence for cuts: removing an example means removing **both** the `.jet`
 
 Cost model, honestly:
 - **Edit cost** (the syntax-sweep pain) scales with file count, but pervasive
-  tokens (`fn`, `print`, `@=`, `->`) touch *every* file regardless — cuts shave
+  tokens (`fn`, `print`, `::`, `->`) touch *every* file regardless — cuts shave
   the count, not the per-file inevitability.
 - **Golden run cost** scales ~linearly with example count (rustc per file).
 - **Re-bless cost** hits only on *output-affecting* changes, not pure syntax
@@ -80,7 +80,7 @@ lacks.
 | Cut | Lines | Preserved by (canon.jet) | Proof |
 |---|---|---|---|
 | `10_structs.jet` + `expected/10_structs.out` | 19 | struct fields + method + static ctor + dot-brace, lines 41–55 & 116–119 | canon's `Point{dist_sq, origin}` ≡ 10's `Point{dist_sq, unit}`; same dot-brace `Point.{...}`, same field/method shape. No unique assertion. Not test-referenced. |
-| `41_fan_out.jet` + `expected/41_fan_out.out` | 10 | fan-out S75 + destructure, canon line ~150 (`tripled @= triple.[1,2,3]` / `[t0,t1,t2] @=`) | identical pattern (`double.[1,2,3]` vs `triple.[1,2,3]`); destructure already in canon. No `.rs` references the fan-out example. |
+| `41_fan_out.jet` + `expected/41_fan_out.out` | 10 | fan-out S75 + destructure, canon line ~150 (`tripled #= triple.[1,2,3]` / `[t0,t1,t2] ::`) | identical pattern (`double.[1,2,3]` vs `triple.[1,2,3]`); destructure already in canon. No `.rs` references the fan-out example. |
 
 That's the entire provably-clean fold list. Two files (~29 lines, ~4 test
 executions each removed). Small on purpose — this is a safety net.

@@ -15,22 +15,22 @@ use core.random as random;
 // Pure: reads time + randomness only through the injected capabilities.
 // `clock` is read-only (`now`); `rng` advances its stream, so it is `~Rng`.
 #Pure fn roll_at(clock: Clock, rng: ~Rng) -> String {
-    ts @= clock.now()
-    die @= rng.int(1, 6)
+    ts #= clock.now()
+    die #= rng.int(1, 6)
     return "t={ts} rolled {die}"
 }
 
 // Pure: same injected caps, deterministic stream — call it twice, get two draws.
 #Pure fn two_rolls(rng: ~Rng) -> String {
-    a @= rng.int(1, 6)
-    b @= rng.int(1, 6)
+    a #= rng.int(1, 6)
+    b #= rng.int(1, 6)
     return "{a} then {b}"
 }
 
 // D-DET-CAPAPI: the widened `Rng` surface — a coin and a uniform choice — read
 // through the same injected, seeded handle, so still pure + reproducible.
 #Pure fn coin_and_card(rng: ~Rng) -> String {
-    flip @= rng.bool()
+    flip #= rng.bool()
     cards := ["A", "K", "Q", "J"]
     drawn := rng.pick(cards) ?? "none"
     return "flip={flip} card={drawn}"

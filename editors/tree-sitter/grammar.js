@@ -5,7 +5,7 @@
 // examples/features/*.jet. This grammar exists for editor syntax highlighting
 // (Zed), not full compilation: it is permissive where the real parser is
 // strict, but every keyword/sigil/marker it names is a *current* one. Retired
-// spellings (`val`/`var`/`::`, `mut`/`take`/`view`, `when`/`switch`/`while`/
+// spellings (`val`/`var`/`#=`, `mut`/`take`/`view`, `when`/`switch`/`while`/
 // `for`, bare `test`/`pure`/`todo`) are deliberately NOT recognized here.
 //
 // Run `tree-sitter generate` in this directory after editing, then rebuild the
@@ -482,16 +482,16 @@ module.exports = grammar({
     scoped_block: ($) =>
       seq("{", optional(seq(field("handle", $.identifier), "->")), repeat($._stmt), "}"),
 
-    // Binding sigils (D-BIND1/2): `name @= expr` immutable, `name := expr` mutable.
+    // Binding sigils (D-BIND3): `name #= expr` immutable, `name := expr` mutable.
     bind_stmt: ($) =>
       seq(
         field("name", choice($.identifier, $.type_identifier, $.list_pattern, $.tuple_pattern)),
         optional(seq(":", field("type", $._type))),
-        choice("@=", ":="),
+        choice("#=", ":="),
         field("value", $._expr)
       ),
 
-    // Destructuring bind targets: `[a, b, c] @= …`, `(a, b) @= …`.
+    // Destructuring bind targets: `[a, b, c] #= …`, `(a, b) #= …`.
     list_pattern: ($) => seq("[", commaSep($.identifier), "]"),
     tuple_pattern: ($) => seq("(", $.identifier, repeat(seq(",", $.identifier)), ")"),
 

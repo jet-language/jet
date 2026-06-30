@@ -12,10 +12,14 @@ pub fn compile_bundle_path_opts(
     mode: crate::Sema::CompileMode,
     freestanding: bool,
     allow_impure: bool,
+    web_target: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    if web_target {
+        bundle.web_partition_enforced = true;
+    }
     if timing {
         timer.lap("load"); // lex + parse + module resolution
     }
@@ -48,6 +52,11 @@ pub fn compile_bundle_path_opts(
         timer.lap("ffi");
     }
     let rust = crate::Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
+    let web = if web_target {
+        Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()))
+    } else {
+        None
+    };
     if timing {
         timer.lap("codegen");
         timer.metric("rust_bytes", rust.len() as u128);
@@ -61,6 +70,13 @@ pub fn compile_bundle_path_opts(
         ffi.is_some() || bundle.cffi.links_c(),
     );
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
+    if let Some(mf) = crate::Manifest::load(&bundle.project_root).and_then(|r| r.ok()) {
+        crate::Lock::record_inferred_layer(
+            &bundle.project_root,
+            &mf.package.name,
+            bundle.inferred_layer,
+        );
+    }
     Ok(crate::CompileOutput {
         rust,
         lints,
@@ -71,6 +87,10 @@ pub fn compile_bundle_path_opts(
         clinks: Vec::new(),
         capabilities,
         comptime_inputs,
+        web,
+        web_partition_report: bundle.web_partition_report.clone(),
+        inferred_layer: bundle.inferred_layer,
+        layer_ceiling: bundle.layer_ceiling,
     })
 }
 
@@ -95,12 +115,19 @@ pub fn compile_src(
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
             source: src.to_string(),
+            web_target_ceiling: prog.web_target_ceiling,
+            pub_file: prog.pub_file,
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
         import_targets: std::collections::HashMap::new(),
+        layer_ceiling: None,
+        inferred_layer: crate::Syntax::RuntimeLayer::Core,
+        web_partitions: std::collections::HashMap::new(),
+        web_partition_enforced: false,
+        web_partition_report: None,
     };
     // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
@@ -139,6 +166,10 @@ pub fn compile_src(
         clinks: Vec::new(),
         capabilities,
         comptime_inputs,
+        web: None,
+        web_partition_report: bundle.web_partition_report.clone(),
+        inferred_layer: bundle.inferred_layer,
+        layer_ceiling: bundle.layer_ceiling,
     })
 }
 
@@ -205,12 +236,19 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
             source: src.to_string(),
+            web_target_ceiling: prog.web_target_ceiling,
+            pub_file: prog.pub_file,
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
         import_targets: std::collections::HashMap::new(),
+        layer_ceiling: None,
+        inferred_layer: crate::Syntax::RuntimeLayer::Core,
+        web_partitions: std::collections::HashMap::new(),
+        web_partition_enforced: false,
+        web_partition_report: None,
     };
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,

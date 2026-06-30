@@ -76,7 +76,7 @@ fn interpreter_matches_compiled_binary() {
     for (i, stem) in all_example_stems().iter().enumerate() {
         let file = example_path(stem);
 
-        let interpreted = match dev_iteration(&file, false) {
+        let interpreted = match dev_iteration(&file, false, true) {
             RunOutcome::Ran { stdout, .. } => stdout,
             RunOutcome::Problems(diags) => {
                 // Not runnable → must be an honest, named boundary, not a silent
@@ -153,7 +153,7 @@ fn interpreter_matches_expected_golden() {
     for stem in all_example_stems() {
         let file = example_path(&stem);
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
-        match dev_iteration(&file, false) {
+        match dev_iteration(&file, false, true) {
             RunOutcome::Ran { stdout, .. } => {
                 if let Ok(expected) = fs::read_to_string(&expected_path) {
                     assert_eq!(
@@ -212,13 +212,10 @@ fn infinite_loop_hits_e2202_fuel_stop() {
     );
 }
 
-/// D-DEV1 honest boundary: a program that spawns a task stops with E2201
-/// naming the feature and `jet build`/`jet run`. The expected note is pinned
-/// in `tests/dev/unsupported.txt`.
 #[test]
-fn task_program_hits_e2201_boundary() {
+fn task_program_hits_e2201_in_interpreter_mode() {
     let file = "examples/features/32_tasks.jet";
-    match dev_iteration(file, false) {
+    match dev_iteration(file, false, true) {
         RunOutcome::Problems(diags) => {
             assert_eq!(diags.len(), 1, "expected exactly one boundary note");
             let d = &diags[0];
@@ -228,16 +225,70 @@ fn task_program_hits_e2201_boundary() {
                 "E2201 should name the task feature, got: {}",
                 d.what
             );
-            assert!(
-                d.fix.contains("jet build") || d.fix.contains("jet run"),
-                "E2201 fix must point at the real build path, got: {}",
-                d.fix
-            );
         }
         RunOutcome::Ran { .. } => {
-            panic!("a task program must not run in the dev interpreter (I2 boundary)")
+            panic!("interpreter mode must not run task programs (E2201 boundary)")
         }
     }
+}
+
+/// c139 M4: task programs inside `jit_covers` run via default `jet dev` (Cranelift), not E2201.
+#[test]
+fn task_program_runs_via_jit() {
+    let file = "examples/features/32_tasks.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("32_tasks bundle should load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "32_tasks must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "32_tasks must be jit-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|e| panic!("32_tasks JIT compile failed: {e}"));
+
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let jit = match backend.run(&bundle, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => panic!("32_tasks must run via JIT backend, got: {ds:?}"),
+    };
+
+    let got = match dev_iteration(file, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => panic!("32_tasks must run via default dev/JIT, got: {ds:?}"),
+    };
+    assert_eq!(got.trim(), "5050", "32_tasks expected sum");
+    assert_eq!(jit.trim(), got.trim(), "JIT output drifted from dev_iteration");
+}
+
+/// c139 M4: scheduler/channel spawn stress example is jit-covered and runs.
+#[test]
+fn scheduler_spawn_runs_via_jit() {
+    let file = "examples/features/160_scheduler_spawn.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "160_scheduler_spawn must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "160_scheduler_spawn must be jit-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+
+    let got = match dev_iteration(file, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => {
+            panic!("160_scheduler_spawn must run via default dev/JIT, got: {ds:?}")
+        }
+    };
+    assert_eq!(got.trim(), "1000");
 }
 
 /// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts
@@ -247,7 +298,7 @@ fn task_program_hits_e2201_boundary() {
 #[test]
 fn try_anyway_skips_the_boundary_scan() {
     let file = "examples/features/32_tasks.jet";
-    match dev_iteration(file, true) {
+    match dev_iteration(file, true, true) {
         RunOutcome::Problems(diags) => {
             // It got past the E2201 pre-scan and hit a real unsupported
             // construct during interpretation.
@@ -275,7 +326,7 @@ fn cranelift_backend_matches_hello() {
         .collect();
     assert!(errors.is_empty(), "hello must type-check");
 
-    let expected = match dev_iteration(file, false) {
+    let expected = match dev_iteration(file, false, true) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => {
             panic!("interpreter baseline must run hello, got diagnostics: {ds:?}")
@@ -311,6 +362,256 @@ fn cranelift_backend_matches_hello() {
     assert_eq!(got, compiled_stdout, "cranelift output drifted from AOT binary");
 }
 
+fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
+    let mut b = jet::Loader::load_entry(file).expect("bundle should load");
+    let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+    b
+}
+
+fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
+    let p = std::env::temp_dir().join(format!("jet_jit_m3_{tag}.jet"));
+    fs::write(&p, src).unwrap();
+    let shown = p.to_string_lossy().to_string();
+
+    let expected = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => {
+            panic!("interpreter baseline must run `{tag}`, got diagnostics: {ds:?}")
+        }
+    };
+
+    let bundle = checked_bundle_from_path(&shown);
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let got = match backend.run(&bundle, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{tag}`: {ds:?}"),
+    };
+    assert_eq!(
+        got, expected,
+        "cranelift output drifted from interpreter for `{tag}`"
+    );
+}
+
+fn golden_stdout(stem: &str) -> String {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::read_to_string(root.join(format!("examples/features/expected/{stem}.out")))
+        .unwrap_or_else(|e| panic!("missing golden for `{stem}`: {e}"))
+}
+
+fn assert_cranelift_three_way(file: &str, stem: &str) {
+    let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "`{stem}` must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "`{stem}` must be jit-covered for three-way differential"
+    );
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds)
+            if ds.iter().any(|d| BOUNDARY_CODES.contains(&d.code)) =>
+        {
+            golden_stdout(stem)
+        }
+        RunOutcome::Problems(ds) => {
+            panic!("interpreter baseline must run `{stem}`, got diagnostics: {ds:?}")
+        }
+    };
+
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let jit = match backend.run(&bundle, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
+    };
+    assert_eq!(
+        jit, interpreted,
+        "JIT vs interpreter divergence for `{stem}`"
+    );
+
+    let src = fs::read_to_string(file).expect("read source");
+    let compiled = jet::compile_with_path(&src, file).expect("compile");
+    let rs = std::env::temp_dir().join(format!("jet_jit_3way_{stem}.rs"));
+    let bin = std::env::temp_dir().join(format!("jet_jit_3way_{stem}"));
+    fs::write(&rs, &compiled.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .expect("run rustc");
+    assert!(
+        rustc.status.success(),
+        "rustc failed for `{stem}`: {}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = Command::new(&bin).output().expect("run binary");
+    let aot = String::from_utf8_lossy(&run.stdout).to_string();
+    assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
+}
+
+/// c139 M3+: three-way differential (JIT == interpreter == AOT) on jit-covered examples.
+#[test]
+fn cranelift_three_way_differential_battery() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: rustc not found; skipping three-way JIT differential battery");
+        return;
+    }
+
+    let jit_covered_stems = [
+        "01_hello",
+        "02_functions",
+        "100_counted_loop",
+        "32_tasks",
+        "160_scheduler_spawn",
+    ];
+    for stem in jit_covered_stems {
+        assert_cranelift_three_way(&example_path(stem), stem);
+    }
+}
+
+/// c139 M3: checked integer arithmetic with overflow traps.
+#[test]
+fn cranelift_covers_checked_arithmetic() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    a := 10\n    b := 3\n    print(a + b)\n    print(a * b)\n    print(a - b)\n}\n",
+        "arith",
+    );
+}
+
+/// c139 M3: `let` chains and plain `if`/`else`.
+#[test]
+fn cranelift_covers_let_and_if() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    n := 5\n    if n > 3 {\n        print(1)\n    } else {\n        print(0)\n    }\n    m := n + 1\n    print(m)\n}\n",
+        "let_if",
+    );
+}
+
+/// c139 M3: calls between JIT-covered helper functions.
+#[test]
+fn cranelift_covers_function_calls() {
+    assert_cranelift_matches_interpreter(
+        "fn double(n: Int) -> Int {\n    return n * 2\n}\nfn main() {\n    print(double(3))\n    print(double(0))\n}\n",
+        "calls",
+    );
+}
+
+/// c139 M3+: counted `loop init; cond; step` with compound assign.
+#[test]
+fn cranelift_covers_counted_loop() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    sum := 0\n    loop i := 0; i < 5; i += 1 {\n        sum += i\n    }\n    print(sum)\n}\n",
+        "counted_loop",
+    );
+}
+
+/// c139 M3+: `loop cond` while-form and compound assign.
+#[test]
+fn cranelift_covers_while_loop() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    fuel := 3\n    loop fuel > 0 {\n        print(fuel)\n        fuel -= 1\n    }\n}\n",
+        "while_loop",
+    );
+}
+
+/// c139 M3+: inclusive range loop.
+#[test]
+fn cranelift_covers_range_loop() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    loop n in 1..3 {\n        print(n)\n    }\n}\n",
+        "range_loop",
+    );
+}
+
+/// c139 M3+: short-circuit && / ||.
+#[test]
+fn cranelift_covers_logic_ops() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    a := true\n    b := false\n    if a && !b {\n        print(1)\n    }\n    if b || a {\n        print(2)\n    }\n}\n",
+        "logic_ops",
+    );
+}
+
+/// c139 M3: string literals and locals passed to `print`.
+#[test]
+fn cranelift_covers_string_print() {
+    assert_cranelift_matches_interpreter(
+        "fn main() {\n    msg := \"hello, jit\"\n    print(msg)\n    print(\"done\")\n}\n",
+        "strings",
+    );
+}
+
+/// c139 M2: type-stable hot_swap re-links in the resident JIT and preserves
+/// live runtime state; restart tears it down.
+#[test]
+fn cranelift_hot_swap_preserves_live_state() {
+    fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
+        let mut b = bundle_of(src, tag);
+        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+        b
+    }
+
+    let v1 = checked_bundle("fn main() {\n    print(\"v1\")\n}\n", "jit_swap_v1");
+    let v2 = checked_bundle("fn main() {\n    print(\"v2\")\n}\n", "jit_swap_v2");
+
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let out1 = match backend.run(&v1, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => panic!("first run failed: {ds:?}"),
+    };
+    assert_eq!(out1, "v1\n");
+    assert_eq!(jet_jit::resident_invocations_for_test(), 1);
+
+    let out2 = match backend.hot_swap("main", &v2, false) {
+        Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+        Ok(RunOutcome::Problems(ds)) => panic!("hot_swap produced diagnostics: {ds:?}"),
+        Err(ds) => panic!("hot_swap failed: {ds:?}"),
+    };
+    assert_eq!(out2, "v2\n");
+    assert_eq!(
+        jet_jit::resident_invocations_for_test(),
+        2,
+        "hot_swap must preserve resident invocation count (live state)"
+    );
+
+    let mut backend2 = CraneliftBackend::new(InterpreterBackend::new());
+    let out3 = match backend2.hot_swap("main", &v1, false) {
+        Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+        Ok(RunOutcome::Problems(ds)) => panic!("second backend hot_swap failed: {ds:?}"),
+        Err(ds) => panic!("second backend hot_swap errored: {ds:?}"),
+    };
+    assert_eq!(out3, "v1\n");
+    assert_eq!(jet_jit::resident_invocations_for_test(), 3);
+
+    let out4 = match backend.restart(&v2, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => panic!("restart failed: {ds:?}"),
+    };
+    assert_eq!(out4, "v2\n");
+    assert_eq!(
+        jet_jit::resident_invocations_for_test(),
+        1,
+        "restart must reset resident live state"
+    );
+}
+
 /// The dev iteration surfaces front-end errors identically to batch
 /// compilation (D-DEV: same diagnostics).
 #[test]
@@ -320,7 +621,7 @@ fn front_end_errors_surface_in_dev_iteration() {
     let file = dir.join("jet_dev_broken.jet");
     fs::write(&file, "fn main() {\n    print(nope);\n}\n").unwrap();
     let shown = file.to_string_lossy().to_string();
-    match dev_iteration(&shown, false) {
+    match dev_iteration(&shown, false, true) {
         RunOutcome::Problems(diags) => {
             assert!(!diags.is_empty(), "broken program must report problems");
             assert!(

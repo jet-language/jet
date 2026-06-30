@@ -98,6 +98,8 @@ pub(crate) struct Cx {
     /// `rust_param_type` can recognize multi-char params without the single-letter
     /// heuristic. Cleared when emit returns.
     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
+    /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
+    pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
 }
 
 pub(crate) const MOD_USE: &str = "use super::{JetShow, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
@@ -348,6 +350,35 @@ impl Cx {
             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
             // D-TERM1 (ratified 2026-06-22): `Key` is a top-level prelude enum.
             Type::Named(name) if name == "Key" => format!("{}JetKey", self.root_prefix),
+            // D-RENDERTGT2=A (c133 M1): UI geometry/event/backend types. User structs
+            // named Point/Rect/Size (common in examples) keep `user_<Name>` lowering.
+            Type::Named(name) if name == "Point" && !self.type_names.contains(name) => {
+                format!("{}JetPoint", self.root_prefix)
+            }
+            Type::Named(name) if name == "Size" && !self.type_names.contains(name) => {
+                format!("{}JetSize", self.root_prefix)
+            }
+            Type::Named(name) if name == "Rect" && !self.type_names.contains(name) => {
+                format!("{}JetRect", self.root_prefix)
+            }
+            Type::Named(name) if name == "SizeConstraint" && !self.type_names.contains(name) => {
+                format!("{}JetSizeConstraint", self.root_prefix)
+            }
+            Type::Named(name) if name == "UiNode" && !self.type_names.contains(name) => {
+                format!("{}JetUiNode", self.root_prefix)
+            }
+            Type::Named(name) if name == "InputEvent" && !self.type_names.contains(name) => {
+                format!("{}JetInputEvent", self.root_prefix)
+            }
+            Type::Named(name) if name == "EventResult" && !self.type_names.contains(name) => {
+                format!("{}JetEventResult", self.root_prefix)
+            }
+            Type::Named(name) if name == "NullBackend" && !self.type_names.contains(name) => {
+                format!("{}JetNullBackend", self.root_prefix)
+            }
+            Type::Named(name) if name == "TuiBackend" && !self.type_names.contains(name) => {
+                format!("{}JetTuiBackend", self.root_prefix)
+            }
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
                 format!(
@@ -429,7 +460,10 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args } if name == Syntax::TYPE_DERIVED && !args.is_empty() => {
+            Type::Apply { name, args }
+                if (name == Syntax::TYPE_DERIVED || name == Syntax::TYPE_COMPUTED)
+                    && !args.is_empty() =>
+            {
                 format!(
                     "{}jet_std::JetDerived<{}>",
                     self.root_prefix,
@@ -596,6 +630,26 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
     map
 }
 
+/// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
+/// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
+/// lowering mis-gates `use core.tasks as tasks` spawn/channel calls.
+pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    use super::Imports::{
+        core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
+        reexport_call_map, unqualified_import_maps,
+    };
+    cx.import_mods = import_mod_map(bundle, module_idx);
+    cx.foreign_types = foreign_type_map(bundle, module_idx);
+    cx.reexport_calls = reexport_call_map(bundle, module_idx);
+    cx.import_sigs = import_sig_map(bundle, module_idx);
+    cx.import_rets = import_ret_map(bundle, module_idx);
+    cx.core_imports = core_import_map(bundle, module_idx);
+    cx.used_core = bundle.used_core.clone();
+    let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
+    cx.unqualified_inline = uinline;
+    cx.unqualified_file = ufile;
+}
+
 pub(crate) fn build_cx_items(
     items: &[Item],
     src: &str,
@@ -643,6 +697,7 @@ pub(crate) fn build_cx_items(
         current_fn: std::cell::RefCell::new(String::new()),
         struct_type_params: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
+        jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
     };
 
     for item in items {

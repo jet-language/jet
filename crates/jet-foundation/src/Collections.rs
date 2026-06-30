@@ -88,6 +88,9 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == crate::Syntax::TYPE_DERIVED => {
             derived_method_return(args, method, arg_count)
         }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_COMPUTED => {
+            derived_method_return(args, method, arg_count)
+        }
         // D-COLLBREADTH1=A: Set<T> and Deque<T>.
         Type::Apply { name, args } if name == "Set" => {
             set_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
@@ -663,6 +666,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Apply { name, .. } if name == crate::Syntax::TYPE_DERIVED => Some(vec![]),
+        Type::Apply { name, .. } if name == crate::Syntax::TYPE_COMPUTED => Some(vec![]),
         // D-COLLBREADTH1=A: Set<T> arg types.
         Type::Apply { name, args } if name == "Set" => {
             let elem = args.first().cloned().unwrap_or(Type::Int);

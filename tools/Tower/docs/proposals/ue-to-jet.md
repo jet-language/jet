@@ -38,14 +38,14 @@ active.add(.Status.Stunned)      // counter: Stunned=2
 active.remove(.Status.Stunned)   // counter: Stunned=1 — entity still stunned
 
 // Composable query — storable, serializable, not just a predicate chain [D-TAG6]
-alive_unimpaired @= TagQuery<Status>.{
+alive_unimpaired #= TagQuery<Status>.{
     all:  [.Alive, .Grounded],
     none: [.Stunned, .Frozen],
 }
 if alive_unimpaired.eval(entity.tags) { ... }
 
 // GAS-style full boolean query for complex activation conditions
-activation @= TagQuery<Ability>.and([
+activation #= TagQuery<Ability>.and([
     TagQuery<Ability>.has(.Buff.Haste),
     TagQuery<Ability>.not(TagQuery<Ability>.has(.Status.Stunned)),
 ])
@@ -60,9 +60,9 @@ if ability_tag {
 
 // Reactive subscriptions — methods returning RAII guard; deregistered when guard drops
 // [D-TAG3: method names and guard type; no `on` keyword needed with method-call form]
-sub_a @= active.on_added(.Status.Stunned,   fn { disable_movement() })
-sub_b @= active.on_removed(.Status.Stunned, fn { enable_movement() })
-sub_c @= active.on_changed(.Status,         fn { update_status_ui() })
+sub_a #= active.on_added(.Status.Stunned,   fn { disable_movement() })
+sub_b #= active.on_removed(.Status.Stunned, fn { enable_movement() })
+sub_c #= active.on_changed(.Status,         fn { update_status_ui() })
 
 // Open tag — extension from another module [D-TAG1, `extend` unratified]
 open tag DamageType { Physical; Fire; Cold }
@@ -72,7 +72,7 @@ extend DamageType { Lightning }  // match against DamageType must have `else ->`
 // Tag-addressed event bus — sender holds no reference to receiver [D-TAG7]
 // Payload type is declared with the tag; emit routes by tag at runtime
 emit(Ability.Attack.Melee.Activated, HitEvent.{ origin: pos, target: entity })
-sub_d @= on_event(Ability.Attack.Melee.Activated, fn(e: HitEvent) {
+sub_d #= on_event(Ability.Attack.Melee.Activated, fn(e: HitEvent) {
     apply_effect(e.target, DamageEffect.{ magnitude: 40.0, element: .Physical })
 })
 ```
@@ -116,20 +116,20 @@ struct Modifier<T: Numeric> {
 // Pure aggregation — explicit op class ordering: Add, then Mul, then Div; Override checked first
 // Caller applies clamp_min / clamp_max after the fold
 #Pure fn aggregate<T: Numeric>(base: T, mods: [Modifier<T>]) -> T {
-    overrides @= mods.filter(fn(m) { m.op == .Override })
+    overrides #= mods.filter(fn(m) { m.op == .Override })
     if overrides.len() > 0 {
         // highest priority Override wins; tie → D-EFFECT5
         overrides.max_by(fn(m) { m.priority }).magnitude
     } else {
-        adds @= mods.filter(fn(m) { m.op == .Add }).map(fn(m) { m.magnitude }).sum()
-        muls @= mods.filter(fn(m) { m.op == .Mul }).map(fn(m) { m.magnitude }).product()
-        divs @= mods.filter(fn(m) { m.op == .Div }).map(fn(m) { m.magnitude }).product()
+        adds #= mods.filter(fn(m) { m.op == .Add }).map(fn(m) { m.magnitude }).sum()
+        muls #= mods.filter(fn(m) { m.op == .Mul }).map(fn(m) { m.magnitude }).product()
+        divs #= mods.filter(fn(m) { m.op == .Div }).map(fn(m) { m.magnitude }).product()
         (base + adds) * muls / divs
     }
 }
 
 // Effect descriptor — a value, not a procedure
-damage_effect @= DamageEffect.{
+damage_effect #= DamageEffect.{
     magnitude:   50.0,
     element:     .Fire,
     duration:    .Instant,
@@ -186,7 +186,7 @@ entities.[take_damage(fireball)]     // element type inferred from take_damage's
 
 // Typed hole — D-HOLE1: must not use `?` (S7, error propagation) or `??` (S71, fallback)
 // Provisional candidates: `_?`, `@?`, `#Hole` — ballot required before parser work
-effect @= <TYPED_HOLE>    // LSP: show all DamageEffect constructors and fns returning DamageEffect
+effect #= <TYPED_HOLE>    // LSP: show all DamageEffect constructors and fns returning DamageEffect
 
 // Framework entry points — stdlib traits, not fixed annotation tokens [D-ANNOT1]
 // A type implements the trait; the runtime calls the method.
@@ -230,7 +230,7 @@ struct PhysicsService {
 
 // Lookup via type-parameterized method on context
 fn apply_physics(world: ~World, dt: Float) {
-    phys @= world.subsystem<PhysicsService>()
+    phys #= world.subsystem<PhysicsService>()
     phys.step(dt)
 }
 
@@ -305,16 +305,16 @@ data GoblinBossData : MonsterData {
 }
 
 // Stable address — Type:Name pair, not a file path
-goblin_id @= DataId<MonsterData>.{ name: "Goblin" }
+goblin_id #= DataId<MonsterData>.{ name: "Goblin" }
 
 // Blocking load with bundle selection (uses v2 task scheduler; blocking-looking API)
 fn show_inventory_item(id: DataId<MonsterData>) {
-    data @= load_data(id, bundle: "ui")   // blocks current green thread; yields to scheduler
+    data #= load_data(id, bundle: "ui")   // blocks current green thread; yields to scheduler
     render_icon(data.icon, data.name)
 }
 
 fn spawn_monster(id: DataId<MonsterData>, pos: Vec3) {
-    data @= load_data(id, bundle: "gameplay")
+    data #= load_data(id, bundle: "gameplay")
     world.spawn(MonsterEntity.{ data, pos })
 }
 ```
@@ -358,12 +358,12 @@ MonsterData.{
 // No async fn / await — all fns yield at logical points; M:N scheduler is transparent
 fn fireball(caster: &Caster, target: Entity) {
     play_animation(caster, "cast_fireball")     // blocks current task; scheduler yields
-    hit @= wait_hit_window(caster, radius: 5.0)
+    hit #= wait_hit_window(caster, radius: 5.0)
     apply_effect(hit.targets, DamageEffect.{ magnitude: caster.spell_power * 1.5, element: .Fire })
 }
 
 // Named outcomes — existing `if subject` form; no new syntax (D-ASYNC1 is closed)
-result @= fetch_asset(monster_id)      // blocking; returns an outcome enum
+result #= fetch_asset(monster_id)      // blocking; returns an outcome enum
 if result {
     .Loaded(data)  -> spawn(data)
     .NotFound      -> log_warning("asset missing")
@@ -380,14 +380,14 @@ tasks.scoped(fn(~g: TaskGroup) {
 })    // all complete before returning; any failure cancels siblings
 
 // Combinators — D-CONCCOMB1 (gated on D-NURSERY1)
-result @= tasks.race([
+result #= tasks.race([
     fn { player_input_received() },
     fn { sleep_for(5.0) },
 ])
 
 // Coroutines — D-COROUTINE1; uncolored suspend/resume
-co @= coroutine(fn {
-    x @= suspend()     // yields; resumes when caller calls co.resume(val)
+co #= coroutine(fn {
+    x #= suspend()     // yields; resumes when caller calls co.resume(val)
     x * 2
 })
 val := co.resume(21)   // val = 42; types flow through the coroutine boundary

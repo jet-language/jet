@@ -278,6 +278,9 @@ fn ffi_cache_dir() -> PathBuf {
 /// Reports whether `rustup target list --installed` contains the triple,
 /// and whether the target's std library directory exists under the sysroot.
 fn check_cross_target(triple: &str) -> Check {
+    if triple == crate::Syntax::BUILD_TARGET_WEB {
+        return Check::ok("cross", triple, "Jet web backend target (WASM + JS)");
+    }
     // Step 1: is it a known rustc target at all?
     let known = Command::new("rustc")
         .arg("--print")

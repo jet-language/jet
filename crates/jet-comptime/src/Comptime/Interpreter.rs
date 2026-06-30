@@ -371,6 +371,7 @@ impl<'a> Interp<'a> {
                 Ok(Flow::Normal)
             }
             Stmt::Unsafe { span, .. } => Err(unsupported("an `#Unsafe` block", *span)),
+            Stmt::Reactive { span, .. } => Err(unsupported("a `#Reactive` block", *span)),
             // D-CTEFFECT1: `#Impure("reason") { … }` — gate for Tier-2 ambient
             // comptime effects. Increments impure_depth around the body so that
             // `apply_core_call` knows we're inside a gate. The E3411 (gate but no

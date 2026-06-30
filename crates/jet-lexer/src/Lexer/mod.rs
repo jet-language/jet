@@ -31,6 +31,7 @@ fn keyword(name: &str) -> Option<TokKind> {
     match name {
         s if s == Syntax::KW_FN => Some(TokKind::KwFn),
         s if s == Syntax::KW_PUB => Some(TokKind::KwPub),
+        s if s == Syntax::KW_PRIV => Some(TokKind::KwPriv),
         s if s == Syntax::KW_IF => Some(TokKind::KwIf),
         s if s == Syntax::KW_ELSE => Some(TokKind::KwElse),
         s if s == Syntax::FOREIGN_WHILE => Some(TokKind::KwWhile),

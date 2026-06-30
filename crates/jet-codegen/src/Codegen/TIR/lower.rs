@@ -209,6 +209,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::CountedLoop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
@@ -301,6 +302,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         is_main: f.name == "main",
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
+        is_reactive: f.is_reactive,
         body,
         kind: TFuncKind::TopLevel,
     }
@@ -446,6 +448,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
+        is_reactive: f.is_reactive,
         body,
         kind,
     }
@@ -507,6 +510,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         // (the dedicated trait-method emit reads it there); the top-level flag is unused
         // for this kind, but keep it consistent.
         is_unsafe: f.is_unsafe,
+        is_reactive: f.is_reactive,
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -588,6 +592,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         line: cov_line(cx, f.name_span.start),
         // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
         is_unsafe: false,
+        is_reactive: false,
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,
@@ -632,7 +637,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     match s {
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Struct { .. })) => {
-            // c109: a struct-destructuring binding `Type { x, y } @= <init>`. Lower the
+            // c109: a struct-destructuring binding `Type { x, y } #= <init>`. Lower the
             // init ONCE; its total `.ty` is a `Type::Named`/`Apply` naming a struct
             // (sema guarantees it). The per-field type comes from `cx.struct_fields`,
             // reproducing `emit_stmt`'s `BindPattern::Struct` arm. Each field binds with
@@ -666,7 +671,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
-            // c109 Phase 23: a tuple-destructuring binding `(a, b) @= <init>`. Lower the
+            // c109 Phase 23: a tuple-destructuring binding `(a, b) #= <init>`. Lower the
             // init ONCE; its total `.ty` is a `Type::Tuple` (sema guarantees it). Pair the
             // pattern elements to the tuple's CANONICAL fields by position, reproducing
             // `emit_stmt`'s `BindPattern::Tuple` arm. Each element binds with its resolved
@@ -696,7 +701,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::List { .. })) => {
-            // c109 Phase 26: a list-destructuring binding `[a, b, c] @= <init>`. Lower
+            // c109 Phase 26: a list-destructuring binding `[a, b, c] #= <init>`. Lower
             // the init ONCE, then bind each element via `jet_unpack_vec(tmp, want, i,
             // file, line)`, reproducing `emit_stmt`'s `BindPattern::List` arm. The
             // element slot type reproduces `expr_jet_ty(init)`'s `Some(List(inner))`-only
@@ -759,7 +764,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     },
                 };
             }
-            // c109 Phase 19: an arena `view` binding (`x @= arena.alloc(v)`). The AST
+            // c109 Phase 19: an arena `view` binding (`x #= arena.alloc(v)`). The AST
             // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
             // NEVER `let mut` — a view is a non-reassignable `&mut T`) and binds a DEREF'd
             // slot (reads go through `(*x)`). Reproduce it exactly: a `Let` with `kw: "let"`,
@@ -1187,6 +1192,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen.
         // The sema suppression is a compile-time-only fact (I3).
         Stmt::SuppressMustUse { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
+        // Clone outer captures into the closure (same as a stored lambda).
+        Stmt::Reactive { body, .. } => {
+            let closure = render_reactive_block_closure(body, cx, env);
+            TStmt::Reactive { closure }
+        }
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1). The AST emits a plain
         // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
         // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.
@@ -2953,8 +2964,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
             // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
             // type so the field read is byte-exact for both core and user structs.
-            let field_rust =
-                core_struct_field_rust_name(&recv.ty, member).unwrap_or_else(|| mangle(member));
+            let field_rust = core_struct_field_rust_name(cx, &recv.ty, member)
+                .unwrap_or_else(|| mangle(member));
             // A self-referential (recursive) edge has Rust type `Box<…>`; the read derefs
             // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
             // resolved struct name — mirrors the AST `boxed_field_read`).
@@ -3490,10 +3501,18 @@ pub(crate) fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
 /// RESOLVED receiver type (the TIR's total `recv.ty`) instead of `expr_jet_ty(env)`.
 /// Returns `Some(plain_name)` for a known core-struct field (so it is emitted
 /// unprefixed, B2), `None` otherwise (the caller falls back to `mangle(member)`).
-pub(crate) fn core_struct_field_rust_name(recv_ty: &Type, member: &str) -> Option<String> {
+pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str) -> Option<String> {
     let Type::Named(type_name) = recv_ty else {
         return None;
     };
+    // User structs named Point/Rect/Size keep `user_<field>` lowering (c133 M1).
+    let ui_name_collision = matches!(
+        type_name.as_str(),
+        "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode"
+    );
+    if ui_name_collision && cx.type_names.contains(type_name) {
+        return None;
+    }
     let known = match type_name.as_str() {
         "ProcessResult" => matches!(member, "code" | "output" | "errors"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => {
@@ -3502,6 +3521,14 @@ pub(crate) fn core_struct_field_rust_name(recv_ty: &Type, member: &str) -> Optio
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => member == "message",
         // D-LSDIR1=A: DirEntry fields — name (bare filename), path (full path), is_dir.
         "DirEntry" => matches!(member, "name" | "path" | "is_dir"),
+        // D-RENDERTGT2=A (c133 M1): UI geometry fields.
+        "Point" => matches!(member, "x" | "y"),
+        "Size" => matches!(member, "width" | "height"),
+        "Rect" => matches!(member, "x" | "y" | "width" | "height"),
+        "SizeConstraint" => {
+            matches!(member, "min_width" | "min_height" | "max_width" | "max_height")
+        }
+        "UiNode" => matches!(member, "label" | "width" | "height"),
         // E2-M10: HttpRequest / HttpResponse field access.
         "HttpRequest" | "HttpResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
@@ -4074,7 +4101,10 @@ pub(crate) fn lower_method_call(
     // `recv_type == Some("Signal"|"Derived")` + `get`/0 or `set`/1. Resolve the op +
     // result type HERE from the receiver's already-resolved `Apply<T>` slot (I3):
     // `Signal.get()`/`Derived.get()` → `T`; `Signal.set(v)` → Unit.
-    if matches!(recv_type.as_deref(), Some("Signal") | Some("Derived"))
+    if matches!(
+        recv_type.as_deref(),
+        Some("Signal") | Some("Derived") | Some("Computed")
+    )
         && is_reactive_method_name(method, args.len())
     {
         let recv_t = lower_expr(receiver, cx, env);
@@ -4143,6 +4173,30 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
                 op: THandleOp::LoadableMethod {
+                    method: method.to_string(),
+                },
+                args: targs,
+            },
+        };
+    }
+    // D-RENDERTGT2=A (c133 M1/M2): a UI backend method (gate shape d7b).
+    if matches!(recv_type.as_deref(), Some("NullBackend" | "TuiBackend"))
+        && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
+    {
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match method {
+            "measure" => Type::Named("Size".to_string()),
+            "on_event" => Type::Named("EventResult".to_string()),
+            "commands" | "frame_lines" => Type::List(Box::new(Type::String)),
+            "render_count" => Type::Int,
+            _ => unit_type(),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::UiBackendMethod {
                     method: method.to_string(),
                 },
                 args: targs,
@@ -4674,6 +4728,8 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             // The spawned body's type (the lambda's return) is the Task's element type.
             let body_ty = lambda_body_ty(lam, cx, env);
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             let spawn_closure = render_spawn_lambda(lam, cx, env);
             return Some(TExpr {
                 ty: core_closure_call_return_ty(module, method, body_ty),
@@ -4715,6 +4771,27 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
             TCoreClosureKind::ReactiveEffect { closure }
+        }
+        // D-SIGNAL1: `computed` is a canonical alias for `derived`.
+        ("jet.reactive", "computed") => {
+            let lam = lam_at(0)?;
+            let body_ty = lambda_body_ty(lam, cx, env);
+            let closure = render_lambda_str(lam, cx, env);
+            return Some(TExpr {
+                ty: Type::Apply {
+                    name: crate::Syntax::TYPE_COMPUTED.to_string(),
+                    args: vec![body_ty],
+                },
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::ReactiveDerived { closure },
+                },
+            });
+        }
+        // D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
+        ("core.ui", "reactive_render") => {
+            let lam = lam_at(0)?;
+            let closure = render_lambda_str(lam, cx, env);
+            TCoreClosureKind::UiReactiveRender { closure }
         }
         _ => return None,
     };
@@ -5298,6 +5375,89 @@ pub(crate) fn lower_lambda_expecting(
     }
 }
 
+/// c139 M4: lower a spawn lambda to compilable TIR for the Cranelift JIT.
+pub(crate) fn lower_spawn_lambda_for_jit(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> TJitSpawnLambda {
+    let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
+    let cloned: HashSet<&str> = lam.meta.cloned_captures.iter().map(|s| s.as_str()).collect();
+    let reads = match &lam.body {
+        LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
+        LambdaBody::Expr(e) => crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())]),
+    };
+    let mut captures: Vec<JitSpawnCapture> = reads
+        .into_iter()
+        .filter(|n| !param_names.contains(n.as_str()))
+        .filter(|n| env.locals.contains_key(n))
+        .map(|name| JitSpawnCapture {
+            clone_at_spawn: cloned.contains(name.as_str()),
+            ty: env
+                .ty_of(&name)
+                .clone()
+                .unwrap_or_else(|| Type::Named("Unit".to_string())),
+            name,
+        })
+        .collect();
+    captures.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut lam_env = fork_panic(env);
+    for cap in &captures {
+        lam_env.bind(&cap.name, mangle(&cap.name), Some(cap.ty.clone()));
+    }
+    for p in &lam.params {
+        lam_env.bind(
+            &p.name,
+            mangle(&p.name),
+            p.ty.clone().or_else(|| Some(Type::Int)),
+        );
+    }
+
+    let ret = lambda_body_ty(lam, cx, env);
+    let body = match &lam.body {
+        LambdaBody::Expr(e) => TJitSpawnBody::Expr(Box::new(lower_expr(e, cx, &mut lam_env))),
+        LambdaBody::Block(stmts) => {
+            if let Some((prefix, tail)) = lambda_block_tail(stmts) {
+                let prefix_lowered = lower_stmts(prefix, cx, &mut lam_env);
+                let tail_lowered = Some(Box::new(match tail {
+                    Stmt::Return(Some(e), _) => lower_expr(e, cx, &mut lam_env),
+                    Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env),
+                    _ => TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::IntLit(0, None),
+                    },
+                }));
+                TJitSpawnBody::Block {
+                    prefix: prefix_lowered,
+                    tail: tail_lowered,
+                }
+            } else {
+                TJitSpawnBody::Block {
+                    prefix: lower_stmts(stmts, cx, &mut lam_env),
+                    tail: None,
+                }
+            }
+        }
+    };
+
+    TJitSpawnLambda {
+        params: lam
+            .params
+            .iter()
+            .map(|p| {
+                (
+                    p.name.clone(),
+                    p.ty.clone().unwrap_or_else(|| Type::Int),
+                )
+            })
+            .collect(),
+        captures,
+        body,
+        ret,
+    }
+}
+
 /// c109 Phase 13: render a `tasks.spawn` lambda, reproducing `emit_spawn_lambda`
 /// (Source/Codegen/Expression.rs) byte-for-byte. It is `emit_lambda` minus the
 /// Fn-vs-FnMut and escape logic: ALWAYS `move`, NEVER `Box::new`. The clone-capture
@@ -5334,6 +5494,38 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
         LambdaBody::Block(stmts) => render_spawn_block_body(stmts, cx, &mut lam_env),
     };
     let closure = format!("move |{}| {}", params.join(", "), body);
+    if prep.is_empty() {
+        closure
+    } else {
+        format!("{{ {} {} }}", prep, closure)
+    }
+}
+
+/// Render a `#Reactive { … }` block as a `move || { … }` closure for
+/// `jet_reactive_effect`. Outer locals read inside the block are cloned into
+/// `_jet_cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
+fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> String {
+    let reads = crate::Sema::block_free_var_reads(stmts);
+    let mut caps: Vec<String> = reads
+        .into_iter()
+        .filter(|n| outer_env.locals.contains_key(n))
+        .collect();
+    caps.sort();
+    let mut lam_env = fork_panic(outer_env);
+    let mut prep = String::new();
+    for name in &caps {
+        let cap = format!("_jet_cap_{}", mangle(name));
+        prep.push_str(&format!(
+            "let {} = ({}).clone();\n    ",
+            cap,
+            outer_env.place_of(name)
+        ));
+        lam_env.bind(name, cap, outer_env.ty_of(name));
+    }
+    let mut inner = String::new();
+    let lowered = lower_stmts(stmts, cx, &mut lam_env);
+    emit_tir_stmts(&lowered, cx, &mut inner, 1);
+    let closure = format!("move || {{ {} }}", inner);
     if prep.is_empty() {
         closure
     } else {

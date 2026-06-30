@@ -5,33 +5,33 @@ use core.mem
 
 fn main() {
     // Arena: general-purpose grow-only allocator.
-    arena @= mem.Arena.new()
-    x @= arena.alloc(42)
+    arena #= mem.Arena.new()
+    x #= arena.alloc(42)
     print(x)
 
     // Arena with capacity hint.
-    sized @= mem.Arena.new(capacity: 4096)
-    s @= sized.alloc("hello")
+    sized #= mem.Arena.new(capacity: 4096)
+    s #= sized.alloc("hello")
     print(s)
 
     // reset keeps the backing buffer; the arena is reusable.
     arena.reset()
-    y @= arena.alloc(99)
+    y #= arena.alloc(99)
     print(y)
 
     // Bump: alias for Arena (append-only, O(1) alloc).
-    bump @= mem.Bump.new()
-    b @= bump.alloc(7)
+    bump #= mem.Bump.new()
+    b #= bump.alloc(7)
     print(b)
 
     // Pool: fixed-slot slab allocator.
-    pool @= mem.Pool.new(slots: 8)
-    p @= pool.alloc(3)
+    pool #= mem.Pool.new(slots: 8)
+    p #= pool.alloc(3)
     print(p)
 
     // Fixed: static backing buffer (stack-only, no heap).
-    fixed @= mem.Fixed.new(size: 256)
-    f @= fixed.alloc(1)
+    fixed #= mem.Fixed.new(size: 256)
+    f #= fixed.alloc(1)
     print(f)
 
     // free returns the backing memory to the OS / releases the buffer.

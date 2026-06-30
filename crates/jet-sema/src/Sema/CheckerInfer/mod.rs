@@ -21,7 +21,9 @@ pub(crate) fn is_reactive_handle_ty(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Apply { name, .. }
-            if name == Syntax::TYPE_SIGNAL || name == Syntax::TYPE_DERIVED
+            if name == Syntax::TYPE_SIGNAL
+                || name == Syntax::TYPE_DERIVED
+                || name == Syntax::TYPE_COMPUTED
     )
 }
 

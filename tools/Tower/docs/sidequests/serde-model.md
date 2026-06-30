@@ -27,8 +27,8 @@ struct Order {
 }
 
 fn main() {
-    raw  @= core.fs.read("orders.csv") ?? panic("no file")
-    rows @= encoding.csv.decode<Order>(raw) ?? panic("bad csv")   // CSV → [Order]
+    raw  #= core.fs.read("orders.csv") ?? panic("no file")
+    rows #= encoding.csv.decode<Order>(raw) ?? panic("bad csv")   // CSV → [Order]
     print(encoding.json.render(rows))                              // [Order] → JSON
 }
 ```

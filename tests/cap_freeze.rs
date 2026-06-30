@@ -83,10 +83,14 @@ fn snapshot_freezes_resolved_sigils_round_trip() {
             is_unsafe: false,
             is_pure: false,
             is_sanitizer: false,
+            is_reactive: false,
             declared_effects: None,
             effect_via: None,
             state_requires: None,
             state_transition: None,
+            web_marker: None,
+            is_must_use: false,
+            must_use_span: None,
             body: vec![],
         })
     };
@@ -146,10 +150,14 @@ fn fingerprint_folds_in_capability_digest() {
             is_unsafe: false,
             is_pure: false,
             is_sanitizer: false,
+            is_reactive: false,
             declared_effects: None,
             effect_via: None,
             state_requires: None,
             state_transition: None,
+            web_marker: None,
+            is_must_use: false,
+            must_use_span: None,
             body: vec![],
         })];
         ApiFreeze::snapshot_from_items(&items, "vecmath", "1.0.0").capability_digest()

@@ -12,6 +12,8 @@
 //! summaries into transitive inferred sets, and the boundary diagnostics
 //! (E0740 out-of-set against a declared `#(…)` bound; E0745 a non-empty bound on
 //! a `#Pure fn`). Casing is PascalCase per D-CASING1.
+//!
+//! D-WASM1=A amends D-EFF4 with `Browser` — DOM / browser API use (c123).
 
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{BTreeSet, HashMap};
@@ -30,6 +32,8 @@ pub enum Effect {
     Exec,
     Log,
     Gpu,
+    /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
+    Browser,
 }
 
 impl Effect {
@@ -46,6 +50,7 @@ impl Effect {
             Effect::Exec => "Exec",
             Effect::Log => "Log",
             Effect::Gpu => "Gpu",
+            Effect::Browser => "Browser",
         }
     }
 
@@ -62,6 +67,7 @@ impl Effect {
             "Exec" => Effect::Exec,
             "Log" => Effect::Log,
             "Gpu" => Effect::Gpu,
+            "Browser" => Effect::Browser,
             _ => return None,
         })
     }
@@ -80,6 +86,7 @@ impl Effect {
             Effect::Exec,
             Effect::Log,
             Effect::Gpu,
+            Effect::Browser,
         ]
         .into_iter()
         .collect()
@@ -215,6 +222,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.io" => Effect::Io,
         "jet.db" | "jet.sql" => Effect::Db,
         "jet.log" => Effect::Log,
+        "core.ui" => Effect::Browser,
         _ => return None,
     })
 }
@@ -355,7 +363,7 @@ pub fn solve(summaries: &HashMap<String, EffectSummary>) -> HashMap<String, Effe
         }
         sets.insert(k.clone(), init);
     }
-    // Worklist fixpoint. The lattice is finite (≤10 effects per node), so a
+    // Worklist fixpoint. The lattice is finite (≤11 effects per node), so a
     // simple round-robin until no set grows terminates quickly.
     let mut changed = true;
     while changed {
@@ -666,7 +674,7 @@ pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
 /// or `None` if the handle is only ever used in place (as the receiver of a
 /// method call / field access / `?` on itself). The receiver of `handle.read(…)`
 /// is an in-place use (performing the granted effect); everything else — `return
-/// handle`, `x @= handle`, `f(handle)`, `[handle]`, a struct field, an `or`
+/// handle`, `x #= handle`, `f(handle)`, `[handle]`, a struct field, an `or`
 /// fallback — lets the revoked authority leak past the grant (E0711).
 pub fn grant_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
     body.iter().find_map(|s| stmt_handle_escape(s, handle))
@@ -721,6 +729,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }

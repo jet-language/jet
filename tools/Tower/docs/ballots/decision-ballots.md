@@ -319,10 +319,10 @@ concrete roadmap slot and owner sign-off. Board items #15/#17.
 use core.scope
 
 fn copy_file(src: String, dst: String) -> () ? Error {
-    f :: core.fs.open(src)?
-    g1 :: scope.guard(() => { core.fs.close(f) })   // replaces `defer close(f)`
-    g :: core.fs.create(dst)?
-    g2 :: scope.guard(() => { core.fs.close(g) })   // fires before g1, even on early return
+    f #= core.fs.open(src)?
+    g1 #= scope.guard(() => { core.fs.close(f) })   // replaces `defer close(f)`
+    g #= core.fs.create(dst)?
+    g2 #= scope.guard(() => { core.fs.close(g) })   // fires before g1, even on early return
     core.fs.copy(f, g)?
 }
 ```

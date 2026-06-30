@@ -23,29 +23,44 @@ pub const KW_FN: &str = "fn";
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
+/// D-VISDEFAULT2=A (ratified): marks an item private inside a `#PubFile` file.
+pub const KW_PRIV: &str = "priv";
+
+/// D-VISDEFAULT2=A (ratified): file-scope marker that flips default visibility to
+/// public-by-default for following top-level items (D-VISDEFAULT1=C).
+pub const MARKER_PUB_FILE: &str = "PubFile";
+
+/// D-VISDEFAULT2 option B (rejected): retired spelling for the private exception
+/// keyword — recognized only for E0412 teaching diagnostics.
+pub const FOREIGN_PRIVATE: &str = "private";
+
+/// D-VISDEFAULT2 option B (rejected): retired spelling for the file marker —
+/// recognized only for E0418 teaching diagnostics.
+pub const MARKER_PUBLIC_FILE: &str = "PublicFile";
+
 /// D-PUBPKG1=A (ratified): the `pub(package)` visibility qualifier — restricts
 /// access to sibling packages in the same payload/workspace.
 pub const PUB_PACKAGE_QUALIFIER: &str = "package";
 
-/// S2 / D-BIND2 (ratified): immutable binding sigil `name @= expr`
-/// (D-BIND2 = A; replaces `::` from D-BIND1). `@=` is unambiguous in the
-/// lexer because `@` + identifier is always a label or host selector.
-/// D-BINDEXPLICIT1=A (ratified 2026-06-26): explicit-type form is `name@ Type = expr`
-/// (immutable) / `name: Type = expr` (mutable). The `@` marker hugs the name suffix;
-/// bare `=` is the explicit binding sigil in those positions. Inferred `@=`/`:=` unchanged.
-pub const SIGIL_BIND_IMMUT: &str = "@=";
+/// S2 / D-BIND1 / D-BIND3: immutable binding sigil `name #= expr`.
+/// D-BIND3: explicit-type immutable form is `name: Type #= expr`; explicit mutable is
+/// `name: Type := expr`. Inferred mutable stays `name := expr`; `=` reassigns `:=`
+/// bindings (S17). Retired: `::`, `@=`, `name: Type :`, and `name: Type =`.
+pub const SIGIL_BIND_IMMUT: &str = "#=";
 
-/// S2 / D-BIND2: the retired immutable-binding sigil `::` (D-BIND1 era).
-/// Recognized only for the E0991 teaching error that points at `@=`.
+/// D-BIND2: retired immutable-binding sigil `::`. Recognized only for E0991.
 pub const SIGIL_BIND_IMMUT_RETIRED: &str = "::";
+
+/// D-BIND2: retired immutable-binding sigil `@=`. Recognized only for E0991.
+pub const SIGIL_BIND_IMMUT_RETIRED2: &str = "@=";
 
 /// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`
 /// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
-/// D-BINDEXPLICIT1=A: explicit-type mutable form is `name: Type = expr`; see SIGIL_BIND_IMMUT.
+/// D-BIND3: explicit-type mutable form is `name: Type := expr`.
 pub const SIGIL_BIND_MUT: &str = ":=";
 
 /// S2 / D-BIND1: the retired binding keywords, recognized only for the E0985
-/// teaching error that points at the `@=` / `:=` sigils.
+/// teaching error that points at the `#=` / `:=` sigils.
 pub const FOREIGN_VAL: &str = "val";
 pub const FOREIGN_VAR: &str = "var";
 
@@ -188,6 +203,34 @@ pub const KW_UNSAFE: &str = "Unsafe";
 /// are required to execute ambient comptime I/O (Fs/Env/Exec/Io). PascalCase
 /// per D-CASING1 (consistent with `Unsafe`).
 pub const KW_IMPURE: &str = "Impure";
+
+/// D-REACTCORE1 (ratified 2026-06-27, opt D): `#Reactive fn` / `#Reactive { … }` —
+/// an explicit opt-in scope marker. Inside it, signal `.get()` reads register with
+/// the active reactive observer (library machinery in `core.reactive`). Lowers to
+/// `jet_reactive_scope` / `jet_reactive_effect` — no new evaluation semantics.
+pub const KW_REACTIVE: &str = "Reactive";
+
+/// D-WASM1=A (ratified 2026-06-28, c123): `#Target(Wasm|Js)` — module- or file-level
+/// default web partition ceiling. Sema validates it against inferred `Browser` effects.
+pub const ATTR_TARGET: &str = "Target";
+
+/// D-WASM1=A: per-function override — force WASM compilation bucket.
+pub const ATTR_WASM: &str = "Wasm";
+
+/// D-WASM1=A: per-function override — force JS compilation bucket.
+pub const ATTR_JS: &str = "Js";
+
+/// D-WASM1=A: export this WASM function to the generated JS loader.
+pub const ATTR_WASM_EXPORT: &str = "WasmExport";
+
+/// D-WASM1=A: `#Target(Js)` argument spelling.
+pub const WEB_BUCKET_JS: &str = "Js";
+
+/// D-WASM1=A: `#Target(Wasm)` argument spelling.
+pub const WEB_BUCKET_WASM: &str = "Wasm";
+
+/// D-WEBKIND1=A (c123): `jet build --target=web` Jet backend target (not a rustc triple).
+pub const BUILD_TARGET_WEB: &str = "web";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
@@ -363,12 +406,19 @@ pub const TYPE_KEY: &str = "Key";
 /// requires). `use jet.reactive as reactive` exposes:
 ///   reactive.signal(initial) -> Signal<T>   — a mutable reactive source
 ///   reactive.derived(() => expr) -> Derived<T> — a value recomputed from signals
+///   reactive.computed(() => expr)            — D-SIGNAL1 alias for `derived`
 ///   reactive.effect(() => { … })             — a side effect re-run on change
-/// Methods: `Signal.get()/set(v)`, `Derived.get()`. Dependency tracking is
-/// explicit-by-read (a `.get()` inside a derived/effect body subscribes to it).
+/// Methods: `Signal.get()/set(v)`, `Derived.get()`/`Computed.get()`. Dependency
+/// tracking is explicit-by-read (a `.get()` inside a derived/effect body subscribes).
+/// `#Reactive { … }` lowers to the effect job (D-REACTCORE1).
 pub const REACTIVE_MODULE: &str = "jet.reactive";
 pub const TYPE_SIGNAL: &str = "Signal";
 pub const TYPE_DERIVED: &str = "Derived";
+/// D-SIGNAL1 (ratified 2026-06-28, opt A): canonical name for a derived reactive
+/// value. `Derived` remains accepted as a backward-compatible alias.
+pub const TYPE_COMPUTED: &str = "Computed";
+/// D-SIGNAL1: the runtime value created by `#Reactive` / `reactive.effect`.
+pub const TYPE_EFFECT: &str = "Effect";
 /// D-HONESTNUM1=A: the science measurement type name.
 pub const TYPE_MEASUREMENT: &str = "Measurement";
 
@@ -1245,6 +1295,17 @@ pub const CAPABILITY_SHARE: &str = "share";
 /// per I7.
 pub const MANIFEST_FIELD_EDITION: &str = "edition";
 
+/// D-RINGLAYER1=A: optional package runtime-layer ceiling in `payload: { … }`.
+pub const MANIFEST_FIELD_LAYER: &str = "layer";
+
+pub use crate::RingLayer::{
+    core_module_layer, core_usage_layer, layer_ceiling_exceeded, RuntimeLayer,
+};
+pub use crate::WebPartition::{
+    is_abi_safe_type, web_abi_type, web_cross_partition, web_target_browser, WebBucket,
+    WebPartitionMarker,
+};
+
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
 /// inside the `.jet/` managed folder (SOURCE_ROOT_DIR). Replaces `jet.lock`
 /// (and `pack.lock`); the manifest reshape chunk migrates the old paths.
@@ -1301,9 +1362,9 @@ pub const SIGIL_SPREAD: &str = "...";
 /// case — the parser resolves by position.
 pub const TYPE_FIXED_SIZE_SEP: &str = "#";
 
-/// D-DIST1 (ratified 2026-06-19): `UserId @= distinct Int` — declares a
+/// D-DIST1 (ratified 2026-06-19): `UserId #= distinct Int` — declares a
 /// distinct type (a separate nominal type sharing the base's representation).
-/// Used in the value position of a `@=` immutable binding at item level;
+/// Used in the value position of a `#=` immutable binding at item level;
 /// `distinct`-over-`distinct` chaining is rejected in v1.
 pub const KW_DISTINCT: &str = "distinct";
 
@@ -1337,6 +1398,12 @@ pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 /// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
 /// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
 pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
+
+/// D-MUSTUSE1 (c18iwxqx): `#MustUse` — marks a type, function, or method whose
+/// result cannot be silently ignored as a bare expression statement (E0419).
+/// Explicit discard uses `.drop("reason")` or `#Suppress(MustUse) { … }`
+/// (D-IGNORERET2). Compile-time only; erases in codegen (I3).
+pub const ATTR_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
 /// a migration block that declares how a `#PublishedSchema` struct changed between
@@ -1504,9 +1571,10 @@ pub const SUPPRESS_MUST_USE: &str = "MustUse"; // D-IGNORERET2  argument of #Sup
 /// FOREIGN_* teaching-error words must NOT appear here — they are recognized only
 /// to emit a diagnostic, not valid syntax.
 pub const JET_KEYWORD_LIST: &[&str] = &[
-    // Core structure (S1, S18, S16, S50, U3)
+    // Core structure (S1, S18, D-VISDEFAULT2, S16, S50, U3)
     KW_FN,
     KW_PUB,
+    KW_PRIV,
     KW_USE,
     KW_EXTERN,
     KW_MODULE,
@@ -1619,10 +1687,22 @@ pub const BUILD_CTOR: &str = "Build"; // D-BUILDPROFILE1
 /// the optimization level.
 pub const BUILD_FIELD_OPTIMIZE: &str = "optimize"; // D-BUILDPROFILE1
 
-/// D-BUILDPROFILE1: blessed profile names — `release` and `debug` carry
-/// built-in defaults and need no explicit declaration in `build { }`.
+/// D-BUILDPROFILE1: blessed profile names — `release`, `debug`, and `ci`
+/// carry built-in defaults and need no explicit declaration in `build { }`.
 pub const BUILD_PROFILE_RELEASE: &str = "release"; // D-BUILDPROFILE1
 pub const BUILD_PROFILE_DEBUG: &str = "debug"; // D-BUILDPROFILE1
+pub const BUILD_PROFILE_CI: &str = "ci"; // D-BUILDPROFILE1
+
+/// D-BUILDPROFILE1: optional fields inside `Build.{ … }` profile values.
+pub const BUILD_FIELD_DEBUG_INFO: &str = "debug_info"; // D-BUILDPROFILE1
+pub const BUILD_FIELD_SMALL: &str = "small"; // D-BUILDPROFILE1
+pub const BUILD_FIELD_PANIC: &str = "panic"; // D-BUILDPROFILE1
+pub const BUILD_FIELD_FEATURES: &str = "features"; // D-BUILDPROFILE1
+pub const BUILD_FIELD_ENV: &str = "env"; // D-BUILDPROFILE1
+
+/// D-BUILDPROFILE1: `panic:` values for `Build.{ panic: … }`.
+pub const BUILD_PANIC_ABORT: &str = "abort"; // D-BUILDPROFILE1
+pub const BUILD_PANIC_UNWIND: &str = "unwind"; // D-BUILDPROFILE1
 
 /// D-BUILDPROFILE1: `optimize:` levels for `Build.{ optimize: … }`:
 /// `none` (no optimization, fastest compile), `basic` (opt-level=2, the
@@ -1688,7 +1768,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
     "core.uuid",
     // D-CORENS1: ring packages now spelled `core.*` (canonical user-facing name).
-    // Internal dispatch uses `jet.*` keys via normalize_core_module.
+    // Most ring packages still dispatch through legacy `jet.*` keys; archive is
+    // canonical end-to-end as `core.archive`.
     "core.log",
     "core.crypto",
     // D-RANDSPLIT1=A: CSPRNG submodule — `core.crypto.random.bytes(n)`.
@@ -1713,6 +1794,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-ADAPTFID1=A (ratified 2026-06-26): Perf.fidelity() / Perf.set_fidelity() —
     // adaptive quality/perf knob backed by a global atomic f32.
     "core.perf",
+    // D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): render-target backend trait seam.
+    "core.ui",
     // D-APPROX1=A (ratified 2026-06-26): approximate data structures under core.sketch.
     "core.sketch.hll",
     "core.sketch.tdigest",
@@ -1754,8 +1837,12 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
     if name == CORE_CANONICAL {
         return Some(CORE_SHORT.to_string());
     }
-    // `core.<ring>` → internal `jet.<ring>` key (sema dispatch uses jet.* names).
+    // `core.archive` is canonical end-to-end. Other ring modules still use
+    // internal `jet.<ring>` keys until their package cleanup lands.
     if let Some(ring) = name.strip_prefix("core.") {
+        if ring == "archive" {
+            return Some(name.to_string());
+        }
         if is_ring_module(ring) {
             return Some(format!("jet.{ring}"));
         }

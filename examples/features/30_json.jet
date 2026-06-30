@@ -1,13 +1,13 @@
 use core.encoding.json as json
 fn main() {
-    raw @= "{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}"
-    data @= json.parse(raw) ?? panic("bad json")
+    raw #= "{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}"
+    data #= json.parse(raw) ?? panic("bad json")
     print(json.to_string(data))
     print(json.to_string_pretty(data).contains("\n"))
     if data == .Object(entries) {
         print(entries.len())
     }
-    obj: [String, Json] = [:]
+    obj: [String, Json] := [:]
     obj["name"] = Json.Text("jet")
     obj["ok"] = Json.Bool(true)
     print(json.to_string(Json.Object(obj)))

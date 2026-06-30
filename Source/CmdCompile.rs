@@ -7,43 +7,38 @@ use std::process::{exit, Command};
 
 use jet::ExitCodes;
 
-use crate::{report_problems, usage, BuildProfile, OptimizeLevel, OutputMode};
+use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
+
+/// D-BUILDPROFILE1: load `pkg.jet` build profiles from the project root of `source_file`.
+fn load_pkg_profiles(source_file: &str) -> Option<Vec<jet::Jetpack::PackageManifest::BuildProfileDef>> {
+    let src_path = std::path::Path::new(source_file);
+    let search_from = src_path.parent().unwrap_or(std::path::Path::new("."));
+    let root = jet::Loader::find_manifest_root(search_from)?;
+    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let raw = fs::read_to_string(&pack_path).ok()?;
+    jet::Jetpack::PackageManifest::parse(&raw).ok().map(|mf| mf.build_profiles)
+}
 
 /// D-BUILDPROFILE1: resolve `--profile=<name>` (or `--release` → `"release"`)
-/// to a `BuildProfile`. Blessed names `release`/`debug` have built-in defaults.
-/// Any other name must be declared in the enclosing `pkg.jet`'s `build {}` block;
-/// if not found, emit E1219 and exit.
+/// to a `BuildProfile`. Manifest entries override blessed defaults for
+/// `release`/`debug`/`ci`; unknown names emit E1219 and exit.
 fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> BuildProfile {
+    if let Some(profiles) = load_pkg_profiles(source_file) {
+        if let Some(def) = profiles.iter().find(|p| p.name == name) {
+            return BuildProfile::Named {
+                name: name.to_string(),
+                config: ProfileConfig::from_def(def),
+            };
+        }
+    }
     match name {
         n if n == jet::Syntax::BUILD_PROFILE_RELEASE => BuildProfile::Release,
         n if n == jet::Syntax::BUILD_PROFILE_DEBUG => BuildProfile::Debug,
+        n if n == jet::Syntax::BUILD_PROFILE_CI => BuildProfile::Ci,
         _ => {
-            // Walk up from the source file to find pkg.jet, then parse build {}.
-            let src_path = std::path::Path::new(source_file);
-            let search_from = src_path.parent().unwrap_or(std::path::Path::new("."));
-            let defined = if let Some(root) = jet::Loader::find_manifest_root(search_from) {
-                let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
-                if let Ok(raw) = fs::read_to_string(&pack_path) {
-                    match jet::Jetpack::PackageManifest::parse(&raw) {
-                        Ok(mf) => {
-                            // Search for the name among the declared profiles.
-                            for pd in &mf.build_profiles {
-                                if pd.name == name {
-                                    let opt = OptimizeLevel::from(pd.optimize);
-                                    return BuildProfile::Named(opt);
-                                }
-                            }
-                            mf.build_profiles.iter().map(|p| p.name.clone()).collect()
-                        }
-                        Err(_) => Vec::new(),
-                    }
-                } else {
-                    Vec::new()
-                }
-            } else {
-                Vec::new()
-            };
-            // Unknown profile — emit E1219.
+            let defined = load_pkg_profiles(source_file)
+                .map(|profiles| profiles.into_iter().map(|p| p.name).collect::<Vec<_>>())
+                .unwrap_or_default();
             let diag = jet::Manifest::e1219(name, &defined);
             if mode.json {
                 eprint!("{}", jet::render_all_json("<cli>", "", &[diag]));
@@ -66,6 +61,7 @@ pub(crate) fn run_compile_cmd(
     freestanding: bool,
     allow_impure: bool,
     cross_target: Option<&str>,
+    explain_partition: bool,
     verbose: bool,
     capabilities_json: bool,
     sbom: bool,
@@ -120,14 +116,32 @@ pub(crate) fn run_compile_cmd(
         validate_target(triple, mode);
     }
 
-    let compile_result = if freestanding {
+    let is_web = cross_target == Some(jet::Syntax::BUILD_TARGET_WEB);
+    if explain_partition && !is_web {
+        let diag = jet::Diagnostics::Diagnostic::error(
+            "E2102",
+            "`--explain-partition` requires `--target=web`".to_string(),
+            "the partition report is only meaningful for the web backend (D-WASM1)".to_string(),
+            format!(
+                "run `jet build --target={} --explain-partition <file>`",
+                jet::Syntax::BUILD_TARGET_WEB
+            ),
+            None,
+        );
+        report_problems(mode, file, &src, &[diag]);
+        exit(ExitCodes::USAGE);
+    }
+    let compile_result = if is_web {
+        jet::compile_web(file)
+    } else if freestanding {
         jet::compile_freestanding(file)
     } else if allow_impure {
         jet::compile_allow_impure(file)
     } else {
         jet::compile_with_path(&src, file)
     };
-    let (rust_code, ffi_link, clinks, capabilities) = match compile_result {
+    let (rust_code, ffi_link, clinks, capabilities, web_out, web_partition_report) =
+        match compile_result {
         Ok(out) => {
             if !out.lints.is_empty() {
                 if mode.json {
@@ -154,7 +168,14 @@ pub(crate) fn run_compile_cmd(
                     exit(ExitCodes::USER_ERROR);
                 }
             };
-            (out.rust, out.ffi, clinks, out.capabilities)
+            (
+                out.rust,
+                out.ffi,
+                clinks,
+                out.capabilities,
+                out.web,
+                out.web_partition_report,
+            )
         }
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
@@ -177,9 +198,19 @@ pub(crate) fn run_compile_cmd(
                 &clinks,
                 verbose,
                 cross_target,
+                web_out.as_ref(),
                 mode,
             );
-            println!("built: {}", bin_path(file).display());
+            if is_web {
+                println!("built: build/app.wasm + build/app.js");
+            } else {
+                println!("built: {}", bin_path(file).display());
+            }
+            if explain_partition {
+                if let Some(report) = &web_partition_report {
+                    println!("{report}");
+                }
+            }
             if let Some(triple) = cross_target {
                 println!("target: {}", triple);
             }
@@ -205,6 +236,7 @@ pub(crate) fn run_compile_cmd(
                 &clinks,
                 verbose,
                 cross_target,
+                web_out.as_ref(),
                 mode,
             );
             if cross_target.is_some() {
@@ -449,6 +481,7 @@ fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
         &[],
         false,
         None,
+        None,
         mode,
     );
     // D-COV1: run with `JET_COV_OUT` pointing at a temp file; the harness writes
@@ -523,6 +556,7 @@ fn run_doctests(shown: &str, src: &str, mode: OutputMode) -> bool {
             ffi_link.as_ref(),
             &[],
             false,
+            None,
             None,
             mode,
         );
@@ -658,7 +692,12 @@ fn test_bin_path(path: &Path) -> PathBuf {
 
 /// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
 /// Runs `rustc --print target-list` and exits with E3302 if the triple is absent.
+/// D-WEBKIND1=A (c123): `web` is a Jet backend target, not a rustc triple — accepted here.
 fn validate_target(triple: &str, mode: OutputMode) {
+    // D-WEBKIND1=A: Jet backend target, not a rustc triple.
+    if triple == "web" || triple == jet::Syntax::BUILD_TARGET_WEB {
+        return;
+    }
     // rustc --print target-list gives the full list; if the output contains
     // the triple exactly (one per line), the target is known.
     let out = Command::new("rustc")
@@ -709,6 +748,7 @@ pub(crate) fn build(
     clinks: &[String],
     verbose: bool,
     cross_target: Option<&str>,
+    web: Option<&jet::Codegen::WebArtifacts>,
     mode: OutputMode,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
@@ -730,22 +770,94 @@ pub(crate) fn build(
         exit(ExitCodes::USER_ERROR);
     });
 
+    // D-WEBKIND1=A (c123 M2): `web` is a Jet backend target — emit WASM + JS.
+    if cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+        let web = web.unwrap_or_else(|| {
+            eprintln!("error: internal compiler error: missing web codegen output");
+            exit(ExitCodes::ICE);
+        });
+        let manifest_path = PathBuf::from("build").join("web.manifest.json");
+        let dom_path = PathBuf::from("build").join("jet_dom_runtime.js");
+        let js_path = PathBuf::from("build").join("app.js");
+        let wasm_rs_path = PathBuf::from("build").join("app_wasm.rs");
+        let wasm_path = PathBuf::from("build").join("app.wasm");
+        fs::write(&manifest_path, &web.manifest_json).unwrap_or_else(|e| {
+            eprintln!("error: couldn't write {}: {}", manifest_path.display(), e);
+            exit(ExitCodes::USER_ERROR);
+        });
+        fs::write(&dom_path, &web.dom_runtime).unwrap_or_else(|e| {
+            eprintln!("error: couldn't write {}: {}", dom_path.display(), e);
+            exit(ExitCodes::USER_ERROR);
+        });
+        fs::write(&js_path, &web.js_app).unwrap_or_else(|e| {
+            eprintln!("error: couldn't write {}: {}", js_path.display(), e);
+            exit(ExitCodes::USER_ERROR);
+        });
+        fs::write(&wasm_rs_path, &web.wasm_rust).unwrap_or_else(|e| {
+            eprintln!("error: couldn't write {}: {}", wasm_rs_path.display(), e);
+            exit(ExitCodes::USER_ERROR);
+        });
+        step(format!("web manifest -> {}", manifest_path.display()));
+        step(format!("dom shim    -> {}", dom_path.display()));
+        step(format!("js entry    -> {}", js_path.display()));
+        step(format!("wasm emit   -> {}", wasm_rs_path.display()));
+        step(format!(
+            "rustc wasm  {} -> {}",
+            wasm_rs_path.display(),
+            wasm_path.display()
+        ));
+        let rustc = Command::new("rustc")
+            .args([
+                "--edition",
+                "2021",
+                "--target",
+                "wasm32-unknown-unknown",
+                "--crate-type",
+                "cdylib",
+                "-O",
+                wasm_rs_path.to_str().unwrap(),
+                "-o",
+                wasm_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap_or_else(|e| {
+                eprintln!("error: couldn't run rustc for wasm: {}", e);
+                exit(ExitCodes::ICE);
+            });
+        if !rustc.status.success() {
+            eprintln!(
+                "error: rustc rejected generated wasm module (internal compiler error)\n{}",
+                String::from_utf8_lossy(&rustc.stderr)
+            );
+            exit(ExitCodes::ICE);
+        }
+        let _ = file;
+        let _ = rust_code;
+        let _ = bin;
+        let _ = profile;
+        let _ = ffi;
+        let _ = clinks;
+        if !mode.json {
+            eprintln!(
+                "note: `--target=web` wrote `{}`, `{}`, `{}`, `{}`",
+                manifest_path.display(),
+                dom_path.display(),
+                js_path.display(),
+                wasm_path.display(),
+            );
+        }
+        return;
+    }
+
     // Cross-compiled or freestanding builds bypass the host binary cache
     // (the binary is not executable on this host, and the target triple
     // affects codegen choices that aren't captured by the source hash).
     let use_cache = ffi.is_none() && clinks.is_empty() && cross_target.is_none();
     // D-BUILDPROFILE1: cache key incorporates the profile tag so different
     // profiles never share a cached binary.
-    let profile_tag = match profile {
-        BuildProfile::Default => "default",
-        BuildProfile::Release => "release",
-        BuildProfile::Debug => "debug",
-        BuildProfile::Named(opt) => opt.cache_tag(),
-        BuildProfile::Small => "small",
-        BuildProfile::Freestanding => "freestanding",
-    };
+    let profile_tag = profile.cache_tag();
     let cache_key = if use_cache {
-        Some(jet::BuildCache::cache_key(rust_code, profile_tag))
+        Some(jet::BuildCache::cache_key(rust_code, &profile_tag))
     } else {
         None
     };
@@ -783,69 +895,10 @@ pub(crate) fn build(
     if let Some(triple) = cross_target {
         cmd.arg("--target").arg(triple);
     }
-    match profile {
-        BuildProfile::Default => {
-            cmd.arg("-O").arg("-C").arg("strip=symbols");
-            // FFI rlibs come from a separate cargo build without LTO bitcode.
-            if ffi.is_none() {
-                cmd.arg("-C").arg("lto=thin");
-            }
-        }
-        // D-BUILDPROFILE1: `--release` / `--profile=release` — full opt-level=3.
-        BuildProfile::Release => {
-            cmd.arg("-C")
-                .arg("opt-level=3")
-                .arg("-C")
-                .arg("strip=symbols");
-            if ffi.is_none() {
-                cmd.arg("-C").arg("lto=thin");
-            }
-        }
-        // D-BUILDPROFILE1: `--profile=debug` — no optimization.
-        BuildProfile::Debug => {
-            // opt-level=0 is rustc's default; no flag needed. Keep symbols.
-        }
-        // D-BUILDPROFILE1: user-defined profile with an explicit optimize level.
-        BuildProfile::Named(opt) => {
-            match opt {
-                OptimizeLevel::None => { /* opt-level=0 is the default */ }
-                OptimizeLevel::Basic => {
-                    cmd.arg("-O");
-                }
-                OptimizeLevel::Full => {
-                    cmd.arg("-C").arg("opt-level=3");
-                }
-            }
-            cmd.arg("-C").arg("strip=symbols");
-            if ffi.is_none() {
-                cmd.arg("-C").arg("lto=thin");
-            }
-        }
-        BuildProfile::Small => {
-            cmd.arg("-C")
-                .arg("opt-level=z")
-                .arg("-C")
-                .arg("panic=abort")
-                .arg("-C")
-                .arg("strip=symbols");
-            if ffi.is_none() {
-                cmd.arg("-C").arg("lto=fat");
-            }
-        }
-        // E2-M15: freestanding — like --small but std-gated APIs already
-        // rejected in sema; panic=abort matches D-CROSS2.
-        BuildProfile::Freestanding => {
-            cmd.arg("-C")
-                .arg("opt-level=z")
-                .arg("-C")
-                .arg("panic=abort")
-                .arg("-C")
-                .arg("strip=symbols");
-            if ffi.is_none() {
-                cmd.arg("-C").arg("lto=fat");
-            }
-        }
-    }
+    let ffi_present = ffi.is_some();
+    let config = profile.config();
+    config.apply_env(&mut cmd);
+    config.apply_rustc(&mut cmd, ffi_present);
     cmd.arg(&rs_path).arg("-o").arg(&bin);
     if let Some(link) = ffi {
         cmd.arg("--extern")

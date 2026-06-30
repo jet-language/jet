@@ -540,6 +540,8 @@ fn lock_file_content_hash_roundtrip() {
         fingerprint: "sha256-cccc".into(),
         content_hash: Some("sha256-deadbeef".into()),
         dependencies: vec![],
+        layer: Some(jet::Syntax::RuntimeLayer::Core),
+        inferred_layer: Some(jet::Syntax::RuntimeLayer::Std),
     };
     let lock = LockFile {
         version: 1,
@@ -556,10 +558,17 @@ fn lock_file_content_hash_roundtrip() {
         serialized.contains("content-hash = \"sha256-deadbeef\""),
         "content-hash must appear in lockfile"
     );
+    assert!(serialized.contains("layer = \"core\""));
+    assert!(serialized.contains("inferred-layer = \"std\""));
     let parsed = jet::Lock::parse(&serialized).expect("must parse back");
     assert_eq!(
         parsed.packages[0].content_hash,
         Some("sha256-deadbeef".into())
+    );
+    assert_eq!(parsed.packages[0].layer, Some(jet::Syntax::RuntimeLayer::Core));
+    assert_eq!(
+        parsed.packages[0].inferred_layer,
+        Some(jet::Syntax::RuntimeLayer::Std)
     );
     assert_eq!(parsed.workspace_members[0].name, "hello");
     assert_eq!(parsed.workspace_members[0].path, "packages/hello");
@@ -1440,6 +1449,8 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             source: LockSource::Path("/tmp/placeholder".into()),
             locked: None,
             dependencies: vec![],
+            layer: None,
+            inferred_layer: None,
         }],
         root_dependencies: vec![name.into()],
         workspace_members: vec![],

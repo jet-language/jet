@@ -41,23 +41,23 @@
 // ============================================================================
 // VALUES, BINDINGS & TYPES
 // ============================================================================
-// `@=` binds immutable (D-BIND2); `:=` binds mutable; `=` reassigns a `:=`
+// `#=` binds immutable (D-BIND3); `:=` binds mutable; `=` reassigns a `:=`
 // binding (S17). Optional type annotation before the sigil (S4).
 
 //<<< Owner Bindings: Incorrect explicit binding syntax.
 // HAVE:
-nameImmut@ String  = "Jet" // Immutable binding with explicit type annotation.
-nameMut: String  = "Jet" // Mutable binding with explicit type annotation.
+nameImmut: String #= "Jet" // Immutable binding with explicit type annotation.
+nameMut: String := "Jet" // Mutable binding with explicit type annotation.
 // WANT:
-nameImmut@ String  = "Jet" // Immutable binding with explicit type annotation.
-nameMut: String  = "Jet" // Mutable binding with explicit type annotation.
+nameImmut: String #= "Jet" // Immutable binding with explicit type annotation.
+nameMut: String := "Jet" // Mutable binding with explicit type annotation.
 //>>> tracked: #29 D-BINDEXPLICIT1
 
 fn values() {
-    name@ String  = "Jet"          // annotated immutable (S4 + D-BIND2)
-    year @= 2026                   // inferred Int (S11/S42)
-    version @= 0.1                 // inferred Float; always prints with `.0` (S21)
-    ready@ Bool  = true            // Bool (S11)
+name: String #= "Jet"          // annotated immutable (S4 + D-BIND2)
+    year #= 2026                   // inferred Int (S11/S42)
+    version #= 0.1                 // inferred Float; always prints with `.0` (S21)
+ready: Bool #= true            // Bool (S11)
 
     count := 0                     // mutable (D-BIND1)
     count = count + 3              // reassign (S17)
@@ -70,22 +70,22 @@ fn values() {
 // Default numerics are Int (i64) / Float (f64) (S42).
 // Sized expert/FFI menu (S42, D-SG9): I8 I16 I32 I64 U8 U16 U32 U64 F32 F64.
 fn sized() {
-    small@ U8 = 255
-    wide@ I64 = 9_000_000_000      // `_` digit separators (S67)
-    mask @= 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
-    big @= 6.022e23                 // float exponent (S67)
+small: U8 #= 255
+wide: I64 #= 9_000_000_000      // `_` digit separators (S67)
+    mask #= 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
+    big #= 6.022e23                 // float exponent (S67)
     // conversions are named methods only — no `as`, no C casts (S42, D-SG9)
-    f @= small.to_float()
-    n @= f.to_int()
+    f #= small.to_float()
+    n #= f.to_int()
 }
 
 // # RATIFIED, NOT YET IMPLEMENTED (D-NUMOPS1)
 // Integer arithmetic traps on overflow by default; experts opt a single op into
 // wrapping/saturating/checked, visible at the use site.
 // fn overflow_surface() {
-//     a @= wrapping(255 + 1)
-//     b @= saturating(big_int + 1)
-//     c @= checked(x + y)            // -> T?
+//     a #= wrapping(255 + 1)
+//     b #= saturating(big_int + 1)
+//     c #= checked(x + y)            // -> T?
 // }
 
 
@@ -182,19 +182,19 @@ fn control() {
 // `if` is the universal branching keyword (D-IF1).
 fn branch(a: Int, b: Int) -> Int {
     // expression form — `else` required, both branches share a type (S68)
-    m @= if a > b { a } else { b }
+    m #= if a > b { a } else { b }
 
     // multi-arm dispatch; bare-value arms compare against the subject (D-IF1/D-IF2)
     //<<< Owner Multi-Arm Dispatch: Modify syntax for consistency.
     // HAVE:
-    label @= if m {
+    label #= if m {
         200 -> "ok"
         400 || 404 -> "client error"
         else -> "other"
     }
     return m
     // WANT:
-    label @= if m {
+    label #= if m {
         200 -> "ok"
         400 | 404 -> "client error"
         500 | 501 || n == false -> "server error" // Better pattern matching expressiveness, support joining boolean expressions. If no "left hand" value is provided, the subject is used.
@@ -228,15 +228,15 @@ struct Point {
 
 // Field punning: a bare name is shorthand for `name: name` when in scope (S77).
 fn punning(name: String, x: Float, y: Float) {
-    p @= Point.{x, y}                      // ≡ Point.{x: x, y: y}
+    p #= Point.{x, y}                      // ≡ Point.{x: x, y: y}
 }
 
 // Tuples are named-only (S73); destructuring reuses bracket conventions (S74).
 fn aggregates() {
-    pair @= (x: 1, y: 2)                    // named tuple
+    pair #= (x: 1, y: 2)                    // named tuple
     print("{pair.x} {pair.y}")
-    Point.{x, y} @= Point.origin()         // struct destructure (S74)
-    (x: a, y: b) @= pair                    // tuple destructure
+    Point.{x, y} #= Point.origin()         // struct destructure (S74)
+    (x: a, y: b) #= pair                    // tuple destructure
 }
 
 
@@ -294,15 +294,15 @@ fn parse_age(raw: String) -> Int ? ParseError {
 }
 
 fn use_errors(raw: String) -> Int ? ParseError {
-    n @= parse_age(raw)?                       // `?` propagates (S7)
-    fallback @= parse_age("0") ?? 0            // `??` fallback (S35/S71)
+    n #= parse_age(raw)?                       // `?` propagates (S7)
+    fallback #= parse_age("0") ?? 0            // `??` fallback (S35/S71)
     return ok(n * 2)
 }
 
 // Optionals: value(x) present, bare null absent (S32). `?.` chains, `??` defaults.
 fn optionals(user: User?) -> String {
-    city @= user?.address?.city               // optional chaining -> T? (S71)
-    name @= user?.display_name()              // `?.` through methods (D-SUGAR6)
+    city #= user?.address?.city               // optional chaining -> T? (S71)
+    name #= user?.display_name()              // `?.` through methods (D-SUGAR6)
     return city ?? "unknown"
 }
 
@@ -325,7 +325,7 @@ impl FileErr.Fallible {
 //     return err(Error.message("bad config").code(2).with_source(io_err))
 // }
 // fn main() -> Unit ? {
-//     cfg @= load()?
+//     cfg #= load()?
 //     return ok(())
 // }
 
@@ -335,7 +335,7 @@ impl FileErr.Fallible {
 // has no parser/sema support yet.)
 // fn skip_bad(lines: [String]) {
 //     loop raw in lines {
-//         line @= next(raw)?? continue
+//         line #= next(raw)?? continue
 //         print(line)
 //     }
 // }
@@ -387,16 +387,16 @@ struct Score {
 // List `[a, b, c]` (S37); map `["k": v]` (S38). Type shorthands `[T]` / `[K, V]`.
 
 fn collections() {
-     nums: [Int]  = [3, 1, 2]                    // list type shorthand (S65)
+     nums: [Int]  := [3, 1, 2]                    // list type shorthand (S65)
     nums.push(4)
     nums.sort()
 
     // empty literals infer element type from context (S78); else annotate
-     seen: [Int]  = []                           // (S78 / explicit)
+     seen: [Int]  := []                           // (S78 / explicit)
 
-     fruits: [String, Float]  = ["limes": 4.2]   // map shorthand (S64)
+     fruits: [String, Float]  := ["limes": 4.2]   // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
-    got @= fruits.get("limes")                  // safe access -> V? (S39)
+    got #= fruits.get("limes")                  // safe access -> V? (S39)
 
     // map entry iteration yields a named entry value (S66)
     loop e in fruits {
@@ -404,11 +404,11 @@ fn collections() {
     }
 
     // indexing & inclusive, copying slices (S39/S40)
-    first @= nums[0]
-    head @= nums[0..1]
+    first #= nums[0]
+    head #= nums[0..1]
 
     // lazy iterator adapters on the blessed iterator protocol (D-ITER1 / D-EXT1)
-    out @= nums.enumerate().zip(seen).take(2).map((p) => p.value)
+    out #= nums.enumerate().zip(seen).take(2).map((p) => p.value)
 }
 
 // Fixed-size list type `[T#N]` — `#` introduces a pinned count (S76/D-FIXARR1).
@@ -417,10 +417,10 @@ fn fixed() -> [Int#3] {
 }
 
 fn strings() {
-    parts @= "a,b,c".split(",")
-    trimmed @= "  hi  ".trim()
+    parts #= "a,b,c".split(",")
+    trimmed #= "  hi  ".trim()
     loop c in "héllo".chars() { }              // Char iteration; no s[i] (S41)
-    block @= """
+    block #= """
         multi-line string
         with {trimmed} interpolation
         """                                     // triple-quoted (S70)
@@ -433,13 +433,13 @@ fn strings() {
 // `(params) => expr` or `(params) => { ... }` (S46). `=>` lambda, `->` returns.
 
 fn closures() {
-    nums @= [3, 1, 2]
-    squares @= nums.map((n: Int) => n * n)
-    big @= squares.filter((n: Int) => n > 5)
-    total @= nums.reduce(0, (acc: Int, n: Int) => acc + n)
+    nums #= [3, 1, 2]
+    squares #= nums.map((n: Int) => n * n)
+    big #= squares.filter((n: Int) => n > 5)
+    total #= nums.reduce(0, (acc: Int, n: Int) => acc + n)
 
     // escaping closures must own captures; explicit `take(name)` when needed (S47)
-    make @= take(total) () => total
+    make #= take(total) () => total
 }
 
 // Function types: `fn(T1, T2) -> R` (S47). Named fns coerce to function values.
@@ -449,8 +449,8 @@ fn apply(f: fn(Int) -> Int, x: Int) -> Int {
 
 // Fan-out (S75): `f.[a, b, c]` == `[f(a), f(b), f(c)]`; result is `[T#N]` (S76).
 fn fanout() {
-    tripled @= triple.[1, 2, 3]
-    [t0, t1, t2] @= tripled
+    tripled #= triple.[1, 2, 3]
+    [t0, t1, t2] #= tripled
 }
 
 
@@ -537,9 +537,9 @@ fn call_sites(player: Player, file: File) {
 // Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.
 #Unsafe("reads through a raw pointer; addr must be live and valid")
 fn deref_cell(cell: Int) -> Int {
-    addr @= mem.address_of(cell)               // address-of is a call, not a sigil
+    addr #= mem.address_of(cell)               // address-of is a call, not a sigil
     #Unsafe("addr is the address of a live Int on this frame") {
-        p @= *addr                             // raw-pointer-of
+        p #= *addr                             // raw-pointer-of
         return p.*                             // dereference (composes as p.*.field)
     }
 }
@@ -553,8 +553,8 @@ fn uninit() {
 
 // Arena allocation: named constructor + `.alloc`, freed at scope end (D-ALLOC1/2).
 fn arena_use() {
-    arena @= mem.Arena.new(capacity: 4096)
-    node @= arena.alloc(42)
+    arena #= mem.Arena.new(capacity: 4096)
+    node #= arena.alloc(42)
 }
 
 // Explicit expert region block (D-REGION1 opt B); the beginner tier infers the
@@ -575,7 +575,7 @@ fn explicit_region() {
 comptime TABLE = build_table()                 // baked into the binary as constants
 
 fn embedding() {
-    data @= embed_file("logo.bin")             // the one I/O exception (S26)
+    data #= embed_file("logo.bin")             // the one I/O exception (S26)
 }
 // Curated pure-Core whitelist at comptime (D-CTCORE1); Result/Option ok (D-STRPARSE1).
 
@@ -587,8 +587,8 @@ fn embedding() {
 // blocks, `.detach()` fires and forgets. No shared mutable state.
 
 fn tasks_demo() {
-    a @= tasks.spawn(() => square(5))
-    b @= tasks.spawn(() => square(6))
+    a #= tasks.spawn(() => square(5))
+    b #= tasks.spawn(() => square(6))
     print("{a.join() + b.join()}")
     tasks.spawn(() => square(7)).detach()
 }
@@ -619,14 +619,18 @@ trait Greeter { fn greet(self) -> String }
 
 // Taint tracking (D-TAINT1): `#Tainted` value-fact spreads; `#Sanitizer fn` strips it.
 fn taint(raw: String) {
-    user @= #Tainted raw                        // marks untrusted input
-    clean @= sanitize(user)                     // strip via sanitizer
+    user #= #Tainted raw                        // marks untrusted input
+    clean #= sanitize(user)                     // strip via sanitizer
 }
 #Sanitizer fn sanitize(s: String) -> String { return s }
 
 // Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
 #SingleUse
 struct Ticket { id: Int }
+
+// Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare statement (E0419).
+#MustUse fn ack() -> Int { return 1 }
+#MustUse struct Receipt { id: Int }
 
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
 #UnitFamily(currency) { usd, eur }
@@ -654,8 +658,8 @@ struct CView { a: Int, b: Int }
 
 // Portable SIMD lane types with safe ops + scalar fallback (D-SIMD1).
 fn simd() {
-    v @= F32x4.splat(1.0)
-    w @= v + v
+    v #= F32x4.splat(1.0)
+    w #= v + v
 }
 
 

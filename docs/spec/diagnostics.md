@@ -121,9 +121,10 @@ before continuing.
 | E0058 | parse | *retired by D-S14-PAUSE* (was: `view` keyword teaching) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
-| E0985 | parse | teaching: `val`/`var` keyword → `name @=`/`name :=` sigil (D-BIND2) |
-| E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
-| E0991 | parse | teaching: `::` retired immutable-binding sigil → `@=` (D-BIND2) |
+| E0985 | parse | teaching: `val`/`var` keyword → `name #=`/`name :=` sigil (D-BIND3) |
+| E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
+| E0991 | parse | teaching: `::` / `@=` retired immutable-binding sigil → `#=` (D-BIND3) |
+| E0998 | parse | teaching: retired explicit binding forms → `: Type #=` / `: Type :=` (D-BIND3) |
 | E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs `==` between the subject and `{` (D-IF3) |
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
 | E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
@@ -137,7 +138,7 @@ before continuing.
 | E0108 | sema  | binding type doesn't match its value      |
 | E0109 | sema  | operator type mismatch (incl. Int/Float mixing, `+` on text) |
 | E0110 | sema  | condition isn't `Bool` (`if`/`while`/arm/logic operand) |
-| E0111 | sema  | changing an `@=`, const, or read-only parameter |
+| E0111 | sema  | changing a `#=`, const, or read-only parameter |
 | E0112 | sema  | value doesn't fit where it's used (argument/print/interpolation) |
 | E0113 | sema  | `return` value mismatch (wrong/missing/unexpected) |
 | E0114 | sema  | a path reaches the end without `return`   |
@@ -216,6 +217,14 @@ before continuing.
 | E0407 | sema  | `.drop()` reason missing or invalid (D-IGNORERET2) |
 | E0410 | parse | `#Suppress` unknown argument (D-IGNORERET2) |
 | E0411 | parse | unknown `pub(…)` visibility qualifier — only `pub(package)` exists (D-PUBPKG1) |
+| E0412 | parse | teaching: `private` → `priv` inside `#PubFile` files (D-VISDEFAULT2) |
+| E0413 | parse | `priv` used outside a `#PubFile` file (D-VISDEFAULT2) |
+| E0414 | parse | redundant `pub` inside a `#PubFile` file (D-VISDEFAULT2) |
+| E0415 | parse | section visibility labels `pub:` / `priv:` rejected (D-VISDEFAULT2 option C) |
+| E0416 | parse | duplicate `#PubFile` marker in one file (D-VISDEFAULT2) |
+| E0417 | parse | conflicting `pub` and `priv` on one item (D-VISDEFAULT2) |
+| E0418 | parse | teaching: `#PublicFile` → `#PubFile` (D-VISDEFAULT2) |
+| E0419 | sema  | `#MustUse` result ignored as a bare statement (D-MUSTUSE1) |
 | E0420 | sema  | `#Uninit` binding read before it is given a value (D-UNINIT1) |
 | E0421 | parse | `#Uninit` binding needs a type annotation (D-UNINIT1) |
 | E0422 | parse | `#Uninit` binding cannot have an initializer (D-UNINIT1) |
@@ -264,6 +273,9 @@ before continuing.
 | E0747 | sema  | a callback argument exceeds its parameter's effect bound (`#Pure fn(…)` / `#(E) fn(…)`) (D-EFF2) |
 | E0748 | sema  | `#(via f)` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
 | E0749 | sema  | a function reaches an effect it prohibits with `#(!E)` in its own call graph (D-PROP1=A) |
+| E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
+| E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
+| E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
 | E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
@@ -359,6 +371,7 @@ before continuing.
 | E1003 | sema  | integer literal out of range for its width |
 | E1004 | sema  | unknown item in core module |
 | E1005 | sema  | overflow opt-in not wrapping a single integer op |
+| E1006 | sema  | `use core.*` import or emitted helper exceeds package `layer:` ceiling (D-RINGLAYER1) |
 | E1301 | sema  | `ArgsSpec.flag` or `ParsedArgs.flag` called with wrong arity (D-ARGS1) |
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
 | E1303 | sema  | `ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity (D-ARGS1) |
@@ -417,6 +430,7 @@ before continuing.
 | E2911 | sema  | `reactive.derived`/`effect` lambda takes parameters (D-REACT1) |
 | E2912 | sema  | `reactive.derived` lambda returns nothing (D-REACT1) |
 | E2913 | sema  | a reactive `Signal`/`Derived` can't hold a function value (D-REACT1) |
+| E2914 | sema  | `#Reactive fn` must not return a value (D-REACTCORE1) |
 
 ## Editions and release policy (E2-M2)
 
@@ -589,7 +603,7 @@ block reserved for M6.
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
 | E2402 | `?` can't convert `{err}` into `Error` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Error` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Error`. | Add `impl {err}: Fallible { fn to_error(self) -> Error { Error(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
-| E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name @= …;` before the struct literal, or write the long form `Type { field_name: value }`. |
+| E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name #= …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source -> Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} -> {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} -> {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … -> …` blocks. |
 | E2406 | Can't declare `impl {Source} -> {Target}` — neither type is defined in this program. | Error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined, so conversions between two foreign types can't be added silently. | Define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type. |
@@ -638,7 +652,7 @@ output is machine-parseable with `--json`.
 | E2606 | `jet yank` requires a version argument. | A yank marks one specific published version as deprecated; without a version the command doesn't know which one to yank. | Run `jet yank <version>`, e.g. `jet yank 1.2.3`. |
 | E1217 | `{dep}` is in `pkg.jet` but has no locked revision. | A `--locked` build (and `jet publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
-| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release` and `debug` have built-in defaults. Any other name must be declared in your `pkg.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `pkg.jet`. |
+| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `pkg.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `pkg.jet`. |
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
@@ -773,6 +787,14 @@ reported as **E0119** (unknown name).
 | E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`Fs`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
 | E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `#Pure fn(…)` parameter demands a pure callback, and a `#(E) fn(…)` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `#Pure fn` for a pure parameter), or widen the parameter's effect bound. |
 | E0748 | `#(via {param})` on `{fn}` names no such parameter / a parameter that isn't a callback. | `#(via f)` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `#(via …)` annotation. |
+
+## Web backend partition diagnostics (c123, D-WASM1 / D-JSBIND1)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E-WEB-CROSS-PARTITION | `{caller}` is compiled to {caller_bucket} but calls `{callee}`, which lives in {callee_bucket}. | The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet (D-WASM1). | Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust `#Target` / `#Wasm` / `#Js` markers. Run `jet build --target web --explain-partition` to audit assignments. |
+| E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `#[Codable]` to the struct/enum and keep every field ABI-safe. |
+| E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Wasm` / `#WasmExport` pin, move browser work into a `#Js` function, or drop the browser API calls. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
 

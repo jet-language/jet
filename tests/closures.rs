@@ -8,7 +8,7 @@ fn apply(f: fn(Int) -> Int, x: Int) -> Int {
 }
 
 fn main() {
-    nums @= [1, 2, 3]
+    nums #= [1, 2, 3]
     print(nums.map((n: Int) => n * n).len())
     total := 0
     nums.each((n: Int) => { total += n })
@@ -64,7 +64,7 @@ fn twice(f: fn(Int) -> Int, x: Int) -> Int {
 }
 
 fn main() {
-    bump @= (x: Int) => x + 1
+    bump #= (x: Int) => x + 1
     print(twice(bump, 10))
 }
 "#;
@@ -77,8 +77,8 @@ fn take_prefix_moves_non_clone_capture() {
     let src = r#"
 struct NoClone { label: Int }
 fn main() {
-    item @= NoClone.{ label: 7 }
-    f @= take(item) (n: Int) => n + item.label
+    item #= NoClone.{ label: 7 }
+    f #= take(item) (n: Int) => n + item.label
     print(f(1))
 }
 "#;
@@ -90,7 +90,7 @@ fn fn_field_callback() {
     let src = r#"
 struct Worker { step: fn(Int) -> Int }
 fn main() {
-    w @= Worker.{ step: (n: Int) => n + 1 }
+    w #= Worker.{ step: (n: Int) => n + 1 }
     print(w.step(4))
 }
 "#;

@@ -1,12 +1,12 @@
-//! D-DEP-ARCHIVE1=A — jet.archive integration.
+//! D-DEP-ARCHIVE1=A — core.archive integration.
 //!
-//! `jet.archive` delivers gzip compress/decompress via the same hidden FFI
+//! `core.archive` delivers gzip compress/decompress via the same hidden FFI
 //! bridge as `jet.regex` (Source/FFI.rs → Source/Prelude/Archive.rs, backed
 //! by the `flate2` crate). These tests are gated on cargo/rustc availability
 //! like the FFI golden tests.
 //!
 //! D-BFS1: a separate test exercises the build-from-source path — realizing
-//! the ring package source (`corelib/jet.archive/`) through CoreProvider and
+//! the ring package source (`corelib/core.archive/`) through CoreProvider and
 //! verifying the rlib artifact lands in the hangar.
 
 use std::fs;
@@ -38,7 +38,7 @@ fn run_archive(src: &str) -> String {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    assert!(out.ffi.is_some(), "jet.archive must produce an FFI bridge");
+    assert!(out.ffi.is_some(), "core.archive must produce an FFI bridge");
     assert!(
         !out.rust.contains("unsafe"),
         "I1: archive output must not contain unsafe"
@@ -73,17 +73,17 @@ fn run_archive(src: &str) -> String {
 #[test]
 fn gzip_compress_decompress_round_trip() {
     if !have_toolchain() {
-        eprintln!("note: cargo/rustc not found; skipping jet.archive integration test");
+        eprintln!("note: cargo/rustc not found; skipping core.archive integration test");
         return;
     }
     let src = r#"
 use core.archive as ar
 
 fn main() {
-    original: [U8] @= [72, 101, 108, 108, 111]
-    compressed @= ar.gzip_compress(original)
+original: [U8] #= [72, 101, 108, 108, 111]
+    compressed #= ar.gzip_compress(original)
     print((compressed.len() > 5))
-    restored @= ar.gzip_decompress(compressed)
+    restored #= ar.gzip_decompress(compressed)
     print((restored == original))
 }
 "#;
@@ -94,7 +94,7 @@ fn main() {
 #[test]
 fn gzip_compress_reduces_repetitive_data() {
     if !have_toolchain() {
-        eprintln!("note: cargo/rustc not found; skipping jet.archive integration test");
+        eprintln!("note: cargo/rustc not found; skipping core.archive integration test");
         return;
     }
     // Highly repetitive data compresses to less than its original length.
@@ -102,14 +102,14 @@ fn gzip_compress_reduces_repetitive_data() {
 use core.archive as ar
 
 fn main() {
-    data: [U8] @= [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+data: [U8] #= [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    compressed @= ar.gzip_compress(data)
+    compressed #= ar.gzip_compress(data)
     print((compressed.len() < data.len()))
-    restored @= ar.gzip_decompress(compressed)
+    restored #= ar.gzip_decompress(compressed)
     print((restored.len() == data.len()))
 }
 "#;
@@ -136,12 +136,12 @@ fn core_provider_compiles_ring_package_to_rlib() {
     use jet::Jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
     use jet::Jetpack::Store::{self, Roots};
 
-    // Locate the jet.archive ring package from the repo root.
+    // Locate the core.archive ring package from the repo root.
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ring_repo = repo_root.join("corelib/jet.archive");
+    let ring_repo = repo_root.join("corelib/core.archive");
     if !ring_repo.is_dir() {
         eprintln!(
-            "note: corelib/jet.archive not found at {}; skipping D-BFS1 test",
+            "note: corelib/core.archive not found at {}; skipping D-BFS1 test",
             ring_repo.display()
         );
         return;
@@ -171,7 +171,7 @@ fn core_provider_compiles_ring_package_to_rlib() {
 
     // Realize the ring package — CoreProvider should compile the Cargo.toml.
     let r = Provider::realize(&spec, &table, &ctx)
-        .expect("CoreProvider should realize jet.archive from source");
+        .expect("CoreProvider should realize core.archive from source");
 
     assert_eq!(r.name, "archive", "realized name should be archive");
     assert!(r.bin.is_empty(), "library package must have no bin");

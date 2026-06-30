@@ -121,15 +121,17 @@ impl<'a> Lexer<'a> {
                 '}' => toks.push(simple(self, TokKind::RBrace, 1)),
                 '[' => toks.push(simple(self, TokKind::LBracket, 1)),
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
-                // D-BIND1: `:=` mutable binding sigil; `::` retained to lex (retired sigil → E0991).
+                // D-BIND3: `:=` mutable binding sigil; `::`/`@=` retired → E0991.
                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
                 ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),
                 ':' => toks.push(simple(self, TokKind::Colon, 1)),
                 ',' => toks.push(simple(self, TokKind::Comma, 1)),
                 ';' => toks.push(simple(self, TokKind::Semi, 1)),
-                // D-BIND2: `@=` immutable binding sigil — checked BEFORE bare `@`.
+                // D-BIND3: `@=` retired immutable sigil — lexed before bare `@` for E0991.
                 '@' if next == '=' => toks.push(simple(self, TokKind::AtEq, 2)),
                 '@' => toks.push(simple(self, TokKind::At, 1)),
+                // D-BIND3: `#=` immutable binding sigil — lex before bare `#`.
+                '#' if next == '=' => toks.push(simple(self, TokKind::HashEq, 2)),
                 '#' => toks.push(simple(self, TokKind::Hash, 1)),
                 '$' => toks.push(simple(self, TokKind::Dollar, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),

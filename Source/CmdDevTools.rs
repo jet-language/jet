@@ -66,7 +66,7 @@ pub(crate) fn run_dev(
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
-        render_dev_iteration(file, try_anyway, mode);
+        render_dev_iteration(file, try_anyway, mode, use_interpreter);
         return;
     }
 
@@ -74,7 +74,7 @@ pub(crate) fn run_dev(
 
     // The bundle from the last successful load, kept so a resident edit can be
     // diffed against it for type stability (D-HOTSWAP1).
-    let mut prev_bundle = render_dev_iteration(file, try_anyway, mode);
+    let mut prev_bundle = render_dev_iteration(file, try_anyway, mode, use_interpreter);
     let mut last_mtime = file_mtime(path);
 
     loop {
@@ -205,7 +205,7 @@ fn render_dev_change(
         // Run-to-completion (default / `--restart`): plain rerun.
         println!("\n— {} changed, re-running —", file);
         render_outcome(
-            jet::Interpreter::dev_iteration(file, try_anyway),
+            jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter),
             file,
             mode,
         );
@@ -285,9 +285,10 @@ fn render_dev_iteration(
     file: &str,
     try_anyway: bool,
     mode: OutputMode,
+    use_interpreter: bool,
 ) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
-    let outcome = jet::Interpreter::dev_iteration(file, try_anyway);
+    let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
     let elapsed = started.elapsed();
     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
     render_outcome_timed(outcome, file, Some(elapsed), mode);
@@ -647,6 +648,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                         is_unsafe: f.is_unsafe,
                         is_pure: f.is_pure,
                         is_sanitizer: f.is_sanitizer,
+                        is_must_use: f.is_must_use,
                         param_info: f
                             .params
                             .iter()
@@ -777,6 +779,7 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
         &[],
         false,
         None,
+        None,
         mode,
     );
 
@@ -847,6 +850,7 @@ fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
         ffi_link.as_ref(),
         &[],
         false,
+        None,
         None,
         mode,
     );

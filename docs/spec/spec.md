@@ -53,11 +53,11 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 stmt     = binding | assign | if | loop
          | "break" NL | "continue" NL | "return" [ expr ] NL
          | expr NL ;
-binding  = ident "@=" expr NL                 // inferred immutable
+binding  = ident "#=" expr NL                 // inferred immutable
          | ident ":=" expr NL                 // inferred mutable
-         | ident "@" type "=" expr NL         // explicit immutable
-         | ident ":" type "=" expr NL         // explicit mutable
-         | destructure ( "@=" | ":=" ) expr NL ;
+         | ident ":" type "#=" expr NL        // explicit immutable
+         | ident ":" type ":=" expr NL        // explicit mutable
+         | destructure ( "#=" | ":=" ) expr NL ;
 destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -91,8 +91,8 @@ expr     = precedence climbing over:
   bindings are optional; mismatched annotations are E0108.
 - A program must define `fn main` with no parameters and no return type
   (E0101, E0122); execution starts there. `main` never takes `pub` (S12).
-- `name @= value` and `name@ Type = value` are immutable; `name := value` and
-  `name: Type = value` are mutable (D-BIND2/D-BINDEXPLICIT1/D-BIND-CANON1).
+- `name #= value` and `name: Type #= value` are immutable; `name := value` and
+  `name: Type := value` are mutable (D-BIND3).
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
@@ -456,9 +456,11 @@ Cross-type **`?`** conversion supports two forms:
   full **`if subject { … }`**, or **`panic`**.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
-bad propagation (**E0403**), `ok`/`err` outside a result context (**E0404**),
-and fallback type mismatches (**E0405**) are compile errors with fixes that
-name **`?`**, **`??`**, and pattern tests.
+ignored **`#MustUse`** results (**E0419**), bad propagation (**E0403**),
+`ok`/`err` outside a result context (**E0404**), and fallback type mismatches
+(**E0405**) are compile errors with fixes that name **`?`**, **`??`**, pattern
+tests, binding, and **`.drop("reason")`** / **`#Suppress(MustUse)`** for
+intentional discard (D-IGNORERET2).
 
 ## M6 phase 1 — `jet fmt` (done)
 
@@ -669,7 +671,10 @@ the project root for `name.jet` or `name/{name,main}.jet`; `core` is a
 compiler-exported module per S51). Optional **`as alias`** in both forms.
 
 Cross-file access uses **`namespace.item`**; only **`pub`** items are visible from
-other files (S18), including **`pub`** struct fields. The driver loads the import
+other files (S18), including **`pub`** struct fields. A file may opt into
+public-by-default with a single **`#PubFile`** marker (D-VISDEFAULT1=C /
+D-VISDEFAULT2=A); inside such a file, top-level items export unless marked
+**`priv`**. The driver loads the import
 graph, sema checks the whole program, codegen emits one Rust file with **`mod`**
 blocks and `user_<module>_<name>` mangling (`main` stays `main`).
 
@@ -848,11 +853,11 @@ and `.normalize()`. Example: `examples/features/87_dir_entry.jet`.
 
 ```jet
 use core.args as args
-spec @= args.spec()
+spec #= args.spec()
     .flag("verbose", "print extra detail")
     .option("output", "write result to FILE", "FILE")
     .positional("input", "file to read")
-parsed @= spec.parse(io.args()) ?? panic(spec.help())
+parsed #= spec.parse(io.args()) ?? panic(spec.help())
 ```
 
 `args.spec()` → `ArgsSpec` (builder). Each builder method consumes `ArgsSpec`
@@ -1175,7 +1180,7 @@ fan_out = expr ".[" [ expr { "," expr } [ "," ] ] "]" ;
 ```jet
 fn double(n: Int) -> Int { return n * 2; }
 
-doubled @= double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
+doubled #= double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
 ```
 
 Errors: **E0961** if the callee is not a one-argument function; **E0962** if an
@@ -1279,7 +1284,7 @@ caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 ```jet
 fn main() {
     #Caps(Fs, Io) {
-        text @= core.fs.read("x") ?? "";   // Fs — allowed
+        text #= core.fs.read("x") ?? "";   // Fs — allowed
         print(text);                            // Io — allowed
     }
 }
@@ -1353,7 +1358,7 @@ unwind) via a RAII scope guard (D-DEFER1).
 use core.term as term
 
 live {
-    k @= term.read_key()
+    k #= term.read_key()
     if k == Enter { return }
     print("got: {k}")
 }

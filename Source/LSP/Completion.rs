@@ -159,6 +159,18 @@ fn detect_switch_enum_type<'a>(src: &str, offset: usize, db: &'a SymbolDB) -> Op
     None
 }
 
+/// True when the cursor is at the start of a statement (indentation after `{` or blank line).
+fn context_is_binding_start(src: &str, offset: usize) -> bool {
+    let before = &src[..offset.min(src.len())];
+    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let prefix = before[line_start..].trim();
+    if !prefix.is_empty() {
+        return false;
+    }
+    let prior = before[..line_start].trim_end();
+    prior.is_empty() || prior.ends_with('{')
+}
+
 pub(crate) fn compute_completions(
     db: &SymbolDB,
     src: &str,
@@ -431,6 +443,43 @@ pub(crate) fn compute_completions(
                 insert_text_format: 1,
                 auto_import: None,
             });
+        }
+    }
+
+    // D-BINDEXPLICIT1: binding snippets with canonical sigils.
+    if context_is_binding_start(src, offset) {
+        for (label, detail, insert) in [
+            (
+                "bind immut (inferred)",
+                "name #= value",
+                "${1:name} #= ${2:value}",
+            ),
+            (
+                "bind mut (inferred)",
+                "name := value",
+                "${1:name} := ${2:value}",
+            ),
+            (
+                "bind immut (explicit)",
+                "name: Type #= value",
+                "${1:name}: ${2:Type} #= ${3:value}",
+            ),
+            (
+                "bind mut (explicit)",
+                "name: Type := value",
+                "${1:name}: ${2:Type} := ${3:value}",
+            ),
+        ] {
+            if seen.insert(format!("bind:{}", label)) {
+                items.push(CompletionItem {
+                    label: label.to_string(),
+                    kind: ck::SNIPPET,
+                    detail: Some(detail.to_string()),
+                    insert_text: Some(insert.to_string()),
+                    insert_text_format: 2,
+                    auto_import: None,
+                });
+            }
         }
     }
 

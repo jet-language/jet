@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
     // ──────────────────────────────────────────────────────────────────────
     // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): scope-bound arena `view`s.
     //
-    // `x :: arena.alloc(v)` makes `x` a *view* into `arena`'s storage — Rust
+    // `x #= arena.alloc(v)` makes `x` a *view* into `arena`'s storage — Rust
     // `&'arena mut T`. The view is sound only while it stays inside its region
     // (the lexical scope of the `arena` binding / an explicit `region`) and only
     // until `arena` is `reset`/`free`d. Two diagnostics enforce that, both
@@ -296,6 +296,106 @@ impl<'a> Checker<'a> {
             }
         }
         false
+    }
+
+    /// D-MUSTUSE1 (c18iwxqx): true when `ty` is a `#MustUse` struct/enum or a
+    /// built-in guard/handle type whose result must not be silently ignored.
+    pub(crate) fn type_is_must_use(&self, ty: &Type) -> bool {
+        let Some(name) = ty.base_name() else {
+            return false;
+        };
+        if super::CheckerCoreLib::core_must_use_type(name) {
+            return true;
+        }
+        if self.registry.is_must_use(name) {
+            return true;
+        }
+        if let Some(mods) = self.modules {
+            for &idx in self.imports.values() {
+                if self.type_is_pub_in(idx, name) && mods[idx].registry.is_must_use(name) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// D-MUSTUSE1 (c18iwxqx): name of a `#MustUse` fn/method call when `expr` is
+    /// that call, else `None`.
+    pub(crate) fn ignored_must_use_call_target(&self, expr: &Expr) -> Option<String> {
+        if let Expr::Call(call) = expr {
+            if self.funcs.get(&call.name).is_some_and(|s| s.is_must_use) {
+                return Some(call.name.clone());
+            }
+        }
+        if let Expr::MethodCall { receiver, method, .. } = expr {
+            if let Some(type_name) = self.receiver_type_name(receiver) {
+                if self.method_is_must_use(&type_name, method) {
+                    return Some(format!("{type_name}.{method}"));
+                }
+            }
+        }
+        None
+    }
+
+    fn receiver_type_name(&self, receiver: &Expr) -> Option<String> {
+        match receiver {
+            Expr::Ident(name, _) => self
+                .lookup(name)
+                .and_then(|info| info.ty.base_name().map(str::to_string)),
+            _ => None,
+        }
+    }
+
+    fn method_is_must_use(&self, type_name: &str, method: &str) -> bool {
+        if self
+            .registry
+            .method(type_name, method)
+            .is_some_and(|m| m.must_use)
+        {
+            return true;
+        }
+        if let Some(mods) = self.modules {
+            for &idx in self.imports.values() {
+                if self.type_is_pub_in(idx, type_name) {
+                    if let Some(m) = mods[idx].registry.method(type_name, method) {
+                        if m.must_use {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// D-MUSTUSE1 (c18iwxqx): emit E0419 when a must-use result is dropped as a
+    /// bare expression statement.
+    pub(crate) fn check_ignored_must_use(&mut self, expr: &Expr, ty: &Type, span: Span) {
+        if self.suppress_must_use || is_task_type(ty) {
+            return;
+        }
+        let target = if let Some(name) = self.ignored_must_use_call_target(expr) {
+            name
+        } else if matches!(ty, Type::Named(n) if n == "Unit") {
+            return;
+        } else if self.type_is_must_use(ty) {
+            ty.name()
+        } else {
+            return;
+        };
+        self.diags.push(Diagnostic::error(
+            "E0419",
+            format!("`{target}` must be used — it was dropped as a bare statement"),
+            "a `#MustUse` result carries work or a resource that is lost when nothing checks it"
+                .to_string(),
+            format!(
+                "bind it (`x := …`), use `{}`, `{} …`, or `.drop(\"reason\")` to discard intentionally",
+                Syntax::OP_TRY_SUFFIX,
+                Syntax::BUILTIN_PANIC
+            ),
+            Some(span),
+        ));
     }
 
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {

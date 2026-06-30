@@ -53,7 +53,7 @@ fn fmt_preserves_block_comments() {
     let src = r#"/* a leading block comment */
 fn main() {
     /* explains the next line, /* with a nested comment */ inside */
-    x @= 5
+    x #= 5
     print("{x}")
 }
 "#;
@@ -88,7 +88,7 @@ fn fmt_if_expression_preserves_condition_parens() {
     // S68 (D-SG2): `if` as a value round-trips.
     // D-FMTPARENS1=A: author-written grouping parens are always preserved.
     let src = r#"fn main() {
-    m @= if (a > b) {
+    m #= if (a > b) {
         a
     } else {
         b
@@ -100,7 +100,7 @@ fn fmt_if_expression_preserves_condition_parens() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept an if-expression");
     assert!(
-        out.contains("m @= if (a > b) {"),
+        out.contains("m #= if (a > b) {"),
         "expected parens preserved in if-expression condition, got:\n{out}"
     );
     assert!(
@@ -121,8 +121,8 @@ fn fmt_preserves_author_placed_chain_breaks() {
     // carry its own trailing comment, and the final step's comment stays after
     // the statement terminator.
     let src = r#"fn main() {
-    raw @= "  hi  "
-    out @= raw
+    raw #= "  hi  "
+    out #= raw
         .trim()  // strip padding
         .to_upper()  // shout it
     print("{out}")
@@ -146,8 +146,8 @@ fn fmt_preserves_triple_quoted_strings() {
     // S70 (D-SG5): a `"""…"""` string keeps its multi-line shape, relative
     // indentation, and interpolation across fmt.
     let src = r#"fn main() {
-    who @= "Jet"
-    banner @= """
+    who #= "Jet"
+    banner #= """
     hello, {who}
         indented
     """
@@ -156,7 +156,7 @@ fn fmt_preserves_triple_quoted_strings() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a triple-quoted string");
     assert!(
-        out.contains("banner @= \"\"\"\n"),
+        out.contains("banner #= \"\"\"\n"),
         "expected the opening `\"\"\"` to stay on its own, got:\n{out}"
     );
     assert!(
@@ -179,14 +179,14 @@ fn fmt_preserves_destructuring_targets() {
     let src = r#"struct Point { x: Int, y: Int }
 
 fn main() {
-    Point.{ x, y } @= make()
+    Point.{ x, y } #= make()
     [a, b, c] := nums()
     print("{x}{y}{a}{b}{c}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept destructuring targets");
     assert!(
-        out.contains("Point.{x, y} @= make()"),
+        out.contains("Point.{x, y} #= make()"),
         "expected dot struct destructuring (D-DOTCTOR1), got:\n{out}"
     );
     assert!(
@@ -204,7 +204,7 @@ fn fmt_flush_construction() {
     let src = r#"struct Point { x: Int, y: Int }
 
 fn main() {
-    p @= Point.{ x: 1, y: 2 }
+    p #= Point.{ x: 1, y: 2 }
     print("{p.x}")
 }
 "#;
@@ -229,14 +229,14 @@ fn fmt_preserves_named_tuples() {
 }
 
 fn main() {
-    p @= (x: 1, y: 2)
-    (a, b) @= p
+    p #= (x: 1, y: 2)
+    (a, b) #= p
     print("{p.x}{a}{b}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept named tuples");
     assert!(
-        out.contains("p @= (x: 1, y: 2)"),
+        out.contains("p #= (x: 1, y: 2)"),
         "expected named tuple literal preserved, got:\n{out}"
     );
     assert!(
@@ -244,7 +244,7 @@ fn main() {
         "expected canonical named tuple return type preserved, got:\n{out}"
     );
     assert!(
-        out.contains("(a, b) @= p"),
+        out.contains("(a, b) #= p"),
         "expected tuple destructuring preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("named tuple output should re-fmt");
@@ -255,7 +255,7 @@ fn main() {
 fn fmt_preserves_optional_chaining() {
     // S71 (D-SG6): `?.` chains round-trip unchanged.
     let src = r#"fn main() {
-    n @= o.mid?.inner?.name
+    n #= o.mid?.inner?.name
     print("{n}")
 }
 "#;
@@ -300,7 +300,7 @@ fn use_collections(items: List<String>, counts: Map<String, Int>) {}
 
 #[test]
 fn fmt_still_errors_on_real_parse_problems() {
-    let src = "fn main() { x @= ; }\n";
+    let src = "fn main() { x #= ; }\n";
     assert!(
         jet::format_source(src).is_err(),
         "fmt must not run when the AST is not recoverable"
@@ -393,14 +393,14 @@ fn assert_fmt_stable(src: &str, label: &str) {
 #[test]
 fn fmt_preserves_single_line_if() {
     // A one-line `if` body the author placed inline survives unchanged.
-    let src = "fn main() {\n    ready @= true\n    if ready { launch() }\n}\n";
+    let src = "fn main() {\n    ready #= true\n    if ready { launch() }\n}\n";
     assert_fmt_stable(src, "single-line if");
 }
 
 #[test]
 fn fmt_preserves_multiline_if() {
     // The 3-line form the author chose stays 3 lines.
-    let src = "fn main() {\n    ready @= true\n    if ready {\n        launch()\n    }\n}\n";
+    let src = "fn main() {\n    ready #= true\n    if ready {\n        launch()\n    }\n}\n";
     assert_fmt_stable(src, "multiline if");
 }
 
@@ -468,7 +468,7 @@ fn fmt_single_line_nested_forces_expand() {
 #[test]
 fn fmt_preserves_single_line_loops_and_fn() {
     // The rule applies uniformly to `while`/`for`/`fn` bodies.
-    let while_src = "fn main() {\n    n @= 0\n    loop n < 3 { n += 1 }\n}\n";
+    let while_src = "fn main() {\n    n #= 0\n    loop n < 3 { n += 1 }\n}\n";
     assert_fmt_stable(while_src, "single-line while/loop");
 
     let for_src = "fn main() {\n    loop i in 0..3 { print(\"{i}\") }\n}\n";
@@ -481,7 +481,7 @@ fn fmt_preserves_single_line_loops_and_fn() {
 #[test]
 fn fmt_preserves_single_line_if_expr_branch() {
     // If-expression branches (routed through fmt_value_block) follow the rule.
-    let src = "fn main() {\n    a @= true\n    n @= if a { 1 } else { 2 }\n    print(\"{n}\")\n}\n";
+    let src = "fn main() {\n    a #= true\n    n #= if a { 1 } else { 2 }\n    print(\"{n}\")\n}\n";
     assert_fmt_stable(src, "single-line if-expression");
 }
 
@@ -525,8 +525,8 @@ struct Order {
 }
 
 fn main() {
-    raw @= \"x\"
-    back @= json.decode<Order>(raw) ?? panic(\"bad\")
+    raw #= \"x\"
+    back #= json.decode<Order>(raw) ?? panic(\"bad\")
     print(back.who)
 }
 ";
@@ -682,7 +682,7 @@ fn fmt_box_drawing_comment_does_not_panic() {
     // glyph in the source that offset could land mid-codepoint and the raw slice
     // panicked. fmt must never panic on valid input (I2). The box-drawing glyphs
     // round-trip verbatim.
-    let src = "fn main() {\n    x @= foo()\n        // \u{2502}\u{250c}\u{2514}\u{2500}\n        .bar()\n    print(x)\n}\n";
+    let src = "fn main() {\n    x #= foo()\n        // \u{2502}\u{250c}\u{2514}\u{2500}\n        .bar()\n    print(x)\n}\n";
     let out = jet::format_source(src).expect("fmt should not panic on box-drawing comments");
     assert!(
         out.contains('\u{250c}') && out.contains('\u{2502}'),
@@ -725,7 +725,7 @@ fn fmt_keeps_parens_around_binary_receiver() {
     // c143(b): `(a + b).method()` must keep its parens — dropping them rebinds
     // the `.method()` to `b` alone and changes the meaning. Likewise `(a + b) * c`
     // must not become `a + b * c`.
-    let src = "fn main() {\n    c @= (1 + 2).to_string()\n    d @= (1 + 2) * 3\n    print(c)\n    print(d)\n}\n";
+    let src = "fn main() {\n    c #= (1 + 2).to_string()\n    d #= (1 + 2) * 3\n    print(c)\n    print(d)\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed");
     assert!(
         out.contains("(1 + 2).to_string()"),
@@ -736,9 +736,9 @@ fn fmt_keeps_parens_around_binary_receiver() {
         "parens around lower-prec binary operand dropped:\n{out}"
     );
     // The common case must NOT gain spurious parens.
-    let plain = jet::format_source("fn main() {\n    a @= 1 + 2 * 3\n    print(a)\n}\n").unwrap();
+    let plain = jet::format_source("fn main() {\n    a #= 1 + 2 * 3\n    print(a)\n}\n").unwrap();
     assert!(
-        plain.contains("a @= 1 + 2 * 3"),
+        plain.contains("a #= 1 + 2 * 3"),
         "added spurious parens:\n{plain}"
     );
     let twice = jet::format_source(&out).expect("paren fmt must re-fmt");
@@ -775,28 +775,28 @@ fn fmt_dot_construction_d_dotctor1() {
     // `Type { … }` form (E0320 recovery) is auto-fixed to `Type.{ … }`.
 
     // Named form round-trips unchanged.
-    let named = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p @= Pt.{ x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+    let named = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p #= Pt.{ x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
     let out_named = jet::format_source(named).expect("fmt should accept Pt.{ … }");
     assert!(
         out_named.contains("Pt.{"),
         "named form `Pt.{{` must survive fmt, got:\n{out_named}"
     );
     assert!(
-        !out_named.contains("Pt {x") && !out_named.contains("p @= Pt {"),
+        !out_named.contains("Pt {x") && !out_named.contains("p #= Pt {"),
         "fmt must not regress to dotless construction form, got:\n{out_named}"
     );
     let twice_named = jet::format_source(&out_named).expect("named form must re-fmt");
     assert_eq!(out_named, twice_named, "named form must be fmt-idempotent");
 
     // Old dotless form (E0320 recovery) is auto-fixed to `Type.{`.
-    let old = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p @= Pt { x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+    let old = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p #= Pt { x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
     let out_old = jet::format_source(old).expect("fmt should recover dotless E0320 form");
     assert!(
         out_old.contains("Pt.{"),
         "E0320 recovery must auto-fix to `Pt.{{`, got:\n{out_old}"
     );
     assert!(
-        !out_old.contains("Pt {x") && !out_old.contains("p @= Pt {"),
+        !out_old.contains("Pt {x") && !out_old.contains("p #= Pt {"),
         "dotless construction form must not survive fmt, got:\n{out_old}"
     );
     let twice_old = jet::format_source(&out_old).expect("fixed form must re-fmt");
@@ -878,7 +878,7 @@ fn fmt_comptime_splice_stability() {
     // (Expr::ComptimeSplice). The formatter must emit it as `$name` so that
     // the round-trip is stable (previously the `$` would be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive Debug for T {\n    info @= T.reflect()\n    tname @= info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn main() {\n    print(\"ok\")\n}\n";
+    let src = "derive Debug for T {\n    info #= T.reflect()\n    tname #= info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn main() {\n    print(\"ok\")\n}\n";
     let once = jet::format_source(src).expect("fmt should accept derive with $name in string");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(
@@ -887,7 +887,7 @@ fn fmt_comptime_splice_stability() {
     );
 
     // Standalone `$name` expression (outside emit string) round-trips as `$name`.
-    let splice_src = "derive Named for T {\n    tname @= \"test\"\n    x @= $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn main() {}\n";
+    let splice_src = "derive Named for T {\n    tname #= \"test\"\n    x #= $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn main() {}\n";
     let splice_once = jet::format_source(splice_src).expect("fmt should accept $name expression");
     assert!(
         splice_once.contains("$tname"),
@@ -939,19 +939,19 @@ fn main() {}
 }
 
 #[test]
-fn fmt_explicit_binding_d_bindexplicit1_stability() {
-    // D-BINDEXPLICIT1=A: `name@ Type = val` (immutable) and `name: Type = val`
-    // (mutable) must survive fmt unchanged.
+fn fmt_explicit_binding_d_bind3_stability() {
+    // D-BIND3: `name: Type #= val` (immutable) and `name: Type := val` (mutable)
+    // must survive fmt unchanged.
     let src = "\
 fn main() {
-    x@ Int = 42
-    s: String = \"hi\"
+    x: Int #= 42
+    s: String := \"hi\"
     print(\"{x} {s}\")
 }
 ";
     assert_fmt_keeps(
         src,
-        &["x@ Int = 42", "s: String = \"hi\""],
+        &["x: Int #= 42", "s: String := \"hi\""],
         "explicit binding",
     );
     let once = jet::format_source(src).expect("fmt should accept explicit-type bindings");
@@ -1036,7 +1036,7 @@ fn process(input: #Tainted String) -> String {
 }
 
 fn main() {
-    result @= process(\"hello\")
+    result #= process(\"hello\")
     print(result)
 }
 ";

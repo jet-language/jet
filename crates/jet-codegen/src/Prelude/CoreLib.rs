@@ -405,68 +405,57 @@ mod jet_std {
     impl super::JetShow for Mat3 { fn jet_show(&self) -> String { format!("Mat3({:?})", self.0) } }
     impl super::JetShow for Mat4 { fn jet_show(&self) -> String { format!("Mat4({:?})", self.0) } }
 
-    #[derive(Default)]
-    struct JetTaskControl {
-        paused: std::sync::atomic::AtomicBool,
-        cancel: std::sync::atomic::AtomicBool,
-    }
-
     pub struct JetTask<T: Send + 'static> {
-        handle: Option<std::thread::JoinHandle<T>>,
-        control: std::sync::Arc<JetTaskControl>,
+        handle: Option<super::JetSchedulerJoin<T>>,
+        control: std::sync::Arc<super::JetTaskControl>,
+    }
+    impl<T: Send + 'static> Default for JetTask<T> {
+        fn default() -> Self {
+            JetTask {
+                handle: None,
+                control: super::JetTaskControl::new(),
+            }
+        }
     }
     impl<T: Send + 'static> JetTask<T> {
         pub fn spawn<F: FnOnce() -> T + Send + 'static>(f: F) -> JetTask<T> {
             let inherited_deadline = super::jet_ctx_deadline_ms();
+            let control = super::JetTaskControl::new();
             JetTask {
-                handle: Some(std::thread::spawn(move || {
-                    let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
-                    f()
-                })),
-                control: std::sync::Arc::new(JetTaskControl::default()),
+                handle: Some(super::jet_scheduler_spawn_with_control(
+                    move || {
+                        let _deadline_guard =
+                            inherited_deadline.map(super::jet_ctx_push_deadline);
+                        f()
+                    },
+                    control.clone(),
+                )),
+                control,
             }
         }
-        // D-COROUTINE1=A: v1 control-plane hooks over the internal substrate.
-        // The thread runtime records requested state for observability while the
-        // scheduler-grade pause/cancel semantics land in the M:N runtime.
+        // D-COROUTINE1=A: control-plane hooks on the M:N scheduler substrate.
         pub fn pause(&self) {
-            self.control
-                .paused
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.control.pause();
         }
         pub fn resume(&self) {
-            self.control
-                .paused
-                .store(false, std::sync::atomic::Ordering::Relaxed);
+            self.control.resume();
         }
         pub fn cancel(&self) {
-            self.control
-                .cancel
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.control.cancel();
         }
         pub fn trace(&self) -> String {
-            let paused = self
-                .control
-                .paused
-                .load(std::sync::atomic::Ordering::Relaxed);
+            let paused = self.control.paused.load(std::sync::atomic::Ordering::Relaxed);
             let cancel = self
                 .control
-                .cancel
+                .cancelled
                 .load(std::sync::atomic::Ordering::Relaxed);
             format!("paused={},cancel={}", paused, cancel)
         }
         pub fn join(mut self) -> T {
             super::jet_deadline_check("task join");
-            match self.handle.take().unwrap().join() {
-                Ok(v) => {
-                    super::jet_deadline_check("task join");
-                    v
-                }
-                Err(_) => {
-                    eprintln!("panic: a task panicked");
-                    std::process::exit(70);
-                }
-            }
+            let v = self.handle.take().unwrap().join();
+            super::jet_deadline_check("task join");
+            v
         }
     }
 
@@ -493,43 +482,52 @@ mod jet_std {
     }
 
     pub struct JetChannel<T> {
-        recv: std::sync::mpsc::Receiver<T>,
-        tx_keeper: std::sync::mpsc::Sender<T>,
+        inner: super::JetSchedulerChannel<T>,
     }
     impl<T: Send> JetChannel<T> {
         pub fn new() -> JetChannel<T> {
-            let (tx, rx) = std::sync::mpsc::channel();
-            JetChannel { recv: rx, tx_keeper: tx }
+            JetChannel {
+                inner: super::JetSchedulerChannel::new(),
+            }
         }
         pub fn sender(&self) -> JetSender<T> {
-            JetSender { tx: self.tx_keeper.clone() }
+            JetSender {
+                tx: self.inner.sender(),
+            }
         }
         pub fn receive(&self) -> Result<T, Closed> {
+            if super::jet_scheduler_task_cancelled() {
+                return Err(Closed::Closed);
+            }
             if let Some(remaining) = super::jet_deadline_remaining_ms() {
                 if remaining <= 0 {
                     super::jet_deadline_exceeded("channel receive");
                 }
-                let wait = std::time::Duration::from_millis(remaining as u64);
-                return match self.recv.recv_timeout(wait) {
-                    Ok(v) => Ok(v),
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        super::jet_deadline_exceeded("channel receive")
-                    }
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(Closed::Closed),
-                };
             }
-            self.recv.recv().map_err(|_| Closed::Closed)
+            match self.inner.receive() {
+                Some(v) => {
+                    super::jet_deadline_check("channel receive");
+                    Ok(v)
+                }
+                None => Err(Closed::Closed),
+            }
         }
     }
 
     pub struct JetSender<T> {
-        tx: std::sync::mpsc::Sender<T>,
+        tx: super::JetSchedulerSender<T>,
     }
-    impl<T> JetSender<T> {
-        pub fn send(&self, value: T) { let _ = self.tx.send(value); }
+    impl<T: Send> JetSender<T> {
+        pub fn send(&self, value: T) {
+            self.tx.send(value);
+        }
     }
     impl<T> Clone for JetSender<T> {
-        fn clone(&self) -> Self { JetSender { tx: self.tx.clone() } }
+        fn clone(&self) -> Self {
+            JetSender {
+                tx: self.tx.clone(),
+            }
+        }
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -668,6 +666,11 @@ mod jet_std {
         let observer: Observer = Rc::new(body);
         let run = observer.clone();
         jet_reactive_run_observed(&observer, &move || { run(); });
+    }
+
+    /// D-REACTCORE1: `#Reactive` scope marker — alias for `jet_reactive_effect`.
+    pub fn jet_reactive_scope<F: Fn() + 'static>(body: F) {
+        jet_reactive_effect(body);
     }
 
     impl super::JetShow for Closed {
@@ -2673,11 +2676,11 @@ fn jet_std_time_sleep(millis: i64) {
             jet_deadline_exceeded("time sleep");
         }
         if want > remaining {
-            std::thread::sleep(std::time::Duration::from_millis(remaining as u64));
+            jet_scheduler_sleep_ms(remaining as u64);
             jet_deadline_exceeded("time sleep");
         }
     }
-    std::thread::sleep(std::time::Duration::from_millis(want as u64));
+    jet_scheduler_sleep_ms(want as u64);
     jet_deadline_check("time sleep");
 }
 fn jet_std_time_start() -> jet_std::Stopwatch {
@@ -3760,18 +3763,23 @@ fn jet_net_tcp_read(stream: &mut JetTcpStream) -> Result<String, String> {
             .set_read_timeout(Some(std::time::Duration::from_millis(remaining as u64)));
     }
     let mut buf = [0u8; 8192];
-    match stream.inner.read(&mut buf) {
-        Ok(0) => Ok(String::new()),
-        Ok(n) => {
-            jet_deadline_check("tcp read");
-            String::from_utf8(buf[..n].to_vec())
-                .map_err(|e| format!("tcp read: invalid UTF-8: {}", e))
-        }
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::TimedOut {
-                jet_deadline_exceeded("tcp read");
+    loop {
+        match stream.inner.read(&mut buf) {
+            Ok(0) => return Ok(String::new()),
+            Ok(n) => {
+                jet_deadline_check("tcp read");
+                return String::from_utf8(buf[..n].to_vec())
+                    .map_err(|e| format!("tcp read: invalid UTF-8: {}", e));
             }
-            Err(format!("tcp read failed: {}", e))
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                jet_scheduler_io_wait(&stream.inner, true, false, "tcp read");
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::TimedOut {
+                    jet_deadline_exceeded("tcp read");
+                }
+                return Err(format!("tcp read failed: {}", e));
+            }
         }
     }
 }
@@ -3786,15 +3794,23 @@ fn jet_net_tcp_write(stream: &mut JetTcpStream, data: &String) -> Result<(), Str
             .inner
             .set_write_timeout(Some(std::time::Duration::from_millis(remaining as u64)));
     }
-    stream
-        .inner
-        .write_all(data.as_bytes())
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::TimedOut {
-                jet_deadline_exceeded("tcp write");
+    let bytes = data.as_bytes();
+    let mut off = 0usize;
+    while off < bytes.len() {
+        match stream.inner.write(&bytes[off..]) {
+            Ok(0) => return Err("tcp write failed: zero bytes written".to_string()),
+            Ok(n) => off += n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                jet_scheduler_io_wait(&stream.inner, false, true, "tcp write");
             }
-            format!("tcp write failed: {}", e)
-        })?;
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::TimedOut {
+                    jet_deadline_exceeded("tcp write");
+                }
+                return Err(format!("tcp write failed: {}", e));
+            }
+        }
+    }
     jet_deadline_check("tcp write");
     Ok(())
 }
@@ -4294,7 +4310,7 @@ fn jet_http_srv_req_header(req: &JetHttpSrvReq, name: &String) -> Option<String>
 // decides what to print and how to exit, which keeps the API testable).
 //
 // Design: builder methods take the spec BY VALUE and return a new one —
-// ownership-safe, no aliasing, works with both immutable (@=) and mutable
+// ownership-safe, no aliasing, works with both immutable (::) and mutable
 // (:=) bindings in Jet. The parse result is cloneable.
 //
 // `--help` is recognized but NOT parsed out of argv here; the caller tests

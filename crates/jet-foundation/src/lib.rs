@@ -5,6 +5,8 @@ pub mod Collections;
 pub mod Diagnostics;
 pub mod Generics;
 pub mod JitBackend;
+pub mod RingLayer;
 pub mod SHA256;
 pub mod Syntax;
+pub mod WebPartition;
 pub mod Traits;

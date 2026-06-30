@@ -196,6 +196,13 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
+            Stmt::Reactive { body, .. } => {
+                self.write(&format!("#{} {{", Syntax::KW_REACTIVE));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-REGION1 (opt B): `region r { … }`.
             Stmt::Region { name, body, .. } => {
                 self.write(&format!("{} {} {{", Syntax::KW_REGION, name));
@@ -534,8 +541,8 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
-        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND2: ordinary
-        // bindings are sigil-led (`name @= …` / `name := …`), no leading keyword.
+        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND3: ordinary
+        // bindings are sigil-led (`name #= …` / `name := …`), no leading keyword.
         if b.is_comptime {
             self.write(Syntax::KW_COMPTIME);
             self.write(" ");
@@ -554,19 +561,17 @@ impl<'a> Fmt<'a> {
                 Syntax::SIGIL_BIND_IMMUT
             });
         } else if let Some(ty) = &b.ty {
-            // D-BINDEXPLICIT1=A: explicit-type form.
-            // Immutable: `name@ Type = expr`. Mutable: `name: Type = expr`.
-            if b.mutable {
-                self.write(&b.name);
-                self.write(": ");
-                self.fmt_type(ty);
-                self.write(" =");
+            // D-BIND3: explicit-type form.
+            // Immutable: `name: Type #= expr`. Mutable: `name: Type #== expr`.
+            self.write(&b.name);
+            self.write(": ");
+            self.fmt_type(ty);
+            self.write(" ");
+            self.write(if b.mutable {
+                Syntax::SIGIL_BIND_MUT
             } else {
-                self.write(&b.name);
-                self.write("@ ");
-                self.fmt_type(ty);
-                self.write(" =");
-            }
+                Syntax::SIGIL_BIND_IMMUT
+            });
         } else {
             self.write(&b.name);
             self.write(" ");

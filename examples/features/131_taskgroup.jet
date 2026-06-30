@@ -15,13 +15,13 @@ fn fast_val() -> Int {
 fn main() {
     taskgroup g {
         print("inside taskgroup")
-        a @= g.task { sum_range(1, 25) }
-        b @= g.task { sum_range(26, 50) }
-        results @= g.all([a, b])
+        a #= g.task { sum_range(1, 25) }
+        b #= g.task { sum_range(26, 50) }
+        results #= g.all([a, b])
         print((results[0] + results[1]))
-        slow @= g.task { sum_range(1, 500000) }
-        fast @= g.task { fast_val() }
-        winner @= g.race([slow, fast])
+        slow #= g.task { sum_range(1, 500000) }
+        fast #= g.task { fast_val() }
+        winner #= g.race([slow, fast])
         print(winner)
     }
 }

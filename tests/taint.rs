@@ -15,7 +15,7 @@ fn tainted_to_exec_sink_is_error() {
     let src = r#"
 use core.process as process
 fn main() {
-    name @= #Tainted "world; rm -rf /"
+    name #= #Tainted "world; rm -rf /"
     process.run(["echo", name]) ?? return
 }
 "#;
@@ -33,7 +33,7 @@ fn sanitized_value_reaches_sink_ok() {
 use core.process as process
 #Sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
 fn main() {
-    name @= #Tainted "world; rm -rf /"
+    name #= #Tainted "world; rm -rf /"
     safe := clean(name)
     process.run(["echo", safe]) ?? return
 }
@@ -52,7 +52,7 @@ fn taint_propagates_through_binding() {
     let src = r#"
 use core.process as process
 fn main() {
-    raw @= #Tainted "evil"
+    raw #= #Tainted "evil"
     cmd := raw
     process.run(["echo", cmd]) ?? return
 }
@@ -70,7 +70,7 @@ fn taint_propagates_through_interpolation() {
     let src = r#"
 use core.process as process
 fn main() {
-    user @= #Tainted "bob"
+    user #= #Tainted "bob"
     arg := "hello {user}"
     process.run(["echo", arg]) ?? return
 }
@@ -121,7 +121,7 @@ fn main() {
 fn tainted_at_non_sink_is_ok() {
     let src = r#"
 fn main() {
-    name @= #Tainted "world"
+    name #= #Tainted "world"
     print(name)
 }
 "#;
@@ -137,13 +137,13 @@ fn main() {
 fn taint_is_erased_in_codegen() {
     let tagged = r#"
 fn main() {
-    name @= #Tainted "world"
+    name #= #Tainted "world"
     print(name)
 }
 "#;
     let plain = r#"
 fn main() {
-    name @= "world"
+    name #= "world"
     print(name)
 }
 "#;
@@ -214,7 +214,7 @@ fn main() {
 fn sanitizer_as_identifier_is_fine() {
     let src = r#"
 fn main() {
-    sanitizer @= 3
+    sanitizer #= 3
     print("{sanitizer}")
 }
 "#;

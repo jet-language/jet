@@ -93,7 +93,7 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     .unwrap();
     fs::write(
         s.join("main.jet"),
-        "use helper;\n\nfn main() {\n    s @= helper.make()\n    print(s.value)\n}\n",
+        "use helper;\n\nfn main() {\n    s #= helper.make()\n    print(s.value)\n}\n",
     )
     .unwrap();
 

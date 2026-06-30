@@ -580,7 +580,7 @@ fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
     fs::write(
         &p,
-        "use core.io as io\nfn main() {\n    args @= io.args()\n    print(args.len())\n}\n",
+        "use core.io as io\nfn main() {\n    args #= io.args()\n    print(args.len())\n}\n",
     )
     .unwrap();
     p
@@ -720,5 +720,52 @@ fn profile_release_flag_is_accepted() {
     assert!(
         !stderr.contains("E1219"),
         "--release must not emit E1219 (it's a blessed profile):\n{stderr}"
+    );
+}
+
+#[test]
+fn profile_ci_flag_is_accepted() {
+    let p = std::env::temp_dir().join("jet_cli_ci_test.jet");
+    fs::write(&p, "fn main() { print(\"ok\") }\n").unwrap();
+    let out = Command::new(jet())
+        .args(["build", p.to_str().unwrap(), "--profile=ci"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("E1219"),
+        "--profile=ci must not emit E1219 (it's a blessed profile):\n{stderr}"
+    );
+}
+
+#[test]
+fn profile_custom_name_from_pkg_jet() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_cli_custom_profile_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        r#"payload: { name: "p", version: "0.1.0" }
+build: { staging: Build.{ optimize: basic } }
+"#,
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    fs::write(&main, "fn main() { print(\"ok\") }\n").unwrap();
+    let out = Command::new(jet())
+        .args(["build", main.to_str().unwrap(), "--profile=staging"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("E1219"),
+        "pkg.jet-defined profile must resolve:\n{stderr}"
     );
 }

@@ -19,6 +19,14 @@ pub struct CompileOutput {
     /// Each entry: relative path + sha256 of the bytes at compile time.
     /// Written to `.jet/lock` by the build driver for reproducibility.
     pub comptime_inputs: Vec<Lock::ComptimeInput>,
+    /// D-WEBBACKEND1 (c123 M2): web target artifacts when `--target=web`.
+    pub web: Option<crate::Codegen::WebArtifacts>,
+    /// D-WASM1: partition report when `--target=web`.
+    pub web_partition_report: Option<String>,
+    /// D-RINGLAYER1=A M2: minimum runtime layer inferred from imports + helpers.
+    pub inferred_layer: crate::Syntax::RuntimeLayer,
+    /// D-RINGLAYER1=A: optional `layer:` ceiling from `pkg.jet`.
+    pub layer_ceiling: Option<crate::Syntax::RuntimeLayer>,
 }
 
 /// D-TOOL5 (E2-M11, ratified as option C): capability summary emitted by `jet build`.

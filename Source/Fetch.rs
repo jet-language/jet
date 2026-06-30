@@ -169,6 +169,8 @@ impl<'a> Resolver<'a> {
             fingerprint: String::new(),
             content_hash: None,
             dependencies: root_deps.clone(),
+            layer: Lock::layer_from_manifest(manifest),
+            inferred_layer: None,
         });
 
         // Dependency packages in stable order.
@@ -181,6 +183,8 @@ impl<'a> Resolver<'a> {
                 fingerprint: pkg.fingerprint.clone(),
                 content_hash: None,
                 dependencies: pkg.deps.clone(),
+                layer: None,
+                inferred_layer: None,
             });
         }
 

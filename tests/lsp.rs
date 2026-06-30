@@ -483,7 +483,7 @@ fn lsp_teaching_autocorrect_let_to_val() {
         diag_msg
     );
 
-    // D-BIND1: `let x = 1` migrates to `x :: 1`, which moves tokens — it is no
+    // D-BIND1: `let x = 1` migrates to `x #= 1`, which moves tokens — it is no
     // longer a single-keyword swap, so the E0009 teaching diagnostic carries no
     // trivial quick-fix edit (the codeAction result is empty). `jet fmt`
     // performs the migration.
@@ -542,7 +542,7 @@ fn main() {
     for edit in edits {
         fixed = jet::LSP::apply_edit(&fixed, &edit);
     }
-    // D-BIND1: E0009 (`let`) carries no token-swap edit — migrating to `count :: 1`
+    // D-BIND1: E0009 (`let`) carries no token-swap edit — migrating to `count #= 1`
     // moves tokens, so `jet fmt` handles it and the LSP leaves `let` in place.
     assert!(fixed.contains("let count"));
     assert!(!fixed.contains("val count"));
@@ -844,7 +844,7 @@ fn lsp_inlay_hints_returns_type_labels() {
     if !jet.exists() {
         return;
     }
-    let source = "fn main() {\n    val x = 42;\n    val s = \"hello\";\n}\n";
+    let source = "fn main() {\n    x #= 42\n    count := 0\n}\n";
     let uri = "file:///tmp/lsp_inlay_test.jet";
 
     run_transcript(
@@ -869,7 +869,7 @@ fn lsp_inlay_hints_returns_type_labels() {
                     r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":10,"character":0}}}}}}}}"#,
                     uri
                 ),
-                expect_contains: Some(vec!["Int".to_string()]),
+                expect_contains: Some(vec![": Int".to_string()]),
             },
             TranscriptStep::Send {
                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
@@ -1135,10 +1135,10 @@ fn c40_is_keyword_import_not_a_keyword() {
 fn c40_keyword_like_identifier_usable_as_variable() {
     // Variables named `printer`, `sprint`, `in_count` must NOT be flagged as keywords.
     // These contain keyword substrings (`print`, `in`, `sprint` → `pr`+`in`+`t`) but
-    // are regular identifiers. Use current Jet binding syntax (@= sigil).
+    // are regular identifiers. Use current Jet binding syntax (:: sigil).
     let diags = jet::check_document(
         "c40_kw_in_ident.jet",
-        "fn main() {\n    printer @= \"hp\";\n    in_count @= 3;\n    sprint @= 9.8;\n}\n",
+        "fn main() {\n    printer #= \"hp\";\n    in_count #= 3;\n    sprint #= 9.8;\n}\n",
     );
     // None of the diagnostics should claim these identifiers are keywords.
     for d in &diags {

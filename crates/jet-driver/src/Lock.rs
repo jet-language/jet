@@ -35,6 +35,10 @@ pub struct LockedPackage {
     pub content_hash: Option<String>,
     /// Direct dependency names.
     pub dependencies: Vec<String>,
+    /// D-RINGLAYER1=A: optional `layer:` ceiling from `pkg.jet` payload.
+    pub layer: Option<crate::Syntax::RuntimeLayer>,
+    /// D-RINGLAYER1=A M2: minimum runtime layer inferred at last build.
+    pub inferred_layer: Option<crate::Syntax::RuntimeLayer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +124,16 @@ pub fn write(lock: &LockFile) -> String {
             out.push_str(&format!("dependencies = [{}]\n", deps.join(", ")));
         } else {
             out.push_str("dependencies = []\n");
+        }
+
+        if let Some(layer) = pkg.layer {
+            out.push_str(&format!("layer = \"{}\"\n", layer.as_str()));
+        }
+        if let Some(inferred) = pkg.inferred_layer {
+            out.push_str(&format!(
+                "inferred-layer = \"{}\"\n",
+                inferred.as_str()
+            ));
         }
     }
 
@@ -296,6 +310,16 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "source" => pkg.source_raw = Some(val.to_string()),
                 "locked" => pkg.locked_raw = Some(val.to_string()),
                 "dependencies" => pkg.deps = parse_string_array(val),
+                "layer" => {
+                    pkg.layer = crate::Syntax::RuntimeLayer::parse_manifest(
+                        val.trim_matches('"'),
+                    );
+                }
+                "inferred-layer" => {
+                    pkg.inferred_layer = crate::Syntax::RuntimeLayer::parse_manifest(
+                        val.trim_matches('"'),
+                    );
+                }
                 _ => {}
             }
         }
@@ -373,6 +397,8 @@ struct PartialPkg {
     fingerprint: Option<String>,
     content_hash: Option<String>,
     deps: Vec<String>,
+    layer: Option<crate::Syntax::RuntimeLayer>,
+    inferred_layer: Option<crate::Syntax::RuntimeLayer>,
 }
 
 impl PartialPkg {
@@ -390,6 +416,8 @@ impl PartialPkg {
             fingerprint,
             content_hash: self.content_hash,
             dependencies: self.deps,
+            layer: self.layer,
+            inferred_layer: self.inferred_layer,
         })
     }
 }
@@ -465,6 +493,31 @@ pub fn load(project_root: &Path) -> Option<LockFile> {
     let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     let raw = std::fs::read_to_string(&path).ok()?;
     parse(&raw).ok()
+}
+
+/// D-RINGLAYER1=A M2: persist inferred runtime layer for the root package after build.
+pub fn record_inferred_layer(project_root: &Path, package_name: &str, layer: crate::Syntax::RuntimeLayer) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let Ok(raw) = std::fs::read_to_string(&lock_path) else {
+        return;
+    };
+    let Ok(mut lock) = parse(&raw) else {
+        return;
+    };
+    let Some(pkg) = lock
+        .packages
+        .iter_mut()
+        .find(|p| p.name == package_name)
+    else {
+        return;
+    };
+    pkg.inferred_layer = Some(layer);
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// D-RINGLAYER1=A M2: set manifest `layer:` ceiling on locked packages at fetch time.
+pub fn layer_from_manifest(manifest: &Manifest) -> Option<crate::Syntax::RuntimeLayer> {
+    manifest.package.layer
 }
 
 /// Check that every dep in the manifest is represented in the lock file.

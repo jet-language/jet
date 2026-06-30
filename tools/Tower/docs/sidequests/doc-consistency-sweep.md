@@ -45,12 +45,12 @@ R10 pay-for-what-you-call). (CLAUDE.md is owner-owned — flag.)
 (Leave user-facing project-layout paths like `src/main.jet` per D-TGT4 — those
 are correct.)
 
-## 5. Example comments teaching retired `::` / `when` (code is clean)
-- `examples/features/03_values.jet:2` — `` `name :: value` `` → `` `name @= value` ``
-- `examples/features/69_distinct_types.jet:2` — `` `Name :: distinct Base` `` →
-  `` `Name @= distinct Base` `` (code below already uses `@=`).
-- `examples/features/75_arena_regions.jet:40` — illustrative `stash :: first` →
-  `stash @= first`.
+## 5. Example comments teaching retired `#=` / `when` (code is clean)
+- `examples/features/03_values.jet:2` — `` `name #= value` `` → `` `name #= value` ``
+- `examples/features/69_distinct_types.jet:2` — `` `Name #= distinct Base` `` →
+  `` `Name #= distinct Base` `` (code below already uses `::`).
+- `examples/features/75_arena_regions.jet:40` — illustrative `stash #= first` →
+  `stash #= first`.
 - `examples/features/11_enums.jet:1` — "exhaustive when" reads as the retired
   `when` keyword; reword to "exhaustive matching".
 

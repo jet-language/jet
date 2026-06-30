@@ -160,6 +160,21 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive { … }` in
+    /// statement position. Lowers to a reactive effect scope at codegen.
+    fn at_reactive_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "expected `#`")?;
+        let _ = self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
+        self.expect(TokKind::LBrace, "after `#Reactive`")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Reactive {
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
     /// unknown fields.
@@ -539,7 +554,7 @@ impl<'a> Parser<'a> {
         let (ty, ty_span) = self.type_()?;
         if matches!(
             self.peek().kind,
-            TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq
+            TokKind::HashEq | TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq
         ) {
             let sigil_span = self.peek().span;
             return Err(Diagnostic::error(
@@ -1024,6 +1039,12 @@ impl<'a> Parser<'a> {
                 // D-CTEFFECT1: `#Impure("reason") { … }` comptime effect gate.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_IMPURE) {
                     return self.at_impure_stmt();
+                }
+                // D-REACTCORE1: `#Reactive { … }` reactive effect scope.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_REACTIVE)
+                    && matches!(self.peek3().kind, TokKind::LBrace)
+                {
+                    return self.at_reactive_stmt();
                 }
                 // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — suppress E0402 in scope.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SUPPRESS) {
@@ -2119,9 +2140,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-BIND1: a binding starting with the target (no keyword), written
-    /// `name (: type)? (:: | :=) expr`. The sigil chooses mutability:
-    /// `::` immutable (was `val`), `:=` mutable (was `var`).
+    /// D-BIND3: a binding starting with the target (no keyword), written
+    /// `name (: type)? (#= | :=) expr`. The sigil chooses mutability:
+    /// `#=` immutable (was `val`), `:=` mutable (was `var`).
     fn sigil_binding(&mut self) -> Result<Binding, Diagnostic> {
         // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
         // struct — instead of a plain `name`.
@@ -2143,10 +2164,26 @@ impl<'a> Parser<'a> {
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
-        // D-BINDEXPLICIT1=A: `name@ Type = expr` — explicit immutable; `@` is suffix on name.
+        // D-BIND3: retired D-BINDEXPLICIT1 form `name@ Type = expr`.
         if matches!(self.peek().kind, TokKind::At) {
             self.bump(); // `@`
             let (ty, ty_span) = self.type_()?;
+            self.diags.push(Diagnostic::error(
+                "E0998",
+                format!(
+                    "explicit immutable binding uses `name: Type {}`, not `name@ Type =`",
+                    Syntax::SIGIL_BIND_IMMUT
+                ),
+                format!(
+                    "explicit immutable bindings use `: Type {}` (D-BIND3)",
+                    Syntax::SIGIL_BIND_IMMUT
+                ),
+                format!(
+                    "write `{name}: <Type> {}` instead of `{name}@ <Type> =`",
+                    Syntax::SIGIL_BIND_IMMUT
+                ),
+                Some(name_span),
+            ));
             self.expect(TokKind::Eq, "after the type in `name@ Type = expr`")?;
             let init = self.expr()?;
             return Ok(Binding {
@@ -2170,25 +2207,141 @@ impl<'a> Parser<'a> {
         } else {
             (None, None)
         };
-        // D-BINDEXPLICIT1=A: `name: Type = expr` — explicit mutable; bare `=` is the sigil.
-        // Old form `name: Type := expr` / `name: Type @= expr` still accepted here with
-        // E0989 teaching error redirecting to the canonical forms.
-        if ty.is_some() && matches!(self.peek().kind, TokKind::Eq) {
-            self.bump(); // `=`
-            let init = self.expr()?;
-            return Ok(Binding {
-                mutable: true,
-                name,
-                name_span,
-                pattern: None,
-                ty,
-                ty_span,
-                init,
-                is_comptime: false,
-                ct: None,
-                uninit: false,
-                arena_view: false,
-            });
+        if ty.is_some() {
+            let sigil_span = self.peek().span;
+            match self.peek().kind {
+                // D-BIND3: `name: Type #= expr` — explicit immutable.
+                TokKind::HashEq => {
+                    self.bump();
+                    let init = self.expr()?;
+                    return Ok(Binding {
+                        mutable: false,
+                        name,
+                        name_span,
+                        pattern: None,
+                        ty,
+                        ty_span,
+                        init,
+                        is_comptime: false,
+                        ct: None,
+                        uninit: false,
+                        arena_view: false,
+                    });
+                }
+                // D-BIND3: `name: Type #== expr` — explicit mutable.
+                TokKind::ColonEq => {
+                    self.bump();
+                    let init = self.expr()?;
+                    return Ok(Binding {
+                        mutable: true,
+                        name,
+                        name_span,
+                        pattern: None,
+                        ty,
+                        ty_span,
+                        init,
+                        is_comptime: false,
+                        ct: None,
+                        uninit: false,
+                        arena_view: false,
+                    });
+                }
+                // Retired: `name: Type #= expr`.
+                TokKind::Colon => {
+                    self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0998",
+                        format!(
+                            "explicit immutable binding uses `name: Type {}`, not `name: Type #=`",
+                            Syntax::SIGIL_BIND_IMMUT
+                        ),
+                        format!(
+                            "when the type is written, immutable uses `{}` and mutable uses `{}` (D-BIND3)",
+                            Syntax::SIGIL_BIND_IMMUT,
+                            Syntax::SIGIL_BIND_MUT
+                        ),
+                        format!(
+                            "write `{name}: <Type> {}` instead of `{name}: <Type> :`",
+                            Syntax::SIGIL_BIND_IMMUT
+                        ),
+                        Some(sigil_span),
+                    ));
+                    let init = self.expr()?;
+                    return Ok(Binding {
+                        mutable: false,
+                        name,
+                        name_span,
+                        pattern: None,
+                        ty,
+                        ty_span,
+                        init,
+                        is_comptime: false,
+                        ct: None,
+                        uninit: false,
+                        arena_view: false,
+                    });
+                }
+                // Retired: `name: Type := expr`.
+                TokKind::Eq => {
+                    self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0998",
+                        format!(
+                            "explicit mutable binding uses `name: Type {}`, not `name: Type :=`",
+                            Syntax::SIGIL_BIND_MUT
+                        ),
+                        format!(
+                            "when the type is written, immutable uses `{}` and mutable uses `{}` (D-BIND3)",
+                            Syntax::SIGIL_BIND_IMMUT,
+                            Syntax::SIGIL_BIND_MUT
+                        ),
+                        format!(
+                            "write `{name}: <Type> {}` instead of `{name}: <Type> =`",
+                            Syntax::SIGIL_BIND_MUT
+                        ),
+                        Some(sigil_span),
+                    ));
+                    let init = self.expr()?;
+                    return Ok(Binding {
+                        mutable: true,
+                        name,
+                        name_span,
+                        pattern: None,
+                        ty,
+                        ty_span,
+                        init,
+                        is_comptime: false,
+                        ct: None,
+                        uninit: false,
+                        arena_view: false,
+                    });
+                }
+                TokKind::AtEq | TokKind::ColonColon => {
+                    let sigil = if matches!(self.peek().kind, TokKind::AtEq) {
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED2
+                    } else {
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED
+                    };
+                    self.diags.push(Diagnostic::error(
+                        "E0998",
+                        format!(
+                            "explicit immutable binding uses `name: Type {}`, not `name: Type {sigil}`",
+                            Syntax::SIGIL_BIND_IMMUT
+                        ),
+                        format!(
+                            "when the type is written, immutable uses `{}` and mutable uses `{}` (D-BIND3)",
+                            Syntax::SIGIL_BIND_IMMUT,
+                            Syntax::SIGIL_BIND_MUT
+                        ),
+                        format!(
+                            "write `{name}: <Type> {}` instead of `{name}: <Type> {sigil}`",
+                            Syntax::SIGIL_BIND_IMMUT
+                        ),
+                        Some(sigil_span),
+                    ));
+                }
+                _ => {}
+            }
         }
         let mutable = self.expect_bind_sigil()?;
         let init = self.expr()?;
@@ -2223,33 +2376,35 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-BIND2: consume `@=` (immutable) or `:=` (mutable); returns `mutable`.
-    /// A `::` in this position emits E0991 (teaching error) and is accepted as immutable.
+    /// D-BIND3: consume `#=` (immutable) or `:=` (mutable); returns `mutable`.
+    /// Retired `::` / `@=` emit E0991 and are accepted as immutable for recovery.
     fn expect_bind_sigil(&mut self) -> Result<bool, Diagnostic> {
         match self.peek().kind {
-            TokKind::AtEq => {
+            TokKind::HashEq => {
                 self.bump();
                 Ok(false)
             }
-            TokKind::ColonColon => {
+            TokKind::ColonColon | TokKind::AtEq => {
                 let span = self.peek().span;
+                let retired = if matches!(self.peek().kind, TokKind::AtEq) {
+                    Syntax::SIGIL_BIND_IMMUT_RETIRED2
+                } else {
+                    Syntax::SIGIL_BIND_IMMUT_RETIRED
+                };
                 self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0991",
                     format!(
-                        "`{}` is the old immutable-binding sigil — use `{}` instead",
-                        Syntax::SIGIL_BIND_IMMUT_RETIRED,
+                        "`{retired}` is the old immutable-binding sigil — use `{}` instead",
                         Syntax::SIGIL_BIND_IMMUT
                     ),
                     format!(
-                        "the immutable binding sigil changed from `{}` to `{}` (D-BIND2)",
-                        Syntax::SIGIL_BIND_IMMUT_RETIRED,
+                        "the immutable binding sigil is `{}` (D-BIND3)",
                         Syntax::SIGIL_BIND_IMMUT
                     ),
                     format!(
-                        "write `name {} value` instead of `name {} value`",
-                        Syntax::SIGIL_BIND_IMMUT,
-                        Syntax::SIGIL_BIND_IMMUT_RETIRED
+                        "write `name {} value` instead of `name {retired} value`",
+                        Syntax::SIGIL_BIND_IMMUT
                     ),
                     Some(span),
                 ));
@@ -2278,42 +2433,39 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-BIND2: true when the tokens at the cursor begin a sigil binding —
-    /// `name @=`, `name :=`, `name : type @=`, or a destructuring pattern target
-    /// (`[ … ] @=`, `Ident { … } @=`). Also accepts retired `::` (for E0991 recovery).
-    /// D-BINDEXPLICIT1=A: also `name@ Type = expr` (immutable) and `name: Type = expr`.
+    /// D-BIND3: true when the tokens at the cursor begin a sigil binding —
+    /// `name #=`, `name :=`, `name : type #=`, `name : type :=`, or a destructuring
+    /// pattern target (`[ … ] #=`, `Ident { … } #=`). Retired `::`/`@=` accepted for E0991.
     /// Used by the statement dispatcher to tell a binding apart from an
     /// expression/assignment that also starts with a name.
     fn looks_like_sigil_binding(&self) -> bool {
         match &self.peek().kind {
-            // `name @= e` / `name := e` / `name :: e` (retired, for E0991)
+            // `name #= e` / `name := e` / retired `#=` / `@=` (E0991)
             TokKind::Ident(_) | TokKind::KwSelf
                 if matches!(
                     self.peek2().kind,
-                    TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq
+                    TokKind::HashEq
+                        | TokKind::AtEq
+                        | TokKind::ColonColon
+                        | TokKind::ColonEq
                 ) =>
             {
                 true
             }
-            // D-BINDEXPLICIT1=A: `name@ Type = expr` — immutable explicit-type binding.
-            // Any `Ident @` that wasn't caught by the `name@ loop` loop-label check
-            // above is an explicit immutable binding. The type may be complex ([T],
-            // T?, (T, U), etc.) so we don't peek further — just `Ident At`.
-            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::At) => true,
-            // `name : type :: e` / `name : type := e` / `name: Type = e` — typed binding.
+            // `name : type #= e` / `name : type := e` / `name: Type := e` — typed binding.
             // A bare `:` only ever opens a type annotation here, so any `name :` at
             // statement start is a binding (a map index uses `[`, not `:`).
             TokKind::Ident(_) | TokKind::KwSelf if matches!(self.peek2().kind, TokKind::Colon) => {
                 true
             }
-            // Destructuring targets: scan ahead to a `::`/`:=` after the matching
+            // Destructuring targets: scan ahead to a `#=`/`:=` after the matching
             // close. Cheap bounded lookahead. `[a, b] ::`, `(a, b) ::`,
             // `Type { … } ::` (E0320 recovery), and `Type.{ … } ::` (D-DOTCTOR1).
             TokKind::LBracket | TokKind::LParen => self.pattern_target_is_binding(),
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
                 self.pattern_target_is_binding()
             }
-            // D-DOTCTOR1: `Type.{ … } @=` — new form.
+            // D-DOTCTOR1: `Type.{ … } ::` — new form.
             TokKind::Ident(_)
                 if matches!(self.peek2().kind, TokKind::Dot)
                     && matches!(self.peek3().kind, TokKind::LBrace) =>
@@ -2349,7 +2501,7 @@ impl<'a> Parser<'a> {
                 if depth == 0 {
                     return matches!(
                         self.toks.get(i + 1).map(|t| &t.kind),
-                        Some(TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq)
+                        Some(TokKind::HashEq | TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq)
                     );
                 }
             }
@@ -2359,7 +2511,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-DOTCTOR1: like `pattern_target_is_binding` but skips `Ident Dot` before
-    /// the opening `{`, for the `Type.{ … } @= expr` destructuring form.
+    /// the opening `{`, for the `Type.{ … } #= expr` destructuring form.
     fn pattern_target_is_binding_dot(&self) -> bool {
         let mut i = self.pos;
         let n = self.toks.len();
@@ -2386,7 +2538,7 @@ impl<'a> Parser<'a> {
                 if depth == 0 {
                     return matches!(
                         self.toks.get(i + 1).map(|t| &t.kind),
-                        Some(TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq)
+                        Some(TokKind::HashEq | TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq)
                     );
                 }
             }

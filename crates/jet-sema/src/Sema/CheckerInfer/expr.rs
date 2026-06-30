@@ -680,7 +680,7 @@ impl<'a> Checker<'a> {
                         "E2712",
                         "`$` splice used outside a comptime context".to_string(),
                         "`$name` looks up a name in the comptime scope and is only valid inside a `derive` body, `comptime {}` block, or comptime binding".to_string(),
-                        "remove the `$` prefix, or move this code into a `comptime { … }` block or a `derive` body".to_string(),
+                        "remove the `$` prefix, or move this code into a `comptime { ... }` block or a `derive` body".to_string(),
                         Some(*span),
                     ));
                 }
@@ -724,7 +724,7 @@ impl<'a> Checker<'a> {
                     "list spread can't build a fixed-size `[T#N]` list".to_string(),
                     "spread expands a growable list — a `[T#N]` has a fixed compile-time length"
                         .to_string(),
-                    "use a growable `[T]` binding (`@=`/`:=`) instead of `[T#N]`".to_string(),
+                    "use a growable `[T]` binding (`#=`/`:=`) instead of `[T#N]`".to_string(),
                     Some(span),
                 ));
                 return None;
@@ -1387,9 +1387,6 @@ impl<'a> Checker<'a> {
                     SwizzleParse::NotSwizzle => {}
                 }
             }
-            if let Some(fty) = core_struct_field(type_name, member) {
-                return Some(fty);
-            }
             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, type_name) {
                     for (fname, _, fty, is_ref, _) in fields {
@@ -1420,6 +1417,9 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+            }
+            if let Some(fty) = core_struct_field(type_name, member) {
+                return Some(fty);
             }
         }
         if let Type::Apply { name, args } = t {

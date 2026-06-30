@@ -346,6 +346,8 @@ mod tests {
             published_schema_span: None,
             is_single_use: false,
             single_use_span: None,
+            is_must_use: false,
+            must_use_span: None,
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),

@@ -210,7 +210,7 @@ fn line_id(line: &str) -> Option<String> {
         return None;
     }
     let rest = &line[2..];
-    let end = rest.find(' ').or_else(|| rest.find('—'))?;
+    let end = rest.find(' ').or_else(|| rest.find('\u{2014}'))?;
     let id = &rest[..end];
     // S/N decisions (language surface) and U decisions (unified ecosystem,
     // U1–U7) are enforced. D-JPK* IDs start with `D` and are left alone.

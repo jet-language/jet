@@ -23,7 +23,7 @@ fn codes_of(src: &str) -> Vec<String> {
 #[test]
 fn same_unit_arithmetic_compiles() {
     let src = format!(
-        "{}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn main() {{ t @= add(Usd(1.0), Usd(2.0)); print(\"{{(t.raw())}}\") }}\n",
+        "{}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn main() {{ t #= add(Usd(1.0), Usd(2.0)); print(\"{{(t.raw())}}\") }}\n",
         FAMILY
     );
     let codes = codes_of(&src);
@@ -35,7 +35,7 @@ fn same_unit_arithmetic_compiles() {
 #[test]
 fn cross_unit_mix_is_e0127() {
     let src = format!(
-        "{}\nfn main() {{ bad @= Usd(1.0) + Eur(2.0); print(\"{{(bad.raw())}}\") }}\n",
+        "{}\nfn main() {{ bad #= Usd(1.0) + Eur(2.0); print(\"{{(bad.raw())}}\") }}\n",
         FAMILY
     );
     let codes = codes_of(&src);
@@ -66,7 +66,7 @@ fn multi_word_member_pascal_cases() {
     let src = r#"
 #UnitFamily(speed) { m_per_s }
 fn main() {
-    v @= MPerS(3.0)
+    v #= MPerS(3.0)
     print("{(v.raw())}")
 }
 "#;
@@ -79,7 +79,7 @@ fn main() {
 #[test]
 fn family_erases_in_codegen() {
     let src = format!(
-        "{}\nfn main() {{ t @= Usd(1.0); print(\"{{(t.raw())}}\") }}\n",
+        "{}\nfn main() {{ t #= Usd(1.0); print(\"{{(t.raw())}}\") }}\n",
         FAMILY
     );
     let out = jet::compile(&src).expect("should compile");

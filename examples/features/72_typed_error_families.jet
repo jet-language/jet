@@ -40,14 +40,14 @@ fn parse_int(s: String) -> Int ? ParseErr {
 
 // Both `?` calls cross error-type boundaries via the declared conversions.
 fn load(path: String) -> Int ? AppErr {
-    raw  @= read_file(path)?   // FileErr  -> AppErr.File  (declared)
-    port @= parse_int(raw)?    // ParseErr -> AppErr.Parse (declared)
+    raw  #= read_file(path)?   // FileErr  -> AppErr.File  (declared)
+    port #= parse_int(raw)?    // ParseErr -> AppErr.Parse (declared)
     return ok(port)
 }
 
 fn main() {
     // Happy path: `?` applies declared conversions; fallback to 0.
-    n @= load("config.txt") ?? 0
+    n #= load("config.txt") ?? 0
     print(n)
 
     // Trigger FileErr -> AppErr conversion via ?

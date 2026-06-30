@@ -9,7 +9,7 @@
 use core.fs as fs
 
 fn main() {
-    path @= "/tmp/jet_scap_grant.txt"
+    path #= "/tmp/jet_scap_grant.txt"
 
     // Filesystem + console authority is granted only for the extent of this
     // block. Like `#Caps`, the block is bounded to the granted set — every effect
@@ -17,7 +17,7 @@ fn main() {
     // it has no capability (E0712). The handle `caps` may not escape (E0711).
     #Grant(Fs, Io) { caps ->
         fs.write(path, "granted\nthen revoked") ?? panic("write failed")
-        text @= fs.read(path) ?? panic("read failed")
+        text #= fs.read(path) ?? panic("read failed")
         print(text.to_upper())
     }
 

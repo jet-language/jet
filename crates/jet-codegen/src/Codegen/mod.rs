@@ -25,6 +25,7 @@ mod Statement;
 pub mod TIR;
 mod Tuples;
 mod Utils;
+mod Web;
 
 pub(crate) use CModule::*;
 pub(crate) use Context::*;
@@ -33,6 +34,7 @@ pub(crate) use Items::*;
 pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
+pub use Web::{emit_web, WebArtifacts};
 
 /// Emitted at the top of every program: core runtime helpers used by generated Rust.
 const PRELUDE: &str = include_str!("../Prelude/Core.rs");
@@ -234,6 +236,9 @@ fn jet_cov_dump() {
 }
 "#;
 const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
+const SCHEDULER_PRELUDE: &str = include_str!("../Prelude/Scheduler.rs");
+/// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
+const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 
@@ -788,6 +793,8 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     out.push_str(MEM_PRELUDE);
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
+        out.push_str(SCHEDULER_PRELUDE);
+        out.push_str(UI_PRELUDE);
     }
     out.push('\n');
 
@@ -896,6 +903,8 @@ pub fn emit_bundle_tests_cov(
     }
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
+        out.push_str(SCHEDULER_PRELUDE);
+        out.push_str(UI_PRELUDE);
     }
     out.push('\n');
 
@@ -1009,6 +1018,8 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     }
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
+        out.push_str(SCHEDULER_PRELUDE);
+        out.push_str(UI_PRELUDE);
     }
     out.push('\n');
 

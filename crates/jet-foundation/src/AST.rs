@@ -412,6 +412,10 @@ pub struct Program {
     /// S16 (M6): `import` declarations at the top of this file.
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// D-WASM1 (c123): optional file-level web bucket ceiling (`js target;` / `wasm target;`).
+    pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
+    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
+    pub pub_file: bool,
 }
 
 /// S16: `import "path" [as alias];` or `import name [as alias];`
@@ -514,6 +518,16 @@ pub struct ProgramBundle {
     /// Core-module imports and C imports are absent (they have no loaded module index).
     /// Empty for single-module bundles created inline (compile_src / check_eval paths).
     pub import_targets: std::collections::HashMap<(usize, Span), usize>,
+    /// D-RINGLAYER1: optional `layer:` ceiling from `pkg.jet`.
+    pub layer_ceiling: Option<crate::RingLayer::RuntimeLayer>,
+    /// D-RINGLAYER1: inferred minimum runtime layer for this package.
+    pub inferred_layer: crate::RingLayer::RuntimeLayer,
+    /// D-WASM1: resolved web bucket per mangled function key (filled by sema).
+    pub web_partitions: std::collections::HashMap<String, crate::WebPartition::WebBucket>,
+    /// True when compiling for web (partition checks enforced).
+    pub web_partition_enforced: bool,
+    /// D-WASM1: human-readable partition report (`--explain-partition`).
+    pub web_partition_report: Option<String>,
 }
 
 #[derive(Debug)]
@@ -526,6 +540,10 @@ pub struct LoadedModule {
     pub alias: String,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// D-WASM1: optional file-level web bucket ceiling.
+    pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
+    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
+    pub pub_file: bool,
 }
 
 /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.
@@ -676,6 +694,8 @@ pub struct CodeModule {
     pub is_package_pub: bool,
     /// None = file declaration (`module math;`), Some = inline body.
     pub body: Option<Vec<Item>>,
+    /// D-WASM1: `module name js { … }` / `module name wasm { … }` ceiling override.
+    pub web_target: Option<crate::WebPartition::WebBucket>,
     pub span: Span,
 }
 
@@ -1121,6 +1141,14 @@ pub struct Func {
     /// requires the receiver/argument be in `from` (E0150 otherwise) and advances it
     /// to `to`. The `Span` points at the marker. Erased in codegen (I3).
     pub state_transition: Option<StateTransition>,
+    /// D-REACTCORE1: `#Reactive fn` — reactive effect scope; must not return a value.
+    pub is_reactive: bool,
+    /// D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / `#MustUse` method — callers must not
+    /// drop the return value as a bare expression statement (E0419).
+    pub is_must_use: bool,
+    pub must_use_span: Option<Span>,
+    /// D-WASM1: `#Wasm` / `#Js` / `#WasmExport` partition marker on the function.
+    pub web_marker: Option<crate::WebPartition::WebPartitionMarker>,
     pub body: Vec<Stmt>,
 }
 
@@ -1200,6 +1228,10 @@ pub struct StructDef {
     /// marker for diagnostics.
     pub is_single_use: bool,
     pub single_use_span: Option<Span>,
+    /// D-MUSTUSE1 (c18iwxqx): `#MustUse` marker before `struct` — values of this
+    /// type cannot be silently ignored as a bare expression statement (E0419).
+    pub is_must_use: bool,
+    pub must_use_span: Option<Span>,
     /// D-REPRC1 (ratified; D-REPRC1 = B): `#layout(…)` attribute. `None` = default layout.
     pub layout: Option<StructLayout>,
     pub layout_span: Option<Span>,
@@ -1318,6 +1350,10 @@ pub struct EnumDef {
     /// `StructDef::is_single_use`.
     pub is_single_use: bool,
     pub single_use_span: Option<Span>,
+    /// D-MUSTUSE1 (c18iwxqx): `#MustUse` marker before `enum`. See
+    /// `StructDef::is_must_use`.
+    pub is_must_use: bool,
+    pub must_use_span: Option<Span>,
     /// D-SERDE3/7/8: container-level serde markers (`RenameAll`, `Tag`,
     /// `Untagged`, `DenyUnknownFields`) attached before the `enum`. Empty when none.
     pub serde_markers: Vec<Marker>,
@@ -1651,6 +1687,12 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-REACTCORE1 (ratified 2026-06-27, opt D): `#Reactive { … }` in statement
+    /// position. Lowers to a reactive effect registration at codegen.
+    Reactive {
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-IGNORERET2=A (ratified 2026-06-28): `#Suppress(MustUse) { … }` — a
     /// lexical scope in which all fallible / `#MustUse` statement results are
     /// allowed to be silently dropped without `.drop("reason")`.  Erases to a
@@ -1809,6 +1851,7 @@ impl Stmt {
             | Stmt::CountedLoop { span, .. }
             | Stmt::Unsafe { span, .. }
             | Stmt::Impure { span, .. }
+            | Stmt::Reactive { span, .. }
             | Stmt::SuppressMustUse { span, .. }
             | Stmt::Region { span, .. }
             | Stmt::TaskGroup { span, .. }
@@ -2328,6 +2371,9 @@ pub struct FuncSig {
     pub is_pure: bool,
     /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
     pub is_sanitizer: bool,
+    /// D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method — return value cannot be
+    /// silently ignored as a bare expression statement (E0419).
+    pub is_must_use: bool,
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,

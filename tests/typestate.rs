@@ -102,7 +102,7 @@ impl Box {
     fn get(self) -> Int { return self.n }
 }
 fn main() {
-    b @= Box.{ n: 1 }
+    b #= Box.{ n: 1 }
     print(b.get())
 }
 "#;

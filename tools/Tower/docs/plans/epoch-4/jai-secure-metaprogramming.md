@@ -919,13 +919,13 @@ build: Build.{
 
 #Build("generate assets and schema")
 fn build(ctx: BuildContext) #(Fs, Net) -> BuildPlan ? {
-    assets @= ctx.find("assets/**/*.png")
-    schema @= ctx.fetch(
+    assets #= ctx.find("assets/**/*.png")
+    schema #= ctx.fetch(
         "https://example.com/schema.json",
         sha256: "..."
     )?
 
-    source @= generate_schema_module(schema)
+    source #= generate_schema_module(schema)
     ctx.generate("generated/schema.jet", source)?
 
     return ctx.plan(

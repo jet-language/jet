@@ -1,7 +1,7 @@
-Error [E0202]: parameter `x` requires write access (`~`) at the call site
-  --> tests/ui/missing_mut_call.jet:6:11
+Error [E0998]: explicit mutable binding uses `name: Type :=`, not `name: Type :=`
+  --> tests/ui/missing_mut_call.jet:5:14
     |
-  6 |     touch(x)
-    |           ^
- Why: `touch` needs to edit (`~`) this value; passing it without `~` grants only read access
- Fix: write `~x` when calling `touch`
+  5 |      x: Int  = 1
+    |              ^
+ Why: when the type is written, immutable uses `#=` and mutable uses `:=` (D-BIND3)
+ Fix: write `x: <Type> :=` instead of `x: <Type> =`

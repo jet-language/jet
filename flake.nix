@@ -21,6 +21,7 @@
         jetRuntimePath = pkgs.lib.makeBinPath [
           pkgs.rustc
           pkgs.stdenv.cc
+          pkgs.lld
         ];
 
         jet = pkgs.rustPlatform.buildRustPackage {
@@ -89,6 +90,7 @@
             cargo
             rustc
             gcc
+            lld
             qemu
             nodejs_22
             nixfmt

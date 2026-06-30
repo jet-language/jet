@@ -184,10 +184,14 @@ mod tests {
             is_unsafe: false,
             is_pure: false,
             is_sanitizer: false,
+            is_reactive: false,
             declared_effects: None,
             effect_via: None,
             state_requires: None,
             state_transition: None,
+            web_marker: None,
+            is_must_use: false,
+            must_use_span: None,
             body: Vec::new(),
         }
     }
@@ -212,6 +216,8 @@ mod tests {
             published_schema_span: None,
             is_single_use: false,
             single_use_span: None,
+            is_must_use: false,
+            must_use_span: None,
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),

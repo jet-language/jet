@@ -176,6 +176,7 @@ fn main() {
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+                    is_must_use: f.is_must_use,
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
@@ -250,6 +251,7 @@ fn main() {
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+                    is_must_use: f.is_must_use,
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
@@ -281,7 +283,7 @@ fn transitive_clean_program_no_error() {
     return n * n
 }
 fn main() {
-    x @= square(5)
+    x #= square(5)
 }
 "#;
     let (toks, _) = jet::Lexer::lex(src);
@@ -316,6 +318,7 @@ fn main() {
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+                    is_must_use: f.is_must_use,
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
@@ -501,5 +504,33 @@ fn eval_normal_void_main_passes_sema() {
         diags.is_empty(),
         "`#Pure fn main()` should pass eval sema, got: {:?}",
         diags
+    );
+}
+
+/// D-REACTCORE1: `#Reactive { … }` parses in statement position.
+#[test]
+fn parse_reactive_block_stmt() {
+    let src = r#"
+fn main() {
+    #Reactive {
+        print(1)
+    }
+}
+"#;
+    let (toks, lex_diags) = jet::Lexer::lex(src);
+    assert!(lex_diags.is_empty(), "lex: {:?}", lex_diags);
+    let prog = jet::Parser::parse(&toks).expect("parse ok");
+    let main = prog
+        .items
+        .iter()
+        .find_map(|i| match i {
+            jet::AST::Item::Func(f) if f.name == "main" => Some(f),
+            _ => None,
+        })
+        .expect("main");
+    assert!(
+        main.body.iter().any(|s| matches!(s, jet::AST::Stmt::Reactive { .. })),
+        "expected Stmt::Reactive in main body, got {:?}",
+        main.body
     );
 }

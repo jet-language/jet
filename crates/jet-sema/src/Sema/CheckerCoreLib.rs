@@ -1104,6 +1104,85 @@ impl<'a> Checker<'a> {
                     args: vec![elem],
                 });
             }
+            // D-SIGNAL1: `reactive.computed` is a canonical alias for `derived`.
+            ("jet.reactive", "computed") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("computed", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let lam_ty = self.infer(&mut args[0].expr);
+                let elem = match &lam_ty {
+                    Some(Type::Fn { params, ret, .. }) => {
+                        if !params.is_empty() {
+                            self.diags.push(reactive_lambda_arity(
+                                "computed",
+                                params.len(),
+                                args[0].expr.span(),
+                            ));
+                            return None;
+                        }
+                        match ret {
+                            Some(r) => (**r).clone(),
+                            None => {
+                                self.diags.push(reactive_derived_unit(args[0].expr.span()));
+                                return None;
+                            }
+                        }
+                    }
+                    Some(other) => {
+                        self.diags
+                            .push(reactive_not_lambda("computed", other, args[0].expr.span()));
+                        return None;
+                    }
+                    None => return None,
+                };
+                if !self.reactive_value_ok(&elem, args[0].expr.span(), "computed") {
+                    return None;
+                }
+                return Some(Type::Apply {
+                    name: crate::Syntax::TYPE_COMPUTED.to_string(),
+                    args: vec![elem],
+                });
+            }
+            // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(() => { … })` — reactive
+            // measure/layout/paint loop; re-runs when a signal read inside changes.
+            ("core.ui", "reactive_render") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("reactive_render", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let lam_ty = self.infer(&mut args[0].expr);
+                match &lam_ty {
+                    Some(Type::Fn { params, .. }) => {
+                        if !params.is_empty() {
+                            self.diags.push(reactive_lambda_arity(
+                                "reactive_render",
+                                params.len(),
+                                args[0].expr.span(),
+                            ));
+                            return None;
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(reactive_not_lambda(
+                            "reactive_render",
+                            other,
+                            args[0].expr.span(),
+                        ));
+                        return None;
+                    }
+                    None => return None,
+                }
+                return None;
+            }
             // D-REACT1=B: reactive.effect(() => { … }) runs the body now and again
             // whenever a signal it read changes. The body is a zero-parameter,
             // unit-returning closure; the call itself yields nothing.
@@ -1565,6 +1644,15 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// D-MUSTUSE1 (c18iwxqx): built-in handle types whose bare statement result must
+/// not be silently ignored (E0419). `scope.guard` returns `ScopeGuard` — bind it
+/// or cleanup runs at end of the statement, not scope exit. `TransactionGuard` is
+/// a phantom return from `on_commit`/`on_rollback` (registration is side-effect);
+/// those calls are intentionally ignorable. `Task` stays on L1101.
+pub(crate) fn core_must_use_type(name: &str) -> bool {
+    matches!(name, "ScopeGuard")
+}
+
 pub(crate) fn unit_ty() -> Type {
     Type::Named("Unit".to_string())
 }
@@ -1648,6 +1736,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Measurement"
         // D-PENDING1=B: async UI state machine.
         | "Loadable"
+        // D-RENDERTGT2=A (c133 M1): UI backend seam types.
+        | "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "InputEvent"
+        | "EventResult" | "NullBackend" | "TuiBackend"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
@@ -1685,6 +1776,16 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
         ("DirEntry", "name" | "path") => Some(Type::String),
         ("DirEntry", "is_dir") => Some(Type::Bool),
+        // D-RENDERTGT2=A (c133 M1): UI geometry fields.
+        ("Point", "x" | "y") => Some(Type::Float),
+        ("Size", "width" | "height") => Some(Type::Float),
+        ("Rect", "x" | "y" | "width" | "height") => Some(Type::Float),
+        (
+            "SizeConstraint",
+            "min_width" | "min_height" | "max_width" | "max_height",
+        ) => Some(Type::Float),
+        ("UiNode", "label") => Some(Type::String),
+        ("UiNode", "width" | "height") => Some(Type::Float),
         ("ProcessResult", "code") => Some(Type::Int),
         ("ProcessResult", "output" | "errors") => Some(Type::String),
         // E2-M10: HTTP request fields exposed to handlers.
@@ -2815,28 +2916,28 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::String, Type::String)),
         )),
-        // D-DEP-ARCHIVE1=A: jet.archive — gzip compress/decompress via the `flate2` crate FFI bridge.
+        // D-DEP-ARCHIVE1=A: core.archive — gzip compress/decompress via the `flate2` crate FFI bridge.
         // Both functions take `[U8]` and return `[U8]`. Compression is infallible; decompression
         // returns an empty list on corrupt input (no error path exposed to the caller).
-        ("jet.archive", "gzip_compress" | "gzip_decompress") => Some((
+        ("core.archive", "gzip_compress" | "gzip_decompress") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::List(Box::new(u8_ty()))),
         )),
         // D-DEP-ARCHIVE1=A: zip_compress — create a single-entry zip archive.
         // Takes (name: String, data: [U8]) → [U8].
-        ("jet.archive", "zip_compress") => Some((
+        ("core.archive", "zip_compress") => Some((
             vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
             Some(Type::List(Box::new(u8_ty()))),
         )),
         // D-DEP-ARCHIVE1=A: zip_decompress — extract first entry from a zip archive.
         // Takes [U8] → [U8]. Returns empty list on invalid input.
-        ("jet.archive", "zip_decompress") => Some((
+        ("core.archive", "zip_decompress") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::List(Box::new(u8_ty()))),
         )),
         // D-DEP-ARCHIVE1=A: tar_add — append/replace a named entry in a tar archive.
         // Takes (archive: [U8], name: String, data: [U8]) → [U8].
-        ("jet.archive", "tar_add") => Some((
+        ("core.archive", "tar_add") => Some((
             vec![
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::String),
@@ -2846,13 +2947,13 @@ pub fn core_fixed_sig(
         )),
         // D-DEP-ARCHIVE1=A: tar_get — extract a named entry from a tar archive.
         // Takes (archive: [U8], name: String) → [U8]. Empty on not-found or bad input.
-        ("jet.archive", "tar_get") => Some((
+        ("core.archive", "tar_get") => Some((
             vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::String)],
             Some(Type::List(Box::new(u8_ty()))),
         )),
         // D-DEP-ARCHIVE1=A: tar_names_json — list entry names as a JSON array string.
         // Takes [U8] → String. Returns "[]" on empty or invalid archive.
-        ("jet.archive", "tar_names_json") => Some((
+        ("core.archive", "tar_names_json") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
@@ -2946,6 +3047,41 @@ pub fn core_fixed_sig(
         // D-ADAPTFID1=A: adaptive fidelity signal.
         ("core.perf", "fidelity") => Some((vec![], Some(float))),
         ("core.perf", "set_fidelity") => Some((vec![(read, float)], Some(unit))),
+        // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
+        ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
+        ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TuiBackend".to_string())))),
+        ("core.ui", "point") => Some((vec![(read, float.clone()), (read, float)], Some(Type::Named("Point".to_string())))),
+        ("core.ui", "size") => Some((vec![(read, float.clone()), (read, float)], Some(Type::Named("Size".to_string())))),
+        ("core.ui", "rect") => Some((
+            vec![
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float),
+            ],
+            Some(Type::Named("Rect".to_string())),
+        )),
+        ("core.ui", "constraint") => Some((
+            vec![
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float),
+            ],
+            Some(Type::Named("SizeConstraint".to_string())),
+        )),
+        ("core.ui", "node") => Some((
+            vec![(read, string.clone()), (read, float.clone()), (read, float)],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        ("core.ui", "key_event") => Some((
+            vec![(read, string)],
+            Some(Type::Named("InputEvent".to_string())),
+        )),
+        ("core.ui", "resize_event") => Some((
+            vec![(read, float.clone()), (read, float)],
+            Some(Type::Named("InputEvent".to_string())),
+        )),
         _ => None,
     }
 }
@@ -3084,6 +3220,30 @@ pub(crate) fn parsed_args_method_return(
     }
 }
 
+/// D-RENDERTGT2=A (c133 M1/M2): type-check method calls on UI backends.
+pub(crate) fn ui_backend_method_return(
+    backend: &str,
+    method: &str,
+    n_args: usize,
+    _span: Span,
+    _diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let size_ty = Type::Named("Size".to_string());
+    let unit = unit_ty();
+    match (backend, method, n_args) {
+        ("NullBackend" | "TuiBackend", "measure", 2) => Some(Some(size_ty)),
+        ("NullBackend" | "TuiBackend", "layout", 2) => Some(Some(unit)),
+        ("NullBackend" | "TuiBackend", "paint", 1) => Some(Some(unit)),
+        ("NullBackend" | "TuiBackend", "on_event", 1) => {
+            Some(Some(Type::Named("EventResult".to_string())))
+        }
+        ("NullBackend", "commands", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("TuiBackend", "frame_lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("TuiBackend", "render_count", 0) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
 pub(crate) fn core_module_items(module: &str) -> Vec<String> {
     let items: &[&str] = match module {
         "core.fs" => &[
@@ -3185,7 +3345,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "split",
         ],
         // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip + tar.
-        "jet.archive" => &[
+        "core.archive" => &[
             "gzip_compress",
             "gzip_decompress",
             "zip_compress",
@@ -3204,6 +3364,19 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.async.loadable" => &["idle", "loading", "loaded", "failed"],
         // D-ADAPTFID1=A: adaptive fidelity signal.
         "core.perf" => &["fidelity", "set_fidelity"],
+        // D-RENDERTGT2=A (c133 M1): UI backend seam.
+        "core.ui" => &[
+            "null_backend",
+            "tui_backend",
+            "reactive_render",
+            "point",
+            "size",
+            "rect",
+            "constraint",
+            "node",
+            "key_event",
+            "resize_event",
+        ],
         // D-APPROX1=A: approximate sketch data structures.
         "core.sketch.hll" => &["new"],
         "core.sketch.tdigest" => &["new"],

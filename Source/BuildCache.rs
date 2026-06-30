@@ -70,9 +70,11 @@ mod tests {
         let b = cache_key("fn main() {}", "small");
         let c = cache_key("fn main() {}", "release");
         let d = cache_key("fn main() {}", "debug");
+        let e = cache_key("fn main() {}", "ci");
         assert_ne!(a, b);
         assert_ne!(a, c);
         assert_ne!(a, d);
+        assert_ne!(a, e);
         assert_ne!(c, d);
         assert_eq!(a.len(), 64);
     }

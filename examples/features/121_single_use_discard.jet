@@ -31,13 +31,13 @@ fn redeem(ticket: ^Ticket) {
 
 fn main() {
     // The ordinary path: the ticket is consumed by being redeemed.
-    a @= issue("A")
+    a #= issue("A")
     redeem(^a)
 
     // The audited discard: this ticket is being voided on purpose — the event
     // it admitted to was cancelled, so there is nothing left to redeem. We say
     // so in the `#Unsafe` reason, and `drop` discharges the consume duty.
-    b @= issue("B")
+    b #= issue("B")
     #Unsafe("event cancelled; the ticket admits to nothing, so voiding it is correct") {
         drop(b)
     }

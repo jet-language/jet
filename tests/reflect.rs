@@ -45,10 +45,14 @@ fn method(name: &str, is_pub: bool) -> Func {
         is_unsafe: false,
         is_pure: false,
         is_sanitizer: false,
+        is_reactive: false,
         declared_effects: None,
         effect_via: None,
         state_requires: None,
-        state_transition: None,
+            state_transition: None,
+            web_marker: None,
+        is_must_use: false,
+        must_use_span: None,
         body: Vec::new(),
     }
 }
@@ -91,6 +95,8 @@ fn type_info_exposes_methods_type_params_and_markers() {
         layout_span: None,
         serde_markers: Vec::new(),
         type_markers: Vec::new(),
+        is_must_use: false,
+        must_use_span: None,
     };
     let info = build_struct_type_info(&s);
     assert_eq!(list_len(struct_field(&info, "fields")), 2);
@@ -124,6 +130,8 @@ fn field_info_carries_visibility() {
         layout_span: None,
         serde_markers: Vec::new(),
         type_markers: Vec::new(),
+        is_must_use: false,
+        must_use_span: None,
     };
     let info = build_struct_type_info(&s);
     let CtValue::List(fields) = struct_field(&info, "fields") else {

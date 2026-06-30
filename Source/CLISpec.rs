@@ -81,6 +81,11 @@ const FLAG_HELP: &[(&str, &str)] = &[
     // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
     ("release", "with `build`/`run`: use the release profile (D-BUILDPROFILE1)"),
     ("profile", "with `build`/`run`: named build profile --profile=<name> (D-BUILDPROFILE1)"),
+    ("target", "with `build`: cross-compile for a rustc target triple or `web` (E2-M15)"),
+    (
+        "explain-partition",
+        "with `build --target=web`: print the JS/WASM partition report (D-WASM1)",
+    ),
 ];
 
 /// Human description for a flag (global or per-command), for man/completions.
@@ -99,7 +104,7 @@ pub fn flag_help(name: &str) -> &'static str {
 /// is generated from it (see `command_names`).
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "check", summary: "look for problems, build nothing", flags: &["json"], arg: Arg::File },
-    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json", "capabilities-json", "release", "profile"], arg: Arg::File },
+    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json", "capabilities-json", "release", "profile", "target", "explain-partition"], arg: Arg::File },
     CommandSpec { name: "run", summary: "build, then run (or run a project)", flags: &["small", "emit-rust", "json", "release", "profile"], arg: Arg::File },
     CommandSpec { name: "test", summary: "compile and run top-level test blocks", flags: &["json", "update-snapshots", "u", "coverage"], arg: Arg::Path },
     CommandSpec { name: "emit", summary: "emit the generated Rust source (D-TOOL3)", flags: &["rust"], arg: Arg::File },

@@ -112,7 +112,139 @@ impl From<jet::Jetpack::PackageManifest::BuildOptimize> for OptimizeLevel {
     }
 }
 
-#[derive(Clone, Copy)]
+/// D-BUILDPROFILE1: rustc flags and build env derived from a profile definition.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ProfileConfig {
+    pub optimize: OptimizeLevel,
+    pub debug_info: bool,
+    pub small: bool,
+    pub panic_abort: bool,
+    pub features: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+impl ProfileConfig {
+    pub(crate) fn release() -> Self {
+        Self {
+            optimize: OptimizeLevel::Full,
+            debug_info: false,
+            small: false,
+            panic_abort: false,
+            features: Vec::new(),
+            env: Vec::new(),
+        }
+    }
+
+    pub(crate) fn debug() -> Self {
+        Self {
+            optimize: OptimizeLevel::None,
+            debug_info: true,
+            small: false,
+            panic_abort: false,
+            features: Vec::new(),
+            env: Vec::new(),
+        }
+    }
+
+    pub(crate) fn ci() -> Self {
+        Self {
+            optimize: OptimizeLevel::Basic,
+            debug_info: true,
+            small: false,
+            panic_abort: false,
+            features: Vec::new(),
+            env: Vec::new(),
+        }
+    }
+
+    pub(crate) fn from_def(def: &jet::Jetpack::PackageManifest::BuildProfileDef) -> Self {
+        use jet::Jetpack::PackageManifest::BuildPanic;
+        Self {
+            optimize: OptimizeLevel::from(def.optimize),
+            debug_info: def.debug_info,
+            small: def.small,
+            panic_abort: matches!(def.panic, Some(BuildPanic::Abort)),
+            features: def.features.clone(),
+            env: def.env.clone(),
+        }
+    }
+
+    /// Cache-key suffix for user-defined profiles — encodes every flag that
+    /// affects the emitted binary.
+    pub(crate) fn settings_tag(&self) -> String {
+        let mut parts = vec![self.optimize.cache_tag().to_string()];
+        if self.debug_info {
+            parts.push("dbg".into());
+        }
+        if self.small {
+            parts.push("small".into());
+        }
+        if self.panic_abort {
+            parts.push("panic=abort".into());
+        }
+        if !self.features.is_empty() {
+            parts.push(format!("feat:{}", self.features.join("+")));
+        }
+        if !self.env.is_empty() {
+            let mut env = self.env.clone();
+            env.sort_by(|a, b| a.0.cmp(&b.0));
+            parts.push(format!(
+                "env:{}",
+                env.iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        parts.join(";")
+    }
+
+    pub(crate) fn apply_rustc(&self, cmd: &mut Command, ffi: bool) {
+        if self.small {
+            cmd.arg("-C")
+                .arg("opt-level=z")
+                .arg("-C")
+                .arg("panic=abort")
+                .arg("-C")
+                .arg("strip=symbols");
+            if !ffi {
+                cmd.arg("-C").arg("lto=fat");
+            }
+            return;
+        }
+        match self.optimize {
+            OptimizeLevel::None => {}
+            OptimizeLevel::Basic => {
+                cmd.arg("-O");
+            }
+            OptimizeLevel::Full => {
+                cmd.arg("-C").arg("opt-level=3");
+            }
+        }
+        if self.debug_info {
+            cmd.arg("-C").arg("debuginfo=2");
+        } else if !matches!(self.optimize, OptimizeLevel::None) {
+            cmd.arg("-C").arg("strip=symbols");
+        }
+        if self.panic_abort {
+            cmd.arg("-C").arg("panic=abort");
+        }
+        if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
+            cmd.arg("-C").arg("lto=thin");
+        }
+        for feat in &self.features {
+            cmd.arg("--cfg").arg(format!("feature=\"{feat}\""));
+        }
+    }
+
+    pub(crate) fn apply_env(&self, cmd: &mut Command) {
+        for (key, value) in &self.env {
+            cmd.env(key, value);
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) enum BuildProfile {
     /// Default: speed-oriented (`-O`, thin LTO). No `--profile` flag.
     Default,
@@ -120,12 +252,66 @@ pub(crate) enum BuildProfile {
     Release,
     /// D-BUILDPROFILE1: `--profile=debug`. No optimization.
     Debug,
-    /// D-BUILDPROFILE1: user-defined profile with an explicit optimize level.
-    Named(OptimizeLevel),
+    /// D-BUILDPROFILE1: `--profile=ci`. Optimized with debug symbols for CI.
+    Ci,
+    /// D-BUILDPROFILE1: user-defined or manifest-overridden profile settings.
+    Named {
+        name: String,
+        config: ProfileConfig,
+    },
     /// S15: size-oriented (`opt-level=z`, fat LTO, `panic=abort`).
     Small,
     /// E2-M15: freestanding / embedded — no OS, only core APIs; `panic=abort`.
     Freestanding,
+}
+
+impl BuildProfile {
+    pub(crate) fn cache_tag(&self) -> String {
+        match self {
+            BuildProfile::Default => "default".to_string(),
+            BuildProfile::Release => "release".to_string(),
+            BuildProfile::Debug => "debug".to_string(),
+            BuildProfile::Ci => "ci".to_string(),
+            BuildProfile::Named { name, config } => {
+                format!("profile:{name};{}", config.settings_tag())
+            }
+            BuildProfile::Small => "small".to_string(),
+            BuildProfile::Freestanding => "freestanding".to_string(),
+        }
+    }
+
+    pub(crate) fn config(&self) -> ProfileConfig {
+        match self {
+            BuildProfile::Default => ProfileConfig {
+                optimize: OptimizeLevel::Basic,
+                debug_info: false,
+                small: false,
+                panic_abort: false,
+                features: Vec::new(),
+                env: Vec::new(),
+            },
+            BuildProfile::Release => ProfileConfig::release(),
+            BuildProfile::Debug => ProfileConfig::debug(),
+            BuildProfile::Ci => ProfileConfig::ci(),
+            BuildProfile::Named { config, .. } => config.clone(),
+            BuildProfile::Small => ProfileConfig {
+                optimize: OptimizeLevel::Basic,
+                debug_info: false,
+                small: true,
+                panic_abort: true,
+                features: Vec::new(),
+                env: Vec::new(),
+            },
+            BuildProfile::Freestanding => ProfileConfig {
+                optimize: OptimizeLevel::Basic,
+                debug_info: false,
+                small: true,
+                panic_abort: true,
+                features: Vec::new(),
+                env: Vec::new(),
+            },
+        }
+    }
 }
 
 pub(crate) fn usage() -> String {
@@ -202,6 +388,7 @@ flags:
   --small                      with build/run: smallest binary (S15)
   --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
   --target=<triple>            with build: cross-compile for a rustc target triple (E2-M15)
+  --explain-partition          with build --target=web: print the JS/WASM partition report (D-WASM1)
   --locked                     with fetch: verify only, refuse network
   --verbose, -v                with build: print the bridge steps
   --json                       emit machine-readable diagnostics
@@ -369,6 +556,7 @@ fn main() {
     let cross_target: Option<String> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    let explain_partition = jet_argv.iter().any(|a| a == "--explain-partition");
     // D-BUILDPROFILE1: `--release` is sugar for `--profile=release`.
     // `--profile=<name>` selects a named profile. Resolved against pkg.jet
     // in run_compile_cmd; only the name is collected here.
@@ -760,6 +948,7 @@ fn main() {
                                     freestanding,
                                     allow_impure,
                                     cross_target.as_deref(),
+                                    explain_partition,
                                     verbose,
                                     capabilities_json,
                                     sbom,
@@ -859,6 +1048,7 @@ fn main() {
                 freestanding,
                 allow_impure,
                 cross_target.as_deref(),
+                explain_partition,
                 verbose,
                 capabilities_json,
                 sbom,
