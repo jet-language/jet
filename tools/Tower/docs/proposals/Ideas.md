@@ -30,7 +30,10 @@ One card per bullet; `Bundle-risk` subfeatures are noted in the card body and sp
 - [#36 decide] Verse style concurrency/async task types (race, wait all, etc.) [Verse Concurrency](https://verselang.github.io/book/14_concurrency/)
 - [#37 decide] Allow ignore multiple return values -> Jai can ignore errors: `content := read_entire_file(...);` works, even though the function returns an error. could accept the error value as `content, ok := read_entire_file(...);`
 - [#38 ready] Broad gated build-time I/O: allow comptime code to read env vars, hit the network, run a subprocess, or codegen at build time (Jai's #run / Zig @embedFile-plus territory), behind a sandbox + an auditable .jet/build-io.lock of every accessed path + cache-invalidation on change. Powerful (full build scripting without a separate build step), but it adds a supply-chain attack surface that the S26 "no ambient I/O at comptime" law was written to refuse — the Nim/Jai evidence shows un-auditable spread once it ships.
-- Consider modifying the contructor syntax to use the following so that LSP could provide suggestions for fields when user types "."
+- [#77 ready] Constructor/LSP dot-completion note: exact Zig-style field syntax
+  remains a reopen, but the underlying autocomplete goal is now covered by
+  dot-construction (`T.{ ... }` / inferred `.{ ... }`) and D-UITREE1 typed
+  constructors. Original note:
 fmt: Fmt = .{
         .gpa = gpa,
         .arena = arena,
