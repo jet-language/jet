@@ -28,16 +28,20 @@ fn build_and_run(name: &str, src: &str) -> (i32, String) {
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let mut rustc_cmd = Command::new("rustc");
+    rustc_cmd
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
+    if let Some(link) = &out.ffi {
+        rustc_cmd
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        if link.deps_dir.is_dir() {
+            rustc_cmd
+                .arg("-L")
+                .arg(format!("dependency={}", link.deps_dir.display()));
+        }
+    }
+    let rustc = rustc_cmd.output().unwrap();
     assert!(
         rustc.status.success(),
         "rustc rejected generated code (I2 violation):\n{}",

@@ -149,6 +149,7 @@ fn examples_compile_and_run() {
             || stem == "100_rawptr"
             || stem == "121_single_use_discard"
             || stem == "124_uninit"
+            || stem == "184_uninit_buffer"
             || stem == "176_crypto_migration"
         {
             assert!(

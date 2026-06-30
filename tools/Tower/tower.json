@@ -125,11 +125,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Canonical memory/allocation implementation plan. Preserve I1: beginner Jet stays safe; expert controls require explicit syntax/imports/audit where applicable.\n\nBuild order:\n1. Labeled stored references: implement #Ref(Label) field syntax and owner relationship checks; remove stale core.mem gate per owner outcome; migrate old ref[label] diagnostics.\n2. Arena allocator inference: keep current arena plan as base; prove region views cannot escape, reset/free invalidates views, and diagnostics remain Jet-owned.\n3. Explicit allocation boundaries: audit Core APIs that allocate across caller-owned boundaries; add buffer/allocator-taking variants using existing allocator model; add lint for hidden boundary allocation in expert/perf contexts.\n4. Visible uninit: #Uninit binding, explicit type/no initializer parser rules, definite-assignment proof, plain-data restriction, MaybeUninit codegen only after sema proof; E0421-E0424 snapshots.\n5. Opt-in GC library: Gc<T> traced handle as library type for cyclic long-running data, explicit import, no default allocation path change, no sema/codegen primitive unless needed for root tracing.\n\nAcceptance: ui snapshots for dangling/escaping refs, uninit misuse, arena use-after-reset, hidden allocation lint; examples for arena parsing, #Ref owner labels, caller buffers, #Uninit fixed buffers, cyclic Gc graph; golden tests; no generated unsafe outside #Unsafe/std-mem internals.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified with full `nix develop -c cargo test` after fixing diagnostic coverage drift, BigInt/debug goldens, task cancel startup semantics, map JetDebug support, syntax reconciliation false positives, TIR FFI linking, version truthfulness, and CLI version snapshots."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",

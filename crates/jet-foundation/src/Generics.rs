@@ -235,7 +235,7 @@ pub fn rust_type_param_list(
             if let Some(ex) = extra_bounds.get(&p.name) {
                 for b in ex {
                     let rb = match b.as_str() {
-                        "Clone" | "JetShow" => b.clone(),
+                        "Clone" | "JetShow" | "JetDebug" => b.clone(),
                         _ if is_builtin_trait(b) => rust_trait_bound(b).unwrap_or("").to_string(),
                         _ => user_trait_rust(b),
                     };
@@ -575,6 +575,14 @@ pub fn rust_extra_jetshow_bounds(params: &[TypeParam]) -> HashMap<String, Vec<St
     params
         .iter()
         .map(|p| (p.name.clone(), vec!["JetShow".to_string()]))
+        .collect()
+}
+
+/// Extra Rust `JetDebug` bounds for generic `JetDebug` impls.
+pub fn rust_extra_jetdebug_bounds(params: &[TypeParam]) -> HashMap<String, Vec<String>> {
+    params
+        .iter()
+        .map(|p| (p.name.clone(), vec!["JetDebug".to_string()]))
         .collect()
 }
 

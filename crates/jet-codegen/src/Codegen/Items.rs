@@ -182,10 +182,19 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             tp_plain,
             show_body
         ));
+        let jetdebug_extra = Generics::rust_extra_jetdebug_bounds(&s.type_params);
+        let mut debug_impl_bounds = jetdebug_extra.clone();
+        for (k, v) in &clone_extra {
+            debug_impl_bounds
+                .entry(k.clone())
+                .or_default()
+                .extend(v.iter().cloned());
+        }
+        let debug_tp_bounds = Generics::rust_type_param_list(&s.type_params, &debug_impl_bounds);
         let debug_body = struct_jet_debug_body(s, has_fn_field);
         out.push_str(&format!(
             "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
-            tp_bounds,
+            debug_tp_bounds,
             user_type_rust(&s.name),
             tp_plain,
             debug_body
@@ -951,7 +960,7 @@ fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
                 format!("\"{}: [redacted]\".to_string()", f.name)
             } else {
                 format!(
-                    "format!(\"{}: {{}}\", ((self).{}).jet_show())",
+                    "format!(\"{}: {{}}\", ((self).{}).jet_debug())",
                     f.name,
                     mangle(&f.name)
                 )

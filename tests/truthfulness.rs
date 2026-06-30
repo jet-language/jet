@@ -300,13 +300,18 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         // I6 applies to compiler `Source/` and seam crates above, not the JIT sibling.
         // `crates/jet-net` is a bootstrap HTTP helper (D-NETDEP1=A, owner-approved
         // `ureq`) — not a compiler seam; I6 applies to `Source/` and seam crates only.
+        // D-REGEX1 explicitly owner-approved `regex` for `core.regex`; comptime
+        // reuses that engine for REPL/dev parity until the native engine replaces it.
     ];
 
     let mut offenders = Vec::new();
     for rel in compiler_crates {
         let text = fs::read_to_string(root.join(rel)).unwrap_or_else(|_| panic!("{rel} missing"));
         for line in dependency_lines(&text) {
-            if !line.contains(" path = ") && !line.contains("{ path =") {
+            if !line.contains(" path = ")
+                && !line.contains("{ path =")
+                && !(rel == "crates/jet-comptime/Cargo.toml" && line == "regex = \"1\"")
+            {
                 offenders.push(format!("{rel}: {line}"));
             }
         }

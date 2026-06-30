@@ -331,6 +331,16 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // REPL codes: tested in tests/repl.rs (E1802 is there; E1801 is not yet tested).
     // TODO: add a repl test that hits the fuel cap.
     "E1801",
+    // E0916 is reserved for Debug auto-derive limits and documented as
+    // "defined, not yet emitted"; the helper lives in Generics.rs before the
+    // feature path is wired. Remove this once auto-derived Debug can actually
+    // reject a non-debuggable field through sema.
+    "E0916",
+    // E0207 was the old unlabeled stored-reference guard. D-REFSTRUCT1 now
+    // requires parser-level `#Ref(label)`, so the sema guard is defensive and
+    // has no reachable source spelling. Remove this once the dead guard is
+    // deleted or a new reachable unlabeled-ref form exists.
+    "E0207",
     // E2202 (dev interpreter step budget) is covered by tests/dev.rs
     // (`infinite_loop_hits_e2202_fuel_stop` + the c77 battery boundary set).
     // Cross-compilation: E3302 requires a target not in the test environment.

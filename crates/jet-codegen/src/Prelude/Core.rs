@@ -85,6 +85,33 @@ impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> { fn jet_debug(&sel
     let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
     format!("[{}]", parts.join(", "))
 } }
+impl<K: Ord + JetShow, V: JetShow> JetShow for std::collections::BTreeMap<K, V> {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
+            .collect();
+        format!("[:{}]", parts.join(", "))
+    }
+}
+impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for std::collections::BTreeMap<K, V> {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k.jet_display(), v.jet_display()))
+            .collect();
+        format!("[:{}]", parts.join(", "))
+    }
+}
+impl<K: Ord + JetDebug, V: JetDebug> JetDebug for std::collections::BTreeMap<K, V> {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k.jet_debug(), v.jet_debug()))
+            .collect();
+        format!("[:{}]", parts.join(", "))
+    }
+}
 impl<T: JetShow> JetShow for Option<T> {
     fn jet_show(&self) -> String {
         match self {

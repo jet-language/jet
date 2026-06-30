@@ -1203,12 +1203,6 @@ where
     scheduler().submit(Box::new(move || {
         jet_scheduler_set_task_control(Some(control.clone()));
         jet_scheduler_task_panic_enter();
-        if control.cancelled.load(Ordering::Relaxed) {
-            jet_scheduler_task_panic_leave();
-            jet_scheduler_set_task_control(None);
-            let _ = tx.send(JetSchedulerResult::Cancelled);
-            return;
-        }
         control.wait_while_paused();
         // Cancel while still paused (never resumed) aborts; cancel after resume only
         // affects yield points inside `f`, not startup — matches 157_task_controls.
