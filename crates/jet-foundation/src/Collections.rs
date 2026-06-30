@@ -12,6 +12,8 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_CHAR,
     "Set",
     "Deque",
+    Syntax::TYPE_BIGINT,
+    Syntax::TYPE_DECIMAL,
 ];
 
 pub fn is_reserved_type(name: &str) -> bool {
@@ -73,6 +75,13 @@ pub fn builtin_method_return(
         // D-DET-CAPAPI: `Duration.millis()` reads the span as ms.
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
             duration_method_return(method, arg_count)
+        }
+        // D-BIGINT1 / D-DECIMAL1: precise numeric methods.
+        Type::Named(n) if n == crate::Syntax::TYPE_BIGINT => {
+            crate::Numeric::bigint_method_return(method, arg_count)
+        }
+        Type::Named(n) if n == crate::Syntax::TYPE_DECIMAL => {
+            crate::Numeric::decimal_method_return(method, arg_count)
         }
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
         Type::Apply { name, args } if name == "Channel" => {

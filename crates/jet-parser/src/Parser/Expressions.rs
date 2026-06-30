@@ -510,6 +510,23 @@ impl<'a> Parser<'a> {
 
     fn expr_unary_inner(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         match &self.peek().kind {
+            // D-INCR1: prefix `++` / `--` on a mutable integer lvalue.
+            TokKind::PlusPlus | TokKind::MinusMinus => {
+                let op_tok = self.bump();
+                let op = match op_tok.kind {
+                    TokKind::PlusPlus => crate::AST::IncDecOp::Inc,
+                    TokKind::MinusMinus => crate::AST::IncDecOp::Dec,
+                    _ => unreachable!(),
+                };
+                let inner = self.expr_unary(allow_struct_lit)?;
+                let full = Span::new(op_tok.span.start, inner.span().end);
+                Ok(Expr::IncDec {
+                    op,
+                    operand: Box::new(inner),
+                    postfix: false,
+                    span: full,
+                })
+            }
             TokKind::Minus => {
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
@@ -859,6 +876,22 @@ impl<'a> Parser<'a> {
                         };
                     }
                 }
+                // D-INCR1: postfix `++` / `--` on the postfix chain.
+                TokKind::PlusPlus | TokKind::MinusMinus => {
+                    let op_tok = self.bump();
+                    let op = match op_tok.kind {
+                        TokKind::PlusPlus => crate::AST::IncDecOp::Inc,
+                        TokKind::MinusMinus => crate::AST::IncDecOp::Dec,
+                        _ => unreachable!(),
+                    };
+                    let full = Span::new(expr.span().start, op_tok.span.end);
+                    expr = Expr::IncDec {
+                        op,
+                        operand: Box::new(expr),
+                        postfix: true,
+                        span: full,
+                    };
+                }
                 _ => break,
             }
         }
@@ -1173,6 +1206,16 @@ impl<'a> Parser<'a> {
                                 self.diags.extend(ds);
                                 return Err(first);
                             }
+                            let mut format = crate::AST::StrFormat::Display;
+                            if matches!(sub.peek().kind, TokKind::At) {
+                                sub.bump();
+                                let (sel, sel_span) = sub.expect_ident("after `@` in interpolation")?;
+                                if sel == crate::Syntax::INTERP_SELECTOR_DEBUG {
+                                    format = crate::AST::StrFormat::Debug;
+                                } else {
+                                    self.diags.push(crate::Generics::e0914(&sel, sel_span));
+                                }
+                            }
                             if !matches!(sub.peek().kind, TokKind::Eof) {
                                 return Err(Diagnostic::error(
                                     "E0003",
@@ -1180,12 +1223,13 @@ impl<'a> Parser<'a> {
                                         "unexpected {} inside this interpolated `{{ }}`",
                                         describe(&sub.peek().kind)
                                     ),
-                                    "the braces hold exactly one value".to_string(),
-                                    "keep one value per `{ }`, e.g. \"{a} and {b}\"".to_string(),
+                                    "the braces hold exactly one value (and an optional `@Debug` selector)"
+                                        .to_string(),
+                                    "keep one value per `{ }`, e.g. \"{a}\" or \"{a@Debug}\"".to_string(),
                                     Some(sub.peek().span),
                                 ));
                             }
-                            out.push(StrPart::Interp(e));
+                            out.push(StrPart::Interp(Box::new(e), format));
                         }
                     }
                 }

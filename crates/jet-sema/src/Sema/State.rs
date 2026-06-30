@@ -512,6 +512,7 @@ impl<'a> StateCtx<'a> {
             }
             Expr::Tainted(inner, _)
             | Expr::Unary(_, inner, _)
+            | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
             | Expr::Field(inner, _, _)
@@ -555,7 +556,7 @@ impl<'a> StateCtx<'a> {
                 crate::AST::EnumLitArg::Named { expr, .. } => self.check_expr(expr),
             }),
             Expr::Str(parts, _) => parts.iter().for_each(|p| {
-                if let crate::AST::StrPart::Interp(e) = p {
+                if let crate::AST::StrPart::Interp(e, _) = p {
                     self.check_expr(e);
                 }
             }),

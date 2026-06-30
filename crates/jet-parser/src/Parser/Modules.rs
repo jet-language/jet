@@ -371,9 +371,9 @@ impl<'a> Parser<'a> {
             // D-WASM1=A: `#Wasm` / `#Js` / `#WasmExport fn` inside a module body.
             TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
             // D-ATTR2 / D-SERDE: `#[Codable] struct …` inside a module body.
-            TokKind::Hash if matches!(self.peek2().kind, TokKind::LBracket) => {
-                self.type_def_with_markers()
-            }
+            TokKind::Hash if self.at_marker_list() => self.type_def_with_markers(),
+            // D-ATTR1: `#Codable struct …` inside a module body.
+            TokKind::Hash if self.at_single_type_marker() => self.type_def_with_single_marker(),
             TokKind::KwPriv => match self.peek2().kind {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),

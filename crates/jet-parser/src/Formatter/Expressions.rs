@@ -283,6 +283,39 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                 }
             }
+            Expr::IncDec {
+                op,
+                operand,
+                postfix,
+                ..
+            } => {
+                if *postfix {
+                    if prec > Prec::Postfix {
+                        self.write("(");
+                    }
+                    self.fmt_expr(operand, Prec::Postfix);
+                    self.write(match op {
+                        crate::AST::IncDecOp::Inc => "++",
+                        crate::AST::IncDecOp::Dec => "--",
+                    });
+                    if prec > Prec::Postfix {
+                        self.write(")");
+                    }
+                } else {
+                    let inner_prec = Prec::Unary;
+                    if prec > inner_prec {
+                        self.write("(");
+                    }
+                    self.write(match op {
+                        crate::AST::IncDecOp::Inc => "++",
+                        crate::AST::IncDecOp::Dec => "--",
+                    });
+                    self.fmt_expr(operand, inner_prec);
+                    if prec > inner_prec {
+                        self.write(")");
+                    }
+                }
+            }
             Expr::Binary(op, lhs, rhs, _) => {
                 let op_prec = Prec::of_bin(*op);
                 // Wrap only when the surrounding slot binds tighter than this
@@ -702,9 +735,13 @@ impl<'a> Fmt<'a> {
         for part in parts {
             match part {
                 StrPart::Lit(s) => self.write(&escape_str_lit(s)),
-                StrPart::Interp(e) => {
+                StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
+                    if *fmt == crate::AST::StrFormat::Debug {
+                        self.write("@");
+                        self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+                    }
                     self.write("}");
                 }
             }
@@ -730,9 +767,13 @@ impl<'a> Fmt<'a> {
                         }
                     }
                 }
-                StrPart::Interp(e) => {
+                StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
+                    if *fmt == crate::AST::StrFormat::Debug {
+                        self.write("@");
+                        self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+                    }
                     self.write("}");
                 }
             }

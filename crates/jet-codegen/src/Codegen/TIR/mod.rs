@@ -360,6 +360,11 @@ pub enum TForInMethod {
     /// block (so the `io.stdin()` temporary outlives the loop body), with a matching
     /// extra closing brace.
     LinesStdin,
+    /// D-ITER-HOOK: `loop x in mytype` when `mytype` implements `Iterable`.
+    Iterable {
+        coll_type: String,
+        iter_type: String,
+    },
 }
 
 /// c109 Phase 22: an `if` condition, resolved at lowering from the AST node shape
@@ -567,6 +572,13 @@ pub enum TStmt {
         is_map: bool,
         value: TExpr,
     },
+    /// D-INDEX-HOOK: `mytype[k] = v` via `IndexMut::set`.
+    IndexHookAssign {
+        type_name: String,
+        base: TExpr,
+        index: TExpr,
+        value: TExpr,
+    },
     /// D-SWIZZLE1: write swizzle `v.xy = value` — ordered lane assignments into the
     /// receiver's backing array. Sema rejects overlapping patterns (E3111).
     MathSwizzleAssign {
@@ -739,6 +751,12 @@ pub enum TExprKind {
         func: String,
         args: Vec<TExpr>,
     },
+    /// D-BIGINT1 / D-DECIMAL1: precise numeric ctor/method/binop → `jet_bigint_*` / `jet_decimal_*`.
+    PreciseBuiltin {
+        type_name: String,
+        func: String,
+        args: Vec<TExpr>,
+    },
     /// `print(x)` — the one builtin the subset covers.
     Print(Box<TExpr>),
     /// D-LIN1-DROP (ratified 2026-06-25): `drop(x)` — deliberately discard a
@@ -778,6 +796,14 @@ pub enum TExprKind {
     Unary {
         op: UnOp,
         operand: Box<TExpr>,
+    },
+    /// D-INCR1: `++`/`--` on a mutable integer lvalue. `place` is the assign/read
+    /// Rust place (total at lowering). `postfix`: return old value before update.
+    IncDec {
+        op: crate::AST::IncDecOp,
+        place: String,
+        postfix: bool,
+        ty: Type,
     },
     /// c109 Phase 3: a struct literal `S { f: v, … }`. `rust_type` is the already
     /// resolved Rust type head (`user_S` or `user_S::<…>`); each field carries its
@@ -922,6 +948,13 @@ pub enum TExprKind {
         base: Box<TExpr>,
         index: Box<TExpr>,
         is_map: bool,
+        line: usize,
+    },
+    /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index`.
+    IndexHook {
+        type_name: String,
+        base: Box<TExpr>,
+        index: Box<TExpr>,
         line: usize,
     },
     /// D-SIMD2: `v[i]` lane access on a SIMD lane type. Lowers to the bounds-checked
@@ -1417,7 +1450,7 @@ pub enum TOrFallback {
 
 pub enum TStrPart {
     Lit(String),
-    Interp(TExpr),
+    Interp(TExpr, crate::AST::StrFormat),
 }
 
 /// c109 Phase 4/16: the resolved payload shape of an enum literal.
@@ -1614,6 +1647,11 @@ pub enum THandleOp {
     RngShuffle,
     /// D-DET-CAPAPI Duration: `millis()` → `{root}jet_duration_millis(&(recv))` (span as ms).
     DurationMillis,
+    /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
+    PreciseMethod {
+        type_name: String,
+        method: String,
+    },
     /// TcpListener: `accept()` → `{root}jet_net_tcp_accept(&(recv))`.
     TcpListenerAccept,
     /// TcpListener: `local_addr()` → `{root}jet_net_listener_local_addr(&(recv))`.
@@ -1715,6 +1753,14 @@ pub enum THandleOp {
     /// `.loaded()` → `(recv).loaded()` → `Option<T>`.
     /// `.or_else(default)` → `(recv).or_else(a0)` → `T`.
     LoadableMethod {
+        method: String,
+    },
+    /// D-TTLVAL1=A: `Expiring<T>` fallible accessors.
+    ExpiringMethod {
+        method: String,
+    },
+    /// D-TTLVAL1=A: `Rotting<T>` fallible secret accessors.
+    RottingMethod {
         method: String,
     },
     /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).

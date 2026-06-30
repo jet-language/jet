@@ -4,7 +4,8 @@
 // all work within Sema source files without cross-crate path changes.
 pub use jet_comptime::Comptime;
 pub use jet_parser::{
-    Collections, Diagnostics, Formatter, Generics, Lexer, Parser, Syntax, Traits, AST, SHA256,
+    Collections, Diagnostics, Formatter, Generics, Lexer, Numeric, Parser, Syntax, Traits, AST,
+    SHA256,
 };
 pub mod Sema;
 pub use Sema::{effect_key, SemIndexEffectFacts};

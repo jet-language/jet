@@ -515,7 +515,7 @@ fn assert_fmt_keeps(src: &str, needles: &[&str], label: &str) {
 
 #[test]
 fn fmt_keeps_codable_and_field_rename_and_turbofish() {
-    // The exact c-fmt regression: `#[Codable]`, a field `#[Rename("…")]`, and a
+    // The exact c-fmt regression: `#Codable` / `#[Codable]`, a field `#[Rename("…")]`, and a
     // method-call turbofish `decode<Order>` must all survive.
     let src = "\
 #[Codable]
@@ -532,7 +532,7 @@ fn main() {
 ";
     assert_fmt_keeps(
         src,
-        &["#[Codable]", "#[Rename(\"customer\")]", "decode<Order>"],
+        &["#Codable", "#[Rename(\"customer\")]", "decode<Order>"],
         "codable + rename + turbofish",
     );
 }
@@ -556,7 +556,7 @@ struct Person {
 
 #[test]
 fn fmt_keeps_layout_columnar_and_codable() {
-    // `#[Codable]` then `#Layout(columnar)` on the same struct — both survive,
+    // `#Codable` then `#Layout(columnar)` on the same struct — both survive,
     // neither is rewritten into body `derive` lines.
     let src = "\
 #[Codable]

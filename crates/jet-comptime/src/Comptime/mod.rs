@@ -17,6 +17,7 @@
 mod Builtins;
 mod Diagnostics;
 mod Interpreter;
+mod JsonInterp;
 mod Methods;
 mod Purity;
 mod Reflect;
@@ -117,6 +118,7 @@ pub fn evaluate_with_imports_opts(
         cur_func: "main".to_string(),
         impure_depth: initial_impure_depth,
         allow_impure,
+        repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -151,6 +153,7 @@ pub fn evaluate_with_imports_opts_collecting(
         cur_func: "main".to_string(),
         impure_depth: initial_impure_depth,
         allow_impure,
+        repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -186,6 +189,7 @@ pub fn run_main(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -219,6 +223,7 @@ pub fn run_main_debug(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -248,6 +253,7 @@ pub fn run_main_value(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -280,6 +286,38 @@ pub fn run_main_with_fuel(
         cur_func: "main".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        repl_mode: false,
+        embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
+    };
+    let mut scope = HashMap::new();
+    interp.exec_block(&main.body, &mut scope)?;
+    Ok(())
+}
+
+/// REPL `:run` transcript path: like `run_main_with_fuel` but with the REPL
+/// sandbox (Tier-2 I/O, accumulated `core_imports`) so materialized sessions
+/// replay the same semantics as interactive inputs.
+pub fn run_repl_main_with_fuel(
+    main: &Func,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    fuel: u64,
+    core_imports: &HashMap<String, String>,
+) -> Result<(), Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel,
+        sink: Some(sink),
+        core_imports,
+        debugger: None,
+        depth: 0,
+        cur_func: "main".to_string(),
+        impure_depth: 1,
+        allow_impure: true,
+        repl_mode: true,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -324,8 +362,10 @@ pub fn run_repl_step(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
-        impure_depth: 0,
-        allow_impure: false,
+        // c133: REPL sandbox — Tier-2 I/O without user `#Impure` gates.
+        impure_depth: 1,
+        allow_impure: true,
+        repl_mode: true,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -394,6 +434,7 @@ pub fn run_block_with_imports(
         // (E3411 until --allow-impure is plumbed through to block evaluation).
         allow_impure: false,
         impure_depth: 0,
+        repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };
@@ -516,6 +557,7 @@ pub fn evaluate_derive_body(
         cur_func: "derive".to_string(),
         impure_depth: 0,
         allow_impure: false,
+        repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
     };

@@ -647,6 +647,8 @@ impl<'a> Parser<'a> {
                 TokKind::KwImpl => self.impl_or_error_conv(),
                 // D-ATTR2 / D-SERDE: `#[Codable, RenameAll(camel)] struct …`.
                 TokKind::Hash if self.at_marker_list() => self.type_def_with_markers(),
+                // D-ATTR1: `#Codable struct …` — one marker, no brackets.
+                TokKind::Hash if self.at_single_type_marker() => self.type_def_with_single_marker(),
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::At if self.at_retired_at_c_module() => {
                     self.retired_at_c_module().map(Item::CModule)
@@ -2580,7 +2582,17 @@ impl<'a> Parser<'a> {
             if self.at_marker_list() {
                 let field_markers = self.parse_marker_groups()?;
                 let mut f = self.field()?;
-                f.serde_markers = field_markers;
+                let mut redact = false;
+                let mut serde_markers = Vec::new();
+                for m in field_markers {
+                    if m.name == crate::Syntax::ATTR_REDACT {
+                        redact = true;
+                    } else {
+                        serde_markers.push(m);
+                    }
+                }
+                f.serde_markers = serde_markers;
+                f.redact = redact;
                 fields.push(f);
                 if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
                     self.bump();
@@ -2932,55 +2944,165 @@ impl<'a> Parser<'a> {
     }
 
     /// True when the cursor is at a `#[ … ]` bracket-marker group (D-ATTR2).
-    fn at_marker_list(&self) -> bool {
+    pub(super) fn at_marker_list(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
     }
 
-    /// D-ATTR2 / D-SERDE2–8: parse one or more stacked `#[ … ]` bracket-marker
-    /// groups. Each group is `#[ Name | Name(arg, …) (, …)* ]`. Returns every marker
-    /// flattened in source order. Args parse as expressions (string literal, bare
-    /// word, or any expression).
-    fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
-        let mut out = Vec::new();
-        while self.at_marker_list() {
-            self.bump(); // `#`
-            self.bump(); // `[`
+    /// D-ATTR1/D-MARKER-CANON1: a PascalCase `#Marker` immediately before `struct`/`enum`.
+    pub(super) fn at_single_type_marker(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::Hash) {
+            return false;
+        }
+        let TokKind::Ident(name) = &self.peek2().kind else {
+            return false;
+        };
+        if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_hash_item_prefix(name) {
+            return false;
+        }
+        self.type_marker_prefix_leads_to_type_def(self.pos + 2)
+    }
+
+    fn is_pascal_type_marker_name(name: &str) -> bool {
+        name.chars().next().is_some_and(|c| c.is_uppercase())
+    }
+
+    /// `#` markers that own their own item parser — not bare type derive prefixes.
+    fn is_reserved_hash_item_prefix(name: &str) -> bool {
+        matches!(
+            name,
+            Syntax::KW_TEST
+                | Syntax::KW_BENCH
+                | Syntax::KW_UNSAFE
+                | Syntax::KW_REACTIVE
+                | Syntax::KW_PURE
+                | Syntax::KW_SANITIZER
+                | Syntax::KW_STATE
+                | Syntax::KW_TRANSITION
+                | Syntax::MARKER_PUB_FILE
+                | Syntax::ATTR_UNIT_FAMILY
+                | Syntax::ATTR_NUMERIC
+                | Syntax::ATTR_LAYOUT
+                | Syntax::ATTR_PUBLISHED_SCHEMA
+                | Syntax::ATTR_SINGLE_USE
+                | Syntax::ATTR_MUST_USE
+                | Syntax::ATTR_EXTERN_MODULE
+                | Syntax::ATTR_BINDGEN
+                | Syntax::ATTR_TARGET
+                | Syntax::ATTR_WASM
+                | Syntax::ATTR_JS
+                | Syntax::ATTR_WASM_EXPORT
+        )
+    }
+
+    /// After a `#Marker` (and optional `(args)`), does the next real token start a type?
+    fn type_marker_prefix_leads_to_type_def(&self, mut i: usize) -> bool {
+        if i >= self.toks.len() {
+            return false;
+        }
+        if matches!(self.toks[i].kind, TokKind::LParen) {
+            let mut depth = 0usize;
             loop {
-                let (name, name_span) = self.expect_ident("for a marker name")?;
-                let mut args = Vec::new();
-                let mut end = name_span.end;
-                if matches!(self.peek().kind, TokKind::LParen) {
-                    self.bump(); // `(`
-                    while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
-                        args.push(self.expr_no_struct_lit()?);
-                        if matches!(self.peek().kind, TokKind::Comma) {
-                            self.bump();
-                        } else {
+                if i >= self.toks.len() {
+                    return false;
+                }
+                match self.toks[i].kind {
+                    TokKind::LParen => depth += 1,
+                    TokKind::RParen => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            i += 1;
                             break;
                         }
                     }
-                    end = self.peek().span.end;
-                    self.expect(TokKind::RParen, "to close marker arguments")?;
+                    _ => {}
                 }
-                out.push(Marker {
-                    name,
-                    name_span,
-                    args,
-                    span: Span::new(name_span.start, end),
-                });
+                i += 1;
+            }
+        }
+        while i < self.toks.len() && matches!(self.toks[i].kind, TokKind::Semi) {
+            i += 1;
+        }
+        if i < self.toks.len() && matches!(self.toks[i].kind, TokKind::KwPub) {
+            i += 1;
+        }
+        i < self.toks.len()
+            && matches!(
+                self.toks[i].kind,
+                TokKind::KwStruct | TokKind::KwEnum
+            )
+    }
+
+    /// Parse one marker name and optional `(args)`; cursor sits on the name.
+    fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for a marker name")?;
+        let mut args = Vec::new();
+        let mut end = name_span.end;
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // `(`
+            while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                args.push(self.expr_no_struct_lit()?);
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
                 } else {
                     break;
                 }
             }
-            self.expect(TokKind::RBracket, "to close a `#[…]` marker list")?;
-            // A marker group may end its line; skip the synthetic terminator.
-            while matches!(self.peek().kind, TokKind::Semi) {
+            end = self.peek().span.end;
+            self.expect(TokKind::RParen, "to close marker arguments")?;
+        }
+        Ok(Marker {
+            name,
+            name_span,
+            args,
+            span: Span::new(name_span.start, end),
+        })
+    }
+
+    /// D-ATTR2: parse one `#[ Name (, …)* ]` group; cursor on `#`.
+    fn parse_marker_bracket_group(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        self.bump(); // `#`
+        self.bump(); // `[`
+        let mut group = Vec::new();
+        loop {
+            group.push(self.parse_one_marker()?);
+            if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
+            } else {
+                break;
             }
         }
+        self.expect(TokKind::RBracket, "to close a `#[…]` marker list")?;
+        while matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        Ok(group)
+    }
+
+    /// D-ATTR2 / D-SERDE2–8: parse `#[ … ]` bracket-marker groups. A second
+    /// consecutive `#[ … ]` line is teaching error E0999 (merge into one list).
+    fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        let mut out = Vec::new();
+        let mut groups = 0usize;
+        while self.at_marker_list() {
+            groups += 1;
+            if groups > 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0999",
+                    "multiple `#[…]` marker lines belong in one comma-separated list".to_string(),
+                    "Jet attaches every marker on a type in a single `#[A, B]` group (D-ATTR2); one marker alone is `#A`".to_string(),
+                    "merge them: `#[Summarize, Debug] struct …`, or use `#Summarize` when there is only one".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+            out.extend(self.parse_marker_bracket_group()?);
+        }
         Ok(out)
+    }
+
+    /// D-ATTR1: parse a lone `#Marker` (or `#Marker(args)`) before `struct`/`enum`.
+    fn parse_single_type_prefix_marker(&mut self) -> Result<Marker, Diagnostic> {
+        self.bump(); // `#`
+        self.parse_one_marker()
     }
 
     /// Split parsed markers on a struct/enum: derive-trait markers
@@ -3011,39 +3133,9 @@ impl<'a> Parser<'a> {
         serde
     }
 
-    /// D-ATTR2: `#[markers] [pub] [#layout|#PublishedSchema] (struct|enum) …`.
-    /// Parses the leading bracket markers, then the type that follows, and attaches
-    /// derives + raw serde markers to it.
-    pub(super) fn type_def_with_markers(&mut self) -> Result<Item, Diagnostic> {
-        let markers = self.parse_marker_groups()?;
-        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-        if is_pub {
-            self.bump();
-        }
-        let item = match &self.peek().kind {
-            TokKind::KwStruct => self.struct_def(false).map(Item::Struct)?,
-            TokKind::KwEnum => self.enum_def(false).map(Item::Enum)?,
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT) => {
-                self.layout_struct_def(is_pub).map(Item::Struct)?
-            }
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) => {
-                self.published_schema_struct_def(is_pub).map(Item::Struct)?
-            }
-            other => {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    format!(
-                        "a `#[…]` marker list must sit before a struct or enum, found {}",
-                        describe(other)
-                    ),
-                    "derive markers like `#[Codable]` and serde attributes attach to a type"
-                        .to_string(),
-                    "write `#[Codable] struct Name { … }`".to_string(),
-                    Some(self.peek().span),
-                ));
-            }
-        };
-        Ok(match item {
+    /// Attach parsed type markers to a freshly parsed struct/enum item.
+    fn attach_type_markers(markers: Vec<Marker>, item: Item) -> Item {
+        match item {
             Item::Struct(mut s) => {
                 s.type_markers = markers.clone();
                 s.serde_markers = Self::split_type_markers(markers, &mut s.derives);
@@ -3055,7 +3147,66 @@ impl<'a> Parser<'a> {
                 Item::Enum(e)
             }
             other => other,
-        })
+        }
+    }
+
+    /// Parse the type item that follows leading markers.
+    fn parse_type_after_markers(&mut self) -> Result<Item, Diagnostic> {
+        while matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
+        match &self.peek().kind {
+            TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+            TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+            TokKind::Hash
+                if matches!(
+                    &self.peek2().kind,
+                    TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT
+                ) =>
+            {
+                self.layout_struct_def(is_pub).map(Item::Struct)
+            }
+            TokKind::Hash
+                if matches!(
+                    &self.peek2().kind,
+                    TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA
+                ) =>
+            {
+                self.published_schema_struct_def(is_pub).map(Item::Struct)
+            }
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "type markers must sit before a struct or enum, found {}",
+                    describe(other)
+                ),
+                "derive markers like `#Codable` / `#[Codable]` and serde attributes attach to a type"
+                    .to_string(),
+                "write `#Codable struct Name { … }` or `#[Codable, RenameAll(camel)] struct …`"
+                    .to_string(),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
+    /// D-ATTR1: `#Marker [pub] (struct|enum) …` — one marker, no brackets.
+    pub(super) fn type_def_with_single_marker(&mut self) -> Result<Item, Diagnostic> {
+        let marker = self.parse_single_type_prefix_marker()?;
+        let item = self.parse_type_after_markers()?;
+        Ok(Self::attach_type_markers(vec![marker], item))
+    }
+
+    /// D-ATTR2: `#[markers] [pub] [#layout|#PublishedSchema] (struct|enum) …`.
+    /// Parses the leading bracket markers, then the type that follows, and attaches
+    /// derives + raw serde markers to it.
+    pub(super) fn type_def_with_markers(&mut self) -> Result<Item, Diagnostic> {
+        let markers = self.parse_marker_groups()?;
+        let item = self.parse_type_after_markers()?;
+        Ok(Self::attach_type_markers(markers, item))
     }
 
     /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
@@ -3275,15 +3426,67 @@ impl<'a> Parser<'a> {
         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
         let mut is_stored_ref = false;
         let mut stored_ref_label = None;
-        if matches!(self.peek().kind, TokKind::KwStored) {
-            is_stored_ref = true;
+        // D-REFSTRUCT1: `#Ref(owner) name: T` stored-reference field marker.
+        if matches!(self.peek().kind, TokKind::Hash) {
+            let hash_start = self.peek().span.start;
             self.bump();
+            let (attr_name, attr_name_span) = self.expect_ident("after `#`")?;
+            if attr_name == Syntax::ATTR_REF {
+                is_stored_ref = true;
+                self.expect(TokKind::LParen, "after `#Ref`")?;
+                let (label, label_span) = self.expect_ident("inside `#Ref(…)`")?;
+                stored_ref_label = Some(label);
+                let rparen_span = self.peek().span;
+                self.expect(TokKind::RParen, "to close `#Ref(…)`")?;
+                let _ = (hash_start, label_span, rparen_span);
+            } else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("`#{}` isn't a known attribute on a field", attr_name),
+                    "only `#Ref(owner)` marks a stored-reference field".to_string(),
+                    format!("write `#{}(owner) field: Type`", Syntax::ATTR_REF),
+                    Some(Span::new(hash_start, attr_name_span.end)),
+                ));
+            }
+        }
+        // Retired S10 `ref[label]` / `ref` spelling (D-REFSTRUCT1).
+        if matches!(self.peek().kind, TokKind::KwStored) {
+            let start = self.peek().span;
+            self.bump();
+            let mut end = start.end;
+            let mut label_hint = String::new();
             if matches!(self.peek().kind, TokKind::LBracket) {
                 self.bump();
-                let (label, _) = self.expect_ident("inside `ref[...]`")?;
-                stored_ref_label = Some(label);
-                self.expect(TokKind::RBracket, "after a ref label")?;
+                if let Ok((label, ls)) = self.expect_ident("inside retired `ref[…]`") {
+                    label_hint = label;
+                    end = ls.end;
+                }
+                if matches!(self.peek().kind, TokKind::RBracket) {
+                    end = self.bump().span.end;
+                }
             }
+            let fix = if label_hint.is_empty() {
+                format!(
+                    "write `#{}(owner)` before the field name",
+                    Syntax::ATTR_REF
+                )
+            } else {
+                format!(
+                    "write `#{}({label_hint})` instead of `ref[{label_hint}]`",
+                    Syntax::ATTR_REF
+                )
+            };
+            return Err(Diagnostic::error(
+                "E0060",
+                format!(
+                    "stored reference fields use `#{}(label)` now",
+                    Syntax::ATTR_REF
+                ),
+                "the old `ref[label]` field keyword was replaced by the `#Ref(label)` marker"
+                    .to_string(),
+                fix,
+                Some(Span::new(start.start, end)),
+            ));
         }
         let (name, name_span) = self.expect_ident("for a field name")?;
         self.expect(TokKind::Colon, "after a field name")?;
@@ -3298,6 +3501,7 @@ impl<'a> Parser<'a> {
             ty,
             ty_span,
             serde_markers: Vec::new(),
+            redact: false,
         })
     }
 
@@ -3917,7 +4121,17 @@ impl<'a> Parser<'a> {
             if self.at_marker_list() {
                 let field_markers = self.parse_marker_groups()?;
                 let mut f = self.field()?;
-                f.serde_markers = field_markers;
+                let mut redact = false;
+                let mut serde_markers = Vec::new();
+                for m in field_markers {
+                    if m.name == crate::Syntax::ATTR_REDACT {
+                        redact = true;
+                    } else {
+                        serde_markers.push(m);
+                    }
+                }
+                f.serde_markers = serde_markers;
+                f.redact = redact;
                 fields.push(f);
                 if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
                     self.bump();

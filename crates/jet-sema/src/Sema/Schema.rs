@@ -326,6 +326,7 @@ mod tests {
                     ty: Type::String,
                     ty_span: zero,
                     serde_markers: Vec::new(),
+                    redact: false,
                 },
                 Field {
                     is_pub: false,
@@ -337,6 +338,7 @@ mod tests {
                     ty: Type::Int,
                     ty_span: zero,
                     serde_markers: Vec::new(),
+                    redact: false,
                 },
             ],
             methods: vec![],

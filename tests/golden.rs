@@ -54,7 +54,9 @@ fn examples_compile_and_run() {
     for (path, stem, shown) in entries {
         let src = fs::read_to_string(&path).unwrap();
 
-        if (stem == "22_ffi" || stem == "127_archive" || stem == "128_db") && !have_cargo {
+        if (stem == "22_ffi" || stem == "127_archive" || stem == "128_db"
+            || stem == "174_crypto_envelope" || stem == "175_crypto_sign" || stem == "176_crypto_migration")
+            && !have_cargo {
             eprintln!(
                 "note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)"
             );
@@ -147,6 +149,7 @@ fn examples_compile_and_run() {
             || stem == "100_rawptr"
             || stem == "121_single_use_discard"
             || stem == "124_uninit"
+            || stem == "176_crypto_migration"
         {
             assert!(
                 user_code.contains("unsafe"),

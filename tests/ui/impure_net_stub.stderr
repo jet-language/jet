@@ -5,3 +5,11 @@ Error [E3412]: `core.net.tcp_connect()` is not available at comptime
     |                             ^^^^^^^^^^^
  Why: only `core.net.fetch(url, sha256:)` is supported at compile time
  Fix: use `core.net.fetch(url, sha256: "<hash>")` for content-hash-pinned downloads
+
+Error [E0915]: `TcpStream ? String` has no `Display` implementation
+  --> tests/ui/impure_net_stub.jet:7:28
+    |
+  7 |         print("connected: {conn}")
+    |                            ^^^^
+ Why: bare `{value}` interpolation calls `Display` — there is no default for user types
+ Fix: add `impl TcpStream ? String.Display { fn display(self) -> String { … } }`, or use `{value@Debug}` for debug output

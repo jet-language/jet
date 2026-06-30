@@ -57,7 +57,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         "core.mem" | "core.mem.alloc" | "core.random" | "core.crypto.random" | "core.uuid"
         | "core.encoding" | "core.encoding.json" | "core.encoding.csv"
         | "core.encoding.toml" | "core.encoding.yaml" | "core.args"
-        | "core.async.loadable" | "jet.reactive" | "core.sketch.hll"
+        | "core.async.loadable" | "core.time.expiring" | "core.secrets" | "jet.reactive" | "core.sketch.hll"
         | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir" | "jet.log"
         | "jet.regex" => RuntimeLayer::Alloc,
 

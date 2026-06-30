@@ -809,7 +809,10 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::Index { base, index, .. } if is_bare_handle(base, handle) => {
             expr_handle_escape(index, handle)
         }
-        Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _)
+        Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
         | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) | Expr::Ok(inner, _) | Expr::Err(inner, _)
         | Expr::Try(inner, _, _) | Expr::Field(inner, _, _) => expr_handle_escape(inner, handle),
@@ -851,7 +854,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         }),
         Expr::PatternTest { subject, .. } => expr_handle_escape(subject, handle),
         Expr::Str(parts, _) => parts.iter().find_map(|p| match p {
-            StrPart::Interp(e) => expr_handle_escape(e, handle),
+            StrPart::Interp(e, _) => expr_handle_escape(e, handle),
             _ => None,
         }),
         Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {

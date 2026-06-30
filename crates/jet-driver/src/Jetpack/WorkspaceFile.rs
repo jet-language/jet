@@ -154,7 +154,7 @@ fn extract_literal_string(expr: &Expr) -> Option<String> {
     for part in parts {
         match part {
             StrPart::Lit(lit) => s.push_str(lit),
-            StrPart::Interp(_) => return None,
+            StrPart::Interp(..) => return None,
         }
     }
     Some(s)

@@ -72,10 +72,16 @@ fn exit_code_user_error_check() {
 }
 
 #[test]
-fn exit_code_no_args_greets() {
-    // E2-M3 Wave B: bare `jet` greets and orients — it is NOT a usage error.
+fn exit_code_no_args_starts_repl() {
+    // c6vz465: bare `jet` starts the REPL — exit 0 after EOF on piped stdin.
     let out = Command::new(jet()).output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "no args should greet (exit 0)");
+    assert_eq!(out.status.code(), Some(0), "no args should start REPL (exit 0)");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("interactive REPL"),
+        "bare jet should print REPL banner:\n{}",
+        stdout
+    );
 }
 
 #[test]
@@ -299,10 +305,81 @@ fn is_code(s: &str) -> bool {
 // ── Wave B: greeting, did-you-mean, doctor, completions, fix, externals ──
 
 #[test]
-fn no_args_greeting_golden() {
+fn no_args_repl_banner_golden() {
     let out = Command::new(jet()).env("NO_COLOR", "1").output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    check_snapshot("no_args_greeting.txt", &stdout);
+    check_snapshot("no_args_repl_banner.txt", &stdout);
+}
+
+#[test]
+fn question_mark_is_help_golden() {
+    let out = Command::new(jet())
+        .arg("?")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "`jet ?` should exit 0");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    check_snapshot("question_mark_help.txt", &stdout);
+}
+
+#[test]
+fn file_sugar_runs_without_run_subcommand() {
+    let stem = std::env::temp_dir().join("jet_cli_file_sugar");
+    let file = stem.with_extension("jet");
+    fs::write(&file, "fn main() {\n    print(\"file-sugar\");\n}\n").unwrap();
+    let out = Command::new(jet()).arg(&file).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "jet <file> sugar should exit 0; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("file-sugar"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn file_sugar_ext_optional() {
+    let stem = std::env::temp_dir().join("jet_cli_file_sugar_extopt");
+    let file = stem.with_extension("jet");
+    fs::write(&file, "fn main() {\n    print(\"ext-sugar\");\n}\n").unwrap();
+    let out = Command::new(jet()).arg(&stem).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "jet <stem> sugar should resolve .jet; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ext-sugar"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn file_sugar_missing_jet_file_errors() {
+    let missing = std::env::temp_dir().join("jet_cli_file_sugar_absent.jet");
+    let _ = fs::remove_file(&missing);
+    let out = Command::new(jet())
+        .arg(&missing)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_ne!(out.status.code(), Some(0));
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        combined.contains("jet_cli_file_sugar_absent"),
+        "missing file should be named in output: {combined}"
+    );
 }
 
 #[test]

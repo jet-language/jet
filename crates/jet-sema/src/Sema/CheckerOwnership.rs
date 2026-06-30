@@ -5,6 +5,16 @@ use crate::Syntax;
 use crate::AST::{AccessConvention, Expr, Lambda, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
+/// Root binding for a `#Ref` field initializer (unwraps auto `.clone()`).
+pub(crate) fn ref_field_init_root<'a>(e: &'a Expr) -> Option<&'a str> {
+    match e {
+        Expr::MethodCall { receiver, method, .. } if method == "clone" => {
+            expr_root_ident(receiver)
+        }
+        _ => expr_root_ident(e),
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Whether `e` may be returned through `-> view T` (reference-safe).
     pub(crate) fn expr_ok_for_view_return(&self, e: &Expr) -> bool {
@@ -98,18 +108,94 @@ impl<'a> Checker<'a> {
             if !ref_fields.contains(fname) {
                 continue;
             }
+            let owner = self
+                .registry
+                .ref_field_label(type_name, fname)
+                .map(str::to_string)
+                .or_else(|| {
+                    let fields = self.struct_fields_of(owner_mod, type_name)?;
+                    let legacy = self.structs.get(type_name)?;
+                    fields.iter().zip(legacy.iter()).find_map(|((n, _, _, is_ref, _), (lab, _))| {
+                        if n == fname && *is_ref {
+                            Some(lab.clone().unwrap_or_else(|| "src".to_string()))
+                        } else {
+                            None
+                        }
+                    })
+                });
+            let root = ref_field_init_root(fexpr);
+            if let (Some(owner), Some(root)) = (owner.as_deref(), root) {
+                if let Expr::Index { .. } | Expr::Slice { .. } = fexpr {
+                    self.diags.push(Diagnostic::error(
+                        "E2302",
+                        format!(
+                            "the `#Ref({owner})` field `{fname}` can't store a sliced or indexed piece",
+                            owner = owner,
+                            fname = fname
+                        ),
+                        "indexing or slicing makes a fresh owned value — there is nothing long-lived for a stored view to point into".to_string(),
+                        format!(
+                            "store an owned value in `{fname}`, or fill the `#Ref` field from the whole `{owner}` value",
+                            fname = fname,
+                            owner = owner
+                        ),
+                        Some(*fspan),
+                    ));
+                    continue;
+                }
+                if let Expr::Field(..) = fexpr {
+                    if let Some(root) = expr_root_ident(fexpr) {
+                        if root == owner {
+                            // Field projection into the owner is lowered as `&owner.field`
+                            // (see codegen `lower_struct_lit_field`); skip the dangling-source
+                            // check below.
+                            continue;
+                        }
+                    }
+                }
+                if root != owner {
+                    self.diags.push(Diagnostic::error(
+                        "E2302",
+                        format!(
+                            "the `#Ref({owner})` field `{fname}` must point into `{owner}`",
+                            owner = owner,
+                            fname = fname
+                        ),
+                        format!(
+                            "this field stores a view into `{owner}`, but the value comes from `{root}` instead",
+                            owner = owner,
+                            root = root
+                        ),
+                        format!(
+                            "fill `{fname}` from `{owner}` (or rename the `#Ref` label to match the real owner)",
+                            fname = fname,
+                            owner = owner
+                        ),
+                        Some(*fspan),
+                    ));
+                    continue;
+                }
+                if self.consts.contains_key(root) {
+                    continue;
+                }
+                if let Some(info) = self.lookup(root) {
+                    if info.param_conv.is_some() {
+                        continue;
+                    }
+                }
+            }
             if let Some(why_short) = self.ref_source_dangles(fexpr) {
                 self.diags.push(Diagnostic::error(
                     "E2302",
                     format!(
-                        "the `ref` field `{}` would point at something that dies first",
+                        "the `#Ref` field `{}` would point at something that dies first",
                         fname
                     ),
                     format!(
-                        "a `ref` field stores a view, not its own copy, so its source has to outlive the struct — but {} doesn't live long enough to promise that here",
+                        "a `#Ref` field stores a view, not its own copy, so its source has to outlive the struct — but {} doesn't live long enough to promise that here",
                         why_short
                     ),
-                    "store an owned value: drop `ref` so the struct keeps its own copy (or `.clone()` into it)".to_string(),
+                    "store an owned value (drop `#Ref` so the struct keeps its own copy), or fill the `#Ref` field from the named owner parameter".to_string(),
                     Some(*fspan),
                 ));
             }
@@ -396,6 +482,39 @@ impl<'a> Checker<'a> {
             ),
             Some(span),
         ));
+    }
+
+    pub(crate) fn has_core_mem_import(&self) -> bool {
+        self.core_imports
+            .values()
+            .any(|m| m == Syntax::CORE_MEM_MODULE)
+    }
+
+    /// c26 / arena-inference lint: heap growth in a loop after `use core.mem`.
+    /// c26 / allocation-boundary lint: growable calls inside `#Context` without allocator.
+    pub(crate) fn lint_allocation_hints(&mut self, method: &str, span: Span) {
+        let grows_heap = matches!(method, "push" | "append" | "insert");
+        if !grows_heap {
+            return;
+        }
+        if self.loop_depth > 0 && self.has_core_mem_import() {
+            self.diags.push(Diagnostic::lint(
+                "L0505",
+                "heap growth inside a loop — consider an arena".to_string(),
+                "each `push` may allocate on the global heap; in a hot loop that adds up".to_string(),
+                "bind `arena #= mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data".to_string(),
+                Some(span),
+            ));
+        }
+        if self.context_depth > 0 && !self.context_allocator_active {
+            self.diags.push(Diagnostic::lint(
+                "L0506",
+                "hidden allocation inside `#Context` without an allocator".to_string(),
+                "this call may allocate on the global heap while a scoped context is active".to_string(),
+                "add `allocator: …` to the `#Context(…)` fields, or move the allocation outside the block".to_string(),
+                Some(span),
+            ));
+        }
     }
 
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {

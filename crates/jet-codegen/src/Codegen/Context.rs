@@ -5,6 +5,7 @@ use crate::AST::FfiLink;
 use crate::AST::{
     AccessConvention, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type, VariantPayload,
 };
+use crate::Diagnostics::Span;
 use std::collections::{HashMap, HashSet};
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
@@ -29,6 +30,8 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
+    /// D-REFSTRUCT1: struct field → `#Ref(owner)` label (for borrow lowering).
+    pub(crate) ref_field_labels: HashMap<String, HashMap<String, String>>,
     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
     /// variant name -> owning enum type (for pattern lowering)
     pub(crate) variant_owner: HashMap<String, String>,
@@ -86,6 +89,12 @@ pub(crate) struct Cx {
     /// Populated in `build_cx_items` from `Item::Impl` blocks with
     /// `trait_name == Some("Rollback")` and from inline `struct { impl Rollback }`.
     pub(crate) rollback_types: HashSet<String>,
+    /// D-DISPLAYDBG1: user types with an explicit `impl Type.Display`.
+    pub(crate) display_types: HashSet<String>,
+    /// D-ITER-HOOK: `for x in coll` on types implementing `Iterable`.
+    pub(crate) iterable_hooks: HashMap<String, IterableHook>,
+    /// D-INDEX-HOOK: `coll[k]` on types implementing `Index`.
+    pub(crate) index_hooks: HashMap<String, IndexHook>,
     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
     /// jet_panic_rich can include the function name in the panic report.
     pub(crate) current_fn: std::cell::RefCell<String>,
@@ -102,7 +111,20 @@ pub(crate) struct Cx {
     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
+
+/// D-ITER-HOOK: metadata for zero-copy `for x in mytype` lowering.
+#[derive(Debug, Clone)]
+pub(crate) struct IterableHook {
+    pub iter_type: String,
+    pub item_type: Type,
+}
+
+/// D-INDEX-HOOK: metadata for expert `mytype[k]` lowering.
+#[derive(Debug, Clone)]
+pub(crate) struct IndexHook {
+    pub value_type: Type,
+}
 
 // D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `Json`/`Toml`/
 // `Yaml`/`Csv`) is the user-facing face of `jet_std::DataTree`.
@@ -123,6 +145,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Rng" => Some("Rng"),
         // D-DET-CAPAPI: deterministic `Duration` value.
         "Duration" => Some("Duration"),
+        // D-BIGINT1 / D-DECIMAL1: precise numerics.
+        "BigInt" => Some("JetBigInt"),
+        "Decimal" => Some("JetDecimal"),
         "Closed" => Some("Closed"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
@@ -430,6 +455,7 @@ impl Cx {
                 let rust_mod = &self.foreign_types[name.as_str()];
                 format!("{}{}::user_{name}", self.root_prefix, rust_mod)
             }
+            Type::Named(n) if n == "Expired" => "JetExpired".to_string(),
             Type::Named(name) => user_type_rust(name),
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
                 format!(
@@ -486,6 +512,13 @@ impl Cx {
                     self.rust_type(&args[1])
                 )
             }
+            // D-TTLVAL1=A: Expiring<T> / Rotting<T>.
+            Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => {
+                format!("JetExpiring<{}>", self.rust_type(&args[0]))
+            }
+            Type::Apply { name, args } if name == "Rotting" && args.len() == 1 => {
+                format!("JetRotting<{}>", self.rust_type(&args[0]))
+            }
             // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Deque<T> → VecDeque<T>.
             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {
                 format!("std::collections::HashSet<{}>", self.rust_type(&args[0]))
@@ -498,6 +531,10 @@ impl Cx {
             // is dumb.
             Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*mut {}", self.rust_type(&args[0]))
+            }
+            // D-OPTGC1: `Gc<T>` lowers to the traced handle in the vetted prelude.
+            Type::Apply { name, args } if name == Syntax::GC_TYPE && args.len() == 1 => {
+                format!("jet_gc::Gc<{}>", self.rust_type(&args[0]))
             }
             Type::Apply { name, args } => {
                 if args.is_empty() {
@@ -668,6 +705,7 @@ pub(crate) fn build_cx_items(
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
+        ref_field_labels: HashMap::new(),
         enum_variants: HashMap::new(),
         variant_owner: HashMap::new(),
         boxed_edges: HashSet::new(),
@@ -694,6 +732,9 @@ pub(crate) fn build_cx_items(
         unqualified_file: HashMap::new(),
         trait_methods: HashSet::new(),
         rollback_types: HashSet::new(),
+        display_types: HashSet::new(),
+        iterable_hooks: HashMap::new(),
+        index_hooks: HashMap::new(),
         current_fn: std::cell::RefCell::new(String::new()),
         struct_type_params: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
@@ -757,6 +798,20 @@ pub(crate) fn build_cx_items(
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect(),
                 );
+                let mut labels = HashMap::new();
+                for f in &s.fields {
+                    if f.is_stored_ref {
+                        labels.insert(
+                            f.name.clone(),
+                            f.stored_ref_label
+                                .clone()
+                                .unwrap_or_else(|| "src".to_string()),
+                        );
+                    }
+                }
+                if !labels.is_empty() {
+                    cx.ref_field_labels.insert(s.name.clone(), labels);
+                }
                 // c148: record the declared type params so multi-char names are
                 // recognized everywhere (struct_is_generic, field_type_cloneable, …).
                 cx.struct_type_params.insert(
@@ -934,10 +989,16 @@ pub(crate) fn build_cx_items(
             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_ROLLBACK) => {
                 cx.rollback_types.insert(i.type_name.clone());
             }
+            Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY) => {
+                cx.display_types.insert(i.type_name.clone());
+            }
             Item::Struct(s) => {
                 for block in &s.trait_impls {
                     if block.trait_name == Syntax::TRAIT_ROLLBACK {
                         cx.rollback_types.insert(s.name.clone());
+                    }
+                    if block.trait_name == Syntax::TRAIT_DISPLAY {
+                        cx.display_types.insert(s.name.clone());
                     }
                 }
             }
@@ -946,13 +1007,140 @@ pub(crate) fn build_cx_items(
                     if block.trait_name == Syntax::TRAIT_ROLLBACK {
                         cx.rollback_types.insert(e.name.clone());
                     }
+                    if block.trait_name == Syntax::TRAIT_DISPLAY {
+                        cx.display_types.insert(e.name.clone());
+                    }
                 }
             }
             _ => {}
         }
     }
 
+    collect_iter_index_hooks(&mut cx, items);
+
     cx
+}
+
+fn assoc_type_impl<'a>(assoc: &'a [(String, Span, Type)], name: &str) -> Option<&'a Type> {
+    assoc
+        .iter()
+        .find(|(n, _, _)| n == name)
+        .map(|(_, _, t)| t)
+}
+
+fn trait_impl_assoc(
+    items: &[Item],
+    type_name: &str,
+    trait_name: &str,
+    assoc_name: &str,
+) -> Option<Type> {
+    for item in items {
+        match item {
+            Item::Impl(i)
+                if i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name) =>
+            {
+                return assoc_type_impl(&i.assoc_type_impls, assoc_name).cloned();
+            }
+            Item::Struct(s) if s.name == type_name => {
+                for block in &s.trait_impls {
+                    if block.trait_name == trait_name {
+                        return assoc_type_impl(&block.assoc_type_impls, assoc_name).cloned();
+                    }
+                }
+            }
+            Item::Enum(e) if e.name == type_name => {
+                for block in &e.trait_impls {
+                    if block.trait_name == trait_name {
+                        return assoc_type_impl(&block.assoc_type_impls, assoc_name).cloned();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
+    let mut iterable_pairs: Vec<(String, String)> = Vec::new();
+    for item in items {
+        match item {
+            Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_ITERABLE) => {
+                if let Some(Type::Named(iter_name)) =
+                    trait_impl_assoc(items, &i.type_name, Syntax::TRAIT_ITERABLE, "Iter")
+                {
+                    iterable_pairs.push((i.type_name.clone(), iter_name));
+                }
+            }
+            Item::Struct(s) => {
+                if trait_impl_assoc(items, &s.name, Syntax::TRAIT_ITERABLE, "Iter").is_some() {
+                    if let Some(Type::Named(iter_name)) =
+                        trait_impl_assoc(items, &s.name, Syntax::TRAIT_ITERABLE, "Iter")
+                    {
+                        iterable_pairs.push((s.name.clone(), iter_name));
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                if trait_impl_assoc(items, &e.name, Syntax::TRAIT_ITERABLE, "Iter").is_some() {
+                    if let Some(Type::Named(iter_name)) =
+                        trait_impl_assoc(items, &e.name, Syntax::TRAIT_ITERABLE, "Iter")
+                    {
+                        iterable_pairs.push((e.name.clone(), iter_name));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for (coll_type, iter_type) in iterable_pairs {
+        if let Some(item_type) =
+            trait_impl_assoc(items, &iter_type, Syntax::TRAIT_ITERATOR, "Item")
+        {
+            cx.iterable_hooks.insert(
+                coll_type,
+                IterableHook {
+                    iter_type,
+                    item_type,
+                },
+            );
+        }
+    }
+
+    let mut index_types: HashSet<String> = HashSet::new();
+    for item in items {
+        match item {
+            Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_INDEX) => {
+                index_types.insert(i.type_name.clone());
+            }
+            Item::Struct(s) => {
+                for block in &s.trait_impls {
+                    if block.trait_name == Syntax::TRAIT_INDEX {
+                        index_types.insert(s.name.clone());
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for block in &e.trait_impls {
+                    if block.trait_name == Syntax::TRAIT_INDEX {
+                        index_types.insert(e.name.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for type_name in index_types {
+        let value_type = trait_impl_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Value");
+        if let (Some(_key_type), Some(value_type)) =
+            (trait_impl_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Key"), value_type)
+        {
+            cx.index_hooks.insert(
+                type_name.clone(),
+                IndexHook { value_type },
+            );
+        }
+    }
 }
 
 /// Parameter conventions for a method, excluding `self` — call-site args

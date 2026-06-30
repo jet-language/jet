@@ -454,10 +454,10 @@ impl<'a> Interp<'a> {
                 if module == "core.net" && method == "fetch" {
                     return self.eval_net_fetch(argv, span);
                 }
-                // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate.
+                // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = matches!(
                     module.as_str(),
-                    "core.fs" | "core.env" | "core.io" | "core.exec" | "core.net"
+                    "core.fs" | "core.env" | "core.io" | "core.exec" | "core.net" | "core.process"
                 );
                 if is_tier2 {
                     if self.impure_depth == 0 {
@@ -482,9 +482,16 @@ impl<'a> Interp<'a> {
                             Some(span),
                         ));
                     }
-                    return apply_impure_core_call(&module, method, argv, span, self.base_dir);
+                    return apply_impure_core_call(
+                        &module,
+                        method,
+                        argv,
+                        span,
+                        self.base_dir,
+                        self.sink.as_deref_mut(),
+                    );
                 }
-                return apply_core_call(&module, method, argv, span);
+                return apply_core_call(&module, method, argv, span, self.repl_mode);
             }
         }
 
@@ -547,14 +554,108 @@ fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
     }
 }
 
-/// Evaluate a whitelisted pure Core call at comptime.
-/// `module` is the full path (e.g. `"core.math"`, `"core.string"`).
+/// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
+fn repl_native_only_module(module: &str) -> Option<&'static str> {
+    match module {
+        "core.http" | "core.http.client" | "core.http.server" | "jet.http" => {
+            Some("the HTTP client/server (`core.http`)")
+        }
+        "core.db" | "jet.db" => Some("`core.db` (SQLite)"),
+        "core.net" => Some("network sockets (`core.net`)"),
+        "core.archive" | "jet.archive" => Some("`core.archive`"),
+        "core.reactive" | "jet.reactive" => Some("`core.reactive`"),
+        "core.crypto" | "core.crypto.random" | "jet.crypto" => Some("`core.crypto`"),
+        "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
+        "core.mem" | "core.mem.alloc" => Some("`core.mem` (low-level memory tier)"),
+        "jet.log" => Some("`core.log`"),
+        _ => None,
+    }
+}
+
+fn repl_native_module_diag(module: &str, method: &str, span: Span) -> Diagnostic {
+    let feature = repl_native_only_module(module).unwrap_or("a native-only core module");
+    Diagnostic::error(
+        "E1802",
+        format!("the REPL interpreter can't run `{}.{method}()`", module),
+        format!(
+            "the REPL is an interpreter for learning Jet; {feature} needs the real compiler \
+             and native runtime"
+        ),
+        "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler".to_string(),
+        Some(span),
+    )
+}
+
+fn io_error_value(path: &str, e: std::io::Error) -> CtValue {
+    let kind = match e.kind() {
+        std::io::ErrorKind::NotFound => "NotFound",
+        std::io::ErrorKind::PermissionDenied => "PermissionDenied",
+        _ => "Other",
+    };
+    CtValue::Struct {
+        type_name: "IoError".to_string(),
+        fields: if kind == "Other" {
+            vec![
+                ("kind".to_string(), CtValue::Str(kind.to_string())),
+                ("message".to_string(), CtValue::Str(e.to_string())),
+            ]
+        } else {
+            vec![
+                ("kind".to_string(), CtValue::Str(kind.to_string())),
+                ("path".to_string(), CtValue::Str(path.to_string())),
+            ]
+        },
+    }
+}
+
+fn splitmix64(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 7;
+    x ^= x >> 9;
+    x = x.wrapping_mul(0x9e3779b97f4a7c15);
+    *state = x;
+    x
+}
+
+pub(super) fn random_int(state: &mut u64, low: i64, high: i64) -> i64 {
+    if high <= low {
+        return low;
+    }
+    low + (splitmix64(state) % ((high - low + 1) as u64)) as i64
+}
+
+pub(super) fn random_float(state: &mut u64) -> f64 {
+    (splitmix64(state) as f64) / (u64::MAX as f64)
+}
+
+thread_local! {
+    static JET_AMBIENT_RNG: std::cell::Cell<u64> = std::cell::Cell::new(0x4d595df4d0f33173);
+}
+
+fn with_ambient_rng<R>(f: impl FnOnce(&mut u64) -> R) -> R {
+    JET_AMBIENT_RNG.with(|cell| {
+        let mut state = cell.get();
+        let out = f(&mut state);
+        cell.set(state);
+        out
+    })
+}
+
+/// Evaluate a whitelisted pure Core call at comptime / in the REPL.
+/// `module` is the full path (e.g. `"core.math"`, `"jet.regex"`).
 fn apply_core_call(
     module: &str,
     method: &str,
     args: Vec<CtValue>,
     span: Span,
+    repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
+    if repl_mode {
+        if let Some(_) = repl_native_only_module(module) {
+            return Err(repl_native_module_diag(module, method, span));
+        }
+    }
+
     let one = |i: usize| {
         args.get(i).ok_or_else(|| {
             unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span)
@@ -633,6 +734,141 @@ fn apply_core_call(
             let to = as_string(one(2)?, span)?.to_string();
             Ok(CtValue::Str(s.replace(&from, &to)))
         }
+        // --- core.path (pure) ---
+        ("core.path", "join") => {
+            let a = as_string(one(0)?, span)?;
+            let b = as_string(one(1)?, span)?;
+            let joined = std::path::Path::new(a)
+                .join(b)
+                .to_string_lossy()
+                .into_owned();
+            Ok(CtValue::Str(joined))
+        }
+        ("core.path", "parent") => {
+            let p = as_string(one(0)?, span)?;
+            Ok(CtValue::Str(
+                std::path::Path::new(p)
+                    .parent()
+                    .map(|x| x.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ))
+        }
+        ("core.path", "extension") => {
+            let p = as_string(one(0)?, span)?;
+            Ok(CtValue::Str(
+                std::path::Path::new(p)
+                    .extension()
+                    .map(|x| x.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ))
+        }
+        ("core.path", "normalize") => {
+            let p = as_string(one(0)?, span)?;
+            Ok(CtValue::Str(
+                std::path::Path::new(p)
+                    .components()
+                    .collect::<std::path::PathBuf>()
+                    .to_string_lossy()
+                    .into_owned(),
+            ))
+        }
+        // --- core.encoding.json ---
+        ("core.encoding.json", "parse") => {
+            let text = as_string(one(0)?, span)?;
+            match super::JsonInterp::parse_json(text) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(super::JsonInterp::json_error_value(
+                    e,
+                )))),
+            }
+        }
+        ("core.encoding.json", "decode") => {
+            // Lenient decode: same as parse for the dynamic interpreter value.
+            let text = as_string(one(0)?, span)?;
+            match super::JsonInterp::parse_json(text) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(super::JsonInterp::json_error_value(
+                    e,
+                )))),
+            }
+        }
+        ("core.encoding.json", "to_string") => {
+            let v = one(0)?;
+            Ok(CtValue::Str(super::JsonInterp::render_json_pretty(v, false, 0)))
+        }
+        ("core.encoding.json", "to_string_pretty") => {
+            let v = one(0)?;
+            Ok(CtValue::Str(super::JsonInterp::render_json_pretty(v, true, 0)))
+        }
+        // --- core.time pure constructors ---
+        ("core.time", "ms") => {
+            let n = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("time.ms expects an Int", span)),
+            };
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                fields: vec![("ms".to_string(), CtValue::Int(n))],
+            })
+        }
+        ("core.time", "secs") => {
+            let n = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("time.secs expects an Int", span)),
+            };
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                fields: vec![("ms".to_string(), CtValue::Int(n * 1000))],
+            })
+        }
+        ("core.time", "clock") => {
+            let seed = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("time.clock expects an Int seed", span)),
+            };
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+                fields: vec![("now".to_string(), CtValue::Int(seed))],
+            })
+        }
+        // --- jet.regex / core.regex (D-REGEX1) ---
+        ("jet.regex", "is_match") => regex_is_match(args, span),
+        ("jet.regex", "find") => regex_find(args, span),
+        ("jet.regex", "find_all") => regex_find_all(args, span),
+        ("jet.regex", "split") => regex_split(args, span),
+        ("jet.regex", "replace") | ("jet.regex", "replace_all") => regex_replace(args, span),
+        ("jet.regex", "match") => regex_match(args, span),
+        // --- core.random (ambient; seed for deterministic REPL transcripts) ---
+        ("core.random", "seed") => {
+            let seed = match one(0)? {
+                CtValue::Int(n) => *n as u64,
+                _ => return Err(unsupported("random.seed expects an Int", span)),
+            };
+            with_ambient_rng(|st| *st = seed);
+            Ok(CtValue::Unit)
+        }
+        ("core.random", "int") => {
+            let low = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("random.int expects Int bounds", span)),
+            };
+            let high = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("random.int expects Int bounds", span)),
+            };
+            Ok(CtValue::Int(with_ambient_rng(|st| random_int(st, low, high))))
+        }
+        ("core.random", "float") => Ok(CtValue::Float(with_ambient_rng(|st| random_float(st)))),
+        ("core.random", "rng") => {
+            let seed = match one(0)? {
+                CtValue::Int(n) => *n as u64,
+                _ => return Err(unsupported("random.rng expects an Int seed", span)),
+            };
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::RNG_TYPE.to_string(),
+                fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
+            })
+        }
         // --- impure / build-time I/O → teaching diagnostic (reached only when
         // no #Impure gate intercepts first in eval_method) ---
         ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {
@@ -653,24 +889,123 @@ fn apply_core_call(
             ))
         }
         // --- unknown / not yet whitelisted ---
-        _ => Err(unsupported(
-            &format!("`{}.{}()` at comptime", module, method),
-            span,
-        )),
+        _ => {
+            if repl_mode {
+                if let Some(_) = repl_native_only_module(module) {
+                    return Err(repl_native_module_diag(module, method, span));
+                }
+            }
+            Err(unsupported(
+                &format!("`{}.{}()` at comptime", module, method),
+                span,
+            ))
+        }
     }
 }
 
-/// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect.
+fn regex_pattern(args: &[CtValue], span: Span) -> Result<regex::Regex, Diagnostic> {
+    let pat = as_string(args.first().ok_or_else(|| {
+        unsupported("regex call: missing pattern argument", span)
+    })?, span)?;
+    regex::Regex::new(pat).map_err(|e| {
+        Diagnostic::error(
+            "E0956",
+            format!("bad regex pattern: {}", e),
+            "the pattern could not be compiled".to_string(),
+            "fix the pattern syntax".to_string(),
+            Some(span),
+        )
+    })
+}
+
+fn regex_is_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| {
+        unsupported("regex.is_match: missing text argument", span)
+    })?, span)?;
+    Ok(CtValue::ResOk(Box::new(CtValue::Bool(re.is_match(text)))))
+}
+
+fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| {
+        unsupported("regex.find: missing text argument", span)
+    })?, span)?;
+    Ok(CtValue::ResOk(Box::new(match re.find(text) {
+        Some(m) => CtValue::Some(Box::new(CtValue::Str(m.as_str().to_string()))),
+        None => CtValue::None(crate::AST::Type::String),
+    })))
+}
+
+fn regex_find_all(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| {
+        unsupported("regex.find_all: missing text argument", span)
+    })?, span)?;
+    let items: Vec<CtValue> = re
+        .find_iter(text)
+        .map(|m| CtValue::Str(m.as_str().to_string()))
+        .collect();
+    Ok(CtValue::ResOk(Box::new(CtValue::List(items))))
+}
+
+fn regex_split(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| {
+        unsupported("regex.split: missing text argument", span)
+    })?, span)?;
+    let items: Vec<CtValue> = re
+        .split(text)
+        .map(|s| CtValue::Str(s.to_string()))
+        .collect();
+    Ok(CtValue::ResOk(Box::new(CtValue::List(items))))
+}
+
+fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| {
+        unsupported("regex.replace: missing text argument", span)
+    })?, span)?;
+    let rep = as_string(args.get(2).ok_or_else(|| {
+        unsupported("regex.replace: missing replacement argument", span)
+    })?, span)?;
+    Ok(CtValue::ResOk(Box::new(CtValue::Str(
+        re.replace_all(text, rep).into_owned(),
+    ))))
+}
+
+fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| {
+        unsupported("regex.match: missing text argument", span)
+    })?, span)?;
+    Ok(CtValue::ResOk(Box::new(match re.captures(text) {
+        Some(caps) => {
+            let groups: Vec<CtValue> = (0..caps.len())
+                .map(|i| {
+                    caps.get(i)
+                        .map(|m| CtValue::Some(Box::new(CtValue::Str(m.as_str().to_string()))))
+                        .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))
+                })
+                .collect();
+            CtValue::Some(Box::new(CtValue::Struct {
+                type_name: "Match".to_string(),
+                fields: vec![("groups".to_string(), CtValue::List(groups))],
+            }))
+        }
+        None => CtValue::None(crate::AST::Type::Named("Match".to_string())),
+    })))
+}
+
+/// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect (or REPL sandbox I/O).
 /// Only called from `eval_method` when `impure_depth > 0` and `allow_impure`.
-/// Supports: `core.fs.read`, `core.env.get`.
-/// `core.net.fetch` is Tier-1 (handled before the gate in `eval_method`).
-/// Other `core.net.*` methods are E3412 (not yet implemented).
 fn apply_impure_core_call(
     module: &str,
     method: &str,
     args: Vec<CtValue>,
     span: Span,
     base_dir: &std::path::Path,
+    sink: Option<&mut super::Interpreter::DevSink>,
 ) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i).ok_or_else(|| {
@@ -685,26 +1020,189 @@ fn apply_impure_core_call(
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::read_to_string(&path) {
-                Ok(s) => Ok(CtValue::Str(s)),
-                Err(e) => Err(Diagnostic::error(
-                    "E3410",
-                    format!("comptime `core.fs.read({:?})` failed: {}", path, e),
-                    "the file could not be read at compile time".to_string(),
-                    "check that the path is correct and readable".to_string(),
-                    Some(span),
-                )),
+                Ok(s) => Ok(CtValue::ResOk(Box::new(CtValue::Str(s)))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                    &path.to_string_lossy(),
+                    e,
+                )))),
+            }
+        }
+        ("core.fs", "read_bytes") => {
+            let path_str = as_string(one(0)?, span)?;
+            let path = base_dir.join(path_str);
+            match std::fs::read(&path) {
+                Ok(bs) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bs)))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                    &path.to_string_lossy(),
+                    e,
+                )))),
+            }
+        }
+        ("core.fs", "write" | "append") => {
+            let path_str = as_string(one(0)?, span)?;
+            let content = as_string(one(1)?, span)?;
+            let path = base_dir.join(path_str);
+            let result = if method == "append" {
+                use std::io::Write;
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .and_then(|mut f| f.write_all(content.as_bytes()).map(|_| ()))
+            } else {
+                std::fs::write(&path, content)
+            };
+            match result {
+                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                    &path.to_string_lossy(),
+                    e,
+                )))),
+            }
+        }
+        ("core.fs", "exists" | "is_dir") => {
+            let path_str = as_string(one(0)?, span)?;
+            let path = base_dir.join(path_str);
+            let meta = std::fs::metadata(&path);
+            Ok(CtValue::Bool(match (method, meta) {
+                ("exists", Ok(_)) => true,
+                ("exists", Err(_)) => false,
+                ("is_dir", Ok(m)) => m.is_dir(),
+                ("is_dir", Err(_)) => false,
+                _ => false,
+            }))
+        }
+        ("core.fs", "create_dir") => {
+            let path_str = as_string(one(0)?, span)?;
+            let path = base_dir.join(path_str);
+            match std::fs::create_dir_all(&path) {
+                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                    &path.to_string_lossy(),
+                    e,
+                )))),
+            }
+        }
+        ("core.fs", "remove") => {
+            let path_str = as_string(one(0)?, span)?;
+            let path = base_dir.join(path_str);
+            let result = if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            match result {
+                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                    &path.to_string_lossy(),
+                    e,
+                )))),
             }
         }
         ("core.env", "get") => {
             let key = as_string(one(0)?, span)?;
             match std::env::var(key) {
                 Ok(v) => Ok(CtValue::Str(v)),
-                // env var absent → null (Option None)
                 Err(_) => Ok(CtValue::None(crate::AST::Type::String)),
             }
         }
+        ("core.env", "set") => {
+            let key = as_string(one(0)?, span)?;
+            let val = as_string(one(1)?, span)?;
+            std::env::set_var(key, val);
+            Ok(CtValue::Unit)
+        }
+        ("core.env", "current_dir") => match std::env::current_dir() {
+            Ok(p) => Ok(CtValue::ResOk(Box::new(CtValue::Str(
+                p.to_string_lossy().into_owned(),
+            )))),
+            Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(".", e)))),
+        },
+        ("core.env", "home_dir") => Ok(match std::env::var("HOME")
+            .ok()
+            .or_else(|| std::env::var("USERPROFILE").ok())
+        {
+            Some(v) => CtValue::Some(Box::new(CtValue::Str(v))),
+            None => CtValue::None(crate::AST::Type::String),
+        }),
+        ("core.io", "args") => Ok(CtValue::List(
+            std::env::args()
+                .skip(1)
+                .map(CtValue::Str)
+                .collect::<Vec<_>>(),
+        )),
+        ("core.io", "eprint") => {
+            let text = match args.first() {
+                Some(v) => v.jet_show(),
+                None => String::new(),
+            };
+            if let Some(s) = sink {
+                s.stderr.push_str(&text);
+                s.stderr.push('\n');
+            }
+            Ok(CtValue::Unit)
+        }
+        ("core.io", "input") | ("core.io", "read_all_input") => Ok(CtValue::ResOk(Box::new(
+            CtValue::Str(String::new()),
+        ))),
+        ("core.io", "stdin") => Ok(CtValue::Struct {
+            type_name: "StdinHandle".to_string(),
+            fields: vec![],
+        }),
+        ("core.process", "exit") => {
+            let code = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => 0,
+            };
+            std::process::exit(code as i32);
+        }
+        ("core.process", "run") => {
+            let cmd = match one(0)? {
+                CtValue::List(items) => items
+                    .iter()
+                    .map(|v| v.jet_show())
+                    .collect::<Vec<_>>(),
+                _ => {
+                    return Err(unsupported(
+                        "process.run expects a list of command words",
+                        span,
+                    ))
+                }
+            };
+            if cmd.is_empty() {
+                return Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                    type_name: "IoError".to_string(),
+                    fields: vec![(
+                        "message".to_string(),
+                        CtValue::Str("process.run needs at least one command word".to_string()),
+                    )],
+                })));
+            }
+            match std::process::Command::new(&cmd[0])
+                .args(&cmd[1..])
+                .output()
+            {
+                Ok(out) => Ok(CtValue::ResOk(Box::new(CtValue::Struct {
+                    type_name: "ProcessResult".to_string(),
+                    fields: vec![
+                        (
+                            "code".to_string(),
+                            CtValue::Int(out.status.code().unwrap_or(-1) as i64),
+                        ),
+                        (
+                            "output".to_string(),
+                            CtValue::Str(String::from_utf8_lossy(&out.stdout).into_owned()),
+                        ),
+                        (
+                            "errors".to_string(),
+                            CtValue::Str(String::from_utf8_lossy(&out.stderr).into_owned()),
+                        ),
+                    ],
+                }))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(&cmd[0], e)))),
+            }
+        }
         // E3412: other core.net methods not yet implemented at comptime.
-        // (core.net.fetch is Tier-1 and handled before this gate in eval_method.)
         ("core.net", _) => Err(Diagnostic::error(
             "E3412",
             format!("`core.net.{}()` is not available at comptime", method),

@@ -429,14 +429,20 @@ fn repl_use_unknown_core_module_rejected() {
 
 #[test]
 fn repl_use_repl_incompatible_module_hard_rejected() {
-    // Modules the interpreter can't run (fs, tasks, …) hard-reject with E1802
-    // before being treated as an import.
-    let out = run_transcript(&["use core.fs as fs"], None);
+    // Native-only modules (HTTP, DB, …) hard-reject with E1802 before import.
+    let out = run_transcript(&["use core.http.client as http"], None);
     assert!(
         out.contains("E1802"),
-        "core.fs should hard-reject, got: {:?}",
+        "core.http.client should hard-reject, got: {:?}",
         out
     );
+}
+
+#[test]
+fn repl_use_core_fs_import_accepted() {
+    let out = run_transcript(&["use core.fs as fs"], None);
+    assert!(out.contains("ok"), "core.fs import should work, got: {:?}", out);
+    assert!(!out.contains("E1802"), "got: {:?}", out);
 }
 
 #[test]
@@ -514,17 +520,115 @@ fn repl_core_result_stored_in_binding() {
 }
 
 #[test]
-fn repl_non_whitelisted_core_io_still_rejects() {
-    // core.io I/O calls must NOT silently execute at comptime (E0958).
-    // core.io is not in the hard-reject list (only core.fs/tasks/mem are).
-    // After importing, calling io.read() must produce an error, not succeed.
-    let inputs = &["use core.io as io", "io.read()"];
+fn repl_core_io_eprint_inline() {
+    // c133: Tier-2 core.io calls run in the REPL sandbox (no #Impure gate).
+    let inputs = &["use core.io as io", "io.eprint(\"repl-err\")"];
     let out = run_transcript(inputs, None);
-    // Either sema rejects it (type error) or the comptime interpreter rejects
-    // it (E0958 — I/O not allowed at comptime). Either way: no silent success.
     assert!(
-        out.contains("error") || out.contains("E095"),
-        "io.read() must not silently succeed, got: {:?}",
+        out.contains("ok") && out.contains("repl-err"),
+        "io.eprint should run inline, got: {:?}",
+        out
+    );
+    assert!(
+        !out.contains("E3410") && !out.contains("E0956"),
+        "got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_core_json_parse_inline() {
+    let inputs = &[
+        "use core.encoding.json as json",
+        "json.to_string(json.parse(\"[42]\") ?? panic(\"bad\"))",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("42") && !out.contains("E0956"),
+        "json.parse/to_string should work inline, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_core_path_join_inline() {
+    let inputs = &["use core.path as path", "path.join(\"a\", \"b\")"];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("a/b") || out.contains("a\\b"),
+        "path.join should work, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_core_regex_is_match_inline() {
+    let inputs = &[
+        "use core.regex as re",
+        "re.is_match(\"\\\\d+\", \"order 42\") ?? panic(\"bad\")",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("true") && !out.contains("E0956"),
+        "regex.is_match should work inline, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_core_fs_read_inline() {
+    let fixture = std::env::temp_dir().join(format!(
+        "jet_repl_fs_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&fixture, "repl-fs-payload").expect("write fixture");
+    let path = fixture.to_string_lossy().to_string();
+    let read_expr = format!(
+        "fs.read(\"{}\") ?? panic(\"read failed\")",
+        path.replace('\\', "\\\\")
+    );
+    let inputs = &["use core.fs as fs", &read_expr];
+    let out = run_transcript(inputs, None);
+    std::fs::remove_file(&fixture).ok();
+    assert!(
+        out.contains("repl-fs-payload") && !out.contains("E1802"),
+        "fs.read should work in REPL, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_http_client_import_hard_rejected() {
+    let out = run_transcript(&["use core.http.client as Client"], None);
+    assert!(
+        out.contains("E1802"),
+        "HTTP client import should hard-reject, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_mut_binding_allows_reassign() {
+    // D-BIND3: `:=` bindings must stay mutable across REPL inputs for sema.
+    let out = run_transcript(&["hi := 2", "hi = hi * 2", "hi"], None);
+    assert!(
+        !out.contains("E0111") && !out.contains("made with"),
+        "mutable REPL binding should allow `=`, got: {:?}",
+        out
+    );
+    assert!(out.contains("4"), "hi * 2 should be 4, got: {:?}", out);
+}
+
+#[test]
+fn repl_immut_binding_rejects_reassign() {
+    let out = run_transcript(&["hi #= 2", "hi = hi * 2"], None);
+    assert!(
+        out.contains("E0111"),
+        "immutable `#=` binding should reject `=`, got: {:?}",
         out
     );
 }

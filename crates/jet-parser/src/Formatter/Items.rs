@@ -282,10 +282,17 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// Render a leading `#[a, b(x), …]` bracket-marker list on its own line, the
-    /// exact surface the user wrote before a `struct`/`enum`. No-op when empty.
-    fn fmt_type_markers(&mut self, markers: &[Marker]) {
+    /// Render a leading type-marker prefix. One marker is `#A` when it sits
+    /// immediately before `struct`/`enum`; otherwise `#[A]`. Two or more are
+    /// always `#[A, B]` (D-ATTR1/D-ATTR2).
+    fn fmt_type_markers(&mut self, markers: &[Marker], lone_hash_ok: bool) {
         if markers.is_empty() {
+            return;
+        }
+        if markers.len() == 1 && lone_hash_ok {
+            self.write("#");
+            self.fmt_marker(&markers[0]);
+            self.newline();
             return;
         }
         self.write("#[");
@@ -486,7 +493,11 @@ impl<'a> Fmt<'a> {
     fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
         // D-ATTR2/D-SERDE: the leading `#[…]` bracket-marker list (derives +
         // container serde attrs), verbatim as the user wrote it.
-        self.fmt_type_markers(&s.type_markers);
+        let lone_hash_ok = s.layout.is_none()
+            && !s.is_published_schema
+            && !s.is_single_use
+            && !s.is_must_use;
+        self.fmt_type_markers(&s.type_markers, lone_hash_ok);
         // D-LIN1: `#SingleUse` precedes `pub`/`struct`, on the same line.
         if s.is_single_use {
             self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
@@ -549,7 +560,8 @@ impl<'a> Fmt<'a> {
 
     fn fmt_enum(&mut self, e: &EnumDef, top_level: bool) {
         // D-ATTR2/D-SERDE: leading `#[…]` bracket-marker list, verbatim.
-        self.fmt_type_markers(&e.type_markers);
+        let lone_hash_ok = !e.is_single_use && !e.is_must_use;
+        self.fmt_type_markers(&e.type_markers, lone_hash_ok);
         // D-LIN1: `#SingleUse` precedes `pub`/`enum`, on the same line.
         if e.is_single_use {
             self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
@@ -771,13 +783,16 @@ impl<'a> Fmt<'a> {
         }
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
         if field.is_stored_ref {
-            self.write("ref");
-            if let Some(label) = &field.stored_ref_label {
-                self.write("[");
-                self.write(label);
-                self.write("]");
-            }
-            self.write(" ");
+            self.write("#");
+            self.write(crate::Syntax::ATTR_REF);
+            self.write("(");
+            self.write(
+                field
+                    .stored_ref_label
+                    .as_deref()
+                    .unwrap_or("src"),
+            );
+            self.write(") ");
         }
         self.write(&field.name);
         self.write(": ");

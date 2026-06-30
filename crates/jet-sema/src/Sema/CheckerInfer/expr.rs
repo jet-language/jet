@@ -196,19 +196,60 @@ impl<'a> Checker<'a> {
             Expr::Bool(_, _) => Some(Type::Bool),
             Expr::Str(parts, _) => {
                 for p in parts.iter_mut() {
-                    if let StrPart::Interp(inner) = p {
-                        // Interpolation borrows (`.jet_show()`); never moves.
+                    if let StrPart::Interp(inner, fmt) = p {
+                        // Interpolation borrows; never moves.
                         self.borrow_ctx = true;
                         let t = self.infer(inner);
                         if let Some(t) = t {
-                            if !is_printable(&t, self.registry) {
-                                self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    format!("{} can't be put into text yet", t.show()),
-                                    "interpolation shows printable values".to_string(),
-                                    "show one of its parts instead".to_string(),
-                                    Some(inner.span()),
-                                ));
+                            match fmt {
+                                crate::AST::StrFormat::Display => {
+                                    if !is_displayable(&t, self.trait_reg) {
+                                        // Migration: auto-printable structs without Display get a lint
+                                        // and still compile via jet_show fallback in codegen.
+                                        if let Type::Named(n) = &t {
+                                            if self.trait_reg.auto_printable.contains(n)
+                                                && !self.trait_reg.implements_trait(
+                                                    n,
+                                                    crate::Generics::DISPLAY,
+                                                )
+                                            {
+                                                self.diags.push(Diagnostic::lint(
+                                                    "L0520",
+                                                    format!(
+                                                        "`{n}` has no `Display` impl — bare `{{}}` will require one soon"
+                                                    ),
+                                                    "Display is the user-facing interpolation hook; Debug is for `{value@Debug}`"
+                                                        .to_string(),
+                                                    format!(
+                                                        "add `impl {n}.Display {{ fn display(self) -> String {{ … }} }}`"
+                                                    ),
+                                                    Some(inner.span()),
+                                                ));
+                                            } else {
+                                                self.diags.push(crate::Generics::e0915(
+                                                    &t.show(),
+                                                    inner.span(),
+                                                ));
+                                            }
+                                        } else {
+                                            self.diags.push(crate::Generics::e0915(
+                                                &t.show(),
+                                                inner.span(),
+                                            ));
+                                        }
+                                    }
+                                }
+                                crate::AST::StrFormat::Debug => {
+                                    if !is_debuggable(&t, self.registry, self.trait_reg) {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!("{} can't be shown with @Debug yet", t.show()),
+                                            "debug interpolation needs a debuggable value".to_string(),
+                                            "implement `Debug` or use a debuggable part".to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
                             }
                         }
                     }
@@ -694,6 +735,13 @@ impl<'a> Checker<'a> {
             }
             // D-FMTPARENS1=A: parenthesized expressions are transparent to type checking.
             Expr::Paren(inner, _) => self.infer(inner),
+            // D-INCR1: `++`/`--` on a mutable integer lvalue.
+            Expr::IncDec {
+                op,
+                operand,
+                postfix,
+                span,
+            } => self.check_incdec(*op, operand, *postfix, *span),
         }
     }
 
@@ -1213,6 +1261,24 @@ impl<'a> Checker<'a> {
                     }
                 }
                 Some(math_scalar_ty(&lane_name))
+            }
+            Type::Named(n) if self.trait_reg.index_types.contains_key(n) => {
+                let (key_ty, value_ty) = self.trait_reg.index_types.get(n).unwrap();
+                *kind = IndexKind::User(n.clone());
+                if idx_ty != *key_ty {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!(
+                            "this value indexes with {}, not {}",
+                            key_ty.show(),
+                            idx_ty.show()
+                        ),
+                        "the key in `value[key]` must match the type's `Index` key".to_string(),
+                        format!("use a {} key here", key_ty.name()),
+                        Some(index.span()),
+                    ));
+                }
+                Some(value_ty.clone())
             }
             Type::String => {
                 self.diags.push(Diagnostic::error(

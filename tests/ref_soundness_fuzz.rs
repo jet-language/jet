@@ -84,27 +84,27 @@ fn ref_field_case(src: Source) -> Case {
     let (label, body) = match src {
         Source::Param => (
             "ref_field/param",
-            "struct R { ref v: String; }\nfn make(p: String) -> R {\n    return R.{ v: p };\n}\n"
+            "struct R { #Ref(p) v: String; }\nfn make(p: String) -> R {\n    return R.{ v: p };\n}\n"
                 .to_string(),
         ),
         Source::Local => (
             "ref_field/local",
-            "struct R { ref v: String; }\nfn make() {\n    val local: String = \"x\";\n    val r: R = R.{ v: local };\n}\n"
+            "struct R { #Ref(src) v: String; }\nfn make() {\n    val local: String = \"x\";\n    val r: R = R.{ v: local };\n}\n"
                 .to_string(),
         ),
         Source::FieldOfParam => (
             "ref_field/field_of_param",
-            "struct Bin { v: String; }\nstruct R { ref v: String; }\nfn make(b: Bin) -> R {\n    return R.{ v: b.v };\n}\n"
+            "struct Bin { v: String; }\nstruct R { #Ref(b) v: String; }\nfn make(b: Bin) -> R {\n    return R.{ v: b.v };\n}\n"
                 .to_string(),
         ),
         Source::IndexOfParam => (
             "ref_field/index_of_param",
-            "struct R { ref v: String; }\nfn make(xs: [String]) -> R {\n    return R.{ v: xs[0] };\n}\n"
+            "struct R { #Ref(xs) v: String; }\nfn make(xs: [String]) -> R {\n    return R.{ v: xs[0] };\n}\n"
                 .to_string(),
         ),
         Source::FreshLiteral => (
             "ref_field/fresh_literal",
-            "struct R { ref v: String; }\nfn make() {\n    val r: R = R.{ v: \"fresh\" };\n}\n"
+            "struct R { #Ref(src) v: String; }\nfn make() {\n    val r: R = R.{ v: \"fresh\" };\n}\n"
                 .to_string(),
         ),
     };

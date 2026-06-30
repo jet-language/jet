@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 
 /// Built-in trait names (prelude).
 pub const PRINTABLE: &str = "Printable";
+pub const DISPLAY: &str = "Display";
+pub const DEBUG: &str = "Debug";
 pub const EQUATABLE: &str = "Equatable";
 pub const COMPARABLE: &str = "Comparable";
 pub const SERIALIZE: &str = "Serialize";
@@ -25,6 +27,8 @@ pub fn is_builtin_trait(name: &str) -> bool {
 pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
     match trait_name {
         PRINTABLE => Some("JetShow"),
+        DISPLAY => Some("user_Display"),
+        DEBUG => Some("JetDebug"),
         EQUATABLE => Some("PartialEq"),
         COMPARABLE => Some("PartialOrd"),
         SERIALIZE => Some("user_Serialize"),
@@ -184,13 +188,17 @@ pub fn sig_matches_trait(
     // impl method matches the abstract trait method.
     for ((_, pt), ep) in params.iter().zip(&expected.params) {
         let exp_ty = substitute_type(&ep.ty, assoc);
-        if !types_equal_modulo_self(pt, &exp_ty) {
+        let impl_ty = substitute_type(pt, assoc);
+        if !types_equal_modulo_self(&impl_ty, &exp_ty) {
             return false;
         }
     }
     match (&ret, &expected.return_type) {
         (None, None) => !is_view && !expected.is_view_return,
-        (Some(r), Some(er)) => types_equal_modulo_self(r, &substitute_type(er, assoc)),
+        (Some(r), Some(er)) => types_equal_modulo_self(
+            &substitute_type(r, assoc),
+            &substitute_type(er, assoc),
+        ),
         _ => false,
     }
 }
@@ -332,6 +340,52 @@ pub fn e0913(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
                 .map(|m| format!("`type {m} = …`"))
                 .collect::<Vec<_>>()
                 .join(", ")
+        ),
+        Some(span),
+    )
+}
+
+/// D-DISPLAYDBG2: unknown interpolation selector after `@`.
+pub fn e0914(selector: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0914",
+        format!("unknown interpolation selector `@{}`", selector),
+        format!(
+            "string interpolation supports a closed selector set — use `@{}` for debug output",
+            crate::Syntax::INTERP_SELECTOR_DEBUG
+        ),
+        format!(
+            "write `{{value@{}}}` for debug formatting, or `{{value}}` for display",
+            crate::Syntax::INTERP_SELECTOR_DEBUG
+        ),
+        Some(span),
+    )
+}
+
+/// D-DISPLAY-SHAPE: bare `{}` requires an explicit `Display` impl.
+pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0915",
+        format!("`{type_show}` has no `Display` implementation"),
+        "bare `{value}` interpolation calls `Display` — there is no default for user types"
+            .to_string(),
+        format!(
+            "add `impl {type_show}.Display {{ fn display(self) -> String {{ … }} }}`, or use `{{value@{}}}` for debug output",
+            crate::Syntax::INTERP_SELECTOR_DEBUG
+        ),
+        Some(span),
+    )
+}
+
+/// D-DEBUG-REDACT / auto-derive limits: a field type blocks Debug auto-derive.
+pub fn e0916(type_show: &str, field: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0916",
+        format!("`{type_show}` can't auto-derive `Debug` because field `{field}` isn't debuggable"),
+        "auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable"
+            .to_string(),
+        format!(
+            "mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type_show}`"
         ),
         Some(span),
     )

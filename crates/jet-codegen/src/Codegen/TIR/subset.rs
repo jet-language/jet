@@ -1830,7 +1830,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         Expr::ComptimeSplice { value, .. } => value.is_some(),
         Expr::Str(parts, _) => parts.iter().all(|p| match p {
             StrPart::Lit(_) => true,
-            StrPart::Interp(e) => expr_in_subset(e, cx, locals),
+            StrPart::Interp(e, _) => expr_in_subset(e, cx, locals),
         }),
         // An ident must resolve to a local/param, OR (c109 Phase 13) be a bare
         // function name used as a VALUE: a non-local, non-const name in `cx.fn_types`
@@ -1848,7 +1848,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || locals.contains(name)
                 || ident_is_named_fn_value(name, cx, locals)
         }
-        Expr::Unary(_, inner, _) => expr_in_subset(inner, cx, locals),
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => expr_in_subset(inner, cx, locals),
         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
         Expr::Call(c) => {
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
@@ -1954,6 +1954,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             let is_math_ctor = !locals.contains(&c.name)
                 && crate::Sema::is_math_type(&c.name)
                 && !cx.type_names.contains(&c.name);
+            let is_precise_ctor = !locals.contains(&c.name)
+                && (c.name == crate::Syntax::TYPE_BIGINT || c.name == crate::Syntax::TYPE_DECIMAL)
+                && !cx.type_names.contains(&c.name);
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s
             // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
@@ -1989,6 +1992,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || is_plain_fn
                 || is_distinct_ctor
                 || is_math_ctor
+                || is_precise_ctor
                 || is_extern
                 || is_unqual_inline
                 || is_unqual_file)
@@ -2465,6 +2469,12 @@ pub(crate) fn method_call_in_subset(
     if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // D-OPTGC1: `handle.with` / `handle.with_mut` on a traced `Gc<T>` value.
+    if matches!(method, "with" | "with_mut") {
+        return args.len() == 1
+            && matches!(&args[0].expr, Expr::Lambda(l) if lambda_in_subset(l, cx, locals))
+            && expr_in_subset(receiver, cx, locals);
+    }
     // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
     // Sema types the handle `Transaction` (`recv_type == Some("Transaction")`).
     // It lowers to a Drop-backed commit guard (a `scope.guard` cousin), so the
@@ -2636,6 +2646,10 @@ pub(crate) fn method_call_in_subset(
     if alloc_new_type(receiver, method, cx, locals).is_some() {
         return args.len() <= 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
+    // D-OPTGC1: `gc.Gc.new<T>(value)` traced-handle constructor.
+    if recv_type.as_deref() == Some(Syntax::GC_TYPE) && method == Syntax::GC_NEW {
+        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (d) [c109 Phase 9]: a built-in collection/string method
     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
     // list/map/string receiver. Sema resolves these via `Collections::
@@ -2757,6 +2771,15 @@ pub(crate) fn method_call_in_subset(
     // Shape (d7) [D-PENDING1=B]: a `Loadable<T,E>` method.
     // Sema sets `recv_type == Some("Loadable")`.
     if recv_type.as_deref() == Some("Loadable") && is_loadable_method_name(method, args.len()) {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
+    // D-TTLVAL1=A: Expiring<T> / Rotting<T> methods.
+    if matches!(recv_type.as_deref(), Some("Expiring" | "Rotting"))
+        && matches!((method, args.len()), ("get", 1) | ("is_valid", 1) | ("force", 1))
+    {
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()
@@ -3659,6 +3682,13 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     {
         return true;
     }
+    // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors. NOT in `core_fixed_sig` (generic T).
+    if module == "core.time.expiring" && method == "new" {
+        return true;
+    }
+    if module == "core.secrets" && method == "rotting_new" {
+        return true;
+    }
     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
     if matches!(module, "core.http.client" | "core.http.server")
         && matches!(
@@ -3808,6 +3838,22 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Rng", "pick", 1) => THandleOp::RngPick,
         ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
         ("Duration", "millis", 0) => THandleOp::DurationMillis,
+        ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
+            type_name: "BigInt".to_string(),
+            method: method.to_string(),
+        },
+        ("BigInt", "neg" | "to_string", 0) => THandleOp::PreciseMethod {
+            type_name: "BigInt".to_string(),
+            method: method.to_string(),
+        },
+        ("Decimal", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
+            type_name: "Decimal".to_string(),
+            method: method.to_string(),
+        },
+        ("Decimal", "to_string", 0) => THandleOp::PreciseMethod {
+            type_name: "Decimal".to_string(),
+            method: method.to_string(),
+        },
         ("TcpListener", "accept", 0) => THandleOp::TcpListenerAccept,
         ("TcpListener", "local_addr", 0) => THandleOp::TcpListenerLocalAddr,
         ("TcpStream", "read", 0) => THandleOp::TcpStreamRead,
@@ -3885,7 +3931,19 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
     let mut sink = Vec::new();
     let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
         .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink))
-        .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink));
+        .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink))
+        .or_else(|| {
+            if handle == crate::Syntax::TYPE_BIGINT || handle == crate::Syntax::TYPE_DECIMAL {
+                crate::Collections::builtin_method_return(
+                    &Type::Named(handle.to_string()),
+                    method,
+                    nargs,
+                    false,
+                )
+            } else {
+                None
+            }
+        });
     match ret {
         Some(Some(t)) => t,
         _ => unit_type(),
@@ -3979,6 +4037,19 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.time.datetime", "from_timestamp") | ("core.time.datetime", "now") => {
             return Type::Named("DateTime".to_string())
+        }
+        // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors — T from arg 0.
+        ("core.time.expiring", "new") => {
+            return Type::Apply {
+                name: "Expiring".to_string(),
+                args: vec![Type::Named("Unknown".to_string())],
+            }
+        }
+        ("core.secrets", "rotting_new") => {
+            return Type::Apply {
+                name: "Rotting".to_string(),
+                args: vec![Type::Named("Unknown".to_string())],
+            }
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
         ("core.http.client", "get") | ("core.http.client", "post") => {

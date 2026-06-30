@@ -727,6 +727,7 @@ impl<'a> Checker<'a> {
             self.borrow_ctx = true;
             return self.infer(receiver);
         }
+        self.lint_allocation_hints(method, span);
         // D-DIST3 (ratified 2026-06-20): `.raw()` unwraps a distinct type.
         if method == crate::Syntax::METHOD_DISTINCT_RAW {
             self.borrow_ctx = true;
@@ -1233,6 +1234,55 @@ impl<'a> Checker<'a> {
             *recv_type_out = Some("Loadable".to_string());
             return ret;
         }
+        // D-TTLVAL1=A: Expiring<T> / Rotting<T> — fallible get, reject force().
+        if let Type::Apply { name, .. } = &recv_ty {
+            if name == "Expiring" {
+                if method == "force" {
+                    self.diags.push(Diagnostic::error(
+                        "E0511",
+                        "`Expiring.force` bypasses expiry checking".to_string(),
+                        "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly (D-TTLVAL1)".to_string(),
+                        "use `match item.get(clock) { .ok(v) -> …; .err(Expired) -> … }` instead".to_string(),
+                        Some(span),
+                    ));
+                }
+                if let Some(ret) = expiring_method_return(&recv_ty, method, args.len()) {
+                    if method == "get" && args.len() == 1 {
+                        self.expect_core_arg(
+                            "get",
+                            0,
+                            &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
+                            &mut args[0],
+                        );
+                    }
+                    *recv_type_out = Some("Expiring".to_string());
+                    return ret;
+                }
+            }
+            if name == "Rotting" {
+                if method == "force" {
+                    self.diags.push(Diagnostic::error(
+                        "E0511",
+                        "`Rotting.force` bypasses expiry checking".to_string(),
+                        "rotting secrets must use fallible `get(clock)` so expired access zeroizes storage (D-TTLVAL1, I1)".to_string(),
+                        "use `match secret.get(clock) { .ok(v) -> …; .err(Expired) -> … }` instead".to_string(),
+                        Some(span),
+                    ));
+                }
+                if let Some(ret) = rotting_method_return(&recv_ty, method, args.len()) {
+                    if method == "get" && args.len() == 1 {
+                        self.expect_core_arg(
+                            "get",
+                            0,
+                            &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
+                            &mut args[0],
+                        );
+                    }
+                    *recv_type_out = Some("Rotting".to_string());
+                    return ret;
+                }
+            }
+        }
         // D-APPROX1=A: method calls on sketch data structures.
         if let Some(ret) = sketch_method_return(&recv_ty, method, args) {
             for a in args.iter_mut() {
@@ -1265,8 +1315,55 @@ impl<'a> Checker<'a> {
         }
         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
         // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
+        if is_gc_type(&recv_ty) && matches!(method, "with" | "with_mut") {
+            if args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`Gc.{method}` takes exactly one closure argument"),
+                    "pass a closure that receives the inner value".to_string(),
+                    format!("write `handle.{method}(|v| {{ … }})`"),
+                    Some(span),
+                ));
+            } else if let Some(arg) = args.get_mut(0) {
+                self.infer(&mut arg.expr);
+            }
+            *recv_type_out = Some(Syntax::GC_TYPE.to_string());
+            return Some(unit_ty());
+        }
         if let Type::Named(handle_ty) = &recv_ty {
             let handle_ty_s = handle_ty.clone();
+            if handle_ty_s == Syntax::GC_TYPE {
+                if let Some(ret) =
+                    gc_method_return(method, type_args, args, span, &mut self.diags)
+                {
+                    *recv_type_out = Some(handle_ty_s);
+                    if method == "new" {
+                        if let Some(arg) = args.get_mut(0) {
+                            let inferred = self.infer(&mut arg.expr);
+                            if let Some(Some(Type::Apply { name, args: targs })) = Some(&ret) {
+                                if name == Syntax::GC_TYPE && targs.len() == 1 {
+                                    if let Some(et) = inferred {
+                                        self.check_type_assignable(&targs[0], &et, arg.expr.span());
+                                    }
+                                    let out = Type::Apply {
+                                        name: Syntax::GC_TYPE.to_string(),
+                                        args: targs.clone(),
+                                    };
+                                    *resolved_ret_out = Some(out.clone());
+                                    return Some(out);
+                                }
+                            }
+                        }
+                    }
+                    if matches!(method, "with" | "with_mut") {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.infer(&mut arg.expr);
+                        }
+                        return Some(unit_ty());
+                    }
+                    return ret;
+                }
+            }
             if let Some(ret) =
                 alloc_method_return(&handle_ty_s, method, args, span, &mut self.diags)
             {
@@ -1602,6 +1699,14 @@ impl<'a> Checker<'a> {
             // D-NUMOPS1: hand codegen the receiver's numeric width so it picks the
             // same widening/narrowing form sema just chose for the return type.
             if recv_ty.is_numeric() {
+                *recv_type_out = Some(recv_ty.name());
+            }
+            // D-BIGINT1 / D-DECIMAL1: precise numeric handle methods.
+            if matches!(
+                &recv_ty,
+                Type::Named(n)
+                    if n == crate::Syntax::TYPE_BIGINT || n == crate::Syntax::TYPE_DECIMAL
+            ) {
                 *recv_type_out = Some(recv_ty.name());
             }
             let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
@@ -2192,6 +2297,72 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Some(Type::Named(call.name.clone())));
             }
+        }
+
+        // D-BIGINT1: `BigInt(100)` or `BigInt("…")` — explicit construction only.
+        if self.funcs.get(&call.name).is_none()
+            && !self.registry.contains(&call.name)
+            && call.name == crate::Syntax::TYPE_BIGINT
+        {
+            if call.args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!(
+                        "`BigInt` takes exactly one argument, got {}",
+                        call.args.len()
+                    ),
+                    "`BigInt` constructs an arbitrary-precision integer from an `Int` or `String`".to_string(),
+                    "write `BigInt(100)` or `BigInt(\"999…\")`".to_string(),
+                    Some(call.name_span),
+                ));
+                for a in call.args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return Some(Some(Type::Named(call.name.clone())));
+            }
+            let got = self.infer(&mut call.args[0].expr);
+            match got {
+                Some(Type::Int) | Some(Type::String) => {}
+                Some(other) => {
+                    self.diags.push(Diagnostic::error(
+                        "E0128",
+                        format!(
+                            "`BigInt` expects `Int` or `String`, got `{}`",
+                            other.name()
+                        ),
+                        "`BigInt` never converts from `Float` or promotes silently".to_string(),
+                        "pass an integer literal or a decimal string".to_string(),
+                        Some(call.args[0].expr.span()),
+                    ));
+                }
+                None => {}
+            }
+            return Some(Some(Type::Named(call.name.clone())));
+        }
+
+        // D-DECIMAL1: `Decimal("12.34")` — exact base-10 parse.
+        if self.funcs.get(&call.name).is_none()
+            && !self.registry.contains(&call.name)
+            && call.name == crate::Syntax::TYPE_DECIMAL
+        {
+            if call.args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!(
+                        "`Decimal` takes exactly one argument, got {}",
+                        call.args.len()
+                    ),
+                    "`Decimal` parses an exact base-10 decimal from a `String`".to_string(),
+                    "write `Decimal(\"12.34\")`".to_string(),
+                    Some(call.name_span),
+                ));
+                for a in call.args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return Some(Some(Type::Named(call.name.clone())));
+            }
+            self.expect_core_arg("Decimal", 0, &Type::String, &mut call.args[0]);
+            return Some(Some(Type::Named(call.name.clone())));
         }
 
         // D-DIST3 (ratified 2026-06-20): `DistinctType(expr)` — construct a distinct value.

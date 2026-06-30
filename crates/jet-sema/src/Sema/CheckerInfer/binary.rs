@@ -233,6 +233,48 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // D-BIGINT1 / D-DECIMAL1: precise numeric operators (closed family).
+        {
+            let lname = match &lt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
+            let rname = match &rt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
+            if crate::Numeric::is_precise_numeric_type_name(&lname)
+                || crate::Numeric::is_precise_numeric_type_name(&rname)
+            {
+                if let Some((code, what, fix)) = precise_mix_error(&lt, &rt) {
+                    self.diags.push(Diagnostic::error(
+                        code,
+                        what,
+                        "precise numeric types never mix with fixed-width integers or floats without an explicit constructor".to_string(),
+                        fix,
+                        Some(span),
+                    ));
+                    return None;
+                }
+                if let Some(result) = precise_binop_result(op, &lname, &rname) {
+                    return Some(result);
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0133",
+                    format!(
+                        "operator `{}` isn't defined between `{}` and `{}`",
+                        op.spell(),
+                        lt.name(),
+                        rt.name()
+                    ),
+                    "`BigInt` and `Decimal` support `+`, `-`, `*`, and `==`/`!=` on matching types only".to_string(),
+                    "use a method like `.add(other)` or make both operands the same precise type".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
+
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                 // D-SG9: arithmetic stays within one numeric type (any width) and

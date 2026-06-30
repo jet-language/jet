@@ -134,7 +134,7 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
             walk_calls(v, f);
         }),
         Expr::Str(parts, _) => parts.iter().for_each(|p| {
-            if let StrPart::Interp(e) = p {
+            if let StrPart::Interp(e, _) = p {
                 walk_calls(e, f)
             }
         }),
@@ -145,6 +145,7 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
             EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => walk_calls(e, f),
         }),
         Expr::Paren(inner, _) => walk_calls(inner, f),
+        Expr::IncDec { operand, .. } => walk_calls(operand, f),
         _ => {}
     }
 }

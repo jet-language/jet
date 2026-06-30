@@ -477,6 +477,7 @@ mod tests {
             ty,
             ty_span: zero(),
             serde_markers: Vec::new(),
+            redact: false,
         }
     }
 

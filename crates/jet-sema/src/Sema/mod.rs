@@ -84,11 +84,20 @@ pub(crate) enum TypeDef {
 
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// D-REFSTRUCT1: struct field → owner label for `#Ref(label)` fields.
+    ref_field_labels: HashMap<String, HashMap<String, String>>,
 }
 
 impl TypeRegistry {
     pub(crate) fn contains(&self, name: &str) -> bool {
         self.types.contains_key(name)
+    }
+
+    pub(crate) fn ref_field_label(&self, struct_name: &str, field_name: &str) -> Option<&str> {
+        self.ref_field_labels
+            .get(struct_name)?
+            .get(field_name)
+            .map(|s| s.as_str())
     }
 
     fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool, bool)]> {
@@ -375,7 +384,7 @@ fn find_forward_refs_inner(
                 }
             }
         }
-        Expr::Unary(_, inner, _) => {
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
             find_forward_refs_inner(inner, all_param_names, default_param_idx, found);
         }
         Expr::Binary(_, lhs, rhs, _) => {
@@ -570,6 +579,10 @@ pub(crate) struct Checker<'a> {
     /// (v1-legal per the card); does not relax memory/type safety, only the
     /// determinism check. Zeroed/restored around lambda bodies like `txn_depth`.
     det_suppress: usize,
+    /// D-CTX1 / c26: nesting depth of `#Context { … }` blocks (for L0506).
+    context_depth: usize,
+    /// True while inside a `#Context` block that set an `allocator` field.
+    context_allocator_active: bool,
     in_unsafe: bool,
     /// D-IGNORERET2=A: true while inside a `#Suppress(MustUse) { … }` block.
     /// Suppresses E0402 / E0419 for fallible / `#MustUse` results dropped as statements.

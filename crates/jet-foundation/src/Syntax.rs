@@ -252,6 +252,20 @@ pub const CORE_MEM_MODULE: &str = "core.mem";
 /// write-before-read (E0420) and codegen lowers to `MaybeUninit`.
 pub const ATTR_UNINIT: &str = "Uninit";
 
+/// D-REFSTRUCT1 (ratified 2026-06-28): stored-reference field marker —
+/// `#Ref(owner) field: T` stores a view into a named owner; sema proves the
+/// owner relationship. No `use core.mem` gate (owner amendment).
+pub const ATTR_REF: &str = "Ref";
+
+/// D-OPTGC1 (ratified 2026-06-26): opt-in traced GC library module.
+pub const CORE_GC_MODULE: &str = "core.gc";
+
+/// D-OPTGC1: `Gc<T>` smart pointer type name in `core.gc`.
+pub const GC_TYPE: &str = "Gc";
+
+/// D-OPTGC1: construct a `Gc<T>` value.
+pub const GC_NEW: &str = "new";
+
 /// S58 / D-CAP9 / D-TYPE-ALIAS-CANON1 (ratified): raw-pointer type is `*T`.
 /// `Ptr<T>` is not live syntax; this string remains only as the internal Rust
 /// dispatch key for legacy TIR/codegen paths until they are renamed to `RawPtr`.
@@ -365,6 +379,14 @@ pub const RNG_TYPE: &str = "Rng";
 /// `duration.millis()`; the injected `Clock` advances by one via `clock.wait(d)`
 /// (relative), alongside the absolute `clock.advance(to_ms)`.
 pub const DURATION_TYPE: &str = "Duration";
+
+/// D-BIGINT1 (ratified 2026-06-28): arbitrary-precision integer. Construct
+/// explicitly with `BigInt(100)` or `BigInt("…")`; fixed `Int` never promotes.
+pub const TYPE_BIGINT: &str = "BigInt";
+
+/// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
+/// `Decimal("12.34")` or `core.numeric.decimal("12.34")`; no implicit `Float`.
+pub const TYPE_DECIMAL: &str = "Decimal";
 
 /// D-SIMD1/D-SIMD2 (ratified 2026-06-24): the built-in portable SIMD lane types.
 /// `F32x4` is four `F32` lanes, `F64x2` is two `F64` lanes. Constructor
@@ -547,7 +569,10 @@ pub const OP_GE: &str = ">=";
 
 /// S17 (ratified): compound assignment operators (M1).
 pub const OP_PLUS_EQ: &str = "+=";
+/// D-INCR1 (ratified 2026-06-30): C-style increment/decrement operators.
+pub const OP_PLUS_PLUS: &str = "++";
 pub const OP_MINUS_EQ: &str = "-=";
+pub const OP_MINUS_MINUS: &str = "--";
 pub const OP_STAR_EQ: &str = "*=";
 pub const OP_SLASH_EQ: &str = "/=";
 pub const OP_PERCENT_EQ: &str = "%=";
@@ -943,6 +968,23 @@ pub const TXN_ON_ROLLBACK: &str = "on_rollback";
 /// type implements `Rollback`, the auto-snapshot (layer 1) uses it instead of a
 /// generic clone. A user-derivable trait name (I7).
 pub const TRAIT_ROLLBACK: &str = "Rollback";
+
+/// D-DISPLAYDBG1 / D-DISPLAY-SHAPE: user-facing string rendering for `{}` interpolation.
+pub const TRAIT_DISPLAY: &str = "Display";
+/// D-DISPLAYDBG1: developer-facing debug rendering for `{value@Debug}` interpolation.
+pub const TRAIT_DEBUG: &str = "Debug";
+/// D-ITER-HOOK: expert opt-in hook enabling zero-copy `for x in mytype`.
+pub const TRAIT_ITERABLE: &str = "Iterable";
+/// D-ITER-HOOK: cursor type for `Iterable::iter`.
+pub const TRAIT_ITERATOR: &str = "Iterator";
+/// D-INDEX-HOOK: expert opt-in hook enabling `mytype[key]` read syntax.
+pub const TRAIT_INDEX: &str = "Index";
+/// D-INDEX-HOOK: expert opt-in hook enabling `mytype[key] = v` write syntax.
+pub const TRAIT_INDEX_MUT: &str = "IndexMut";
+/// D-DISPLAYDBG2: closed interpolation selector spelling after `@`.
+pub const INTERP_SELECTOR_DEBUG: &str = "Debug";
+/// D-DEBUG-REDACT: hide a field from auto-derived Debug output.
+pub const ATTR_REDACT: &str = "Redact";
 
 /// D-TXN4: the type of a transaction handle bound by `#Transact(name)`. An
 /// opaque sema-only handle; erased in codegen (I3).
@@ -1780,6 +1822,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.mem",
     // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
     "core.mem.alloc",
+    // D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` library.
+    "core.gc",
     // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
     "core.files",
     "core.path",
@@ -1810,6 +1854,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.crypto",
     // D-RANDSPLIT1=A: CSPRNG submodule — `core.crypto.random.bytes(n)`.
     "core.crypto.random",
+    // D-CRYPTOENV1=A: expert-only raw crypto primitives.
+    "core.crypto.expert",
     // D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
     "core.http",
     // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.
@@ -1824,6 +1870,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-HONESTNUM1=A (ratified 2026-06-26): Measurement<T> — value ± uncertainty
     // with standard uncertainty propagation. Pure float arithmetic; no external crates.
     "core.science.measurement",
+    // D-BIGINT1 / D-DECIMAL1 (ratified 2026-06-28 / 2026-06-26): precise numerics.
+    "core.numeric",
     // D-PENDING1=B (ratified 2026-06-26): Loadable<T, E> — async UI state machine
     // (Idle / Loading / Loaded(T) / Failed(E)). Pure stdlib enum; no external crates.
     "core.async.loadable",
@@ -1840,6 +1888,10 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-TIMEDEPTH1=A (ratified 2026-06-26): civil-time constructors.
     "core.time.date",
     "core.time.datetime",
+    // D-TTLVAL1=A: TTL-wrapped cache values.
+    "core.time.expiring",
+    // D-TTLVAL1=A: rotting secrets with zeroize-on-expiry.
+    "core.secrets",
     // D-NETDEP1=A / D-HTTPLIB2=B (ratified 2026-06-26): full HTTP library.
     "core.http.client",
     "core.http.server",

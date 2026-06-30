@@ -92,7 +92,20 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         .used_core
         .iter()
         .any(|u| u == "core.http.client" || u.starts_with("core.http.client::"));
-    if entries.is_empty() && !needs_regex && !needs_archive && !needs_db && !needs_http_client {
+    // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
+    let needs_crypto = bundle.used_core.iter().any(|u| {
+        u == "jet.crypto"
+            || u.starts_with("jet.crypto::")
+            || u == "core.crypto.expert"
+            || u.starts_with("core.crypto.expert::")
+    });
+    if entries.is_empty()
+        && !needs_regex
+        && !needs_archive
+        && !needs_db
+        && !needs_http_client
+        && !needs_crypto
+    {
         return Ok(None);
     }
 
@@ -102,6 +115,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         needs_archive,
         needs_db,
         needs_http_client,
+        needs_crypto,
     )
     .map(Some)
 }
@@ -156,12 +170,26 @@ const ARCHIVE_RUNTIME: &str = include_str!("Prelude/Archive.rs");
 /// is used. This is the only code that touches the `rusqlite` crate.
 const DB_RUNTIME: &str = include_str!("Prelude/Db.rs");
 
+/// The `aes-gcm` crate version backing `core.crypto` envelope (D-DEP-CRYPTO1).
+pub const AES_GCM_CRATE_SPEC: (&str, &str) = ("aes-gcm", "0.10");
+
+/// The `chacha20poly1305` crate version backing `core.crypto` envelope (D-DEP-CRYPTO1).
+pub const CHACHA_POLY_CRATE_SPEC: (&str, &str) = ("chacha20poly1305", "0.10");
+
+/// The `ed25519-dalek` crate version backing `core.crypto.sign/verify` (D-DEP-CRYPTO1).
+pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "2");
+
+/// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
+/// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
+const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
+
 pub fn build_bridge(
     entries: &[ExternEntry],
     needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
+    needs_crypto: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
@@ -187,6 +215,20 @@ pub fn build_bridge(
             HTTP_CLIENT_CRATE_SPEC.1.to_string(),
         );
     }
+    if needs_crypto {
+        deps.insert(
+            AES_GCM_CRATE_SPEC.0.to_string(),
+            AES_GCM_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            CHACHA_POLY_CRATE_SPEC.0.to_string(),
+            CHACHA_POLY_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            ED25519_CRATE_SPEC.0.to_string(),
+            ED25519_CRATE_SPEC.1.to_string(),
+        );
+    }
     let key = cache_key_full(
         entries,
         &deps,
@@ -194,6 +236,7 @@ pub fn build_bridge(
         needs_archive,
         needs_db,
         needs_http_client,
+        needs_crypto,
     );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
@@ -228,6 +271,7 @@ pub fn build_bridge(
             needs_archive,
             needs_db,
             needs_http_client,
+            needs_crypto,
         ),
     )
     .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
@@ -337,6 +381,7 @@ fn cache_key_full(
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
+    needs_crypto: bool,
 ) -> u64 {
     let mut h = DefaultHasher::new();
     // Only perturb the key when a ring module is actually needed, so programs
@@ -353,6 +398,9 @@ fn cache_key_full(
     }
     if needs_http_client {
         needs_http_client.hash(&mut h);
+    }
+    if needs_crypto {
+        needs_crypto.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -454,6 +502,7 @@ fn emit_wrapper_lib(
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
+    needs_crypto: bool,
 ) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
@@ -477,6 +526,11 @@ fn emit_wrapper_lib(
     if needs_http_client {
         // D-NETDEP1=A: the HTTP client runtime is the only place `ureq` is touched.
         out.push_str(HTTP_CLIENT_RUNTIME);
+        out.push('\n');
+    }
+    if needs_crypto {
+        // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
+        out.push_str(CRYPTO_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();

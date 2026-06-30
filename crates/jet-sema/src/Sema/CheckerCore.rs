@@ -6,7 +6,7 @@ use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COM
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch, Expr, ForKind, IfStmt,
-    IndexKind, LValue, Pattern, Stmt, StrPart, Type,
+    IncDecOp, IndexKind, LValue, Pattern, Stmt, StrPart, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -243,6 +243,7 @@ impl<'a> Checker<'a> {
                     "Task" | "Channel" | "Sender" | "Ptr"
                         // D-COLLBREADTH1=A: Set<T> and Deque<T>.
                         | "Set" | "Deque"
+                        | "BigInt" | "Decimal"
                         // D-REACT1=B: reactive handle types.
                         | "Signal" | "Derived"
                 );
@@ -684,12 +685,22 @@ impl<'a> Checker<'a> {
                         span,
                         kind,
                     } => {
+                        if let Expr::Ident(name, _) = base.as_ref() {
+                            if self.uninit.contains_key(name) && !is_compound {
+                                self.uninit.remove(name);
+                            }
+                        }
                         self.borrow_ctx = true;
                         let base_ty = self.infer(base);
                         let idx_ty = self.infer(index);
                         match &base_ty {
                             Some(Type::Map { .. }) => *kind = IndexKind::Map,
                             Some(Type::List(_)) => *kind = IndexKind::List,
+                            Some(Type::Named(n))
+                                if self.trait_reg.index_types.contains_key(n) =>
+                            {
+                                *kind = IndexKind::User(n.clone());
+                            }
                             _ => {}
                         }
                         // D-SOA1: index-WRITE through a columnar list (`xs[i] = …`)
@@ -718,7 +729,10 @@ impl<'a> Checker<'a> {
                         }
                         // Writing through `[ ]` changes the owner: the root
                         // name must be changeable and not under a `for` borrow.
-                        if matches!(base_ty, Some(Type::Map { .. }) | Some(Type::List(_))) {
+                        if matches!(
+                            base_ty,
+                            Some(Type::Map { .. }) | Some(Type::List(_))
+                        ) {
                             if let Some(root) = expr_root_ident(base) {
                                 let root = root.to_string();
                                 if self.iter_borrowed.contains(&root) {
@@ -809,6 +823,77 @@ impl<'a> Checker<'a> {
                                         type_fix_hint(&elem_ty, &vt),
                                         Some(value.span()),
                                     ));
+                                }
+                            }
+                        } else if let Some(Type::Named(n)) = &base_ty {
+                            if let Some((key_ty, value_ty)) = self.trait_reg.index_types.get(n) {
+                                if !self.trait_reg.index_mutable.contains(n) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0505",
+                                        format!(
+                                            "`{}` can be read with `[ ]` but not written — it has no `IndexMut` impl",
+                                            n
+                                        ),
+                                        "bracket assignment needs `impl Type.IndexMut { fn set(~self, k, v) }`"
+                                            .to_string(),
+                                        format!(
+                                            "use `.set(key, value)` instead, or add `impl {n}.IndexMut`"
+                                        ),
+                                        Some(*span),
+                                    ));
+                                }
+                                if let Some(kt) = idx_ty {
+                                    if kt != *key_ty {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0505",
+                                            format!(
+                                                "this value indexes with {}, not {}",
+                                                key_ty.show(),
+                                                kt.show()
+                                            ),
+                                            "the key must match the type's `Index` key".to_string(),
+                                            format!("use a {} key here", key_ty.name()),
+                                            Some(index.span()),
+                                        ));
+                                    }
+                                }
+                                if let Some(vt) = vt {
+                                    if vt != *value_ty {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0108",
+                                            format!(
+                                                "this value holds {}, not {}",
+                                                value_ty.show(),
+                                                vt.show()
+                                            ),
+                                            "the stored value must match the type's `Index` value"
+                                                .to_string(),
+                                            type_fix_hint(value_ty, &vt),
+                                            Some(value.span()),
+                                        ));
+                                    }
+                                }
+                                if let Some(root) = expr_root_ident(base) {
+                                    let root = root.to_string();
+                                    if let Some(info) = self.lookup(&root) {
+                                        if !info.mutable {
+                                            self.diags.push(Diagnostic::error(
+                                                "E0202",
+                                                format!(
+                                                    "cannot write to `{}` — it does not have edit access (`~`)",
+                                                    root
+                                                ),
+                                                "assigning through `[ ]` edits the value; the binding must be declared mutable"
+                                                    .to_string(),
+                                                format!(
+                                                    "declare `{} {} ...`",
+                                                    root,
+                                                    Syntax::SIGIL_BIND_MUT
+                                                ),
+                                                Some(*span),
+                                            ));
+                                        }
+                                    }
                                 }
                             }
                         } else if let Some(Type::String) = base_ty {
@@ -1405,6 +1490,30 @@ impl<'a> Checker<'a> {
                             Some(Type::Named(n)) if n == "StdinLines" => {
                                 self.declare_loop_var(var.clone(), *var_span, &Type::String);
                             }
+                            Some(Type::Named(n))
+                                if self.trait_reg.iterable_items.contains_key(n) =>
+                            {
+                                if var2.is_some() {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0109",
+                                        format!(
+                                            "`for x in` on `{}` needs one loop name, not two",
+                                            n
+                                        ),
+                                        "a custom iterable yields one item per step".to_string(),
+                                        format!("write `for item in {n}`").to_string(),
+                                        Some(collection.span()),
+                                    ));
+                                } else {
+                                    let item_ty = self
+                                        .trait_reg
+                                        .iterable_items
+                                        .get(n)
+                                        .cloned()
+                                        .unwrap_or(Type::Int);
+                                    self.declare_loop_var(var.clone(), *var_span, &item_ty);
+                                }
+                            }
                             Some(other) => {
                                 self.diags.push(Diagnostic::error(
                                     "E0109",
@@ -1844,7 +1953,18 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                let has_allocator = fields
+                    .iter()
+                    .any(|(n, _, _)| n == crate::Syntax::CTX_FIELD_ALLOCATOR);
+                let saved_depth = self.context_depth;
+                let saved_alloc = self.context_allocator_active;
+                self.context_depth += 1;
+                if has_allocator {
+                    self.context_allocator_active = true;
+                }
                 self.check_block(body, true);
+                self.context_allocator_active = saved_alloc;
+                self.context_depth = saved_depth;
             }
         }
     }
@@ -2692,6 +2812,21 @@ impl<'a> Checker<'a> {
         if b.ty.is_none() {
             b.ty = Some(final_ty.clone());
         }
+        // D-DECIMAL1: default-on float-money lint for money-like binding names.
+        if final_ty.is_float()
+            && crate::Numeric::is_money_like_name(&b.name)
+        {
+            self.diags.push(Diagnostic::lint(
+                "L0504",
+                format!(
+                    "binding `{}` looks like money but has type `Float`",
+                    b.name
+                ),
+                "floating-point money loses cents on common values like `0.1 + 0.2`".to_string(),
+                "use `Decimal` for exact money: `price: Decimal := Decimal(\"9.99\")`".to_string(),
+                Some(b.name_span),
+            ));
+        }
         if b.is_comptime {
             let globals = self.current_ct_globals();
             // D-CTCORE1: pass core_imports so the interpreter can evaluate
@@ -3069,6 +3204,202 @@ impl<'a> Checker<'a> {
             fix,
             Some(span),
         ));
+    }
+
+    /// D-INCR1: type-check `++`/`--`. Prefix returns the updated value; postfix
+    /// returns the value before the update. Operand must be a mutable integer
+    /// lvalue (same LHS policy as S17; indexed slots are rejected like `+=`).
+    pub(crate) fn check_incdec(
+        &mut self,
+        _op: IncDecOp,
+        operand: &mut Expr,
+        _postfix: bool,
+        span: Span,
+    ) -> Option<Type> {
+        let lvalue = match operand {
+            Expr::Ident(name, name_span) => LValue::Local {
+                name: name.clone(),
+                name_span: *name_span,
+            },
+            Expr::Index { span: idx_span, .. } => {
+                self.diags.push(Diagnostic::error(
+                    "E0163",
+                    "increment and decrement can't target an indexed slot".to_string(),
+                    "write the full update: `map[key] = map[key] + 1`".to_string(),
+                    "use `+= 1` on a name, or assign through `=` with the whole right-hand side"
+                        .to_string(),
+                    Some(*idx_span),
+                ));
+                return None;
+            }
+            Expr::Field(base, field, field_span) => LValue::Field {
+                base: base.clone(),
+                field: field.clone(),
+                span: *field_span,
+            },
+            other => {
+                self.diags.push(Diagnostic::error(
+                    "E0160",
+                    "this value can't be incremented or decremented".to_string(),
+                    "only a mutable name or field like `count` or `self.hits` accepts `++`/`--`"
+                        .to_string(),
+                    format!(
+                        "use a `{}` binding and write `name += 1` / `name -= 1`",
+                        Syntax::SIGIL_BIND_MUT
+                    ),
+                    Some(other.span()),
+                ));
+                return None;
+            }
+        };
+
+        let ty = match &lvalue {
+            LValue::Local { name, name_span } => {
+                let name_span = *name_span;
+                if let Some(info) = self.uninit.get(name) {
+                    let _ = info;
+                    self.diags.push(Diagnostic::error(
+                        "E0420",
+                        format!("`{}` may be read before it is given a value", name),
+                        format!(
+                            "`{}` was declared `#Uninit` and has no value yet — `++`/`--` read it first",
+                            name
+                        ),
+                        format!("give `{}` a value with `{} = …` before updating it", name, name),
+                        Some(name_span),
+                    ));
+                }
+                let Some(info) = self.lookup(name).cloned() else {
+                    if self.consts.contains_key(name.as_str()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0111",
+                            format!("`{}` is a const and can never change", name),
+                            "a const is fixed for the whole program".to_string(),
+                            format!(
+                                "use a `{}` binding if it needs to change",
+                                Syntax::SIGIL_BIND_MUT
+                            ),
+                            Some(name_span),
+                        ));
+                    } else {
+                        self.unknown_name(name, name_span);
+                    }
+                    return None;
+                };
+                if !info.mutable {
+                    let what = if info.param_conv.is_some() {
+                        format!("the parameter `{}` can't be changed here", name)
+                    } else {
+                        format!(
+                            "`{}` was made with `{}`, so it can't change",
+                            name,
+                            Syntax::SIGIL_BIND_IMMUT
+                        )
+                    };
+                    let fix = if info.param_conv.is_some() {
+                        format!(
+                            "mark the parameter `{}: {}{}` if the function should change it",
+                            name,
+                            Syntax::SIGIL_MUTATE,
+                            info.ty.name()
+                        )
+                    } else {
+                        format!(
+                            "declare it with `{} {} ...` instead",
+                            name,
+                            Syntax::SIGIL_BIND_MUT
+                        )
+                    };
+                    self.diags.push(Diagnostic::error(
+                        "E0161",
+                        what,
+                        format!(
+                            "only `{}` bindings (and `{}` parameters) can use `++`/`--`",
+                            Syntax::SIGIL_BIND_MUT,
+                            Syntax::SIGIL_MUTATE
+                        ),
+                        fix,
+                        Some(name_span),
+                    ));
+                    return None;
+                }
+                if !info.ty.is_integer() {
+                    self.diags.push(Diagnostic::error(
+                        "E0162",
+                        format!("`++`/`--` is not defined for {}", info.ty.show()),
+                        "increment and decrement work on integer types only".to_string(),
+                        if info.ty.is_float() {
+                            format!("use `{} += 1.0` / `{} -= 1.0` instead", name, name)
+                        } else {
+                            format!("use `{} += 1` / `{} -= 1` on an integer binding", name, name)
+                        },
+                        Some(span),
+                    ));
+                    return None;
+                }
+                info.ty.clone()
+            }
+            LValue::Field { base, field, span: field_span } => {
+                self.borrow_ctx = true;
+                let mut base_expr = base.as_ref().clone();
+                let base_ty = self.infer(&mut base_expr)?;
+                if let Some(root) = expr_root_ident(base) {
+                    let root = root.to_string();
+                    if let Some(info) = self.lookup(&root) {
+                        if !info.mutable {
+                            let is_self = root == Syntax::KW_SELF;
+                            let what = if is_self {
+                                format!(
+                                    "cannot edit `{}` — `{}` has read access only; write access (`~`) is required",
+                                    field,
+                                    Syntax::KW_SELF
+                                )
+                            } else {
+                                format!(
+                                    "cannot edit `{}` — `{}` does not have write access (`~`)",
+                                    field, root
+                                )
+                            };
+                            let fix = if is_self {
+                                format!(
+                                    "write the receiver as `{}{}` to grant write access",
+                                    Syntax::SIGIL_MUTATE,
+                                    Syntax::KW_SELF
+                                )
+                            } else {
+                                format!(
+                                    "declare `{} {} ...`",
+                                    root,
+                                    Syntax::SIGIL_BIND_MUT
+                                )
+                            };
+                            self.diags.push(Diagnostic::error(
+                                "E0161",
+                                what,
+                                "increment and decrement edit the field in place".to_string(),
+                                fix,
+                                Some(*field_span),
+                            ));
+                            return None;
+                        }
+                    }
+                }
+                let field_ty = self.field_type(&base_ty, field, *field_span)?;
+                if !field_ty.is_integer() {
+                    self.diags.push(Diagnostic::error(
+                        "E0162",
+                        format!("`++`/`--` is not defined for field `{}` ({})", field, field_ty.show()),
+                        "increment and decrement work on integer fields only".to_string(),
+                        format!("use `self.{field} += 1` / `self.{field} -= 1` instead"),
+                        Some(span),
+                    ));
+                    return None;
+                }
+                field_ty
+            }
+            LValue::Index { .. } => unreachable!("indexed inc/dec rejected above"),
+        };
+        Some(ty)
     }
 }
 

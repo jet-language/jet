@@ -21,6 +21,7 @@ fn field(name: &str, ty: &str, is_pub: bool) -> Field {
         ty: Type::Named(ty.to_string()),
         ty_span: span(),
         serde_markers: Vec::new(),
+        redact: false,
     }
 }
 

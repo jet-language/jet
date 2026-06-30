@@ -363,6 +363,7 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
             None
         }
         Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Field(inner, _, _) => expr_mut_arg(inner),
@@ -473,8 +474,8 @@ fn expr_struct_interp(e: &Expr, locals: &std::collections::HashSet<String>) -> O
     match e {
         Expr::Str(parts, span) => {
             for p in parts {
-                if let crate::AST::StrPart::Interp(inner) = p {
-                    if let Expr::Ident(name, _) = inner {
+                if let crate::AST::StrPart::Interp(inner, _) = p {
+                    if let Expr::Ident(name, _) = inner.as_ref() {
                         if locals.contains(name) {
                             return Some(Boundary {
                                 feature: "prints a whole struct or enum value via `{…}` interpolation (its format isn't interpreted yet)".to_string(),
@@ -504,6 +505,7 @@ fn expr_struct_interp(e: &Expr, locals: &std::collections::HashSet<String>) -> O
                 .find_map(|a| expr_struct_interp(&a.expr, locals))
         }),
         Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Field(inner, _, _) => expr_struct_interp(inner, locals),

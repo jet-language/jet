@@ -1,0 +1,38 @@
+// 180 — D-ITER-HOOK: zero-copy `loop x in mytype` via Iterable + Iterator
+
+struct Bag {
+    data: [Int]
+}
+
+struct BagIter {
+    bag: Bag
+    idx: Int
+}
+
+impl BagIter.Iterator {
+    type Item = Int
+    fn next(~self) -> (Int?) {
+        if self.idx >= self.bag.data.len() {
+            return null
+        }
+        v #= self.bag.data[self.idx]
+        self.idx += 1
+        return value(v)
+    }
+}
+
+impl Bag.Iterable {
+    type Iter = BagIter
+    fn iter(^self) -> BagIter {
+        return BagIter.{ bag: self, idx: 0 }
+    }
+}
+
+fn main() {
+    b #= Bag.{ data: [10, 20, 30] }
+    sum := 0
+    loop n in b {
+        sum += n
+    }
+    print("sum: {sum}")
+}

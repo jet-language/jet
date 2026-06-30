@@ -129,6 +129,7 @@ before continuing.
 | E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs `==` between the subject and `{` (D-IF3) |
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
 | E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
+| E0999 | parse | teaching: stacked `#[…]` marker lines → one `#[A, B]` list or lone `#A` (D-ATTR2) |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -161,6 +162,10 @@ before continuing.
 | E0127 | sema  | arithmetic on a distinct type without `@Numeric`, or between two different distinct types — incl. cross-unit mixing (D-DIST3, D-QUAL3) |
 | E0128 | sema  | implicit coercion between a distinct type and its base (D-DIST3) |
 | E0129 | sema  | distinct-over-distinct: base type is itself a distinct type (D-DIST1) |
+| E0130 | sema  | `Int` and `BigInt` mixed without explicit construction (D-BIGINT1) |
+| E0131 | sema  | `Float` and `Decimal` mixed (D-DECIMAL1) |
+| E0132 | sema  | `BigInt` and `Decimal` mixed (D-BIGINT1/D-DECIMAL1) |
+| E0133 | sema  | unsupported operator on `BigInt`/`Decimal` (D-BIGINT1/D-DECIMAL1) |
 | E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |
 | E0141 | sema  | `#SingleUse` value consumed on only one `if` branch (D-LIN1) |
 | E0142 | sema  | `#SingleUse` value lent/shared instead of moved (D-LIN1) |
@@ -168,6 +173,10 @@ before continuing.
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
+| E0160 | sema  | `++`/`--` operand is not an assignable lvalue (D-INCR1) |
+| E0161 | sema  | `++`/`--` on an immutable binding or read-only parameter (D-INCR1) |
+| E0162 | sema  | `++`/`--` on a non-integer type (D-INCR1) |
+| E0163 | sema  | `++`/`--` can't target an indexed slot (D-INCR1) |
 | E0154 | parse | protocol message endpoint pair is not `client -> server` or `server -> client` (D-PROTO2) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S -> …)` — a dead-end state (D-STATE-DECL, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
@@ -240,9 +249,15 @@ before continuing.
 | E0505 | sema  | wrong index/key type or bad slice target  |
 | E0506 | sema  | `Set<T>` element type is not hashable (D-COLLBREADTH1) |
 | E0507 | sema  | collection changed while `for` reads it   |
+| E0510 | sema  | raw crypto expert API used without `use core.crypto.expert` and/or outside `#Unsafe` — use `crypto.seal`/`open` instead (D-CRYPTOENV1) |
+| E0511 | sema  | `Expiring.force` / `Rotting.force` bypasses fallible expiry access — use `get(clock)` (D-TTLVAL1) |
 | L0501 | sema  | slice copy inside a loop (lint)           |
 | L0502 | sema  | float `==`/`!=` comparison is unreliable (D-SMELLLINT1) |
 | L0503 | sema  | visually confusable single-character names in one scope (`l`/`I`/`1`, `O`/`0`) (D-CONFUSE1) |
+| L0504 | sema  | money-like name holds `Float` instead of `Decimal` (D-DECIMAL1) |
+| L0505 | sema  | heap growth in a loop after `use core.mem` — consider an arena (c26) |
+| L0506 | sema  | hidden allocation inside `#Context` without an allocator (c26) |
+| L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | E0601 | sema  | `#Test` block in wrong position / none found |
 | E0602 | jet   | `use` path escapes the project (`..` or outside entry tree) |
 | E0603 | jet   | `use` target file / module not found |
@@ -340,6 +355,9 @@ before continuing.
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0912 | sema  | a frozen public capability signature drifted: a param a caller could pass by read now demands `~`/`^`/`&` in an `api: stable`/`api: explicit` library (c129, D-CAP8) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
+| E0914 | sema  | unknown interpolation selector after `@` (D-DISPLAYDBG2) |
+| E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
+| E0916 | sema  | auto-derived `Debug` blocked by a non-debuggable field (D-DEBUG-REDACT) — *defined, not yet emitted* |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -624,6 +642,7 @@ block reserved for M6.
 | E2412 | `E2412: unknown field `{field}`` (runtime `DecodeError`). | The struct is marked `#[DenyUnknownFields]` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails fast instead of silently dropping it. | Remove `#[DenyUnknownFields]` to ignore extra keys (the lenient default), add the field, or fix the producer. |
 | E2413 | retired (D-SERDE12) — generic `#[Codable]` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
+| L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) -> String { … } }`, or use `{value@Debug}` for debug output. |
 
 ## Streaming I/O diagnostics (E2-M7, D-IO1..3)
 
@@ -877,6 +896,10 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
 | E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
+| E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
+| E0161 | `{what}` | Increment and decrement edit the binding or field in place (D-INCR1). | Declare with `:=` or mark the parameter `~` if the function should change it. |
+| E0162 | `` `++`/`--` is not defined for {type} ``. | Increment and decrement work on integer types only (D-INCR1). | On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding. |
+| E0163 | increment and decrement can't target an indexed slot. | Write the full update: `map[key] = map[key] + 1` (D-INCR1). | Use `+= 1` on a name, or assign through `=` with the whole right-hand side. |
 | E0154 | after `{from} ->` expected `{expected}`, found `{to}`. | Protocol messages (D-PROTO2): each line must be `client -> server: Msg(…)` or `server -> client: Msg(…)` — other endpoint pairs are not part of the ratified spelling. | Write `client -> server: …` or `server -> client: …`. |
 | L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state} -> …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state} -> NextState) fn …`, or remove `{state}` from the declaration. |
 
@@ -1120,6 +1143,26 @@ E0910 checks intent only.
 | `drop` (D-MIGRATE2D) | `drop` isn't a migration verb — use `remove`. | A migration deletes a field with `remove`; `drop` is not a Jet keyword here. | Write `remove <field>`. |
 | `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `#PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
 | other | `{op}` isn't a known migration verb. | A migration block contains `rename`, `add`, `remove`, or `change` operations. | Use one of those four verbs. |
+
+### E0914 — Unknown interpolation selector (D-DISPLAYDBG2)
+
+| What | Why | Fix |
+|------|-----|-----|
+| Unknown interpolation selector `@…`. | String interpolation supports a closed selector set — only `@Debug` is defined today. | Write `{value@Debug}` for debug formatting, or `{value}` for display. |
+
+### E0915 — No Display implementation (D-DISPLAY-SHAPE)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `{type}` has no `Display` implementation ``. | Bare `{value}` interpolation calls `Display` — there is no default for user types. | Add `impl {type}.Display { fn display(self) -> String { … } }`, or use `{value@Debug}` for debug output. |
+
+### E0916 — Debug auto-derive blocked (D-DEBUG-REDACT)
+
+*Defined in sema; not yet emitted — reserved for when auto-derived `Debug` must reject a non-debuggable field type.*
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `{type}` can't auto-derive `Debug` because field `{field}` isn't debuggable ``. | Auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable. | Mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type}`. |
 
 ### E0912 — Frozen capability signature drift (c129)
 

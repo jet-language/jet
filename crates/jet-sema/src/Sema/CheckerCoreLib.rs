@@ -243,6 +243,8 @@ impl<'a> Checker<'a> {
             ("core.mem", "Bump") => Some(Type::Named(Syntax::MEM_BUMP.to_string())),
             ("core.mem", "Pool") => Some(Type::Named(Syntax::MEM_POOL.to_string())),
             ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
+            // D-OPTGC1: `gc.Gc` sentinel — `.new<T>(value)` constructs a traced handle.
+            ("core.gc", "Gc") => Some(Type::Named(Syntax::GC_TYPE.to_string())),
             _ => {
                 self.diags.push(unknown_core_item(module, name, span));
                 let _ = alias_span;
@@ -1275,6 +1277,94 @@ impl<'a> Checker<'a> {
                     args: vec![Type::Named("Unknown".to_string()), err_ty],
                 });
             }
+            // D-TTLVAL1=A: Expiring<T> — value + TTL + injectable Clock.
+            ("core.time.expiring", "new") => {
+                if args.len() != 3 {
+                    self.diags
+                        .push(wrong_core_arity("new", 3, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let val_ty = self
+                    .infer(&mut args[0].expr)
+                    .unwrap_or(Type::Named("Unknown".to_string()));
+                self.expect_core_arg(
+                    "new",
+                    1,
+                    &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
+                    &mut args[1],
+                );
+                self.expect_core_arg(
+                    "new",
+                    2,
+                    &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
+                    &mut args[2],
+                );
+                return Some(Type::Apply {
+                    name: "Expiring".to_string(),
+                    args: vec![val_ty],
+                });
+            }
+            // D-TTLVAL1=A: Rotting<T> — secret with TTL + zeroize on expiry.
+            ("core.secrets", "rotting_new") => {
+                if args.len() != 3 {
+                    self.diags
+                        .push(wrong_core_arity("rotting_new", 3, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let val_ty = self
+                    .infer(&mut args[0].expr)
+                    .unwrap_or(Type::Named("Unknown".to_string()));
+                self.expect_core_arg(
+                    "rotting_new",
+                    1,
+                    &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
+                    &mut args[1],
+                );
+                self.expect_core_arg(
+                    "rotting_new",
+                    2,
+                    &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
+                    &mut args[2],
+                );
+                return Some(Type::Apply {
+                    name: "Rotting".to_string(),
+                    args: vec![val_ty],
+                });
+            }
+            // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
+            ("core.crypto.expert", _) => {
+                let has_import = self
+                    .core_imports
+                    .values()
+                    .any(|m| m == "core.crypto.expert");
+                if !has_import {
+                    self.diags.push(Diagnostic::error(
+                        "E0510",
+                        format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
+                        "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
+                        "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
+                        Some(span),
+                    ));
+                } else if !self.in_unsafe {
+                    self.diags.push(Diagnostic::error(
+                        "E0510",
+                        format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
+                        "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
+                        "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+                        Some(span),
+                    ));
+                }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+            }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
             ("core.http.client", "get") => {
                 if args.len() != 1 {
@@ -1457,6 +1547,19 @@ impl<'a> Checker<'a> {
                     name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
                     args: vec![Type::Float],
                 });
+            }
+            // D-DECIMAL1: `core.numeric.decimal(s)` → `Decimal`.
+            ("core.numeric", "decimal") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("decimal", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg("decimal", 0, &Type::String, &mut args[0]);
+                return Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()));
             }
             _ => {}
         }
@@ -1713,6 +1816,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"
+        // D-BIGINT1 / D-DECIMAL1: arbitrary-precision numerics.
+        | "BigInt" | "Decimal"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines"
         // D-LSDIR1=A: directory entry value.
@@ -1736,6 +1841,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Measurement"
         // D-PENDING1=B: async UI state machine.
         | "Loadable"
+        // D-TTLVAL1=A: TTL-wrapped values and rotting secrets.
+        | "Expired" | "Expiring" | "Rotting"
         // D-RENDERTGT2=A (c133 M1): UI backend seam types.
         | "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "InputEvent"
         | "EventResult" | "NullBackend" | "TuiBackend"
@@ -2212,6 +2319,69 @@ pub fn math_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Ty
     }
 }
 
+/// D-BIGINT1 / D-DECIMAL1: binary ops on precise numeric types (no Int promotion).
+pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Type> {
+    use crate::AST::BinOp;
+    use crate::Numeric::{is_bigint_type_name, is_decimal_type_name};
+    let same = lt == rt;
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_bigint_type_name(lt) => {
+            Some(Type::Named(crate::Syntax::TYPE_BIGINT.to_string()))
+        }
+        BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_decimal_type_name(lt) => {
+            Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()))
+        }
+        BinOp::Eq | BinOp::Ne
+            if same && (is_bigint_type_name(lt) || is_decimal_type_name(lt)) =>
+        {
+            Some(Type::Bool)
+        }
+        _ => None,
+    }
+}
+
+/// D-BIGINT1: mixing fixed `Int` with `BigInt` is rejected — no silent promotion.
+pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, String)> {
+    use crate::Numeric::{type_is_bigint, type_is_decimal};
+    let li = lt.is_integer();
+    let ri = rt.is_integer();
+    if (type_is_bigint(lt) && ri) || (type_is_bigint(rt) && li) {
+        return Some((
+            "E0130",
+            format!(
+                "`Int` and `BigInt` can't be mixed — got `{}` and `{}`",
+                lt.show(),
+                rt.show()
+            ),
+            "fixed-width `Int` never promotes to `BigInt`; construct a `BigInt` explicitly with `BigInt(…)` or `BigInt(\"…\")`".to_string(),
+        ));
+    }
+    if (type_is_decimal(lt) && rt.is_float()) || (type_is_decimal(rt) && lt.is_float()) {
+        return Some((
+            "E0131",
+            format!(
+                "`Float` and `Decimal` can't be mixed — got `{}` and `{}`",
+                lt.show(),
+                rt.show()
+            ),
+            "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science".to_string(),
+        ));
+    }
+    if (type_is_bigint(lt) && type_is_decimal(rt)) || (type_is_bigint(rt) && type_is_decimal(lt))
+    {
+        return Some((
+            "E0132",
+            format!(
+                "`BigInt` and `Decimal` can't be mixed — got `{}` and `{}`",
+                lt.show(),
+                rt.show()
+            ),
+            "convert explicitly with `to_string()` / `Decimal(\"…\")` at a boundary".to_string(),
+        ));
+    }
+    None
+}
+
 /// E2-M10: type-check a method call on a networking opaque type.
 /// Returns `Some(return_type)` when the method is valid.
 pub fn net_method_return(
@@ -2280,6 +2450,47 @@ pub fn loadable_method_return(
         "loaded" => Some(Some(Type::Option(Box::new(val_ty)))),
         // or_else(default: T) → T
         "or_else" => Some(Some(val_ty)),
+        _ => None,
+    }
+}
+
+/// D-TTLVAL1=A: instance methods on `Expiring<T>` / `Rotting<T>`.
+pub fn expiring_method_return(
+    type_apply: &Type,
+    method: &str,
+    _n_args: usize,
+) -> Option<Option<Type>> {
+    let val_ty = match type_apply {
+        Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => args[0].clone(),
+        _ => return None,
+    };
+    match method {
+        "get" => Some(Some(Type::Result {
+            ok: Box::new(val_ty),
+            err: Box::new(Type::Named("Expired".to_string())),
+        })),
+        "is_valid" => Some(Some(Type::Bool)),
+        "force" => Some(Some(val_ty)), // sema rejects the call site separately (E0511)
+        _ => None,
+    }
+}
+
+pub fn rotting_method_return(
+    type_apply: &Type,
+    method: &str,
+    _n_args: usize,
+) -> Option<Option<Type>> {
+    let val_ty = match type_apply {
+        Type::Apply { name, args } if name == "Rotting" && args.len() == 1 => args[0].clone(),
+        _ => return None,
+    };
+    match method {
+        "get" => Some(Some(Type::Result {
+            ok: Box::new(val_ty),
+            err: Box::new(Type::Named("Expired".to_string())),
+        })),
+        "is_valid" => Some(Some(Type::Bool)),
+        "force" => Some(Some(val_ty)),
         _ => None,
     }
 }
@@ -2416,6 +2627,65 @@ pub fn path_method_return(
 /// D-ALLOC1/D-ALLOC2: is `ty` one of the four allocator handle types?
 pub(crate) fn is_allocator_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if matches!(n.as_str(), "Arena" | "Bump" | "Pool" | "Fixed"))
+}
+
+/// D-OPTGC1: method calls on the `Gc` constructor sentinel (`gc.Gc.new<T>(…)`).
+pub(crate) fn gc_method_return(
+    method: &str,
+    type_args: &[Type],
+    args: &[crate::AST::CallArg],
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    match method {
+        "new" => {
+            if type_args.len() != 1 {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    "`Gc.new` needs exactly one type argument".to_string(),
+                    "pass the element type in angle brackets".to_string(),
+                    "write `gc.Gc.new<Int>(value)`".to_string(),
+                    Some(span),
+                ));
+                return Some(None);
+            }
+            if args.len() != 1 {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    "`Gc.new` takes exactly one value argument".to_string(),
+                    "pass the owned value to store in the traced heap".to_string(),
+                    "write `gc.Gc.new<MyType>(value)`".to_string(),
+                    Some(span),
+                ));
+                return Some(None);
+            }
+            Some(Some(Type::Apply {
+                name: Syntax::GC_TYPE.to_string(),
+                args: vec![type_args[0].clone()],
+            }))
+        }
+        "with" | "with_mut" => {
+            if args.len() != 1 {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`Gc.{method}` takes exactly one closure argument"),
+                    "pass a closure that receives the inner value".to_string(),
+                    format!("write `handle.{method}(|v| {{ … }})`"),
+                    Some(span),
+                ));
+                return Some(None);
+            }
+            Some(Some(Type::Named("__gc_with_infer__".to_string())))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn is_gc_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, .. } if name == Syntax::GC_TYPE
+    )
 }
 
 pub(crate) fn alloc_method_return(
@@ -2797,6 +3067,36 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
+        // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
+        ("jet.crypto", "seal") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("jet.crypto", "open") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("jet.crypto", "sign") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("jet.crypto", "verify") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(unit_ty(), Type::String)),
+        )),
+        // D-CRYPTOENV1=A: expert-only raw AEAD (requires #Unsafe + expert import).
+        ("core.crypto.expert", "aes256_gcm_seal" | "chacha20_seal") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("core.crypto.expert", "aes256_gcm_open" | "chacha20_open") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
         ("core.net", "tcp_listen") => Some((
             vec![(read, Type::String)],
@@ -3034,9 +3334,8 @@ pub fn core_fixed_sig(
             vec![(read, Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))],
             Some(Type::String),
         )),
-        // D-ARGS1 (ratified 2026-06-22): `args.spec()` → `ArgsSpec` builder.
-        // The builder methods (.flag/.option/.positional/.help/.parse) are handled
-        // in `args_spec_method_return` / `parsed_args_method_return` below.
+        // D-OPTGC1: run a mark-sweep collection over traced `Gc<T>` roots.
+        ("core.gc", "collect") => Some((vec![], Some(unit))),
         ("core.args", "spec") => Some((vec![], Some(Type::Named("ArgsSpec".to_string())))),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
         // `term.read_key()` → `Key` (the key-event enum). No arguments.
@@ -3047,6 +3346,11 @@ pub fn core_fixed_sig(
         // D-ADAPTFID1=A: adaptive fidelity signal.
         ("core.perf", "fidelity") => Some((vec![], Some(float))),
         ("core.perf", "set_fidelity") => Some((vec![(read, float)], Some(unit))),
+        // D-DECIMAL1: exact decimal parse from string.
+        ("core.numeric", "decimal") => Some((
+            vec![(read, string.clone())],
+            Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())),
+        )),
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
         ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
         ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TuiBackend".to_string())))),
@@ -3299,6 +3603,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
+        "core.gc" => &["Gc", "collect"],
         "core.tasks" => &["spawn", "channel"],
         "core.files" => &["open", "create", "append"],
         "core.path" => &["join", "parent", "extension", "normalize"],
@@ -3320,7 +3625,12 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "set_trace_id",
             "setup",
         ],
-        "jet.crypto" => &["sha256", "sha256_bytes"],
+        "jet.crypto" => &["sha256", "sha256_bytes", "seal", "open", "sign", "verify"],
+        // D-CRYPTOENV1=A: expert-only raw primitives — misuse lint at call site.
+        "core.crypto.expert" => &["aes256_gcm_seal", "aes256_gcm_open", "chacha20_seal", "chacha20_open"],
+        // D-TTLVAL1=A: TTL-wrapped values and rotting secrets.
+        "core.time.expiring" => &["new"],
+        "core.secrets" => &["rotting_new"],
         // E2-M10: networking modules.
         "core.net" => &[
             "tcp_listen",
@@ -3360,6 +3670,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "jet.reactive" => &["signal", "derived", "effect"],
         // D-HONESTNUM1=A: Measurement<T> constructor.
         "core.science.measurement" => &["from"],
+        // D-DECIMAL1: exact decimal constructor alias.
+        "core.numeric" => &["decimal"],
         // D-PENDING1=B: Loadable<T,E> constructors.
         "core.async.loadable" => &["idle", "loading", "loaded", "failed"],
         // D-ADAPTFID1=A: adaptive fidelity signal.

@@ -1501,6 +1501,8 @@ pub struct Field {
     /// D-SERDE5: per-field serde markers (`Rename`/`Skip`/`Default`/`Flatten`)
     /// attached before this field. Empty when none.
     pub serde_markers: Vec<Marker>,
+    /// D-DEBUG-REDACT: `#[Redact]` — omit/redact in auto-derived Debug output.
+    pub redact: bool,
 }
 
 /// D-PATW / D-PATR (ratified 2026-06-19): a single payload slot inside a variant pattern.
@@ -1995,6 +1997,8 @@ pub enum IndexKind {
     /// D-SIMD2: `v[i]` lane access on a SIMD lane type (`F32x4`/`F64x2`). Lowers to a
     /// bounds-checked lane read `{root}jet_math_<T>_lane(&v, i, file, line)`.
     Lane(String),
+    /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index` (+ optional `IndexMut`).
+    User(String),
 }
 
 /// `for i in 1..10` vs `for x in xs` (M5).
@@ -2126,12 +2130,29 @@ pub enum UnOp {
     Not,
 }
 
+/// D-INCR1: increment (`Inc`) or decrement (`Dec`) on a mutable integer lvalue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncDecOp {
+    Inc,
+    Dec,
+}
+
+/// D-DISPLAYDBG2: which protocol hook an interpolated value uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StrFormat {
+    /// Bare `{value}` — calls `Display` (D-DISPLAY-SHAPE).
+    #[default]
+    Display,
+    /// `{value@Debug}` — calls auto-derived or explicit `Debug`.
+    Debug,
+}
+
 /// One piece of a string literal (S8): literal text or an interpolated
 /// expression.
 #[derive(Debug, Clone)]
 pub enum StrPart {
     Lit(String),
-    Interp(Expr),
+    Interp(Box<Expr>, StrFormat),
 }
 
 /// S46 (M8): one parameter in `(x: Int) => …`.
@@ -2376,6 +2397,15 @@ pub enum Expr {
     /// D-FMTPARENS1=A: explicit author grouping parentheses `(expr)`.
     /// Transparent to type-checking and codegen; formatter always emits the parens.
     Paren(Box<Expr>, Span),
+    /// D-INCR1: `++x`/`--x` (prefix) or `x++`/`x--` (postfix). Prefix returns the
+    /// updated value; postfix returns the value before the update. Operand must be
+    /// a mutable integer lvalue (same LHS policy as S17 compound assignment).
+    IncDec {
+        op: IncDecOp,
+        operand: Box<Expr>,
+        postfix: bool,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -2415,7 +2445,8 @@ impl Expr {
             | Expr::CallValue { span: s, .. }
             | Expr::FanOut { span: s, .. }
             | Expr::PtrFromAddr { span: s, .. }
-            | Expr::ComptimeSplice { span: s, .. } => *s,
+            | Expr::ComptimeSplice { span: s, .. }
+            | Expr::IncDec { span: s, .. } => *s,
             Expr::Paren(_, s) => *s,
             Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,

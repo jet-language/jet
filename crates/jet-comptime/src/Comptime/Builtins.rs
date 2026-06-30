@@ -337,6 +337,106 @@ pub(super) fn apply_method(
             }
             Ok(CtValue::Bool(false))
         }
+        (CtValue::Struct { type_name, fields }, "group") if type_name == "Match" => {
+            let idx = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            let groups = fields
+                .iter()
+                .find(|(n, _)| n == "groups")
+                .and_then(|(_, v)| match v {
+                    CtValue::List(xs) => Some(xs),
+                    _ => None,
+                });
+            Ok(match groups.and_then(|g| g.get(idx as usize)) {
+                Some(v) => v.clone(),
+                None => CtValue::None(crate::AST::Type::String),
+            })
+        }
+        (CtValue::Struct { type_name, fields }, "now")
+            if type_name == crate::Syntax::CLOCK_TYPE =>
+        {
+            Ok(fields
+                .iter()
+                .find(|(n, _)| n == "now")
+                .map(|(_, v)| v.clone())
+                .unwrap_or(CtValue::Int(0)))
+        }
+        (CtValue::Struct { type_name, fields }, "tick" | "advance" | "wait")
+            if type_name == crate::Syntax::CLOCK_TYPE =>
+        {
+            let mut now = fields
+                .iter()
+                .find(|(n, _)| n == "now")
+                .and_then(|(_, v)| match v {
+                    CtValue::Int(n) => Some(*n),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            if method == "wait" {
+                if let Some(CtValue::Struct {
+                    type_name: dur_ty,
+                    fields: dur_fields,
+                }) = args.first()
+                {
+                    if dur_ty == crate::Syntax::DURATION_TYPE {
+                        if let Some(CtValue::Int(ms)) = dur_fields
+                            .iter()
+                            .find(|(n, _)| n == "ms")
+                            .map(|(_, v)| v)
+                        {
+                            now += ms;
+                        }
+                    }
+                }
+            } else if let Some(ms) = args.first().and_then(|v| match v {
+                CtValue::Int(n) => Some(*n),
+                _ => None,
+            }) {
+                now = if method == "advance" { ms } else { now + ms };
+            }
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+                fields: vec![("now".to_string(), CtValue::Int(now))],
+            })
+        }
+        (CtValue::Struct { type_name, fields }, "millis")
+            if type_name == crate::Syntax::DURATION_TYPE =>
+        {
+            Ok(fields
+                .iter()
+                .find(|(n, _)| n == "ms")
+                .cloned()
+                .map(|(_, v)| v)
+                .unwrap_or(CtValue::Int(0)))
+        }
+        (CtValue::Struct { type_name, fields }, "int")
+            if type_name == crate::Syntax::RNG_TYPE =>
+        {
+            let mut state = fields
+                .iter()
+                .find(|(n, _)| n == "state")
+                .and_then(|(_, v)| match v {
+                    CtValue::Int(n) => Some(*n as u64),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            let low = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            let high = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+            let draw = super::Methods::random_int(&mut state, low, high);
+            Ok(CtValue::Int(draw))
+        }
+        (CtValue::Struct { type_name, fields }, "float")
+            if type_name == crate::Syntax::RNG_TYPE =>
+        {
+            let mut state = fields
+                .iter()
+                .find(|(n, _)| n == "state")
+                .and_then(|(_, v)| match v {
+                    CtValue::Int(n) => Some(*n as u64),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            Ok(CtValue::Float(super::Methods::random_float(&mut state)))
+        }
         _ => Err(unsupported(
             &format!("the method `.{}` at compile time", method),
             span,

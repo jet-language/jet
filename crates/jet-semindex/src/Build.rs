@@ -894,7 +894,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             collect_expr(l, mp, ctx);
             collect_expr(r, mp, ctx);
         }
-        AST::Expr::Unary(_, inner, _) => collect_expr(inner, mp, ctx),
+        AST::Expr::Unary(_, inner, _) | AST::Expr::IncDec { operand: inner, .. } => {
+            collect_expr(inner, mp, ctx)
+        }
         AST::Expr::Deref(inner, _) | AST::Expr::RawOf(inner, _) => collect_expr(inner, mp, ctx),
         AST::Expr::Index { base, index, .. } => {
             collect_expr(base, mp, ctx);
@@ -909,7 +911,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         }
         AST::Expr::Str(parts, _) => {
             for part in parts {
-                if let AST::StrPart::Interp(inner) = part {
+                if let AST::StrPart::Interp(inner, _) = part {
                     collect_expr(inner, mp, ctx);
                 }
             }

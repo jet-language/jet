@@ -476,12 +476,13 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::ComptimeSplice { .. } => {}
         Expr::Str(parts, _) => {
             for p in parts.iter_mut() {
-                if let StrPart::Interp(e) = p {
+                if let StrPart::Interp(e, _) = p {
                     rewrite_inline_calls_expr(e, siblings, modname);
                 }
             }
         }
         Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Field(inner, _, _)
@@ -637,6 +638,7 @@ pub(crate) fn check_bundle_opts(
             field_pkg_pub: HashMap::new(),
             registry: TypeRegistry {
                 types: HashMap::new(),
+                ref_field_labels: HashMap::new(),
             },
             structs: HashMap::new(),
             consts: HashMap::new(),
@@ -957,6 +959,8 @@ pub(crate) fn check_bundle_opts(
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
         // D-TXN-ROLLBACK layer 2: ensure Rollback is known before user impl blocks.
         st.trait_reg.register_synthetic_rollback();
+        st.trait_reg.register_synthetic_display_debug();
+        st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_items(&module.items, &mut diags);
         // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2412)
         // now that the trait registry resolves field/variant types — keeps the emitted
@@ -1936,6 +1940,16 @@ pub(crate) fn collect_core_expr(
                 Some(c.name_span),
             );
         }
+        Expr::Call(c)
+            if c.name == crate::Syntax::TYPE_BIGINT || c.name == crate::Syntax::TYPE_DECIMAL =>
+        {
+            note_core_usage(
+                used,
+                spans,
+                "core.numeric::__precise__",
+                Some(c.name_span),
+            );
+        }
         Expr::MethodCall {
             receiver,
             method_span,
@@ -1980,6 +1994,17 @@ pub(crate) fn collect_core_expr(
                     used,
                     spans,
                     "core.tasks::spawn",
+                    Some(*method_span),
+                );
+            }
+            if matches!(
+                recv_type.as_deref(),
+                Some(crate::Syntax::TYPE_BIGINT) | Some(crate::Syntax::TYPE_DECIMAL)
+            ) {
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.numeric::__precise__",
                     Some(*method_span),
                 );
             }
@@ -2051,6 +2076,7 @@ pub(crate) fn collect_core_expr(
         }
         Expr::OptField { base, .. } => collect_core_expr(base, imports, used, spans),
         Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
@@ -2076,7 +2102,7 @@ pub(crate) fn collect_core_expr(
         }
         Expr::Str(parts, _) => {
             for part in parts {
-                if let StrPart::Interp(e) = part {
+                if let StrPart::Interp(e, _) = part {
                     collect_core_expr(e, imports, used, spans);
                 }
             }
@@ -2437,6 +2463,8 @@ pub(crate) fn check_func_body_bundle(
         fx_callback_obligations: Vec::new(),
         txn_depth: 0,
         det_suppress: 0,
+        context_depth: 0,
+        context_allocator_active: false,
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).

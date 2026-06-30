@@ -25,8 +25,8 @@ pub struct CommandSpec {
     pub name: &'static str,
     /// One-line summary (man + completion description).
     pub summary: &'static str,
-    /// Whether this is one of the three "commands that matter" shown in the
-    /// bare-`jet` greeting.
+    /// Whether this is one of the three "commands that matter" shown when argv
+    /// is flags-only with no subcommand (bare `jet` starts the REPL instead).
     pub headline: bool,
 }
 

@@ -1,20 +1,39 @@
 trait JetShow { fn jet_show(&self) -> String; }
-impl JetShow for i64 { fn jet_show(&self) -> String { self.to_string() } }
-// D-SG9: fixed-width integers and the 32-bit float print like their defaults.
-impl JetShow for i8 { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for i16 { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for i32 { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for u8 { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for u16 { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for u32 { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for u64 { fn jet_show(&self) -> String { self.to_string() } }
+/// D-DISPLAYDBG1: user-facing interpolation (`{value}`).
+trait JetDisplay { fn jet_display(&self) -> String; }
+/// D-DISPLAYDBG1: developer interpolation (`{value@Debug}`).
+trait JetDebug { fn jet_debug(&self) -> String; }
+
+macro_rules! jet_scalar_show {
+    ($($t:ty),+ $(,)?) => {$(
+        impl JetShow for $t { fn jet_show(&self) -> String { self.to_string() } }
+        impl JetDisplay for $t { fn jet_display(&self) -> String { self.to_string() } }
+        impl JetDebug for $t { fn jet_debug(&self) -> String { self.to_string() } }
+    )+};
+}
+jet_scalar_show!(i64, i8, i16, i32, u8, u16, u32, u64, bool, char);
 impl JetShow for f32 { fn jet_show(&self) -> String { format!("{:?}", self) } }
+impl JetDisplay for f32 { fn jet_display(&self) -> String { format!("{:?}", self) } }
+impl JetDebug for f32 { fn jet_debug(&self) -> String { format!("{:?}", self) } }
 impl JetShow for f64 { fn jet_show(&self) -> String { format!("{:?}", self) } }
-impl JetShow for bool { fn jet_show(&self) -> String { self.to_string() } }
+impl JetDisplay for f64 { fn jet_display(&self) -> String { format!("{:?}", self) } }
+impl JetDebug for f64 { fn jet_debug(&self) -> String { format!("{:?}", self) } }
 impl JetShow for String { fn jet_show(&self) -> String { self.clone() } }
+impl JetDisplay for String { fn jet_display(&self) -> String { self.clone() } }
+impl JetDebug for String { fn jet_debug(&self) -> String { format!("{self:?}") } }
 impl<T: JetShow> JetShow for &T { fn jet_show(&self) -> String { (**self).jet_show() } }
+impl<T: JetDisplay> JetDisplay for &T { fn jet_display(&self) -> String { (**self).jet_display() } }
+impl<T: JetDebug> JetDebug for &T { fn jet_debug(&self) -> String { (**self).jet_debug() } }
 impl<T: JetShow> JetShow for Vec<T> { fn jet_show(&self) -> String {
     let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+    format!("[{}]", parts.join(", "))
+} }
+impl<T: JetDisplay> JetDisplay for Vec<T> { fn jet_display(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+    format!("[{}]", parts.join(", "))
+} }
+impl<T: JetDebug> JetDebug for Vec<T> { fn jet_debug(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
     format!("[{}]", parts.join(", "))
 } }
 // D-FIXARR1: `[T#N]` lowers to a real Rust array `[T; N]`; render it like a list
@@ -23,7 +42,14 @@ impl<T: JetShow, const N: usize> JetShow for [T; N] { fn jet_show(&self) -> Stri
     let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
     format!("[{}]", parts.join(", "))
 } }
-impl JetShow for char { fn jet_show(&self) -> String { self.to_string() } }
+impl<T: JetDisplay, const N: usize> JetDisplay for [T; N] { fn jet_display(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+    format!("[{}]", parts.join(", "))
+} }
+impl<T: JetDebug, const N: usize> JetDebug for [T; N] { fn jet_debug(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
+    format!("[{}]", parts.join(", "))
+} }
 // D-COLLBREADTH1=A: Set<T> (HashSet) shows lexicographically sorted like a list;
 // Deque<T> shows in order like a list. Sort by string rep for determinism.
 impl<T: JetShow> JetShow for std::collections::HashSet<T> {
@@ -33,8 +59,30 @@ impl<T: JetShow> JetShow for std::collections::HashSet<T> {
         format!("[{}]", parts.join(", "))
     }
 }
+impl<T: JetDisplay> JetDisplay for std::collections::HashSet<T> {
+    fn jet_display(&self) -> String {
+        let mut parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+        parts.sort();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDebug> JetDebug for std::collections::HashSet<T> {
+    fn jet_debug(&self) -> String {
+        let mut parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
+        parts.sort();
+        format!("[{}]", parts.join(", "))
+    }
+}
 impl<T: JetShow> JetShow for std::collections::VecDeque<T> { fn jet_show(&self) -> String {
     let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+    format!("[{}]", parts.join(", "))
+} }
+impl<T: JetDisplay> JetDisplay for std::collections::VecDeque<T> { fn jet_display(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+    format!("[{}]", parts.join(", "))
+} }
+impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> { fn jet_debug(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
     format!("[{}]", parts.join(", "))
 } }
 impl<T: JetShow> JetShow for Option<T> {
@@ -45,11 +93,43 @@ impl<T: JetShow> JetShow for Option<T> {
         }
     }
 }
+impl<T: JetDisplay> JetDisplay for Option<T> {
+    fn jet_display(&self) -> String {
+        match self {
+            Some(v) => v.jet_display(),
+            None => "null".to_string(),
+        }
+    }
+}
+impl<T: JetDebug> JetDebug for Option<T> {
+    fn jet_debug(&self) -> String {
+        match self {
+            Some(v) => v.jet_debug(),
+            None => "null".to_string(),
+        }
+    }
+}
 impl<T: JetShow, E: JetShow> JetShow for Result<T, E> {
     fn jet_show(&self) -> String {
         match self {
             Ok(v) => format!("ok({})", v.jet_show()),
             Err(e) => format!("err({})", e.jet_show()),
+        }
+    }
+}
+impl<T: JetDisplay, E: JetDisplay> JetDisplay for Result<T, E> {
+    fn jet_display(&self) -> String {
+        match self {
+            Ok(v) => format!("ok({})", v.jet_display()),
+            Err(e) => format!("err({})", e.jet_display()),
+        }
+    }
+}
+impl<T: JetDebug, E: JetDebug> JetDebug for Result<T, E> {
+    fn jet_debug(&self) -> String {
+        match self {
+            Ok(v) => format!("ok({})", v.jet_debug()),
+            Err(e) => format!("err({})", e.jet_debug()),
         }
     }
 }
@@ -76,6 +156,70 @@ impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
             JetLoadable::Loaded(v) => format!("Loaded({})", v.jet_show()),
             JetLoadable::Failed(e) => format!("Failed({})", e.jet_show()),
         }
+    }
+}
+// D-TTLVAL1=A / D-CRYPTOENV1 c64: TTL-wrapped values and rotting secrets.
+#[derive(Clone, Debug)]
+struct JetExpired;
+impl JetShow for JetExpired {
+    fn jet_show(&self) -> String { "Expired".to_string() }
+}
+#[derive(Clone, Debug)]
+struct JetExpiring<T: Clone> {
+    value: T,
+    deadline_ms: i64,
+}
+impl<T: Clone> JetExpiring<T> {
+    fn new(value: T, deadline_ms: i64) -> Self {
+        JetExpiring { value, deadline_ms }
+    }
+    fn get(&self, now_ms: i64) -> Result<T, JetExpired> {
+        if now_ms > self.deadline_ms {
+            Err(JetExpired)
+        } else {
+            Ok(self.value.clone())
+        }
+    }
+    fn is_valid(&self, now_ms: i64) -> bool { now_ms <= self.deadline_ms }
+}
+impl<T: Clone + JetShow> JetShow for JetExpiring<T> {
+    fn jet_show(&self) -> String {
+        format!("Expiring(deadline={})", self.deadline_ms)
+    }
+}
+#[derive(Clone, Debug)]
+struct JetRotting<T: Clone> {
+    value: T,
+    deadline_ms: i64,
+    consumed: bool,
+}
+impl<T: Clone + 'static> JetRotting<T> {
+    fn new(value: T, deadline_ms: i64) -> Self {
+        JetRotting { value, deadline_ms, consumed: false }
+    }
+    fn get(&mut self, now_ms: i64) -> Result<T, JetExpired> {
+        if self.consumed || now_ms > self.deadline_ms {
+            self.zeroize();
+            Err(JetExpired)
+        } else {
+            let v = self.value.clone();
+            self.zeroize();
+            Ok(v)
+        }
+    }
+    fn zeroize(&mut self) {
+        self.consumed = true;
+        if let Some(s) = (&mut self.value as &mut dyn std::any::Any).downcast_mut::<String>() {
+            s.clear();
+        } else if let Some(v) = (&mut self.value as &mut dyn std::any::Any).downcast_mut::<Vec<u8>>() {
+            for b in v.iter_mut() { *b = 0; }
+            v.clear();
+        }
+    }
+}
+impl<T: Clone + JetShow> JetShow for JetRotting<T> {
+    fn jet_show(&self) -> String {
+        format!("Rotting(deadline={})", self.deadline_ms)
     }
 }
 // D-TIMEDEPTH1=A: civil-time types (Date, DateTime) and calendar math.

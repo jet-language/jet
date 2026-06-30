@@ -3,7 +3,8 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
     self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type,
-    unify_types, BUILTIN_TRAITS, COMPARABLE, DECODE, ENCODE, EQUATABLE, PRINTABLE, SERIALIZE,
+    unify_types, BUILTIN_TRAITS, COMPARABLE, DEBUG, DECODE, DISPLAY, ENCODE, EQUATABLE, PRINTABLE,
+    SERIALIZE,
 };
 use crate::Syntax;
 use crate::AST::FuncSig;
@@ -34,7 +35,16 @@ pub struct TraitRegistry {
     /// used as a dispatching trait bound (E0731).
     pub local_tags: HashSet<String>,
     pub auto_printable: HashSet<String>,
+    pub auto_debug: HashSet<String>,
     pub auto_equatable: HashSet<String>,
+    /// D-ITER-HOOK: collection type → element type for `for x in coll`.
+    pub iterable_items: HashMap<String, Type>,
+    /// D-INDEX-HOOK: type → (key, value) for expert `[]` indexing.
+    pub index_types: HashMap<String, (Type, Type)>,
+    /// D-INDEX-HOOK: types that also implement `IndexMut`.
+    pub index_mutable: HashSet<String>,
+    /// D-INDEX-HOOK: `Index` assoc bindings per type for `IndexMut` validation.
+    pub index_key_value: HashMap<String, (Type, Type)>,
     /// D-ERR-CONV: registered `(from_ty, to_ty)` error conversions.
     /// Maps (source_type_name, target_type_name) → the span where it was declared.
     /// Used for duplicate detection and orphan-rule checking.
@@ -136,6 +146,74 @@ impl TraitRegistry {
             }
         }
         self.compute_auto_derives(items);
+        self.collect_iter_index_metadata(items);
+    }
+
+    fn collect_iter_index_metadata(&mut self, items: &[Item]) {
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        for item in items {
+            match item {
+                Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_ITERABLE) => {
+                    if let Some(Type::Named(iter)) =
+                        trait_assoc(items, &i.type_name, Syntax::TRAIT_ITERABLE, "Iter")
+                    {
+                        pairs.push((i.type_name.clone(), iter));
+                    }
+                }
+                Item::Struct(s) => {
+                    if let Some(Type::Named(iter)) =
+                        trait_assoc(items, &s.name, Syntax::TRAIT_ITERABLE, "Iter")
+                    {
+                        pairs.push((s.name.clone(), iter));
+                    }
+                }
+                Item::Enum(e) => {
+                    if let Some(Type::Named(iter)) =
+                        trait_assoc(items, &e.name, Syntax::TRAIT_ITERABLE, "Iter")
+                    {
+                        pairs.push((e.name.clone(), iter));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (coll, iter) in pairs {
+            if let Some(item_ty) = trait_assoc(items, &iter, Syntax::TRAIT_ITERATOR, "Item") {
+                self.iterable_items.insert(coll, item_ty);
+            }
+        }
+        for item in items {
+            let type_name = match item {
+                Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_INDEX) => {
+                    Some(i.type_name.clone())
+                }
+                Item::Struct(s)
+                    if s.trait_impls
+                        .iter()
+                        .any(|b| b.trait_name == Syntax::TRAIT_INDEX) =>
+                {
+                    Some(s.name.clone())
+                }
+                Item::Enum(e)
+                    if e.trait_impls
+                        .iter()
+                        .any(|b| b.trait_name == Syntax::TRAIT_INDEX) =>
+                {
+                    Some(e.name.clone())
+                }
+                _ => None,
+            };
+            if let Some(type_name) = type_name {
+                let key = trait_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Key");
+                let value = trait_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Value");
+                if let (Some(key), Some(value)) = (key, value) {
+                    self.index_types.insert(type_name.clone(), (key, value));
+                    if self.implements_trait(&type_name, Syntax::TRAIT_INDEX_MUT) {
+                        self.index_mutable.insert(type_name);
+                    }
+                }
+            }
+        }
     }
 
     fn register_trait(&mut self, t: &TraitDef, diags: &mut Vec<Diagnostic>) {
@@ -294,11 +372,24 @@ impl TraitRegistry {
             // D-LIB2: an impl supplies a concrete type for each of the trait's
             // associated types (`type Item = Int`). Resolve them so the abstract
             // method signatures match the impl's concrete ones.
-            let assoc: HashMap<String, Type> = assoc_type_impls
-                .iter()
-                .filter(|(name, _, _)| trait_info.assoc_types.contains(name))
-                .map(|(name, _, ty)| (name.clone(), ty.clone()))
-                .collect();
+            let assoc: HashMap<String, Type> = if trait_name == Syntax::TRAIT_INDEX_MUT {
+                let mut merged: HashMap<String, Type> = assoc_type_impls
+                    .iter()
+                    .filter(|(name, _, _)| trait_info.assoc_types.contains(name))
+                    .map(|(name, _, ty)| (name.clone(), ty.clone()))
+                    .collect();
+                if let Some((key, value)) = self.index_key_value.get(type_name) {
+                    merged.entry("Key".to_string()).or_insert_with(|| key.clone());
+                    merged.entry("Value".to_string()).or_insert_with(|| value.clone());
+                }
+                merged
+            } else {
+                assoc_type_impls
+                    .iter()
+                    .filter(|(name, _, _)| trait_info.assoc_types.contains(name))
+                    .map(|(name, _, ty)| (name.clone(), ty.clone()))
+                    .collect()
+            };
             // Every associated type the trait declares must be bound by the impl.
             let missing_assoc: Vec<String> = trait_info
                 .assoc_types
@@ -311,6 +402,12 @@ impl TraitRegistry {
                 // would spuriously trip E0907 on every method — report only E0913.
                 diags.push(e0913(trait_name, &missing_assoc, span));
             } else {
+                if trait_name == Syntax::TRAIT_INDEX {
+                    if let (Some(key), Some(value)) = (assoc.get("Key"), assoc.get("Value")) {
+                        self.index_key_value
+                            .insert(type_name.to_string(), (key.clone(), value.clone()));
+                    }
+                }
                 for m in methods {
                     if let Some(sig) = trait_info.methods.get(&m.name) {
                         let params: Vec<_> = m
@@ -346,10 +443,12 @@ impl TraitRegistry {
             match item {
                 Item::Struct(s) if struct_auto_derive_ok(s) => {
                     self.auto_printable.insert(s.name.clone());
+                    self.auto_debug.insert(s.name.clone());
                     self.auto_equatable.insert(s.name.clone());
                 }
                 Item::Enum(e) if enum_auto_derive_ok(e) => {
                     self.auto_printable.insert(e.name.clone());
+                    self.auto_debug.insert(e.name.clone());
                     self.auto_equatable.insert(e.name.clone());
                 }
                 _ => {}
@@ -390,6 +489,10 @@ impl TraitRegistry {
         }
         match trait_name {
             PRINTABLE if self.auto_printable.contains(type_name) => true,
+            DEBUG if self.auto_debug.contains(type_name) => true,
+            DISPLAY => self
+                .trait_impls
+                .contains(&(type_name.to_string(), DISPLAY.to_string())),
             EQUATABLE if self.auto_equatable.contains(type_name) => true,
             COMPARABLE | SERIALIZE | ENCODE | DECODE => self
                 .derives
@@ -584,6 +687,234 @@ impl TraitRegistry {
             },
         );
     }
+
+    /// D-DISPLAYDBG1: register synthetic `Display` + `Debug` protocol hooks.
+    pub fn register_synthetic_display_debug(&mut self) {
+        self.register_synthetic_trait_method(
+            crate::Syntax::TRAIT_DISPLAY,
+            "display",
+            Some(Type::String),
+            AccessConvention::Move,
+        );
+        // Debug is auto-derived; manual impl is allowed but uncommon.
+        self.register_synthetic_trait_method(
+            crate::Syntax::TRAIT_DEBUG,
+            "debug",
+            Some(Type::String),
+            AccessConvention::Move,
+        );
+    }
+
+    /// D-ITER-HOOK / D-INDEX-HOOK: register Iterable/Iterator/Index/IndexMut hooks.
+    pub fn register_synthetic_iter_index(&mut self) {
+        let dummy = Span { start: 0, end: 0 };
+        if !self.traits.contains_key(crate::Syntax::TRAIT_ITERATOR) {
+            let next_sig = TraitMethodSig {
+                name: "next".to_string(),
+                name_span: dummy,
+                params: vec![crate::AST::Param {
+                    name: crate::Syntax::KW_SELF.to_string(),
+                    name_span: dummy,
+                    ty: Type::Named(String::new()),
+                    ty_span: dummy,
+                    convention: AccessConvention::Write,
+                    default: None,
+                    variadic: false,
+                }],
+                return_type: Some(Type::Option(Box::new(Type::Named("Item".to_string())))),
+                is_view_return: false,
+                span: dummy,
+                default_body: None,
+                is_pure: false,
+                declared_effects: None,
+            };
+            let mut methods = HashMap::new();
+            methods.insert("next".to_string(), next_sig);
+            self.local_traits
+                .insert(crate::Syntax::TRAIT_ITERATOR.to_string());
+            self.traits.insert(
+                crate::Syntax::TRAIT_ITERATOR.to_string(),
+                TraitInfo {
+                    methods,
+                    assoc_types: vec!["Item".to_string()],
+                    span: dummy,
+                },
+            );
+        }
+        if !self.traits.contains_key(crate::Syntax::TRAIT_ITERABLE) {
+            let iter_sig = TraitMethodSig {
+                name: "iter".to_string(),
+                name_span: dummy,
+                params: vec![crate::AST::Param {
+                    name: crate::Syntax::KW_SELF.to_string(),
+                    name_span: dummy,
+                    ty: Type::Named(String::new()),
+                    ty_span: dummy,
+                    convention: AccessConvention::Move,
+                    default: None,
+                    variadic: false,
+                }],
+                return_type: Some(Type::Named("Iter".to_string())),
+                is_view_return: false,
+                span: dummy,
+                default_body: None,
+                is_pure: false,
+                declared_effects: None,
+            };
+            let mut methods = HashMap::new();
+            methods.insert("iter".to_string(), iter_sig);
+            self.local_traits
+                .insert(crate::Syntax::TRAIT_ITERABLE.to_string());
+            self.traits.insert(
+                crate::Syntax::TRAIT_ITERABLE.to_string(),
+                TraitInfo {
+                    methods,
+                    assoc_types: vec!["Iter".to_string()],
+                    span: dummy,
+                },
+            );
+        }
+        if !self.traits.contains_key(crate::Syntax::TRAIT_INDEX) {
+            let get_sig = TraitMethodSig {
+                name: "get".to_string(),
+                name_span: dummy,
+                params: vec![
+                    crate::AST::Param {
+                        name: crate::Syntax::KW_SELF.to_string(),
+                        name_span: dummy,
+                        ty: Type::Named(String::new()),
+                        ty_span: dummy,
+                        convention: AccessConvention::Read,
+                        default: None,
+                        variadic: false,
+                    },
+                    crate::AST::Param {
+                        name: "k".to_string(),
+                        name_span: dummy,
+                        ty: Type::Named("Key".to_string()),
+                        ty_span: dummy,
+                        convention: AccessConvention::Move,
+                        default: None,
+                        variadic: false,
+                    },
+                ],
+                return_type: Some(Type::Option(Box::new(Type::Named("Value".to_string())))),
+                is_view_return: false,
+                span: dummy,
+                default_body: None,
+                is_pure: false,
+                declared_effects: None,
+            };
+            let mut methods = HashMap::new();
+            methods.insert("get".to_string(), get_sig);
+            self.local_traits
+                .insert(crate::Syntax::TRAIT_INDEX.to_string());
+            self.traits.insert(
+                crate::Syntax::TRAIT_INDEX.to_string(),
+                TraitInfo {
+                    methods,
+                    assoc_types: vec!["Key".to_string(), "Value".to_string()],
+                    span: dummy,
+                },
+            );
+        }
+        if !self.traits.contains_key(crate::Syntax::TRAIT_INDEX_MUT) {
+            let set_sig = TraitMethodSig {
+                name: "set".to_string(),
+                name_span: dummy,
+                params: vec![
+                    crate::AST::Param {
+                        name: crate::Syntax::KW_SELF.to_string(),
+                        name_span: dummy,
+                        ty: Type::Named(String::new()),
+                        ty_span: dummy,
+                        convention: AccessConvention::Write,
+                        default: None,
+                        variadic: false,
+                    },
+                    crate::AST::Param {
+                        name: "k".to_string(),
+                        name_span: dummy,
+                        ty: Type::Named("Key".to_string()),
+                        ty_span: dummy,
+                        convention: AccessConvention::Move,
+                        default: None,
+                        variadic: false,
+                    },
+                    crate::AST::Param {
+                        name: "v".to_string(),
+                        name_span: dummy,
+                        ty: Type::Named("Value".to_string()),
+                        ty_span: dummy,
+                        convention: AccessConvention::Move,
+                        default: None,
+                        variadic: false,
+                    },
+                ],
+                return_type: None,
+                is_view_return: false,
+                span: dummy,
+                default_body: None,
+                is_pure: false,
+                declared_effects: None,
+            };
+            let mut methods = HashMap::new();
+            methods.insert("set".to_string(), set_sig);
+            self.local_traits
+                .insert(crate::Syntax::TRAIT_INDEX_MUT.to_string());
+            self.traits.insert(
+                crate::Syntax::TRAIT_INDEX_MUT.to_string(),
+                TraitInfo {
+                    methods,
+                    assoc_types: vec![],
+                    span: dummy,
+                },
+            );
+        }
+    }
+
+    fn register_synthetic_trait_method(
+        &mut self,
+        trait_name: &str,
+        method: &str,
+        ret: Option<Type>,
+        self_conv: AccessConvention,
+    ) {
+        if self.traits.contains_key(trait_name) {
+            return;
+        }
+        let dummy = Span { start: 0, end: 0 };
+        let sig = TraitMethodSig {
+            name: method.to_string(),
+            name_span: dummy,
+            params: vec![crate::AST::Param {
+                name: crate::Syntax::KW_SELF.to_string(),
+                name_span: dummy,
+                ty: Type::Named(String::new()),
+                ty_span: dummy,
+                convention: self_conv,
+                default: None,
+                variadic: false,
+            }],
+            return_type: ret,
+            is_view_return: false,
+            span: dummy,
+            default_body: None,
+            is_pure: false,
+            declared_effects: None,
+        };
+        let mut methods = HashMap::new();
+        methods.insert(method.to_string(), sig);
+        self.local_traits.insert(trait_name.to_string());
+        self.traits.insert(
+            trait_name.to_string(),
+            TraitInfo {
+                methods,
+                assoc_types: Vec::new(),
+                span: dummy,
+            },
+        );
+    }
 }
 
 fn struct_auto_derive_ok(s: &StructDef) -> bool {
@@ -740,4 +1071,44 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
         ));
     }
     out.push_str("}\n\n");
+}
+
+fn trait_assoc(items: &[Item], type_name: &str, trait_name: &str, assoc: &str) -> Option<Type> {
+    for item in items {
+        match item {
+            Item::Impl(i)
+                if i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name) =>
+            {
+                return i
+                    .assoc_type_impls
+                    .iter()
+                    .find(|(n, _, _)| n == assoc)
+                    .map(|(_, _, t)| t.clone());
+            }
+            Item::Struct(s) if s.name == type_name => {
+                for block in &s.trait_impls {
+                    if block.trait_name == trait_name {
+                        return block
+                            .assoc_type_impls
+                            .iter()
+                            .find(|(n, _, _)| n == assoc)
+                            .map(|(_, _, t)| t.clone());
+                    }
+                }
+            }
+            Item::Enum(e) if e.name == type_name => {
+                for block in &e.trait_impls {
+                    if block.trait_name == trait_name {
+                        return block
+                            .assoc_type_impls
+                            .iter()
+                            .find(|(n, _, _)| n == assoc)
+                            .map(|(_, _, t)| t.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }

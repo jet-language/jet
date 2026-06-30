@@ -2,19 +2,19 @@
   "meta": {
     "version": 3,
     "currentEpoch": "e3",
-    "nextNum": 155,
+    "nextNum": 160,
     "ui": {
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
-        "epoch:e4",
-        "epoch:e5",
         "epdone:e6",
         "epoch:e6",
         "dec-group:other",
-        "epoch:e7",
         "epoch:e8",
-        "board-sidequests"
+        "board-sidequests",
+        "epoch:e4",
+        "epoch:e5",
+        "epoch:e7"
       ]
     }
   },
@@ -125,11 +125,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Canonical memory/allocation implementation plan. Preserve I1: beginner Jet stays safe; expert controls require explicit syntax/imports/audit where applicable.\n\nBuild order:\n1. Labeled stored references: implement #Ref(Label) field syntax and owner relationship checks; remove stale core.mem gate per owner outcome; migrate old ref[label] diagnostics.\n2. Arena allocator inference: keep current arena plan as base; prove region views cannot escape, reset/free invalidates views, and diagnostics remain Jet-owned.\n3. Explicit allocation boundaries: audit Core APIs that allocate across caller-owned boundaries; add buffer/allocator-taking variants using existing allocator model; add lint for hidden boundary allocation in expert/perf contexts.\n4. Visible uninit: #Uninit binding, explicit type/no initializer parser rules, definite-assignment proof, plain-data restriction, MaybeUninit codegen only after sema proof; E0421-E0424 snapshots.\n5. Opt-in GC library: Gc<T> traced handle as library type for cyclic long-running data, explicit import, no default allocation path change, no sema/codegen primitive unless needed for root tracing.\n\nAcceptance: ui snapshots for dangling/escaping refs, uninit misuse, arena use-after-reset, hidden allocation lint; examples for arena parsing, #Ref owner labels, caller buffers, #Uninit fixed buffers, cyclic Gc graph; golden tests; no generated unsafe outside #Unsafe/std-mem internals.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Shipped #Ref(Label) + owner checks, L0505/L0506 lints, examples 183–185/182, gc.Gc.new/collect prelude. ref_field/field_of_param codegen fixed (skip clone + borrow owner.field)."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -1686,12 +1691,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "workOrder": 40,
       "plan": "tools/Tower/docs/plans/epoch-3/protocol-repr-hooks.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented Display/Debug split (179), Iterable hook (180), Index hook (181), E0914/E0915/L0520 snapshots, diagnostics + syntax-decisions updated. Rollback hooks unchanged."
+        },
         {
           "at": "2026-06-30",
           "text": "All decisions ratified; advanced out of deciding."
@@ -2525,11 +2535,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Canonical crypto/secrets implementation plan. Default API must be misuse-resistant; raw primitives stay expert-only.\n\nBuild order:\n1. Preserve/finish RNG split prerequisite: deterministic PRNG and CSPRNG remain structurally separate.\n2. Envelope API: crypto.seal/open and crypto.sign/verify hide nonce/mode/key details; versioned envelope metadata; clear error types; no raw AES/ChaCha/RSA beginner path.\n3. Algorithm agility: design hybrid-ready envelope metadata and algorithm ids now; do not expose PQ primitive until backend exists; migration tests prove old envelopes still open.\n4. TTL/rotting secrets: core.time.Expiring<T> and core.secrets.Rotting<T>; constructors require clock/context and deadline/ttl; access returns T? or fallible expired error.\n5. Static/lint support: warn/error for expired unwrap in test-known clock cases; reject crypto API misuse that bypasses envelope surface.\n\nAcceptance: examples for seal/open, sign/verify, envelope version migration, expiring cache, rotating secret; golden tests; ui snapshots for wrong RNG/raw primitive misuse/expired unchecked access; docs explain expert escape hatches.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified done: crypto.seal/open/sign/verify (RustCrypto FFI), core.crypto.expert behind #Unsafe (E0510), Expiring/Rotting (E0511), examples 174–177, ui snapshots; golden/ui/corelib/diagnostics_coverage/decisions green."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Building: crypto.seal/open/sign/verify envelope (D-CRYPTOENV1, D-DEP-CRYPTO1=A RustCrypto) + Expiring/Rotting secrets."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -2573,11 +2593,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Canonical precise numeric implementation plan.\n\nBuild order:\n1. BigInt: std-only backing, explicit Core type, constructors/ops/methods, no Int auto-promotion, parser/sema/codegen support only where ratified.\n2. Decimal: base-10 arbitrary precision built on BigInt/internal digits; exact decimal parsing/printing; explicit constructors; no implicit Float conversion.\n3. Money safety lint: default-on lint for Float bindings/fields with money-like names (price/cost/amount/total/fee/balance/tax), suppressible with documented marker.\n4. Interop: parse/format, comparisons, arithmetic with same precise type only, serialization behavior.\n\nAcceptance: examples for BigInt overflow avoidance, Decimal exact cents, float-money lint; ui snapshots for implicit mixing/rejected auto-promotion; golden tests; docs clarify when to use Int, Float, BigInt, Decimal.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "All acceptance tests pass: golden 172/173, ui E0130–E0133, lint L0504, diagnostics_coverage, decisions, corelib. Full suite green except pre-existing syntax_reconciliation retired-spelling scan."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented BigInt/Decimal + L0504 float-money lint; examples 172/173; ui snapshots; running full test suite."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -3298,11 +3328,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Full CoreLib REPL execution plan: (1) expand interpreter whitelist from pure math/time/random to all side-effect-safe Core modules; (2) route fs/io/env/process calls through REPL capability sandbox prompts/errors; (3) preserve deterministic transcript mode for tests; (4) add REPL fixtures for json/fs/path/regex/http-disabled cases; (5) document unsupported native-only modules with E2203-style message.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Verified: cargo test --test repl 40/40 pass. REPL sandbox Tier-2 I/O, json/path/regex/fs whitelist, E1802 for native-only modules."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Building: expand REPL Core whitelist + sandbox Tier-2 I/O; add json/path/regex fixtures; E2203-style msgs for native-only modules."
+        },
         {
           "at": "2026-06-30",
           "text": "Work order normalized: unset -> 450 after grouped Epoch 3 active cards."
@@ -3735,8 +3775,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30",
-      "workOrder": 4
+      "updated": "2026-06-30"
     },
     {
       "id": "c1nixrpd",
@@ -3856,8 +3895,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30",
-      "workOrder": 5
+      "updated": "2026-06-30"
     },
     {
       "id": "c1qixxin",
@@ -6148,6 +6186,151 @@
       "created": "2026-06-29T00:00:00.000Z",
       "updated": "2026-06-29",
       "workOrder": 64
+    },
+    {
+      "id": "c2l9f7y",
+      "num": 155,
+      "title": "Add docs for embedded systems & for API/fn maturity tags",
+      "body": "Add docs for embedded systems & for API/fn maturity tags",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e6",
+      "phase": "triage",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Added from Ideas"
+        }
+      ],
+      "created": "2026-06-30T18:42:56.476Z",
+      "updated": "2026-06-30"
+    },
+    {
+      "id": "c39sekg",
+      "num": 156,
+      "title": "Cargo docs -> html docs generator? Look into this for release as an option",
+      "body": "Cargo docs -> html docs generator? Look into this for release as an option",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e6",
+      "phase": "triage",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Added from Ideas"
+        }
+      ],
+      "created": "2026-06-30T18:43:06.554Z",
+      "updated": "2026-06-30"
+    },
+    {
+      "id": "c4w0m88",
+      "num": 157,
+      "title": "130_reflect.jet shows the following for multiple markers #[Summarize] #[Debug], ",
+      "body": "130_reflect.jet shows the following for multiple markers #[Summarize] #[Debug], but a single marker should be #Debug, multiple markers should be #[Debug, Summarize], or with \"method\" type markers, something like #[Test(\"this is a test\"), Debug, Summarize]",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Done: 130_reflect.jet → #[Summarize, Debug]; parser accepts #Marker + #[A, B] (+ args); E0999 teaching error for stacked #[…] lines; ui snapshot tests/ui/stacked_type_markers.jet; fmt emits #A when lone marker sits directly before struct/enum."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Building: canonicalize multi-marker attrs per D-ATTR1/D-ATTR2; fix 130_reflect.jet; verify #[A, B] list + parameterized markers."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Activated into sidequest track"
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Added from Ideas"
+        }
+      ],
+      "created": "2026-06-30T18:43:27.211Z",
+      "updated": "2026-06-30"
+    },
+    {
+      "id": "c5rmib6",
+      "num": 158,
+      "title": "Support pre & post increment operators --x, ++x, x++, x--",
+      "body": "Support pre & post increment operators --x, ++x, x++, x--",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "done",
+      "priority": "P3",
+      "plan": "tools/Tower/docs/plans/epoch-3/increment-operators.md",
+      "blockedBy": [],
+      "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Shipped D-INCR1=A: lexer `++`/`--`, parser prefix/postfix, sema E0160–E0163, TIR codegen + comptime interpreter, example 178_increment.jet, ui fixtures incr_{immut,float,not_lvalue}. Terminator pass treats postfix `++`/`--` as statement-ending (S6-R)."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Plan written; D-INCR1 ballot raised (full C-style vs reject vs postfix/prefix/statement-only). Advanced to deciding — blocked on owner ratification per syntax decision protocol."
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Activated into epoch e3 track"
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Added from Ideas"
+        }
+      ],
+      "created": "2026-06-30T18:43:38.027Z",
+      "updated": "2026-06-30"
+    },
+    {
+      "id": "c6vz465",
+      "num": 159,
+      "title": "jet ? as sugar for jet help, empty jet command enter repl, jet with just file na",
+      "body": "jet ? as sugar for jet help, empty jet command enter repl, jet with just file name runs file if possible",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Activated into epoch e3 track"
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Added from Ideas"
+        },
+        {
+          "at": "2026-06-30",
+          "text": "Implemented c6vz465 CLI sugar: bare jet→REPL, jet ?→help, jet <file>→run. looks_like_jet_source() gates file sugar before external jet-* lookup. 39/39 tests/cli green; snapshots no_args_repl_banner + question_mark_help."
+        }
+      ],
+      "created": "2026-06-30T18:43:46.620Z",
+      "updated": "2026-06-30"
     }
   ],
   "decisions": [
@@ -13260,6 +13443,79 @@
       "comparisons": "Jet structs:  Point.{x: 3.0, y: 4.0}  — same dot-constructor family\nJet enums:    Color.Red / .Variant     — leading dot\nCSS:          width: 100px            — rejected suffix grammar\nKotlin:       100.px                   — extension property, not constructor\nRust:         Px::new(100)             — function, not dot-constructor",
       "outcome": "A",
       "ratifiedAt": "2026-06-30"
+    },
+    {
+      "id": "D-INCR1",
+      "cardId": "c5rmib6",
+      "status": "ratified",
+      "title": "Add C-style ++/-- increment and decrement operators?",
+      "gist": "Jet already increments with `x += 1`. Should Jet also accept `++x`, `x++`, `--x`, and `x--` on mutable integers?",
+      "explainer": "S17 ratified compound assignment (`+=`, `-=`, …) as the update-operator family. The owner asked for C-style `++`/`--`. Under I8 there should be one mechanical path — unless the owner explicitly chooses familiarity over uniformity on this site. The ballot covers full C semantics, permanent rejection, and three partial shapes (postfix-only, prefix-only, statement-only). Operand policy mirrors S17: mutable `var`, `mut` parameters, `self.field` on `mut self`, and index sites; integer types only (trap-on-overflow per D-NUMOPS2). No user-defined operator overloading.",
+      "story": "Carla is porting a C sprite engine. Her game loop has `tick++` and `while (--lives > 0)` scattered through the original. She wants Jet to accept the same tokens so she can translate line-for-line, but she also wants beginners reading her code to understand what changed.",
+      "inWild": "// C original Carla is porting:\nwhile (--lives > 0) {\n    update_sprite(sprite_id)\n    sprite_id++\n}\n\n// Jet today (S17):\nloop lives > 0 {\n    lives -= 1\n    update_sprite(sprite_id)\n    sprite_id += 1\n}\n\n// What this card would add (if ratified A):\nloop --lives > 0 {\n    update_sprite(sprite_id)\n    sprite_id++\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full C-style ++/-- on mutable integer lvalues (pre + post)",
+          "detail": "All four forms. Prefix returns the new value; postfix returns the old value. Operand must be a mutable integer lvalue (same LHS policy as S17). Applies to `Int` and sized integer widths; not `Float`. Overflow traps like `+= 1` (D-NUMOPS2). Gives C/C++ transliteration fidelity; spends a second increment spelling (I8 tension).",
+          "code": "fn game_loop() {\n    mut lives: Int = 3\n    mut tick: Int = 0\n    loop --lives > 0 {\n        tick++\n        print(\"tick {tick} lives {lives}\")\n    }\n    let n: Int = 5\n    let old: Int = n++        // old == 5, n == 6\n    let fresh: Int = ++n      // fresh == 7, n == 7\n}\n\n// Errors:\nlet x: Int = 0\nx++           // E-INCR-IMMUT: cannot increment immutable binding `x`\nlet f: Float = 1.0\nf++           // E-INCR-TYPE: `++` is not defined for Float — use `f += 1.0`"
+        },
+        {
+          "key": "B",
+          "name": "Reject ++/-- forever — keep `+= 1` / `-= 1` only (recommended)",
+          "detail": "No increment/decrement operators. S17 compound assignment is the single canonical update path (I8). Matches Rust, Swift, Zig, Go, and Python. Users coming from C see a teaching error pointing at `+= 1`. Owner request is satisfied by documenting the transliteration table in the cookbook, not new syntax.",
+          "code": "fn game_loop() {\n    mut lives: Int = 3\n    mut tick: Int = 0\n    loop lives > 0 {\n        lives -= 1\n        tick += 1\n        print(\"tick {tick} lives {lives}\")\n    }\n}\n\n// If someone writes C syntax:\ntick++\n// E-INCR-UNSUPPORTED: Jet has no `++` operator — update with `tick += 1`"
+        },
+        {
+          "key": "C",
+          "name": "Postfix only (`x++`, `x--`) — no prefix forms",
+          "detail": "Only postfix increment/decrement. Value of `x++` is discarded (statement form) or typed as `Void` — no old-value expression semantics. Covers the most common C loop idiom (`i++` at end of body) without prefix `--lives` in conditions. Still a second path beside `+= 1` but avoids prefix/precedence puzzles in conditions.",
+          "code": "fn scan() {\n    mut i: Int = 0\n    loop i < 10 {\n        process(i)\n        i++\n    }\n    // prefix rejected:\n    // ++i  → E-INCR-PREFIX: use `i += 1` or postfix `i++`\n}"
+        },
+        {
+          "key": "D",
+          "name": "Prefix only (`++x`, `--x`) — no postfix forms",
+          "detail": "Only prefix forms; they return the updated value (usable in expressions). Matches the `--lives > 0` condition pattern and `++it` iterator style. No postfix old-value trap. Rejects `tick++` at statement end — users write `tick += 1` or `++tick` there.",
+          "code": "fn game_loop() {\n    mut lives: Int = 3\n    loop --lives > 0 {\n        update()\n    }\n    mut n: Int = 5\n    let v: Int = ++n    // v == 6\n    // n++  → E-INCR-POSTFIX: Jet allows prefix `++n` only — write `n += 1` for statement increment\n}"
+        },
+        {
+          "key": "E",
+          "name": "Statement-position only — both pre and post, never inside expressions",
+          "detail": "Lexer/parser accept `++x`, `x++`, `--x`, `x--` only as standalone statements (or loop-header afterthought if D-LOOP-SURFACE B is extended). Using them where a value is expected is an error. Cuts the classic footgun (`arr[i] = i++`) while still letting Carla write familiar statement lines. Expression increment stays `+= 1`.",
+          "code": "fn loop_body() {\n    mut i: Int = 0\n    i++\n    ++i\n    // in expression context — error:\n    let x: Int = i++\n    // E-INCR-EXPR: `++`/`--` may only appear as statements — use `i += 1` or prefix `++i` as a statement\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C / C++",
+          "note": "Full four-form family; prefix/postfix differ in expression value. Decades of familiarity; also decades of postfix confusion.",
+          "code": "int i = 0;\nint a = i++;   // a=0, i=1\nint b = ++i;   // b=2, i=2"
+        },
+        {
+          "lang": "Rust",
+          "note": "No `++`/`--`. Updates use `+= 1`, `-= 1`, or `+=` with any step. Deliberate removal from C lineage.",
+          "code": "let mut i = 0;\ni += 1;\n// i++  // compile error"
+        },
+        {
+          "lang": "Swift",
+          "note": "No `++`/`--` (removed in Swift 3). `+= 1` / `-= 1` only.",
+          "code": "var i = 0\ni += 1"
+        }
+      ],
+      "rec": "B",
+      "group": "syntax",
+      "recommendation": "Reject `++`/`--` (Option B). S17 already owns increment/decrement; adding C operators duplicates that job and reintroduces prefix/postfix value semantics beginners stumble on. Choose A only if C transliteration ergonomics outweigh I8 on this site.",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-30",
+      "log": [
+        {
+          "at": "2026-06-30",
+          "text": "Ballot raised from increment-operators.md plan. Five options: full C-style, reject, postfix-only, prefix-only, statement-only. Rec B on I8 + beginner clarity."
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-30"
     }
   ],
   "binder": [
@@ -13338,8 +13594,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-06-29T20:09:17.789Z"
+      "status": "tagged",
+      "created": "2026-06-29T20:09:17.789Z",
+      "cardId": "c2l9f7y"
     },
     {
       "id": "b462k7u",
@@ -13347,8 +13604,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-06-30T11:21:59.052Z"
+      "status": "tagged",
+      "created": "2026-06-30T11:21:59.052Z",
+      "cardId": "c39sekg"
     },
     {
       "id": "b6r6gwn",
@@ -13365,8 +13623,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-06-30T15:41:42.220Z"
+      "status": "tagged",
+      "created": "2026-06-30T15:41:42.220Z",
+      "cardId": "c4w0m88"
     },
     {
       "id": "b1mqzxr",
@@ -13374,8 +13633,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-06-30T16:44:56.071Z"
+      "status": "tagged",
+      "created": "2026-06-30T16:44:56.071Z",
+      "cardId": "c5rmib6"
     },
     {
       "id": "b2o7ofc",
@@ -13383,8 +13643,72 @@
       "note": "",
       "level": null,
       "tags": [],
+      "status": "tagged",
+      "created": "2026-06-30T16:56:22.364Z",
+      "cardId": "c6vz465"
+    },
+    {
+      "id": "b7hjfk2",
+      "text": "Evaluate go's flag module for jet's cli",
+      "note": "",
+      "level": null,
+      "tags": [],
       "status": "open",
-      "created": "2026-06-30T16:56:22.364Z"
+      "created": "2026-06-30T19:56:03.412Z"
+    },
+    {
+      "id": "b86bdeq",
+      "text": "Consider Jai implementation of Any type -> struct Any {type: *Type_Info; value_pointer: *void;}",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T20:05:12.244Z"
+    },
+    {
+      "id": "b9b4pwe",
+      "text": "Jai dynamic array [..]$Type",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T20:06:02.016Z"
+    },
+    {
+      "id": "bai0by7",
+      "text": "Jai style shift method",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T20:17:27.774Z"
+    },
+    {
+      "id": "bbhk428",
+      "text": "jai what does `slot.var.value_pointer.(*bool).*` do?",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T20:31:39.198Z"
+    },
+    {
+      "id": "bckgbjs",
+      "text": "for uninit -> consider using var: Type := --- (jai style)",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T20:43:39.113Z"
+    },
+    {
+      "id": "bdne4mx",
+      "text": "Why do we need #Ref(...)? Why not something like var: ~Type",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-06-30T20:45:48.999Z"
     }
   ],
   "questions": [

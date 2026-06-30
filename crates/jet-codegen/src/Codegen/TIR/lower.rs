@@ -14,6 +14,71 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+fn struct_lit_field_root<'a>(e: &'a Expr) -> Option<&'a str> {
+    match e {
+        Expr::MethodCall { receiver, method, .. } if method == "clone" => {
+            struct_lit_field_root(receiver)
+        }
+        Expr::Ident(n, _) => Some(n),
+        Expr::Field(inner, _, _) => struct_lit_field_root(inner),
+        Expr::Index { base, .. } | Expr::Slice { base, .. } => struct_lit_field_root(base),
+        _ => None,
+    }
+}
+
+/// D-REFSTRUCT1: a `#Ref(owner)` field filled from its owner borrows the param slot.
+fn lower_struct_lit_field(
+    type_name: &str,
+    field_name: &str,
+    fe: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    if let Some(owner) = cx
+        .ref_field_labels
+        .get(type_name)
+        .and_then(|m| m.get(field_name))
+    {
+        if struct_lit_field_root(fe) == Some(owner.as_str()) {
+            if env.locals.contains_key(owner) {
+                let ty = env.ty_of(owner).unwrap_or(Type::String);
+                let place = match fe {
+                    Expr::Ident(_, _) => env.rust_name_of(owner),
+                    Expr::Field(inner, field, _) => {
+                        let base = lower_expr(inner, cx, env);
+                        format!(
+                            "&({}).{}",
+                            emit_tir_expr(&base, cx),
+                            mangle(field)
+                        )
+                    }
+                    Expr::MethodCall { receiver, method, .. }
+                        if method == "clone" =>
+                    {
+                        match receiver.as_ref() {
+                            Expr::Field(inner, field, _) => {
+                                let base = lower_expr(inner, cx, env);
+                                format!(
+                                    "&({}).{}",
+                                    emit_tir_expr(&base, cx),
+                                    mangle(field)
+                                )
+                            }
+                            _ => env.rust_name_of(owner),
+                        }
+                    }
+                    _ => env.rust_name_of(owner),
+                };
+                return TExpr {
+                    ty,
+                    kind: TExprKind::Local(place),
+                };
+            }
+        }
+    }
+    lower_expr(fe, cx, env)
+}
+
 /// Per-function lowering environment: a local name -> (Rust place string, type).
 /// Built from params, extended by `let` bindings. The "place" already accounts
 /// for parameter deref, so `Local` emission needs no further resolution.
@@ -930,6 +995,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let base_t = lower_expr(base, cx, env);
                 let index_t = lower_expr(index, cx, env);
                 let value_t = lower_expr(value, cx, env);
+                if let IndexKind::User(type_name) = kind {
+                    return TStmt::IndexHookAssign {
+                        type_name: type_name.clone(),
+                        base: base_t,
+                        index: index_t,
+                        value: value_t,
+                    };
+                }
                 TStmt::IndexAssign {
                     base: base_t,
                     index: index_t,
@@ -1103,16 +1176,26 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // Infer the element type from the lowered collection so the loop
                 // variable binds with its concrete type. This lets `core_struct_field_rust_name`
                 // emit plain field names (not `user_<field>`) for core types like DirEntry.
-                let coll_elem_ty: Option<Type> = {
-                    let lowered_coll = lower_expr(collection, cx, env);
-                    match &lowered_coll.ty {
-                        Type::List(inner) => Some((**inner).clone()),
-                        Type::FixedList { elem, .. } => Some((**elem).clone()),
-                        // Map iteration: key type for single-binding form.
-                        Type::Map { key, .. } => Some((**key).clone()),
-                        _ => None,
-                    }
+                let lowered_coll = lower_expr(collection, cx, env);
+                let mut method_kind = method_kind;
+                let mut coll_elem_ty: Option<Type> = match &lowered_coll.ty {
+                    Type::List(inner) => Some((**inner).clone()),
+                    Type::FixedList { elem, .. } => Some((**elem).clone()),
+                    // Map iteration: key type for single-binding form.
+                    Type::Map { key, .. } => Some((**key).clone()),
+                    _ => None,
                 };
+                if method_kind.is_none() {
+                    if let Type::Named(n) = &lowered_coll.ty {
+                        if let Some(hook) = cx.iterable_hooks.get(n) {
+                            method_kind = Some(TForInMethod::Iterable {
+                                coll_type: n.clone(),
+                                iter_type: hook.iter_type.clone(),
+                            });
+                            coll_elem_ty = Some(hook.item_type.clone());
+                        }
+                    }
+                }
                 let mut branch = clone_env(env);
                 branch
                     .locals
@@ -2262,7 +2345,9 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|p| match p {
                     StrPart::Lit(s) => TStrPart::Lit(s.clone()),
-                    StrPart::Interp(e) => TStrPart::Interp(lower_expr(e, cx, env)),
+                    StrPart::Interp(e, fmt) => {
+                        TStrPart::Interp(lower_expr(e, cx, env), *fmt)
+                    }
                 })
                 .collect();
             TExpr {
@@ -2349,6 +2434,24 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        Expr::IncDec {
+            op,
+            operand,
+            postfix,
+            ..
+        } => {
+            let read = lower_expr(operand, cx, env);
+            let place = lower_incdec_place(operand, cx, env);
+            TExpr {
+                ty: read.ty.clone(),
+                kind: TExprKind::IncDec {
+                    op: *op,
+                    place,
+                    postfix: *postfix,
+                    ty: read.ty,
+                },
+            }
+        }
         // D-CAP9: postfix `p.*` deref. Result type is the pointer's element type.
         Expr::Deref(inner, _) => {
             let operand = lower_expr(inner, cx, env);
@@ -2401,12 +2504,42 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
                 if lm || rm {
                     crate::Sema::math_binop_result(*op, ln, rn).unwrap_or_else(|| lhs.ty.clone())
+                } else if ln == rn
+                    && (ln == crate::Syntax::TYPE_BIGINT || ln == crate::Syntax::TYPE_DECIMAL)
+                    && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
+                {
+                    lhs.ty.clone()
                 } else {
                     lhs.ty.clone()
                 }
             } else {
                 lhs.ty.clone()
             };
+            // D-BIGINT1 / D-DECIMAL1: `+`/`-`/`*` lower to prelude helpers.
+            if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
+                if ln == rn
+                    && (ln == crate::Syntax::TYPE_BIGINT || ln == crate::Syntax::TYPE_DECIMAL)
+                {
+                    if let Some(result_ty) = crate::Sema::precise_binop_result(*op, ln, rn) {
+                        if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) {
+                            let func = match op {
+                                BinOp::Add => "add",
+                                BinOp::Sub => "sub",
+                                BinOp::Mul => "mul",
+                                _ => unreachable!(),
+                            };
+                            return TExpr {
+                                ty: result_ty,
+                                kind: TExprKind::PreciseBuiltin {
+                                    type_name: ln.clone(),
+                                    func: func.to_string(),
+                                    args: vec![lhs, rhs],
+                                },
+                            };
+                        }
+                    }
+                }
+            }
             TExpr {
                 ty,
                 kind: TExprKind::Binary {
@@ -2656,6 +2789,39 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
             }
+            // D-BIGINT1 / D-DECIMAL1: `BigInt(…)` / `Decimal(…)` constructors.
+            if !env.locals.contains_key(&call.name)
+                && (call.name == crate::Syntax::TYPE_BIGINT
+                    || call.name == crate::Syntax::TYPE_DECIMAL)
+                && !cx.type_names.contains(&call.name)
+            {
+                let targs: Vec<TExpr> = call
+                    .args
+                    .iter()
+                    .map(|a| lower_expr(&a.expr, cx, env))
+                    .collect();
+                let func = if call.name == crate::Syntax::TYPE_BIGINT {
+                    if targs
+                        .first()
+                        .map(|a| a.ty == Type::String)
+                        .unwrap_or(false)
+                    {
+                        "from_str"
+                    } else {
+                        "from_int"
+                    }
+                } else {
+                    "from_str"
+                };
+                return TExpr {
+                    ty: Type::Named(call.name.clone()),
+                    kind: TExprKind::PreciseBuiltin {
+                        type_name: call.name.clone(),
+                        func: func.to_string(),
+                        args: targs,
+                    },
+                };
+            }
             // D-SIMD2 / D-LINALG1: a built-in math-type constructor. Plainly lower the
             // float components and emit `{root}jet_math_<T>_new(…)`.
             if !env.locals.contains_key(&call.name)
@@ -2874,7 +3040,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|(n, _, fe)| {
                     let boxed = cx.boxed_edges.contains(&(type_name.clone(), n.clone()));
-                    (mangle(n), lower_expr(fe, cx, env), boxed)
+                    let value = lower_struct_lit_field(type_name, n, fe, cx, env);
+                    (mangle(n), value, boxed)
                 })
                 .collect();
             // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
@@ -3232,6 +3399,22 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            if let IndexKind::User(type_name) = kind {
+                let value_ty = cx
+                    .index_hooks
+                    .get(type_name)
+                    .map(|h| h.value_type.clone())
+                    .unwrap_or(Type::Int);
+                return TExpr {
+                    ty: value_ty,
+                    kind: TExprKind::IndexHook {
+                        type_name: type_name.clone(),
+                        base: Box::new(base_t),
+                        index: Box::new(index_t),
+                        line,
+                    },
+                };
+            }
             let result_ty = match &base_t.ty {
                 Type::List(elem) => (**elem).clone(),
                 Type::Map { value, .. } => (**value).clone(),
@@ -3528,6 +3711,18 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         Expr::Paren(inner, _) => lower_expr(inner, cx, env),
         _ => unreachable!("expression not in TIR subset"),
+    }
+}
+
+/// D-INCR1: Rust place string for `++`/`--` read/update on an lvalue operand.
+fn lower_incdec_place(operand: &Expr, cx: &Cx, env: &mut LowerEnv) -> String {
+    match operand {
+        Expr::Ident(name, _) => env.place_of(name),
+        Expr::Field(base, field, span) => {
+            let field_expr = Expr::Field(base.clone(), field.clone(), *span);
+            emit_tir_expr(&lower_expr(&field_expr, cx, env), cx)
+        }
+        other => emit_tir_expr(&lower_expr(other, cx, env), cx),
     }
 }
 
@@ -3974,6 +4169,24 @@ pub(crate) fn lower_method_call(
             }
         }
     }
+    // D-OPTGC1: `gc.Gc.new<T>(value)` traced handle constructor.
+    if method == Syntax::GC_NEW && recv_type.as_deref() == Some(Syntax::GC_TYPE) {
+        if let Some(Type::Apply { name, args: targs }) = resolved_ret {
+            if name == Syntax::GC_TYPE && targs.len() == 1 && args.len() == 1 {
+                let rust_t = cx.rust_type(&targs[0]);
+                let a0 = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
+                return TExpr {
+                    ty: Type::Apply {
+                        name: name.clone(),
+                        args: targs.clone(),
+                    },
+                    kind: TExprKind::AllocNew {
+                        ctor: format!("jet_gc::Gc::<{}>::new({})", rust_t, a0),
+                    },
+                };
+            }
+        }
+    }
     // c109 Phase 16: an enum-variant CONSTRUCTION `Enum.Variant(args)` reaching codegen
     // as a `MethodCall` (sema never rewrites a payload variant to `Expr::EnumLit`). The
     // AST `emit_method_call` routes it to `emit_enum_lit` with all-positional args; we
@@ -4315,6 +4528,41 @@ pub(crate) fn lower_method_call(
                 op: THandleOp::LoadableMethod {
                     method: method.to_string(),
                 },
+                args: targs,
+            },
+        };
+    }
+    // D-TTLVAL1=A: Expiring<T> / Rotting<T> method calls.
+    if matches!(recv_type.as_deref(), Some("Expiring" | "Rotting"))
+        && matches!(method, "get" | "is_valid" | "force")
+    {
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match (recv_type.as_deref(), method) {
+            (Some("Expiring") | Some("Rotting"), "get") => Type::Result {
+                ok: Box::new(match &recv_t.ty {
+                    Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+                    _ => Type::Named("Unknown".to_string()),
+                }),
+                err: Box::new(Type::Named("Expired".to_string())),
+            },
+            (Some(_), "is_valid") => Type::Bool,
+            _ => recv_t.ty.clone(),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        let op = if recv_type.as_deref() == Some("Rotting") {
+            THandleOp::RottingMethod {
+                method: method.to_string(),
+            }
+        } else {
+            THandleOp::ExpiringMethod {
+                method: method.to_string(),
+            }
+        };
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op,
                 args: targs,
             },
         };
@@ -4807,6 +5055,21 @@ pub(crate) fn lower_method_call(
     // A user instance method on a covered type. `recv_type` is total (gate proved
     // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
     // name (trait-impl methods keep their bare name; others get the `user_` mangle).
+    if matches!(method, "with" | "with_mut") {
+        let recv = lower_expr(receiver, cx, env);
+        if matches!(&recv.ty, Type::Apply { name, .. } if name == Syntax::GC_TYPE) {
+            if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
+                let closure = render_lambda_str(lam, cx, env);
+                let recv_rust = emit_tir_expr(&recv, cx);
+                return TExpr {
+                    ty: unit_type(),
+                    kind: TExprKind::AllocNew {
+                        ctor: format!("jet_gc::Gc::{method}(&({recv_rust}), {closure})"),
+                    },
+                };
+            }
+        }
+    }
     let ty_name = recv_type.clone().expect("gate proved recv_type is Some");
     let sig = cx
         .method_sigs

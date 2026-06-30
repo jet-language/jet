@@ -135,7 +135,7 @@ pub(crate) fn walk_expr_for_const_refs(
         }
         Expr::Str(parts, _) => {
             for p in parts {
-                if let StrPart::Interp(e) = p {
+                if let StrPart::Interp(e, _) = p {
                     walk_expr_for_const_refs(e, const_names, taken);
                 }
             }
@@ -146,6 +146,7 @@ pub(crate) fn walk_expr_for_const_refs(
             }
         }
         Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Field(inner, _, _) => {
@@ -274,7 +275,10 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
     match e {
         Expr::PtrFromAddr { addr, .. } => expr_refs_name(addr, name),
         Expr::Ident(n, _) => n == name,
-        Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _) => {
+        Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _) => {
             expr_refs_name(inner, name)
         }
         Expr::Binary(_, l, r, _) => expr_refs_name(l, name) || expr_refs_name(r, name),
@@ -320,7 +324,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::PatternTest { subject, .. } => expr_refs_name(subject, name),
         Expr::Lambda(_) => false,
         Expr::Str(parts, _) => parts.iter().any(|p| {
-            if let StrPart::Interp(e) = p {
+            if let StrPart::Interp(e, _) = p {
                 expr_refs_name(e, name)
             } else {
                 false
@@ -598,6 +602,20 @@ pub(crate) fn expr_collect_captures(
             read.insert(n.clone());
         }
         Expr::Unary(_, inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
+        Expr::IncDec { operand, .. } => {
+            expr_collect_captures(operand, bound, read, mut_cap);
+            if let Expr::Ident(name, _) = operand.as_ref() {
+                if !bound.contains(name) {
+                    mut_cap.insert(name.clone());
+                }
+            } else if let Expr::Field(base, _, _) = operand.as_ref() {
+                if let Some(root) = expr_root_ident(base) {
+                    if !bound.contains(root) {
+                        mut_cap.insert(root.to_string());
+                    }
+                }
+            }
+        }
         Expr::Binary(_, l, r, _) => {
             expr_collect_captures(l, bound, read, mut_cap);
             expr_collect_captures(r, bound, read, mut_cap);
@@ -682,7 +700,7 @@ pub(crate) fn expr_collect_captures(
         Expr::PatternTest { subject, .. } => expr_collect_captures(subject, bound, read, mut_cap),
         Expr::Str(parts, _) => {
             for p in parts {
-                if let StrPart::Interp(ex) = p {
+                if let StrPart::Interp(ex, _) = p {
                     expr_collect_captures(ex, bound, read, mut_cap);
                 }
             }

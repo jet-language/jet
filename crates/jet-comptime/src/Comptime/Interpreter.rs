@@ -7,8 +7,8 @@ use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
-    BinOp, BindPattern, EnumLitArg, Expr, Func, OrFallback as FallbackKind, Stmt, StrPart, Type,
-    UnOp,
+    BinOp, BindPattern, EnumLitArg, Expr, Func, IncDecOp, OrFallback as FallbackKind, Stmt,
+    StrPart, Type, UnOp,
 };
 
 use super::Builtins::{as_bool, as_int, eval_binop};
@@ -122,6 +122,9 @@ pub(super) struct Interp<'a> {
     /// Without this, `#Impure` blocks are syntactically valid but Tier-2
     /// effect calls inside them still fail with E3411.
     pub(super) allow_impure: bool,
+    /// E2-M18 / c133: true only in `run_repl_step` — enables REPL-specific
+    /// diagnostics for native-only Core modules (E1802-style wording).
+    pub(super) repl_mode: bool,
     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated during
     /// this evaluation. Each entry records the relative path and the sha256
     /// of the bytes read, for recording in `.jet/lock`. Drained by the
@@ -559,6 +562,46 @@ impl<'a> Interp<'a> {
         }
     }
 
+    fn eval_incdec(
+        &mut self,
+        op: IncDecOp,
+        operand: &Expr,
+        postfix: bool,
+        span: Span,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let delta = match op {
+            IncDecOp::Inc => 1,
+            IncDecOp::Dec => -1,
+        };
+        match operand {
+            Expr::Ident(name, name_span) => {
+                let CtValue::Int(n) = scope
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| unsupported("this update", *name_span))?
+                else {
+                    let old = scope.get(name).cloned().unwrap();
+                    return Err(unsupported(
+                        &format!("`++`/`--` on {}", old.jet_show()),
+                        span,
+                    ));
+                };
+                let new_n = n
+                    .checked_add(delta)
+                    .ok_or_else(|| overflow("increment/decrement", span))?;
+                let ret = if postfix {
+                    CtValue::Int(n)
+                } else {
+                    CtValue::Int(new_n)
+                };
+                scope.insert(name.clone(), CtValue::Int(new_n));
+                Ok(ret)
+            }
+            _ => Err(unsupported("this increment/decrement", span)),
+        }
+    }
+
     fn exec_assign(
         &mut self,
         target: &crate::AST::LValue,
@@ -652,7 +695,7 @@ impl<'a> Interp<'a> {
                 for part in parts {
                     match part {
                         StrPart::Lit(t) => s.push_str(t),
-                        StrPart::Interp(e) => s.push_str(&self.eval(e, scope)?.jet_show()),
+                        StrPart::Interp(e, _) => s.push_str(&self.eval(e, scope)?.jet_show()),
                     }
                 }
                 Ok(CtValue::Str(s))
@@ -690,6 +733,12 @@ impl<'a> Interp<'a> {
                     _ => Err(unsupported("this operation", *span)),
                 }
             }
+            Expr::IncDec {
+                op,
+                operand,
+                postfix,
+                span,
+            } => self.eval_incdec(*op, operand, *postfix, *span, scope),
             Expr::Binary(op, l, r, span) => {
                 // Short-circuit && / || to match runtime.
                 if matches!(op, BinOp::And | BinOp::Or) {

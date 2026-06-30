@@ -1,0 +1,25 @@
+// D-TTLVAL1=A: Expiring<T> cache + Rotting<T> secret with injectable Clock.
+use core.time as time
+use core.time.expiring as expiring
+use core.secrets as secrets
+
+fn main() {
+    clk := time.clock(1000)
+    ttl #= time.secs(5)
+    cache #= expiring.new("fresh", ttl, clk)
+    if cache.get(clk) == ok(v) {
+        print("cache: {v}")
+    }
+    clk.tick(6000)
+    if cache.get(clk) == err(_) {
+        print("cache expired: true")
+    }
+    secret_clk := time.clock(1000)
+    secret := secrets.rotting_new("api-key-123", time.secs(2), secret_clk)
+    if secret.get(secret_clk) == ok(s) {
+        print("secret once: {s.len()}")
+    }
+    if secret.get(secret_clk) == err(_) {
+        print("secret consumed: true")
+    }
+}

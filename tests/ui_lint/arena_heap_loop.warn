@@ -1,0 +1,7 @@
+Warning [L0505]: heap growth inside a loop — consider an arena
+  --> tests/ui_lint/arena_heap_loop.jet:6:12
+    |
+  6 |         xs.push(i)
+    |            ^^^^
+ Why: each `push` may allocate on the global heap; in a hot loop that adds up
+ Fix: bind `arena #= mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data

@@ -119,7 +119,11 @@ pub enum TokKind {
     Ge,
     // Compound assignment (S17).
     PlusEq,
+    /// D-INCR1: prefix/postfix increment `++`.
+    PlusPlus,
     MinusEq,
+    /// D-INCR1: prefix/postfix decrement `--` (adjacent dashes only — `x - -y` stays two `-`).
+    MinusMinus,
     StarEq,
     SlashEq,
     PercentEq,
@@ -255,7 +259,9 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Le => "`<=`".to_string(),
         TokKind::Ge => "`>=`".to_string(),
         TokKind::PlusEq => "`+=`".to_string(),
+        TokKind::PlusPlus => "`++`".to_string(),
         TokKind::MinusEq => "`-=`".to_string(),
+        TokKind::MinusMinus => "`--`".to_string(),
         TokKind::StarEq => "`*=`".to_string(),
         TokKind::SlashEq => "`/=`".to_string(),
         TokKind::PercentEq => "`%=`".to_string(),

@@ -2,6 +2,7 @@ use super::*;
 use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::Numeric::{allows_float_money, is_money_like_name};
 use crate::Traits::TraitRegistry;
 use crate::AST::{
     AccessConvention, ConstAttr, DistinctDef, EnumDef, Expr, Func, Item, Param, Program,
@@ -137,6 +138,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     let mut tests: HashMap<String, Span> = HashMap::new();
     let mut registry = TypeRegistry {
         types: HashMap::new(),
+        ref_field_labels: HashMap::new(),
     };
     let mut consts: HashMap<String, Type> = HashMap::new();
     let mut trait_reg = TraitRegistry::default();
@@ -1322,6 +1324,22 @@ pub(crate) fn register_struct(
             f.is_stored_ref,
             f.is_pub,
         ));
+        if f.ty.is_float()
+            && is_money_like_name(&f.name)
+            && !allows_float_money(&f.serde_markers)
+            && !allows_float_money(&s.serde_markers)
+        {
+            diags.push(Diagnostic::lint(
+                "L0504",
+                format!(
+                    "field `{}` looks like money but has type `Float`",
+                    f.name
+                ),
+                "floating-point money loses cents on common values like `0.1 + 0.2`".to_string(),
+                "use `Decimal` for exact money, or suppress with `#[allow(float_money)]` on the field".to_string(),
+                Some(f.name_span),
+            ));
+        }
     }
     registry.types.insert(
         s.name.clone(),
@@ -1334,6 +1352,20 @@ pub(crate) fn register_struct(
             columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
         },
     );
+    let mut labels = HashMap::new();
+    for f in &s.fields {
+        if f.is_stored_ref {
+            labels.insert(
+                f.name.clone(),
+                f.stored_ref_label
+                    .clone()
+                    .unwrap_or_else(|| "src".to_string()),
+            );
+        }
+    }
+    if !labels.is_empty() {
+        registry.ref_field_labels.insert(s.name.clone(), labels);
+    }
     legacy.insert(
         s.name.clone(),
         s.fields
@@ -1373,8 +1405,12 @@ pub(crate) fn register_struct(
             diags.push(Diagnostic::error(
                 "E0207",
                 "this struct has more than one stored reference without a label".to_string(),
-                "when two `ref` fields may come from different places, each needs a label like `ref[src]`".to_string(),
-                "add labels: `ref[a] x: String` and `ref[b] y: String`".to_string(),
+                "when two `#Ref` fields may come from different owners, each needs a distinct owner label".to_string(),
+                format!(
+                    "add labels: `#{}(a) x: String` and `#{}(b) y: String`",
+                    Syntax::ATTR_REF,
+                    Syntax::ATTR_REF
+                ),
                 Some(s.name_span),
             ));
         }
@@ -1617,6 +1653,8 @@ pub(crate) fn check_func_body(
         fx_callback_obligations: Vec::new(),
         txn_depth: 0,
         det_suppress: 0,
+        context_depth: 0,
+        context_allocator_active: false,
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).

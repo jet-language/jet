@@ -407,7 +407,7 @@ fn flatten_string(parts: &[TStrPart]) -> Option<String> {
     for p in parts {
         match p {
             TStrPart::Lit(s) => out.push_str(s),
-            TStrPart::Interp(_) => return None,
+            TStrPart::Interp(_, _) => return None,
         }
     }
     Some(out)
@@ -416,7 +416,7 @@ fn flatten_string(parts: &[TStrPart]) -> Option<String> {
 fn jit_covers_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> bool {
     parts.iter().all(|p| match p {
         TStrPart::Lit(_) => true,
-        TStrPart::Interp(e) => jit_covers_expr(e, callees),
+        TStrPart::Interp(e, _) => jit_covers_expr(e, callees),
     })
 }
 
@@ -1701,7 +1701,7 @@ impl LowerCtx<'_, '_> {
                         .declare_func_in_func(self.host.str_push_lit, self.b.func);
                     self.b.ins().call(host_ref, &[buf_id, lit_const]);
                 }
-                TStrPart::Interp(e) => {
+                TStrPart::Interp(e, _) => {
                     let val = self.lower_expr(e)?;
                     let host_id = match &e.ty {
                         Type::Int => self.host.str_push_i64,

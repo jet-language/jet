@@ -6,6 +6,34 @@ use crate::AST::{
 };
 use std::collections::HashMap;
 
+fn type_mentions_gc(ty: &Type) -> bool {
+    match ty {
+        Type::Apply { name, .. } if name == Syntax::GC_TYPE => true,
+        Type::Option(inner) => type_mentions_gc(inner),
+        _ => false,
+    }
+}
+
+fn emit_gc_trace_impl(s: &StructDef, out: &mut String) {
+    if !s.fields.iter().any(|f| type_mentions_gc(&f.ty)) {
+        return;
+    }
+    let mut trace_body = String::new();
+    for f in &s.fields {
+        if type_mentions_gc(&f.ty) {
+            trace_body.push_str(&format!(
+                "        jet_gc::GcTrace::trace(&self.{}, out);\n",
+                mangle(&f.name)
+            ));
+        }
+    }
+    out.push_str(&format!(
+        "impl jet_gc::GcTrace for {name} {{\n    fn trace(&self, out: &mut Vec<usize>) {{\n{trace_body}    }}\n}}\n\n",
+        name = user_type_rust(&s.name),
+        trace_body = trace_body
+    ));
+}
+
 fn struct_lifetimes(fields: &[Field]) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
     for f in fields {
@@ -118,6 +146,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
+    emit_gc_trace_impl(s, out);
     if !s.type_params.is_empty() {
         let jetshow_extra = Generics::rust_extra_jetshow_bounds(&s.type_params);
         let mut impl_bounds = jetshow_extra.clone();
@@ -153,6 +182,22 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             tp_plain,
             show_body
         ));
+        let debug_body = struct_jet_debug_body(s, has_fn_field);
+        out.push_str(&format!(
+            "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            tp_bounds,
+            user_type_rust(&s.name),
+            tp_plain,
+            debug_body
+        ));
+        if !cx.display_types.contains(&s.name) {
+            out.push_str(&format!(
+                "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
+                tp_bounds,
+                user_type_rust(&s.name),
+                tp_plain,
+            ));
+        }
     } else if lifetimes.is_empty() {
         let show_body = if has_fn_field {
             format!("\"{} {{ ... }}\".to_string()", s.name)
@@ -164,6 +209,18 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             user_type_rust(&s.name),
             show_body
         ));
+        let debug_body = struct_jet_debug_body(s, has_fn_field);
+        out.push_str(&format!(
+            "impl JetDebug for {} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            user_type_rust(&s.name),
+            debug_body
+        ));
+        if !cx.display_types.contains(&s.name) {
+            out.push_str(&format!(
+                "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
+                user_type_rust(&s.name),
+            ));
+        }
     } else {
         let lt = lifetimes
             .iter()
@@ -324,6 +381,16 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
         e.name
     ));
+    out.push_str(&format!(
+        "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
+        e.name
+    ));
+    if !cx.display_types.contains(&e.name) {
+        out.push_str(&format!(
+            "impl JetDisplay for user_{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
+            e.name
+        ));
+    }
     emit_enum_serde(cx, e, out);
 }
 
@@ -859,6 +926,43 @@ pub(crate) fn emit_trait_impl(
         emit_trait_method(cx, type_name, m, out, 1);
     }
     out.push_str("}\n\n");
+    if block.trait_name == crate::Syntax::TRAIT_DISPLAY {
+        out.push_str(&format!(
+            "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ <{} as {}>::display(self) }}\n}}\n\n",
+            user_type_rust(type_name),
+            user_type_rust(type_name),
+            Generics::user_trait_rust(crate::Syntax::TRAIT_DISPLAY),
+        ));
+    }
+}
+
+fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
+    if has_fn_field {
+        return format!("\"{} {{ ... }}\".to_string()", s.name);
+    }
+    if s.fields.is_empty() {
+        return format!("\"{} {{}}\".to_string()", s.name);
+    }
+    let parts: Vec<String> = s
+        .fields
+        .iter()
+        .map(|f| {
+            if f.redact {
+                format!("\"{}: [redacted]\".to_string()", f.name)
+            } else {
+                format!(
+                    "format!(\"{}: {{}}\", ((self).{}).jet_show())",
+                    f.name,
+                    mangle(&f.name)
+                )
+            }
+        })
+        .collect();
+    format!(
+        "format!(\"{} {{{{ {{}} }}}}\", [{}].join(\", \"))",
+        s.name,
+        parts.join(", ")
+    )
 }
 
 pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
@@ -903,6 +1007,14 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
         }
     }
     out.push_str("}\n\n");
+    if trait_name == crate::Syntax::TRAIT_DISPLAY {
+        out.push_str(&format!(
+            "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ <{} as {}>::display(self) }}\n}}\n\n",
+            user_type_rust(&i.type_name),
+            user_type_rust(&i.type_name),
+            Generics::user_trait_rust(crate::Syntax::TRAIT_DISPLAY),
+        ));
+    }
 }
 
 fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {

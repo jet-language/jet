@@ -632,12 +632,12 @@ fn js_emit_expr(expr: &Expr, funcs: &[FuncWeb]) -> String {
 }
 
 fn js_string_lit(parts: &[crate::AST::StrPart]) -> String {
-    if parts.iter().any(|p| matches!(p, crate::AST::StrPart::Interp(_))) {
+    if parts.iter().any(|p| matches!(p, crate::AST::StrPart::Interp(_, _))) {
         let mut s = String::from("`");
         for part in parts {
             match part {
                 crate::AST::StrPart::Lit(t) => s.push_str(t),
-                crate::AST::StrPart::Interp(e) => {
+                crate::AST::StrPart::Interp(e, _) => {
                     s.push_str("${");
                     s.push_str(&js_emit_expr(e, &[]));
                     s.push('}');

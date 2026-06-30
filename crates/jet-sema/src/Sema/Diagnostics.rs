@@ -1,6 +1,6 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::is_type_var_name;
+use crate::Generics::{self, is_type_var_name};
 use crate::Syntax;
 use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
@@ -380,6 +380,67 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_printable(elem, registry),
         Type::Tagged { inner, .. } => is_printable(inner, registry),
+    }
+}
+
+/// D-DISPLAYDBG1: bare `{value}` requires `Display` (explicit impl or builtin scalar).
+pub(crate) fn is_displayable(ty: &Type, trait_reg: &crate::Traits::TraitRegistry) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
+        Type::Option(inner) => is_displayable(inner, trait_reg),
+        Type::Result { ok, err } => is_displayable(ok, trait_reg) && is_displayable(err, trait_reg),
+        Type::List(inner) => is_displayable(inner, trait_reg),
+        Type::Map { value, .. } => is_displayable(value, trait_reg),
+        Type::Named(n) => {
+            trait_reg.implements_trait(n, Generics::DISPLAY)
+                || matches!(
+                    n.as_str(),
+                    Syntax::TYPE_INT
+                        | Syntax::TYPE_FLOAT
+                        | Syntax::TYPE_BOOL
+                        | Syntax::TYPE_STRING
+                        | Syntax::TYPE_CHAR
+                )
+        }
+        Type::Apply { name, args } => {
+            trait_reg.implements_trait(name, Generics::DISPLAY)
+                || args.iter().all(|a| is_displayable(a, trait_reg))
+        }
+        Type::Tuple(fields) => fields.iter().all(|(_, t)| is_displayable(t, trait_reg)),
+        Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => is_displayable(elem, trait_reg),
+        Type::Tagged { inner, .. } => is_displayable(inner, trait_reg),
+    }
+}
+
+/// D-DISPLAYDBG1: `{value@Debug}` uses auto-derived or explicit `Debug`.
+pub(crate) fn is_debuggable(
+    ty: &Type,
+    type_reg: &TypeRegistry,
+    trait_reg: &crate::Traits::TraitRegistry,
+) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
+        Type::Option(inner) => is_debuggable(inner, type_reg, trait_reg),
+        Type::Result { ok, err } => {
+            is_debuggable(ok, type_reg, trait_reg) && is_debuggable(err, type_reg, trait_reg)
+        }
+        Type::List(inner) => is_debuggable(inner, type_reg, trait_reg),
+        Type::Map { value, .. } => is_debuggable(value, type_reg, trait_reg),
+        Type::Named(n) => {
+            type_reg.contains(n)
+                || core_type_known(n)
+                || trait_reg.implements_trait(n, Generics::DEBUG)
+        }
+        Type::Apply { args, .. } => args.iter().all(|a| is_debuggable(a, type_reg, trait_reg)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| is_debuggable(t, type_reg, trait_reg)),
+        Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => is_debuggable(elem, type_reg, trait_reg),
+        Type::Tagged { inner, .. } => is_debuggable(inner, type_reg, trait_reg),
     }
 }
 

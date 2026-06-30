@@ -189,7 +189,7 @@ fn find_dir_arg(imp: &Expr) -> Result<String, Diagnostic> {
     for part in parts {
         match part {
             StrPart::Lit(s) => path.push_str(s),
-            StrPart::Interp(_) => return Err(bad_import_directive(imp.span())),
+            StrPart::Interp(..) => return Err(bad_import_directive(imp.span())),
         }
     }
     Ok(path)

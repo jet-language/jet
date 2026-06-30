@@ -343,13 +343,13 @@ fn scan_expr(
             scan_expr(lhs, caps, method_map, param_types);
             scan_expr(rhs, caps, method_map, param_types);
         }
-        Expr::Unary(_, inner, _) => scan_expr(inner, caps, method_map, param_types),
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => scan_expr(inner, caps, method_map, param_types),
         Expr::Deref(inner, _) | Expr::RawOf(inner, _) => {
             scan_expr(inner, caps, method_map, param_types)
         }
         Expr::Str(parts, _) => {
             for p in parts {
-                if let crate::AST::StrPart::Interp(pe) = p {
+                if let crate::AST::StrPart::Interp(pe, _) = p {
                     scan_expr(pe, caps, method_map, param_types);
                 }
             }

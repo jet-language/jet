@@ -1192,7 +1192,8 @@ impl<'a> Parser<'a> {
                     | Expr::ComptimeSplice { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
                     | Expr::Try(_, _, _)
-                    | Expr::OrFallback { .. } => {}
+                    | Expr::OrFallback { .. }
+                    | Expr::IncDec { .. } => {}
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",

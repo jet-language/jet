@@ -241,6 +241,8 @@ const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+/// D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` runtime (stripped when unused).
+const GC_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
 
 /// I1: native scheduler IO uses `unsafe` syscalls; keep them in `jet_codegen::scheduler`
 /// but strip from emitted user Rust so archive/golden programs stay `unsafe`-free.
@@ -301,6 +303,43 @@ fn strip_unused_mem_prelude(out: String) -> String {
     }
     let mut s = out[..start].to_string();
     // Drop a trailing blank line left by the removed block.
+    let rest = out[end..].trim_start_matches('\n');
+    s.push_str(rest);
+    s
+}
+
+/// D-OPTGC1: strip `mod jet_gc { … }` when the program never references `jet_gc::`.
+fn strip_unused_gc_prelude(out: String) -> String {
+    let Some(start) = out.find("mod jet_gc") else {
+        return out;
+    };
+    let bytes = out.as_bytes();
+    let mut depth = 0usize;
+    let mut seen = false;
+    let mut end = out.len();
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                depth += 1;
+                seen = true;
+            }
+            b'}' => {
+                depth -= 1;
+                if seen && depth == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let used = out[..start].contains("jet_gc::") || out[end..].contains("jet_gc::");
+    if used {
+        return out;
+    }
+    let mut s = out[..start].to_string();
     let rest = out[end..].trim_start_matches('\n');
     s.push_str(rest);
     s
@@ -411,6 +450,88 @@ pub(crate) fn user_type_rust(name: &str) -> String {
     format!("user_{}", name.replace('.', "__"))
 }
 
+pub(crate) fn emit_synthetic_display_trait(out: &mut String) {
+    out.push_str("pub trait user_Display {\n");
+    out.push_str("    fn display(&self) -> String;\n");
+    out.push_str("}\n\n");
+}
+
+/// D-ITER-HOOK / D-INDEX-HOOK: emit Iterable/Iterator/Index/IndexMut when used.
+pub(crate) fn emit_synthetic_iter_index_traits(
+    out: &mut String,
+    has_iterable: bool,
+    has_iterator: bool,
+    has_index: bool,
+    has_index_mut: bool,
+) {
+    if has_iterable {
+        out.push_str("pub trait user_Iterable {\n");
+        out.push_str("    type Iter;\n");
+        out.push_str("    fn iter(self) -> Self::Iter;\n");
+        out.push_str("}\n\n");
+    }
+    if has_iterator {
+        out.push_str("pub trait user_Iterator {\n");
+        out.push_str("    type Item;\n");
+        out.push_str("    fn next(&mut self) -> Option<Self::Item>;\n");
+        out.push_str("}\n\n");
+    }
+    if has_index {
+        out.push_str("pub trait user_Index {\n");
+        out.push_str("    type Key;\n");
+        out.push_str("    type Value;\n");
+        out.push_str("    fn get(&self, k: Self::Key) -> Option<Self::Value>;\n");
+        out.push_str("}\n\n");
+    }
+    if has_index_mut {
+        out.push_str("pub trait user_IndexMut: user_Index {\n");
+        out.push_str("    fn set(&mut self, k: <Self as user_Index>::Key, v: <Self as user_Index>::Value);\n");
+        out.push_str("}\n\n");
+    }
+}
+
+pub(crate) fn program_iter_index_usage(items: &[Item]) -> (bool, bool, bool, bool) {
+    let mut has_iterable = false;
+    let mut has_iterator = false;
+    let mut has_index = false;
+    let mut has_index_mut = false;
+    for item in items {
+        match item {
+            Item::Impl(i) => match i.trait_name.as_deref() {
+                Some(Syntax::TRAIT_ITERABLE) => has_iterable = true,
+                Some(Syntax::TRAIT_ITERATOR) => has_iterator = true,
+                Some(Syntax::TRAIT_INDEX) => has_index = true,
+                Some(Syntax::TRAIT_INDEX_MUT) => has_index_mut = true,
+                _ => {}
+            },
+            Item::Struct(s) => {
+                for block in &s.trait_impls {
+                    match block.trait_name.as_str() {
+                        Syntax::TRAIT_ITERABLE => has_iterable = true,
+                        Syntax::TRAIT_ITERATOR => has_iterator = true,
+                        Syntax::TRAIT_INDEX => has_index = true,
+                        Syntax::TRAIT_INDEX_MUT => has_index_mut = true,
+                        _ => {}
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for block in &e.trait_impls {
+                    match block.trait_name.as_str() {
+                        Syntax::TRAIT_ITERABLE => has_iterable = true,
+                        Syntax::TRAIT_ITERATOR => has_iterator = true,
+                        Syntax::TRAIT_INDEX => has_index = true,
+                        Syntax::TRAIT_INDEX_MUT => has_index_mut = true,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (has_iterable, has_iterator, has_index, has_index_mut)
+}
+
 /// D-TXN-ROLLBACK layer 2: emit the `trait user_Rollback { … }` Rust trait
 /// declaration when any impl block in the program references `Rollback`. Programs
 /// with no `Rollback` impl produce zero output here (byte-identical to before).
@@ -455,11 +576,16 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
+    out.push_str(GC_PRELUDE);
     out.push('\n');
 
     let cx = build_cx(prog, src, file);
     let tuple_shapes = collect_tuple_shapes(&prog.items);
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
+
+    emit_synthetic_display_trait(&mut out);
+    let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
+    emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
 
     // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff needed.
     if program_has_rollback_impl(&prog.items) {
@@ -527,7 +653,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             emit_func(&cx, f, &mut out);
         }
     }
-    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
@@ -551,6 +677,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
+    out.push_str(GC_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if any_property_test(&tests) {
         out.push_str(PROP_PRELUDE);
@@ -561,6 +688,10 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     cx.test_mode = true;
     let tuple_shapes = collect_tuple_shapes(&prog.items);
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
+
+    emit_synthetic_display_trait(&mut out);
+    let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
+    emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
 
     // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff needed.
     if program_has_rollback_impl(&prog.items) {
@@ -632,7 +763,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main(&tests, &mut out);
-    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
 }
 
 /// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
@@ -815,6 +946,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     }
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
+    out.push_str(GC_PRELUDE);
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
@@ -876,7 +1008,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
-    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
@@ -918,6 +1050,7 @@ pub fn emit_bundle_tests_cov(
     }
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
+    out.push_str(GC_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
@@ -993,7 +1126,7 @@ pub fn emit_bundle_tests_cov(
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main_cov(&tests, &mut out, coverage);
-    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
@@ -1033,6 +1166,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     }
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
+    out.push_str(GC_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
@@ -1163,5 +1297,5 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    }\n");
     }
     out.push_str("}\n");
-    strip_unused_term_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out)))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
 }

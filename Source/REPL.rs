@@ -239,19 +239,23 @@ impl Session {
     }
 
     /// Register a val binding for sema visibility after it was evaluated.
-    /// `name` and `val` come from the interpreter scope.
-    pub fn record_binding(&mut self, name: &str, v: &CtValue) {
-        // Generate a synthetic `name: Type #= zero_val` for sema (D-BIND3).
-        // We use a zero/default value of the right type so sema accepts it.
+    /// `mutable` must match the original `#=` / `:=` sigil (D-BIND3).
+    pub fn record_binding(&mut self, name: &str, v: &CtValue, mutable: bool) {
+        let sigil = if mutable {
+            crate::Syntax::SIGIL_BIND_MUT
+        } else {
+            crate::Syntax::SIGIL_BIND_IMMUT
+        };
+        // Synthetic `name: Type {sigil} zero_val` so later inputs type-check.
         let type_and_val = match v {
-            CtValue::Int(_) => ": Int #= 0",
-            CtValue::Float(_) => ": Float #= 0.0",
-            CtValue::Bool(_) => ": Bool #= false",
-            CtValue::Char(_) => ": Char #= 'a'",
-            CtValue::Str(_) => ": String #= \"\"",
-            CtValue::Bytes(_) => ": [U8] #= []",
-            CtValue::List(_) => ": List<Int> #= []",
-            CtValue::Map(_) => ": Map<String, Int> #= [:]",
+            CtValue::Int(_) => format!(": Int {} 0", sigil),
+            CtValue::Float(_) => format!(": Float {} 0.0", sigil),
+            CtValue::Bool(_) => format!(": Bool {} false", sigil),
+            CtValue::Char(_) => format!(": Char {} 'a'", sigil),
+            CtValue::Str(_) => format!(": String {} \"\"", sigil),
+            CtValue::Bytes(_) => format!(": [U8] {} []", sigil),
+            CtValue::List(_) => format!(": List<Int> {} []", sigil),
+            CtValue::Map(_) => format!(": Map<String, Int> {} [:]", sigil),
             CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
             CtValue::ResOk(_) | CtValue::ResErr(_) => return, // skip Result for now
             CtValue::Struct { .. } => {
@@ -267,6 +271,16 @@ impl Session {
 }
 
 // ── move detection (D-REPL8=A) ─────────────────────────────────────────────
+
+/// Whether a `Stmt::Val` in this step introduced `name` as mutable (`:=`).
+fn val_binding_mutable(stmts: &[Stmt], name: &str) -> bool {
+    stmts.iter().any(|stmt| {
+        matches!(
+            stmt,
+            Stmt::Val(b) if b.name == name && b.mutable
+        )
+    })
+}
 
 /// Scan the successfully-parsed stmts for names that were moved from the
 /// session's current bindings. A move occurs when:
@@ -509,7 +523,14 @@ fn cmd_run_transcript(session: &Session) -> String {
     let mut sink = DevSink::new();
     // Use a very large fuel budget (but still finite) for :run.
     const RUN_FUEL: u64 = 1_000_000_000;
-    match crate::Comptime::run_main_with_fuel(&main_clone, &funcs, &base_dir, &mut sink, RUN_FUEL) {
+    match crate::Comptime::run_repl_main_with_fuel(
+        &main_clone,
+        &funcs,
+        &base_dir,
+        &mut sink,
+        RUN_FUEL,
+        &session.core_imports,
+    ) {
         Ok(()) => sink.stdout,
         Err(d) => format!("error [{}]: {}\n", d.code, d.what),
     }
@@ -701,11 +722,26 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.mem") {
         return Some("`core.mem` (low-level memory tier)");
     }
-    if t.contains("core.fs") {
-        return Some("`core.fs` (file system)");
+    if t.contains("core.http") || t.contains("jet.http") {
+        return Some("the HTTP client/server (`core.http`)");
     }
-    if t.contains("core.process") {
-        return Some("`core.process`");
+    if t.contains("core.db") || t.contains("jet.db") {
+        return Some("`core.db` (SQLite)");
+    }
+    if t.contains("core.net") {
+        return Some("network sockets (`core.net`)");
+    }
+    if t.contains("core.archive") || t.contains("jet.archive") {
+        return Some("`core.archive`");
+    }
+    if t.contains("core.reactive") || t.contains("jet.reactive") {
+        return Some("`core.reactive`");
+    }
+    if t.contains("core.crypto") || t.contains("jet.crypto") {
+        return Some("`core.crypto`");
+    }
+    if t.contains("jet.log") {
+        return Some("`core.log`");
     }
     if t.contains("core.term") || t.contains("live {") || t.contains("live{") {
         return Some("`core.term` / `live` blocks (terminal direct-input)");
@@ -1285,7 +1321,8 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                         for name in &new_names {
                             if let Some(v) = session.scope.get(name) {
                                 let v = v.clone();
-                                session.record_binding(name, &v);
+                                let mutable = val_binding_mutable(&stmts, name);
+                                session.record_binding(name, &v, mutable);
                             }
                         }
                         if !sink.stdout.is_empty() {
@@ -1579,11 +1616,15 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                         for name in &new_names {
                             if let Some(v) = session.scope.get(name) {
                                 let v = v.clone();
-                                session.record_binding(name, &v);
+                                let mutable = val_binding_mutable(&stmts, name);
+                                session.record_binding(name, &v, mutable);
                             }
                         }
                         if !sink.stdout.is_empty() {
                             out.push_str(&sink.stdout);
+                        }
+                        if !sink.stderr.is_empty() {
+                            out.push_str(&sink.stderr);
                         }
                         if let Some(v) = echo_val {
                             if !matches!(v, CtValue::Unit) {

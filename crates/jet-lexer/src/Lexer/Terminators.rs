@@ -39,6 +39,8 @@ fn ends_statement(kind: &TokKind) -> bool {
             | TokKind::RBracket
             | TokKind::RBrace
             | TokKind::Question      // S7: `expr?` trailing propagation
+            | TokKind::PlusPlus      // D-INCR1: postfix `x++` / `x--` statement
+            | TokKind::MinusMinus    // D-INCR1: postfix `x++` / `x--` statement
             | TokKind::Gt            // generic type close `List<Int>` at line end
             | TokKind::Shr // nested generic close `Map<K, List<V>>`
     )

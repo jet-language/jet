@@ -54,6 +54,362 @@ mod jet_std {
         pub ms: i64,
     }
 
+    // D-BIGINT1: arbitrary-precision integer (std-only limb arithmetic).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct JetBigInt {
+        negative: bool,
+        limbs: Vec<u32>, // little-endian base 10^9
+    }
+
+    const BI_BASE: u64 = 1_000_000_000;
+
+    impl JetBigInt {
+        pub fn from_int(n: i64) -> Self {
+            if n == 0 {
+                return JetBigInt { negative: false, limbs: vec![0] };
+            }
+            let negative = n < 0;
+            let mut v = if negative { (n as i128).wrapping_neg() as u64 } else { n as u64 };
+            let mut limbs = Vec::new();
+            while v > 0 {
+                limbs.push((v % BI_BASE) as u32);
+                v /= BI_BASE;
+            }
+            JetBigInt { negative, limbs }
+        }
+
+        pub fn from_str(s: &str) -> Result<Self, String> {
+            let t = s.trim();
+            if t.is_empty() {
+                return Err("empty BigInt string".to_string());
+            }
+            let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
+                (true, rest)
+            } else if let Some(rest) = t.strip_prefix('+') {
+                (false, rest)
+            } else {
+                (false, t)
+            };
+            if body.is_empty() || !body.chars().all(|c| c.is_ascii_digit()) {
+                return Err(format!("invalid BigInt string `{s}`"));
+            }
+            let mut acc = JetBigInt { negative: false, limbs: vec![0] };
+            for ch in body.chars() {
+                let digit = ch.to_digit(10).unwrap() as u32;
+                acc = acc.mul_small(10).add_small(digit);
+            }
+            acc.negative = negative && !(acc.limbs.len() == 1 && acc.limbs[0] == 0);
+            Ok(acc)
+        }
+
+        fn normalize(mut self) -> Self {
+            while self.limbs.len() > 1 && *self.limbs.last().unwrap() == 0 {
+                self.limbs.pop();
+            }
+            if self.limbs.len() == 1 && self.limbs[0] == 0 {
+                self.negative = false;
+            }
+            self
+        }
+
+        fn mul_small(&self, m: u32) -> Self {
+            let mut carry = 0u64;
+            let mut limbs = Vec::with_capacity(self.limbs.len() + 1);
+            for &limb in &self.limbs {
+                let prod = limb as u64 * m as u64 + carry;
+                limbs.push((prod % BI_BASE) as u32);
+                carry = prod / BI_BASE;
+            }
+            if carry > 0 {
+                limbs.push(carry as u32);
+            }
+            JetBigInt { negative: self.negative, limbs }.normalize()
+        }
+
+        fn add_small(&self, n: u32) -> Self {
+            self.add(&JetBigInt::from_int(n as i64))
+        }
+
+        pub fn add(&self, other: &JetBigInt) -> JetBigInt {
+            if self.negative == other.negative {
+                let mut carry = 0u64;
+                let len = self.limbs.len().max(other.limbs.len());
+                let mut limbs = Vec::with_capacity(len + 1);
+                for i in 0..len {
+                    let a = *self.limbs.get(i).unwrap_or(&0) as u64;
+                    let b = *other.limbs.get(i).unwrap_or(&0) as u64;
+                    let sum = a + b + carry;
+                    limbs.push((sum % BI_BASE) as u32);
+                    carry = sum / BI_BASE;
+                }
+                if carry > 0 {
+                    limbs.push(carry as u32);
+                }
+                JetBigInt { negative: self.negative, limbs }.normalize()
+            } else {
+                let cmp = self.cmp_abs(other);
+                if cmp == 0 {
+                    JetBigInt::from_int(0)
+                } else if cmp > 0 {
+                    self.sub_abs(other).with_sign(self.negative)
+                } else {
+                    other.sub_abs(self).with_sign(other.negative)
+                }
+            }
+        }
+
+        fn with_sign(self, negative: bool) -> Self {
+            JetBigInt { negative, limbs: self.limbs }
+        }
+
+        pub fn sub(&self, other: &JetBigInt) -> JetBigInt {
+            let mut neg_other = other.clone();
+            neg_other.negative = !neg_other.negative;
+            self.add(&neg_other)
+        }
+
+        fn sub_abs(&self, other: &JetBigInt) -> JetBigInt {
+            let mut borrow = 0i64;
+            let len = self.limbs.len();
+            let mut limbs = Vec::with_capacity(len);
+            for i in 0..len {
+                let a = self.limbs[i] as i64;
+                let b = *other.limbs.get(i).unwrap_or(&0) as i64;
+                let mut cur = a - b - borrow;
+                if cur < 0 {
+                    cur += BI_BASE as i64;
+                    borrow = 1;
+                } else {
+                    borrow = 0;
+                }
+                limbs.push(cur as u32);
+            }
+            JetBigInt { negative: false, limbs }.normalize()
+        }
+
+        fn cmp_abs(&self, other: &JetBigInt) -> i8 {
+            match self.limbs.len().cmp(&other.limbs.len()) {
+                std::cmp::Ordering::Greater => 1,
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => {
+                    for (a, b) in self.limbs.iter().rev().zip(other.limbs.iter().rev()) {
+                        match a.cmp(b) {
+                            std::cmp::Ordering::Greater => return 1,
+                            std::cmp::Ordering::Less => return -1,
+                            std::cmp::Ordering::Equal => {}
+                        }
+                    }
+                    0
+                }
+            }
+        }
+
+        pub fn mul(&self, other: &JetBigInt) -> JetBigInt {
+            let mut out = JetBigInt::from_int(0);
+            for (i, &limb) in other.limbs.iter().enumerate() {
+                if limb == 0 {
+                    continue;
+                }
+                let mut part = self.mul_small(limb);
+                for _ in 0..i {
+                    part = part.mul_small(BI_BASE as u32);
+                }
+                out = out.add(&part);
+            }
+            JetBigInt {
+                negative: self.negative != other.negative,
+                limbs: out.limbs,
+            }
+            .normalize()
+        }
+
+        pub fn neg(&self) -> JetBigInt {
+            if self.limbs.len() == 1 && self.limbs[0] == 0 {
+                self.clone()
+            } else {
+                JetBigInt { negative: !self.negative, limbs: self.limbs.clone() }
+            }
+        }
+
+        pub fn to_string_rep(&self) -> String {
+            if self.limbs.len() == 1 && self.limbs[0] == 0 {
+                return "0".to_string();
+            }
+            let mut s = String::new();
+            let top = *self.limbs.last().unwrap();
+            s.push_str(&top.to_string());
+            for &limb in self.limbs.iter().rev().skip(1) {
+                s.push_str(&format!("{:09}", limb));
+            }
+            if self.negative {
+                format!("-{s}")
+            } else {
+                s
+            }
+        }
+    }
+
+    impl super::JetShow for JetBigInt {
+        fn jet_show(&self) -> String { self.to_string_rep() }
+    }
+
+    // D-DECIMAL1: exact base-10 decimal (scaled integer + scale).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct JetDecimal {
+        negative: bool,
+        digits: Vec<u8>, // big-endian mantissa digits 0-9, no dot
+        scale: u32,
+    }
+
+    impl JetDecimal {
+        pub fn from_str(s: &str) -> Result<Self, String> {
+            let t = s.trim();
+            if t.is_empty() {
+                return Err("empty Decimal string".to_string());
+            }
+            let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
+                (true, rest)
+            } else if let Some(rest) = t.strip_prefix('+') {
+                (false, rest)
+            } else {
+                (false, t)
+            };
+            let parts: Vec<&str> = body.split('.').collect();
+            if parts.len() > 2 {
+                return Err(format!("invalid Decimal string `{s}`"));
+            }
+            let (int_part, frac_part) = (parts[0], parts.get(1).copied().unwrap_or(""));
+            if int_part.is_empty() && frac_part.is_empty() {
+                return Err(format!("invalid Decimal string `{s}`"));
+            }
+            if !int_part.chars().all(|c| c.is_ascii_digit())
+                || !frac_part.chars().all(|c| c.is_ascii_digit())
+            {
+                return Err(format!("invalid Decimal string `{s}`"));
+            }
+            let mut digits: Vec<u8> = int_part
+                .chars()
+                .chain(frac_part.chars())
+                .map(|c| (c as u8 - b'0'))
+                .collect();
+            while digits.len() > 1 && digits.first() == Some(&0) {
+                digits.remove(0);
+            }
+            if digits.is_empty() {
+                digits.push(0);
+            }
+            let scale = frac_part.len() as u32;
+            Ok(JetDecimal { negative, digits, scale }.normalize())
+        }
+
+        fn normalize(mut self) -> Self {
+            while self.digits.len() > 1 && self.digits.last() == Some(&0) {
+                self.digits.pop();
+            }
+            if self.digits == [0] {
+                self.negative = false;
+            }
+            self
+        }
+
+        fn align_scales(a: &JetDecimal, b: &JetDecimal) -> (JetDecimal, JetDecimal) {
+            let scale = a.scale.max(b.scale);
+            let mut left = a.clone();
+            let mut right = b.clone();
+            while left.scale < scale {
+                left.digits.push(0);
+                left.scale += 1;
+            }
+            while right.scale < scale {
+                right.digits.push(0);
+                right.scale += 1;
+            }
+            (left, right)
+        }
+
+        fn to_bigint(&self) -> JetBigInt {
+            let mut s = String::new();
+            for &d in &self.digits {
+                s.push((b'0' + d) as char);
+            }
+            JetBigInt::from_str(&s).unwrap()
+        }
+
+        fn from_bigint(v: JetBigInt, scale: u32, negative: bool) -> JetDecimal {
+            let s = v.to_string_rep();
+            let body = if s.starts_with('-') { &s[1..] } else { &s };
+            let digits: Vec<u8> = body.bytes().map(|b| b - b'0').collect();
+            JetDecimal { negative, digits, scale }.normalize()
+        }
+
+        pub fn add(&self, other: &JetDecimal) -> JetDecimal {
+            let (a, b) = JetDecimal::align_scales(self, other);
+            let sum = a.to_bigint().add(&b.to_bigint());
+            let negative = if a.negative == b.negative {
+                a.negative
+            } else if a.to_bigint().cmp_abs(&b.to_bigint()) >= 0 {
+                a.negative
+            } else {
+                b.negative
+            };
+            if a.negative == b.negative {
+                JetDecimal::from_bigint(sum, a.scale, negative)
+            } else {
+                let diff = if a.to_bigint().cmp_abs(&b.to_bigint()) >= 0 {
+                    a.to_bigint().sub_abs(&b.to_bigint())
+                } else {
+                    b.to_bigint().sub_abs(&a.to_bigint())
+                };
+                JetDecimal::from_bigint(diff, a.scale, negative)
+            }
+        }
+
+        pub fn sub(&self, other: &JetDecimal) -> JetDecimal {
+            let mut neg = other.clone();
+            neg.negative = !neg.negative;
+            self.add(&neg)
+        }
+
+        pub fn mul(&self, other: &JetDecimal) -> JetDecimal {
+            let prod = self.to_bigint().mul(&other.to_bigint());
+            JetDecimal::from_bigint(
+                prod,
+                self.scale + other.scale,
+                self.negative != other.negative,
+            )
+        }
+
+        pub fn to_string_rep(&self) -> String {
+            if self.digits == [0] {
+                return if self.scale == 0 {
+                    "0".to_string()
+                } else {
+                    format!("0.{}", "0".repeat(self.scale as usize))
+                };
+            }
+            let mut int_digits = self.digits.clone();
+            let frac_len = self.scale as usize;
+            let sign = if self.negative { "-" } else { "" };
+            if frac_len == 0 {
+                let s: String = int_digits.iter().map(|d| (b'0' + *d) as char).collect();
+                return format!("{sign}{s}");
+            }
+            if int_digits.len() <= frac_len {
+                let pad = frac_len - int_digits.len() + 1;
+                int_digits.splice(0..0, vec![0; pad]);
+            }
+            let split = int_digits.len() - frac_len;
+            let (whole, frac) = int_digits.split_at(split);
+            let w: String = whole.iter().map(|d| (b'0' + *d) as char).collect();
+            let f: String = frac.iter().map(|d| (b'0' + *d) as char).collect();
+            format!("{sign}{w}.{f}")
+        }
+    }
+
+    impl super::JetShow for JetDecimal {
+        fn jet_show(&self) -> String { self.to_string_rep() }
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct JsonError {
         pub line: i64,
@@ -2831,6 +3187,44 @@ fn jet_duration_millis(d: &jet_std::Duration) -> i64 {
     d.ms
 }
 
+// D-BIGINT1 / D-DECIMAL1: precise numeric constructors and methods.
+fn jet_bigint_from_int(n: i64) -> jet_std::JetBigInt {
+    jet_std::JetBigInt::from_int(n)
+}
+fn jet_bigint_from_str(s: &String) -> jet_std::JetBigInt {
+    jet_std::JetBigInt::from_str(s).expect("invalid BigInt string")
+}
+fn jet_bigint_add(a: &jet_std::JetBigInt, b: &jet_std::JetBigInt) -> jet_std::JetBigInt {
+    a.add(b)
+}
+fn jet_bigint_sub(a: &jet_std::JetBigInt, b: &jet_std::JetBigInt) -> jet_std::JetBigInt {
+    a.sub(b)
+}
+fn jet_bigint_mul(a: &jet_std::JetBigInt, b: &jet_std::JetBigInt) -> jet_std::JetBigInt {
+    a.mul(b)
+}
+fn jet_bigint_neg(a: &jet_std::JetBigInt) -> jet_std::JetBigInt {
+    a.neg()
+}
+fn jet_bigint_to_string(a: &jet_std::JetBigInt) -> String {
+    a.to_string_rep()
+}
+fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
+    jet_std::JetDecimal::from_str(s).expect("invalid Decimal string")
+}
+fn jet_decimal_add(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+    a.add(b)
+}
+fn jet_decimal_sub(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+    a.sub(b)
+}
+fn jet_decimal_mul(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+    a.mul(b)
+}
+fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
+    a.to_string_rep()
+}
+
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
 // user-facing face of `DataTree`). JSON text parses through the internal `Json`
 // enum, then collapses onto `DataTree` (integral numbers become `Int`, fractional
@@ -3553,6 +3947,20 @@ fn jet_ring_crypto_sha256(s: &String) -> String {
 fn jet_ring_crypto_sha256_bytes(bs: &Vec<u8>) -> String {
     let hash = jet_sha256_raw(bs.as_slice());
     hash.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+// D-TTLVAL1=A: Expiring<T> / Rotting<T> (pure std, injectable Clock).
+fn jet_expiring_new<T: Clone>(value: T, ttl_ms: i64, clock_now: i64) -> JetExpiring<T> {
+    JetExpiring::new(value, clock_now.saturating_add(ttl_ms))
+}
+fn jet_rotting_new<T: Clone + 'static>(value: T, ttl_ms: i64, clock_now: i64) -> JetRotting<T> {
+    JetRotting::new(value, clock_now.saturating_add(ttl_ms))
+}
+fn jet_expiring_get<T: Clone>(exp: &JetExpiring<T>, now_ms: i64) -> Result<T, JetExpired> {
+    exp.get(now_ms)
+}
+fn jet_rotting_get<T: Clone + 'static>(rot: &mut JetRotting<T>, now_ms: i64) -> Result<T, JetExpired> {
+    rot.get(now_ms)
 }
 
 // Minimal SHA-256 (same algorithm as src/sha256.rs — duplicated here so the

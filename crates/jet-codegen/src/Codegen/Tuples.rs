@@ -64,7 +64,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         Expr::TupleLit(_, _, Some(ty)) => collect_tuple_shapes_from_type(ty, out),
         Expr::Str(parts, _) => {
             for p in parts {
-                if let StrPart::Interp(e) = p {
+                if let StrPart::Interp(e, _) = p {
                     collect_tuple_shapes_from_expr(e, out);
                 }
             }
@@ -109,6 +109,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
             }
         }
         Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.

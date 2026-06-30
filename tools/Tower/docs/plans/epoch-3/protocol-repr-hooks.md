@@ -1,6 +1,6 @@
 # Protocol/representation hooks push — Tower #41
 
-**Status:** deciding — 5 ballots pending
+**Status:** implemented 2026-06-30
 
 ## What already exists (do not rebuild)
 
@@ -14,48 +14,37 @@
 - `.take`, `.skip`, `.filter`, `.map`, `.fold`, `.flat_map` etc. as built-in methods on `[T]`
 - Example: `examples/features/89_iter_adapters.jet`
 
-## What needs building (after ballots)
+## Shipped (2026-06-30)
 
-### Display/Debug split (gated on D-DISPLAY-SHAPE + D-DEBUG-REDACT)
+### Display/Debug split (D-DISPLAY-SHAPE + D-DEBUG-REDACT + D-DISPLAYDBG2)
 
-Current `Printable`/`JetShow` auto-derives show for all types. Display/Debug splits this:
-- `Display`: explicit `impl Type.Display { fn ???(self) -> String }` — user-facing
-- `Debug`: auto-derived for all structs/enums; `{val@Debug}` in interpolation
-- `{val}` in interpolation requires Display (breaking change from current Printable default)
-- `{val@UNKNOWN}` → E0914 (unknown interpolation selector)
+- `Display`: explicit `impl Type.Display { fn display(self) -> String }` — user-facing
+- `Debug`: auto-derived for structs/enums; `{val@Debug}` in interpolation; `#[Redact]` → `[redacted]`
+- `{val}` in interpolation requires Display (L0520 migration lint for auto-printable structs without Display)
+- `{val@UNKNOWN}` → E0914
 
-**Migration:** introduce lint warning phase (L0xxx) before hard Display enforcement.
+Examples: `179_display_debug.jet`
+UI: `debug_unknown_selector` (E0914), `display_no_impl` (L0520 via `// @all_diags`)
 
-Build order (after D-DISPLAY-SHAPE + D-DEBUG-REDACT):
-1. `Syntax.rs`: add `TRAIT_DISPLAY`, `TRAIT_DEBUG`, `INTERP_SELECTOR_DEBUG`
-2. `AST.rs` (`StrPart`): add selector enum for `{val@Debug}` / `{val}` 
-3. `Traits.rs`: register synthetic Display (no auto-derive) + Debug (auto-derived)
-4. `Sema/Diagnostics.rs` `is_printable`: require Display for bare `{}` → E0915
-5. `Codegen/Items.rs`: split JetShow — Debug backing (auto) vs Display override (user)
-6. Diagnostic codes: E0914 (unknown selector), E0915 (no Display impl), E0916 (Debug blocked by field)
-7. Example + UI snapshots
+### Iterator/Index hooks (D-ITER-HOOK, D-INDEX-HOOK)
 
-### Iterator/Index/Suffix hooks (gated on D-ITER-HOOK, D-INDEX-HOOK, D-LITSUFFIX-SCOPE)
+- **Iterable/Iterator:** `loop x in mytype` when expert impl present; `.each`/`.to_list()` remain beginner path
+- **Index/IndexMut:** `mytype[k]` / assign when expert impl present; List/Map keep native `[]`
 
-**Owner direction (2026-06-30):** dual-tier on iterator + index; dot-constructor for units.
+Examples: `180_iter_hook.jet`, `181_index_hook.jet`
 
-- **D-ITER-HOOK (rec A):** `.each`/`.to_list()` for beginners; expert `impl Iterable` + `Iterator` for zero-copy `for x in mytype`
-- **D-INDEX-HOOK (rec A):** built-in `[]` for List/Map; `.get`/`.set` for custom types; expert `impl Index`/`IndexMut` for `mytype[k]`
-- **D-LITSUFFIX-SCOPE (rec A):** no literal-suffix hook — units construct as `px.{100}` (dot-constructor family, D-DOTCTOR1)
+### Units (D-LITSUFFIX-SCOPE)
 
-## Ballots needed
+- No literal-suffix hook — units construct as `px.{100}` (dot-constructor family, D-DOTCTOR1). Doc-only.
 
-- **D-DISPLAY-SHAPE**: method name in `impl Type.Display` — `fn display` vs `fn to_string` vs `fn format`
-- **D-DEBUG-REDACT**: field-level marker to exclude from Debug output — `#[Redact]` vs `#[Debug.skip]` vs defer
-- **D-ITER-HOOK**: dual-tier iterable — beginner `.each`/`.to_list()` + expert Iterable/Iterator
-- **D-INDEX-HOOK**: dual-tier indexing — beginner `.get`/`.set` + expert Index/IndexMut
-- **D-LITSUFFIX-SCOPE**: dot-constructor units (`px.{100}`) — close literal-suffix hook
+## Follow-ups
 
-Agent recommendations: Display=A (fn display), Debug=A (#[Redact]), Iterator/Index=A (dual-tier), Units=A (dot-constructor, no suffix hook).
+- E0916 defined but not yet emitted (non-debuggable field blocks auto-derive)
+- Field-of-index assign in trait bodies may copy (181 `set` uses get/mutate/write-back workaround)
 
-## Acceptance
+## Acceptance ✓
 
 - Display/Debug example with `impl Type.Display`, `{val}` vs `{val@Debug}`, field redaction
-- E0914 (unknown selector), E0915 (no Display) snapshots
+- E0914 (unknown selector), E0915 (no Display), L0520 (migration lint) snapshots
+- Iterable/Index golden examples pass
 - Rollback tests remain green
-- Hook set is closed — only Display and Debug unless owner ratifies iterator/index/suffix

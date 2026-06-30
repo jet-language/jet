@@ -1,0 +1,79 @@
+Welcome to Jet! (v0.0.1)
+
+usage:
+  jet check <file.jet>          look for problems, build nothing
+  jet build <file.jet>          compile to a native binary in ./build/
+  jet run   <file.jet>          build, then run (or `jet run` inside a project)
+  jet run   <file.jet> a b      extra words become program arguments
+  jet run   <file.jet> -- ...   everything after `--` is forwarded to the program (D-CLI1)
+  jet test  <file|dir>            compile and run top-level test blocks
+  jet test  <file|dir>  -- ...    `--` forwards to the test runner
+  jet new   <name>                create a new project folder with pkg.jet
+  jet new   <name> --annotated    same, with commented example deps
+  jet env                         enter the project dev shell (delegates to `jetpack enter`)
+  jet env   -- cmd                run a command in the project dev shell, then exit
+  jet dev   <file.jet>          watch and re-run on every save (c77 auto-detects mode)
+  jet serve <file.jet>          watch a resident program; hot-swap type-stable edits (c77)
+  jet debug <file.jet>          step through a program at the Jet source level (D-DBG3)
+  jet repl                         start an interactive session (E2-M18)
+  jet repl  --project <dir>        same, with access to a project's imports
+  jet eval  <file.jet> --pure   evaluate a pure program to stable JSON (S60)
+  jet fmt   <file.jet>          rewrite file to canonical style (S44)
+  jet fix   <file.jet>          apply all auto-fixable diagnostics in place
+  jet fix   <file.jet> --dry-run   show the fixes as a diff, write nothing
+  jet doctor                      diagnose the toolchain and offer fixes
+  jet doctor --fix                apply the auto-fixable problems
+  jet completions <bash|zsh|fish> print a shell completion script
+  jet man                         print the jet man page (roff)
+  jet bind  <header.h> --pkg <lib>   generate a C binding cache (S59)
+  jet lsp                         language server (stdio JSON-RPC)
+  jet doctor                      diagnose your environment (rustc, cache, PATH, FFI)
+  jet doctor --fix                same, applying safe auto-fixes
+  jet completions <shell>         print a completion script (bash|zsh|fish)
+  jet man [<command>]             print the manual page (roff)
+  jet lsp doctor                  health-check the language server
+  jet lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
+  jet version                     print compiler version
+  jet help                        print this help text
+  jet ?                           same as help
+  jet                             start the interactive REPL (same as repl)
+  jet <file.jet>                run a file (same as run)
+  jet upgrade                     how to download a newer release
+
+package management (M12.1):
+  jet add   <dep> --path <dir>    add a path dependency and fetch
+  jet add   <dep> --git <url> --tag <tag>   add a git dependency
+  jet remove <dep>                remove a dependency
+  jet fetch                       download and link all dependencies
+  jet fetch --locked              verify lock only, no network
+  jet update                      refresh @latest / branch selectors
+  jet update <dep>                update one moving selector
+  jet store verify                re-check all store entry hashes
+  jet store generations           list recorded store generations (D-PURE3)
+  jet store rollback <gen>        roll back to a prior generation (D-PURE3)
+  jet gc                          remove unreferenced store entries
+
+supply chain (E2-M8):
+  jet publish                     publish the current package to the registry
+  jet publish --force             publish even if the pre-publish gate warns
+  jet vendor                      copy all dependencies into vendor/ (offline builds)
+  jet vendor --vendor-dir <path>  copy them into a chosen directory instead
+  jet build  --sbom <file>        also write an SPDX SBOM next to the binary
+  jet audit                       check dependencies against the advisory database
+  jet audit --advisory-db <path>  use a custom advisory database
+  jet sbom                        emit an SPDX SBOM from the lockfile
+  jet sbom --cyclonedx            emit a CycloneDX JSON SBOM instead
+
+flags:
+  --emit-rust                  also print the generated Rust code
+  --check                      with fmt: exit 1 if file would change (CI)
+  --sbom                       with build: write an SPDX SBOM beside the binary
+  --vendor-dir <path>          with vendor: directory to copy dependencies into
+  --small                      with build/run: smallest binary (S15)
+  --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
+  --target=<triple>            with build: cross-compile for a rustc target triple (E2-M15)
+  --explain-partition          with build --target=web: print the JS/WASM partition report (D-WASM1)
+  --locked                     with fetch: verify only, refuse network
+  --verbose, -v                with build: print the bridge steps
+  --json                       emit machine-readable diagnostics
+  --color=auto|always|never    control color (auto: only on a terminal)

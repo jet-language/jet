@@ -93,10 +93,27 @@ fn main() {
 }
 
 #[test]
+fn ref_owner_param_fill_compiles() {
+    let src = r#"
+struct TokenView {
+    #Ref(source) text: String
+}
+fn show(source: String) {
+    t: TokenView #= TokenView.{ text: source }
+    print(t.text)
+}
+fn main() {
+    show("hello")
+}
+"#;
+    jet::compile(src).expect("param fill of #Ref(source) should compile");
+}
+
+#[test]
 fn stored_ref_generates_struct_lifetime() {
     let src = r#"
 struct Holder {
-    ref data: String,
+    #Ref(src) data: String,
 }
 
 fn main() {

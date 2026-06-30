@@ -583,6 +583,14 @@ impl<'a> Checker<'a> {
             let field_def = def_fields.iter().find(|(n, ..)| n == name);
             let saved_expected = self.expected_type.clone();
             let saved_esc = self.lambda_escapes;
+            let skip_clone = field_def.is_some_and(|(_, _, _, is_ref, _)| *is_ref)
+                && self
+                    .registry
+                    .ref_field_label(type_name, name)
+                    .is_some_and(|owner| {
+                        super::CheckerOwnership::ref_field_init_root(expr)
+                            .is_some_and(|root| root == owner)
+                    });
             if let Some((_, _, fty, _, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 self.expected_type = Some(inst);
@@ -590,15 +598,22 @@ impl<'a> Checker<'a> {
             if matches!(expr, Expr::Lambda(_)) {
                 self.lambda_escapes = true;
             }
+            // A `#Ref(owner)` fill from `owner` (or `owner.field`) is a borrow slot;
+            // suppress `field_read_to_clone` during infer so we don't wrap `.clone()`.
+            let saved_borrow = self.borrow_ctx;
+            if skip_clone {
+                self.borrow_ctx = true;
+            }
             let et = self.infer(expr);
+            self.borrow_ctx = saved_borrow;
             self.expected_type = saved_expected;
             self.lambda_escapes = saved_esc;
-            // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
-            // non-`Copy` ident (a `read`/`mut` param → `&T`/`&mut T`) can't be moved
-            // into the field — codegen would emit `(*user_n)` → rustc E0507. `infer`'s
-            // clone rewrite only fires for *field reads* (`field_read_to_clone`), not a
-            // bare ident, so clone it here, where the owning-field clone already lives.
-            self.clone_borrowed_struct_field_value(expr);
+            if !skip_clone {
+                // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
+                // non-`Copy` ident (a `read`/`mut` param → `&T`/`&mut T`) can't be moved
+                // into the field — codegen would emit `(*user_n)` → rustc E0507.
+                self.clone_borrowed_struct_field_value(expr);
+            }
             // D-ALLOC2: E0631 — storing an arena `view` in a struct field would
             // let the struct (which can outlive the region) keep a dangling
             // borrow into the arena.

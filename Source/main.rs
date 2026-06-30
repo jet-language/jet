@@ -356,6 +356,9 @@ usage:
   {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
   {bin} version                     print compiler version
   {bin} help                        print this help text
+  {bin} ?                           same as help
+  {bin}                             start the interactive REPL (same as repl)
+  {bin} <file.{ext}>                run a file (same as run)
   {bin} upgrade                     how to download a newer release
 
 package management (M12.1):
@@ -403,8 +406,26 @@ flags:
     )
 }
 
+/// True when `arg` names a Jet source file or project directory (c6vz465 sugar:
+/// `jet <file>` → `jet run <file>`). Unknown bare stems that do not exist are
+/// false so E2101 still fires for typos like `buld`.
+fn looks_like_jet_source(arg: &str) -> bool {
+    let path = Path::new(arg);
+    if path
+        .extension()
+        .is_some_and(|e| e == jet::Syntax::FILE_EXT)
+    {
+        return true;
+    }
+    if path.exists() {
+        return path.is_file() || path.is_dir();
+    }
+    Path::new(&format!("{}.{}", arg, jet::Syntax::FILE_EXT)).exists()
+}
+
 /// The bare-`jet` greeting (D-DX): friendly, exit 0, not a usage error.
-/// Keep this function as the single edit point for greeting customization.
+/// Shown when argv is flags-only with no subcommand (not for a bare `jet` —
+/// that starts the REPL per c6vz465).
 fn greeting() -> String {
     format!(
         "\
@@ -511,10 +532,13 @@ fn is_executable(p: &Path) -> bool {
 fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
 
-    // E2-M3: a bare `jet` greets and orients. This is NOT a usage error — it is
-    // the front door, so it exits 0. (A genuine usage problem still exits 2.)
+    // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
-        print!("{}", greeting());
+        run_repl(None);
+        return;
+    }
+    if raw.len() == 1 && raw[0] == "?" {
+        print!("{}", usage());
         exit(ExitCodes::OK);
     }
 
@@ -637,6 +661,33 @@ fn main() {
                 | "impact"
         );
     if !known {
+        // c6vz465: `jet <file>` → `jet run <file>` when the first word names a
+        // source path (not a typo'd subcommand like `buld`).
+        if looks_like_jet_source(cmd) {
+            let resolved = resolve_source_path(cmd);
+            let program_args: Vec<&String> = if passthrough_sep.is_some() {
+                passthrough.clone()
+            } else {
+                args.iter().skip(1).copied().collect()
+            };
+            run_compile_cmd(
+                "run",
+                &resolved,
+                emit_rust,
+                small,
+                freestanding,
+                allow_impure,
+                cross_target.as_deref(),
+                explain_partition,
+                verbose,
+                capabilities_json,
+                sbom,
+                named_profile.as_deref(),
+                &program_args,
+                mode,
+            );
+            return;
+        }
         if let Some(bin) = find_external(cmd) {
             // Forward every argument after the subcommand name verbatim.
             let fwd: Vec<&String> = raw

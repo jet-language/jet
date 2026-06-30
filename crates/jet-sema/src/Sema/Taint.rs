@@ -116,6 +116,7 @@ impl<'a> TaintCtx<'a> {
             // Derivations — taint flows through if any operand is tainted.
             Expr::Binary(_, l, r, _) => self.is_tainted(l) || self.is_tainted(r),
             Expr::Unary(_, inner, _)
+            | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
             | Expr::Field(inner, _, _)
@@ -140,7 +141,7 @@ impl<'a> TaintCtx<'a> {
             }),
             // Interpolation: a tainted value spliced into a string taints it.
             Expr::Str(parts, _) => parts.iter().any(|p| match p {
-                StrPart::Interp(e) => self.is_tainted(e),
+                StrPart::Interp(e, _) => self.is_tainted(e),
                 _ => false,
             }),
             Expr::OrFallback {
@@ -223,6 +224,7 @@ impl<'a> TaintCtx<'a> {
                 self.check_expr(r);
             }
             Expr::Unary(_, inner, _)
+            | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
             | Expr::Field(inner, _, _)
@@ -256,7 +258,7 @@ impl<'a> TaintCtx<'a> {
                 EnumLitArg::Named { expr, .. } => self.check_expr(expr),
             }),
             Expr::Str(parts, _) => parts.iter().for_each(|p| {
-                if let StrPart::Interp(e) = p {
+                if let StrPart::Interp(e, _) = p {
                     self.check_expr(e);
                 }
             }),

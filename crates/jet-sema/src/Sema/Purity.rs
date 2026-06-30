@@ -398,7 +398,7 @@ fn check_pure_expr_with_path(
             None
         }
         Expr::Binary(_, left, right, _) => rec!(left).or_else(|| rec!(right)),
-        Expr::Unary(_, operand, _) => rec!(operand),
+        Expr::Unary(_, operand, _) | Expr::IncDec { operand, .. } => rec!(operand),
         Expr::Index { base, index, .. } => rec!(base).or_else(|| rec!(index)),
         Expr::Slice {
             base, start, end, ..
@@ -871,7 +871,7 @@ fn walk_expr_for_calls(
                 walk_expr_for_calls(right, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             }
         }
-        Expr::Unary(_, operand, _) => {
+        Expr::Unary(_, operand, _) | Expr::IncDec { operand, .. } => {
             walk_expr_for_calls(operand, root_fn, funcs_sig, ast_funcs, path, visited, diags);
         }
         Expr::Index { base, index, .. } => {
