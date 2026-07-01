@@ -23,7 +23,7 @@ mod CmdImpact;
 mod CmdSemIndex;
 mod CmdSupply;
 
-use CmdCompile::{run_compile_cmd, run_fix, run_fmt, run_new, run_test, run_test_cov};
+use CmdCompile::{run_compile_cmd, run_debug_native, run_fix, run_fmt, run_new, run_test, run_test_cov};
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_doctor, run_emit_rust, run_eval,
     run_explain, run_repl, run_serve, watch_policy_from, WatchPolicy,
@@ -925,6 +925,14 @@ fn main() {
             // debugger. Loads + checks the file, then steps it in the dev
             // interpreter with an interactive `(jet)` prompt. I2: every line,
             // frame, and value shown is in Jet terms (never generated Rust).
+            //
+            // D-DBG3 step 2 (dap-debugger): `--dap` always uses the native
+            // lldb backend (an editor debugs the compiled program, never the
+            // interpreter); otherwise auto-detect via the SAME boundary scan
+            // the interpreter itself declines on (E2203) — one command, one
+            // meaning (I8), the backend choice is never a separate flag.
+            let raw_frames = raw.iter().any(|a| a == "--raw-frames"); // D-DBG2
+            let dap = raw.iter().any(|a| a == "--dap");
             let file = match args.get(1) {
                 Some(f) => f.as_str(),
                 None => {
@@ -937,7 +945,11 @@ fn main() {
                 }
             };
             let resolved = resolve_source_path(file);
-            exit(jet::Debug::run_debug(&resolved));
+            let use_native = dap || jet::Debug::needs_native(&resolved).unwrap_or(false);
+            if !use_native {
+                exit(jet::Debug::run_debug(&resolved));
+            }
+            exit(run_debug_native(&resolved, raw_frames, dap, mode));
         }
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");

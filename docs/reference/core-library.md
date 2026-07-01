@@ -946,7 +946,9 @@ These shipped in Epoch 2:
 | `core.crypto` | Hash, HMAC, vetted random primitives |
 | `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
 | `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
-| `core.db` | SQLite — open/exec/query_json/close via rusqlite bundled (D-DEP-DB1) |
+| `core.compress.gzip` | standalone gzip compress/decompress, no archive container (D-CODECS1) |
+| `core.compress.zstd` | standalone zstd compress/decompress, no archive container (D-CODECS1) |
+| `core.db` | SQLite — parameterized `DbConnection.query`/`.query_one`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` via rusqlite bundled (D-DBDRIVER1) |
 
 ---
 

@@ -696,7 +696,21 @@ pub(crate) fn param_place(rust_name: &str, p: &Param) -> String {
 }
 
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    stmts.iter().map(|s| lower_stmt(s, cx, env)).collect()
+    if !cx.debug_linemap {
+        return stmts.iter().map(|s| lower_stmt(s, cx, env)).collect();
+    }
+    // D-DBG3 step 2 (dap-debugger): native `jet debug` build — interleave a
+    // `LineMarker` ahead of every statement so the generated Rust carries a
+    // rust-line -> jet-line table (`TStmt::LineMarker`'s doc). Off by default, so
+    // every other build (incl. the JIT tier, which never sets `debug_linemap`)
+    // is unaffected — `Vec<TStmt>` doubles in length ONLY on this path.
+    let mut out = Vec::with_capacity(stmts.len() * 2);
+    for s in stmts {
+        let line = crate::Diagnostics::span_line_col(&cx.src, s.span().start).0;
+        out.push(TStmt::LineMarker(line));
+        out.push(lower_stmt(s, cx, env));
+    }
+    out
 }
 
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
@@ -3110,6 +3124,19 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         },
                     };
                 }
+                // D-DBDRIVER1: `DbValue.Null` — same no-arg-`Field` shape as `Data.Null`.
+                if env.ty_of(enum_name).is_none()
+                    && is_db_value_type_name(enum_name)
+                    && member == "Null"
+                {
+                    return TExpr {
+                        ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
+                        kind: TExprKind::DbValueLit {
+                            variant: "Null".to_string(),
+                            arg: None,
+                        },
+                    };
+                }
                 // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
                 // `Float.INFINITY`/…). The gate proved the receiver is a numeric type
                 // name and `member` a bounds-const name. Reproduce the AST `emit_expr`
@@ -4133,6 +4160,26 @@ pub(crate) fn lower_method_call(
             return TExpr {
                 ty: Type::Named(Syntax::TYPE_DATA.to_string()),
                 kind: TExprKind::JsonLit {
+                    variant: method.to_string(),
+                    arg,
+                },
+            };
+        }
+    }
+    // D-DBDRIVER1: a `DbValue` construction `DbValue.Int(n)` / `.Float(f)` /
+    // `.Text(s)` / `.Bool(b)` (the gate proved the receiver is `DbValue` and
+    // `method` a `DbValue` variant). Same shape as the `Data` construction above.
+    if let Expr::Ident(type_name, _) = receiver {
+        if !env.locals.contains_key(type_name)
+            && is_db_value_type_name(type_name)
+            && is_db_value_variant(method)
+        {
+            let arg = args
+                .first()
+                .map(|a| Box::new((lower_expr(&a.expr, cx, env), a.flags.implicit_clone)));
+            return TExpr {
+                ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
+                kind: TExprKind::DbValueLit {
                     variant: method.to_string(),
                     arg,
                 },

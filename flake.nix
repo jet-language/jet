@@ -97,6 +97,7 @@
             ripgrep
             tree-sitter
             emscripten
+            lldb
             jetDev
           ];
 
@@ -110,6 +111,7 @@
             echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
             echo "  editor:   editors/vscode/install.sh   (Cursor/VS Code)"
             echo "            editors/zed/install.sh        (Zed dev extension)"
+            echo "  debug:    jet debug <file.jet>  (native lldb backend: tests/debug_native.rs)"
             echo "  release:  nix build .#jet"
           '';
         };

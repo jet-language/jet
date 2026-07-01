@@ -914,6 +914,13 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             }
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-DBG3 step 2 (dap-debugger): a source line marker (only present when
+        // `cx.debug_linemap` is set — see `TStmt::LineMarker`'s doc). A bare comment,
+        // never affects the Rust it precedes; the native backend's line-table loader
+        // reads the rust-line this comment sits on and pairs it with `n`.
+        TStmt::LineMarker(n) => {
+            out.push_str(&format!("{}// jet:line {}\n", pad, n));
+        }
     }
 }
 
@@ -1458,6 +1465,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
             }
         }
+        // D-DBDRIVER1: a `DbValue` construction — `{root}jet_std::DbValue::<Variant>(<arg>)`.
+        // Same shape as `JsonLit` (a foreign prelude enum), minus the recursive
+        // `Array`/`Object` special-case (`DbValue` has no compound variants).
+        TExprKind::DbValueLit { variant, arg } => {
+            let prefix = format!("{}jet_std::DbValue", cx.root_prefix);
+            match arg {
+                None => format!("{}::{}", prefix, variant),
+                Some(boxed) => {
+                    let (val, implicit_clone) = boxed.as_ref();
+                    let s = emit_tir_expr(val, cx);
+                    let arg_str = if *implicit_clone {
+                        format!("({}).clone()", s)
+                    } else {
+                        s
+                    };
+                    format!("{}::{}({})", prefix, variant, arg_str)
+                }
+            }
+        }
         TExprKind::IfExpr {
             cond,
             then_body,
@@ -1840,6 +1866,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .unwrap_or_default()
             };
             let root = &cx.root_prefix;
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             match op {
                 THandleOp::FileReaderReadLine => {
                     format!("{}jet_std_file_reader_read_line(&mut ({}))", root, recv)
@@ -2233,6 +2260,37 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_path_write_atomic(&({}), &({}))", root, recv, a(0))
                 }
                 THandleOp::PathWalk => format!("{}jet_path_walk(&({}))", root, recv),
+                // D-DBDRIVER1: `DbConnection` instance methods. `query`/`query_one`/
+                // `execute` cross the FFI bridge boundary as plain wire text (params
+                // encoded, rows/count/error decoded) — see `Source/Prelude/Db.rs` and
+                // `jet_std::jet_db_{encode_params,decode_query_result,decode_execute_result}`
+                // in `Source/Prelude/CoreLib.rs`.
+                THandleOp::DbQuery => format!(
+                    "{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({}))))",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::DbQueryOne => format!(
+                    "{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({})))).map(|__rows| __rows.into_iter().next())",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::DbExecute => format!(
+                    "{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({}))))",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::DbBegin => format!("{ffi}::jet_db_begin(({recv}).handle)"),
+                THandleOp::DbCommit => format!("{ffi}::jet_db_commit(({recv}).handle)"),
+                THandleOp::DbRollback => format!("{ffi}::jet_db_rollback(({recv}).handle)"),
+                THandleOp::DbClose => format!("{ffi}::jet_db_close(({recv}).handle)"),
+                // D-DBDRIVER1: `DbValue` accessors — plain inherent Rust methods on
+                // the always-compiled `jet_std::DbValue` enum (no FFI bridge involved).
+                THandleOp::DbValueInt => format!("({}).int()", recv),
+                THandleOp::DbValueFloat => format!("({}).float()", recv),
+                THandleOp::DbValueText => format!("({}).text()", recv),
+                THandleOp::DbValueBool => format!("({}).bool()", recv),
+                THandleOp::DbValueIsNull => format!("({}).is_null()", recv),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -2994,26 +3052,42 @@ pub(crate) fn emit_tir_core_call(
         ("core.archive", "tar_names_json") => {
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
         }
-        // D-DEP-DB1: jet.db — SQLite via the FFI bridge crate.
-        // The u64 handle is a scalar — passed by value (no &). String/slice args get &.
+        // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs
+        // (separate from core.archive) via the FFI bridge crate. `compress` is
+        // infallible; `decompress` returns a Rust `Result<Vec<u8>, String>` which is
+        // already the runtime shape of the Jet `Result<[U8], String>` value — no
+        // extra wrapping needed (same pattern as `jet.crypto`'s seal/open).
+        ("core.compress.gzip", "compress") => {
+            format!("{}(&({}))", regex_fn("jet_compress_gzip_compress"), arg(0))
+        }
+        ("core.compress.gzip", "decompress") => {
+            format!("{}(&({}))", regex_fn("jet_compress_gzip_decompress"), arg(0))
+        }
+        ("core.compress.zstd", "compress") => {
+            format!("{}(&({}))", regex_fn("jet_compress_zstd_compress"), arg(0))
+        }
+        ("core.compress.zstd", "decompress") => {
+            format!("{}(&({}))", regex_fn("jet_compress_zstd_decompress"), arg(0))
+        }
+        // D-DBDRIVER1: jet.db — SQLite via the FFI bridge crate. `open`/`open_memory`
+        // are the only module-level entry points; they wrap the bridge's raw u64
+        // handle in the Jet-visible `DbConnection` handle (`JetDbConnection`), so
+        // every other operation dispatches by receiver TYPE as an instance method
+        // (`THandleOp::DbQuery`/… in the `HandleMethod` arm below), not a second
+        // module-call surface.
         ("jet.db", "open") => {
-            format!("{}(&({}))", regex_fn("jet_db_open"), arg(0))
+            format!(
+                "{}JetDbConnection {{ handle: {}(&({})) }}",
+                cx.root_prefix,
+                regex_fn("jet_db_open"),
+                arg(0)
+            )
         }
         ("jet.db", "open_memory") => {
-            format!("{}()", regex_fn("jet_db_open_memory"))
-        }
-        ("jet.db", "close") => {
-            format!("{}({})", regex_fn("jet_db_close"), arg(0))
-        }
-        ("jet.db", "exec") => {
-            format!("{}({}, &({}))", regex_fn("jet_db_exec"), arg(0), arg(1))
-        }
-        ("jet.db", "query_json") => {
             format!(
-                "{}({}, &({}))",
-                regex_fn("jet_db_query_json"),
-                arg(0),
-                arg(1)
+                "{}JetDbConnection {{ handle: {}() }}",
+                cx.root_prefix,
+                regex_fn("jet_db_open_memory")
             )
         }
         // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.

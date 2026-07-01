@@ -1,21 +1,59 @@
 # DAP step-through debugger + adoption docs
 
 **Status:** Step 1 SHIPPED (2026-06-25) — interpreter-backed source-level
-debugger; step 2 (native DAP/lldb backend) remains. **READY to start** —
-command vocabulary + entry point ratified (D-DBG1=A, D-DBG2, D-DBG3); no new
-syntax. One confirm-only product item in `## Open Owner-Q` below (lldb runtime
-dependency + platform matrix) — a posture confirmation, not a blocking gate.
-**Card:** c52
+debugger. **Step 2 SHIPPED (2026-07-01)** — native lldb backend + DAP server;
+card c144, phase `done`. The `## Open Owner-Q` below is now resolved — owner
+added lldb to the flake devShell.
+**Card:** c144 (split from c52)
 
-**Verification (2026-06-25):** Step 1 is real and committed (b364176 "c52: jet
-debug interactive source-level stepper"). Driver `Source/Debug.rs` (21 KB) runs
-the `(jet)` prompt with the ratified vocabulary — `backtrace`/`bt` (`Debug.rs:257,312`,
-help `Debug.rs:336`), plus step/next/continue/finish/break/print/locals/list/quit.
-The interpreter declines native-only features with **E2203** (emitted at
-`Source/Interpreter.rs:111-117`, named for `jet debug`) and a mid-run `quit` surfaces
-**E2204** (`Debug.rs:379`; `Syntax.rs:1272`). Example `examples/features/118_debug.jet`
-and `tests/debug.rs` both present. The step-2 delta (native backend, `--raw-frames`,
-editor DAP wiring) is unchanged and accurate.
+**Verification (2026-07-01, step 2):** Built AND verified against a REAL live
+lldb (fetched ad hoc via `nix shell nixpkgs#lldb` for this session — not yet a
+flake.nix devShell input, see Open Owner-Q). Live verification caught three
+real bugs that a docs-only implementation would have shipped broken:
+
+1. **lldb never re-prints a bare `(lldb) ` prompt over a pipe.** Driven
+   non-interactively it only ECHOES the command it just read
+   (`(lldb) <cmd>\n<output>`); waiting for the prompt to reappear hangs
+   forever. Fixed with a bogus sentinel command after every real one — its
+   deterministic rejection is the only reliable "output is flushed" signal.
+2. **A resume command's own stop banner is asynchronous** and can lose a race
+   to the NEXT command's synchronous reply — parsing `run`/`continue`/a step's
+   own returned text for frame info is unreliable (confirmed: the banner
+   sometimes arrived attached to the FOLLOWING command's output instead). Fixed
+   by always sending a synchronous `bt` immediately after the resume command
+   and deriving position from THAT reply, never the resume's own text. The
+   same raciness hit the async EXIT notification too (arrived after even the
+   sentinel) — a short grace-window drain after the sentinel catches it.
+3. **The debuggee inherits lldb's own stdout by default**, so a Jet `print()`
+   can land byte-interleaved into the middle of the sentinel's own echo
+   (confirmed: a `total is 6` print tore the sentinel in half, hanging the
+   session). Fixed by redirecting the debuggee's stdout/stderr to their own
+   temp files (`settings set target.output-path`/`error-path`, before the
+   first `run`) and draining them into the transcript / DAP `output` events.
+
+Also loads rustc's own Rust pretty-printer setup (`lldb_lookup.py` +
+`lldb_commands` — the same two files `rust-lldb` loads) so `String`/`&str`
+locals render as `"text"` instead of the raw allocator/pointer/capacity
+struct dump; `Inferior::parse_locals` also strips the synthetic per-byte
+children a `String` summary still appends on the same line.
+
+New: `Source/Debug/{LineMap,Inferior,Native,Dap}.rs`, `TStmt::LineMarker` +
+`emit_bundle_dbg`/`compile_for_debug` (codegen line table, gated by
+`cx.debug_linemap` — off by default, zero effect on normal builds/golden
+tests/the JIT tier), `jet::Debug::needs_native` (auto-dispatch off the SAME
+E2203 boundary scan step 1 already had — one command, one meaning, I8),
+`--raw-frames` (D-DBG2) and `--dap` CLI flags. 12 new unit tests + 5 in
+`tests/debug_native.rs` (gated on lldb presence like `tests/observe.rs` gates
+on `rustc` — skips clean without it). Example
+`examples/features/189_debug_native.jet` (native-only via `use core.fs`) +
+golden `.out`. Full regression pass green (build/debug/debug_native/golden/
+observe/cli/tir/decisions/dev+JIT).
+
+**Not verified / explicitly out of scope this pass:** the DAP JSON-over-stdio
+server (`Dap.rs`) is implemented to the documented wire spec but UNTESTED
+against a real editor (no VS Code/Zed available in this environment) — verify
+live before wiring into `editors/zed`/`editors/vscode` launch configs. gdb and
+Windows are still follow-ups (phase 1 = lldb/Linux, as scoped below).
 
 ## Step 1 — SHIPPED (2026-06-25): interpreter-backed source-level debugger
 
@@ -93,41 +131,68 @@ locals:  n = 5   total = 0   i = 1
 The editor (Zed/VS Code) sees Jet files and Jet line numbers throughout; lldb and
 the Rust intermediate are never surfaced.
 
-## Implementation sketch — file-level touchpoints
+## Implementation — actual file-level touchpoints (SHIPPED 2026-07-01)
 
-- `Source/Codegen/mod.rs` — replace the single `jet:source-map` marker with a
-  structured line table: for each emitted Rust statement, record `(jet_line,
-  rust_line)`. Emit as trailing `// jet:line <rust>=<jet>` comments or a sidecar
-  `<file>.jetmap` JSON. Keep codegen dumb (I3): it only records spans it already
-  has, no debug-specific transforms.
-- New `Source/Debug/` module (std-only, I6):
-  - `adapter.rs` — DAP stdio loop: `initialize`, `launch`, `setBreakpoints`,
-    `stackTrace`, `scopes`, `variables`, `continue`, `next`/`stepIn`/`stepOut`.
-  - `linemap.rs` — load the line table; translate Jet↔Rust line both directions.
-  - `inferior.rs` — spawn + drive lldb (`-batch`/MI-style) via pipes; map
-    breakpoints, read frames and locals, format values in Jet terms.
-- `Source/main.rs` / `Source/CLI.rs` — add `jet debug <file>` dispatch + a
-  `CommandSpec`; build in debug mode (so D-OBS2 safe-locals are live) then attach.
-- `Source/CmdCompile.rs` — a debug-build entry that emits the line table and
-  keeps the temp Rust + binary around for the inferior to load.
-- `editors/zed/` — register the DAP adapter so Zed's debugger UI drives `jet debug`.
-- `docs/guides/debugging.md` (new adoption doc) — the end-to-end session above,
-  plus how breakpoints, stepping, and locals map to Jet, and the E3001/E3002
-  relationship (post-mortem vs live).
+Paths below reflect the post-workspace-split layout (`crates/jet-codegen/…`,
+not `Source/Codegen/…` as the sketch above originally said).
 
-## Test plan — snapshots / transcripts / examples
+- `crates/jet-codegen/src/Codegen/TIR/mod.rs` — `TStmt::LineMarker(usize)`, a
+  new TIR node `lower_stmts` (`TIR/lower.rs`) interleaves ahead of every
+  lowered statement, ONLY when `cx.debug_linemap` is set. `TIR/emit.rs` turns
+  it into a `// jet:line N` comment. Gated (not the single always-on marker
+  the sketch proposed) because the SAME `lower_stmts`/`TStmt` feed the JIT
+  tier (`crates/jet-jit`) — an always-on marker would have silently disabled
+  JIT coverage for every function. `Codegen/mod.rs::emit_bundle_dbg` /
+  `Codegen/Context.rs::Cx.debug_linemap` / `jet::compile_for_debug` /
+  `jet-driver::Driver::compile_bundle_path_opts_dbg` thread the flag through;
+  default `false` everywhere else (byte-identical to today's output).
+- `Source/Debug/` (std-only, I6; PascalCase filenames per this repo's module
+  convention, not the sketch's lowercase names):
+  - `LineMap.rs` — parses `// jet:line N` markers back into a rust-line ↔
+    jet-line table; `main_entry_line` finds `fn main`'s first real statement.
+  - `Inferior.rs` — spawns + drives `lldb` over piped stdin/stdout (module doc
+    there covers three live-verified lldb quirks worked around: no bare
+    prompt over a pipe, async stop/exit notifications that race a follow-up
+    command, and stdout interleaving with the debuggee — see the Verification
+    note up top). Also loads rustc's own Rust pretty-printer files.
+  - `Native.rs` — the `(jet)` terminal session, reusing D-DBG3's vocabulary.
+  - `Dap.rs` — the DAP JSON-over-stdio server (reuses `Source/LSP/JSON.rs`,
+    now `pub(crate)`, for the hand-rolled codec — I6, one parser not two).
+  - `mod.rs` — `needs_native` (the E2203 boundary scan, shared with the
+    interpreter path) decides interpreter vs native; `run_native`/`run_dap`
+    are the public entry points `Source/CmdCompile.rs` calls.
+- `Source/main.rs` — `debug` dispatch gained `--raw-frames`/`--dap` parsing
+  and the `needs_native` auto-routing; `Source/CLISpec.rs` registers both
+  flags (`FLAG_HELP` + the `debug` `CommandSpec`).
+- `Source/CmdCompile.rs::run_debug_native` — compiles via `compile_for_debug`,
+  builds with `BuildProfile::Debug` (full `-C debuginfo=2`) through the
+  existing `build()` bridge (FFI/clinks handled identically to a normal
+  build), then calls `Debug::run_native`/`run_dap`.
+- `editors/zed`/`editors/vscode` DAP registration — NOT done this pass (no
+  editor available to verify against); `Dap.rs` is ready but its wire
+  behavior is unverified live. Named follow-up, not silently skipped.
+- `docs/guides/debugging.md` adoption doc — NOT written this pass; the
+  example (`examples/features/189_debug_native.jet`) and this doc's
+  Verification section cover the same ground informally. Follow-up if the
+  owner wants a dedicated guide.
 
-- `tests/debug.rs` (new) — script the adapter over a pipe with a recorded DAP
-  request sequence; assert the JSON responses (breakpoint resolved to the right
-  Jet line, stack frame in Jet terms, locals match). Gate on lldb presence the
-  same way `tests/observe.rs` gates on `rustc` (skip when absent) so CI without a
-  debugger still passes.
-- `tests/observe.rs` — add a line-table assertion: emitted map round-trips
-  Jet↔Rust for a known fixture.
-- `examples/` — a small stepping example + an expected transcript the adoption
-  doc references (I5).
-- Adoption doc is prose, not snapshot-pinned, but its example transcript must be
-  golden-checked against real `jet debug` output.
+## Test plan — actual (SHIPPED)
+
+- `Source/Debug/LineMap.rs` / `Inferior.rs` `#[cfg(test)]` — 12 unit tests,
+  no lldb needed (line-table math, lldb-text parsing against captured live
+  fixtures, name-mangling round trips).
+- `tests/debug_native.rs` (new, 5 tests) — codegen-only checks
+  (`debug_linemap` markers present/absent) run unconditionally; the full
+  native session test gates on BOTH `rustc` and `lldb` presence, same
+  posture `tests/observe.rs` takes for `rustc` alone (skip, don't fail, when
+  either is absent).
+- `examples/features/189_debug_native.jet` + golden `.out` — a native-only
+  (`use core.fs`) program, golden-tested via the normal `jet run` path (I5);
+  `jet debug` on it is a manual/live check, not snapshot-pinned (an
+  interactive session isn't a stdout diff).
+- Full regression pass (2026-07-01): `cargo build`, `cargo test` for
+  `debug`/`debug_native`/`golden`/`observe`/`cli`/`tir`/`decisions`/`dev`
+  (JIT differential battery) — all green.
 
 ## Risks & invariant check
 
@@ -161,6 +226,11 @@ The one borderline product call worth an owner confirm (not a code-blocking gate
   clear message + the interpreter-backed step-1 debugger as the no-lldb fallback), and
   (b) phase-1 = lldb/Linux+macOS only is the right initial scope. Tests gate on lldb
   presence (skip when absent), like `tests/observe.rs` gates on `rustc`.
+  **Resolved (2026-07-01):** built and verified against a real lldb (21.1.8) — the
+  stance and no-lldb fallback both work as designed. Owner approved adding `lldb` to
+  `flake.nix`'s `devShells.default.packages`; done — `nix develop -c which lldb`
+  resolves, `tests/debug_native.rs`'s live-gated case reruns clean with no manual
+  fetch/PATH workaround.
 
 ## Open decisions (history)
 

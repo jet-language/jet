@@ -25,6 +25,16 @@
 //! I6: std-only — no DAP/JSON crate, no debugger library. The interactive loop
 //! reads stdin with `std::io`; tests drive it with a scripted-input transcript
 //! (`run_session`), the same shape as the REPL transcript tests.
+//!
+//! D-DBG3 step 2 (dap-debugger): the native backend lives in the sibling
+//! submodules below. [`LineMap`] and [`Inferior`] are the shared building
+//! blocks; [`Native`] is the `(jet)`-prompt terminal session; [`Dap`] is the
+//! Debug Adapter Protocol server editors (VS Code/Zed) launch instead.
+
+mod Dap;
+mod Inferior;
+mod LineMap;
+mod Native;
 
 use std::collections::{HashMap, HashSet};
 
@@ -551,4 +561,61 @@ pub fn run_session(file: &str, inputs: &[&str]) -> String {
     };
     let (_code, captured) = run_with_io(file, io);
     captured
+}
+
+/// D-DBG3 step 2 (dap-debugger): whether this program needs the native backend
+/// — the interpreter's boundary scan (E2203) found an FFI/task/`#Unsafe`/
+/// native-std construct step-1 can't step through. `None` means the file
+/// couldn't even be loaded; the caller should fall through to [`run_debug`],
+/// which reports that error the normal way (no duplicated error path here).
+pub fn needs_native(file: &str) -> Option<bool> {
+    let bundle = crate::Loader::load_entry(file).ok()?;
+    Some(crate::Interpreter::debug_boundary_scan(&bundle).is_some())
+}
+
+/// D-DBG3 step 2: the native lldb-backed `(jet)` terminal session — steps the
+/// FULL feature set (FFI/tasks/`#Unsafe`/native std) the interpreter declines.
+/// `binary` is the already-built debug binary (full debuginfo); `rust_file`/
+/// `rust_src` are the generated Rust this build produced (with `// jet:line N`
+/// markers from `emit_bundle_dbg`); `jet_file`/`jet_src` are the original
+/// source. `raw_frames` is the D-DBG2 expert opt-in (`--raw-frames`).
+pub fn run_native(
+    binary: &std::path::Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+    raw_frames: bool,
+) -> i32 {
+    Native::run(binary, rust_file, rust_src, jet_file, jet_src, raw_frames)
+}
+
+/// Scripted native session for tests (mirrors [`run_session`] for the native
+/// backend): feeds `inputs` to the `(jet)` prompt and returns the transcript.
+/// Callers should gate on lldb availability themselves before building a debug
+/// binary to hand in — this only reports "lldb missing" into the transcript.
+#[allow(clippy::too_many_arguments)]
+pub fn run_native_scripted(
+    binary: &std::path::Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+    raw_frames: bool,
+    inputs: &[&str],
+) -> String {
+    Native::run_scripted(binary, rust_file, rust_src, jet_file, jet_src, raw_frames, inputs)
+}
+
+/// D-DBG3 step 2: the DAP JSON-over-stdio server (editor wiring) — same native
+/// backend as [`run_native`], speaking the Debug Adapter Protocol on stdin/
+/// stdout instead of the `(jet)` terminal prompt.
+pub fn run_dap(
+    binary: &std::path::Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+) -> i32 {
+    Dap::run(binary, rust_file, rust_src, jet_file, jet_src)
 }

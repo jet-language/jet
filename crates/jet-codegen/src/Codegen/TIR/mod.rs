@@ -690,6 +690,13 @@ pub enum TStmt {
         snapshots: Vec<(String, Option<String>)>,
         body: Vec<TStmt>,
     },
+    /// D-DBG3 step 2 (dap-debugger): a source line marker, one per lowered `Stmt`,
+    /// inserted ONLY when `cx.debug_linemap` is set (native `jet debug` builds —
+    /// never a normal build or the JIT tier, so this is invisible to `jit_covers_stmt`'s
+    /// coverage decision and every other TStmt consumer). Emits a `// jet:line N`
+    /// comment immediately before the statement's generated Rust, giving the native
+    /// backend a rust-line -> jet-line table without touching any other TStmt shape.
+    LineMarker(usize),
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
@@ -889,6 +896,16 @@ pub enum TExprKind {
     /// byte-for-byte. `JSON.Null` has no arg (`None`). The `{root}jet_std::Json` prefix
     /// is rendered at emit (`cx.root_prefix` is program-level, read there).
     JsonLit {
+        variant: String,
+        arg: Option<Box<(TExpr, bool)>>,
+    },
+    /// D-DBDRIVER1: a `DbValue` construction (`DbValue.Int(n)` / `.Float(f)` /
+    /// `.Text(s)` / `.Bool(b)` / `.Null`) — the tagged SQL parameter/column value.
+    /// Same shape as `JsonLit` (a FOREIGN prelude enum, not a user `EnumLit`), kept
+    /// as its own node rather than reusing `JsonLit` because `DbValue` renders to
+    /// a DIFFERENT prelude type (`jet_std::DbValue`, not `jet_std::DataTree`) and
+    /// has no recursive `Array`/`Object`-style payload to special-case.
+    DbValueLit {
         variant: String,
         arg: Option<Box<(TExpr, bool)>>,
     },
@@ -1820,6 +1837,30 @@ pub enum THandleOp {
     PathWalk,
     /// D-RENDERTGT2=A (c133 M1): NullBackend measure/layout/paint/on_event/commands.
     UiBackendMethod { method: String },
+    /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DbError>`. Encodes
+    /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
+    /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.
+    DbQuery,
+    /// D-DBDRIVER1: `conn.query_one(sql, params)` → `Result<Option<Row>, DbError>`.
+    /// Same as `DbQuery` but takes only the first row (if any).
+    DbQueryOne,
+    /// D-DBDRIVER1: `conn.execute(sql, params)` → `Result<Int, DbError>` (affected rows).
+    DbExecute,
+    /// D-DBDRIVER1: `conn.begin()` → `{ffi}::jet_db_begin((recv).handle)` → `Bool`.
+    DbBegin,
+    /// D-DBDRIVER1: `conn.commit()` → `{ffi}::jet_db_commit((recv).handle)` → `Bool`.
+    DbCommit,
+    /// D-DBDRIVER1: `conn.rollback()` → `{ffi}::jet_db_rollback((recv).handle)` → `Bool`.
+    DbRollback,
+    /// D-DBDRIVER1: `conn.close()` → `{ffi}::jet_db_close((recv).handle)` → `Bool`.
+    DbClose,
+    /// D-DBDRIVER1: `DbValue` accessor methods (`.int()`/`.float()`/`.text()`/
+    /// `.bool()`/`.is_null()`) → `(recv).<method>()`, same shape as `JsonInt`/….
+    DbValueInt,
+    DbValueFloat,
+    DbValueText,
+    DbValueBool,
+    DbValueIsNull,
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so

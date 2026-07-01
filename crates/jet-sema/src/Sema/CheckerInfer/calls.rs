@@ -881,6 +881,15 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+            // D-DBDRIVER1: `DbValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` —
+            // the tagged SQL parameter/column value construction (same mechanism as
+            // `Data`/`Json` above). `DbValue.Null` (no args) is a `Field`, not a
+            // `MethodCall` — handled in `infer_field` alongside `Data.Null`.
+            if type_name == Syntax::TYPE_DB_VALUE {
+                if let Some(ret) = self.check_core_dbvalue_lit(method, args, span) {
+                    return Some(ret);
+                }
+            }
             {
                 let has_variant = self
                     .resolve_enum_variants_cloned(type_name)
@@ -1186,6 +1195,20 @@ impl<'a> Checker<'a> {
                 }
                 *recv_type_out = Some(handle_ty.clone());
                 return Some(Type::Named("TransactionGuard".to_string()));
+            }
+        }
+        // D-DBDRIVER1: method calls on a `DbConnection` handle. A bespoke block
+        // (like the `#Transact` handle above) rather than the generic
+        // `file_handle_method_return` table, because `.query`/`.query_one`/
+        // `.execute` need real expected-type-directed arg elaboration
+        // (`sql: String, params: [DbValue]`) — an empty `[]` params literal must
+        // resolve its element type from the parameter, not blind inference.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == "DbConnection" {
+                if let Some(ret) = self.check_db_connection_method(method, args, span) {
+                    *recv_type_out = Some(handle_ty.clone());
+                    return ret;
+                }
             }
         }
         // E2-M7: method calls on streaming file handles (D-IO2).
@@ -1691,6 +1714,17 @@ impl<'a> Checker<'a> {
                         self.infer(&mut a.expr);
                     }
                     *recv_type_out = Some("DataTree".to_string());
+                    return Some(ret);
+                }
+            }
+            // D-DBDRIVER1: accessor methods on `DbValue` (`.int()`/`.text()`/
+            // `.bool()`/`.float()`/`.is_null()`) — read back a bound/column value.
+            if is_db_value_type_name(tn) {
+                if let Some(ret) = db_value_method_return(method, args.len()) {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    *recv_type_out = Some(tn.clone());
                     return Some(ret);
                 }
             }

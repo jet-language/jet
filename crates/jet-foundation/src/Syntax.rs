@@ -492,6 +492,23 @@ pub fn is_data_variant(variant: &str) -> bool {
     )
 }
 
+/// D-DBDRIVER1 (ratified): the tagged SQL parameter/column value. Construct with
+/// `DbValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Null`; a `[DbValue]`
+/// is the parameterized-query bind list, never a raw SQL string. A dedicated
+/// dynamic-value type (mirrors `Data`'s construction mechanism, D-ENC-DYN1=A+)
+/// — not a user-registrable enum, so it never appears in `match`.
+pub const TYPE_DB_VALUE: &str = "DbValue";
+
+/// D-DBDRIVER1: is `name` the `DbValue` dynamic-value type name?
+pub fn is_db_value_type_name(name: &str) -> bool {
+    name == TYPE_DB_VALUE
+}
+
+/// D-DBDRIVER1: the variants of `DbValue`.
+pub fn is_db_value_variant(variant: &str) -> bool {
+    matches!(variant, "Null" | "Int" | "Float" | "Text" | "Bool")
+}
+
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
 
@@ -1865,6 +1882,10 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.regex",
     // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
     "core.archive",
+    // D-CODECS1 (ratified): standalone compression codecs, separate from `core.archive`.
+    // `flate2` (gzip) and `zstd` FFI bridges.
+    "core.compress.gzip",
+    "core.compress.zstd",
     // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
     "core.db",
     // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,

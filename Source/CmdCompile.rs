@@ -964,6 +964,58 @@ pub(crate) fn build(
     }
 }
 
+/// D-DBG3 step 2 (dap-debugger): build + launch the native lldb-backed `jet
+/// debug` backend — a debug-profile build (full debuginfo) whose generated Rust
+/// carries the `// jet:line N` table (`emit_bundle_dbg` via
+/// `jet::compile_for_debug`), then either the `(jet)` terminal session or the
+/// DAP server (`--dap`) drives it through `Source/Debug/Inferior.rs`. Returns
+/// the process exit code.
+pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            return ExitCodes::USER_ERROR;
+        }
+    };
+    let out = match jet::compile_for_debug(file) {
+        Ok(o) => o,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            return ExitCodes::USER_ERROR;
+        }
+    };
+    let clinks = match jet::resolve_c_links(file) {
+        Ok(a) => a,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            return ExitCodes::USER_ERROR;
+        }
+    };
+    let bin = PathBuf::from("build").join(format!("{}_dbg", stem(file)));
+    build(
+        file,
+        &out.rust,
+        bin.clone(),
+        BuildProfile::Debug,
+        out.ffi.as_ref(),
+        &clinks,
+        false,
+        None,
+        None,
+        mode,
+    );
+    // `build()` always writes the generated Rust to `build/<stem>.rs` (the
+    // debug binary path is the only caller-chosen path) — lldb's `-f` flag
+    // matches by basename, so this is what `Inferior::set_breakpoint` needs.
+    let rust_file = format!("{}.rs", stem(file));
+    if dap {
+        jet::Debug::run_dap(&bin, &rust_file, &out.rust, file, &src)
+    } else {
+        jet::Debug::run_native(&bin, &rust_file, &out.rust, file, &src, raw_frames)
+    }
+}
+
 /// Scan a failed rustc/linker stderr for a missing C library and return its
 /// link name. Matches the GNU ld / lld phrasing `cannot find -l<name>` (and the
 /// `-l<name>` form some linkers print). Used to keep a missing *system library*

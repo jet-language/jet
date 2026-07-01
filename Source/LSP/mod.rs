@@ -8,7 +8,9 @@
 mod Check;
 mod Completion;
 mod Features;
-mod JSON;
+// D-DBG3 step 2 (dap-debugger): shared hand-rolled JSON codec (I6) — the DAP
+// adapter (`Source/Debug/Dap.rs`) reuses this instead of a second parser/escaper.
+pub(crate) mod JSON;
 mod Position;
 mod Server;
 mod SymbolDB;

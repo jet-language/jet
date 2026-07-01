@@ -14,6 +14,22 @@ pub fn compile_bundle_path_opts(
     allow_impure: bool,
     web_target: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_dbg(file, mode, freestanding, allow_impure, web_target, false)
+}
+
+/// Like `compile_bundle_path_opts`, but `debug_linemap = true` routes codegen
+/// through `emit_bundle_dbg` (D-DBG3 step 2 / dap-debugger): every generated
+/// statement gets a `// jet:line N` marker the native `jet debug` backend reads
+/// back into a rust-line -> jet-line table. Used ONLY by the native debug build
+/// path — every other caller keeps `debug_linemap = false` (byte-identical output).
+pub fn compile_bundle_path_opts_dbg(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    freestanding: bool,
+    allow_impure: bool,
+    web_target: bool,
+    debug_linemap: bool,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
@@ -51,7 +67,7 @@ pub fn compile_bundle_path_opts(
     if timing {
         timer.lap("ffi");
     }
-    let rust = crate::Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
+    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap);
     let web = if web_target {
         Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()))
     } else {

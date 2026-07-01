@@ -1,5 +1,6 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Effects::Effect;
 use crate::Syntax;
 use crate::AST::{AccessConvention, Expr, Type};
 
@@ -1665,6 +1666,72 @@ impl<'a> Checker<'a> {
         Some(json)
     }
 
+    /// D-DBDRIVER1: `DbValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)`
+    /// — the tagged SQL parameter/column value construction. Mirrors
+    /// `check_core_json_lit` exactly (same dynamic-value mechanism, SQL-shaped
+    /// variants); `Int` stays `Type::Int` (64-bit), never widened through `Float`.
+    pub(crate) fn check_core_dbvalue_lit(
+        &mut self,
+        variant: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let dbvalue = Type::Named(Syntax::TYPE_DB_VALUE.to_string());
+        let expected = match variant {
+            "Null" => Vec::new(),
+            "Int" => vec![Type::Int],
+            "Float" => vec![Type::Float],
+            "Text" => vec![Type::String],
+            "Bool" => vec![Type::Bool],
+            _ => {
+                let candidates = ["Null", "Int", "Float", "Text", "Bool"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
+                let mut fix = "check the variant name".to_string();
+                if let Some(s) = suggest_field(variant, &candidates) {
+                    fix = format!("did you mean `{}`?", s);
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0304",
+                    format!("`{}` has no variant `{}`", Syntax::TYPE_DB_VALUE, variant),
+                    "`DbValue` is the tagged SQL parameter/column value: Null/Int/Float/Text/Bool"
+                        .to_string(),
+                    fix,
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return Some(dbvalue);
+            }
+        };
+        if args.len() != expected.len() {
+            self.diags.push(Diagnostic::error(
+                "E0306",
+                format!(
+                    "`{}.{}` expects {} value{}, got {}",
+                    Syntax::TYPE_DB_VALUE,
+                    variant,
+                    expected.len(),
+                    if expected.len() == 1 { "" } else { "s" },
+                    args.len()
+                ),
+                "each `DbValue` variant has a fixed payload (Int→64-bit int, Float→float, Text→String, Bool→bool, Null→none)".to_string(),
+                "check the variant payload".to_string(),
+                Some(span),
+            ));
+        }
+        for (i, arg) in args.iter_mut().enumerate() {
+            if let Some(want) = expected.get(i) {
+                self.expect_core_arg(variant, i, want, arg);
+            } else {
+                self.infer(&mut arg.expr);
+            }
+        }
+        Some(dbvalue)
+    }
+
     pub(crate) fn expect_core_arg(
         &mut self,
         call_name: &str,
@@ -1745,6 +1812,89 @@ impl<'a> Checker<'a> {
             }
         }
     }
+
+    /// D-DBDRIVER1: `(sql: String, params: [DbValue])` argument elaboration shared
+    /// by `.query`/`.query_one`/`.execute` — SQL text plus a separate bind list,
+    /// never a raw execute(sql) escape (the ratified build plan is explicit that
+    /// a generic `execute_raw(sql)` must not exist).
+    fn check_db_sql_params_args(&mut self, name: &str, args: &mut [crate::AST::CallArg], span: Span) {
+        if args.len() != 2 {
+            self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return;
+        }
+        let params_ty = Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())));
+        self.expect_core_arg(name, 0, &Type::String, &mut args[0]);
+        self.expect_core_arg(name, 1, &params_ty, &mut args[1]);
+    }
+
+    /// D-DBDRIVER1: instance methods on a `DbConnection` handle (produced by
+    /// `db.open`/`db.open_memory`, mirroring `core.files`'s `open`/`create`
+    /// producing a `FileReader`/`FileWriter`). The one generic driver interface:
+    /// SQL text plus a separate `[DbValue]` bind list. `query`/`query_one`/
+    /// `execute` are fallible (`? DbError`); `begin`/`commit`/`rollback`/`close`
+    /// report plain success/failure (`Bool`) — there is nothing else to recover
+    /// from a transaction control statement or a close.
+    pub(crate) fn check_db_connection_method(
+        &mut self,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Option<Type>> {
+        match method {
+            "query" => {
+                self.check_db_sql_params_args("query", args, span);
+                self.record_effect(Effect::Db);
+                Some(Some(result_ty(
+                    Type::List(Box::new(db_row_ty())),
+                    db_error_ty(),
+                )))
+            }
+            "query_one" => {
+                self.check_db_sql_params_args("query_one", args, span);
+                self.record_effect(Effect::Db);
+                Some(Some(result_ty(
+                    Type::Option(Box::new(db_row_ty())),
+                    db_error_ty(),
+                )))
+            }
+            "execute" => {
+                self.check_db_sql_params_args("execute", args, span);
+                self.record_effect(Effect::Db);
+                Some(Some(result_ty(Type::Int, db_error_ty())))
+            }
+            "begin" | "commit" | "rollback" | "close" => {
+                if !args.is_empty() {
+                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                }
+                self.record_effect(Effect::Db);
+                Some(Some(Type::Bool))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// D-DBDRIVER1: the resolved return type of a covered `DbConnection` method, read
+/// from `check_db_connection_method`'s authoritative match (arity/diagnostics
+/// already ran in sema; this is a pure lookup for codegen's TIR totality
+/// bookkeeping, mirroring `handle_method_return_ty`'s other sources).
+pub fn db_connection_method_return_ty(method: &str) -> Option<Type> {
+    match method {
+        "query" => Some(result_ty(Type::List(Box::new(db_row_ty())), db_error_ty())),
+        "query_one" => Some(result_ty(
+            Type::Option(Box::new(db_row_ty())),
+            db_error_ty(),
+        )),
+        "execute" => Some(result_ty(Type::Int, db_error_ty())),
+        "begin" | "commit" | "rollback" | "close" => Some(Type::Bool),
+        _ => None,
+    }
 }
 
 /// D-MUSTUSE1 (c18iwxqx): built-in handle types whose bare statement result must
@@ -1789,6 +1939,11 @@ pub(crate) fn json_error_ty() -> Type {
 // `Yaml`/`Csv`).
 pub(crate) fn is_json_type_name(name: &str) -> bool {
     Syntax::is_data_type_name(name)
+}
+
+// D-DBDRIVER1: the `DbValue` dynamic tagged SQL value.
+pub(crate) fn is_db_value_type_name(name: &str) -> bool {
+    Syntax::is_db_value_type_name(name)
 }
 
 /// D-SERDE2: the typed-decode error (`{ path, reason }`). Flows as the error arm
@@ -2800,6 +2955,21 @@ pub(crate) fn io_error_ty() -> Type {
     Type::Named(Syntax::TYPE_IO_ERROR.to_string())
 }
 
+/// D-DBDRIVER1: the error type `.query`/`.query_one`/`.execute` fail with.
+pub(crate) fn db_error_ty() -> Type {
+    Type::Named("DbError".to_string())
+}
+
+/// D-DBDRIVER1: a `Row` is `Map<String, DbValue>` — the built-in `Map` already
+/// gives `.get`/`.keys`/`.values`/`.contains_key`, so no separate nominal `Row`
+/// type is registered (I8: reuse the existing collection instead of inventing one).
+pub(crate) fn db_row_ty() -> Type {
+    Type::Map {
+        key: Box::new(Type::String),
+        value: Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())),
+    }
+}
+
 pub(crate) fn result_ty(ok: Type, err: Type) -> Type {
     Type::Result {
         ok: Box::new(ok),
@@ -3271,59 +3441,32 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
-        // D-DEP-DB1: jet.db — SQLite via rusqlite (bundled).
-        // open/open_memory return a u64 handle (0 = error).
+        // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs,
+        // separate from core.archive. `compress` takes `[U8]` and is infallible;
+        // `decompress` is fallible (malformed compressed stream → `Err(String)`),
+        // following the same house style as core.encoding.hex/base64 `decode`.
+        ("core.compress.gzip", "compress") | ("core.compress.zstd", "compress") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.compress.gzip", "decompress") | ("core.compress.zstd", "decompress") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        // D-DBDRIVER1: jet.db — SQLite via rusqlite (bundled). `open`/`open_memory`
+        // are the only module-level entry points; they PRODUCE a `DbConnection`
+        // handle (mirrors `core.files`'s `open`/`create` producing a `FileReader`/
+        // `FileWriter`). Every other operation — `query`/`query_one`/`execute`/
+        // `begin`/`commit`/`rollback`/`close` — is an INSTANCE method dispatched
+        // by the receiver's `DbConnection` type (see `check_db_connection_method`
+        // below), not a second module-call surface. There is no raw-string
+        // `execute(sql)` escape (D-DBDRIVER1's build plan: "must not expose a
+        // generic `execute_raw(sql)` escape").
         ("jet.db", "open") => Some((
             vec![(read, Type::String)],
-            Some(Type::IntN {
-                signed: false,
-                bits: 64,
-            }),
+            Some(Type::Named("DbConnection".to_string())),
         )),
-        ("jet.db", "open_memory") => Some((
-            vec![],
-            Some(Type::IntN {
-                signed: false,
-                bits: 64,
-            }),
-        )),
-        // close/exec/query_json take the handle by value (u64 is a scalar).
-        ("jet.db", "close") => Some((
-            vec![(
-                read,
-                Type::IntN {
-                    signed: false,
-                    bits: 64,
-                },
-            )],
-            Some(Type::Bool),
-        )),
-        ("jet.db", "exec") => Some((
-            vec![
-                (
-                    read,
-                    Type::IntN {
-                        signed: false,
-                        bits: 64,
-                    },
-                ),
-                (read, Type::String),
-            ],
-            Some(Type::Bool),
-        )),
-        ("jet.db", "query_json") => Some((
-            vec![
-                (
-                    read,
-                    Type::IntN {
-                        signed: false,
-                        bits: 64,
-                    },
-                ),
-                (read, Type::String),
-            ],
-            Some(Type::String),
-        )),
+        ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DbConnection".to_string())))),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
         // returns `[Byte] ? String` (invalid input → Err).
         ("core.encoding.hex", "encode") => {
@@ -3687,8 +3830,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "tar_get",
             "tar_names_json",
         ],
+        // D-CODECS1: standalone compression codecs, separate from core.archive.
+        "core.compress.gzip" => &["compress", "decompress"],
+        "core.compress.zstd" => &["compress", "decompress"],
         // D-DEP-DB1: SQLite ring package.
-        "jet.db" => &["open", "open_memory", "close", "exec", "query_json"],
+        // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
+        // `rollback` are `DbConnection` instance methods, not module items.
+        "jet.db" => &["open", "open_memory"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         "jet.reactive" => &["signal", "derived", "effect"],
         // D-HONESTNUM1=A: Measurement<T> constructor.
@@ -4176,6 +4324,32 @@ pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
             ok: Box::new(Type::Float),
             err: Box::new(Type::String),
         }),
+        _ => None,
+    }
+}
+
+/// D-DBDRIVER1: accessor methods on `DbValue` — read back the tagged value a
+/// query bound or a row column carried. Mirrors `datatree_method_return`'s
+/// shape exactly (`Result<T, String>`); `int` stays 64-bit (never `Float`).
+pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {
+    match (method, n_args) {
+        ("int", 0) => Some(Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::String),
+        }),
+        ("float", 0) => Some(Type::Result {
+            ok: Box::new(Type::Float),
+            err: Box::new(Type::String),
+        }),
+        ("text", 0) => Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::String),
+        }),
+        ("bool", 0) => Some(Type::Result {
+            ok: Box::new(Type::Bool),
+            err: Box::new(Type::String),
+        }),
+        ("is_null", 0) => Some(Type::Bool),
         _ => None,
     }
 }

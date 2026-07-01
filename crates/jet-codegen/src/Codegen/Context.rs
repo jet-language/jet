@@ -109,6 +109,12 @@ pub(crate) struct Cx {
     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
     /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
+    /// D-DBG3 step 2 (dap-debugger): when true, `lower_stmts` interleaves a
+    /// `TStmt::LineMarker` before every lowered statement, and emission turns each
+    /// into a `// jet:line N` comment. Set ONLY by the native `jet debug` build path
+    /// (`emit_bundle_dbg`); false (the default) is byte-identical to today's output,
+    /// so normal builds, `jet test`, and the JIT tier never see a marker.
+    pub(crate) debug_linemap: bool,
 }
 
 pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
@@ -130,6 +136,12 @@ pub(crate) struct IndexHook {
 // `Yaml`/`Csv`) is the user-facing face of `jet_std::DataTree`.
 pub(crate) fn is_json_type_name(name: &str) -> bool {
     Syntax::is_data_type_name(name)
+}
+
+// D-DBDRIVER1: the `DbValue` dynamic tagged SQL value — same construction
+// mechanism as `Data`/`Json`, mirrored via `jet_std::DbValue`.
+pub(crate) fn is_db_value_type_name(name: &str) -> bool {
+    Syntax::is_db_value_type_name(name)
 }
 
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
@@ -154,6 +166,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
         "DataTree" => Some("DataTree"),
         "DecodeError" => Some("DecodeError"),
+        // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
+        "DbValue" => Some("DbValue"),
+        "DbError" => Some("DbError"),
         // D-SIMD2 / D-LINALG1: built-in math value types (lane + linalg structs).
         "F32x4" => Some("F32x4"),
         "F64x2" => Some("F64x2"),
@@ -178,6 +193,8 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "StdinLines" => Some("()"),
         // D-PATHFS1: typed path handle.
         "Path" => Some("JetPath"),
+        // D-DBDRIVER1: the SQLite connection handle wrapper.
+        "DbConnection" => Some("JetDbConnection"),
         _ => None,
     }
 }
@@ -717,6 +734,7 @@ pub(crate) fn build_cx_items(
         file: file.to_string(),
         test_mode: false,
         coverage: false,
+        debug_linemap: false,
         import_mods: HashMap::new(),
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),

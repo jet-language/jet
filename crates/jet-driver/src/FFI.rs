@@ -62,13 +62,14 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
 /// program has no `extern rust` declarations and does not use `jet.regex`,
-/// `core.archive`, or `jet.db`.
+/// `core.archive`, `jet.db`, or `core.compress.{gzip,zstd}`.
 ///
-/// `jet.regex` (D-REGEX1), `core.archive` (D-DEP-ARCHIVE1), and `jet.db`
-/// (D-DEP-DB1) are delivered through this same hidden-cargo bridge: when a
-/// program imports any of them, the bridge crate gains the matching dependency
-/// and a hand-written runtime (`Source/Prelude/Regex.rs`,
-/// `Source/Prelude/Archive.rs`, `Source/Prelude/Db.rs`). The compiler crate
+/// `jet.regex` (D-REGEX1), `core.archive` (D-DEP-ARCHIVE1), `jet.db`
+/// (D-DEP-DB1), and `core.compress` (D-CODECS1) are delivered through this
+/// same hidden-cargo bridge: when a program imports any of them, the bridge
+/// crate gains the matching dependency and a hand-written runtime
+/// (`Source/Prelude/Regex.rs`, `Source/Prelude/Archive.rs`,
+/// `Source/Prelude/Db.rs`, `Source/Prelude/Compress.rs`). The compiler crate
 /// (`Source/`) stays zero-dependency (I6). These are the owner-approved I6
 /// bootstrap exceptions, to be native-ized before the end of Epoch 3.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
@@ -87,6 +88,13 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         .used_core
         .iter()
         .any(|u| u == "jet.db" || u.starts_with("jet.db::"));
+    // D-CODECS1: standalone `core.compress.gzip` / `core.compress.zstd` codecs.
+    let needs_compress = bundle.used_core.iter().any(|u| {
+        u == "core.compress.gzip"
+            || u.starts_with("core.compress.gzip::")
+            || u == "core.compress.zstd"
+            || u.starts_with("core.compress.zstd::")
+    });
     // D-NETDEP1=A / D-HTTPLIB4=B: ureq + rustls for core.http.client TLS support.
     let needs_http_client = bundle
         .used_core
@@ -105,6 +113,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         && !needs_db
         && !needs_http_client
         && !needs_crypto
+        && !needs_compress
     {
         return Ok(None);
     }
@@ -116,6 +125,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         needs_db,
         needs_http_client,
         needs_crypto,
+        needs_compress,
     )
     .map(Some)
 }
@@ -183,6 +193,25 @@ pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "2");
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
 
+/// The `flate2` crate version that backs `core.compress.gzip` (D-CODECS1).
+/// Same crate as `core.archive`'s gzip; `core.compress` must also work standalone,
+/// independent of `core.archive`, so it is inserted whenever `core.compress.gzip`
+/// is used even if `core.archive` isn't. Lives only here — never in the
+/// compiler's Cargo.toml (I6).
+pub const COMPRESS_GZIP_CRATE_SPEC: (&str, &str) = ARCHIVE_CRATE_SPEC;
+
+/// The `zstd` crate version that backs `core.compress.zstd` (D-CODECS1). Pure
+/// bootstrap dep: the `zstd` crate is a Rust binding that vendors/builds the C
+/// zstd source via `zstd-sys` at compile time (same I6 bootstrap-exception
+/// posture as `rusqlite`'s bundled SQLite, `DB_CRATE_SPEC`). Lives only here —
+/// never in the compiler's Cargo.toml (I6).
+pub const COMPRESS_ZSTD_CRATE_SPEC: (&str, &str) = ("zstd", "0.13");
+
+/// Hand-written compression runtime emitted into the bridge crate when
+/// `core.compress.gzip` or `core.compress.zstd` is used (D-CODECS1). This is
+/// the only place the standalone codec paths touch `flate2` / `zstd`.
+const COMPRESS_RUNTIME: &str = include_str!("Prelude/Compress.rs");
+
 pub fn build_bridge(
     entries: &[ExternEntry],
     needs_regex: bool,
@@ -190,6 +219,7 @@ pub fn build_bridge(
     needs_db: bool,
     needs_http_client: bool,
     needs_crypto: bool,
+    needs_compress: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
@@ -229,6 +259,19 @@ pub fn build_bridge(
             ED25519_CRATE_SPEC.1.to_string(),
         );
     }
+    if needs_compress {
+        // core.compress must work standalone, independent of core.archive, so
+        // flate2 is inserted here too; BTreeMap::insert with the same key/value
+        // when core.archive also pulled it in is a harmless no-op overwrite.
+        deps.insert(
+            COMPRESS_GZIP_CRATE_SPEC.0.to_string(),
+            COMPRESS_GZIP_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            COMPRESS_ZSTD_CRATE_SPEC.0.to_string(),
+            COMPRESS_ZSTD_CRATE_SPEC.1.to_string(),
+        );
+    }
     let key = cache_key_full(
         entries,
         &deps,
@@ -237,6 +280,7 @@ pub fn build_bridge(
         needs_db,
         needs_http_client,
         needs_crypto,
+        needs_compress,
     );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
@@ -272,6 +316,7 @@ pub fn build_bridge(
             needs_db,
             needs_http_client,
             needs_crypto,
+            needs_compress,
         ),
     )
     .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
@@ -382,6 +427,7 @@ fn cache_key_full(
     needs_db: bool,
     needs_http_client: bool,
     needs_crypto: bool,
+    needs_compress: bool,
 ) -> u64 {
     let mut h = DefaultHasher::new();
     // Only perturb the key when a ring module is actually needed, so programs
@@ -401,6 +447,9 @@ fn cache_key_full(
     }
     if needs_crypto {
         needs_crypto.hash(&mut h);
+    }
+    if needs_compress {
+        needs_compress.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -503,6 +552,7 @@ fn emit_wrapper_lib(
     needs_db: bool,
     needs_http_client: bool,
     needs_crypto: bool,
+    needs_compress: bool,
 ) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
@@ -531,6 +581,12 @@ fn emit_wrapper_lib(
     if needs_crypto {
         // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
         out.push_str(CRYPTO_RUNTIME);
+        out.push('\n');
+    }
+    if needs_compress {
+        // D-CODECS1: the compress runtime is the only place the standalone
+        // `core.compress.gzip` / `core.compress.zstd` codec paths are touched.
+        out.push_str(COMPRESS_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();

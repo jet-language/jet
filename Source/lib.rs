@@ -120,6 +120,13 @@ pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, false, true)
 }
 
+/// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
+/// normal build with `debug_linemap = true`, so the generated Rust carries the
+/// `// jet:line N` table `Source/Debug/LineMap.rs` reads back.
+pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    Driver::compile_bundle_path_opts_dbg(file, Sema::CompileMode::Run, false, false, false, true)
+}
+
 /// In-memory web-target compile (used by integration tests).
 pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     let (toks, lex_diags) = Lexer::lex(src);

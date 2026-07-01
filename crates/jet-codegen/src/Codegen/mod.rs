@@ -931,6 +931,15 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 }
 
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
+    emit_bundle_dbg(bundle, link, false)
+}
+
+/// D-DBG3 step 2 (dap-debugger): identical to `emit_bundle`, but with
+/// `debug_linemap = true` every generated statement gets a `// jet:line N` marker
+/// (`TStmt::LineMarker`) the native debug backend's line table reads back. Used ONLY
+/// by the `jet debug` native build path; `emit_bundle` (linemap off) stays
+/// byte-identical to today's output for every other build (golden tests, JIT).
+pub fn emit_bundle_dbg(bundle: &ProgramBundle, link: Option<&FfiLink>, debug_linemap: bool) -> String {
     let entry = &bundle.modules[bundle.entry];
     let mut out = String::new();
     out.push_str(&format!(
@@ -971,6 +980,9 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
             link,
             &extern_funcs,
         );
+        // D-DBG3 step 2: line markers stay scoped to the entry file only (v1, same
+        // restriction as the step-1 interpreter debugger) — a bare `// jet:line N`
+        // can't disambiguate which file N belongs to across modules.
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
@@ -995,6 +1007,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         link,
         &extern_funcs,
     );
+    cx.debug_linemap = debug_linemap;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);

@@ -1407,6 +1407,13 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+            // D-DBDRIVER1: `DbValue.Null` — the only zero-arg `DbValue` variant,
+            // reaching sema as a `Field` (mirrors `Data.Null` just above).
+            if type_name == crate::Syntax::TYPE_DB_VALUE {
+                if let Some(ret) = self.check_core_dbvalue_lit(member, &mut [], span) {
+                    return Some(ret);
+                }
+            }
             // D-NUMOPS1: numeric type constants — `U8.MAX`, `Int.MIN`,
             // `Float.INFINITY`/`NAN`/`EPSILON`.
             if let Some(nt) = crate::AST::numeric_type_from_name(type_name) {

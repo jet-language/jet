@@ -86,6 +86,9 @@ const FLAG_HELP: &[(&str, &str)] = &[
         "explain-partition",
         "with `build --target=web`: print the JS/WASM partition report (D-WASM1)",
     ),
+    // D-DBG2/D-DBG3 step 2 (dap-debugger): the native lldb-backed backend.
+    ("raw-frames", "with `debug`: show raw Rust frames/lines instead of Jet terms (D-DBG2 expert opt-in)"),
+    ("dap", "with `debug`: speak the Debug Adapter Protocol on stdio instead of the `(jet)` terminal prompt (editor wiring)"),
 ];
 
 /// Human description for a flag (global or per-command), for man/completions.
@@ -111,7 +114,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "bench", summary: "benchmark a Jet program (D-TOOL5)", flags: &["json"], arg: Arg::File },
     CommandSpec { name: "new", summary: "create a new project folder", flags: &["annotated"], arg: Arg::Name },
     CommandSpec { name: "dev", summary: "enter the project shell (jetpack enter)", flags: &[], arg: Arg::None },
-    CommandSpec { name: "debug", summary: "step through a program at the Jet source level (D-DBG3)", flags: &[], arg: Arg::File },
+    CommandSpec { name: "debug", summary: "step through a program at the Jet source level (D-DBG3)", flags: &["raw-frames", "dap"], arg: Arg::File },
     CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", flags: &["check"], arg: Arg::Path },
     CommandSpec { name: "fix", summary: "preview auto-fixable diagnostics (use --write to apply)", flags: &["write", "apply"], arg: Arg::Path },
     CommandSpec { name: "bind", summary: "generate a C binding cache from a header", flags: &["pkg", "out"], arg: Arg::Path },

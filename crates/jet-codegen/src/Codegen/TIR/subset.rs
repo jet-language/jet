@@ -684,6 +684,7 @@ pub(crate) fn enum_is_covered(name: &str, cx: &Cx) -> bool {
 pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     if crate::Generics::is_type_var_name(name)
         || is_json_type_name(name)
+        || is_db_value_type_name(name)
         || core_enum_or_prelude(name)
     {
         return false;
@@ -2157,6 +2158,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 if !locals.contains(enum_name) && is_json_type_name(enum_name) && member == "Null" {
                     return true;
                 }
+                // D-DBDRIVER1: `DbValue.Null` — the same no-arg-`Field` shape as
+                // `JSON.Null` above, for the tagged SQL parameter/column value.
+                if !locals.contains(enum_name)
+                    && is_db_value_type_name(enum_name)
+                    && member == "Null"
+                {
+                    return true;
+                }
                 // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
                 // `Float.INFINITY`/… — D-NUMOPS1) reaches codegen as a `Field` whose
                 // receiver is a numeric type NAME and `member` is one of the per-type
@@ -2560,6 +2569,18 @@ pub(crate) fn method_call_in_subset(
     // form, handled in `expr_in_subset`'s `Field` arm, not here.
     if let Expr::Ident(type_name, _) = receiver {
         if !locals.contains(type_name) && is_json_type_name(type_name) && is_json_variant(method) {
+            return args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+        }
+    }
+    // D-DBDRIVER1: a `DbValue` construction `DbValue.Int(n)` / `.Float(f)` /
+    // `.Text(s)` / `.Bool(b)` — same shape as the JSON construction just above.
+    if let Expr::Ident(type_name, _) = receiver {
+        if !locals.contains(type_name)
+            && is_db_value_type_name(type_name)
+            && is_db_value_variant(method)
+        {
             return args
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
@@ -3913,6 +3934,20 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Path", "to_string", 0) => THandleOp::PathToString,
         ("Path", "write_atomic", 1) => THandleOp::PathWriteAtomic,
         ("Path", "walk", 0) => THandleOp::PathWalk,
+        // D-DBDRIVER1: `DbConnection` instance methods.
+        ("DbConnection", "query", 2) => THandleOp::DbQuery,
+        ("DbConnection", "query_one", 2) => THandleOp::DbQueryOne,
+        ("DbConnection", "execute", 2) => THandleOp::DbExecute,
+        ("DbConnection", "begin", 0) => THandleOp::DbBegin,
+        ("DbConnection", "commit", 0) => THandleOp::DbCommit,
+        ("DbConnection", "rollback", 0) => THandleOp::DbRollback,
+        ("DbConnection", "close", 0) => THandleOp::DbClose,
+        // D-DBDRIVER1: `DbValue` accessor methods.
+        ("DbValue", "int", 0) => THandleOp::DbValueInt,
+        ("DbValue", "float", 0) => THandleOp::DbValueFloat,
+        ("DbValue", "text", 0) => THandleOp::DbValueText,
+        ("DbValue", "bool", 0) => THandleOp::DbValueBool,
+        ("DbValue", "is_null", 0) => THandleOp::DbValueIsNull,
         // D-SIMD2 / D-LINALG1 math methods are handled by a dedicated gate + lowering
         // block (user-type-aware via `cx.type_names`), NOT here — `handle_method_op`
         // has no `cx`, and a user struct may share a math name.
@@ -3932,6 +3967,20 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
     let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
         .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink))
+        .or_else(|| {
+            if handle == "DbConnection" {
+                Some(crate::Sema::db_connection_method_return_ty(method))
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if is_db_value_type_name(handle) {
+                Some(crate::Sema::db_value_method_return(method, nargs))
+            } else {
+                None
+            }
+        })
         .or_else(|| {
             if handle == crate::Syntax::TYPE_BIGINT || handle == crate::Syntax::TYPE_DECIMAL {
                 crate::Collections::builtin_method_return(

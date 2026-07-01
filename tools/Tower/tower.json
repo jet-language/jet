@@ -7,14 +7,13 @@
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
-        "epdone:e6",
-        "epoch:e6",
         "dec-group:other",
         "epoch:e8",
-        "board-sidequests",
-        "epoch:e4",
+        "epoch:e6",
+        "epoch:e7",
         "epoch:e5",
-        "epoch:e7"
+        "epoch:e4",
+        "board-sidequests"
       ]
     }
   },
@@ -580,12 +579,24 @@
       "body": "D-DBG3 step 2 (the in-session command surface shipped in c52 over the interpreter). Remaining: a native backend that steps the FULL feature set the interpreter declines (E2203: FFI, tasks, #Unsafe, native std), the D-DBG2 --raw-frames expert view, and editor DAP wiring (VS Code/Zed). The ratified command vocabulary (step/next/continue/finish/break/print/locals/backtrace) is fixed and reused; only the native backend + protocol transport remain.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e7",
-      "phase": "planning",
+      "epoch": "e3",
+      "phase": "done",
       "priority": "P2",
       "plan": "dap-debugger",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-01",
+          "text": "[handoff] lldb added to flake.nix devShells.default.packages (was an ad-hoc nixpkgs fetch for verification only). `nix develop -c which lldb` resolves; tests/debug_native.rs's live-gated case reruns clean (5/5 ok, 1.90s) with no manual PATH workaround. The Open Owner-Q ask below is now resolved — owner said add it."
+        },
+        {
+          "at": "2026-07-01",
+          "text": "[done] Native lldb backend shipped end-to-end and verified against a REAL live lldb (fetched via nixpkgs for this session; not yet in flake.nix devShell — see Open Owner-Q). Codegen: TStmt::LineMarker + emit_bundle_dbg/compile_for_debug emit `// jet:line N` markers gated by cx.debug_linemap (off by default — zero effect on normal builds, golden tests, or the JIT tier; confirmed via full test suite + `cargo test --workspace` diffing). New Source/Debug/{LineMap,Inferior,Native,Dap}.rs. `jet debug` auto-dispatches interpreter vs native via the SAME E2203 boundary scan (needs_native) — one command, one meaning (I8); `--dap` forces native for editor launch; `--raw-frames` (D-DBG2) shows raw Rust file:line. Reuses the exact ratified (jet) vocabulary (D-DBG3) over both backends. Live-lldb verification surfaced and fixed THREE real bugs a docs-only implementation would have shipped broken: (1) lldb never re-prints a bare prompt over a pipe (echoes command instead) — naive prompt-wait hangs forever, fixed with a sentinel-command read loop; (2) a resume command's own stop banner is asynchronous and can lose a race to the NEXT command's reply — fixed by always deriving position from a synchronous follow-up `bt`, never the resume's own text; (3) the debuggee inherits lldb's stdout by default, so a Jet `print()` can tear a control-channel sentinel in half — fixed by redirecting debuggee stdout/stderr to temp files via `settings set target.output/error-path` and draining them into the transcript. Also loads rustc's own Rust pretty-printer (lldb_lookup.py + lldb_commands, same two files rust-lldb loads) so String/&str locals render as `\"text\"` instead of raw allocator internals. Tests: 12 new unit tests (LineMap/Inferior, no lldb needed) + tests/debug_native.rs (5 tests, gated on lldb presence like tests/observe.rs gates on rustc — skips clean without it). New example examples/features/189_debug_native.jet (native-only via `use core.fs`) + golden .out. Full regression pass: cargo build/test workspace-relevant targets (debug, debug_native, golden, observe, cli, tir, decisions, dev/JIT) all green. NOT done: DAP JSON-over-stdio server (Dap.rs) is implemented to the documented wire spec but UNTESTED against a real editor (no VS Code/Zed available here) — verify before wiring into editors/zed or vscode launch configs. gdb/Windows explicitly out of scope (phase 1 = lldb/Linux, per the plan)."
+        },
+        {
+          "at": "2026-07-01",
+          "text": "Pulled back into e3 per owner: IDE tooling is an E3 exit criterion and this closes it (native DAP/lldb backend + editor wiring). e7 tag on 2026-06-30 was a batch sweep, not a deliberate re-exclude."
+        },
         {
           "at": "2026-06-30",
           "text": "Activated into epoch e7 track"
@@ -608,7 +619,8 @@
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-30"
+      "updated": "2026-07-01",
+      "workOrder": 460
     },
     {
       "id": "c146",
@@ -4409,7 +4421,7 @@
       "body": "Ideas.md: keep variable histories for debugging. Related to the debugger; no value-history feature found. New/Reopen.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e6",
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P3",
       "plan": "D-TIMETRAVEL1=C plan: no per-variable history now. Ready action: (1) record Epoch-6 deferral; (2) document manual history workaround and debugger/replay prerequisites; (3) ensure no active implementation card claims time-travel support. No compiler work.",
@@ -4433,7 +4445,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-07-01"
     },
     {
       "id": "c24iyrqk",
@@ -4625,6 +4637,16 @@
       "plan": "Canonical Core library breadth plan. Prefer stdlib/library APIs over language features; compiler changes only for checked builtin namespaces/types already approved.\n\nBuild order:\n1. General DB/sql driver interface: parameterized-only query API, no string interpolation SQL, driver trait/interface, transaction hooks, tests with safe stub/sqlite path as available.\n2. Data formats: finish YAML 1.2 advanced tags/features under core.encoding.yaml; keep JSON/TOML/CSV behavior stable.\n3. Unicode text: opt-in core.text.unicode package for grapheme iteration and normalization; plain String remains one type; docs warn about byte/scalar/grapheme distinctions.\n4. Compression codecs: gzip/zstd/brotli under core.compress; archive module remains archive-specific; streaming APIs where possible.\n5. Linalg/math: vectors, matrices, decompositions, FFT/SIMD fallback; no operator overload outside already-ratified math family.\n\nAcceptance: one example per module with expected output; golden tests; API docs/reference updates; misuse diagnostics where API is safety-critical (SQL parameters, invalid Unicode form, malformed compressed stream); pay-for-what-you-call codegen remains R10.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-01",
+          "by": "agent",
+          "text": "Items 1 and 4 shipped for real, re-closing done. (1) D-DBDRIVER1: core.db reworked to `DbConnection`/`DbValue`/`DbError` types, `.query/.query_one/.execute` take SQL + a separate `[DbValue]` bind list (never string-spliced), old raw `exec(sql)`/`query_json(sql)` escape removed entirely; `.begin/.commit/.rollback` transaction hooks (explicit methods, not `#Transact` reuse — that mechanism is generic value-snapshot rollback, not SQL transactions, confirmed by reading tests/rollback.rs; wiring it in would need new unratified semantics). Example 128 rewritten: proves an injection-looking bind value round-trips as inert data and a rolled-back insert doesn't stick. (4) D-CODECS1: new core.compress.gzip/core.compress.zstd modules (own FFI-bridge plumbing, Compress.rs), decompress is fallible (Result), unlike core.archive's silent-empty-on-corrupt gzip. Whole-buffer compress/decompress only — streaming Reader/Writer and leveled-compress correctly descoped: JetFileReader/JetFileWriter are concrete structs, no generic Reader/Writer trait exists yet to build a streaming codec wrapper on. Examples 187/188. Full `nix develop -c cargo test` green (all binaries, 0 failed), zero new Cargo.toml deps in any crates/* crate (rusqlite/flate2/zstd stay FFI.rs string literals per I6). syntax-decisions.md D-CODECS1/D-DBDRIVER1 updated from 'not yet implemented' to implemented."
+        },
+        {
+          "at": "2026-07-01",
+          "by": "agent",
+          "text": "Reverted done->ready: verification found items 1 and 4 unshipped despite done flag. (1) core.db is raw-SQL exec/query_json only, no DbParam/Driver/Connection/Row/Rows per ratified D-DBDRIVER1 — safety-relevant miss (plan explicitly bars a raw execute(sql) escape). (4) core.compress does not exist; only jet_archive_gzip_* lives inside core.archive, no zstd, no brotli — matches syntax-decisions.md D-CODECS1 note 'Ratified — not yet implemented'. Items 2 (YAML unverified but plausible), 3 (unicode, verified correct via example 186), 5 (linalg — decompositions/FFT correctly descoped to 'later' per tools/Tower/docs/sidequests/math-linalg-simd.md, not a gap) are fine. Re-opening to build items 1 and 4 for real."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -6480,18 +6502,22 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-01",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-06-30",
           "text": "Carded from Tower Ideas binder. Full decision ballot attached with examples, cross-language comparison, and adversarial pass."
         }
       ],
       "created": "2026-06-30T23:13:57.169Z",
-      "updated": "2026-06-30"
+      "updated": "2026-07-01"
     },
     {
       "id": "c7uninitsentinel",
@@ -14031,7 +14057,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-01"
     },
     {
       "id": "D-UNINIT-SENTINEL1",
