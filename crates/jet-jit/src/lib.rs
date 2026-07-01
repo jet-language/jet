@@ -8,8 +8,10 @@
 //! compound assign, &&/|| short-circuit.
 //! M4: tasks/channels/spawn via scheduler host shims (D-ASYNCRT1=A).
 
-mod collections;
-mod concurrency;
+#![allow(non_snake_case)]
+
+mod Collections;
+mod Concurrency;
 
 use jet_codegen::scheduler::{JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl};
 // I6: Cranelift crates live here, not in the compiler `jet` crate (`Source/`).
@@ -68,7 +70,7 @@ struct ResidentModule {
 }
 
 fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
-    concurrency::with_runtime_mut(f);
+    Concurrency::with_runtime_mut(f);
 }
 
 fn render_float(v: f64) -> String {
@@ -157,7 +159,7 @@ extern "C" fn jet_jit_print_str(id: i64) {
 }
 
 extern "C" fn jet_jit_str_begin() -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let id = rt.strings.len() as i64;
         rt.strings.push(String::new());
         id
@@ -222,7 +224,7 @@ extern "C" fn jet_jit_str_push_str(buf_id: i64, str_id: i64) {
 }
 
 extern "C" fn jet_jit_str_eq(a: i64, b: i64) -> i8 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         match (
             rt.strings.get(a as usize).map(String::as_str),
             rt.strings.get(b as usize).map(String::as_str),
@@ -234,7 +236,7 @@ extern "C" fn jet_jit_str_eq(a: i64, b: i64) -> i8 {
 }
 
 extern "C" fn jet_jit_struct_new_f64(n: i64) -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let id = rt.structs_f64.len() as i64;
         rt.structs_f64.push(vec![0.0; n as usize]);
         id
@@ -242,7 +244,7 @@ extern "C" fn jet_jit_struct_new_f64(n: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_struct_get_f64(h: i64, idx: i64) -> f64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         rt.structs_f64
             .get(h as usize)
             .and_then(|s| s.get(idx as usize).copied())
@@ -281,8 +283,8 @@ struct HostFns {
     struct_new_f64: FuncId,
     struct_get_f64: FuncId,
     struct_set_f64: FuncId,
-    coll: collections::CollectionsHostFns,
-    conc: concurrency::ConcurrencyHostFns,
+    coll: Collections::CollectionsHostFns,
+    conc: Concurrency::ConcurrencyHostFns,
 }
 
 fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -308,19 +310,19 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_struct_new_f64", jet_jit_struct_new_f64 as *const u8);
     builder.symbol("jet_jit_struct_get_f64", jet_jit_struct_get_f64 as *const u8);
     builder.symbol("jet_jit_struct_set_f64", jet_jit_struct_set_f64 as *const u8);
-    collections::register_collections_symbols(&mut builder);
-    concurrency::register_concurrency_symbols(&mut builder);
+    Collections::register_collections_symbols(&mut builder);
+    Concurrency::register_concurrency_symbols(&mut builder);
     let mut module = JITModule::new(builder);
-    let coll = collections::declare_collections_host_fns(&mut module)?;
-    let conc = concurrency::declare_concurrency_host_fns(&mut module)?;
+    let coll = Collections::declare_collections_host_fns(&mut module)?;
+    let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let host = declare_host_fns(&mut module, coll, conc)?;
     Ok((module, host))
 }
 
 fn declare_host_fns(
     module: &mut JITModule,
-    coll: collections::CollectionsHostFns,
-    conc: concurrency::ConcurrencyHostFns,
+    coll: Collections::CollectionsHostFns,
+    conc: Concurrency::ConcurrencyHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -2943,7 +2945,7 @@ fn fresh_runtime() -> JitRuntime {
 fn resident_teardown() {
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = None);
-    concurrency::set_active_runtime(None);
+    Concurrency::set_active_runtime(None);
 }
 
 fn ensure_resident_module(program: &JitProgram) -> Result<(), String> {
@@ -2999,11 +3001,11 @@ fn resident_invoke() -> Result<RunOutcome, String> {
         runtime.stdout.clear();
         runtime.stderr.clear();
         let ptr: *mut JitRuntime = runtime;
-        concurrency::set_active_runtime(Some(ptr));
+        Concurrency::set_active_runtime(Some(ptr));
         let entry: extern "C" fn() = unsafe { std::mem::transmute(code) };
         entry();
         jet_codegen::scheduler::jet_scheduler_drain();
-        concurrency::set_active_runtime(None);
+        Concurrency::set_active_runtime(None);
         Ok(RunOutcome::Ran {
             stdout: runtime.stdout.clone(),
             stderr: runtime.stderr.clone(),

@@ -1,9 +1,9 @@
 //! M5: list host shims for the Cranelift JIT (`Vec<i64>` handles).
 
-use super::concurrency;
+use super::Concurrency;
 
 fn trap_index(line: u32) -> ! {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         rt.stderr
             .push_str("panic: index out of bounds: the index is outside the list\n");
         rt.stderr
@@ -13,7 +13,7 @@ fn trap_index(line: u32) -> ! {
 }
 
 extern "C" fn jet_jit_list_new() -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let id = rt.lists.len() as i64;
         rt.lists.push(Vec::new());
         id
@@ -21,7 +21,7 @@ extern "C" fn jet_jit_list_new() -> i64 {
 }
 
 extern "C" fn jet_jit_list_push(list: i64, v: i64) {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         rt.lists
             .get_mut(list as usize)
             .expect("jit list push: bad handle")
@@ -30,7 +30,7 @@ extern "C" fn jet_jit_list_push(list: i64, v: i64) {
 }
 
 extern "C" fn jet_jit_list_len(list: i64) -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         rt.lists
             .get(list as usize)
             .expect("jit list len: bad handle")
@@ -39,7 +39,7 @@ extern "C" fn jet_jit_list_len(list: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get(list as usize)
@@ -57,7 +57,7 @@ extern "C" fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
 
 /// `0` = absent; otherwise `value + 1`.
 extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get(list as usize)
@@ -70,7 +70,7 @@ extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get_mut(list as usize)
@@ -83,7 +83,7 @@ extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
 }
 
 extern "C" fn jet_jit_list_sort(list: i64) {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         rt.lists
             .get_mut(list as usize)
             .expect("jit list sort: bad handle")
@@ -92,7 +92,7 @@ extern "C" fn jet_jit_list_sort(list: i64) {
 }
 
 extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, line: u32) -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get(list as usize)
@@ -112,7 +112,7 @@ extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, line: u32) -> 
 }
 
 extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
-    concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get(list as usize)
