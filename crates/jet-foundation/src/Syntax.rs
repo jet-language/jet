@@ -238,6 +238,17 @@ pub const WEB_BUCKET_WASM: &str = "Wasm";
 /// D-WEBKIND1=A (c123): `jet build --target=web` Jet backend target (not a rustc triple).
 pub const BUILD_TARGET_WEB: &str = "web";
 
+/// D-WEBDEFAULT1 (open, c134): `#Target(Web)` argument spelling — a file-level
+/// marker distinct from the `Wasm`/`Js` partition-ceiling values above (same
+/// `#Target(...)` marker, different axis: "build me for the web backend by
+/// default" rather than "cap this file's partition ceiling").
+pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
+
+/// D-HTMLPAIR1 (open, c134): `#Html("path.html")` — an explicit, file-level
+/// declaration of this program's companion host page for `--target=web`
+/// builds, replacing the silent `<stem>.html` filename convention.
+pub const ATTR_HTML: &str = "Html";
+
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
 pub const FOREIGN_UNSAFE: &str = "unsafe";
@@ -1437,6 +1448,10 @@ pub const JTOML_KEY_VERSION: &str = "version";
 /// Inferred form (type from context): `.{ field: val }` — leading dot with no type name.
 /// Both are parser-level adjacency of `.` and `{`; the lexer emits no dedicated token.
 /// The old dotless `Type { … }` form is teaching error E0320, auto-fixed by `jet fmt`.
+/// D-UITREE1 (ratified 2026-06-30): the same sigil also constructs a named-payload
+/// enum variant — `.Variant.{ field: val }` / `Type.Variant.{ field: val }` (S30
+/// multi-field variants). No new token; `enum_lit_named_fields` in
+/// `Parser/Expressions.rs` reuses this `.{` adjacency after a leading-dot variant name.
 pub const OP_NAMED_CTOR: &str = ".{";
 
 /// S75 (ratified 2026-06-16): the fan-out operator — `f.[a, b, c]` desugars to
@@ -1813,6 +1828,70 @@ pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
 /// having it here prevents silent divergence.
 pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "read_all_input"];
 
+// ── Marker family + syntax wave (ratified 2026-07-01) ───────────────────────
+//
+// D-MARKER-FAMILY1 (B): two-plane sigil law. `@` precedes a declaration and
+// states a checkable contract about it; `#` instructs the compiler (modes,
+// regions, effects, compile-time values) and may appear in type/expression
+// position where `@` never does; `$` stays splice-only (D-CTMARKER1).
+// NO existing `#` marker is renamed yet: the exact move list is the open
+// follow-up D-MARKERMOVE1, and the `@` plane's casing is the open follow-up
+// D-CONTRACTCASE1 (D-CASING1's PascalCase law is textually scoped to `#`).
+// Constants below use each ballot's as-ratified spelling; expect a mechanical
+// casing pass once D-CONTRACTCASE1 lands.
+
+/// D-MARKER-FAMILY1: the contract-plane prefix — sibling of `ATTR_PREFIX` ("#").
+/// `@` markers attach only to declarations (fn, type, field), never to
+/// expressions or type positions. Loop-label suffix `@` (D-LOOPLABEL2) is a
+/// different grammatical slot and unaffected.
+pub const CONTRACT_PREFIX: &str = "@"; // D-MARKER-FAMILY1
+
+/// D-PREPOST1: precondition contract on a function signature —
+/// `@pre(cond, "msg")`. The condition is a pure expression (same checker as
+/// `#Pure`). Checked in every build by default; per-module build-policy strip
+/// is the explicit opt-out. Spelling pending D-CONTRACTCASE1.
+pub const CONTRACT_PRE: &str = "pre"; // D-PREPOST1
+/// D-PREPOST1: postcondition contract — `@post(cond, "msg")`; `result` names
+/// the return value inside `cond`. Spelling pending D-CONTRACTCASE1.
+pub const CONTRACT_POST: &str = "post"; // D-PREPOST1
+
+/// D-PERSIST1: dev-tier contract on a module-level binding — the value
+/// survives `jet dev` hot reloads (identity = module path + binding name).
+/// Inert in release builds. Spelling pending D-CONTRACTCASE1.
+pub const CONTRACT_PERSIST: &str = "persist"; // D-PERSIST1
+
+/// D-CAPBUNDLE1: capability bundles on a nominal distinct type — each
+/// re-exposes a curated slice of the base type's operations while keeping
+/// nominal identity. Stackable. Relationship to `#Numeric` (ATTR_NUMERIC,
+/// D-DIST3) is deliberately unresolved — rides D-MARKERMOVE1. Spellings
+/// pending D-CONTRACTCASE1.
+pub const CONTRACT_BUNDLE_NUMERIC: &str = "numeric"; // D-CAPBUNDLE1
+pub const CONTRACT_BUNDLE_COMPARABLE: &str = "comparable"; // D-CAPBUNDLE1
+pub const CONTRACT_BUNDLE_PRINTABLE: &str = "printable"; // D-CAPBUNDLE1
+pub const CONTRACT_BUNDLE_CODABLE_AS_BASE: &str = "codable_as_base"; // D-CAPBUNDLE1
+
+// D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
+// keyword — the lexer resolves a literal's identifier suffix against
+// #UnitFamily members in scope (ATTR_UNIT_FAMILY, D-QUAL3). One fixed rule:
+/// D-UNITLIT1: a literal suffix shaped `e` + digits is reserved for float
+/// exponent notation (`1e5`) and may never resolve as a unit name.
+pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
+
+// D-TRAILBLOCK1: no new token — `{` directly after a call's `)` parses as the
+// trailing zero-parameter lambda argument. Parser-position rule, not lexical.
+// D-DESTRUCT1: no new token — reuses the D-DOTCTOR1 `.{` sigil in pattern
+// position and `..` (OP_RANGE) as the now-mandatory partial-pattern rest
+// marker.
+// D-CHAINCMP1: no new token — same-direction `<`/`<=`/`>`/`>=` chains are a
+// parser/sema desugaring (`0 <= sev < 10` → `0 <= sev && sev < 10`, middle
+// operand evaluated once).
+// D-CLIFLAG1: the struct-level CLI-derive marker and field-level doc marker
+// spellings ride D-CONTRACTCASE1/D-MARKERMOVE1 — constants land with them.
+// D-EFFBUDGET1: `effects`/`allow`/`deny`/`grants` are pkg.jet manifest keys
+// (Jetpack/PackageManifest), not language tokens; effect names reuse D-EFF4.
+// D-ANY-JAI1: reuses D-VARIADIC1 `...T` + S45 `<T: A + B>` bounds; no token.
+// D-UFCS1 (B), D-POINTERCHAIN1 (A), D-ERRCTX1 (D): no typeable surface.
+
 // ── Module name resolution helpers ───────────────────────────────────────────
 //
 // These are pure string functions used by both Sema and Codegen to identify
@@ -1919,6 +1998,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-NETDEP1=A / D-HTTPLIB2=B (ratified 2026-06-26): full HTTP library.
     "core.http.client",
     "core.http.server",
+    // c-devserver (owner-directed 2026-07-01): a `.jet` file's own `jet dev`
+    // behavior — a configurable server value (`for_app`/`.html`/`.port`/`.serve`).
+    "core.devserver",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {
