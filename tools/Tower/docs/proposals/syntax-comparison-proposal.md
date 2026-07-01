@@ -1693,7 +1693,7 @@ remains rejected; imported functions get Jet signatures and Jet diagnostics.
 ```jet
 // CHANGE: stop emitting generated code as raw strings.
 // CURRENT:
-derive Label for T {
+derive T.Label {
     info #= T.reflect()
     name #= info.name
     emit("impl $name { fn label(self) -> String { return \"$name\" } }")

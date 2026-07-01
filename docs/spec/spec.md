@@ -255,7 +255,7 @@ fn bump(c: Counter, by: Int) {
 }
 
 fn main() {
-    c := Counter { value: 0 }
+    c := Counter.{ value: 0 }
     bump(~c, 5)    // ~ still required at the call site
     bump(~c, 3)
     print(value_of(c))
@@ -279,7 +279,7 @@ struct Player { hp: Int }
 impl Player { fn damage(~self, n: Int) { self.hp =  self.hp - n } }
 
 fn hurt(p: Player) { p.damage(5) }    // p is bare; body calls ~self → infers ~Player
-fn main() { x := Player { hp: 100 }; hurt(~x); print(x.hp) }
+fn main() { x := Player.{ hp: 100 }; hurt(~x); print(x.hp) }
 ```
 
 ### Optional composition
@@ -306,7 +306,7 @@ Access capabilities use sigils only: bare `T`, `~T`, `^T`, and `&T`.
 ## M3 — data & methods (done)
 
 Structs and enums carry fields; methods attach behavior (S27). Ratified
-surface (Group 2): struct literals **`Type{f: v}`** (S29; flush, S29-FLUSH); enums with
+surface (Group 2): struct literals **`Type.{f: v}`** (S29; flush, S29-FLUSH; dot-prefixed by D-DOTCTOR2); enums with
 **`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
 **`T?`** with **`value(v)`** / **`null`** (S32); generic args
 **`Type<Args>`** (S33). `null` is only legal for `T?`, never plain `T`.
@@ -322,7 +322,7 @@ struct Circle {
 
 impl Circle {
     fn unit() -> Circle {
-        return Circle { radius: 1.0 };
+        return Circle.{ radius: 1.0 };
     }
 }
 ```
@@ -330,7 +330,7 @@ impl Circle {
 - **`self`** is the receiver; prefix the type sigil (`~self`, `^self`, `&self`) like any parameter (D-CAP7).
 - **Self-mutation (D-MUTSELF1):** inside a **`~self`** method the receiver may be
   changed in place — assign a field (`self.field = v`), update one (`self.field += v`,
-  S17), or reassign the whole receiver (`self = New{…}`). No new syntax (a `~`
+  S17), or reassign the whole receiver (`self = New.{…}`). No new syntax (a `~`
   parameter is already a valid assignment LHS). The same write in a non-`~self`
   method (a shared-read receiver) is **E0205**, pointed at the assignment with a "write
   the receiver as `~self`" fix. Calling a `~self` method needs a changeable
@@ -845,190 +845,15 @@ E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 
 Full user-facing reference: **docs/reference/core-library.md**.
 
-M10 standard library modules are compiler-known namespaces backed by Rust std
-helpers in the generated prelude. Every first-party module is spelled `core.<name>`
-(D-CORENS1/D-CORENS-CANON1):
-
-```
-use core.fs as fs;
-use core.encoding.json as json;
-```
-
-Implemented modules: `core.fs`, `core.io`, `core.env`, `core.process`,
-`core.math`, `core.random`, `core.time`, `core.encoding.json`, and `core.args`. Unknown core modules are
-**E1001**; local modules/import aliases may not shadow reserved first-party
-roots (`core`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
-**E1002**. Selective imports are rejected; keep qualified access through an
-alias.
-
-Fallible core functions return `T ? E` and must be handled with `?`,
-`??`, or pattern tests like any M4 result. File APIs use whole-file helpers
-only; file handles and streaming are out of scope. Paths are `String` in M10.
-Binary APIs use `U8` and `[U8]`. Unknown items in a core module are **E1004**
-with a did-you-mean suggestion when possible.
-
-#### Directory listing — `fs.list_dir` (D-LSDIR1=A + C)
-
-`fs.list_dir(path) -> [DirEntry] ? IOError` returns one `DirEntry` value per
-entry in the directory, sorted by name. `DirEntry` has three readable fields:
-
-| Field    | Type   | Meaning                            |
-|----------|--------|------------------------------------|
-| `name`   | String | bare filename (no directory prefix) |
-| `path`   | String | full path (portable, OS-native sep) |
-| `is_dir` | Bool   | true when the entry is a directory  |
-
-The old bare-name return (`[String]`) is replaced. Any code that was
-building a full path manually (`"{dir}/{entry}"`) should switch to `entry.path`
-directly; use `entry.name` for the bare filename check (e.g. `entry.name.ends_with(".txt")`).
-
-`path.join(dir, name) -> String` (D-LSDIR1 option C) constructs a portable
-OS-native path from two pieces, for cases where experts need to compose paths
-independently of `DirEntry`. `core.path` also provides `.parent()`, `.extension()`,
-and `.normalize()`. Example: `examples/features/87_dir_entry.jet`.
-
-#### `core.args` — declarative CLI parsing (D-ARGS1, ratified 2026-06-22)
-
-```jet
-use core.args as args
-spec #= args.spec()
-    .flag("verbose", "print extra detail")
-    .option("output", "write result to FILE", "FILE")
-    .positional("input", "file to read")
-parsed #= spec.parse(io.args()) ?? panic(spec.help())
-```
-
-`args.spec()` → `ArgsSpec` (builder). Each builder method consumes `ArgsSpec`
-and returns a new one:
-
-| Method | Signature | Registers |
-|--------|-----------|-----------|
-| `.flag(name, help)` | `(String, String) → ArgsSpec` | `--name` boolean flag |
-| `.option(name, help, meta)` | `(String, String, String) → ArgsSpec` | `--name VALUE` string option |
-| `.positional(name, help)` | `(String, String) → ArgsSpec` | required positional |
-| `.help()` | `() → String` | returns formatted help text |
-| `.parse(argv)` | `([String]) → ParsedArgs ? String` | parses `io.args()` against the spec |
-
-`ParsedArgs` query methods:
-
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `.flag(name)` | `(String) → Bool` | true if `--name` was passed |
-| `.option(name)` | `(String) → String?` | value of `--name VALUE`, or `None` |
-| `.positional(idx)` | `(Int) → String?` | the nth positional (0-based), or `None` |
-
-`--help` is not wired automatically; add a `.flag("help", "…")` and check
-`parsed.flag("help")` explicitly. `.parse` returns `ParsedArgs ? String`
-where the error string contains the parse message (unknown flag, missing positional, etc.).
-Wrong argument counts on builder/query methods are **E1301–E1304**.
-
-#### Sized numeric types (D-SG9/S42)
-
-`Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =
-`F64`). The explicit-width menu — `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is
-available for expert and FFI/binary work. `I64`/`F64` are aliases for the
-defaults and interchange with `Int`/`Float` freely; every other width is its
-own distinct type. Rules:
-
-- A bare integer literal is `Int` by default, but **adopts the width of the
-  slot it lands in** — a binding/parameter/return annotation or sized
-  arithmetic — and is range-checked at compile time. A literal that doesn't fit
-  the width is **E1003** (e.g. `b@ I8=  200`). `-128` fits `I8` because the
-  negation is folded before the check; negating an unsigned type is **E0109**.
-- Widths never mix implicitly: arithmetic, comparison, and assignment require
-  the same width on both sides (**E0109**/**E0112**/**E0108**), with no silent
-  narrowing or widening. Same-width arithmetic keeps that width.
-- A float literal is `Float` by default and adopts `F32` where that width is
-  expected.
-
-The sized types erase to their Rust equivalents (`u8`…`i64`, `f32`) at codegen,
-so they cross the C ABI by value (S59).
-
-**Width conversions (D-NUMOPS1)** are named methods, never implicit:
-`.to_i8() … .to_i64()/.to_int()`, `.to_u8() … .to_u64()`, `.to_f32()`,
-`.to_f64()/.to_float()`. A conversion whose target range fully contains the
-source range is **widening** and infallible (returns the target type); any
-other integer conversion is **narrowing** and fallible (returns `T ? String`,
-handled with `?`/`??`) — there is no silent truncation. Int→float and
-float→float conversions are infallible (a float→int via `.to_int()` truncates).
-
-**Numeric surface (D-NUMOPS1).** Per-type bounds `TYPE.MIN`/`TYPE.MAX`
-(`U8.MAX` = 255, `I32.MIN`, `Int.MAX`); float constants `Float.INFINITY`/`NAN`/
-`EPSILON` (also on `F32`); float predicates `.is_nan()`/`.is_infinite()`/
-`.is_finite()`; integer bit queries `.count_ones()`/`.count_zeros()`/
-`.leading_zeros()`/`.trailing_zeros()`.
-
-**Overflow is checked by default (D-NUMOPS1).** Plain integer `+`/`-`/`*`/`/`
-**traps** at runtime (exit 70 with the source location) when the result leaves
-the type's range, rather than wrapping silently — a corruption becomes a caught
-bug. This holds in every build (debug and release). Floats and `#Numeric`
-distinct types keep the native operators.
-
-An expert opts a **single** operation out at the use site:
-`wrapping(a + b)` wraps around, `saturating(a + b)` clamps to the type's range,
-and `checked(a + b) -> T?` returns `null` on overflow (handle with `?`/`??`).
-Each takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005**.
-
-Receiver additions: `String.bytes() -> [U8]`,
-`String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and
-`b.to_int()`. String parsing (c97/D-STRPARSE1): `String.to_int() -> Int ?
-ParseError` is a fallible integer parse (same result `Int.parse(s)` returns,
-handled with `?`/`??`), and `String.lines() -> [String]` splits text into its
-lines (recognizing `\n` and `\r\n`, with no trailing empty line). Both
-`.to_int()` / `.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
-evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
-`?` / `??` propagate or unwrap them in pure comptime expressions
-(examples/features/86_comptime_parse.jet). Time stays
-unix milliseconds (`time.now()`); random is
-deterministic after `random.seed(n)`.
-
-**Serialization (`core.encoding`, D-ENC1 / D-SERDE).** One library, one data model,
-every format an arm. A `#[Codable]` type serializes once and gets JSON, CSV, TOML,
-and YAML for free; each format exposes the same verbs: `parse` (text → dynamic
-value), `decode<T>` (text → typed value), and `to_string` / `to_string_pretty`
-(value → text). Every format's untyped `parse` returns the one rich dynamic value
-**`Data`** (D-ENC-DYN1=A+) — the user-facing face of the internal `DataTree`, with
-variants `.Null` / `.Bool` / `.Int` / `.Float` / `.Text` / `.Array` / `.Object`.
-`Json`, `Toml`, `Yaml`, and `Csv` are type aliases over `Data` (so `json.parse` is
-typed `Json`, `toml.parse` is typed `Toml`, …), but it is one structure with one
-walker and one accessor set. Integral numbers decode to `.Int`, fractional to
-`.Float`; objects keep their fields. The four adapters are full serde equivalents:
-
-Jet has no general `Any` top type (D-DYNAMIC-TYPE1=A). Use the precise shape for
-the job: an enum for a closed set of variants, generics or traits for
-abstraction, `T?` for absence, and `Data` for parsed dynamic input. Writing
-`Any` in type position is **E0350**.
-
-- **JSON** — full RFC 8259 (D-PARSE-1): exponents and the strict number grammar,
-  every escape including `\uXXXX` with surrogate-pair combining; rejects invalid
-  escapes, lone surrogates, and raw control characters with a line + message.
-- **CSV** — header-mapped typed rows (`decode<T>` maps columns to fields by name).
-- **TOML** — full TOML 1.0: `[table]` headers, `[[array-of-tables]]`, dotted keys,
-  inline tables, strings (every escape + multi-line), integers in every base,
-  floats incl. `inf`/`nan`, booleans, datetimes, arrays.
-- **YAML** — full YAML 1.2 core (D-ENC-YAML1=A): block + flow maps/sequences,
-  core-schema typed scalars, single/double-quoted + plain + block scalars
-  (`|`/`>` with chomping), comments, `---`/`...` document markers, and
-  anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred
-  to a separate card (full YAML 1.2, c153).
-
-All parsers are std-only (I6). `json.decode` additionally has a lenient mode
-(D-JSON1-decode + D-JSON3=B): it coerces string values that look like numbers or
-booleans (`"8080"` → `8080`, `"true"` → `true`) and emits one structured log line
-per coercion to stderr naming the field and the from→to types.
-
-Codegen invariant: importing core modules is free; sema records reachable core
-calls and codegen emits only those helpers (R10).
-
-Program arguments: `jet run file.jet -- arg1 arg2` forwards everything after `--`
-verbatim to the program; `io.args()` sees them as argv[1..]. An unknown `--`-flag
-before `--` is an error (E2102) that teaches the `--` form (D-CLI1=A). Plain
-positional words with no separator still work (`jet run greet.jet Ada`). `jet test`
-also accepts `--`; `jet build` does not (no running process).
-
-Examples: `examples/features/29_files.jet`, `examples/features/30_json.jet`,
-`examples/features/31_cli.jet`, `examples/features/64_cli_args.jet`. UI: `tests/ui/core_*`,
-`tests/ui/u8_out_of_range.jet`, and M10 teaching errors **E0037**–**E0039**.
+Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
+generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
+math, random, time, args, sized numeric types with checked-by-default
+overflow, and unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
+one `Data` value, plus `#[Codable]` derive). Every fallible call returns
+`T ? E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
+module is free (R10) — codegen only emits the helpers a program actually
+calls. See core-library.md for the full module list, signatures, and
+examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
 
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
 
@@ -1145,7 +970,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `System` (whole machine), `image` → `Image` (disk image). Any other namespace
   is **E0960** (parse).
 - **`env.<name>:` values reuse the ordinary expression parser** — typically a
-  struct literal (`Env { packages: […], prompt: "…" }`), so lists and strings
+  struct literal (`Env.{ packages: […], prompt: "…" }`), so lists and strings
   work with no new grammar.
 - **`system.<name>:` and `image.<name>:` values use dedicated typed parsers**
   (U11/U13/U14) — the `options` list (`net.hostName: laptop`), the typed
@@ -1159,17 +984,17 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
 ### `System` / `Service` / `Image` (U11–U14, U18; modeval field-check + capture)
 
 ```ebnf
-system_lit  = [ "System" ] "{" system_field { "," system_field } [ "," ] "}" ;
+system_lit  = [ "System" "." ] "{" system_field { "," system_field } [ "," ] "}" ;
 system_field = "target"   ":" platform
              | "packages" ":" list
              | "services" ":" service_map
              | "options"  ":" option_list ;
 platform    = ident "." ident ;                    (* U13: linux.x64 / linux.arm64 *)
 service_map = "{" { ident ":" service_rec [ "," ] } "}" ;
-service_rec = [ "Service" ] "{" { ident ":" expr [ "," ] } "}" ;
+service_rec = [ "Service" "." ] "{" { ident ":" expr [ "," ] } "}" ;
 option_list = "[" { dotted_key ":" expr [ "," ] } "]" ;
 dotted_key  = ident { "." ident } ;
-image_lit   = [ "Image" ] "{" image_field { "," image_field } [ "," ] "}" ;
+image_lit   = [ "Image" "." ] "{" image_field { "," image_field } [ "," ] "}" ;
 image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S84 name *)
             | "format" ":" ident                   (* U14: iso | qcow | raw, default iso *)
             | "target" ":" platform ;              (* U14: cross-compile only *)
@@ -1197,7 +1022,8 @@ image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S84 name 
 - **U18 — inferred constructors.** Under a typed namespace (`system.<name>:`,
   `image.<name>:`, `env.<name>:`) or a typed field (`services:` holds `Service`s)
   the type name is optional: a bare `{ … }` elaborates to it. The explicit
-  `System { … }` / `Image { … }` / `Service { … }` / `Env { … }` form stays legal.
+  `System.{ … }` / `Image.{ … }` / `Service.{ … }` / `Env.{ … }` form stays legal
+  (dot-prefixed by D-DOTCTOR2 — `System { … }` etc. without the dot is E0320).
 
 The evaluator captures each `system.<name>:` into a `SystemPlan` and each
 `image.<name>:` into an `ImagePlan` (`Source/Jetpack/ModuleEval.rs`), carried on

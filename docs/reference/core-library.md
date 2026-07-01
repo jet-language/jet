@@ -69,7 +69,14 @@ use "std/fs"               // quoted paths are for .jet files only
 
 If you name a local file or folder `core`, `jet`, `http`, `regex`, `csv`, `toml`,
 `crypto`, or `archive`, the compiler rejects it — those names are reserved for
-first-party packages.
+first-party packages (**E1002**). An unknown core module is **E1001**;
+selective imports (`use core.fs.{read}`) are rejected — keep qualified access
+through an alias. An unknown item in a known core module is **E1004**, with a
+did-you-mean suggestion when possible.
+
+Fallible core functions return `T ? E` and must be handled with `?`, `??`, or
+a pattern test like any other Jet result. File APIs are whole-file only (no
+streaming handles); paths are plain `String`; binary APIs use `U8` and `[U8]`.
 
 ---
 
@@ -119,8 +126,8 @@ fn main() {
     print(fs.read(path) ?? return)        // "hello\nworld\n"
     print(fs.exists(path))                // true
     print(fs.is_dir("/tmp"))              // true
-    names #= fs.list_dir("/tmp") ?? return
-    print(names.len())
+    entries #= fs.list_dir("/tmp") ?? return
+    print(entries.len())
 }
 ```
 
@@ -132,13 +139,27 @@ fn main() {
 | `append(path, text)` | `() ? IOError` | Append text to a file |
 | `exists(path)` | `Bool` | Whether the path exists |
 | `remove(path)` | `() ? IOError` | Delete a file |
-| `list_dir(path)` | `[String] ? IOError` | Names in a directory |
+| `list_dir(path)` | `[DirEntry] ? IOError` | One entry per directory member, sorted by name (D-LSDIR1) |
 | `create_dir(path)` | `() ? IOError` | Create a directory |
 | `is_dir(path)` | `Bool` | Whether the path is a directory |
 | `copy(from, to)` | `() ? IOError` | Copy a file |
 | `rename(from, to)` | `() ? IOError` | Rename or move a file |
 
 **`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
+
+**`DirEntry`** (D-LSDIR1) has three readable fields:
+
+| Field    | Type   | Meaning                             |
+|----------|--------|--------------------------------------|
+| `name`   | String | bare filename (no directory prefix)  |
+| `path`   | String | full path (portable, OS-native sep)  |
+| `is_dir` | Bool   | true when the entry is a directory   |
+
+Use `entry.path` for a ready-to-use path (don't build `"{dir}/{entry}"` by
+hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
+`core.path` provides `path.join(dir, name) -> String` plus `.parent()`,
+`.extension()`, and `.normalize()` for composing paths independently of
+`DirEntry`. Example: `examples/features/87_dir_entry.jet`.
 
 ---
 
@@ -169,6 +190,58 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
 
 `print` stays in the core prelude (no `use` needed). Use `io.eprint` for stderr.
+
+`jet run file.jet -- arg1 arg2` forwards everything after `--` verbatim as
+program arguments (`io.args()` sees them, argv[1..]); plain positional words
+with no separator also work (`jet run greet.jet Ada`). An unknown `--`-flag
+written before the `--` is **E2102**, which teaches the `--` form (D-CLI1).
+`jet test` also accepts `--`; `jet build` does not (no running process).
+
+---
+
+### `core.args` — declarative CLI parsing (D-ARGS1)
+
+Build a flag/option/positional spec once and parse `io.args()` against it,
+instead of hand-walking `[String]`:
+
+```jet
+use core.args as args
+
+fn main() {
+    spec #= args.spec()
+        .flag("verbose", "print extra detail")
+        .option("output", "write result to FILE", "FILE")
+        .positional("input", "file to read")
+    parsed #= spec.parse(io.args()) ?? panic(spec.help())
+    print(parsed.flag("verbose"))
+    print(parsed.option("output") ?? "(default)")
+}
+```
+
+`args.spec()` returns an `ArgsSpec` builder; each method consumes it and
+returns a new one:
+
+| Method | Signature | Registers |
+|--------|-----------|-----------|
+| `.flag(name, help)` | `(String, String) → ArgsSpec` | `--name` boolean flag |
+| `.option(name, help, meta)` | `(String, String, String) → ArgsSpec` | `--name VALUE` string option |
+| `.positional(name, help)` | `(String, String) → ArgsSpec` | required positional |
+| `.help()` | `() → String` | formatted help text |
+| `.parse(argv)` | `([String]) → ParsedArgs ? String` | parses `argv` against the spec |
+
+`ParsedArgs` query methods:
+
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `.flag(name)` | `(String) → Bool` | true if `--name` was passed |
+| `.option(name)` | `(String) → String?` | value of `--name VALUE`, or `null` |
+| `.positional(idx)` | `(Int) → String?` | the nth positional (0-based), or `null` |
+
+`--help` is not wired automatically — add a `.flag("help", "…")` and check
+`parsed.flag("help")` yourself. `.parse` returns `ParsedArgs ? String`, where
+the error string carries the parse message (unknown flag, missing positional,
+…). Wrong argument counts on builder/query methods are **E1301**–**E1304**.
+Example: `examples/features/64_cli_args.jet`.
 
 ---
 
@@ -469,7 +542,7 @@ fn main() {
     print(encoding.json.to_string(data))           // compact one line
     print(encoding.json.to_string_pretty(data))    // indented
 
-    if data == Object(entries) {
+    if data == .Object(entries) {
         if entries.contains("name") {
             print(entries["name"])
         }
@@ -477,14 +550,19 @@ fn main() {
 }
 ```
 
-**`core.encoding.json`** — dynamic JSON; you walk a `JSON` enum by hand.
-**`JSON` variants:** `Null`, `Boolean(b)`, `Number(n)`, `Text(s)`,
-`Array(items)`, `Object(entries: [String, JSON])`.
+**One dynamic value, four format faces (D-ENC-DYN1).** Every format's untyped
+`parse` returns the same rich dynamic value, internally `DataTree`, user-facing
+as **`Data`** — variants `.Null` / `.Bool` / `.Int` / `.Float` / `.Text` /
+`.Array` / `.Object`. `Json`, `Toml`, `Yaml`, and `Csv` are type aliases over
+`Data` (so `json.parse` reads as `Json`, `toml.parse` as `Toml`, …), but it's
+one structure with one walker and one accessor set (`.field(name)`, `.at(i)`,
+`.int()`, `.float()`, `.text()`, `.bool()`). Integral numbers decode to `.Int`,
+fractional to `.Float`; objects keep field order.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `parse(text)` | `JSON ? JSONError` | Parse a JSON string |
-| `decode(text)` | `JSON ? JSONError` | Lenient parse — coerces string→number/bool, logs each coercion (D-JSON3) |
+| `parse(text)` | `Json ? JSONError` | Parse a JSON string |
+| `decode(text)` | `Json ? JSONError` | Lenient parse — coerces string→number/bool, logs each coercion (D-JSON3) |
 | `to_string(j)` | `String` | Compact JSON text |
 | `to_string_pretty(j)` | `String` | Indented JSON text |
 
@@ -492,7 +570,29 @@ fn main() {
 
 **`core.encoding.csv`** — `parse(text) -> [[String]] ? String` (rows of fields),
 `to_string(rows) -> String`. **`core.encoding.toml`** / **`core.encoding.yaml`**
-— `parse(text) -> [String, String] ? String` (flat key/value), `to_string(map)`.
+— `parse(text) -> Toml ? JSONError` / `Yaml ? JSONError` (full adapters over
+`Data`, not a flat map), `to_string(value)`.
+
+Each adapter is a full serde equivalent, not a lossy subset:
+
+- **JSON** — full RFC 8259: exponents and the strict number grammar, every
+  escape including `\uXXXX` with surrogate-pair combining; rejects invalid
+  escapes, lone surrogates, and raw control characters with a line + message.
+- **CSV** — header-mapped typed rows (`decode<T>` maps columns to fields by name).
+- **TOML** — full TOML 1.0: `[table]` headers, `[[array-of-tables]]`, dotted keys,
+  inline tables, strings (every escape + multi-line), integers in every base,
+  floats incl. `inf`/`nan`, booleans, datetimes, arrays.
+- **YAML** — full YAML 1.2 core (D-ENC-YAML1): block + flow maps/sequences,
+  core-schema typed scalars, single/double-quoted + plain + block scalars
+  (`|`/`>` with chomping), comments, `---`/`...` document markers, and
+  anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred.
+
+All four parsers are std-only (I6).
+
+Jet has no general `Any` top type (D-DYNAMIC-TYPE1): use the precise shape for
+the job — an enum for a closed set of variants, generics or traits for
+abstraction, `T?` for absence, and `Data` for parsed dynamic input. Writing
+`Any` in type position is **E0350**.
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 
@@ -514,7 +614,7 @@ struct Order {
 }
 
 fn main() {
-    o #= Order { id: 7, who: "Ada", items: ["pen", "ink"], note: null }
+    o #= Order.{ id: 7, who: "Ada", items: ["pen", "ink"], note: null }
     print(json.to_string(o))               // {"id":7,"customer":"Ada","items":["pen","ink"]}
 
     raw #= "{{\"id\":9,\"customer\":\"Bo\",\"items\":[\"ink\"],\"note\":\"rush\"}}"
@@ -834,6 +934,11 @@ fn main() {
 | `String.to_int()` | `Int ? ParseError` | Parse the text as an integer (leading/trailing space ignored) |
 | `String.lines()` | `[String]` | Split into lines (`\n` and `\r\n`; no trailing empty line) |
 
+`.to_int()` / `.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
+evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
+`?` / `??` propagate or unwrap them in pure comptime expressions
+(`examples/features/86_comptime_parse.jet`).
+
 ---
 
 ## Binary data (`U8`)
@@ -865,6 +970,19 @@ Use `fs.read_bytes` / `fs.write` when you need raw file bytes.
 
 ## Numeric surface (D-NUMOPS1)
 
+`Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =
+`F64`). The explicit-width menu — `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is
+available for expert and FFI/binary work; `I64`/`F64` interchange with
+`Int`/`Float` freely, every other width is its own distinct type. A bare
+integer literal adopts the width of the slot it lands in (a binding/parameter/
+return annotation, or sized arithmetic) and is range-checked at compile time —
+a literal that doesn't fit is **E1003**. Widths never mix implicitly:
+arithmetic, comparison, and assignment require the same width on both sides
+(**E0109**/**E0112**/**E0108**), with no silent narrowing or widening. The
+sized types erase to their Rust equivalents (`u8`…`i64`, `f32`) at codegen, so
+they cross the C ABI by value (S59). Width conversions are always named
+methods (below), never implicit.
+
 Plain integer arithmetic (`+` `-` `*` `/`) **traps on overflow** at every width —
 a result outside the type's range stops the program with a Jet panic instead of
 silently wrapping. Opt a single op out at the use site:
@@ -885,6 +1003,8 @@ lo: U8 #= 100
 | `wrapping(a + b)` | `T` | Wraps around the type's range |
 | `saturating(a + b)` | `T` | Clamps to `MIN`/`MAX` |
 | `checked(a + b)` | `T?` | `null` on overflow |
+
+Each wrapper takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005**.
 
 **Bounds and float constants** — per-type `MIN`/`MAX`, plus float specials:
 
@@ -967,6 +1087,8 @@ the package system fully stabilizes.
 | `examples/features/29_files.jet` | Read, transform, write with errors |
 | `examples/features/30_json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/31_cli.jet` | Args, environment, exit codes |
+| `examples/features/64_cli_args.jet` | `core.args` — flag/option/positional spec + parse |
+| `examples/features/87_dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
 | `examples/features/106_serde_derive.jet` | `#[Codable]` encode + typed `decode<T>` with `#[Rename]` |
 | `examples/features/107_csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/108_json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
