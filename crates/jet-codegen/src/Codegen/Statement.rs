@@ -80,10 +80,25 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                         PatSlot::Range { .. } => format!("__jet_range_{}", i),
                     })
                     .collect();
-                if slot_pats.len() == 1 {
+                // Named-field struct variant (S30, incl. a single named field):
+                // positional pattern slots bind by declaration order, so map slot
+                // index -> the real Rust field name (mangle(&f.name), matching enum
+                // definition codegen in Items.rs) rather than always assuming a
+                // tuple variant. `VariantPayload::Single` is the only real tuple case.
+                let real_names = variant_field_names(cx, variant);
+                if let Some(real_names) = real_names {
+                    let fields: Vec<String> = slot_pats
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| {
+                            let name = real_names.get(i).cloned().unwrap_or_else(|| format!("f{i}"));
+                            format!("{name}: {p}")
+                        })
+                        .collect();
+                    format!("{}::{} {{ {} }}", prefix, vname(variant), fields.join(", "))
+                } else if slot_pats.len() == 1 {
                     format!("{}::{}({})", prefix, vname(variant), slot_pats[0])
                 } else {
-                    // Named-field struct variant: use positional f0, f1 ... names.
                     let fields: Vec<String> = slot_pats
                         .iter()
                         .enumerate()
@@ -109,6 +124,20 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 .collect();
             pats.join(" | ")
         }
+    }
+}
+
+/// The real Rust field names (declaration order, mangled) for a named-payload
+/// variant, used to map positional pattern slots onto the struct-variant shape
+/// that Items.rs emits for `VariantPayload::Named`. `None` when `variant` isn't
+/// a known user enum with a named payload (JSON/Key variants, single/unit).
+fn variant_field_names(cx: &Cx, variant: &str) -> Option<Vec<String>> {
+    let owner = cx.variant_owner.get(variant)?;
+    let variants = cx.enum_variants.get(owner)?;
+    let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
+    match payload {
+        VariantPayload::Named(fs) => Some(fs.iter().map(|f| mangle(&f.name)).collect()),
+        _ => None,
     }
 }
 

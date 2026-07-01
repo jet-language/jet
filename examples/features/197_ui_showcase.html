@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jet — flight deck</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 15px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
+    background: radial-gradient(circle at 20% 20%, #1c2333, #0b0d14 60%);
+    color: #e8ebf5;
+  }
+  .card {
+    width: 460px;
+    padding: 36px 32px 32px;
+    border-radius: 20px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    text-align: center;
+  }
+  .kicker {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #8a92ad;
+    margin: 0 0 6px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 4px;
+    color: #f4f6ff;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #7d84a0;
+    margin: 0 0 24px;
+  }
+  /* `#jet-app` is the mount point every `ui.null_backend()` DOM box gets
+     appended to (crates/jet-codegen/src/Prelude/DomRuntime.js's
+     `jetDomContainer()`) — sized to hold the 2x2 grid of stat cards the
+     `.jet` source lays out via `ui.rect(x, y, w, h)`. */
+  #jet-app {
+    position: relative;
+    height: 176px;
+    margin-bottom: 24px;
+  }
+  #jet-app > div {
+    transition: background 200ms ease, transform 120ms ease;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    border: none !important;
+    box-shadow: 0 12px 24px -8px rgba(0,0,0,0.5);
+  }
+  button {
+    appearance: none;
+    border: none;
+    padding: 12px 28px;
+    border-radius: 12px;
+    font: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    color: #0b0d14;
+    background: linear-gradient(160deg, #ffd39a, #e8790c);
+    cursor: pointer;
+    box-shadow: 0 8px 20px -6px rgba(232,121,12,0.35);
+    transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 10px 24px -6px rgba(232,121,12,0.45); }
+  button:active:not(:disabled) { transform: translateY(1px) scale(0.98); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .footer {
+    margin-top: 20px;
+    font-size: 12px;
+    color: #5b6280;
+  }
+  code { color: #a9b4e8; }
+</style>
+</head>
+<body>
+<div class="card">
+  <p class="kicker">jet · compiled to js + wasm</p>
+  <h1>Flight deck</h1>
+  <p class="subtitle">view tree · typed style · motion · reactive signals — one page</p>
+  <div id="jet-app"></div>
+  <button id="boost-btn">Boost fuel</button>
+  <p class="footer">Typed <code>Color</code> structs render every card's fill —<br>
+    Boost tweens Fuel 40%&nbsp;&rarr;&nbsp;95% over 600ms and bumps the reactive counter —<br>
+    <code>examples/features/197_ui_showcase.jet</code></p>
+</div>
+<script type="module">
+import { initApp, initFuel } from "./app.js";
+
+// `initApp`/`initFuel` each paint their own real DOM elements once (the two
+// static stat cards + the "Boosts" counter box, and the Fuel card) and
+// return the live `Signal` object `core.reactive.signal` compiled to
+// (crates/jet-codegen/src/Prelude/DomRuntime.js's `makeSignal`) — this page
+// drives both signals directly with plain `.get()`/`.set()`, the same real
+// reactive object 195_ui_web_reactive.jet's native golden test exercises,
+// not a lookalike.
+const boosts = initApp();
+const elapsed = initFuel();
+
+const DURATION_MS = 600;
+let boosting = false;
+let boostStart = 0;
+
+const btn = document.getElementById("boost-btn");
+btn.addEventListener("click", () => {
+  boosts.set(boosts.get() + 1);
+  boosting = true;
+  boostStart = performance.now();
+  btn.disabled = true;
+});
+
+// D-MOTIONTIME1: motion is a pure function of elapsed clock time — this loop
+// never mutates the animated value itself, it only advances the `elapsed`
+// signal from real wall-clock time (`performance.now()`); `tween(...)` inside
+// `initFuel`'s `reactive_render` closure derives the eased Fuel value fresh
+// every time that signal changes.
+function frame(now) {
+  if (boosting) {
+    const t = Math.round(now - boostStart);
+    elapsed.set(t);
+    if (t >= DURATION_MS) {
+      boosting = false;
+      btn.disabled = false;
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

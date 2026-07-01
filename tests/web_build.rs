@@ -76,6 +76,143 @@ fn run_web_app(dir: &PathBuf) -> String {
     String::from_utf8_lossy(&node.stdout).into_owned()
 }
 
+/// A minimal, dependency-free `document` stub — just the API surface
+/// `DomRuntime.js`'s `paint()`/`createBackend()` actually touches (see that
+/// file's `jetDomContainer()`) — so the real-DOM code path can be exercised
+/// under plain `node` (no browser, no new npm dependency) exactly the way a
+/// real page would drive it: import an exported function, call it multiple
+/// times as if in response to clicks, and observe the DOM tree it built.
+const FAKE_DOM_HARNESS: &str = r#"
+class FakeElement {
+  constructor(tag) { this.tagName = tag; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; }
+  appendChild(child) { this.children.push(child); return child; }
+  querySelector(sel) {
+    if (sel === "[data-jet-node]") return this.children.find((c) => c.dataset.jetNode) ?? null;
+    return null;
+  }
+}
+class FakeDocument {
+  constructor() { this.body = new FakeElement("body"); this._byId = new Map(); }
+  createElement(tag) { return new FakeElement(tag); }
+  getElementById(id) { return this._byId.get(id) ?? null; }
+}
+const doc = new FakeDocument();
+const origAppend = doc.body.appendChild.bind(doc.body);
+doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
+globalThis.document = doc;
+
+const { render } = await import("./app.js");
+for (const n of [0, 1, 2]) {
+  render(n);
+  const container = doc.getElementById("jet-app");
+  const box = container.children.find((c) => c.dataset.jetNode);
+  console.log(`click ${n}: children=${container.children.length} text=${JSON.stringify(box.textContent)} left=${box.style.left} top=${box.style.top} background=${box.style.background} color=${box.style.color}`);
+}
+"#;
+
+/// Runs `FAKE_DOM_HARNESS` against the compiled `app.js` — the same click-then-
+/// observe loop a real browser session would produce, proving `paint()` mounts
+/// one real element and reuses it (not one-new-div-per-click) as the exported
+/// `render(n)` is called repeatedly, the way a button's `onclick` calls it.
+fn run_web_click_harness(dir: &PathBuf) -> String {
+    let harness_path = dir.join("build/harness.mjs");
+    fs::write(&harness_path, FAKE_DOM_HARNESS).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "node harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    String::from_utf8_lossy(&node.stdout).into_owned()
+}
+
+/// D-UISHOWCASE1 (c134 Phase 8, flagship showcase — 197_ui_showcase.jet):
+/// same fake-`document` trick as `FAKE_DOM_HARNESS`, but exercises the
+/// dashboard's two independent entry points instead of one click-driven
+/// `render(n)`. `initApp`/`initFuel` each return the real `Signal` object
+/// `core.reactive.signal` compiles to (`jetDom.makeSignal` — a plain
+/// `{get, set}` cell); this harness drives both directly, the same way
+/// 197_ui_showcase.html's `requestAnimationFrame` loop and click handler do,
+/// and reads every painted box back out of the fake DOM tree.
+const SHOWCASE_HARNESS: &str = r#"
+class FakeElement {
+  constructor(tag) { this.tagName = tag; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; }
+  appendChild(child) { this.children.push(child); return child; }
+}
+class FakeDocument {
+  constructor() { this.body = new FakeElement("body"); this._byId = new Map(); }
+  createElement(tag) { return new FakeElement(tag); }
+  getElementById(id) { return this._byId.get(id) ?? null; }
+}
+const doc = new FakeDocument();
+const origAppend = doc.body.appendChild.bind(doc.body);
+doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
+globalThis.document = doc;
+
+const { initApp, initFuel } = await import("./app.js");
+const boosts = initApp();
+const elapsed = initFuel();
+
+const container = doc.getElementById("jet-app");
+const boxes = () => container.children.map((c) => ({ text: c.textContent, bg: c.style.background, color: c.style.color }));
+const find = (prefix) => boxes().find((b) => b.text.startsWith(prefix));
+
+console.log(`nodes=${container.children.length}`);
+for (const b of boxes()) {
+  console.log(`box text=${JSON.stringify(b.text)} bg=${b.bg} color=${b.color}`);
+}
+
+boosts.set(boosts.get() + 1);
+boosts.set(boosts.get() + 1);
+console.log(`boosts: ${find("Boosts").text}`);
+
+for (const t of [0, 150, 300, 450, 600, 900]) {
+  elapsed.set(t);
+  console.log(`elapsed=${t}: ${find("Fuel").text}`);
+}
+"#;
+
+fn run_showcase_harness(dir: &PathBuf) -> String {
+    let harness_path = dir.join("build/showcase_harness.mjs");
+    fs::write(&harness_path, SHOWCASE_HARNESS).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("showcase_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "node showcase harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    String::from_utf8_lossy(&node.stdout).into_owned()
+}
+
+/// Smoothstep ease, mirroring 197_ui_showcase.jet's `tween(40.0, 95.0,
+/// elapsed_ms, 600)` exactly (3t^2 - 2t^3, clamped at the ends) — the
+/// independent oracle the harness's printed `Fuel: N%` lines are checked
+/// against, so the assertion is "the interpolation math", not "whatever the
+/// code happens to print".
+fn expected_fuel_pct(elapsed_ms: i64) -> i64 {
+    let (from, to, duration) = (40.0_f64, 95.0_f64, 600_i64);
+    let value = if elapsed_ms <= 0 {
+        from
+    } else if elapsed_ms >= duration {
+        to
+    } else {
+        let t = elapsed_ms as f64 / duration as f64;
+        let eased = t * t * (3.0 - 2.0 * t);
+        from + (to - from) * eased
+    };
+    value.trunc() as i64
+}
+
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
@@ -129,6 +266,204 @@ fn jet_cli_web_build_succeeds() {
     );
 }
 
+/// D-WEBDEFAULT1 (open, c134): a file-level `#Target(Web)` marker makes
+/// `jet build <file>` (no `--target=` flag at all) infer the web backend.
+#[test]
+fn jet_cli_infers_web_target_from_file_marker() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping web-target-inference (file marker) test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_web_target_marker_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        "#Target(Web)\nuse core.ui as ui\nfn main() {\n    b #= ui.null_backend()\n    n #= ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c #= ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s #= b.measure(n, c)\n    f #= ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
+    )
+    .unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "app.jet"]) // deliberately no --target=
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "jet build (no --target flag) should infer web from #Target(Web):\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("build/app.js").is_file(), "no build/app.js — web backend wasn't inferred");
+    assert!(dir.join("build/app.wasm").is_file(), "no build/app.wasm — web backend wasn't inferred");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-WEBDEFAULT1 (open, c134): a package's `pkg.jet` `target: "web"` makes
+/// `jet build <file>` infer the web backend even with no file-level marker
+/// and no `--target=` flag — the managed-package counterpart to the loose-
+/// file marker above.
+#[test]
+fn jet_cli_infers_web_target_from_manifest() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping web-target-inference (manifest) test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_web_target_manifest_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: {\n    name: \"webproj\",\n    version: \"0.1.0\",\n    target: \"web\",\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.jet"),
+        "use core.ui as ui\nfn main() {\n    b #= ui.null_backend()\n    n #= ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c #= ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s #= b.measure(n, c)\n    f #= ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
+    )
+    .unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "main.jet"]) // deliberately no --target=
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "jet build (no --target flag) should infer web from pkg.jet target: \"web\":\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("build/app.js").is_file(), "no build/app.js — web backend wasn't inferred from pkg.jet");
+    assert!(dir.join("build/app.wasm").is_file(), "no build/app.wasm — web backend wasn't inferred from pkg.jet");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-WEBDEFAULT1 (open, c134): `jet run` never infers the web backend from
+/// `#Target(Web)`, even with no `--target=` flag — "run" means "execute and
+/// show console output," which a web build can't satisfy (there's no runtime
+/// to run a `.wasm`+`.js` bundle as a console program). This is a real
+/// regression that was caught while dogfooding the marker on 196/197: the
+/// first cut of D-WEBDEFAULT1 inferred web for every command including
+/// `run`, which made `jet run <file-with-#Target(Web)>` fail trying to exec
+/// the wrong artifact as a native binary. `build`/`dev`/`check` still infer.
+#[test]
+fn jet_cli_run_never_infers_web_target_from_marker() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_web_target_run_never_infers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        &dir.join("app.jet"),
+        "#Target(Web)\nfn main() {\n    print(\"native\")\n}\n",
+    )
+    .unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["run", "app.jet"]) // no --target= — must stay native despite the marker
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "jet run should stay native for #Target(Web) (never infer for `run`):\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "native",
+        "expected native program output, not a web-build side effect"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-HTMLPAIR1 (open, c134): an explicit `#Html("path.html")` marker wins
+/// over the `<stem>.html` sibling-filename convention.
+#[test]
+fn jet_cli_uses_explicit_html_marker() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping #Html marker test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_html_marker_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        "#Target(Web)\n#Html(\"custom.html\")\nfn main() {}\n",
+    )
+    .unwrap();
+    // A sibling `app.html` exists too — the explicit marker must win over it.
+    fs::write(dir.join("app.html"), "<html>sibling, should be ignored</html>").unwrap();
+    fs::write(dir.join("custom.html"), "<html>custom marker page</html>").unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "app.jet"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "jet build with #Html marker failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let served = fs::read_to_string(dir.join("build/index.html")).unwrap();
+    assert!(
+        served.contains("custom marker page"),
+        "expected the #Html(\"custom.html\") content, got:\n{served}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-HTMLPAIR1 (open, c134): a `#Html(...)` path that doesn't exist is a
+/// loud build error, never a silent fallback to the generic page.
+#[test]
+fn jet_cli_html_marker_missing_file_is_an_error() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping #Html missing-file test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_html_marker_missing_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        "#Target(Web)\n#Html(\"does_not_exist.html\")\nfn main() {}\n",
+    )
+    .unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "app.jet"])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "jet build should fail loudly when #Html names a missing file"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("does_not_exist.html"),
+        "error should name the missing file, got:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn compile_web_file_loads() {
     let out = jet::compile_web("examples/features/164_web_compute.jet").expect("compile_web");
@@ -150,6 +485,45 @@ fn web_hello_dom_shim_roundtrip() {
 }
 
 #[test]
+fn web_reactive_dom_snapshot_roundtrip() {
+    // Phase 7 (c134): a `reactive.signal` + `ui.reactive_render` render loop
+    // over the null/DOM backend, compiled to JS and actually executed under
+    // `node` — the "web DOM snapshot" acceptance bar. `jetDom.commands()`
+    // accumulates every paint, so the log after the second render includes
+    // both the "hello" and "world" paints (deterministic reactive replay).
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build reactive (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/195_ui_web_reactive.jet");
+    let dir = build_web_fixture("reactive", src, "examples/features/195_ui_web_reactive.jet");
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/195_ui_web_reactive.web.out");
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_click_counter_dom_roundtrip() {
+    // 196_ui_web_click.jet: every top-level `#Js fn` is exported (not just
+    // `main`), and `paint()` mounts a real, reused DOM element when a
+    // `document` exists. This proves both, end to end: a fake `document` (no
+    // browser, no new dependency) stands in for the click-driven host page
+    // (examples/features/196_ui_web_click.html), calling the exported
+    // `render(n)` three times and observing the same element update in place.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build click counter (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/196_ui_web_click.jet");
+    let dir = build_web_fixture("click", src, "examples/features/196_ui_web_click.jet");
+    let stdout = run_web_click_harness(&dir);
+    let expected = include_str!("../examples/features/expected/196_ui_web_click.harness.out");
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_compute_wasm_bridge_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build compute (need rustc + node)");
@@ -160,5 +534,63 @@ fn web_compute_wasm_bridge_roundtrip() {
     let stdout = run_web_app(&dir);
     let expected = include_str!("../examples/features/expected/164_web_compute.out");
     assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_showcase_dashboard_roundtrip() {
+    // 197_ui_showcase.jet (Tower c134 Phase 8 flagship): proves, end to end
+    // under the fake-DOM harness, that (1) `initApp`/`initFuel` mount FOUR
+    // distinct real DOM elements from FOUR independent `ui.null_backend()`
+    // instances — not one element repeatedly overwritten, which is what the
+    // pre-fix `paint()` (a single `[data-jet-node]` `querySelector` shared
+    // across every backend) would have produced; (2) each card's typed
+    // `Color` struct reaches the DOM as the exact right `background` hex,
+    // via the real `to_hex` conversion; (3) the reactive `boosts` counter
+    // box repaints through nothing but external `Signal.set()` calls; and
+    // (4) the Fuel card's motion tween is *exactly* the smoothstep formula
+    // (`expected_fuel_pct`) at every elapsed-time sample, not just "some
+    // plausible-looking number".
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build showcase dashboard (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/197_ui_showcase.jet");
+    let dir = build_web_fixture("showcase", src, "examples/features/197_ui_showcase.jet");
+    let stdout = run_showcase_harness(&dir);
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    assert_eq!(lines[0], "nodes=4", "expected 4 independently-mounted DOM boxes:\n{stdout}");
+
+    assert!(
+        lines.iter().any(|l| l.contains("\"Altitude: 12,400 ft\"") && l.contains("bg=#3366ff")),
+        "missing/wrong Altitude card:\n{stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("\"Airspeed: 410 kt\"") && l.contains("bg=#12b886")),
+        "missing/wrong Airspeed card:\n{stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("\"Boosts: 0\"") && l.contains("bg=#8855ee")),
+        "missing/wrong initial Boosts card:\n{stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("\"Fuel: 40%\"") && l.contains("bg=#e8790c")),
+        "missing/wrong initial Fuel card:\n{stdout}"
+    );
+
+    assert!(
+        lines.contains(&"boosts: Boosts: 2"),
+        "reactive counter didn't repaint from two external Signal.set() calls:\n{stdout}"
+    );
+
+    for elapsed_ms in [0i64, 150, 300, 450, 600, 900] {
+        let want = format!("elapsed={elapsed_ms}: Fuel: {}%", expected_fuel_pct(elapsed_ms));
+        assert!(
+            lines.contains(&want.as_str()),
+            "tween mismatch at elapsed={elapsed_ms} — want line {want:?} in:\n{stdout}"
+        );
+    }
+
     let _ = fs::remove_dir_all(&dir);
 }

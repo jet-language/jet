@@ -110,6 +110,7 @@ fn dom_fn() {
             items: std::mem::take(&mut prog.items),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
+            html_path: prog.html_path.clone(),
         }],
         parse_teaching: vec![],
         used_core: Default::default(),

@@ -4,8 +4,10 @@
 
 > **Design-of-record:** the authoring surface, files, namespaces, types, and
 > merge rules are defined by [`unified-ecosystem.md`](unified-ecosystem.md)
-> (owner-ratified). This file owns **sequencing, milestones, the provider
-> roadmap, and the jetos parity baseline** — not syntax. The Phase-2 jetos
+> (owner-ratified). The end-state picture, domain walkthroughs, and Nix-bridge
+> strategy live in [`vision.md`](vision.md) (draft for owner review,
+> 2026-07-01, open gates U11–U17). This file owns **sequencing, milestones,
+> the provider roadmap, and the jetos parity baseline** — not syntax. The Phase-2 jetos
 > mechanics live in [`jetos-design.md`](jetos-design.md). Ratified decisions
 > (D-JPK*, U1–U10, D-OS1/7) live only in `docs/spec/syntax-decisions.md`; this
 > file no longer restates them.

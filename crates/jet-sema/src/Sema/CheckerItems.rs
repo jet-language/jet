@@ -817,9 +817,10 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0303",
                                 format!("variant `{}` requires labeled fields", variant),
-                                "multi-payload variants need `name: value` at the call site (S30)"
+                                "named-payload variants construct with the dot-brace form \
+                                 (D-UITREE1/D-DOTCTOR1), matching struct construction"
                                     .to_string(),
-                                format!("write `{type_name}.{variant}(w: 1.0, h: 2.0)`"),
+                                format!("write `{type_name}.{variant}.{{ w: 1.0, h: 2.0 }}`"),
                                 Some(span),
                             ));
                         }

@@ -127,6 +127,14 @@ pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     Driver::compile_bundle_path_opts_dbg(file, Sema::CompileMode::Run, false, false, false, true)
 }
 
+/// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`
+/// defines a top-level `fn dev()` — a normal native compile, but with `dev()`
+/// swapped in as the program's real entry point instead of `main()` (see
+/// `Driver::compile_bundle_path_with_entry`).
+pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    Driver::compile_bundle_path_with_entry(file, entry_fn)
+}
+
 /// In-memory web-target compile (used by integration tests).
 pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     let (toks, lex_diags) = Lexer::lex(src);
@@ -146,6 +154,7 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
             source: src.to_string(),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
+            html_path: prog.html_path.clone(),
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),

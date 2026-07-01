@@ -457,7 +457,7 @@ module net {
     #[test]
     fn committed_system_example_field_checks_clean() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/jetpack-typed/system.jet");
+            .join("../../tests/fixtures/jetpack-typed/system.jet");
         let src = std::fs::read_to_string(&path).unwrap();
         let dir = path.parent().unwrap();
         let plan = evaluate_env(&src, dir).unwrap();

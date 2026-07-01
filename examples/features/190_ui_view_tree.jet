@@ -1,0 +1,63 @@
+// 190 — reactive UI stack: typed view-model tree over core.reactive (Tower c134,
+// D-UITREE1=A). `View` is a plain enum with named-payload variants, constructed
+// with the dot-brace syntax (D-UITREE1/D-DOTCTOR1): `.Box.{ children: [...] }`,
+// `.Text.{ text: "..." }`. The tree lives in a Signal and its flattened leaf list
+// is a Derived, so re-rendering is diff-based: only leaves whose content actually
+// changed are repainted, not the whole tree.
+use core.reactive as reactive
+
+enum View {
+    Text(text: String)
+    Box(children: [View])
+}
+
+fn flatten(v: View) -> [String] {
+    if v == {
+        .Text(text) -> { return [text] }
+        .Box(children) -> {
+            out: [String] := []
+            loop c in children {
+                loop t in flatten(c) {
+                    out.push(t)
+                }
+            }
+            return out
+        }
+    }
+}
+
+// Diff-based rerender: only leaves that changed position/content are repainted.
+fn repaint(old: [String], updated: [String]) -> Int {
+    n := 0
+    i := 0
+    loop leaf in updated {
+        same := false
+        if i < old.len() {
+            if leaf == old[i] {
+                same = true
+            }
+        }
+        if !same {
+            n++
+            print("repaint: {leaf}")
+        }
+        i++
+    }
+    return n
+}
+
+fn main() {
+    initial: View #= .Box.{ children: [.Text.{ text: "a" }, .Text.{ text: "b" }] }
+    tree #= reactive.signal(initial)
+    leaves #= reactive.derived(() => flatten(tree.get()))
+
+    empty: [String] #= []
+    before #= leaves.get()
+    print("initial repaints: {repaint(empty, before)}")
+
+    // Only the second leaf's text changes; the first ("a") must not repaint.
+    next: View #= .Box.{ children: [.Text.{ text: "a" }, .Text.{ text: "zz" }] }
+    tree.set(next)
+    after #= leaves.get()
+    print("update repaints: {repaint(before, after)}")
+}

@@ -448,7 +448,11 @@ impl<'a> Fmt<'a> {
                 self.write(".");
                 self.write(variant);
                 if !args.is_empty() {
-                    self.write("(");
+                    // D-UITREE1/D-DOTCTOR1: named-payload variants use the struct
+                    // dot-brace spelling (`.Variant.{ field: val }`); positional
+                    // (single-payload, S30) variants keep the paren call form.
+                    let named = matches!(args.first(), Some(EnumLitArg::Named { .. }));
+                    self.write(if named { ".{" } else { "(" });
                     for (i, arg) in args.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
@@ -462,7 +466,7 @@ impl<'a> Fmt<'a> {
                             }
                         }
                     }
-                    self.write(")");
+                    self.write(if named { "}" } else { ")" });
                 }
             }
             // D-TAINT1: `#Tainted expr` — prefix value-fact tag, space-separated.

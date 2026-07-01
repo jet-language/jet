@@ -1,5 +1,13 @@
 use super::*;
 
+/// D-WEBDEFAULT1 (open, c134): what a `#Target(…)` marker parsed to — a
+/// partition-ceiling `Bucket` (`Wasm`/`Js`, existing D-WASM1 meaning) or
+/// `DefaultWeb` (`Web` — this file's default CLI backend, a different axis).
+pub(super) enum TargetMarker {
+    Bucket(crate::Syntax::WebBucket),
+    DefaultWeb,
+}
+
 impl<'a> Parser<'a> {
     /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
     fn import_decl(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
@@ -254,6 +262,8 @@ impl<'a> Parser<'a> {
         let mut imports = Vec::new();
         let mut items = Vec::new();
         let mut web_target_ceiling = None;
+        let mut default_target: Option<String> = None;
+        let mut html_path: Option<String> = None;
         let mut pub_file = false;
         loop {
             let r = match &self.peek().kind {
@@ -361,7 +371,35 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Hash if self.at_web_target() => {
                     match self.parse_web_target_marker() {
-                        Ok(target) => {
+                        Ok(TargetMarker::DefaultWeb) => {
+                            if matches!(self.peek().kind, TokKind::KwModule) {
+                                let span = self.peek().span;
+                                self.diags.push(Diagnostic::error(
+                                    "E0003",
+                                    "`#Target(Web)` isn't valid on a module".to_string(),
+                                    "`Web` is a file-level default-backend marker, not a partition ceiling".to_string(),
+                                    "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(Js)` on a module".to_string(),
+                                    Some(span),
+                                ));
+                                self.sync_top();
+                                continue;
+                            }
+                            if default_target.is_some() {
+                                let span = self.peek().span;
+                                self.diags.push(Diagnostic::error(
+                                    "E0003",
+                                    "only one `#Target(Web)` marker is allowed per file".to_string(),
+                                    "a file may declare at most one default backend".to_string(),
+                                    "remove the duplicate `#Target(Web)` marker".to_string(),
+                                    Some(span),
+                                ));
+                                self.sync_top();
+                                continue;
+                            }
+                            default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
+                            continue;
+                        }
+                        Ok(TargetMarker::Bucket(target)) => {
                             if matches!(self.peek().kind, TokKind::KwModule) {
                                 match self.code_module_with_pkg_and_target(false, false, Some(target))
                                 {
@@ -387,6 +425,34 @@ impl<'a> Parser<'a> {
                                 continue;
                             }
                             web_target_ceiling = Some(target);
+                            continue;
+                        }
+                        Err(d) => {
+                            self.diags.push(d);
+                            self.sync_top();
+                            continue;
+                        }
+                    }
+                }
+                // D-HTMLPAIR1 (open, c134): `#Html("path.html")` — explicit
+                // companion host page for `--target=web` builds.
+                TokKind::Hash if self.at_html_marker() => {
+                    match self.parse_html_marker() {
+                        Ok(path) => {
+                            if html_path.is_some() {
+                                let span = self.peek().span;
+                                self.diags.push(Diagnostic::error(
+                                    "E0003",
+                                    "only one `#Html(…)` marker is allowed per file".to_string(),
+                                    "a file may declare at most one companion host page"
+                                        .to_string(),
+                                    "remove the duplicate `#Html(…)` marker".to_string(),
+                                    Some(span),
+                                ));
+                                self.sync_top();
+                                continue;
+                            }
+                            html_path = Some(path);
                             continue;
                         }
                         Err(d) => {
@@ -695,7 +761,7 @@ impl<'a> Parser<'a> {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
                     self.type_alias_def(is_pub, is_package_pub).map(Item::TypeAlias)
                 }
-                // D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive.
+                // D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored derive.
                 TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
                 TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
                 TokKind::At => {
@@ -867,6 +933,8 @@ impl<'a> Parser<'a> {
             items,
             web_target_ceiling,
             pub_file,
+            default_target,
+            html_path,
         }
     }
 
@@ -1781,23 +1849,79 @@ impl<'a> Parser<'a> {
             && matches!(self.peek3().kind, TokKind::LParen)
     }
 
-    /// D-WASM1=A: parse `#Target(Wasm)` or `#Target(Js)`.
-    pub(super) fn parse_web_target_marker(&mut self) -> Result<crate::Syntax::WebBucket, Diagnostic> {
+    /// D-HTMLPAIR1 (open, c134): detect `#Html(`.
+    pub(super) fn at_html_marker(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_HTML)
+            && matches!(self.peek3().kind, TokKind::LParen)
+    }
+
+    /// D-HTMLPAIR1 (open, c134): parse `#Html("path.html")` — the file's
+    /// explicit companion host page for `--target=web` builds.
+    pub(super) fn parse_html_marker(&mut self) -> Result<String, Diagnostic> {
+        self.bump(); // `#`
+        self.bump(); // `Html`
+        self.expect(TokKind::LParen, "after `#Html`")?;
+        let parts = match &self.peek().kind {
+            TokKind::Str(parts) => parts.clone(),
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected a path in quotes inside `#Html(…)`, found {}", describe(other)),
+                    "the companion host page is a fixed file path".to_string(),
+                    "write `#Html(\"index.html\")`".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        let span = self.bump().span;
+        self.expect(TokKind::RParen, "to close `#Html(…)`")?;
+        if parts.len() != 1 {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a `#Html(…)` path must be one piece of quoted text".to_string(),
+                "paths are fixed labels, not interpolated messages".to_string(),
+                "write `#Html(\"index.html\")`".to_string(),
+                Some(span),
+            ));
+        }
+        match &parts[0] {
+            StrTokPart::Lit(s) => Ok(s.clone()),
+            StrTokPart::Interp(_) => Err(Diagnostic::error(
+                "E0003",
+                "a `#Html(…)` path can't contain `{ }` interpolation".to_string(),
+                "paths are fixed labels".to_string(),
+                "write `#Html(\"index.html\")`".to_string(),
+                Some(span),
+            )),
+        }
+    }
+
+    /// D-WASM1=A / D-WEBDEFAULT1 (open, c134): `#Target(Wasm)` / `#Target(Js)`
+    /// (a partition ceiling) or `#Target(Web)` (this file's default CLI
+    /// backend — a different axis, same marker).
+    pub(super) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
         self.bump(); // `#`
         self.bump(); // `Target`
         self.expect(TokKind::LParen, "after `#Target`")?;
-        let (name, name_span) =
-            self.expect_ident("the partition name inside `#Target(…)` (`Wasm` or `Js`)")?;
+        let (name, name_span) = self.expect_ident(
+            "the partition name inside `#Target(…)` (`Wasm`, `Js`, or `Web`)",
+        )?;
         self.expect(TokKind::RParen, "to close `#Target(…)`")?;
-        crate::Syntax::WebBucket::parse(&name).ok_or_else(|| {
+        if name == crate::Syntax::WEB_TARGET_DEFAULT_WEB {
+            return Ok(TargetMarker::DefaultWeb);
+        }
+        crate::Syntax::WebBucket::parse(&name).map(TargetMarker::Bucket).ok_or_else(|| {
             Diagnostic::error(
                 "E0003",
                 format!("`#Target({name})` is not a known web partition"),
-                "web targets are `Wasm` (compute) or `Js` (DOM/view)".to_string(),
+                "web targets are `Wasm` (compute), `Js` (DOM/view), or `Web` (default CLI backend)"
+                    .to_string(),
                 format!(
-                    "write `#Target({})` or `#Target({})`",
+                    "write `#Target({})`, `#Target({})`, or `#Target({})`",
                     Syntax::WEB_BUCKET_WASM,
-                    Syntax::WEB_BUCKET_JS
+                    Syntax::WEB_BUCKET_JS,
+                    Syntax::WEB_TARGET_DEFAULT_WEB,
                 ),
                 Some(name_span),
             )
@@ -4560,20 +4684,25 @@ impl<'a> Parser<'a> {
         Ok(fields)
     }
 
-    /// D-METADERIVE1=A: `derive Trait for T { … }` — user-authored derive block.
+    /// D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored
+    /// derive block. The retired `derive Trait for T` spelling teaches the dot form (E2714).
     fn user_derive_def(&mut self) -> Result<crate::AST::DeriveDef, Diagnostic> {
         let start = self.peek().span.start;
         self.bump(); // consume `derive`
-        let (trait_name, trait_span) = self.expect_ident("after `derive`")?;
-        self.expect(
-            TokKind::KwFor,
-            "after the trait name in `derive Trait for T`",
-        )?;
-        let (type_param, _) = self.expect_ident("after `for` in `derive Trait for T`")?;
-        self.expect(
-            TokKind::LBrace,
-            "after the type parameter in `derive Trait for T`",
-        )?;
+        let (type_param, type_param_span) = self.expect_ident("after `derive`")?;
+        if matches!(self.peek().kind, TokKind::KwFor) {
+            // Old spelling `derive Trait for T`: the first ident was the trait name.
+            return Err(Diagnostic::error(
+                "E2714",
+                format!("a user derive is written `derive T.{}`", type_param),
+                "the type parameter comes first, joined to the trait name with a dot; `derive Trait for T` was retired".to_string(),
+                format!("write `derive T.{} {{ … }}`", type_param),
+                Some(type_param_span),
+            ));
+        }
+        self.expect(TokKind::Dot, "after the type parameter in `derive T.Trait`")?;
+        let (trait_name, trait_span) = self.expect_ident("after `.` in `derive T.Trait`")?;
+        self.expect(TokKind::LBrace, "after the trait name in `derive T.Trait`")?;
         let body = self.block_stmts(); // consumes `}`
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::AST::DeriveDef {

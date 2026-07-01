@@ -507,6 +507,7 @@ fn load_file(
         items: prog.items,
         web_target_ceiling: prog.web_target_ceiling,
         pub_file: prog.pub_file,
+        html_path: prog.html_path.clone(),
     });
 
     for imp in &imports {

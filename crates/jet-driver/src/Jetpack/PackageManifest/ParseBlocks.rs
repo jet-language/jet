@@ -30,6 +30,7 @@ pub(super) fn parse_package(body: &str) -> Result<PackageMeta, ManifestError> {
             "description" => meta.description = Some(v),
             "repository" => meta.repository = Some(v),
             "jet" => meta.jet_constraint = Some(v),
+            "target" => meta.target = Some(v),
             "layer" => {
                 let raw = value.trim().trim_matches('"');
                 meta.layer = Some(

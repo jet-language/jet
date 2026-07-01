@@ -145,50 +145,76 @@ pub(crate) fn is_cloneable(
     registry: &TypeRegistry,
     structs: &HashMap<String, Vec<(Option<String>, Type)>>,
 ) -> bool {
+    let mut visiting = HashSet::new();
+    is_cloneable_rec(ty, registry, structs, &mut visiting)
+}
+
+/// `is_cloneable`'s recursion, with a `visiting` guard against self-referential
+/// types (`enum Nat { Succ(n: Nat) }`). Every such type compiles to a `Box`
+/// indirection (I3: sema already proves this elsewhere), so a cycle back to a
+/// type still being visited is vacuously cloneable — the recursion doesn't need
+/// to unwind further to know that. Without this guard the walk never terminates.
+fn is_cloneable_rec(
+    ty: &Type,
+    registry: &TypeRegistry,
+    structs: &HashMap<String, Vec<(Option<String>, Type)>>,
+    visiting: &mut HashSet<String>,
+) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-            is_cloneable(inner, registry, structs)
+            is_cloneable_rec(inner, registry, structs, visiting)
         }
         Type::Map { key, value } => {
-            is_cloneable(key, registry, structs) && is_cloneable(value, registry, structs)
+            is_cloneable_rec(key, registry, structs, visiting)
+                && is_cloneable_rec(value, registry, structs, visiting)
         }
         Type::Result { ok, err } => {
-            is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs)
+            is_cloneable_rec(ok, registry, structs, visiting)
+                && is_cloneable_rec(err, registry, structs, visiting)
         }
         Type::Fn { .. } => false,
         Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
         Type::Named(name) => {
-            registry.contains(name)
+            if !visiting.insert(name.clone()) {
+                return true;
+            }
+            let result = registry.contains(name)
                 && match registry.types.get(name) {
-                    Some(TypeDef::Struct { fields, .. }) => {
-                        fields.iter().all(|(_, _, fty, is_ref, _)| {
-                            !*is_ref && is_cloneable(fty, registry, structs)
-                        })
-                    }
+                    Some(TypeDef::Struct { fields, .. }) => fields.iter().all(|(_, _, fty, is_ref, _)| {
+                        !*is_ref && is_cloneable_rec(fty, registry, structs, visiting)
+                    }),
                     Some(TypeDef::Enum { variants, .. }) => {
                         variants.values().all(|(_, p)| match p {
                             VariantPayload::Unit => true,
-                            VariantPayload::Single(t, _) => is_cloneable(t, registry, structs),
-                            VariantPayload::Named(fs) => {
-                                fs.iter().all(|f| is_cloneable(&f.ty, registry, structs))
+                            VariantPayload::Single(t, _) => {
+                                is_cloneable_rec(t, registry, structs, visiting)
                             }
+                            VariantPayload::Named(fs) => fs
+                                .iter()
+                                .all(|f| is_cloneable_rec(&f.ty, registry, structs, visiting)),
                         })
                     }
                     // D-DIST1: distinct types wrap a scalar; they are always cloneable.
                     Some(TypeDef::Distinct { .. }) => true,
-                    Some(TypeDef::Alias { target, .. }) => is_cloneable(target, registry, structs),
+                    Some(TypeDef::Alias { target, .. }) => {
+                        is_cloneable_rec(target, registry, structs, visiting)
+                    }
                     None => false,
-                }
+                };
+            visiting.remove(name);
+            result
         }
-        Type::Apply { args, .. } => args.iter().all(|a| is_cloneable(a, registry, structs)),
+        Type::Apply { args, .. } => args
+            .iter()
+            .all(|a| is_cloneable_rec(a, registry, structs, visiting)),
         Type::Tuple(fields) => fields
             .iter()
-            .all(|(_, t)| is_cloneable(t, registry, structs)),
+            .all(|(_, t)| is_cloneable_rec(t, registry, structs, visiting)),
         Type::TraitObject(_) => false,
-        Type::FixedList { elem, .. } => is_cloneable(elem, registry, structs),
-        Type::Tagged { inner, .. } => is_cloneable(inner, registry, structs),
+        Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, structs, visiting),
+        Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, structs, visiting),
     }
 }
 

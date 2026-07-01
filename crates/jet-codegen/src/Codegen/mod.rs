@@ -239,6 +239,9 @@ const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
 const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
 /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
+/// c-devserver (owner-directed 2026-07-01): `core.devserver` — the
+/// configurable `jet dev` server value (`for_app`/`.html`/`.port`/`.serve`).
+const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 /// D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` runtime (stripped when unused).
@@ -960,6 +963,7 @@ pub fn emit_bundle_dbg(bundle: &ProgramBundle, link: Option<&FfiLink>, debug_lin
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
+        out.push_str(DEVSERVER_PRELUDE);
     }
     out.push('\n');
 
@@ -1075,6 +1079,7 @@ pub fn emit_bundle_tests_cov(
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
+        out.push_str(DEVSERVER_PRELUDE);
     }
     out.push('\n');
 
@@ -1191,6 +1196,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
+        out.push_str(DEVSERVER_PRELUDE);
     }
     out.push('\n');
 

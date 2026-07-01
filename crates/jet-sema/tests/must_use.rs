@@ -30,6 +30,7 @@ fn err_codes(src: &str) -> Vec<String> {
             source: src.to_string(),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
+            html_path: prog.html_path.clone(),
         }],
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),

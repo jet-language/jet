@@ -89,6 +89,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "lint",
+        summary: "opt-in lint categories, never blocking (--a11y: D-A11YGATE1)",
+        headline: false,
+    },
+    CommandSpec {
         name: "explain",
         summary: "print the offline essay for a diagnostic code",
         headline: false,
@@ -273,6 +278,8 @@ pub const FLAGS: &[FlagSpec] = &[
     // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
     FlagSpec { long: "--release", help: "with build/run: use the release profile (D-BUILDPROFILE1)" },
     FlagSpec { long: "--profile", help: "with build/run: named build profile --profile=<name> (D-BUILDPROFILE1)" },
+    // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
+    FlagSpec { long: "--a11y", help: "with lint: check accessibility — missing roles, unlabeled controls (D-A11YGATE1)" },
 ];
 
 /// Is `name` a built-in command?

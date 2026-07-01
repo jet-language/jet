@@ -1465,10 +1465,28 @@ impl<'a> Checker<'a> {
                 if let Some(ret) =
                     ui_backend_method_return(handle_ty, method, args.len(), span, &mut self.diags)
                 {
+                    // D-A11YGATE1=B (c134 Phase 6, E2931): duplicate accessible
+                    // labels among an inline focus group's interactive nodes.
+                    if method == "set_focus_group" {
+                        self.check_a11y_focus_group_duplicates(args, span);
+                    }
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
                     *recv_type_out = Some(handle_ty.to_string());
+                    return ret;
+                }
+            }
+            // c-devserver (owner-directed 2026-07-01): DevServer builder
+            // methods (.html/.port/.serve).
+            if handle_ty == "DevServer" {
+                if let Some(ret) =
+                    devserver_method_return(method, args.len(), span, &mut self.diags)
+                {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    *recv_type_out = Some("DevServer".to_string());
                     return ret;
                 }
             }

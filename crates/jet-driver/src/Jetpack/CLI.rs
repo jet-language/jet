@@ -3,6 +3,7 @@
 //! `jetpack run/build/list/clean/add/remove`. Independent from the `jet`
 //! binary (D-JPK1). All user-facing output flows through `Output::Theme`.
 
+use super::Components;
 use super::ManifestTOML;
 use super::Output::{self, Theme};
 use super::Provider::{self, ProviderError};
@@ -605,16 +606,26 @@ fn cmd_clean(theme: &Theme) -> i32 {
     }
 }
 
-/// `jetpack add <ref>` — edit the project env file.
+/// `jetpack add <ref>` — edit the project env file. `jetpack add <Component>`
+/// (an exact, case-sensitive match against the starter component catalog —
+/// Button/Label/Input/Container) is a distinct behavior checked first: it
+/// copies real `.jet` source into `./components/` instead of touching the env
+/// file (Tower c134 Phase 4, the ownable component kit). The two never
+/// collide because Jetpack source names are always lowercase
+/// (`nixpkgs`/`github`/`path`/user-declared names), so an exact-case
+/// `Button`-style name can only ever mean a component.
 fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.first() else {
         theme.error(
             "add what?",
-            "`jetpack add` needs a ref to add.",
-            "try `jetpack add nixpkgs:ripgrep`.",
+            "`jetpack add` needs a ref or a starter component to add.",
+            "try `jetpack add nixpkgs:ripgrep` or `jetpack add Button`.",
         );
         return 2;
     };
+    if let Some(component) = Components::find(raw) {
+        return cmd_add_component(theme, component);
+    }
     let dir = std::env::current_dir().unwrap_or_default();
     // Classify against the env's declared sources so `add unstable:fd` works
     // when `unstable` is already declared.
@@ -641,6 +652,39 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
         Err(e) => {
             theme.error(
                 "could not edit the env file",
+                &format!("{e}"),
+                "check write permissions here.",
+            );
+            1
+        }
+    }
+}
+
+/// Copy a starter component's source into `./components/<Name>.jet`.
+fn cmd_add_component(theme: &Theme, component: &Components::StarterComponent) -> i32 {
+    let dir = std::env::current_dir().unwrap_or_default();
+    match Components::add_component(&dir, component) {
+        Ok(dest) => {
+            theme.ok(&format!(
+                "added {} to {}",
+                theme.bold(component.name),
+                Components::COMPONENTS_DIR
+            ));
+            theme.detail(&theme.gray(&format!("wrote {}", dest.display())));
+            theme.detail("it's yours now — edit it freely.");
+            0
+        }
+        Err(Components::ComponentError::AlreadyExists(path)) => {
+            theme.error(
+                &format!("{} already exists", path.display()),
+                "it may already be customized — `jetpack add` never overwrites a component you own.",
+                "edit it directly, or remove it first if you want a fresh copy.",
+            );
+            1
+        }
+        Err(e) => {
+            theme.error(
+                "could not add that component",
                 &format!("{e}"),
                 "check write permissions here.",
             );
@@ -727,6 +771,7 @@ usage:
   {bin} list                           show realized packages
   {bin} clean                          drop unused store records
   {bin} add    <source>:<package>      add a package to ./{pack}
+  {bin} add    <Component>             copy a starter component into ./components
   {bin} remove <source>:<package>      remove a package from ./{pack}
   {bin} os switch [<config>]@<host>    build + activate a machine from a config.jet
   {bin} os build  [<config>]@<host>    build a machine generation, don't activate
@@ -735,6 +780,9 @@ refs:
   nixpkgs:fastfetch                    a package from nixpkgs
   github:owner/repo                    a Jet pack repo (or a flake fallback)
   path:./my-env                        a local pack/flake directory
+
+components:
+  Button, Label, Input, Container      starter kit — ownable, editable .jet source
 
 flags:
   --no-color                           disable colored output (also: NO_COLOR)

@@ -2072,6 +2072,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "commands" => format!("({}).paint_commands()", recv),
                     "frame_lines" => format!("({}).frame_lines()", recv),
                     "render_count" => format!("({}).render_count()", recv),
+                    // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
+                    "set_focus_group" => {
+                        format!("({}).set_focus_group(({}).clone())", recv, a(0))
+                    }
+                    "focused_label" => format!("({}).focused_label()", recv),
+                    _ => format!("({}).{}()", recv, method),
+                },
+                // c-devserver (owner-directed 2026-07-01): DevServer builder
+                // methods — the Rust method names match the Jet ones exactly.
+                THandleOp::DevServerMethod { method } => match method.as_str() {
+                    "html" => format!("({}).html(({}).clone())", recv, a(0)),
+                    "port" => format!("({}).port({})", recv, a(0)),
+                    "serve" => format!("({}).serve()", recv),
                     _ => format!("({}).{}()", recv, method),
                 },
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client method call.
@@ -3158,6 +3171,45 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        // D-A11YGATE1=B (c134 Phase 6): accessible-role node + role constants.
+        ("core.ui", "node_role") => format!(
+            "{}jet_ui_node_role(&({}), {}, {}, {})",
+            cx.root_prefix,
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        // D-STYLESHAPE1=A wiring: a node carrying an explicit fill color.
+        ("core.ui", "node_color") => format!(
+            "{}jet_ui_node_color(&({}), {}, {}, &({}))",
+            cx.root_prefix,
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.ui", "aria_role_button") => {
+            format!("{}jet_ui_aria_role_button()", cx.root_prefix)
+        }
+        ("core.ui", "aria_role_text_input") => {
+            format!("{}jet_ui_aria_role_text_input()", cx.root_prefix)
+        }
+        ("core.ui", "aria_role_label") => {
+            format!("{}jet_ui_aria_role_label()", cx.root_prefix)
+        }
+        ("core.ui", "aria_role_container") => {
+            format!("{}jet_ui_aria_role_container()", cx.root_prefix)
+        }
+        // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)`
+        // constructor — the builder methods dispatch through
+        // `THandleOp::DevServerMethod` above, not here.
+        ("core.devserver", "for_app") => {
+            format!("{}jet_devserver_for_app(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.devserver", "app") => {
+            format!("{}jet_devserver_app()", cx.root_prefix)
+        }
         // D-APPROX1=A: sketch constructors.
         ("core.sketch.hll", "new") => format!("JetHyperLogLog::new()"),
         ("core.sketch.tdigest", "new") => format!("JetTDigest::new()"),

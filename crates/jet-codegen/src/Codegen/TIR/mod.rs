@@ -1837,6 +1837,9 @@ pub enum THandleOp {
     PathWalk,
     /// D-RENDERTGT2=A (c133 M1): NullBackend measure/layout/paint/on_event/commands.
     UiBackendMethod { method: String },
+    /// c-devserver (owner-directed 2026-07-01): `DevServer` builder methods
+    /// (`.html`/`.port`/`.serve`).
+    DevServerMethod { method: String },
     /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DbError>`. Encodes
     /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
     /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.
@@ -1955,12 +1958,18 @@ mod tests {
                 source: src.to_string(),
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
+                html_path: prog.html_path.clone(),
             }],
             parse_teaching: Vec::new(),
             used_core: std::collections::HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
             import_targets: std::collections::HashMap::new(),
+            layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core,
+            web_partitions: std::collections::HashMap::new(),
+            web_partition_enforced: false,
+            web_partition_report: None,
         };
         // No C imports in unit tests; CFfi::default() is the correct empty state.
         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
@@ -2323,7 +2332,7 @@ fn mk() {
 
     #[test]
     fn covers_labeled_loops() {
-        let src = "fn f() {\n @outer loop {\n loop n in 1..3 {\n if (n == 2) {\n break @outer\n }\n }\n break\n }\n}\n";
+        let src = "fn f() {\n outer@ loop {\n loop n in 1..3 {\n if (n == 2) {\n break outer@\n }\n }\n break\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -3604,7 +3613,7 @@ trait Named {
 struct Dog {
     name: String
 }
-impl Dog: Named {
+impl Dog.Named {
     fn label(self) -> &String {
         return self.name
     }

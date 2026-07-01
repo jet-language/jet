@@ -467,6 +467,15 @@ impl<'a> Checker<'a> {
             }
             return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
         }
+        // D-A11YGATE1=B (c134 Phase 6): E2930 (empty accessible label on an
+        // interactive-role node) is checked here, on the raw call-site args,
+        // independent of `sig`/arity checking below. It always runs — the
+        // diagnostic is `Severity::Lint`, and CLI layers decide whether to
+        // show it (`jet lint --a11y`) or suppress it (`jet build`/`jet run`),
+        // per D-A11YGATE1's opt-in-surface, never-blocking contract.
+        if module == "core.ui" && name == "node_role" {
+            self.check_a11y_node_role_label(args, span);
+        }
         let sig = core_fixed_sig(module, name);
         match (module, name) {
             // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
@@ -1599,6 +1608,103 @@ impl<'a> Checker<'a> {
         ret
     }
 
+    /// D-A11YGATE1=B (c134 Phase 6, E2930): flag `ui.node_role(label, w, h, role)`
+    /// when `label` is a literal empty string and `role` is a literal interactive
+    /// role (`ui.aria_role_button()` / `ui.aria_role_text_input()`). Static and
+    /// literal-only by design: a computed label isn't traced, so this never
+    /// second-guesses a runtime value — only a call site that's provably wrong.
+    pub(crate) fn check_a11y_node_role_label(&mut self, args: &[crate::AST::CallArg], span: Span) {
+        if args.len() != 4 {
+            return;
+        }
+        if !is_empty_string_literal(&args[0].expr) {
+            return;
+        }
+        let Some(role) = self.interactive_aria_role_name(&args[3].expr) else {
+            return;
+        };
+        self.diags.push(a11y_unlabeled_control(role, span));
+    }
+
+    /// D-A11YGATE1=B (E2931): within an inline `[ui.node_role(...), ...]` list
+    /// literal passed to `backend.set_focus_group(...)`, flag two interactive
+    /// nodes that share the same non-empty literal label. Inline-construction
+    /// only (like E2930) — a list of pre-bound variables isn't traced back to
+    /// their `node_role` call sites, so this catches the common "copy-pasted a
+    /// focus group" mistake, not every possible duplicate.
+    pub(crate) fn check_a11y_focus_group_duplicates(
+        &mut self,
+        args: &[crate::AST::CallArg],
+        span: Span,
+    ) {
+        let Some(list_arg) = args.first() else {
+            return;
+        };
+        let Expr::ListLit(items, _) = &list_arg.expr else {
+            return;
+        };
+        let mut seen: std::collections::HashMap<String, ()> = std::collections::HashMap::new();
+        for item in items {
+            let Expr::MethodCall {
+                receiver,
+                method,
+                args: call_args,
+                ..
+            } = item
+            else {
+                continue;
+            };
+            if method != "node_role" || call_args.len() != 4 {
+                continue;
+            }
+            let Expr::Ident(alias, _) = &**receiver else {
+                continue;
+            };
+            if self.core_imports.get(alias).map(|m| m.as_str()) != Some("core.ui") {
+                continue;
+            }
+            if self
+                .interactive_aria_role_name(&call_args[3].expr)
+                .is_none()
+            {
+                continue;
+            }
+            let Some(label) = literal_string_value(&call_args[0].expr) else {
+                continue;
+            };
+            if label.is_empty() {
+                continue;
+            }
+            if seen.insert(label.clone(), ()).is_some() {
+                self.diags.push(a11y_duplicate_label(&label, span));
+                return;
+            }
+        }
+    }
+
+    /// D-A11YGATE1=B: is `expr` a literal `ui.aria_role_button()` /
+    /// `ui.aria_role_text_input()` call through a `use core.ui as ui` alias?
+    /// Returns the display name (`"button"` / `"text input"`) when so.
+    fn interactive_aria_role_name(&self, expr: &Expr) -> Option<&'static str> {
+        let Expr::MethodCall {
+            receiver, method, ..
+        } = expr
+        else {
+            return None;
+        };
+        let Expr::Ident(alias, _) = &**receiver else {
+            return None;
+        };
+        if self.core_imports.get(alias).map(|m| m.as_str()) != Some("core.ui") {
+            return None;
+        }
+        match method.as_str() {
+            "aria_role_button" => Some("button"),
+            "aria_role_text_input" => Some("text input"),
+            _ => None,
+        }
+    }
+
     pub(crate) fn check_core_json_lit(
         &mut self,
         variant: &str,
@@ -2001,6 +2107,11 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-RENDERTGT2=A (c133 M1): UI backend seam types.
         | "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "InputEvent"
         | "EventResult" | "NullBackend" | "TuiBackend"
+        // D-A11YGATE1=B (c134 Phase 6): accessible-role opaque type.
+        | "UiAriaRole"
+        // c-devserver (owner-directed 2026-07-01): the configurable `jet dev`
+        // server value returned by `core.devserver.for_app(...)`.
+        | "DevServer"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
@@ -3543,6 +3654,51 @@ pub fn core_fixed_sig(
             vec![(read, float.clone()), (read, float)],
             Some(Type::Named("InputEvent".to_string())),
         )),
+        // D-A11YGATE1=B (c134 Phase 6): accessible-role node constructor + role
+        // constants. `node_role` is the a11y-checked sibling of `node` — it's the
+        // only UiNode constructor that carries a role, so it's the only one E2930
+        // (unlabeled interactive control) needs to watch.
+        ("core.ui", "node_role") => Some((
+            vec![
+                (read, string),
+                (read, float.clone()),
+                (read, float),
+                (read, Type::Named("UiAriaRole".to_string())),
+            ],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        // D-STYLESHAPE1=A wiring: a node with an explicit fill color (a `#RRGGBB`
+        // string, matching `JetPaintCmd::FillRect`'s existing color representation —
+        // no new opaque type needed, this just makes the field settable from Jet).
+        ("core.ui", "node_color") => Some((
+            vec![
+                (read, string.clone()),
+                (read, float.clone()),
+                (read, float),
+                (read, string),
+            ],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        ("core.ui", "aria_role_button" | "aria_role_text_input" | "aria_role_label"
+        | "aria_role_container") => {
+            Some((vec![], Some(Type::Named("UiAriaRole".to_string()))))
+        }
+        // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)` —
+        // the constructor for a configurable `jet dev` server value. The
+        // builder methods (`.html`/`.port`/`.serve`) are instance methods on
+        // `DevServer`, dispatched through `devserver_method_return` (mirrors
+        // `ui_backend_method_return`), not module-level names here.
+        ("core.devserver", "for_app") => Some((
+            vec![(read, string)],
+            Some(Type::Named("DevServer".to_string())),
+        )),
+        // `devserver.app()` — zero-arg: watch the file `jet dev` launched
+        // (passed to the running program via JET_DEV_FILE). The common case:
+        // the file defining `fn dev()` is the file to watch, so no path is
+        // spelled out at all.
+        ("core.devserver", "app") => {
+            Some((vec![], Some(Type::Named("DevServer".to_string()))))
+        }
         _ => None,
     }
 }
@@ -3701,6 +3857,32 @@ pub(crate) fn ui_backend_method_return(
         ("NullBackend", "commands", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("TuiBackend", "frame_lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("TuiBackend", "render_count", 0) => Some(Some(Type::Int)),
+        // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing over a flat
+        // list of interactive nodes.
+        ("NullBackend" | "TuiBackend", "set_focus_group", 1) => Some(Some(unit)),
+        ("NullBackend" | "TuiBackend", "focused_label", 0) => Some(Some(Type::String)),
+        _ => None,
+    }
+}
+
+/// c-devserver (owner-directed 2026-07-01): type-check builder method calls
+/// on a `DevServer` value (`.html`/`.port`/`.serve`). `.html`/`.port` return
+/// `DevServer` for chaining, but are equally valid as bare statements (they
+/// are not `#MustUse`) — the reference example calls them as plain
+/// statements without reassigning. `.serve()` blocks forever and returns
+/// nothing.
+pub(crate) fn devserver_method_return(
+    method: &str,
+    n_args: usize,
+    _span: Span,
+    _diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let devserver_ty = Type::Named("DevServer".to_string());
+    let unit = unit_ty();
+    match (method, n_args) {
+        ("html", 1) => Some(Some(devserver_ty)),
+        ("port", 1) => Some(Some(devserver_ty)),
+        ("serve", 0) => Some(Some(unit)),
         _ => None,
     }
 }
@@ -3838,7 +4020,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // `rollback` are `DbConnection` instance methods, not module items.
         "jet.db" => &["open", "open_memory"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
-        "jet.reactive" => &["signal", "derived", "effect"],
+        // D-SIGNAL1: "computed" is the canonical alias for "derived".
+        "jet.reactive" => &["signal", "derived", "computed", "effect"],
         // D-HONESTNUM1=A: Measurement<T> constructor.
         "core.science.measurement" => &["from"],
         // D-DECIMAL1: exact decimal constructor alias.
@@ -3859,7 +4042,18 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "node",
             "key_event",
             "resize_event",
+            // D-A11YGATE1=B (c134 Phase 6): accessible-role node + role constants.
+            "node_role",
+            "aria_role_button",
+            "aria_role_text_input",
+            "aria_role_label",
+            "aria_role_container",
+            // D-STYLESHAPE1=A (c134 Phase 3/7 wiring): a typed-Color-backed node —
+            // the paint pipeline's fill color is no longer hardcoded.
+            "node_color",
         ],
+        // c-devserver (owner-directed 2026-07-01): `jet dev` server builder.
+        "core.devserver" => &["for_app", "app"],
         // D-APPROX1=A: approximate sketch data structures.
         "core.sketch.hll" => &["new"],
         "core.sketch.tdigest" => &["new"],
@@ -4191,6 +4385,54 @@ pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) 
         ),
         "every argument must match a standard library function parameter".to_string(),
         format!("check the call to `{}`", name),
+        Some(span),
+    )
+}
+
+/// D-A11YGATE1=B: is `expr` a single, non-interpolated literal string part?
+/// Shared by E2930 (empty-label check) and E2931 (duplicate-label check).
+fn is_empty_string_literal(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Str(parts, _) if parts.iter().all(|p| matches!(p, crate::AST::StrPart::Lit(s) if s.is_empty()))
+    )
+}
+
+/// D-A11YGATE1=B: the literal text of `expr` when it's a plain (non-interpolated)
+/// string literal, else `None`.
+fn literal_string_value(expr: &Expr) -> Option<String> {
+    let Expr::Str(parts, _) = expr else {
+        return None;
+    };
+    if parts.len() != 1 {
+        return None;
+    }
+    match &parts[0] {
+        crate::AST::StrPart::Lit(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// D-A11YGATE1=B (c134 Phase 6, E2930): an interactive-role `UiNode` with an
+/// empty accessible label.
+pub(crate) fn a11y_unlabeled_control(role: &str, span: Span) -> Diagnostic {
+    Diagnostic::lint(
+        "E2930",
+        format!("this {role} has no accessible label"),
+        "screen readers announce a control by its accessible label — an empty label is invisible to assistive tech".to_string(),
+        "pass a real label, e.g. `ui.node_role(\"Submit\", w, h, ui.aria_role_button())`".to_string(),
+        Some(span),
+    )
+}
+
+/// D-A11YGATE1=B (c134 Phase 6, E2931): two interactive nodes in the same
+/// inline focus group share an accessible label.
+pub(crate) fn a11y_duplicate_label(label: &str, span: Span) -> Diagnostic {
+    Diagnostic::lint(
+        "E2931",
+        format!("two interactive nodes both have the label \"{label}\""),
+        "assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3)".to_string(),
+        "give each interactive node a distinct, descriptive label".to_string(),
         Some(span),
     )
 }

@@ -458,6 +458,8 @@ before continuing.
 | E2912 | sema  | `reactive.derived` lambda returns nothing (D-REACT1) |
 | E2913 | sema  | a reactive `Signal`/`Derived` can't hold a function value (D-REACT1) |
 | E2914 | sema  | `#Reactive fn` must not return a value (D-REACTCORE1) |
+| E2930 | sema  | an interactive `UiAriaRole` node has an empty accessible label, lint-only (D-A11YGATE1) |
+| E2931 | sema  | two interactive nodes in an inline focus group share an accessible label, lint-only (D-A11YGATE1) |
 
 ## Editions and release policy (E2-M2)
 
@@ -722,6 +724,26 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E2912 | `reactive.derived` must compute and return a value. | A derived value is recomputed from its signals, so its lambda has to return the new value (D-REACT1=B). A body that returns nothing is a side effect, not a value. | Return a value from the body, or use `reactive.effect(() => { … })` for a side effect. |
 | E2913 | a reactive {kind} can't hold a {type}. | Signals and derived values hold ordinary data so it can be copied to dependents (D-REACT1=B). A function value isn't reactive data — wrap behaviour in an effect instead. | Use a data value (number, text, list, struct, …); put behaviour in `reactive.effect`. |
 | L2901 | This `#Test` block has no assertions. | A test with no `require`, `require_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
+
+## Accessibility diagnostics (D-A11YGATE1=B, c134 Phase 6)
+
+`jet lint --a11y <file>` is the opt-in surface for accessibility issues.
+E2930/E2931 are computed during ordinary sema (same as any other lint), but
+they never appear in `jet build`/`jet run`/`jet check`/`jet emit` output —
+only `jet lint --a11y` prints them, and it exits non-zero when it finds one so
+a project can wire "zero a11y warnings" into CI without those warnings ever
+blocking ordinary compilation (D-A11YGATE1 rejected making these compile
+errors — over-strict for interactive iteration). Both are static and
+literal-only: they check the `label`/`role` arguments at a `ui.node_role(…)`
+call site directly, and (E2931) an inline `[…]` list literal passed to
+`set_focus_group`. A label read from a variable or a computed expression is
+not traced back to its source, by design — the lint never guesses about a
+runtime value it can't see.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2930 | this {role} has no accessible label | Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech. | Pass a real label, e.g. `ui.node_role("Submit", w, h, ui.aria_role_button())`. |
+| E2931 | two interactive nodes both have the label "{label}" | Assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3). | Give each interactive node a distinct, descriptive label. |
 
 ## Debugging and observability diagnostics (E2-M12, D-OBS1–3)
 

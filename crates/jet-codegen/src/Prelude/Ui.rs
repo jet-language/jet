@@ -31,11 +31,39 @@ pub struct JetSizeConstraint {
     pub max_height: f64,
 }
 
+/// D-A11YGATE1=B (c134 Phase 6): the accessible-role vocabulary. A small,
+/// real ARIA-style role set — mirrors the four Phase-4 starter components
+/// (Button, Input, Label, Container) rather than the full ARIA taxonomy.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum JetAriaRole {
+    Button,
+    TextInput,
+    Label,
+    Container,
+}
+
+impl JetAriaRole {
+    /// Interactive roles are keyboard-focusable and need a real accessible
+    /// label (E2930); `Label`/`Container` are structural/static, never
+    /// focused.
+    pub fn is_interactive(&self) -> bool {
+        matches!(self, JetAriaRole::Button | JetAriaRole::TextInput)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct JetUiNode {
+    /// Also the accessible name (WAI-ARIA accname model — one field serves
+    /// both display and accessibility; no separate name field).
     pub label: String,
     pub width: f64,
     pub height: f64,
+    /// D-A11YGATE1=B: `None` = decorative/non-interactive node.
+    pub role: Option<JetAriaRole>,
+    /// D-STYLESHAPE1=A (c134 Phase 3/7 wiring): explicit fill color as a
+    /// `#RRGGBB` string, matching `JetPaintCmd::FillRect`'s existing color
+    /// representation. `None` falls back to the default fill (`#000000`).
+    pub color: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +89,30 @@ struct JetNullBackendState {
     layout_frame: Option<JetRect>,
     commands: Vec<JetPaintCmd>,
     last_event: Option<JetEventResult>,
+    // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing over a flat list
+    // of interactive nodes. `focused_index` is `Some` whenever `focus_nodes`
+    // is non-empty (registration always focuses the first node).
+    focus_nodes: Vec<JetUiNode>,
+    focused_index: Option<usize>,
+}
+
+/// D-A11YGATE1=B: advance focus on a `Tab` key. Returns `Some(Handled)` when
+/// the key was consumed by focus routing; `None` means "not a focus event,
+/// fall through to normal key handling".
+fn jet_ui_advance_focus(
+    focus_nodes: &[JetUiNode],
+    focused_index: &mut Option<usize>,
+    code: &str,
+) -> Option<JetEventResult> {
+    if code != "Tab" || focus_nodes.is_empty() {
+        return None;
+    }
+    let next = match *focused_index {
+        Some(i) => (i + 1) % focus_nodes.len(),
+        None => 0,
+    };
+    *focused_index = Some(next);
+    Some(JetEventResult::Handled)
 }
 
 /// D-RENDERTGT2=A: portable backend seam between Jet UI and platform renderers.
@@ -84,8 +136,29 @@ impl JetNullBackend {
                 layout_frame: None,
                 commands: Vec::new(),
                 last_event: None,
+                focus_nodes: Vec::new(),
+                focused_index: None,
             })),
         }
+    }
+
+    /// D-A11YGATE1=B: register the interactive focus order. Always focuses
+    /// the first node when the list is non-empty.
+    pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
+        let mut state = self.state.borrow_mut();
+        state.focused_index = if nodes.is_empty() { None } else { Some(0) };
+        state.focus_nodes = nodes;
+    }
+
+    /// D-A11YGATE1=B: the accessible label of the currently focused node, or
+    /// `""` when nothing is focused.
+    pub fn focused_label(&self) -> String {
+        let state = self.state.borrow();
+        state
+            .focused_index
+            .and_then(|i| state.focus_nodes.get(i))
+            .map(|n| n.label.clone())
+            .unwrap_or_default()
     }
 
     pub fn measure_node(
@@ -158,7 +231,7 @@ impl JetBackend for JetNullBackendState {
         });
         self.commands.push(JetPaintCmd::FillRect {
             rect: frame,
-            color: "#000000".to_string(),
+            color: node.color.clone().unwrap_or_else(|| "#000000".to_string()),
         });
         self.commands.push(JetPaintCmd::Text {
             rect: frame,
@@ -167,6 +240,14 @@ impl JetBackend for JetNullBackendState {
     }
 
     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
+        if let JetInputEvent::Key { code } = &event {
+            if let Some(result) =
+                jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code)
+            {
+                self.last_event = Some(result);
+                return result;
+            }
+        }
         let result = match &event {
             JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
             JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {
@@ -189,6 +270,9 @@ struct JetTuiBackendState {
     grid_rows: usize,
     render_count: usize,
     last_event: Option<JetEventResult>,
+    // D-A11YGATE1=B (c134 Phase 6): see `JetNullBackendState`.
+    focus_nodes: Vec<JetUiNode>,
+    focused_index: Option<usize>,
 }
 
 fn tui_grid_dims(frame: &JetRect) -> (usize, usize) {
@@ -229,8 +313,29 @@ impl JetTuiBackend {
                 grid_rows: 0,
                 render_count: 0,
                 last_event: None,
+                focus_nodes: Vec::new(),
+                focused_index: None,
             })),
         }
+    }
+
+    /// D-A11YGATE1=B: register the interactive focus order. Always focuses
+    /// the first node when the list is non-empty.
+    pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
+        let mut state = self.state.borrow_mut();
+        state.focused_index = if nodes.is_empty() { None } else { Some(0) };
+        state.focus_nodes = nodes;
+    }
+
+    /// D-A11YGATE1=B: the accessible label of the currently focused node, or
+    /// `""` when nothing is focused.
+    pub fn focused_label(&self) -> String {
+        let state = self.state.borrow();
+        state
+            .focused_index
+            .and_then(|i| state.focus_nodes.get(i))
+            .map(|n| n.label.clone())
+            .unwrap_or_default()
     }
 
     pub fn measure_node(
@@ -318,6 +423,14 @@ impl JetBackend for JetTuiBackendState {
     }
 
     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
+        if let JetInputEvent::Key { code } = &event {
+            if let Some(result) =
+                jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code)
+            {
+                self.last_event = Some(result);
+                return result;
+            }
+        }
         let result = match &event {
             JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
             JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {
@@ -393,7 +506,51 @@ pub fn jet_ui_node(label: &str, width: f64, height: f64) -> JetUiNode {
         label: label.to_string(),
         width,
         height,
+        role: None,
+        color: None,
     }
+}
+
+/// D-A11YGATE1=B (c134 Phase 6): construct a `UiNode` with an explicit
+/// accessible role — the entry point for interactive controls that
+/// `jet lint --a11y` checks (E2930 unlabeled control, E2931 duplicate label).
+pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetAriaRole) -> JetUiNode {
+    JetUiNode {
+        label: label.to_string(),
+        width,
+        height,
+        role: Some(role),
+        color: None,
+    }
+}
+
+/// D-STYLESHAPE1=A (c134 Phase 3/7 wiring): construct a `UiNode` with an
+/// explicit fill color — makes the typed `Style`/`Color` built in Phase 3
+/// actually reach the paint pipeline instead of the hardcoded `#000000`.
+pub fn jet_ui_node_color(label: &str, width: f64, height: f64, color: &str) -> JetUiNode {
+    JetUiNode {
+        label: label.to_string(),
+        width,
+        height,
+        role: None,
+        color: Some(color.to_string()),
+    }
+}
+
+pub fn jet_ui_aria_role_button() -> JetAriaRole {
+    JetAriaRole::Button
+}
+
+pub fn jet_ui_aria_role_text_input() -> JetAriaRole {
+    JetAriaRole::TextInput
+}
+
+pub fn jet_ui_aria_role_label() -> JetAriaRole {
+    JetAriaRole::Label
+}
+
+pub fn jet_ui_aria_role_container() -> JetAriaRole {
+    JetAriaRole::Container
 }
 
 pub fn jet_ui_key_event(code: &str) -> JetInputEvent {
@@ -438,6 +595,17 @@ impl JetShow for JetEventResult {
     }
 }
 
+impl JetShow for JetAriaRole {
+    fn jet_show(&self) -> String {
+        match self {
+            JetAriaRole::Button => "Button".to_string(),
+            JetAriaRole::TextInput => "TextInput".to_string(),
+            JetAriaRole::Label => "Label".to_string(),
+            JetAriaRole::Container => "Container".to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +645,37 @@ mod tests {
         backend.paint_node(node);
         assert_eq!(backend.render_count(), 1);
         assert_eq!(backend.frame_lines(), vec!["hi".to_string()]);
+    }
+
+    // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
+    #[test]
+    fn focus_group_tab_cycles_and_wraps() {
+        let backend = JetNullBackend::new();
+        let save = jet_ui_node_role("Save", 40.0, 10.0, JetAriaRole::Button);
+        let cancel = jet_ui_node_role("Cancel", 40.0, 10.0, JetAriaRole::Button);
+        assert_eq!(backend.focused_label(), "");
+
+        backend.set_focus_group(vec![save, cancel]);
+        assert_eq!(backend.focused_label(), "Save");
+
+        let tab = jet_ui_key_event("Tab");
+        assert_eq!(backend.dispatch_event(tab.clone()), JetEventResult::Handled);
+        assert_eq!(backend.focused_label(), "Cancel");
+
+        assert_eq!(backend.dispatch_event(tab.clone()), JetEventResult::Handled);
+        assert_eq!(backend.focused_label(), "Save");
+
+        // A non-Tab key doesn't disturb focus.
+        let enter = jet_ui_key_event("enter");
+        assert_eq!(backend.dispatch_event(enter), JetEventResult::Handled);
+        assert_eq!(backend.focused_label(), "Save");
+    }
+
+    #[test]
+    fn aria_role_button_is_interactive_label_is_not() {
+        assert!(JetAriaRole::Button.is_interactive());
+        assert!(JetAriaRole::TextInput.is_interactive());
+        assert!(!JetAriaRole::Label.is_interactive());
+        assert!(!JetAriaRole::Container.is_interactive());
     }
 }

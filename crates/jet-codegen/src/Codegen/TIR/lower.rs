@@ -4624,6 +4624,8 @@ pub(crate) fn lower_method_call(
             "on_event" => Type::Named("EventResult".to_string()),
             "commands" | "frame_lines" => Type::List(Box::new(Type::String)),
             "render_count" => Type::Int,
+            // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
+            "focused_label" => Type::String,
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -4632,6 +4634,25 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
                 op: THandleOp::UiBackendMethod {
+                    method: method.to_string(),
+                },
+                args: targs,
+            },
+        };
+    }
+    // c-devserver (owner-directed 2026-07-01): a DevServer builder method.
+    if recv_type.as_deref() == Some("DevServer") && is_devserver_method_name(method, args.len()) {
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match method {
+            "serve" => unit_type(),
+            _ => Type::Named("DevServer".to_string()),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::DevServerMethod {
                     method: method.to_string(),
                 },
                 args: targs,

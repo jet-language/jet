@@ -1,0 +1,55 @@
+// Input — starter component from the Jetpack ownable component kit
+// (Tower c134 Phase 4). `jetpack add Input` copies this exact file into your
+// project's components/ dir — it is now yours to edit; nothing here is
+// compiler magic. A controlled text field: `type_char` appends to the
+// current value and returns a new Input (no hidden mutation). Self-contained,
+// same `View` shape as examples/features/190_ui_view_tree.jet.
+
+enum View {
+    Text(text: String)
+    Box(children: [View])
+}
+
+struct Input {
+    value: String
+    placeholder: String
+}
+
+fn input(placeholder: String) -> Input {
+    return Input.{value: "", placeholder: placeholder}
+}
+
+fn type_char(i: Input, ch: String) -> Input {
+    return Input.{value: "{i.value}{ch}", placeholder: i.placeholder}
+}
+
+fn to_view(i: Input) -> View {
+    shown := i.value
+    if i.value == "" {
+        shown = i.placeholder
+    }
+    return .Box.{children: [.Text.{text: "[{shown}]"}]}
+}
+
+fn flatten(v: View) -> [String] {
+    if v == {
+        .Text(text) -> { return [text] }
+        .Box(children) -> {
+            out: [String] := []
+            loop c in children {
+                loop t in flatten(c) {
+                    out.push(t)
+                }
+            }
+            return out
+        }
+    }
+}
+
+fn main() {
+    i := input("type here…")
+    print(flatten(to_view(i)).join(" "))
+    i = type_char(i, "h")
+    i = type_char(i, "i")
+    print(flatten(to_view(i)).join(" "))
+}

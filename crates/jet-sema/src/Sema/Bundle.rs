@@ -880,7 +880,7 @@ pub(crate) fn check_bundle_opts(
                             diags.push(Diagnostic::error(
                                 "E2711",
                                 format!(
-                                    "derive orphan rule: `derive {} for T` and `{}` are both in an imported module",
+                                    "derive orphan rule: `derive T.{}` and `{}` are both in an imported module",
                                     derive_name, s.name
                                 ),
                                 "user-derive expansion can only run in the entry module; both the derive block and the struct are from the same imported file".to_string(),
@@ -922,7 +922,7 @@ pub(crate) fn check_bundle_opts(
                                 Err(inner) => diags.push(Diagnostic::error(
                                     "E2710",
                                     format!(
-                                        "`derive {} for T` body failed while expanding `#[{}]` on `{}`",
+                                        "`derive T.{}` body failed while expanding `#[{}]` on `{}`",
                                         derive_name, derive_name, s.name
                                     ),
                                     inner.what.clone(),

@@ -2815,6 +2815,13 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    // c-devserver (owner-directed 2026-07-01): a DevServer builder method.
+    if recv_type.as_deref() == Some("DevServer") && is_devserver_method_name(method, args.len()) {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
     if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
@@ -3397,8 +3404,16 @@ pub(crate) fn is_ui_backend_method_name(
         (_, "measure", 2) | (_, "layout", 2) | (_, "paint", 1) | (_, "on_event", 1) => true,
         (Some("NullBackend"), "commands", 0) => true,
         (Some("TuiBackend"), "frame_lines" | "render_count", 0) => true,
+        // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
+        (_, "set_focus_group", 1) | (_, "focused_label", 0) => true,
         _ => false,
     }
+}
+
+/// c-devserver (owner-directed 2026-07-01): is `(method, nargs)` a `DevServer`
+/// builder method? `.html(path)` / `.port(n)` (1 arg each), `.serve()` (0 args).
+pub(crate) fn is_devserver_method_name(method: &str, nargs: usize) -> bool {
+    matches!((method, nargs), ("html", 1) | ("port", 1) | ("serve", 0))
 }
 
 /// D-NETDEP1=A / D-HTTPLIB1=A: is this an HTTP type?

@@ -367,6 +367,37 @@ fn main() {
     );
 }
 
+#[test]
+fn fmt_preserves_named_payload_variant_dot_brace() {
+    // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val }` — named-payload enum
+    // construction reuses the struct dot-brace spelling. Must round-trip
+    // byte-for-byte (fmt STABILITY, not just accept-without-crash).
+    let src = r#"enum View {
+    Text(text: String)
+    Box(width: Int)
+}
+fn main() {
+    a: View #= .Text.{ text: "hi" }
+    b: View #= .Box.{ width: 10 }
+}
+"#;
+    let out = jet::format_source(src)
+        .expect("fmt should accept named-payload dot-brace enum literals");
+    assert!(
+        out.contains(".Text.{"),
+        "expected `.Text.{{` preserved, got:\n{out}"
+    );
+    assert!(
+        out.contains(".Box.{"),
+        "expected `.Box.{{` preserved, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("named-payload dot-brace output should re-fmt");
+    assert_eq!(
+        out, twice,
+        "named-payload dot-brace enum literal formatting must be idempotent"
+    );
+}
+
 // --- D-FMT1 (revises S44): author-intent single-line brace bodies ---
 //
 // A brace body the author wrote on one line stays one line when it holds one
@@ -878,7 +909,7 @@ fn fmt_comptime_splice_stability() {
     // (Expr::ComptimeSplice). The formatter must emit it as `$name` so that
     // the round-trip is stable (previously the `$` would be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive Debug for T {\n    info #= T.reflect()\n    tname #= info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn main() {\n    print(\"ok\")\n}\n";
+    let src = "derive T.Debug {\n    info #= T.reflect()\n    tname #= info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn main() {\n    print(\"ok\")\n}\n";
     let once = jet::format_source(src).expect("fmt should accept derive with $name in string");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(
@@ -887,7 +918,7 @@ fn fmt_comptime_splice_stability() {
     );
 
     // Standalone `$name` expression (outside emit string) round-trips as `$name`.
-    let splice_src = "derive Named for T {\n    tname #= \"test\"\n    x #= $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn main() {}\n";
+    let splice_src = "derive T.Named {\n    tname #= \"test\"\n    x #= $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn main() {}\n";
     let splice_once = jet::format_source(splice_src).expect("fmt should accept $name expression");
     assert!(
         splice_once.contains("$tname"),

@@ -151,7 +151,7 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AST::{Span, Type};
+    use crate::{AST::Type, Diagnostics::Span};
 
     fn span() -> Span {
         Span::new(0, 1)

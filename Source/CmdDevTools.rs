@@ -273,7 +273,9 @@ pub(crate) fn run_repl(project_dir: Option<&str>) {
 
 /// Last-modified time of a path, or `None` if it can't be read (treated as a
 /// distinct state so a transient unlink/rewrite still triggers a re-run).
-fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
+/// `pub(crate)`: also reused verbatim by `CmdDevWeb::run_dev_web` (c134
+/// Phase 7) — same mtime-poll pattern, no `notify` crate (I6).
+pub(crate) fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
     fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
@@ -709,6 +711,21 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
     }
 }
 
+/// D-A11YGATE1=B (c134 Phase 6): the a11y lint codes (E2930/E2931). These are
+/// always computed during sema (same as any other `Severity::Lint`), but per
+/// the ratified decision they only *surface* under `jet lint --a11y` — never
+/// as ordinary build/run/emit warnings. `visible_lints` is the one filter
+/// every normal compile-flavored command applies before printing `out.lints`.
+const A11Y_LINT_CODES: [&str; 2] = ["E2930", "E2931"];
+
+pub(crate) fn visible_lints(lints: &[jet::Diagnostics::Diagnostic]) -> Vec<jet::Diagnostics::Diagnostic> {
+    lints
+        .iter()
+        .filter(|d| !A11Y_LINT_CODES.contains(&d.code))
+        .cloned()
+        .collect()
+}
+
 /// D-TOOL3 (E2-M11): `jet emit --rust` — print the generated Rust source for a
 /// Jet file. This is the expert-window view: the hidden Jet→Rust translation
 /// without compiling to native. Useful for debugging or learning what codegen
@@ -727,10 +744,11 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode) {
     };
     match jet::compile_with_path(&src, file) {
         Ok(out) => {
-            if !out.lints.is_empty() {
+            let lints = visible_lints(&out.lints);
+            if !lints.is_empty() {
                 eprint!(
                     "{}",
-                    jet::render_all_colored(file, &src, &out.lints, mode.color_stderr())
+                    jet::render_all_colored(file, &src, &lints, mode.color_stderr())
                 );
             }
             print!("{}", out.rust);
@@ -740,6 +758,62 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     }
+}
+
+/// D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y <file>` — the opt-in
+/// surface for accessibility lints (E2930 unlabeled control, E2931 duplicate
+/// label). Never runs during `jet build`/`jet run`/`jet check`; exits nonzero
+/// when it finds something so a project can gate CI on "zero a11y warnings"
+/// without those warnings ever blocking ordinary compilation.
+pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            eprintln!(
+                " fix: check the spelling, or run {} from the folder that contains it",
+                jet::Syntax::BINARY_NAME
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let diags = jet::check_with_path(file);
+    let errors: Vec<jet::Diagnostics::Diagnostic> = diags
+        .iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .cloned()
+        .collect();
+    if !errors.is_empty() {
+        report_problems(mode, file, &src, &errors);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let a11y_lints: Vec<jet::Diagnostics::Diagnostic> = diags
+        .into_iter()
+        .filter(|d| A11Y_LINT_CODES.contains(&d.code))
+        .collect();
+    if a11y_lints.is_empty() {
+        if mode.json {
+            println!("{}", jet::render_all_json(file, &src, &[]).trim_end());
+        } else {
+            println!("ok: `{}` has no accessibility problems", file);
+        }
+        return;
+    }
+    if mode.json {
+        eprint!("{}", jet::render_all_json(file, &src, &a11y_lints));
+    } else {
+        eprint!(
+            "{}",
+            jet::render_all_colored(file, &src, &a11y_lints, mode.color_stderr())
+        );
+        let n = a11y_lints.len();
+        eprintln!(
+            "\n{} accessibility warning{} found",
+            n,
+            if n == 1 { "" } else { "s" }
+        );
+    }
+    exit(ExitCodes::USER_ERROR);
 }
 
 /// D-TEST1 / D-TOOL5 (E2-M11): `jet bench` — benchmark a Jet program.

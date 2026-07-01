@@ -10,6 +10,7 @@
 //! consolidated plan lives in `tools/Tower/docs/plans/epoch-5/README.md`.
 
 pub mod CLI;
+pub mod Components;
 pub mod EnvFile;
 pub mod JSON;
 pub mod JetOS;

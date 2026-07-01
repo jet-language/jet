@@ -536,7 +536,7 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     )
 }
 
-/// D-METADERIVE1=A: evaluate the body of a user-authored `derive Trait for T { … }`
+/// D-METADERIVE1=A: evaluate the body of a user-authored `derive T.Trait { … }`
 /// block in a comptime scope where `type_param` is bound to `type_info`.
 /// Returns the source fragments emitted by `emit(…)` calls (D-CTCODEGEN1=A).
 pub fn evaluate_derive_body(

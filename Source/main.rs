@@ -8,6 +8,7 @@
 // Source files/modules use PascalCase names (owner decision).
 #![allow(non_snake_case)]
 
+use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
@@ -17,17 +18,22 @@ use jet::ExitCodes;
 
 mod CmdCompile;
 mod CmdDevTools;
+mod CmdDevWeb;
 mod CmdPkg;
 mod CmdSchema;
 mod CmdImpact;
 mod CmdSemIndex;
 mod CmdSupply;
 
-use CmdCompile::{run_compile_cmd, run_debug_native, run_fix, run_fmt, run_new, run_test, run_test_cov};
+use CmdCompile::{
+    run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new, run_test,
+    run_test_cov,
+};
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_doctor, run_emit_rust, run_eval,
-    run_explain, run_repl, run_serve, watch_policy_from, WatchPolicy,
+    run_explain, run_lint_a11y, run_repl, run_serve, watch_policy_from, WatchPolicy,
 };
+use CmdDevWeb::run_dev_web;
 use CmdPkg::{
     run_add, run_fetch, run_gc, run_remove, run_store_generations, run_store_rollback,
     run_store_verify, run_update,
@@ -574,6 +580,8 @@ fn main() {
     let locked = jet_argv.iter().any(|a| a == "--locked");
     let annotated = jet_argv.iter().any(|a| a == "--annotated");
     let verbose = jet_argv.iter().any(|a| a == "--verbose" || a == "-v");
+    // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in, never blocking.
+    let a11y = jet_argv.iter().any(|a| a == "--a11y");
     // D-TOOL5 (E2-M11): capability summary flags.
     let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
@@ -582,6 +590,18 @@ fn main() {
     let cross_target: Option<String> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    // c134 Phase 7: `jet dev <file> --target=web --port=<N>` picks the dev
+    // server's port explicitly instead of scanning from 8080.
+    let dev_port: Option<u16> = jet_argv
+        .iter()
+        .find_map(|a| a.strip_prefix("--port=").map(str::to_string))
+        .map(|s| {
+            s.parse::<u16>().unwrap_or_else(|_| {
+                eprintln!("error: `--port={}` isn't a valid port number", s);
+                eprintln!(" fix: use a number from 1 to 65535, e.g. `--port=3000`");
+                exit(ExitCodes::USAGE);
+            })
+        });
     let explain_partition = jet_argv.iter().any(|a| a == "--explain-partition");
     // D-BUILDPROFILE1: `--release` is sugar for `--profile=release`.
     // `--profile=<name>` selects a named profile. Resolved against pkg.jet
@@ -890,6 +910,37 @@ fn main() {
                     exit(ExitCodes::USAGE);
                 }
             };
+            // c-devserver (owner-directed 2026-07-01): a `.jet` file can define
+            // its own `jet dev` behavior as ordinary Jet code — a top-level
+            // `fn dev()` becomes the program's real (native) entry point,
+            // normally configuring and starting a `core.devserver` value.
+            // Checked FIRST, ahead of the #Target(Web)-inferred built-in web
+            // server below: `fn dev()` is the more specific, user-authored
+            // override, so a file that carries BOTH `#Target(Web)` (a build
+            // default) and `fn dev()` (an explicit dev-command override) must
+            // run the override, not silently fall back to the built-in server
+            // because a *different* marker also happened to be present. (This
+            // ordering bug was caught during manual verification — the first
+            // cut checked #Target(Web) first, which made `fn dev()` totally
+            // unreachable on any file that also declared #Target(Web), e.g.
+            // 196_ui_web_click.jet, which has both.)
+            if has_dev_entry_fn(file) {
+                run_dev_entry(file, mode);
+                return;
+            }
+            // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
+            // and serves `build/` with browser live-reload — a completely
+            // different execution model from the native interpret/hot-swap
+            // loop above, so it's a separate function, not a new branch
+            // inside `run_dev`'s interpreter machinery.
+            // D-WEBDEFAULT1 (open): no explicit --target= falls back to the
+            // file's own `#Target(Web)` marker, if any.
+            if effective_target("dev", file, cross_target.as_deref()).as_deref()
+                == Some(jet::Syntax::BUILD_TARGET_WEB)
+            {
+                run_dev_web(file, mode, verbose, dev_port);
+                return;
+            }
             run_dev(file, try_anyway, policy, mode, use_interpreter);
             return;
         }
@@ -1013,6 +1064,7 @@ fn main() {
                                 } else {
                                     args.iter().skip(1).copied().collect()
                                 };
+                                let effective = effective_target(cmd, &entry_str, cross_target.as_deref());
                                 run_compile_cmd(
                                     cmd,
                                     &entry_str,
@@ -1020,7 +1072,7 @@ fn main() {
                                     small,
                                     freestanding,
                                     allow_impure,
-                                    cross_target.as_deref(),
+                                    effective.as_deref(),
                                     explain_partition,
                                     verbose,
                                     capabilities_json,
@@ -1091,6 +1143,26 @@ fn main() {
         "bench" => {
             run_bench(target, mode);
         }
+        // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in accessibility
+        // lints (E2930/E2931), never blocking `jet build`/`jet run`.
+        "lint" => {
+            if !a11y {
+                eprintln!(
+                    "usage: {} lint --a11y <file.{}>",
+                    jet::Syntax::BINARY_NAME,
+                    jet::Syntax::FILE_EXT
+                );
+                eprintln!(" Why: `lint` needs a category flag; today only `--a11y` is supported (D-A11YGATE1)");
+                eprintln!(
+                    " Fix: run `{} lint --a11y <file.{}>` to check accessibility (missing roles, unlabeled controls)",
+                    jet::Syntax::BINARY_NAME,
+                    jet::Syntax::FILE_EXT
+                );
+                exit(ExitCodes::USAGE);
+            }
+            let resolved = resolve_source_path(target);
+            run_lint_a11y(&resolved, mode);
+        }
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
@@ -1113,6 +1185,7 @@ fn main() {
             } else {
                 target.to_string()
             };
+            let effective = effective_target(cmd, &resolved, cross_target.as_deref());
             run_compile_cmd(
                 cmd,
                 &resolved,
@@ -1120,7 +1193,7 @@ fn main() {
                 small,
                 freestanding,
                 allow_impure,
-                cross_target.as_deref(),
+                effective.as_deref(),
                 explain_partition,
                 verbose,
                 capabilities_json,
@@ -1137,6 +1210,78 @@ fn main() {
 /// (ext-optional CLI). If `raw` exists as-is, use it. Otherwise, if `raw.jet`
 /// exists, use that. If neither exists, return `raw` unchanged so the normal
 /// file-not-found diagnostic fires with the original name the user typed.
+/// D-WEBDEFAULT1 (open, c134): resolve the effective `--target=` value for
+/// `file`. Precedence: an explicit CLI flag always wins; else `pkg.jet`'s
+/// `target: "web"` (a managed package's project-level default); else a
+/// lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
+/// file's own default, for standalone examples with no manifest at all).
+/// Reparses the file/manifest — wasteful compared to threading the fact
+/// through the real compile pipeline, but `jet` recompiles from scratch on
+/// every invocation anyway (no incremental compilation), so a couple of
+/// extra cheap lex+parse passes are negligible, and it keeps this CLI-only
+/// concern out of `ProgramBundle`/codegen entirely.
+///
+/// `cmd == "run"` never infers: "run" means "execute this program and show
+/// me console output," a native-execution concept a web build can't satisfy
+/// (there's no runtime to run a `.wasm`+`.js` bundle as a console program —
+/// it just fails trying to exec the wrong artifact as a native binary). `jet
+/// run` on a web-targeted file still requires an explicit `--target=web`
+/// (which then hits the normal "can't run a cross-compiled binary" message,
+/// same as any other cross target) or, better, `jet dev`/`jet build`.
+fn effective_target(cmd: &str, file: &str, explicit: Option<&str>) -> Option<String> {
+    if explicit.is_some() {
+        return explicit.map(str::to_string);
+    }
+    if cmd == "run" {
+        return None;
+    }
+    if let Some(target) = manifest_default_target(file) {
+        return Some(target);
+    }
+    let src = fs::read_to_string(file).ok()?;
+    let (toks, lex_diags) = jet::Lexer::lex(&src);
+    if !lex_diags.is_empty() {
+        return None;
+    }
+    let prog = jet::Parser::parse(&toks).ok()?;
+    prog.default_target
+}
+
+/// c-devserver (owner-directed 2026-07-01): cheap lex+parse check (same style
+/// as `effective_target`) for whether `file`'s entry defines a top-level `fn
+/// dev()`. A lex/parse failure here is never fatal — it just means "no"; the
+/// real diagnostics surface a moment later when `run_dev_entry`/`run_dev`
+/// actually compiles the file.
+fn has_dev_entry_fn(file: &str) -> bool {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let (toks, lex_diags) = jet::Lexer::lex(&src);
+    if !lex_diags.is_empty() {
+        return false;
+    }
+    let prog = match jet::Parser::parse(&toks) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    prog.items
+        .iter()
+        .any(|i| matches!(i, jet::AST::Item::Func(f) if f.name == "dev"))
+}
+
+/// D-WEBDEFAULT1 (open, c134): `pkg.jet`'s `target: "web"`, if `file` sits
+/// inside a managed package (found via the same `find_manifest_root` walk
+/// `jet run`/`jet build` already use to resolve project-root mode).
+fn manifest_default_target(file: &str) -> Option<String> {
+    let start = Path::new(file).parent().unwrap_or(Path::new("."));
+    let root = jet::Loader::find_manifest_root(start)?;
+    let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+    let raw = fs::read_to_string(&pack_path).ok()?;
+    let manifest = jet::Jetpack::PackageManifest::parse(&raw).ok()?;
+    manifest.package.target
+}
+
 pub(crate) fn resolve_source_path(raw: &str) -> String {
     let path = Path::new(raw);
     // A directory argument is a project root: resolve its entry

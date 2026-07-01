@@ -371,7 +371,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             Err(inner) => diags.push(Diagnostic::error(
                                 "E2710",
                                 format!(
-                                    "`derive {} for T` body failed while expanding `#[{}]` on `{}`",
+                                    "`derive T.{}` body failed while expanding `#[{}]` on `{}`",
                                     derive_name, derive_name, s.name
                                 ),
                                 inner.what.clone(),

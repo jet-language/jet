@@ -421,6 +421,11 @@ impl Cx {
             Type::Named(name) if name == "TuiBackend" && !self.type_names.contains(name) => {
                 format!("{}JetTuiBackend", self.root_prefix)
             }
+            // c-devserver (owner-directed 2026-07-01): DevServer is a
+            // top-level prelude struct (Prelude/DevServer.rs).
+            Type::Named(name) if name == "DevServer" && !self.type_names.contains(name) => {
+                format!("{}JetDevServer", self.root_prefix)
+            }
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
                 format!(

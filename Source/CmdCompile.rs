@@ -143,15 +143,18 @@ pub(crate) fn run_compile_cmd(
     let (rust_code, ffi_link, clinks, capabilities, web_out, web_partition_report) =
         match compile_result {
         Ok(out) => {
-            if !out.lints.is_empty() {
+            // D-A11YGATE1=B (c134 Phase 6): a11y lints (E2930/E2931) are opt-in
+            // via `jet lint --a11y`; ordinary build/run never surfaces them.
+            let lints = crate::CmdDevTools::visible_lints(&out.lints);
+            if !lints.is_empty() {
                 if mode.json {
-                    eprint!("{}", jet::render_all_json(file, &src, &out.lints));
+                    eprint!("{}", jet::render_all_json(file, &src, &lints));
                 } else {
                     eprint!(
                         "{}",
-                        jet::render_all_colored(file, &src, &out.lints, mode.color_stderr())
+                        jet::render_all_colored(file, &src, &lints, mode.color_stderr())
                     );
-                    let n = out.lints.len();
+                    let n = lints.len();
                     eprintln!(
                         "\n{} warning{} emitted (compilation continues)",
                         n,
@@ -263,6 +266,79 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USAGE);
         }
     }
+}
+
+/// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`
+/// defines a top-level `fn dev()` — compile NATIVELY with `dev()` swapped in
+/// as the program's real entry point (`jet::compile_with_entry`), then run the
+/// resulting binary exactly like `jet run` does. `dev()`'s own body decides
+/// what happens next — normally configuring and starting a `core.devserver`
+/// value, but it's just an ordinary function; this call site owns none of
+/// that behavior (I3: codegen/the driver stay dumb about what `dev()` does).
+pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            eprintln!(
+                " fix: check the spelling, or run {} from the folder that contains it",
+                jet::Syntax::BINARY_NAME
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let out = match jet::compile_with_entry(file, "dev") {
+        Ok(out) => out,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let clinks = match jet::resolve_c_links(file) {
+        Ok(args) => args,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let bin = bin_path(file);
+    build(
+        file,
+        &out.rust,
+        bin.clone(),
+        BuildProfile::Default,
+        out.ffi.as_ref(),
+        &clinks,
+        false,
+        None,
+        None,
+        mode,
+    );
+    // `devserver.app()` support: hand the running `dev()` program the
+    // canonical absolute path of the file `jet dev` was pointed at, so "the
+    // file being run is the file to watch" needs no path spelled out in the
+    // Jet source — and works from any invocation directory (a relative
+    // string literal in `for_app(...)` only resolves from one cwd).
+    let dev_file = fs::canonicalize(file)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| file.to_string());
+    // JET_BIN: the devserver's rebuild subprocess must use THIS `jet`, not
+    // whatever a bare PATH lookup finds — a different `jet` on PATH could be
+    // a different version, and cwd-sensitive wrappers (the repo's own nix
+    // devshell `jet` resolves target/debug/jet relative to cwd) break
+    // outright when the rebuild runs from a staging directory.
+    let jet_bin = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| jet::Syntax::BINARY_NAME.to_string());
+    let status = Command::new(&bin)
+        .env("JET_DEV_FILE", &dev_file)
+        .env("JET_BIN", &jet_bin)
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("error: couldn't run the built program: {}", e);
+            exit(ExitCodes::USER_ERROR);
+        });
+    exit(status.code().unwrap_or(ExitCodes::OK));
 }
 
 /// D-SUPPLY1 — write an SPDX SBOM next to the freshly built binary.
@@ -739,6 +815,133 @@ fn validate_target(triple: &str, mode: OutputMode) {
     }
 }
 
+/// Where `write_web_artifacts` put each `build/*` file it wrote — returned so
+/// a caller can print/report the exact locations without recomputing the
+/// path-join logic a second time (I8: the join logic lives in exactly one
+/// place).
+pub(crate) struct WebBuildPaths {
+    pub(crate) manifest: PathBuf,
+    pub(crate) dom: PathBuf,
+    pub(crate) js: PathBuf,
+    pub(crate) wasm: PathBuf,
+    pub(crate) html: PathBuf,
+}
+
+/// D-WEBKIND1=A (c123 M2), extended by c134 Phase 7 (`jet dev --target=web`):
+/// the ONE place that knows how to turn a compiled `WebArtifacts` bundle into
+/// files on disk under `out_dir` (I8 — `jet build --target=web` and `jet dev
+/// --target=web`'s rebuild-on-save loop both call this, never duplicating the
+/// write/rustc-invoke logic).
+///
+/// `file` is the `.jet` source path — used only to look for a companion
+/// `<stem>.html` next to it, which wins over the generic `index_html` codegen
+/// emits (an example wiring a button to an exported `#Js` function ships its
+/// own page; see `Codegen::Web::emit_web`'s `index_html` doc comment).
+///
+/// Returns the paths written on success. On failure to run/pass rustc for the
+/// wasm half, returns `Err` with an already-formatted message instead of
+/// exiting — I2: rustc rejecting generated code is always an internal
+/// compiler error, but only the caller knows whether that should abort the
+/// process (`jet build`) or just be reported while the previous good build
+/// keeps serving (`jet dev --target=web`).
+pub(crate) fn write_web_artifacts(
+    file: &str,
+    web: &jet::Codegen::WebArtifacts,
+    verbose: bool,
+    out_dir: &Path,
+) -> Result<WebBuildPaths, String> {
+    let step = |msg: String| {
+        if verbose {
+            eprintln!("[build] {}", msg);
+        }
+    };
+
+    fs::create_dir_all(out_dir)
+        .map_err(|e| format!("error: couldn't create the {} folder: {}", out_dir.display(), e))?;
+
+    let manifest_path = out_dir.join("web.manifest.json");
+    let dom_path = out_dir.join("jet_dom_runtime.js");
+    let js_path = out_dir.join("app.js");
+    let wasm_rs_path = out_dir.join("app_wasm.rs");
+    let wasm_path = out_dir.join("app.wasm");
+    let html_path = out_dir.join("index.html");
+    // D-HTMLPAIR1 (open, c134): precedence for the served HTML source —
+    // (1) an explicit `#Html("path.html")` marker, relative to the source
+    //     file's own directory; a path that doesn't resolve is a hard error
+    //     naming the missing file, never a silent fallback;
+    // (2) the legacy `<stem>.html` sibling-filename convention, kept for
+    //     backward-compat with existing examples that predate the marker;
+    // (3) the generic `jet_main()`-only page from `emit_index_html`.
+    let html_contents = if let Some(rel) = &web.explicit_html_path {
+        let source_dir = Path::new(file).parent().unwrap_or(Path::new("."));
+        let explicit_path = source_dir.join(rel);
+        fs::read_to_string(&explicit_path).map_err(|e| {
+            format!(
+                "error: `#Html(\"{}\")` names a file that doesn't exist: {} ({})",
+                rel,
+                explicit_path.display(),
+                e
+            )
+        })?
+    } else {
+        let sibling_html = PathBuf::from(file).with_extension("html");
+        fs::read_to_string(&sibling_html).unwrap_or_else(|_| web.index_html.clone())
+    };
+
+    fs::write(&manifest_path, &web.manifest_json)
+        .map_err(|e| format!("error: couldn't write {}: {}", manifest_path.display(), e))?;
+    fs::write(&dom_path, &web.dom_runtime)
+        .map_err(|e| format!("error: couldn't write {}: {}", dom_path.display(), e))?;
+    fs::write(&js_path, &web.js_app)
+        .map_err(|e| format!("error: couldn't write {}: {}", js_path.display(), e))?;
+    fs::write(&wasm_rs_path, &web.wasm_rust)
+        .map_err(|e| format!("error: couldn't write {}: {}", wasm_rs_path.display(), e))?;
+    fs::write(&html_path, &html_contents)
+        .map_err(|e| format!("error: couldn't write {}: {}", html_path.display(), e))?;
+
+    step(format!("web manifest -> {}", manifest_path.display()));
+    step(format!("dom shim    -> {}", dom_path.display()));
+    step(format!("js entry    -> {}", js_path.display()));
+    step(format!("wasm emit   -> {}", wasm_rs_path.display()));
+    step(format!("index.html  -> {}", html_path.display()));
+    step(format!(
+        "rustc wasm  {} -> {}",
+        wasm_rs_path.display(),
+        wasm_path.display()
+    ));
+
+    let rustc = Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            wasm_rs_path.to_str().unwrap(),
+            "-o",
+            wasm_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))?;
+
+    if !rustc.status.success() {
+        return Err(format!(
+            "error: rustc rejected generated wasm module (internal compiler error)\n{}",
+            String::from_utf8_lossy(&rustc.stderr)
+        ));
+    }
+
+    Ok(WebBuildPaths {
+        manifest: manifest_path,
+        dom: dom_path,
+        js: js_path,
+        wasm: wasm_path,
+        html: html_path,
+    })
+}
+
 pub(crate) fn build(
     file: &str,
     rust_code: &str,
@@ -776,62 +979,13 @@ pub(crate) fn build(
             eprintln!("error: internal compiler error: missing web codegen output");
             exit(ExitCodes::ICE);
         });
-        let manifest_path = PathBuf::from("build").join("web.manifest.json");
-        let dom_path = PathBuf::from("build").join("jet_dom_runtime.js");
-        let js_path = PathBuf::from("build").join("app.js");
-        let wasm_rs_path = PathBuf::from("build").join("app_wasm.rs");
-        let wasm_path = PathBuf::from("build").join("app.wasm");
-        fs::write(&manifest_path, &web.manifest_json).unwrap_or_else(|e| {
-            eprintln!("error: couldn't write {}: {}", manifest_path.display(), e);
-            exit(ExitCodes::USER_ERROR);
-        });
-        fs::write(&dom_path, &web.dom_runtime).unwrap_or_else(|e| {
-            eprintln!("error: couldn't write {}: {}", dom_path.display(), e);
-            exit(ExitCodes::USER_ERROR);
-        });
-        fs::write(&js_path, &web.js_app).unwrap_or_else(|e| {
-            eprintln!("error: couldn't write {}: {}", js_path.display(), e);
-            exit(ExitCodes::USER_ERROR);
-        });
-        fs::write(&wasm_rs_path, &web.wasm_rust).unwrap_or_else(|e| {
-            eprintln!("error: couldn't write {}: {}", wasm_rs_path.display(), e);
-            exit(ExitCodes::USER_ERROR);
-        });
-        step(format!("web manifest -> {}", manifest_path.display()));
-        step(format!("dom shim    -> {}", dom_path.display()));
-        step(format!("js entry    -> {}", js_path.display()));
-        step(format!("wasm emit   -> {}", wasm_rs_path.display()));
-        step(format!(
-            "rustc wasm  {} -> {}",
-            wasm_rs_path.display(),
-            wasm_path.display()
-        ));
-        let rustc = Command::new("rustc")
-            .args([
-                "--edition",
-                "2021",
-                "--target",
-                "wasm32-unknown-unknown",
-                "--crate-type",
-                "cdylib",
-                "-O",
-                wasm_rs_path.to_str().unwrap(),
-                "-o",
-                wasm_path.to_str().unwrap(),
-            ])
-            .output()
-            .unwrap_or_else(|e| {
-                eprintln!("error: couldn't run rustc for wasm: {}", e);
+        let paths = match write_web_artifacts(file, web, verbose, Path::new("build")) {
+            Ok(p) => p,
+            Err(msg) => {
+                eprintln!("{}", msg);
                 exit(ExitCodes::ICE);
-            });
-        if !rustc.status.success() {
-            eprintln!(
-                "error: rustc rejected generated wasm module (internal compiler error)\n{}",
-                String::from_utf8_lossy(&rustc.stderr)
-            );
-            exit(ExitCodes::ICE);
-        }
-        let _ = file;
+            }
+        };
         let _ = rust_code;
         let _ = bin;
         let _ = profile;
@@ -839,11 +993,12 @@ pub(crate) fn build(
         let _ = clinks;
         if !mode.json {
             eprintln!(
-                "note: `--target=web` wrote `{}`, `{}`, `{}`, `{}`",
-                manifest_path.display(),
-                dom_path.display(),
-                js_path.display(),
-                wasm_path.display(),
+                "note: `--target=web` wrote `{}`, `{}`, `{}`, `{}`, `{}`",
+                paths.manifest.display(),
+                paths.dom.display(),
+                paths.js.display(),
+                paths.wasm.display(),
+                paths.html.display(),
             );
         }
         return;

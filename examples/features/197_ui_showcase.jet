@@ -1,0 +1,286 @@
+// 197 — the reactive UI stack flagship (Tower c134 Phase 8): a "Flight Deck"
+// dashboard showing view tree + typed style + component-kit composition +
+// motion + reactive signals + real DOM rendering all working together.
+// Companion page: examples/features/197_ui_showcase.html — open it via
+// `jet dev examples/features/197_ui_showcase.jet --target=web --port=<N>`.
+//
+// This file is split into two partitions on purpose (D-WASM1's own model,
+// not a workaround): a native-only cluster (View tree + a plain reactive
+// counter, no `core.ui`) that `main()` runs and prints, and a browser-only
+// cluster (`initApp`/`initFuel` + everything they call) that paints the real
+// dashboard. The two clusters never call into each other. That split isn't
+// a limitation dodged — the web JS backend (crates/jet-codegen/src/Codegen/Web.rs)
+// has no `Stmt::Switch`/pattern-matching support, so the `View` enum's
+// `.Text(text) -> {...}` matching (same shape as 190_ui_view_tree.jet) can
+// only run through the normal native/TIR pipeline, never through the JS
+// bucket. Mixing the two clusters under one `#Js`-tainted `main()` would
+// force the View/flatten machinery into the JS bucket too and silently
+// produce broken output (D-WASM1 partition markers are enforced on *every*
+// build, native included, the moment any function in the file carries one —
+// see check_web_partition). Keeping them apart is the honest way to show
+// every mechanism doing real work without overclaiming a JS match-codegen
+// path that doesn't exist yet.
+//
+// D-WEBDEFAULT1/D-HTMLPAIR1 (both open, c134): `jet build`/`jet dev` infer
+// the web backend from #Target(Web) below (no --target=web needed); #Html
+// names the companion host page explicitly instead of relying on the
+// <stem>.html filename convention. `jet run` never infers web from either
+// marker — see jet_cli_run_never_infers_web_target_from_marker in
+// tests/web_build.rs — so the native cluster below still runs normally.
+#Target(Web)
+#Html("197_ui_showcase.html")
+use core.ui as ui
+use core.reactive as reactive
+
+// ── Phase 2/3 (native only): typed View tree + composed stat descriptions ──
+
+enum View {
+    Text(text: String)
+    Box(children: [View])
+}
+
+fn stat_line(label: String, value: String) -> View {
+    return .Box.{children: [.Text.{text: "{label}: {value}"}]}
+}
+
+fn dashboard_view(cards: [View]) -> View {
+    return .Box.{children: cards.clone()}
+}
+
+fn flatten(v: View) -> [String] {
+    if v == {
+        .Text(text) -> { return [text] }
+        .Box(children) -> {
+            out: [String] := []
+            loop c in children {
+                loop t in flatten(c) {
+                    out.push(t)
+                }
+            }
+            return out
+        }
+    }
+}
+
+// ── Phase 3/7 (browser-side wiring): typed Color -> real hex, wired to paint ─
+// `Color` is a plain r/g/b struct — same flat shape as 191_ui_typed_style.jet.
+// `to_hex` is a REAL conversion (integer arithmetic, no shortcuts) that runs
+// in the browser and feeds `ui.node_color`'s paint pipeline directly: this is
+// the "typed style drives the actual paint" wiring 191 could only gesture at
+// (there, `Style`/`Color` were built but never reached the backend).
+//
+// Organization note: tried grouping every browser-side function into ONE
+// `#Target(Js) module browser { ... }` instead of a `#Js` tag on each one —
+// this WOULD be the cleaner shape (a module-level `#Target(Js)` ceiling does
+// cascade to member functions, confirmed working for simple cases), but it
+// exposed two real, general compiler bugs unrelated to this file's own logic:
+// (1) a struct declared *inside* an inline `module { }` isn't visible even to
+// that module's own sibling functions (repro: `module m { struct T {} fn f()
+// -> T { return T.{} } }` fails E0119, no #Target/web involved at all);
+// (2) moving a function into a module changes how native codegen handles an
+// unmodified struct-field forward, producing a real rustc rejection (I2 P0 —
+// `return StatCard.{ ..., color: color, ... }` inside a module wants a
+// `.clone()` that the identical code at file scope never needed). Both are
+// reported, not fixed here (out of scope for this pass) — so this file keeps
+// the original, verified-working per-function `#Js` tags below instead.
+
+struct Color {
+    r: Int
+    g: Int
+    b: Int
+}
+
+struct StatCard {
+    label: String
+    value: String
+    color: Color
+    x: Float
+    y: Float
+}
+
+#Js
+fn hex_digit(n: Int) -> String {
+    if n == 0 { return "0" }
+    if n == 1 { return "1" }
+    if n == 2 { return "2" }
+    if n == 3 { return "3" }
+    if n == 4 { return "4" }
+    if n == 5 { return "5" }
+    if n == 6 { return "6" }
+    if n == 7 { return "7" }
+    if n == 8 { return "8" }
+    if n == 9 { return "9" }
+    if n == 10 { return "a" }
+    if n == 11 { return "b" }
+    if n == 12 { return "c" }
+    if n == 13 { return "d" }
+    if n == 14 { return "e" }
+    return "f"
+}
+
+// Truncating divide-by-16, computed via range comparison + subtraction
+// (never `/`) — deliberately sidesteps int-vs-float division semantics the
+// narrow JS backend doesn't distinguish (JS `/` is always float division;
+// Jet `Int / Int` truncates). Comparisons/sub/mul are exact under both.
+#Js
+fn hi_nibble(n: Int) -> Int {
+    if n < 16 { return 0 }
+    if n < 32 { return 1 }
+    if n < 48 { return 2 }
+    if n < 64 { return 3 }
+    if n < 80 { return 4 }
+    if n < 96 { return 5 }
+    if n < 112 { return 6 }
+    if n < 128 { return 7 }
+    if n < 144 { return 8 }
+    if n < 160 { return 9 }
+    if n < 176 { return 10 }
+    if n < 192 { return 11 }
+    if n < 208 { return 12 }
+    if n < 224 { return 13 }
+    if n < 240 { return 14 }
+    return 15
+}
+
+#Js
+fn hex_byte(n: Int) -> String {
+    hi := hi_nibble(n)
+    lo := n - (hi * 16)
+    return "{hex_digit(hi)}{hex_digit(lo)}"
+}
+
+#Js
+fn to_hex(c: Color) -> String {
+    return "#{hex_byte(c.r)}{hex_byte(c.g)}{hex_byte(c.b)}"
+}
+
+#Js
+fn altitude_color() -> Color { return Color.{r: 51, g: 102, b: 255} }
+
+#Js
+fn airspeed_color() -> Color { return Color.{r: 18, g: 184, b: 134} }
+
+#Js
+fn fuel_color() -> Color { return Color.{r: 232, g: 121, b: 12} }
+
+#Js
+fn boost_color() -> Color { return Color.{r: 136, g: 85, b: 238} }
+
+// ── Phase 4 pattern: component-kit-style composition ──────────────────────
+// `stat_card` (spec builder) + `paint_stat_card` (renderer) — two small
+// composed functions in the same spirit as the Jetpack Button/Label/Container
+// kit (crates/jet-driver/src/Jetpack/components/*.jet): a typed struct plus a
+// constructor plus a function that turns it into real pixels, rather than one
+// monolithic render function.
+
+#Js
+fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) -> StatCard {
+    return StatCard.{label: label, value: value, color: color, x: x, y: y}
+}
+
+fn paint_stat_card(card: StatCard) {
+    backend #= ui.null_backend()
+    hex := to_hex(card.color)
+    node #= ui.node_color("{card.label}: {card.value}", 170.0, 74.0, hex)
+    constraint #= ui.constraint(0.0, 0.0, 400.0, 200.0)
+    size #= backend.measure(node, constraint)
+    frame #= ui.rect(card.x, card.y, size.width, size.height)
+    backend.layout(node, frame)
+    backend.paint(node)
+}
+
+// ── Phase 5: motion — smoothstep tween, pure function of elapsed time ─────
+// Identical shape to 193_ui_motion.jet's `tween`: no imperative frame tick,
+// just an eased interpolation of (from, to, elapsed, duration).
+
+#Js
+fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
+    if elapsed_ms <= 0 {
+        return from
+    }
+    if elapsed_ms >= duration_ms {
+        return to
+    }
+    t := elapsed_ms.to_float() / duration_ms.to_float()
+    eased := t * t * (3.0 - 2.0 * t)
+    return from + (to - from) * eased
+}
+
+// ── Phase 7: the real reactive/DOM dashboard ───────────────────────────────
+// Two independent entry points, each returning a `Signal` the host page
+// keeps and drives directly (`.get()`/`.set()`) — the same real
+// `jetDom.makeSignal` object 195_ui_web_reactive.jet's `reactive.signal`
+// compiles to, not a lookalike. `initApp` paints the two static stat cards
+// once and wires a `Signal<Int>` boost counter through `reactive_render` (the
+// counter box repaints itself whenever the returned signal changes — real
+// reactivity, driven from outside Jet by the host's click handler).
+// `initFuel` wires a second `Signal<Int>` holding elapsed motion time: the
+// host's `requestAnimationFrame` loop calls `.set(elapsedMs)` every frame
+// once boosting starts, `reactive_render` recomputes `tween(...)` from that
+// elapsed reading and repaints the Fuel card — motion driven by real clock
+// time, never by a stored/mutated animated value (D-MOTIONTIME1).
+
+fn initApp() -> Signal<Int> {
+    boosts #= reactive.signal(0)
+
+    paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), 0.0, 0.0))
+    paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), 190.0, 0.0))
+
+    counter_backend #= ui.null_backend()
+    ui.reactive_render(() => {
+        hex := to_hex(boost_color())
+        node #= ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, hex)
+        constraint #= ui.constraint(0.0, 0.0, 400.0, 200.0)
+        size #= counter_backend.measure(node, constraint)
+        frame #= ui.rect(190.0, 90.0, size.width, size.height)
+        counter_backend.layout(node, frame)
+        counter_backend.paint(node)
+    })
+
+    return boosts
+}
+
+fn initFuel() -> Signal<Int> {
+    elapsed #= reactive.signal(0)
+    backend #= ui.null_backend()
+    hex := to_hex(fuel_color())
+
+    ui.reactive_render(() => {
+        value := tween(40.0, 95.0, elapsed.get(), 600)
+        pct := value.to_int()
+        node #= ui.node_color("Fuel: {pct}%", 170.0, 74.0, hex)
+        constraint #= ui.constraint(0.0, 0.0, 400.0, 200.0)
+        size #= backend.measure(node, constraint)
+        frame #= ui.rect(0.0, 90.0, size.width, size.height)
+        backend.layout(node, frame)
+        backend.paint(node)
+    })
+
+    return elapsed
+}
+
+// ── native entry point: exercises the Phase 2/3 view-tree cluster + a plain
+// reactive counter (no `core.ui`, so this stays in the Wasm/native partition
+// — see the file-header note). `initApp`/`initFuel` are browser-only and are
+// never reached from here; they're exercised by the fake-DOM harness test
+// (tests/web_build.rs) and by the real page (197_ui_showcase.html) instead.
+use core.devserver as devserver
+fn dev() {
+    devserver.app().serve()
+}
+
+fn main() {
+    tree := dashboard_view([
+        stat_line("Altitude", "12,400 ft"),
+        stat_line("Airspeed", "410 kt"),
+        stat_line("Fuel", "40%"),
+    ])
+    loop line in flatten(tree) {
+        print(line)
+    }
+
+    boosts #= reactive.signal(0)
+    print("boosts={boosts.get()}")
+    boosts.set(boosts.get() + 1)
+    print("boosts={boosts.get()}")
+}

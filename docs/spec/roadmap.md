@@ -197,6 +197,13 @@ duplicated here:
 - Comptime layer 3 / user-defined derives (S56) → Epoch 3
 - Formal core / desugaring map → **Epoch 6** (D-FORMALCORE1=C); placeholder at
   [`docs/spec/formal-core.md`](formal-core.md); enforcement deferred until sema is frozen
+- Time-travel variable history (reversible execution / runtime value timeline)
+  → **Epoch 6** (D-TIMETRAVEL1=C, c111); prerequisites: D-REPLAY1 runtime replay
+  harness shipped, `jet debug` (D-DBG3) mature. No compiler work in Epoch 3.
+  Manual workaround today: use `jet debug <file>` (source-level step debugger,
+  D-DBG3) with breakpoints/watch, or add temporary `Log.debug(x)` calls at the
+  points where history matters — the interpreter re-run is cheap enough for
+  most debugging sessions. No standing per-variable history buffer exists.
 
 When a deferred item is promoted, add a milestone slot in the appropriate epoch
 README and ratify any new syntax in `syntax-decisions.md` before implementation.

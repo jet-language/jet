@@ -12,6 +12,17 @@ pub struct WebArtifacts {
     pub wasm_rust: String,
     pub js_app: String,
     pub dom_runtime: String,
+    /// D-DOMGEN1=A (Phase 7 extension): a minimal host page that loads
+    /// `app.js` as an ES module and runs `jet_main()` — so `jet build --target
+    /// web` produces something openable in a browser, not just source files.
+    /// Generic on purpose: it doesn't know about any app-specific exported
+    /// function beyond `jet_main`. An example that wants real interactivity
+    /// (a button calling an exported function) ships its own companion HTML
+    /// alongside the `.jet` source instead of relying on this default.
+    pub index_html: String,
+    /// D-HTMLPAIR1 (open, c134): the entry file's `#Html("path.html")`
+    /// marker, if any — relative to the `.jet` source's own directory.
+    pub explicit_html_path: Option<String>,
 }
 
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
@@ -37,7 +48,36 @@ pub fn emit_web(bundle: &ProgramBundle, _mode: CompileMode, _link: Option<&FfiLi
         wasm_rust,
         js_app,
         dom_runtime: DOM_RUNTIME.to_string(),
+        index_html: emit_index_html(),
+        explicit_html_path: bundle.modules[bundle.entry].html_path.clone(),
     }
+}
+
+fn emit_index_html() -> String {
+    "<!DOCTYPE html>\n\
+     <html lang=\"en\">\n\
+     <head>\n\
+     <meta charset=\"utf-8\">\n\
+     <title>jet web app</title>\n\
+     <style>\n\
+       :root { color-scheme: dark; }\n\
+       body {\n\
+         margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;\n\
+         font: 15px -apple-system, system-ui, sans-serif;\n\
+         background: radial-gradient(circle at 20% 20%, #1c2333, #0b0d14 60%); color: #e8ebf5;\n\
+       }\n\
+       #jet-app { position: relative; min-height: 40px; }\n\
+     </style>\n\
+     </head>\n\
+     <body>\n\
+     <div id=\"jet-app\"></div>\n\
+     <script type=\"module\">\n\
+     import { jet_main } from \"./app.js\";\n\
+     jet_main();\n\
+     </script>\n\
+     </body>\n\
+     </html>\n"
+        .to_string()
 }
 
 fn collect_web_funcs(bundle: &ProgramBundle) -> Vec<FuncWeb> {
@@ -428,7 +468,10 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
     if let Some(main_fn) = funcs.iter().find(|f| f.name == "main") {
         if main_fn.bucket == WebBucket::Js {
             out.push_str("export async function jet_main() {\n");
-            emit_js_body(&main_fn.body, &mut out, funcs, 1);
+            out.push_str(&format!("  jetDom.enterRenderScope({});\n", json_quote("main")));
+            out.push_str("  try {\n");
+            emit_js_body(&main_fn.body, &mut out, funcs, 2);
+            out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
             out.push_str("}\n\n");
             out.push_str("const _isMain = typeof process !== \"undefined\" && process.argv[1]?.endsWith(\"app.js\");\n");
             out.push_str("if (_isMain) { jet_main(); }\n");
@@ -445,13 +488,35 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
 }
 
 fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) {
-    out.push_str(&format!("function {}({}) {{\n", f.name, param_names(&f.params)));
-    emit_js_body(&f.body, out, all, 1);
+    // D-DOMGEN1=A (Phase 7 extension): every top-level #Js function is
+    // exported, not just `main` — a hand-written host page (index.html) can
+    // call any of them directly (e.g. a click handler invoking a Jet-compiled
+    // render function), the same way #WasmExport functions are callable via
+    // their `bridge_*` wrapper.
+    //
+    // D-UISHOWCASE1 (c134 Phase 8): every exported function's body runs
+    // inside `jetDom.enterRenderScope(name)` / `exitRenderScope()` — see
+    // DomRuntime.js. This is what lets `ui.null_backend()` stay a real
+    // zero-argument Jet call (no new language surface) while still giving
+    // each DOM box a *stable* identity: `enterRenderScope` only resets the
+    // "which box am I" counter when this is the OUTERMOST exported call
+    // (re-entrant nested exported calls, e.g. a shared paint helper invoked
+    // twice for two different cards, just keep incrementing within the
+    // caller's scope instead of colliding on one reused box). A repeatedly
+    // re-invoked entry point (`render(n)` in 196_ui_web_click.jet) resets to
+    // the same first key every call, so its one box is reused in place; an
+    // entry point that internally paints several distinct nodes in one call
+    // (197_ui_showcase.jet's `initApp`) gets one distinct key per node.
+    out.push_str(&format!("export function {}({}) {{\n", f.name, param_names(&f.params)));
+    out.push_str(&format!("  jetDom.enterRenderScope({});\n", json_quote(&f.name)));
+    out.push_str("  try {\n");
+    emit_js_body(&f.body, out, all, 2);
     if let Some(ret) = &f.return_type {
         if !body_has_return(&f.body) {
-            out.push_str(&format!("  return {};\n", js_default(ret)));
+            out.push_str(&format!("    return {};\n", js_default(ret)));
         }
     }
+    out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
     out.push_str("}\n\n");
 }
 
@@ -512,6 +577,32 @@ fn emit_js_body(body: &[Stmt], out: &mut String, funcs: &[FuncWeb], indent: usiz
                     out.push_str(&format!("{pad}}}\n"));
                 }
             },
+            // D-DOMGEN1=A wiring: a plain local reassignment (`name = expr` /
+            // `name += expr`, S17) inside an `#Js` function body — needed for
+            // e.g. picking a color/label based on a condition without an
+            // if-expression. Only `LValue::Local` is handled; other targets
+            // (index/field assignment) stay unsupported in this narrow JS
+            // codegen subset, same as every other construct this file
+            // doesn't emit (see the module doc comment).
+            Stmt::Assign {
+                target: crate::AST::LValue::Local { name, .. },
+                op,
+                value,
+                ..
+            } => {
+                let js_op = match op {
+                    None => "=",
+                    Some(crate::AST::BinOp::Add) => "+=",
+                    Some(crate::AST::BinOp::Sub) => "-=",
+                    Some(crate::AST::BinOp::Mul) => "*=",
+                    Some(crate::AST::BinOp::Div) => "/=",
+                    _ => "=",
+                };
+                out.push_str(&format!(
+                    "{pad}{name} {js_op} {};\n",
+                    js_emit_expr(value, funcs)
+                ));
+            }
             Stmt::If(if_stmt) => {
                 out.push_str(&format!(
                     "{pad}if ({}) {{\n",
@@ -571,8 +662,31 @@ fn ui_method_call(
         if ns == "ui" {
             return ui_dom_call(&format!("ui.{method}"), args, funcs);
         }
+        if ns == "reactive" {
+            return reactive_dom_call(&format!("reactive.{method}"), args, funcs);
+        }
     }
     None
+}
+
+/// `reactive.signal(initial)` — the only `core.reactive` constructor this
+/// example needs; `derived`/`effect`/`computed` are out of scope for Phase 7.
+fn reactive_dom_call(
+    name: &str,
+    args: &[crate::AST::CallArg],
+    funcs: &[FuncWeb],
+) -> Option<String> {
+    let short = name.rsplit('.').next().unwrap_or(name);
+    let a = |i: usize| {
+        args.get(i)
+            .map(|arg| js_emit_expr(&arg.expr, funcs))
+            .unwrap_or_else(|| "undefined".to_string())
+    };
+    let rendered = match short {
+        "signal" => format!("jetDom.makeSignal({})", a(0)),
+        _ => return None,
+    };
+    Some(rendered)
 }
 
 fn emit_js_method(
@@ -600,6 +714,26 @@ fn emit_js_method(
         ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", arg_exprs[0]),
         ("get", 0) => format!("{recv}.get()"),
         ("set", 1) => format!("{recv}.set({})", arg_exprs[0]),
+        // D-UISHOWCASE1 (c134 Phase 8): numeric width conversions
+        // (`to_int`/`to_float`, TIR/subset.rs's `numeric_conv_target`) — JS
+        // has one `Number` type, so `to_float` is an identity passthrough and
+        // `to_int` truncates toward zero (`Math.trunc`, matching Rust `as
+        // i64`'s truncation, not `Math.floor`'s round-toward-negative-infinity).
+        ("to_float", 0) => recv,
+        ("to_int", 0) => format!("Math.trunc({recv})"),
+        // D-UISHOWCASE1 (c134 Phase 8): sema silently inserts a `.clone()`
+        // `MethodCall` around struct-literal field values that need Rust
+        // value-semantics copying (CheckerOwnership.rs/CheckerInfer — not
+        // something this example's source ever spells out). Before this
+        // arm, the unknown-method fallback below turned every such field
+        // into `/* clone */ undefined` — a real, silent JS-codegen bug (a
+        // struct built from local variables, e.g. `stat_card(label, value,
+        // color, x, y) -> StatCard`, emitted `undefined` for every cloned
+        // field). JS objects/strings/numbers are copied-by-reference or by
+        // value naturally and nothing in this codegen subset mutates a
+        // struct's fields in place after construction, so `clone` is a safe
+        // identity passthrough here — no deep-copy needed.
+        ("clone", 0) => recv,
         _ => format!("/* {method} */ undefined"),
     }
 }
@@ -627,7 +761,44 @@ fn js_emit_expr(expr: &Expr, funcs: &[FuncWeb]) -> String {
             args,
             ..
         } => emit_js_method(receiver, method, args, funcs),
+        Expr::Lambda(lam) => js_emit_lambda(lam, funcs),
+        // D-UISHOWCASE1 (c134 Phase 8, flagship showcase): dot-construction
+        // (`Type.{ field: expr, ... }` / `.{ ... }`) inside a `#Js` function
+        // body — a real, narrow gap (this file's module doc already flagged
+        // it as unconfirmed). JS has no struct nominal type, so a Jet struct
+        // literal is just a plain object literal keyed by field name; that's
+        // all a JS-bucketed consumer (`.field` access, already supported)
+        // ever needs. `EnumLit`/tagged-variant construction is intentionally
+        // NOT added here — this codegen has no pattern-matching (`Stmt::Switch`)
+        // support, so a JS-bucketed function can build plain structs but not
+        // enums it would need to later destructure; that stays a native-only
+        // mechanism until switch/pattern support is added to this backend.
+        Expr::StructLit { fields, .. } => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(name, _, expr)| format!("{name}: {}", js_emit_expr(expr, funcs)))
+                .collect();
+            format!("({{ {} }})", parts.join(", "))
+        }
         _ => "undefined".to_string(),
+    }
+}
+
+/// Render a Jet lambda (`() => expr` or `() => { stmts }`) as a JS arrow
+/// function. Scoped to what `ui.reactive_render(() => { ... })` needs: a
+/// zero/narrow-arg closure whose block body is plain statements already
+/// covered by `emit_js_body` — no capture-list handling (JS closures capture
+/// lexically for free, unlike the Rust `take`-list machinery).
+fn js_emit_lambda(lam: &crate::AST::Lambda, funcs: &[FuncWeb]) -> String {
+    let params: Vec<String> = lam.params.iter().map(|p| p.name.clone()).collect();
+    let header = format!("({})", params.join(", "));
+    match &lam.body {
+        crate::AST::LambdaBody::Expr(e) => format!("{header} => ({})", js_emit_expr(e, funcs)),
+        crate::AST::LambdaBody::Block(stmts) => {
+            let mut body = String::new();
+            emit_js_body(stmts, &mut body, funcs, 1);
+            format!("{header} => {{\n{body}}}")
+        }
     }
 }
 
@@ -700,6 +871,8 @@ fn ui_dom_call(name: &str, args: &[crate::AST::CallArg], funcs: &[FuncWeb]) -> O
     let rendered = match short {
         "null_backend" => "jetDom.createBackend()".to_string(),
         "node" => format!("jetDom.makeNode({}, {}, {})", a(0), a(1), a(2)),
+        // D-STYLESHAPE1=A wiring: same shim function, explicit color arg.
+        "node_color" => format!("jetDom.makeNode({}, {}, {}, {})", a(0), a(1), a(2), a(3)),
         "constraint" => format!(
             "jetDom.makeConstraint({}, {}, {}, {})",
             a(0),
@@ -709,6 +882,9 @@ fn ui_dom_call(name: &str, args: &[crate::AST::CallArg], funcs: &[FuncWeb]) -> O
         ),
         "rect" => format!("jetDom.makeRect({}, {}, {}, {})", a(0), a(1), a(2), a(3)),
         "key_event" => format!("jetDom.makeKeyEvent({})", a(0)),
+        // D-RENDERTGT2=A carried into JS (Phase 7): `ui.reactive_render(() => {...})`
+        // runs the closure now and re-runs it whenever a signal it reads changes.
+        "reactive_render" => format!("jetDom.reactiveRender({})", a(0)),
         _ => return None,
     };
     Some(rendered)

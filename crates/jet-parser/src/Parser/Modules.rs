@@ -145,7 +145,20 @@ impl<'a> Parser<'a> {
         is_package_pub: bool,
     ) -> Result<Item, Diagnostic> {
         let web_target = if self.at_web_target() {
-            Some(self.parse_web_target_marker()?)
+            match self.parse_web_target_marker()? {
+                super::Items::TargetMarker::Bucket(b) => Some(b),
+                super::Items::TargetMarker::DefaultWeb => {
+                    let span = self.peek().span;
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "`#Target(Web)` isn't valid on a module".to_string(),
+                        "`Web` is a file-level default-backend marker, not a partition ceiling"
+                            .to_string(),
+                        "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(Js)` on a module".to_string(),
+                        Some(span),
+                    ));
+                }
+            }
         } else {
             None
         };

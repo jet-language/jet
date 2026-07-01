@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jet — click counter</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 15px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
+    background: radial-gradient(circle at 20% 20%, #1c2333, #0b0d14 60%);
+    color: #e8ebf5;
+  }
+  .card {
+    width: 360px;
+    padding: 36px 32px 32px;
+    border-radius: 20px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    text-align: center;
+  }
+  .kicker {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #8a92ad;
+    margin: 0 0 6px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 24px;
+    color: #f4f6ff;
+  }
+  #jet-app {
+    position: relative;
+    height: 80px;
+    margin-bottom: 24px;
+  }
+  /* The box itself is rendered by DomRuntime.js (paint()), which sets its
+     `left`/`top` from the Jet-computed layout frame — override `left` here
+     to center it in the card regardless of that frame's x, and animate the
+     color change it drives. */
+  #jet-app > div {
+    left: 50% !important;
+    transform: translateX(-50%);
+    transition: background 160ms ease;
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    border: none !important;
+    box-shadow: 0 12px 24px -8px rgba(0,0,0,0.5);
+  }
+  button {
+    appearance: none;
+    border: none;
+    padding: 12px 28px;
+    border-radius: 12px;
+    font: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    color: #0b0d14;
+    background: linear-gradient(160deg, #ffffff, #cdd3e6);
+    cursor: pointer;
+    box-shadow: 0 8px 20px -6px rgba(255,255,255,0.25);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  button:hover { transform: translateY(-1px); box-shadow: 0 10px 24px -6px rgba(255,255,255,0.35); }
+  button:active { transform: translateY(1px) scale(0.98); box-shadow: 0 4px 12px -4px rgba(255,255,255,0.2); }
+  .footer {
+    margin-top: 20px;
+    font-size: 12px;
+    color: #5b6280;
+  }
+  code { color: #a9b4e8; }
+</style>
+</head>
+<body>
+<div class="card">
+  <p class="kicker">jet · compiled to js</p>
+  <h1>Reactive counter, rendered live</h1>
+  <div id="jet-app"></div>
+  <button id="btn">Click me</button>
+  <p class="footer">Every 5th click flips the accent color —<br><code>examples/features/196_ui_web_click.jet</code></p>
+</div>
+<script type="module">
+import { render } from "./app.js";
+let n = 0;
+render(n);
+document.getElementById("btn").addEventListener("click", () => {
+  n += 1;
+  render(n);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+// 191 — typed styles (Tower c134, D-STYLESHAPE1=A). `Style` is a flat record
+// holding every visual property in one place (no nested sub-records), matching
+// D-LAYOUT1's constraint-layout typed-axis shape. `Color` is a plain r/g/b
+// struct; `Length` pairs a value with a unit enum (`LengthUnit { Px }` — only
+// the one unit this phase needs, no speculative unit system). All three types
+// are ordinary user-space Jet types (struct/enum), dot-constructed exactly
+// like Phase 2's `View` — this phase adds ZERO new core-opaque types or
+// sema/codegen plumbing.
+//
+// Length was first attempted as a `#UnitFamily(length) { px }` distinct-Float
+// unit (D-QUAL3 sugar, `Px(10.0)`) — cheaper Jet-source surface, since it's a
+// pre-existing mechanism. That hit a genuine, pre-existing TIR-codegen gap:
+// the subset coverage checker (`crates/jet-codegen/src/Codegen/TIR/subset.rs`,
+// `field_ty_covered`/`struct_is_covered`) does not recognize a `distinct`
+// type as a coverable struct-field type, so any struct with a distinct-typed
+// field ICEs at codegen ("construct the typed IR does not cover") — reproducible
+// with a minimal `struct Box2 { m: Meters }` where `Meters` is `distinct Float`,
+// unrelated to UI/styles. That's a standing compiler bug (I2: any ICE is a P0),
+// not something to patch as a side-effect of this phase's example — it needs
+// its own investigation into every TIR coverage predicate that walks struct/enum
+// field types. Filed as a follow-up; this example instead uses the flat
+// struct+enum `Length` shape, which IS covered (enum-typed struct fields are
+// already in the TIR subset), so the example ships a real, working slice.
+//
+// See `JetPaintCmd`'s backend paint-command color: that field isn't reachable
+// or settable from Jet source today (`paint()` hardcodes its fill color in
+// Rust), so there is nothing load-bearing to wire a typed `Color` into on the
+// backend side yet — the acceptance bar is a real, dot-constructible,
+// meaningfully-used `Style`, which these plain user types satisfy.
+
+enum LengthUnit {
+    Px
+}
+
+struct Length {
+    value: Float
+    unit: LengthUnit
+}
+
+struct Color {
+    r: Int
+    g: Int
+    b: Int
+}
+
+struct Style {
+    color: Color
+    width: Length
+    height: Length
+}
+
+enum View {
+    Text(text: String, style: Style)
+    Box(children: [View])
+}
+
+fn describe(v: View) -> [String] {
+    if v == {
+        .Text(text, style) -> {
+            return ["{text} rgb=({style.color.r},{style.color.g},{style.color.b}) w={style.width.value} h={style.height.value}"]
+        }
+        .Box(children) -> {
+            out: [String] := []
+            loop c in children {
+                loop line in describe(c) {
+                    out.push(line)
+                }
+            }
+            return out
+        }
+    }
+}
+
+fn total_width(v: View) -> Float {
+    if v == {
+        .Text(text, style) -> { return style.width.value }
+        .Box(children) -> {
+            sum := 0.0
+            loop c in children {
+                sum += total_width(c)
+            }
+            return sum
+        }
+    }
+}
+
+fn main() {
+    red #= Color.{r: 220, g: 20, b: 60}
+    blue #= Color.{r: 30, g: 60, b: 200}
+    px10 #= Length.{value: 10.0, unit: .Px}
+    px20 #= Length.{value: 20.0, unit: .Px}
+
+    a: View #= .Text.{text: "a", style: Style.{color: red, width: px10, height: Length.{value: 4.0, unit: .Px}}}
+    b: View #= .Text.{text: "b", style: Style.{color: blue, width: px20, height: Length.{value: 4.0, unit: .Px}}}
+    tree: View #= .Box.{children: [a, b]}
+
+    loop line in describe(tree) {
+        print(line)
+    }
+    print("total width {(total_width(tree))}")
+}
+// --- expected output --------------------------------------------------
+// a rgb=(220,20,60) w=10.0 h=4.0
+// b rgb=(30,60,200) w=20.0 h=4.0
+// total width 30.0

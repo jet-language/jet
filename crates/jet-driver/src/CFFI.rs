@@ -298,6 +298,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             items: vec![Item::CModule(merged_module)],
             web_target_ceiling: None,
             pub_file: false,
+            html_path: None,
         });
         lib_to_idx.insert(lib.clone(), synth_idx);
         cffi.libs.push(CLib {
@@ -358,6 +359,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                         })],
                         web_target_ceiling: None,
                         pub_file: false,
+                        html_path: None,
                     });
                     lib_to_idx.insert(lib.clone(), synth_idx);
                     cffi.libs.push(CLib {
@@ -570,6 +572,7 @@ fn load_cache_source(
         items: std::mem::take(&mut prog.items),
         web_target_ceiling: prog.web_target_ceiling,
         pub_file: prog.pub_file,
+        html_path: prog.html_path.clone(),
     });
 }
 

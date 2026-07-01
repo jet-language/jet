@@ -416,6 +416,19 @@ pub struct Program {
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
     pub pub_file: bool,
+    /// D-WEBDEFAULT1 (open, c134): `#Target(Web)` — this file's default CLI
+    /// backend is the web target, so `jet run`/`jet dev`/`jet build` don't
+    /// need `--target=web` on every invocation. `None` means the native
+    /// default applies unless `pkg.jet` or an explicit `--target=` flag says
+    /// otherwise. Distinct from `web_target_ceiling` (`Wasm`/`Js`, a partition
+    /// ceiling *within* a web build) — `Web` here means "build for the web
+    /// backend at all," a different axis, same marker family (I8).
+    pub default_target: Option<String>,
+    /// D-HTMLPAIR1 (open, c134): `#Html("path.html")` — this program's
+    /// companion host page for `--target=web` builds, explicit instead of
+    /// the silent `<stem>.html` sibling-filename convention. Relative to the
+    /// `.jet` source file's own directory.
+    pub html_path: Option<String>,
 }
 
 /// S16: `import "path" [as alias];` or `import name [as alias];`
@@ -544,6 +557,9 @@ pub struct LoadedModule {
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
     pub pub_file: bool,
+    /// D-HTMLPAIR1 (open, c134): `#Html("path.html")` — this file's explicit
+    /// companion host page for `--target=web` builds.
+    pub html_path: Option<String>,
 }
 
 /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.
@@ -680,7 +696,7 @@ pub enum Item {
     /// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
     /// methods. Erases as generated items; the declaration itself never reaches codegen.
     ProtocolDecl(ProtocolDecl),
-    /// D-METADERIVE1=A: `derive Trait for T { … }` user-authored derive.
+    /// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
     UserDerive(DeriveDef),
     /// D-GENMOD2=A: `module Name<params> { … }` — a parameterized module template.
     /// Stores the body as-is; sema expands `ModuleAlias` references before codegen.
@@ -1080,7 +1096,7 @@ pub struct StateDecl {
     pub span: Span,
 }
 
-/// D-METADERIVE1=A: `derive Trait for T { … }` user-authored derive.
+/// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
 #[derive(Debug, Clone)]
 pub struct DeriveDef {
     pub trait_name: String,

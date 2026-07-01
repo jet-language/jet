@@ -584,15 +584,25 @@ impl<'a> Parser<'a> {
                 let dot_start = self.bump().span.start; // consume `.`
                 self.struct_lit_inferred(dot_start)
             }
-            // D-ENUMDOT2=A: `.Variant` or `.Variant(args)` in value position.
-            // An uppercase ident after `.` with no receiver is a leading-dot enum literal.
-            // type_name="" is the unresolved sentinel; sema fills it in via expected_type.
+            // D-ENUMDOT2=A: `.Variant`, `.Variant(arg)`, or `.Variant.{ field: val }` in
+            // value position. An uppercase ident after `.` with no receiver is a
+            // leading-dot enum literal. type_name="" is the unresolved sentinel;
+            // sema fills it in via expected_type.
             TokKind::Dot if matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase())) =>
             {
                 let dot_start = self.bump().span.start; // consume `.`
                 let (variant, variant_span) =
                     self.expect_ident("after `.` in a leading-dot enum variant")?;
-                let (args, end) = if matches!(self.peek().kind, TokKind::LParen) {
+                // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val, … }` — named-payload
+                // construction reuses the struct dot-brace spelling (one leading-dot
+                // rule for every inferred construction, structs and enums alike).
+                let (args, end) = if allow_struct_lit
+                    && matches!(self.peek().kind, TokKind::Dot)
+                    && matches!(self.peek2().kind, TokKind::LBrace)
+                {
+                    self.bump(); // consume `.`
+                    self.enum_lit_named_fields()?
+                } else if matches!(self.peek().kind, TokKind::LParen) {
                     self.bump(); // consume `(`
                     let mut args = Vec::new();
                     if !matches!(self.peek().kind, TokKind::RParen) {
@@ -1660,6 +1670,36 @@ impl<'a> Parser<'a> {
             inferred: true,
             span: Span::new(dot_start, end),
         })
+    }
+
+    /// D-UITREE1/D-DOTCTOR1: named-payload enum literal fields `{ field: val, … }`.
+    /// The leading `.` before `{` was already consumed; parses the brace body and
+    /// returns `EnumLitArg::Named` entries (S77 field punning applies, matching
+    /// struct dot-construction).
+    fn enum_lit_named_fields(&mut self) -> Result<(Vec<EnumLitArg>, usize), Diagnostic> {
+        self.expect(TokKind::LBrace, "to open a named enum-variant literal")?;
+        let mut args = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let (label, label_span) = self.expect_ident("for a variant field name")?;
+            let value = if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                self.expr()?
+            } else {
+                // S77: field punning — `{ name }` means `{ name: name }`.
+                Expr::Ident(label.clone(), label_span)
+            };
+            args.push(EnumLitArg::Named { label, expr: value });
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        let end = self.peek().span.end;
+        self.bump();
+        Ok((args, end))
     }
 
     /// S31: try to parse a pattern on the right of `==`.
