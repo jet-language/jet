@@ -1136,3 +1136,35 @@ The enterprise-safe slogan is:
 Power users get build-time computation, source generation, reflection, fixed-output
 fetching, and eventually sandboxed macros. Enterprises get hermetic defaults,
 least privilege, lockfiles, SBOM/provenance, and one place to audit every effect.
+
+## 12. Owner direction recorded 2026-07-01 (session, not ratification)
+
+The owner reviewed the fn-build vision and gave direction. Nothing below is
+ratified; the ballots on card c95 (c1nixrpd) carry the actual decisions.
+
+- **Entry concept approved in principle:** a `fn main`-equivalent build entry
+  ("fn build") as the single auditable bottleneck, mapping to `jet build`.
+  Spelling is D-BUILDENTRY1 (open).
+- **Capabilities must not require a manifest.** Declaration travels with the
+  code (`#Impure`/effect tags on the build fn, D-CTEFFECT1) so a lone `.jet`
+  file can use build-time metaprogramming. pkg.jet is the *permission* layer;
+  the workspace is the *policy ceiling*. Declare / permit / cap — one mechanism
+  per layer. Spelling is D-BUILDSCOPE1 (open).
+- **File naming:** `pkg.jet` confirmed (already ratified, U10 revised).
+- **Monorepo layering:** workspace ⊃ payloads ⊃ packages ⊃ modules;
+  `workspace.jet` is the monorepo surface, never pkg.jet. Solo → enterprise
+  must be the same model at growing scale.
+- **Enforce rung:** custom org rules with first-class diagnostics from the
+  build entry is wanted; that is the D-METADEPTH1 rung-B "future vote", now
+  balloted as D-METADEPTH2 (open). Rung C stays frozen (c154).
+- **Generated source:** materialized, additive-only, lock-hashed; home/
+  addressing balloted as D-BUILDGEN1 (open).
+
+**Status correction:** the lifecycle-verbs law (`jet <verb>` → `fn <verb>()`,
+syntax-comparison-proposal.md §36A) is an OPEN proposal (see D-JPK-DEVCOMPOSE1),
+not ratified. An earlier ballot edit called it ratified; corrected in
+D-BUILDENTRY1 on 2026-07-01. This document's remaining decision bundle
+(D-BUILDACTION1/TARGET1/TOOLCHAIN1/CACHE1/PROBE1/LOCK1, D-SURFACEFAMILY1) is
+this proposal's expansion and is NOT yet balloted — deliberately held back so
+the owner decides the five open ballots (ENTRY/POLICY/SCOPE/GEN/METADEPTH2)
+before the build-graph internals are put in front of him.
