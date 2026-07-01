@@ -786,7 +786,7 @@ staged).
 ## M6 phase 4 — `--small` + LSP v0 (done)
 
 **`jet build --small`** (S15): `opt-level=z`, fat LTO, `panic=abort`, stripped symbols.
-Smaller binaries than the default speed-oriented profile (`tests/small.rs` on
+Smaller binaries than the default speed-oriented profile (`tests/release_gates.rs` on
 `examples/features/16_wordcount.jet`).
 
 **`jet lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).

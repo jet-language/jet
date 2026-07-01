@@ -41,7 +41,7 @@ list into one call or one new list.
 
 ## Verification
 
-- `nix develop -c cargo test --test ui`
+- `nix develop -c cargo test --test diagnostic_snapshots`
 - `nix develop -c cargo test --test golden`
 - `nix develop -c cargo test`
 

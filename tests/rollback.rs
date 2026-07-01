@@ -1,55 +1,17 @@
 //! D-TXN-ROLLBACK layer 2: the `Rollback` trait — custom snapshot/restore path.
 
 use std::fs;
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-static SEQ: AtomicU64 = AtomicU64::new(0);
+mod common;
+use common::have_rustc;
 
 fn unique_tmp(tag: &str) -> std::path::PathBuf {
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("jet_rollback_{tag}_{}_{}", std::process::id(), n))
-}
-
-fn have_rustc() -> bool {
-    Command::new("rustc").arg("--version").output().is_ok()
+    common::unique_tmp(&format!("jet_rollback_{tag}"))
 }
 
 fn build_and_run(name: &str, src: &str) -> (i32, String) {
-    let dir = unique_tmp(name);
-    fs::create_dir_all(&dir).unwrap();
-    let jet_path = dir.join(format!("{name}.jet"));
-    fs::write(&jet_path, src).unwrap();
-    let shown = jet_path.to_string_lossy().into_owned();
-    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!(
-            "front end rejected:\n{}",
-            jet::render_diagnostics(&shown, src, &diags)
-        )
-    });
-    let rs = dir.join(format!("{name}.rs"));
-    let bin = dir.join(name);
-    fs::write(&rs, &out.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        rustc.status.success(),
-        "rustc rejected generated code (I2 violation):\n{}",
-        String::from_utf8_lossy(&rustc.stderr)
-    );
-    let run = Command::new(&bin).output().unwrap();
-    (
-        run.status.code().unwrap_or(0),
-        String::from_utf8_lossy(&run.stdout).into_owned(),
-    )
+    let (code, stdout, _stderr) = common::build_and_run("jet_rollback", name, src);
+    (code, stdout)
 }
 
 /// On `?`-failure both fields are restored to their pre-block values via the

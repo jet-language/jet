@@ -152,8 +152,9 @@ deterministic, ANSI-free bytes — scripts never parse escape sequences.
 
 ## Testing strategy
 
-1. **ui snapshots** (tests/ui.rs): every diagnostic's exact text, pinned.
-   The error messages are the product; treat snapshot diffs like UI diffs.
+1. **diagnostic snapshots** (tests/diagnostic_snapshots.rs): every
+   diagnostic's exact text, pinned. The error messages are the product;
+   treat snapshot diffs like UI diffs.
 2. **golden examples** (tests/golden.rs): examples/ must front-end-pass,
    contain no `unsafe`, and — when rustc is present — build and print
    exactly examples/features/expected/*.out.

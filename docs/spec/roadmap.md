@@ -83,7 +83,7 @@ and fixed-size lists `[T#N]` (S76) — ratified and implemented 2026-06-16; see
 showcases were retired from `examples/`; milestone coverage lives in
 `examples/features/` and `examples/canon.jet` (E2 GA verified 2026-06-18; jetgrep,
 lowlevel, freestanding, http_service) and pass the front end. Hard size budgets
-(D-GA2=B) enforced in `tests/ga.rs`. Every E2 diagnostic has `jet explain`
+(D-GA2=B) enforced in `tests/release_gates.rs`. Every E2 diagnostic has `jet explain`
 (enforced). Single-file `jet run` needs no manifest.
 
 Moved to Epoch 3 (owner, 2026-06-18): DAP step-through / full source-level

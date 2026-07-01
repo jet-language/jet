@@ -1,46 +1,14 @@
 //! E2-M12 observability tests: structured JSON logs, rich panic reports,
 //! safe-locals policy (D-OBS1/D-OBS2/D-OBS3).
 
-use std::fs;
 use std::process::Command;
 
+mod common;
+
+/// Builds WITHOUT -O so cfg!(debug_assertions) is true (dev-mode locals) —
+/// the shared helper never passes -O, which is exactly this contract.
 fn build_and_run_debug(name: &str, src: &str) -> (i32, String, String) {
-    let dir = std::env::temp_dir().join(format!("jet_observe_test_{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(format!("{name}.jet"));
-    fs::write(&path, src).unwrap();
-    let shown = path.to_string_lossy().into_owned();
-    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!(
-            "front end rejected:\n{}",
-            jet::render_diagnostics(&shown, src, &diags)
-        )
-    });
-    let rs = dir.join(format!("{name}.rs"));
-    let bin = dir.join(name);
-    fs::write(&rs, &out.rust).unwrap();
-    // Build WITHOUT -O so cfg!(debug_assertions) is true (dev-mode locals).
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        rustc.status.success(),
-        "rustc rejected generated code (I2):\n{}",
-        String::from_utf8_lossy(&rustc.stderr)
-    );
-    let run = Command::new(&bin).output().unwrap();
-    (
-        run.status.code().unwrap_or(0),
-        String::from_utf8_lossy(&run.stdout).into_owned(),
-        String::from_utf8_lossy(&run.stderr).into_owned(),
-    )
+    common::build_and_run("jet_observe_test", name, src)
 }
 
 // ── D-OBS3: structured JSON log format ──────────────────────────────────────

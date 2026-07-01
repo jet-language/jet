@@ -30,7 +30,7 @@ The language spec lives in [docs/spec/spec.md](docs/spec/spec.md). Ratified synt
 ## Syntax canon
 
 [`examples/canon.jet`](examples/canon.jet) is the compiling syntax showcase — every
-line is ratified and implemented. It is golden-tested (`tests/canon.rs`). Milestone
+line is ratified and implemented. It is golden-tested (`tests/release_gates.rs`). Milestone
 feature programs live under [`examples/features/`](examples/features/) with the
 same golden harness (`tests/golden.rs`).
 

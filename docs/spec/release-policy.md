@@ -71,7 +71,7 @@ program's output beyond what your own dependencies require.
 
 ## `jet --version` contract (E2-D1)
 
-`jet --version` prints, deterministically (golden-tested in `tests/release.rs`):
+`jet --version` prints, deterministically (golden-tested in `tests/release_gates.rs`):
 
 ```
 Jet 1.0.0

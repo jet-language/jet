@@ -1,49 +1,11 @@
 //! D-NUMOPS1: checked-by-default integer overflow. Plain `+`/`-`/`*`/`/` on a
 //! fixed-width integer traps at runtime (exit 70) instead of wrapping silently.
 
-use std::fs;
-use std::process::Command;
+mod common;
+use common::have_rustc;
 
 fn build_and_run(name: &str, src: &str) -> (i32, String, String) {
-    let dir = std::env::temp_dir().join(format!("jet_numops_test_{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let jet_path = dir.join(format!("{name}.jet"));
-    fs::write(&jet_path, src).unwrap();
-    let shown = jet_path.to_string_lossy().into_owned();
-    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!(
-            "front end rejected:\n{}",
-            jet::render_diagnostics(&shown, src, &diags)
-        )
-    });
-    let rs = dir.join(format!("{name}.rs"));
-    let bin = dir.join(name);
-    fs::write(&rs, &out.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        rustc.status.success(),
-        "rustc rejected generated code (I2):\n{}",
-        String::from_utf8_lossy(&rustc.stderr)
-    );
-    let run = Command::new(&bin).output().unwrap();
-    (
-        run.status.code().unwrap_or(0),
-        String::from_utf8_lossy(&run.stdout).into_owned(),
-        String::from_utf8_lossy(&run.stderr).into_owned(),
-    )
-}
-
-fn have_rustc() -> bool {
-    Command::new("rustc").arg("--version").output().is_ok()
+    common::build_and_run("jet_numops_test", name, src)
 }
 
 #[test]

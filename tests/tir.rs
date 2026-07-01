@@ -8,50 +8,12 @@
 use std::fs;
 use std::process::Command;
 
-fn have_rustc() -> bool {
-    Command::new("rustc").arg("--version").output().is_ok()
-}
+mod common;
+use common::have_rustc;
 
 fn build_and_run(name: &str, src: &str) -> (i32, String) {
-    let dir = std::env::temp_dir().join(format!("jet_tir_test_{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    // `compile_with_path` loads the entry from disk, so write the .jet first.
-    let jet_path = dir.join(format!("{name}.jet"));
-    fs::write(&jet_path, src).unwrap();
-    let shown = jet_path.to_string_lossy().into_owned();
-    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!(
-            "front end rejected:\n{}",
-            jet::render_diagnostics(&shown, src, &diags)
-        )
-    });
-    let rs = dir.join(format!("{name}.rs"));
-    let bin = dir.join(name);
-    fs::write(&rs, &out.rust).unwrap();
-    let mut rustc_cmd = Command::new("rustc");
-    rustc_cmd
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
-    if let Some(link) = &out.ffi {
-        rustc_cmd
-            .arg("--extern")
-            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        if link.deps_dir.is_dir() {
-            rustc_cmd
-                .arg("-L")
-                .arg(format!("dependency={}", link.deps_dir.display()));
-        }
-    }
-    let rustc = rustc_cmd.output().unwrap();
-    assert!(
-        rustc.status.success(),
-        "rustc rejected generated code (I2 violation):\n{}",
-        String::from_utf8_lossy(&rustc.stderr)
-    );
-    let run = Command::new(&bin).output().unwrap();
-    (
-        run.status.code().unwrap_or(0),
-        String::from_utf8_lossy(&run.stdout).into_owned(),
-    )
+    let (code, stdout, _stderr) = common::build_and_run("jet_tir_test", name, src);
+    (code, stdout)
 }
 
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
