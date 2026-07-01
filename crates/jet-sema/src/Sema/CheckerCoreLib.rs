@@ -3048,6 +3048,20 @@ pub fn core_fixed_sig(
         ("core.path", "parent" | "extension" | "normalize") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
+        // D-TEXTUNICODE1: std-only Unicode scalar helpers.
+        ("core.text.unicode", "scalar_count" | "byte_count") => {
+            Some((vec![(read, Type::String)], Some(Type::Int)))
+        }
+        ("core.text.unicode", "is_ascii") => {
+            Some((vec![(read, Type::String)], Some(Type::Bool)))
+        }
+        ("core.text.unicode", "lower" | "upper") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.text.unicode", "scalars") => Some((
+            vec![(read, Type::String)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
         // jet.log: structured JSON logging to stderr (E2-M12, D-OBS3).
         ("jet.log", "info" | "warn" | "error" | "debug") => Some((vec![(read, string)], None)),
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
@@ -3590,6 +3604,15 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-UUIDENC1=A: hex/base64 codecs and UUID generator.
         "core.encoding.hex" => &["encode", "decode"],
         "core.encoding.base64" => &["encode", "decode"],
+        // D-TEXTUNICODE1: std-only Unicode scalar helpers.
+        "core.text.unicode" => &[
+            "scalar_count",
+            "byte_count",
+            "is_ascii",
+            "lower",
+            "upper",
+            "scalars",
+        ],
         "core.uuid" => &["v4", "v7"],
         "core.mem" => &[
             "Ptr",

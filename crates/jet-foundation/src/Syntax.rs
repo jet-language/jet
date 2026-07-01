@@ -1845,6 +1845,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-UUIDENC1=A (ratified 2026-06-26): hex and base64 codecs (pure, no deps).
     "core.encoding.hex",
     "core.encoding.base64",
+    // D-TEXTUNICODE1: std-only Unicode scalar helpers. Grapheme segmentation stays
+    // future work because it needs a Unicode data table/engine.
+    "core.text.unicode",
     // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
     "core.uuid",
     // D-CORENS1: ring packages now spelled `core.*` (canonical user-facing name).

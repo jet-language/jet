@@ -2856,6 +2856,26 @@ fn jet_std_path_normalize(path: &String) -> String {
     if absolute { format!("/{}", joined) } else { joined }
 }
 
+// ── core.text.unicode helpers (D-TEXTUNICODE1) ───────────────────────────────
+fn jet_text_unicode_scalar_count(s: &String) -> i64 {
+    s.chars().count() as i64
+}
+fn jet_text_unicode_byte_count(s: &String) -> i64 {
+    s.len() as i64
+}
+fn jet_text_unicode_is_ascii(s: &String) -> bool {
+    s.is_ascii()
+}
+fn jet_text_unicode_lower(s: &String) -> String {
+    s.to_lowercase()
+}
+fn jet_text_unicode_upper(s: &String) -> String {
+    s.to_uppercase()
+}
+fn jet_text_unicode_scalars(s: &String) -> Vec<String> {
+    s.chars().map(|c| c.to_string()).collect()
+}
+
 fn jet_std_fs_read(path: &String) -> Result<String, jet_std::IoError> {
     std::fs::read_to_string(path).map_err(|e| jet_std::io_error(path, e))
 }

@@ -2731,6 +2731,25 @@ pub(crate) fn emit_tir_core_call(
         ("core.path", "normalize") => {
             format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0))
         }
+        // D-TEXTUNICODE1: std-only Unicode scalar helpers.
+        ("core.text.unicode", "scalar_count") => {
+            format!("{}(&({}))", helper("jet_text_unicode_scalar_count"), arg(0))
+        }
+        ("core.text.unicode", "byte_count") => {
+            format!("{}(&({}))", helper("jet_text_unicode_byte_count"), arg(0))
+        }
+        ("core.text.unicode", "is_ascii") => {
+            format!("{}(&({}))", helper("jet_text_unicode_is_ascii"), arg(0))
+        }
+        ("core.text.unicode", "lower") => {
+            format!("{}(&({}))", helper("jet_text_unicode_lower"), arg(0))
+        }
+        ("core.text.unicode", "upper") => {
+            format!("{}(&({}))", helper("jet_text_unicode_upper"), arg(0))
+        }
+        ("core.text.unicode", "scalars") => {
+            format!("{}(&({}))", helper("jet_text_unicode_scalars"), arg(0))
+        }
         // E2-M9: first-party ring packages.
         ("jet.log", "info") => format!("{}(&({}))", helper("jet_ring_log_info"), arg(0)),
         ("jet.log", "warn") => format!("{}(&({}))", helper("jet_ring_log_warn"), arg(0)),

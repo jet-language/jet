@@ -4620,11 +4620,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Canonical Core library breadth plan. Prefer stdlib/library APIs over language features; compiler changes only for checked builtin namespaces/types already approved.\n\nBuild order:\n1. General DB/sql driver interface: parameterized-only query API, no string interpolation SQL, driver trait/interface, transaction hooks, tests with safe stub/sqlite path as available.\n2. Data formats: finish YAML 1.2 advanced tags/features under core.encoding.yaml; keep JSON/TOML/CSV behavior stable.\n3. Unicode text: opt-in core.text.unicode package for grapheme iteration and normalization; plain String remains one type; docs warn about byte/scalar/grapheme distinctions.\n4. Compression codecs: gzip/zstd/brotli under core.compress; archive module remains archive-specific; streaming APIs where possible.\n5. Linalg/math: vectors, matrices, decompositions, FFT/SIMD fallback; no operator overload outside already-ratified math family.\n\nAcceptance: one example per module with expected output; golden tests; API docs/reference updates; misuse diagnostics where API is safety-critical (SQL parameters, invalid Unicode form, malformed compressed stream); pay-for-what-you-call codegen remains R10.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-06-30",
+          "by": "agent",
+          "text": "Implemented std-only `core.text.unicode` scalar helpers and example 186; verified with `nix develop -c cargo test`. Existing DB/YAML/archive/linalg breadth examples and tests remain green."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
