@@ -48,7 +48,7 @@ dotless `T { }`; `T.{ … }` is the sole named-construction spelling, E0320) ·
 **D-METAREFLECT1** (B — one reflected `T.reflect()` handle) · **D-PLUGIN1** (B —
 `target: plugin` = sandboxed WASM, safe-by-default, WASM-runtime dep owner-gated) ·
 **D-WORKSPACE2** (A — `workspace` keyword / `workspace.jet`, kept the industry term
-over the aviation menu) · **D-METADERIVE1** (A — `derive Trait for T` + source-fragment
+over the aviation menu) · **D-METADERIVE1** (A — `derive T.Trait` + source-fragment
 re-entry; errors pin at the `#[…]` trigger, matches Rust/Swift macros) · **D-DEP-WASM1**
 (A — wasmtime + Component Model backs the D-PLUGIN1 sandbox; reuses the already-approved
 Cranelift, runtime-side only so I6 holds). Tracking cards: c81, c155, c156, c158._
