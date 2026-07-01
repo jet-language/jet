@@ -26,10 +26,18 @@ if [ ! -x "$rustc_aarch64" ]; then
   rustc_aarch64="$(command -v rustc)"
 fi
 
+# Debian/Ubuntu name the cross gcc aarch64-linux-gnu-gcc; Nix pkgsCross uses
+# the full GNU triplet. Accept either.
+linker="$(command -v aarch64-unknown-linux-gnu-gcc || command -v aarch64-linux-gnu-gcc || true)"
+if [ -z "$linker" ]; then
+  echo "no aarch64 cross gcc found (tried aarch64-unknown-linux-gnu-gcc, aarch64-linux-gnu-gcc)" >&2
+  exit 1
+fi
+
 "$rustc_aarch64" \
   --edition 2021 \
   --target "$target" \
-  -C linker=aarch64-unknown-linux-gnu-gcc \
+  -C linker="$linker" \
   -C opt-level=z \
   -C panic=abort \
   -C strip=symbols \
