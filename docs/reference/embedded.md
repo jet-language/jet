@@ -8,7 +8,7 @@ target matrix. This document covers the local QEMU harness (D-CROSS3 option A).
 Build for a non-host target by passing `--target=<triple>` to `jet build`:
 
 ```
-jet build --target=aarch64-unknown-linux-gnu examples/features/60_cross.jet
+jet build --target=aarch64-unknown-linux-gnu examples/features/lowlevel/cross.jet
 ```
 
 Jet passes `--target <triple>` straight through to rustc. Any triple that
@@ -42,7 +42,7 @@ permitted:
 Example:
 
 ```
-jet build --freestanding examples/features/61_freestanding.jet
+jet build --freestanding examples/features/lowlevel/freestanding.jet
 ```
 
 Combine with a cross target:

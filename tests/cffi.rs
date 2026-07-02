@@ -695,9 +695,9 @@ fn ffi_example_compiles_and_runs() {
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("examples/features/22_ffi.jet");
+    let path = root.join("examples/features/lowlevel/ffi.jet");
     let src = fs::read_to_string(&path).unwrap();
-    let shown = "examples/features/22_ffi.jet";
+    let shown = "examples/features/lowlevel/ffi.jet";
 
     let out = jet::compile_with_path(&src, shown).unwrap_or_else(|diags| {
         panic!(
@@ -732,7 +732,7 @@ fn ffi_example_compiles_and_runs() {
 
     let run = Command::new(&bin).output().unwrap();
     assert!(run.status.success(), "22_ffi runtime failed");
-    let expected = fs::read_to_string(root.join("examples/features/expected/22_ffi.out")).unwrap();
+    let expected = fs::read_to_string(root.join("examples/features/expected/lowlevel/ffi.out")).unwrap();
     assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
 }
 

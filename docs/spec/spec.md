@@ -501,7 +501,7 @@ and exit **1** when any test fails. **`require_eq`** failures print
 **`jet new <name>`** creates `<name>/main.jet` (hello world) and
 `<name>/.gitignore` (`build/`). No manifest (M12; opt-in).
 
-Example: `examples/features/20_tests.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
+Example: `examples/features/tooling/tests.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
 `tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`.
 
 ## `#Bench` region benchmarks + perf timing (c121, D-BENCH1) — done
@@ -514,7 +514,7 @@ body is warmed, its iteration count auto-scaled to ≥1ms, sampled, and reported
 as `name  <ns> ns/iter (±sd)  <ops> ops/sec`. A file with no `#Bench` blocks
 keeps whole-program `jet bench` timing (5 warmup + 20 trials). The body call is
 `black_box`'d so the optimizer can't elide it. Example:
-`examples/features/105_bench.jet`; golden `examples/features/expected/105_bench.out`
+`examples/features/tooling/bench.jet`; golden `examples/features/expected/105_bench.out`
 (the `jet run` `main` output) + structural check in `tests/jet_test.rs`.
 
 **Compiler phase timing** — set **`JET_TIMING=1`** and any build writes
@@ -554,7 +554,7 @@ at the boundary and become the M4 runtime report (exit 70).
 
 Teaching: **`unsafe`** / C-style FFI spellings → **`extern rust`** (**E0031**).
 
-Example: `examples/features/22_ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
+Example: `examples/features/lowlevel/ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
 Integration: `tests/ffi.rs` (gated on `cargo`).
 
 ## E2-M14 — C FFI (implemented: overlay + merge + link + bind backend)
@@ -623,7 +623,7 @@ Codegen stays dumb (I3): an `#Unsafe { … }` region lowers straight to a Rust
 sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
 (`tests/ui/lowlevel_e310*`, `tests/ui/mem_arena_gate`, `tests/ui/mem_use_after_free`,
 `tests/ui_lint/unsafe_missing_audit`); the audited end-to-end example is
-`examples/features/48_lowlevel.jet`.
+`examples/features/lowlevel/lowlevel.jet`.
 
 ### Allocators (D-ALLOC1, D-ALLOC-C, D-ALLOC-D; ratified 2026-06-19, implemented)
 
@@ -682,7 +682,7 @@ blocks and `user_<module>_<name>` mangling (`main` stays `main`).
 
 Diagnostics: **E0602** path escapes the project · **E0603** missing import ·
 **E0604** import cycle · **E0605** private item · **E0606** ambiguous module.
-Example: `examples/features/21_imports/` (three files; file import + `as alias`). UI
+Example: `examples/features/modules/imports/` (three files; file import + `as alias`). UI
 fixtures under `tests/ui/import_{escape,missing,cycle,private,private_field,ambiguous}/`.
 
 **Library packages resolve through the same `use` (U17, D-LIB-USE A).** One
@@ -741,7 +741,7 @@ auto-surfaces — a `pub`-but-not-re-exported item stays internal to the directo
 `text.wrap(…)` then resolves through the re-export to the defining module, with
 the real function's borrow/move conventions preserved.
 
-Examples: `examples/features/42_inline_module`, `43_module_file`,
+Examples: `examples/features/modules/inline_module`, `43_module_file`,
 `44_module_dir`, `45_module_use_unqualified`, `46_module_use_group`,
 `47_module_reexport`, `48_module_file_use`, `49_module_inline_sibling`,
 `170_generic_modules`. UI
@@ -787,7 +787,7 @@ staged).
 
 **`jet build --small`** (S15): `opt-level=z`, fat LTO, `panic=abort`, stripped symbols.
 Smaller binaries than the default speed-oriented profile (`tests/release_gates.rs` on
-`examples/features/16_wordcount.jet`).
+`examples/features/collections/wordcount.jet`).
 
 **`jet lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).
 Capabilities: full-document diagnostics on open/change (real front end, including
@@ -834,8 +834,8 @@ result use).
 Teaching: **`lambda`** / anonymous-fn spellings → `(x) => …` (**E0032**);
 **`|x|`** pipes → `(x) => …` (**E0033**).
 
-Examples: `examples/features/23_closures.jet`, `examples/features/24_callbacks.jet`,
-`examples/features/89_iter_adapters.jet`. Ui:
+Examples: `examples/features/basics/closures.jet`, `examples/features/basics/callbacks.jet`,
+`examples/features/collections/iter_adapters.jet`. Ui:
 `tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
 E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 `tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`

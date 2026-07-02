@@ -19,7 +19,7 @@ fn jet_test_example_output() {
         return;
     }
 
-    let example = root.join("examples/features/20_tests.jet");
+    let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
         .arg("test")
         .arg(&example)
@@ -27,12 +27,12 @@ fn jet_test_example_output() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet test examples/features/20_tests.jet failed:\nstdout: {}\nstderr: {}",
+        "jet test examples/features/tooling/tests.jet failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let expected = fs::read_to_string(root.join("examples/features/expected/20_tests.test.out"))
-        .expect("examples/features/expected/20_tests.test.out");
+    let expected = fs::read_to_string(root.join("examples/features/expected/tooling/tests.test.out"))
+        .expect("examples/features/expected/tooling/tests.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 }
 
@@ -50,7 +50,7 @@ fn jet_bench_example_regions() {
         return;
     }
 
-    let example = root.join("examples/features/105_bench.jet");
+    let example = root.join("examples/features/tooling/bench.jet");
     let out = Command::new(&jet)
         .arg("bench")
         .arg(&example)
@@ -59,7 +59,7 @@ fn jet_bench_example_regions() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
-        "jet bench examples/features/105_bench.jet failed:\nstdout: {}\nstderr: {}",
+        "jet bench examples/features/tooling/bench.jet failed:\nstdout: {}\nstderr: {}",
         stdout,
         String::from_utf8_lossy(&out.stderr)
     );
@@ -122,7 +122,7 @@ fn jet_property_test_passes() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/114_property_tests.jet");
+    let example = root.join("examples/features/tooling/property_tests.jet");
     let out = Command::new(&jet)
         .arg("test")
         .arg(&example)
@@ -215,7 +215,7 @@ fn jet_doctest_passes() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let example = root.join("examples/features/115_doctests.jet");
+    let example = root.join("examples/features/comptime/doctests.jet");
     let out = Command::new(&jet)
         .arg("test")
         .arg(&example)
@@ -304,7 +304,7 @@ fn jet_bench_target_integration() {
         eprintln!("note: rustc not found; skipping jet bench target integration");
         return;
     }
-    let example = root.join("examples/features/123_bench_target/main.jet");
+    let example = root.join("examples/features/tooling/bench_target/main.jet");
     let out = Command::new(&jet)
         .arg("bench")
         .arg(&example)
@@ -313,7 +313,7 @@ fn jet_bench_target_integration() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
-        "jet bench examples/features/123_bench_target/main.jet failed:\nstdout: {}\nstderr: {}",
+        "jet bench examples/features/tooling/bench_target/main.jet failed:\nstdout: {}\nstderr: {}",
         stdout,
         String::from_utf8_lossy(&out.stderr)
     );

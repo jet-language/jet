@@ -224,7 +224,7 @@ fn jet_cli_explain_partition_requires_web_target() {
         .args([
             "build",
             "--explain-partition",
-            "examples/features/01_hello.jet",
+            "examples/features/basics/hello.jet",
         ])
         .output()
         .unwrap();
@@ -254,7 +254,7 @@ fn jet_cli_web_build_succeeds() {
         .args([
             "build",
             "--target=web",
-            "examples/features/164_web_compute.jet",
+            "examples/features/web/web_compute.jet",
         ])
         .output()
         .unwrap();
@@ -466,7 +466,7 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
 
 #[test]
 fn compile_web_file_loads() {
-    let out = jet::compile_web("examples/features/164_web_compute.jet").expect("compile_web");
+    let out = jet::compile_web("examples/features/web/web_compute.jet").expect("compile_web");
     assert!(out.web.is_some());
 }
 
@@ -476,10 +476,10 @@ fn web_hello_dom_shim_roundtrip() {
         eprintln!("note: skipping web_build hello (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/163_web_hello.jet");
-    let dir = build_web_fixture("hello", src, "examples/features/163_web_hello.jet");
+    let src = include_str!("../examples/features/web/web_hello.jet");
+    let dir = build_web_fixture("hello", src, "examples/features/web/web_hello.jet");
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/163_web_hello.web.out");
+    let expected = include_str!("../examples/features/expected/web/web_hello.web.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -495,10 +495,10 @@ fn web_reactive_dom_snapshot_roundtrip() {
         eprintln!("note: skipping web_build reactive (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/195_ui_web_reactive.jet");
-    let dir = build_web_fixture("reactive", src, "examples/features/195_ui_web_reactive.jet");
+    let src = include_str!("../examples/features/web/ui_web_reactive.jet");
+    let dir = build_web_fixture("reactive", src, "examples/features/web/ui_web_reactive.jet");
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/195_ui_web_reactive.web.out");
+    let expected = include_str!("../examples/features/expected/web/ui_web_reactive.web.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -509,16 +509,16 @@ fn web_click_counter_dom_roundtrip() {
     // `main`), and `paint()` mounts a real, reused DOM element when a
     // `document` exists. This proves both, end to end: a fake `document` (no
     // browser, no new dependency) stands in for the click-driven host page
-    // (examples/features/196_ui_web_click.html), calling the exported
+    // (examples/features/web/ui_web_click.html), calling the exported
     // `render(n)` three times and observing the same element update in place.
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build click counter (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/196_ui_web_click.jet");
-    let dir = build_web_fixture("click", src, "examples/features/196_ui_web_click.jet");
+    let src = include_str!("../examples/features/web/ui_web_click.jet");
+    let dir = build_web_fixture("click", src, "examples/features/web/ui_web_click.jet");
     let stdout = run_web_click_harness(&dir);
-    let expected = include_str!("../examples/features/expected/196_ui_web_click.harness.out");
+    let expected = include_str!("../examples/features/expected/web/ui_web_click.harness.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -529,10 +529,10 @@ fn web_compute_wasm_bridge_roundtrip() {
         eprintln!("note: skipping web_build compute (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/164_web_compute.jet");
-    let dir = build_web_fixture("compute", src, "examples/features/164_web_compute.jet");
+    let src = include_str!("../examples/features/web/web_compute.jet");
+    let dir = build_web_fixture("compute", src, "examples/features/web/web_compute.jet");
     let stdout = run_web_app(&dir);
-    let expected = include_str!("../examples/features/expected/164_web_compute.out");
+    let expected = include_str!("../examples/features/expected/web/web_compute.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -555,8 +555,8 @@ fn web_showcase_dashboard_roundtrip() {
         eprintln!("note: skipping web_build showcase dashboard (need rustc + node)");
         return;
     }
-    let src = include_str!("../examples/features/197_ui_showcase.jet");
-    let dir = build_web_fixture("showcase", src, "examples/features/197_ui_showcase.jet");
+    let src = include_str!("../examples/features/web/ui_showcase.jet");
+    let dir = build_web_fixture("showcase", src, "examples/features/web/ui_showcase.jet");
     let stdout = run_showcase_harness(&dir);
     let lines: Vec<&str> = stdout.lines().collect();
 

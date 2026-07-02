@@ -16,7 +16,7 @@ fn semindex_schema_version() {
 
 #[test]
 fn semindex_hello_json_shape() {
-    let idx = open(&fixture("01_hello.jet")).expect("hello indexes");
+    let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
     assert!(json.contains("\"schema_version\":1"));
@@ -26,7 +26,7 @@ fn semindex_hello_json_shape() {
 
 #[test]
 fn semindex_effects_and_calls() {
-    let idx = open(&fixture("effects.jet")).expect("effects indexes");
+    let idx = open(&fixture("effects/effects.jet")).expect("effects indexes");
     assert!(idx.lookup("report").is_some());
     assert!(!idx.call_edges().is_empty());
     let report_effects = idx.effect_of("report").expect("report has effects");
@@ -37,14 +37,14 @@ fn semindex_effects_and_calls() {
 
 #[test]
 fn semindex_references() {
-    let idx = open(&fixture("01_hello.jet")).expect("hello indexes");
+    let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     assert!(!idx.references_to("print").is_empty());
 }
 
 #[test]
 fn jet_semindex_cli_json_smoke() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
-    let path = fixture("01_hello.jet");
+    let path = fixture("basics/hello.jet");
     let out = std::process::Command::new(bin)
         .args(["semindex", path.to_str().unwrap(), "--json"])
         .output()

@@ -171,8 +171,8 @@ fn repl_help_shows_commands() {
 
 #[test]
 fn repl_load_hello() {
-    // Load examples/features/01_hello.jet and check it runs.
-    let out = run_transcript(&[":load examples/features/01_hello.jet"], None);
+    // Load examples/features/basics/hello.jet and check it runs.
+    let out = run_transcript(&[":load examples/features/basics/hello.jet"], None);
     assert!(
         out.contains("hello, world"),
         "load should run main, got: {:?}",

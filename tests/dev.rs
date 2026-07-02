@@ -30,21 +30,47 @@ fn example_path(stem: &str) -> String {
     format!("examples/features/{}.jet", stem)
 }
 
-/// Every top-level example stem under `examples/features/`, sorted for
-/// determinism. (Subdirectory examples — imports, modules, packages — have
-/// their own multi-file drivers and are not single-entry dev targets.)
+/// All `.jet` files directly under a topic directory of `examples/features/`
+/// (one level: `examples/features/<topic>/<name>.jet`). Skips `expected/`
+/// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
+/// have their own multi-file drivers and are not single-entry dev targets.
+fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
+    let ex_dir = root.join("examples/features");
+    let mut files = Vec::new();
+    for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
+        let topic_path = topic_entry.path();
+        if !topic_path.is_dir() {
+            continue;
+        }
+        let topic_name = topic_path.file_name().unwrap().to_string_lossy().into_owned();
+        if topic_name == "expected" {
+            continue;
+        }
+        for e in fs::read_dir(&topic_path).unwrap().flatten() {
+            let path = e.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("jet") {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+/// The "topic/name" stem for a `.jet` file found via `topic_jet_files`.
+fn stem_of(root: &std::path::Path, path: &std::path::Path) -> String {
+    let ex_dir = root.join("examples/features");
+    let rel = path.strip_prefix(&ex_dir).unwrap().with_extension("");
+    rel.to_string_lossy().replace('\\', "/")
+}
+
+/// Every top-level example stem under `examples/features/<topic>/`, sorted
+/// for determinism. (Subdirectory examples — imports, modules, packages —
+/// have their own multi-file drivers and are not single-entry dev targets.)
 fn all_example_stems() -> Vec<String> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features");
-    let mut stems: Vec<String> = fs::read_dir(&dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("jet"))
-        .filter_map(|e| {
-            e.path()
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string())
-        })
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut stems: Vec<String> = topic_jet_files(&root)
+        .iter()
+        .map(|p| stem_of(&root, p))
         .collect();
     stems.sort();
     stems
@@ -214,7 +240,7 @@ fn infinite_loop_hits_e2202_fuel_stop() {
 
 #[test]
 fn task_program_hits_e2201_in_interpreter_mode() {
-    let file = "examples/features/32_tasks.jet";
+    let file = "examples/features/concurrency/tasks.jet";
     match dev_iteration(file, false, true) {
         RunOutcome::Problems(diags) => {
             assert_eq!(diags.len(), 1, "expected exactly one boundary note");
@@ -235,57 +261,57 @@ fn task_program_hits_e2201_in_interpreter_mode() {
 /// c139 M4: task programs inside `jit_covers` run via default `jet dev` (Cranelift), not E2201.
 #[test]
 fn task_program_runs_via_jit() {
-    let file = "examples/features/32_tasks.jet";
-    let mut bundle = jet::Loader::load_entry(file).expect("32_tasks bundle should load");
+    let file = "examples/features/concurrency/tasks.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("tasks bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
-    assert!(errors.is_empty(), "32_tasks must type-check");
+    assert!(errors.is_empty(), "tasks must type-check");
     assert!(
         jet_jit::jit_covers_bundle(&bundle),
-        "32_tasks must be jit-covered: {}",
+        "tasks must be jit-covered: {}",
         jet_jit::jit_covers_bundle_detail(&bundle)
     );
     jet_jit::try_compile_bundle(&bundle)
-        .unwrap_or_else(|e| panic!("32_tasks JIT compile failed: {e}"));
+        .unwrap_or_else(|e| panic!("tasks JIT compile failed: {e}"));
 
     let mut backend = CraneliftBackend::new(InterpreterBackend::new());
     let jit = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(ds) => panic!("32_tasks must run via JIT backend, got: {ds:?}"),
+        RunOutcome::Problems(ds) => panic!("tasks must run via JIT backend, got: {ds:?}"),
     };
 
     let got = match dev_iteration(file, false, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(ds) => panic!("32_tasks must run via default dev/JIT, got: {ds:?}"),
+        RunOutcome::Problems(ds) => panic!("tasks must run via default dev/JIT, got: {ds:?}"),
     };
-    assert_eq!(got.trim(), "5050", "32_tasks expected sum");
+    assert_eq!(got.trim(), "5050", "tasks expected sum");
     assert_eq!(jit.trim(), got.trim(), "JIT output drifted from dev_iteration");
 }
 
 /// c139 M4: scheduler/channel spawn stress example is jit-covered and runs.
 #[test]
 fn scheduler_spawn_runs_via_jit() {
-    let file = "examples/features/160_scheduler_spawn.jet";
+    let file = "examples/features/concurrency/scheduler_spawn.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
-    assert!(errors.is_empty(), "160_scheduler_spawn must type-check");
+    assert!(errors.is_empty(), "scheduler_spawn must type-check");
     assert!(
         jet_jit::jit_covers_bundle(&bundle),
-        "160_scheduler_spawn must be jit-covered: {}",
+        "scheduler_spawn must be jit-covered: {}",
         jet_jit::jit_covers_bundle_detail(&bundle)
     );
 
     let got = match dev_iteration(file, false, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => {
-            panic!("160_scheduler_spawn must run via default dev/JIT, got: {ds:?}")
+            panic!("scheduler_spawn must run via default dev/JIT, got: {ds:?}")
         }
     };
     assert_eq!(got.trim(), "1000");
@@ -297,7 +323,7 @@ fn scheduler_spawn_runs_via_jit() {
 /// tried.
 #[test]
 fn try_anyway_skips_the_boundary_scan() {
-    let file = "examples/features/32_tasks.jet";
+    let file = "examples/features/concurrency/tasks.jet";
     match dev_iteration(file, true, true) {
         RunOutcome::Problems(diags) => {
             // It got past the E2201 pre-scan and hit a real unsupported
@@ -313,11 +339,11 @@ fn try_anyway_skips_the_boundary_scan() {
     }
 }
 
-/// c139 M1: the Cranelift tier-1 backend runs `01_hello.jet` with byte-identical
+/// c139 M1: the Cranelift tier-1 backend runs `basics/hello.jet` with byte-identical
 /// stdout to the interpreter baseline.
 #[test]
 fn cranelift_backend_matches_hello() {
-    let file = "examples/features/01_hello.jet";
+    let file = "examples/features/basics/hello.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("hello bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -440,8 +466,10 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 
     let src = fs::read_to_string(file).expect("read source");
     let compiled = jet::compile_with_path(&src, file).expect("compile");
-    let rs = std::env::temp_dir().join(format!("jet_jit_3way_{stem}.rs"));
-    let bin = std::env::temp_dir().join(format!("jet_jit_3way_{stem}"));
+    // stems are topic-relative paths (basics/compound) — flatten for temp names
+    let flat = stem.replace('/', "_");
+    let rs = std::env::temp_dir().join(format!("jet_jit_3way_{flat}.rs"));
+    let bin = std::env::temp_dir().join(format!("jet_jit_3way_{flat}"));
     fs::write(&rs, &compiled.rust).unwrap();
     let rustc = Command::new("rustc")
         .args(["--edition", "2021"])
@@ -463,12 +491,12 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 #[test]
 fn jit_coverage_detail_smoke() {
     for stem in [
-        "06_compound",
-        "07_switch",
-        "10_structs",
-        "11_enums",
-        "04_branches",
-        "131_taskgroup",
+        "basics/compound",
+        "basics/switch",
+        "types/structs",
+        "types/enums",
+        "basics/branches",
+        "concurrency/taskgroup",
     ] {
         let file = format!("examples/features/{stem}.jet");
         let mut bundle = jet::Loader::load_entry(&file).expect("load");
@@ -477,7 +505,7 @@ fn jit_coverage_detail_smoke() {
         let stmts = jet_jit::jit_dump_main_stmts(&bundle);
         let funcs = jet_jit::jit_program_func_names(&bundle);
         eprintln!("{stem}: {detail}");
-        if stem == "07_switch" {
+        if stem == "basics/switch" {
             eprintln!(
                 "  compile: {:?}",
                 jet_jit::try_compile_bundle(&bundle)
@@ -511,12 +539,7 @@ fn jit_coverage_audit() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut covered = Vec::new();
     let mut gaps = Vec::new();
-    for entry in fs::read_dir(root.join("examples/features")).expect("read examples") {
-        let entry = entry.expect("entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jet") {
-            continue;
-        }
+    for path in topic_jet_files(&root) {
         let file = path.to_string_lossy();
         let mut bundle = match jet::Loader::load_entry(&file) {
             Ok(b) => b,
@@ -530,7 +553,7 @@ fn jit_coverage_audit() {
         if !errors.is_empty() {
             continue;
         }
-        let stem = path.file_stem().unwrap().to_string_lossy();
+        let stem = stem_of(&root, &path);
         if jet_jit::jit_covers_bundle(&bundle) {
             covered.push(stem.to_string());
         } else {
@@ -556,12 +579,7 @@ fn jit_coverage_audit() {
 fn jit_covered_example_stems() -> Vec<String> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut stems = Vec::new();
-    for entry in fs::read_dir(root.join("examples/features")).expect("read examples") {
-        let entry = entry.expect("entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jet") {
-            continue;
-        }
+    for path in topic_jet_files(&root) {
         let file = path.to_string_lossy();
         let mut bundle = match jet::Loader::load_entry(&file) {
             Ok(b) => b,
@@ -577,7 +595,7 @@ fn jit_covered_example_stems() -> Vec<String> {
         if jet_jit::jit_covers_bundle(&bundle)
             && jet_jit::try_compile_bundle(&bundle).is_ok()
         {
-            stems.push(path.file_stem().unwrap().to_string_lossy().into_owned());
+            stems.push(stem_of(&root, &path));
         }
     }
     stems.sort();
@@ -620,12 +638,7 @@ fn cranelift_three_way_differential_battery() {
 #[test]
 fn jit_covers_implies_tir_lowers() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for entry in fs::read_dir(root.join("examples/features")).expect("read examples") {
-        let entry = entry.expect("entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jet") {
-            continue;
-        }
+    for path in topic_jet_files(&root) {
         let file = path.to_string_lossy();
         let mut bundle = match jet::Loader::load_entry(&file) {
             Ok(b) => b,
@@ -638,7 +651,7 @@ fn jit_covers_implies_tir_lowers() {
         {
             continue;
         }
-        let stem = path.file_stem().unwrap().to_string_lossy();
+        let stem = stem_of(&root, &path);
         if jet_jit::jit_covers_bundle(&bundle) {
             assert!(
                 jet_jit::tir_lowers_bundle(&bundle),
@@ -817,7 +830,7 @@ fn front_end_errors_surface_in_dev_iteration() {
 /// the diagnostic-producing work the watch loop does on every save.
 #[test]
 fn check_latency_under_budget() {
-    let file = "examples/features/16_wordcount.jet";
+    let file = "examples/features/collections/wordcount.jet";
     // Warm up (first load touches the filesystem and caches).
     let _ = jet::check_with_path(file);
     let mut best = u128::MAX;

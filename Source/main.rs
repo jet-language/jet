@@ -632,7 +632,7 @@ fn main() {
             }
             (_, true) | (Some("--bench"), _) => {
                 // jet lsp --bench: run latency benchmark on a small program
-                let src = include_str!("../examples/features/16_wordcount.jet");
+                let src = include_str!("../examples/features/collections/wordcount.jet");
                 jet::LSP::run_bench(src, 10, 200);
                 return;
             }

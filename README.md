@@ -15,13 +15,13 @@ no exceptions, no hidden control flow.
 
 ```bash
 nix develop -c cargo build
-nix develop -c jet run examples/features/01_hello.jet
+nix develop -c jet run examples/features/basics/hello.jet
 ```
 
 `hello, world` means the toolchain is working. Next:
 
 ```bash
-nix develop -c jet check examples/features/02_functions.jet
+nix develop -c jet check examples/features/basics/functions.jet
 nix develop -c cargo test    # golden examples + error snapshots
 ```
 

@@ -60,7 +60,7 @@ fn main() {
 }
 
 /// Statement-form if / else-if / else with a returning helper — mirrors the
-/// shape of examples/features/05_fizzbuzz.jet's `label`.
+/// shape of examples/features/basics/fizzbuzz.jet's `label`.
 #[test]
 fn if_else_chain_and_return() {
     if !have_rustc() {
@@ -324,7 +324,7 @@ fn main() {
 /// A unit-variant enum, enum literals (`Light.Red` etc.), and two exhaustive
 /// variant matches (the `_ => unreachable!` fallthrough is dead but mandatory).
 /// `next`, `label`, and `main` (an enum-typed local + covered helper calls) all
-/// route through the TIR. Mirrors examples/features/11_enums.jet.
+/// route through the TIR. Mirrors examples/features/types/enums.jet.
 #[test]
 fn enum_unit_variants_and_exhaustive_match() {
     if !have_rustc() {
@@ -431,7 +431,7 @@ fn main() {
 
 /// An arm-head range switch over a scalar subject with an `else` (the mixed-switch
 /// `if/else if … else` lowering, with the parity `_jet_switch_subject` binding).
-/// Mirrors examples/features/71_pattern_matching.jet's `score_grade`.
+/// Mirrors examples/features/basics/pattern_matching.jet's `score_grade`.
 #[test]
 fn arm_head_range_switch() {
     if !have_rustc() {

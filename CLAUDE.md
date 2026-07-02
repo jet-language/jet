@@ -23,7 +23,7 @@ the same Rust, C toolchain, Node, Jet wrapper, and repo utilities:
 ```
 nix develop -c cargo build
 nix develop -c cargo test
-nix develop -c jet run examples/features/01_hello.jet
+nix develop -c jet run examples/features/basics/hello.jet
 nix develop -c rg "pattern" docs Source tests
 ```
 
@@ -42,7 +42,7 @@ This scaffold was authored in a sandbox **without a Rust toolchain**.
    only because rendering drifted from the hand-computed fixtures, check
    the actual output against the format in docs/spec/diagnostics.md, then
    bless with `nix develop -c env UPDATE_EXPECT=1 cargo test` and re-run.
-3. `nix develop -c jet run examples/features/01_hello.jet` prints `hello, world`.
+3. `nix develop -c jet run examples/features/basics/hello.jet` prints `hello, world`.
 Commit that as "M0 verified" before anything else.
 
 ## Invariants (violating one = stop and fix)

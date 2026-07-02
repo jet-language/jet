@@ -61,10 +61,10 @@ fn small_profile_binary_is_smaller_than_default() {
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/features/16_wordcount.jet");
+    let example = root.join("examples/features/collections/wordcount.jet");
     assert!(
         example.is_file(),
-        "examples/features/16_wordcount.jet must exist"
+        "examples/features/collections/wordcount.jet must exist"
     );
 
     let dir = std::env::temp_dir().join(format!("jet_small_test_{}", std::process::id()));
@@ -83,8 +83,8 @@ fn small_profile_binary_is_smaller_than_default() {
         String::from_utf8_lossy(&build_default.stderr)
     );
     fs::rename(
-        dir.join("build/16_wordcount"),
-        dir.join("build/16_wordcount_default"),
+        dir.join("build/wordcount"),
+        dir.join("build/wordcount_default"),
     )
     .unwrap();
 
@@ -99,15 +99,15 @@ fn small_profile_binary_is_smaller_than_default() {
         String::from_utf8_lossy(&build_small.stderr)
     );
     fs::rename(
-        dir.join("build/16_wordcount"),
-        dir.join("build/16_wordcount_small"),
+        dir.join("build/wordcount"),
+        dir.join("build/wordcount_small"),
     )
     .unwrap();
 
-    let default_size = fs::metadata(dir.join("build/16_wordcount_default"))
+    let default_size = fs::metadata(dir.join("build/wordcount_default"))
         .unwrap()
         .len();
-    let small_size = fs::metadata(dir.join("build/16_wordcount_small"))
+    let small_size = fs::metadata(dir.join("build/wordcount_small"))
         .unwrap()
         .len();
 
@@ -130,10 +130,10 @@ fn hello_world_small_binary_stays_under_budget() {
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/features/01_hello.jet");
+    let example = root.join("examples/features/basics/hello.jet");
     assert!(
         example.is_file(),
-        "examples/features/01_hello.jet must exist"
+        "examples/features/basics/hello.jet must exist"
     );
 
     let dir = std::env::temp_dir().join(format!("jet_hello_budget_{}", std::process::id()));
@@ -217,10 +217,10 @@ fn is_code(s: &str) -> bool {
 #[test]
 fn ga_milestone_features_front_end_clean() {
     let features: &[(&str, &str)] = &[
-        ("47_library.jet", "library authoring"),
-        ("48_lowlevel.jet", "expert low-level tier"),
-        ("57_http_server.jet", "HTTP service"),
-        ("61_freestanding.jet", "freestanding smoke"),
+        ("modules/library.jet", "library authoring"),
+        ("lowlevel/lowlevel.jet", "expert low-level tier"),
+        ("net/http_server_tasks.jet", "HTTP service"),
+        ("lowlevel/freestanding.jet", "freestanding smoke"),
     ];
 
     let features_dir = root().join("examples/features");
@@ -255,9 +255,9 @@ fn ga_feature_size_budgets() {
     }
 
     let budgets: &[(&str, u64)] = &[
-        ("47_library.jet", 4_194_304),
-        ("48_lowlevel.jet", 4_194_304),
-        ("61_freestanding.jet", 4_194_304),
+        ("modules/library.jet", 4_194_304),
+        ("lowlevel/lowlevel.jet", 4_194_304),
+        ("lowlevel/freestanding.jet", 4_194_304),
     ];
 
     let features_dir = root().join("examples/features");

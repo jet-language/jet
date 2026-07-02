@@ -159,7 +159,7 @@ Use `entry.path` for a ready-to-use path (don't build `"{dir}/{entry}"` by
 hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
 `core.path` provides `path.join(dir, name) -> String` plus `.parent()`,
 `.extension()`, and `.normalize()` for composing paths independently of
-`DirEntry`. Example: `examples/features/87_dir_entry.jet`.
+`DirEntry`. Example: `examples/features/io/dir_entry.jet`.
 
 ---
 
@@ -241,7 +241,7 @@ returns a new one:
 `parsed.flag("help")` yourself. `.parse` returns `ParsedArgs ? String`, where
 the error string carries the parse message (unknown flag, missing positional,
 …). Wrong argument counts on builder/query methods are **E1301**–**E1304**.
-Example: `examples/features/64_cli_args.jet`.
+Example: `examples/features/io/cli_args.jet`.
 
 ---
 
@@ -516,7 +516,7 @@ A `Duration` is a deterministic span of milliseconds minted by `time.ms(n)` /
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)
 for its body — the "I know this is deterministic" hatch. It is a semantic
 footgun: nothing verifies the claim, so use it only when you can guarantee
-reproducibility yourself. See `examples/features/111_determinism.jet`.
+reproducibility yourself. See `examples/features/effects/determinism.jet`.
 
 ---
 
@@ -937,7 +937,7 @@ fn main() {
 `.to_int()` / `.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
 evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
 `?` / `??` propagate or unwrap them in pure comptime expressions
-(`examples/features/86_comptime_parse.jet`).
+(`examples/features/comptime/comptime_parse.jet`).
 
 ---
 
@@ -1084,13 +1084,13 @@ the package system fully stabilizes.
 
 | Example | Shows |
 |---------|-------|
-| `examples/features/29_files.jet` | Read, transform, write with errors |
-| `examples/features/30_json.jet` | Parse, inspect, mutate, re-render JSON |
-| `examples/features/31_cli.jet` | Args, environment, exit codes |
-| `examples/features/64_cli_args.jet` | `core.args` — flag/option/positional spec + parse |
-| `examples/features/87_dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
-| `examples/features/106_serde_derive.jet` | `#[Codable]` encode + typed `decode<T>` with `#[Rename]` |
-| `examples/features/107_csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
-| `examples/features/108_json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
+| `examples/features/io/files.jet` | Read, transform, write with errors |
+| `examples/features/serde/json.jet` | Parse, inspect, mutate, re-render JSON |
+| `examples/features/io/cli.jet` | Args, environment, exit codes |
+| `examples/features/io/cli_args.jet` | `core.args` — flag/option/positional spec + parse |
+| `examples/features/io/dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
+| `examples/features/serde/serde_derive.jet` | `#[Codable]` encode + typed `decode<T>` with `#[Rename]` |
+| `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
+| `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.

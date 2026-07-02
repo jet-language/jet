@@ -25,7 +25,7 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
         [path, symbol] => (*path, *symbol),
         _ => {
             eprintln!("error: `jet impact` needs an entry file and a symbol name");
-            eprintln!(" Fix: jet impact examples/features/effects.jet report");
+            eprintln!(" Fix: jet impact examples/features/effects/effects.jet report");
             exit(ExitCodes::USER_ERROR);
         }
     };

@@ -653,8 +653,8 @@ mod tests {
     #[test]
     fn jit_covers_task_examples() {
         for file in [
-            "examples/features/32_tasks.jet",
-            "examples/features/160_scheduler_spawn.jet",
+            "examples/features/concurrency/tasks.jet",
+            "examples/features/concurrency/scheduler_spawn.jet",
         ] {
             let mut bundle =
                 crate::Loader::load_entry(file).unwrap_or_else(|_| panic!("load {file}"));

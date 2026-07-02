@@ -182,7 +182,8 @@ fn readme_subcommands_exist_in_cli() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 5: Every examples/features/*.jet has a matching expected output
+// Check 5: Every examples/features/<topic>/*.jet has a matching expected
+// output. `expected/` mirrors the <topic>/ tree (D-REPO-EXAMPLES1=A).
 // ---------------------------------------------------------------------------
 #[test]
 fn every_feature_example_has_expected_output() {
@@ -192,34 +193,45 @@ fn every_feature_example_has_expected_output() {
 
     let mut missing: Vec<String> = Vec::new();
 
-    for entry in fs::read_dir(&ex_dir).unwrap().flatten() {
-        let path = entry.path();
-        let ext = path.extension().and_then(|e| e.to_str());
+    for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
+        let topic_path = topic_entry.path();
+        if !topic_path.is_dir() {
+            continue;
+        }
+        let topic = topic_path.file_name().unwrap().to_string_lossy().into_owned();
+        if topic == "expected" {
+            continue;
+        }
+        let expected_topic_dir = expected_dir.join(&topic);
 
-        if ext == Some("jet") {
-            let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
-            let out = expected_dir.join(format!("{}.out", stem));
-            let errout = expected_dir.join(format!("{}.err.out", stem));
-            if !out.is_file() && !errout.is_file() {
-                missing.push(format!(
-                    "examples/features/{}.jet → missing expected/{}.out or .err.out",
-                    stem, stem
-                ));
-            }
-        } else if path.is_dir() {
-            let stem = path.file_name().unwrap().to_string_lossy().into_owned();
-            if stem == "expected" {
-                continue;
-            }
-            let main = path.join("main.jet");
-            if main.is_file() {
-                let out = expected_dir.join(format!("{}.out", stem));
-                let errout = expected_dir.join(format!("{}.err.out", stem));
+        for entry in fs::read_dir(&topic_path).unwrap().flatten() {
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str());
+
+            if ext == Some("jet") {
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                let stem = format!("{}/{}", topic, name);
+                let out = expected_topic_dir.join(format!("{}.out", name));
+                let errout = expected_topic_dir.join(format!("{}.err.out", name));
                 if !out.is_file() && !errout.is_file() {
                     missing.push(format!(
-                        "examples/features/{}/main.jet → missing expected/{}.out or .err.out",
+                        "examples/features/{}.jet → missing expected/{}.out or .err.out",
                         stem, stem
                     ));
+                }
+            } else if path.is_dir() {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                let stem = format!("{}/{}", topic, name);
+                let main = path.join("main.jet");
+                if main.is_file() {
+                    let out = expected_topic_dir.join(format!("{}.out", name));
+                    let errout = expected_topic_dir.join(format!("{}.err.out", name));
+                    if !out.is_file() && !errout.is_file() {
+                        missing.push(format!(
+                            "examples/features/{}/main.jet → missing expected/{}.out or .err.out",
+                            stem, stem
+                        ));
+                    }
                 }
             }
         }

@@ -40,11 +40,25 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
     let ex_dir = root.join("examples/features");
     let ext = jet::Syntax::FILE_EXT;
     let mut seeds = Vec::new();
-    for e in fs::read_dir(&ex_dir).unwrap().flatten() {
-        let path = e.path();
+    // examples live one level down in topic directories (D-REPO-EXAMPLES1)
+    let mut files = Vec::new();
+    for t in fs::read_dir(&ex_dir).unwrap().flatten() {
+        let tp = t.path();
+        if !tp.is_dir() || tp.file_name().unwrap() == "expected" {
+            continue;
+        }
+        for e in fs::read_dir(&tp).unwrap().flatten() {
+            files.push(e.path());
+        }
+    }
+    for path in files {
         if path.extension().and_then(|x| x.to_str()) == Some(ext) {
-            let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
-            if stem == "22_ffi" {
+            let stem = format!(
+                "{}/{}",
+                path.parent().unwrap().file_name().unwrap().to_string_lossy(),
+                path.file_stem().unwrap().to_string_lossy()
+            );
+            if stem == "lowlevel/ffi" {
                 continue;
             }
             let src = fs::read_to_string(&path).unwrap();

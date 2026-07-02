@@ -122,25 +122,18 @@ card there is exactly one numeric-capability marker (I8). Concretely:
 
 ## 4. Gates / ambiguities — resolve before writing parser code
 
-These are genuine holes in the binding record. **G1 blocks parser work**; raise it as a
-ballot if the reading below is not obviously right (memory: ballot-first). G2–G4 have a
-defensible default; implement the default and flag in the card log.
+G1 and G3 were raised as ballots and are now **ratified 2026-07-02** — the outcomes
+below are binding. G2 and G4 keep their defensible defaults; implement and flag in
+the card log.
 
-**G1 — `#Pure` in type position (callback effect bound).** `#Pure fn(T) -> U` is a
-callback-type bound (`Parser/Types.rs:39,361,741`; `Sema/Effects.rs:534`). The law says
-**"@ never appears inside a type or expression; # can."** But `#Pure` is on the move
-list (D-MARKERMOVE1=B) with no exception carved for its type-position use. Two readings:
-  - (a) **Position-split**: `@Pure` on a fn/trait-method **declaration**; `#Pure` stays
-    on the callback **type** `#Pure fn(T)->U` (a bound, not a declaration-contract). The
-    same word lives on both planes by grammatical role. Consistent with the law's plain
-    text; costs a two-spelling word.
-  - (b) **Whole-move**: `@Pure` everywhere, accepting `@` in this one type-ish slot as an
-    exception. Simpler mental model; bends the "@ never in type position" line.
-  D-MARKER-FAMILY1's own canonical example is `@Pure fn score(...)` (declaration). The
-  move list names `#Pure → @Pure` flatly. **Neither text addresses the callback bound.**
-  Recommended: (a) position-split, because the law's type-position rule is stated as
-  absolute and E0745/E0747/E0742 treat the bound as an effect-directive, not a promise.
-  **Confirm with owner before building — do not guess the surface.**
+**G1 — RATIFIED: D-MARKERMOVE2=B (whole-move).** `@Pure` is one spelling everywhere,
+including the single type-position callback-bound slot: `fn map(items: [Int],
+f: @Pure fn(Int) -> Int)`. The plane law gains exactly one carve-out — a contract
+marker may prefix a function TYPE to state a bound; "declarations only" reads
+"declarations, plus contract bounds on function types". `#Pure` in type position
+(`Parser/Types.rs:39,361,741`; `Sema/Effects.rs:534`) migrates with the plane and the
+old spelling gets the E0062 teaching error like every other moved contract. Update
+E0742/E0745/E0747 message text to the `@Pure` spelling in the same phase.
 
 **G2 — bracket-list form across planes.** Today `#[Codable, RenameAll(camel)]` mixes a
 derive (→`@`) and a serde attribute (stays `#`) in one group, and E0999 forbids stacked
@@ -152,14 +145,15 @@ group for contract derives, and (ii) **allow an `@[…]` group and a `#[…]` gr
 on the same declaration** (they are different planes — E0999 must not fire across planes).
 Default: implement both; keep E0999 firing only for two `#[…]` lines or two `@[…]` lines.
 
-**G3 — non-named derive markers.** `#[Debug]`, `#[Summarize]`, `#[Comparable]`, and user
-derives (`#[Wire]`, D-METADERIVE1) are derive-trait markers routed by `split_type_markers`
-(`Parser/Items.rs:3253` "Any other name is a derive-trait"). D-MARKERMOVE1=B names **only**
-`Codable`/`Encode`/`Decode` among derives. The detail even frames user derives as
-"#Derive is generation machinery you write" (a directive). Default: **only the three named
-derive markers move; `Debug`/`Summarize`/`Comparable`/user `#[Wire]` stay `#`** pending a
-follow-up ballot. Flag in card log that Codable-on-`@` beside Debug-on-`#` in the same
-struct will look odd and likely wants a future sweep.
+**G3 — RATIFIED: D-MARKERMOVE3=B (all built-ins move; user derives stay `#`).**
+`@Debug`, `@Summarize`, `@Comparable` join `@Codable`/`@Encode`/`@Decode` on the
+contract plane as capability promises. User derives (`derive T.Wire { … }` bodies,
+applied as `#[Wire]`) remain `#` generation machinery — the built-in/user line IS the
+plane line. `split_type_markers` (`Parser/Items.rs:3253`) therefore needs a fixed
+built-in contract-derive name set (the six above) routed to `@`, with "any other
+name" still parsing as a `#` user derive. Old `#[Debug]`-style spellings of the six
+get the E0062 teaching error. Add the three extra markers to every phase's move
+tables (registry, parser, prelude, examples, snapshots, docs).
 
 **G4 — D-CLIFLAG1 markers.** D-CLIFLAG1 (card c7cliflag, blocked on this card) mints a
 struct-level CLI-derive marker and a field-level doc marker whose spelling "rides"
@@ -224,9 +218,9 @@ build agent, **re-verify with a real `cargo build` + `cargo test --no-run`** —
 new-diagnostics reminder is a stale mid-build snapshot. Clean `/tmp/nix-shell.*` if disk
 looks tight.
 
-### Phase 0 — resolve G1 (blocking)
-Confirm G1 reading (owner ballot if not obviously right). Do not start Phase 2 until the
-callback-`#Pure` surface is settled. Phases 1 and 8-docs can proceed meanwhile.
+### Phase 0 — gates resolved (done 2026-07-02)
+D-MARKERMOVE2=B and D-MARKERMOVE3=B ratified — §4 carries the binding outcomes. No
+remaining blockers; all phases may proceed in order.
 
 ### Phase 1 — `Syntax.rs` registry (I7/R3 first)
 Files: `crates/jet-foundation/src/Syntax.rs`.
@@ -254,7 +248,7 @@ Files: `crates/jet-parser/src/Parser/{Items.rs,Statements.rs,Modules.rs,Types.rs
   (`Items.rs:771`, `Statements.rs:1086`) to only fire for `@`+non-marker.
 - `split_type_markers` (`Items.rs:3235`): Codable/Encode/Decode now arrive from the `@`
   group; serde names now arrive from the `#` group; allow both groups on one type (G2).
-- **G1**: apply the settled surface to `Parser/Types.rs` (callback bound).
+- **G1 (D-MARKERMOVE2=B)**: `Parser/Types.rs` callback bound accepts `@Pure fn(T) -> U`; old `#Pure` type-position spelling → E0062.
 - **Formatter**: emit moved markers with `@` — `fmt_type_markers`/`fmt_marker`
   (`Formatter/Items.rs:271,288`), the `#Pure`/`#MustUse` fn emitters (`Items.rs:121`),
   and the `rfind("#Pure"/"#Test")` span logic in `Formatter/mod.rs:180-233` (the moved

@@ -22,29 +22,41 @@ fn examples_compile_and_run() {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
 
+    // Recursive discovery: examples/features/<topic>/<name>.jet or
+    // examples/features/<topic>/<name>/main.jet. Test id (`stem`) is the
+    // relative path without extension, e.g. "net/http_server". `expected/`
+    // mirrors the same <topic>/<name> tree.
     let mut entries: Vec<(PathBuf, String, String)> = Vec::new();
-    for e in fs::read_dir(&ex_dir).unwrap().flatten() {
-        let path = e.path();
-        if path.extension().and_then(|x| x.to_str()) == Some(ext) {
-            let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
-            entries.push((
-                path.clone(),
-                stem.clone(),
-                format!("examples/features/{}.{}", stem, ext),
-            ));
-        } else if path.is_dir() {
-            let main = path.join(format!("main.{}", ext));
-            if main.is_file() {
-                let stem = path.file_name().unwrap().to_string_lossy().into_owned();
+    for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
+        let topic_path = topic_entry.path();
+        if !topic_path.is_dir() {
+            continue;
+        }
+        let topic_name = topic_path.file_name().unwrap().to_string_lossy().into_owned();
+        if topic_name == "expected" {
+            continue;
+        }
+        for e in fs::read_dir(&topic_path).unwrap().flatten() {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str()) == Some(ext) {
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                let stem = format!("{}/{}", topic_name, name);
                 entries.push((
-                    main.clone(),
-                    stem,
-                    format!(
-                        "examples/features/{}/main.{}",
-                        path.file_name().unwrap().to_string_lossy(),
-                        ext
-                    ),
+                    path.clone(),
+                    stem.clone(),
+                    format!("examples/features/{}.{}", stem, ext),
                 ));
+            } else if path.is_dir() {
+                let main = path.join(format!("main.{}", ext));
+                if main.is_file() {
+                    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                    let stem = format!("{}/{}", topic_name, name);
+                    entries.push((
+                        main.clone(),
+                        stem.clone(),
+                        format!("examples/features/{}/main.{}", stem, ext),
+                    ));
+                }
             }
         }
     }
@@ -54,9 +66,9 @@ fn examples_compile_and_run() {
     for (path, stem, shown) in entries {
         let src = fs::read_to_string(&path).unwrap();
 
-        if (stem == "22_ffi" || stem == "127_archive" || stem == "128_db"
-            || stem == "174_crypto_envelope" || stem == "175_crypto_sign" || stem == "176_crypto_migration"
-            || stem == "187_compress_gzip" || stem == "188_compress_zstd")
+        if (stem == "lowlevel/ffi" || stem == "io/archive" || stem == "io/db"
+            || stem == "crypto/crypto_envelope" || stem == "crypto/crypto_sign" || stem == "crypto/crypto_migration"
+            || stem == "io/compress_gzip" || stem == "io/compress_zstd")
             && !have_cargo {
             eprintln!(
                 "note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)"
@@ -146,12 +158,12 @@ fn examples_compile_and_run() {
         // `#Unsafe fn`, or `#Uninit` which lowers to `MaybeUninit::uninit().assume_init()`
         // inside an inline `unsafe { }` block). Their generated `unsafe` is allowed, but
         // ONLY in the gated block/fn form — never ungated (I1).
-        if stem == "48_lowlevel"
-            || stem == "100_rawptr"
-            || stem == "121_single_use_discard"
-            || stem == "124_uninit"
-            || stem == "184_uninit_buffer"
-            || stem == "176_crypto_migration"
+        if stem == "lowlevel/lowlevel"
+            || stem == "memory/rawptr"
+            || stem == "effects/single_use_discard"
+            || stem == "memory/uninit"
+            || stem == "memory/uninit_buffer"
+            || stem == "crypto/crypto_migration"
         {
             assert!(
                 user_code.contains("unsafe"),
@@ -188,9 +200,11 @@ fn examples_compile_and_run() {
         );
 
         if have_rustc {
+            // stem contains '/' (topic/name) — flatten for the temp filename.
+            let flat_stem = stem.replace('/', "_");
             let dir = std::env::temp_dir();
-            let rs = dir.join(format!("jet_golden_{}.rs", stem));
-            let bin = dir.join(format!("jet_golden_{}", stem));
+            let rs = dir.join(format!("jet_golden_{}.rs", flat_stem));
+            let bin = dir.join(format!("jet_golden_{}", flat_stem));
             fs::write(&rs, &rust_code).unwrap();
             let mut rustc_cmd = Command::new("rustc");
             rustc_cmd

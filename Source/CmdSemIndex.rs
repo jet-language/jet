@@ -14,7 +14,7 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
 
     let Some(path) = path else {
         eprintln!("error: `jet semindex` needs an entry file");
-        eprintln!(" Fix: jet semindex examples/features/01_hello.jet");
+        eprintln!(" Fix: jet semindex examples/features/basics/hello.jet");
         exit(ExitCodes::USER_ERROR);
     };
 

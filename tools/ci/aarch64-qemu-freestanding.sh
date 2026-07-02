@@ -5,10 +5,10 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 
 target="aarch64-unknown-linux-gnu"
-src="examples/features/61_freestanding.jet"
-rust_src="build/61_freestanding.rs"
-bin="build/61_freestanding-aarch64"
-expected="examples/features/expected/61_freestanding.out"
+src="examples/features/lowlevel/freestanding.jet"
+rust_src="build/freestanding.rs"
+bin="build/freestanding-aarch64"
+expected="examples/features/expected/lowlevel/freestanding.out"
 
 # Unset any cross-compiler env vars so the host build uses the host toolchain.
 unset CC CXX
@@ -38,6 +38,7 @@ fi
   --edition 2021 \
   --target "$target" \
   -C linker="$linker" \
+  -C target-feature=+crt-static \
   -C opt-level=z \
   -C panic=abort \
   -C strip=symbols \

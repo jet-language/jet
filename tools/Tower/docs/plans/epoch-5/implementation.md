@@ -23,7 +23,7 @@ through the Nix shell (`nix develop -c …`, see CLAUDE.md).
 | U16 | D-JPK-BRIDGE1 | **A** | Three Nix flows verb-for-verb (`jet env -p`, `jet env` detects `flake.nix`, `jet run nixpkgs@tool`) + `jet bridge flake` export shim. Phase 1 shells out to `nix`. |
 | U18 | D-JPK-TWONAMES1 | **A** (+amendment) | One reserved filename **`pack.jet`**; one command **`jet`**. Role modules (`env.*`/`system.*`/`fleet.*`/`build`) live in **any** `.jet` file, discovered by declaration via `find()`. Revises U10, D-WORKSPACE2, D-PM4. |
 | U19 | D-JPK-DEVCOMPOSE1 | **D** | `jet env [name]` = shell only (base `env.*` + optional named overlay), **never executes project fns**, direnv-style trust gate on first entry. `jet dev`/`test`/`build` = explicit execution inside `env(base + env.<verb>)`. |
-| U17 | D-JPK-OSNAME1 | **OPEN** | OS product name. Reference "jetos (working title)" only; **must not gate any U11–U19 work.** |
+| U17 | D-JPK-OSNAME1 | **A** (2026-07-02) | OS product name is **jetos** — working title confirmed. Spell it `jetos` everywhere; trademark sweep stays a pre-release task. |
 
 **U18 owner amendment (ratificationNote, verbatim intent — becomes an acceptance
 test):** "only `pack.jet` is a reserved filename; every role module (`env.*`,
@@ -660,7 +660,7 @@ stopgap; unmappable devenv fields warn; foreign inputs land in `.jet/lock`.
   the cipher/build step, not the surrounding surface. Raise them ballot-ready in
   `tools/Tower/tower.json` (per the `owner-gates-must-be-ballots` rule) before the
   crypto/OCI code, with the option menus in §U13/§U14.
-- **OSNAME (U17) is OPEN:** reference "jetos (working title)"; gate nothing on it.
+- **OSNAME (U17) ratified 2026-07-02:** the name is `jetos`, final.
 
 ---
 

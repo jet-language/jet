@@ -1368,7 +1368,7 @@ fn c44_prelude_idents_canonical() {
 fn lsp_bench_under_budget() {
     // Run the bench in-process: 10 rounds on the wordcount example, budget 200ms/round.
     // This mirrors what `jet lsp --bench` does in CI.
-    let src = include_str!("../examples/features/16_wordcount.jet");
+    let src = include_str!("../examples/features/collections/wordcount.jet");
     let budget_ms = 200u128;
     let rounds = 10usize;
 

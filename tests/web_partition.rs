@@ -74,8 +74,8 @@ fn codable_struct_wasm_export_is_abi_safe() {
 
 #[test]
 fn web_partition_report_generated_for_web_compile() {
-    let src = include_str!("../examples/features/164_web_compute.jet");
-    let out = jet::compile_web_with_path(src, "examples/features/164_web_compute.jet")
+    let src = include_str!("../examples/features/web/web_compute.jet");
+    let out = jet::compile_web_with_path(src, "examples/features/web/web_compute.jet")
         .expect("web compile should succeed");
     let report = out
         .web_partition_report
