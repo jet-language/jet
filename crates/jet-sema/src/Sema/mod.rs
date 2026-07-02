@@ -30,7 +30,7 @@ pub(crate) struct MethodSig {
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
-    /// D-MUSTUSE1 (c18iwxqx): `#MustUse` method — return cannot be silently ignored (E0419).
+    /// D-MUSTUSE1 (c18iwxqx): `@MustUse` method — return cannot be silently ignored (E0419).
     pub(crate) must_use: bool,
 }
 
@@ -45,7 +45,7 @@ pub(crate) enum TypeDef {
         /// Values of this type must be consumed exactly once (E0140/E0141) and
         /// may not be aliased (E0142).
         single_use: bool,
-        /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `struct`.
+        /// D-MUSTUSE1 (c18iwxqx): `@MustUse` was present before `struct`.
         must_use: bool,
         /// D-SOA1 / D-SOA2A=C: `#layout(columnar)` was present. A `[S]` of this
         /// struct is stored struct-of-arrays; sema gates the list-op surface to
@@ -60,7 +60,7 @@ pub(crate) enum TypeDef {
         methods: HashMap<String, MethodSig>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `enum`.
         single_use: bool,
-        /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `enum`.
+        /// D-MUSTUSE1 (c18iwxqx): `@MustUse` was present before `enum`.
         must_use: bool,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
@@ -71,6 +71,13 @@ pub(crate) enum TypeDef {
         name_span: Span,
         base: Type,
         is_numeric: bool,
+        /// D-CAPBUNDLE1: `@Comparable`/`@Printable`/`@CodableAsBase` grants.
+        is_comparable: bool,
+        is_printable: bool,
+        is_codable_as_base: bool,
+        /// D-RANGETYPE1: `distinct Int(0..10)` — the inclusive `(lo, hi)`
+        /// bounds this type provably holds. `None` for a plain distinct type.
+        range: Option<(i64, i64)>,
     },
     /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — transparent
     /// generic shortcut; expands in sema, erases at codegen.
@@ -180,7 +187,7 @@ impl TypeRegistry {
         )
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): true when `name` is a `#MustUse` struct/enum.
+    /// D-MUSTUSE1 (c18iwxqx): true when `name` is a `@MustUse` struct/enum.
     pub(crate) fn is_must_use(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
@@ -202,7 +209,7 @@ impl TypeRegistry {
         }
     }
 
-    /// D-DIST3: true when the distinct type has `#Numeric`.
+    /// D-DIST3: true when the distinct type has `@Numeric`.
     pub(crate) fn distinct_is_numeric(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
@@ -211,6 +218,68 @@ impl TypeRegistry {
                 ..
             })
         )
+    }
+
+    /// D-RANGETYPE1: the declared `(lo, hi)` inclusive bounds of a range type
+    /// (`distinct Int(0..10)`), or `None` for a plain distinct type / a name
+    /// that isn't distinct.
+    pub(crate) fn distinct_range(&self, name: &str) -> Option<(i64, i64)> {
+        match self.types.get(name) {
+            Some(TypeDef::Distinct { range, .. }) => *range,
+            _ => None,
+        }
+    }
+
+    /// D-CAPBUNDLE1: true when the distinct type has `@Comparable`.
+    pub(crate) fn distinct_is_comparable(&self, name: &str) -> bool {
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Distinct {
+                is_comparable: true,
+                ..
+            })
+        )
+    }
+
+    /// D-CAPBUNDLE1: true when the distinct type has `@Printable`.
+    pub(crate) fn distinct_is_printable(&self, name: &str) -> bool {
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Distinct {
+                is_printable: true,
+                ..
+            })
+        )
+    }
+
+    /// D-CAPBUNDLE1: true when the distinct type has `@CodableAsBase`.
+    pub(crate) fn distinct_is_codable_as_base(&self, name: &str) -> bool {
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Distinct {
+                is_codable_as_base: true,
+                ..
+            })
+        )
+    }
+
+    /// D-CAPBUNDLE1: the names of every capability bundle granted to distinct
+    /// type `name`, in fixed order — used to compose the E0138 "has" clause.
+    pub(crate) fn distinct_granted_bundles(&self, name: &str) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.distinct_is_numeric(name) {
+            out.push("@Numeric");
+        }
+        if self.distinct_is_comparable(name) {
+            out.push("@Comparable");
+        }
+        if self.distinct_is_printable(name) {
+            out.push("@Printable");
+        }
+        if self.distinct_is_codable_as_base(name) {
+            out.push("@CodableAsBase");
+        }
+        out
     }
 }
 
@@ -562,7 +631,7 @@ pub(crate) struct Checker<'a> {
     /// `EffectSummary` for the post-pass E0741 check.
     fx_regions: Vec<RegionSummary>,
     /// D-EFF2: callback-bound obligations recorded at higher-order call sites
-    /// where the function-typed parameter carries a `#Pure`/`#(…)` bound. Rolled
+    /// where the function-typed parameter carries a `@Pure`/`#(…)` bound. Rolled
     /// into the `EffectSummary` for the post-pass E0747 check.
     fx_callback_obligations: Vec<CallbackObligation>,
     /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
@@ -573,7 +642,7 @@ pub(crate) struct Checker<'a> {
     /// (effects inside an `on_commit`/other lambda are deferred, not rejected).
     txn_depth: usize,
     /// D-DET1: nesting depth of `assume_deterministic { … }` blocks currently
-    /// being checked. While `> 0`, the determinism rejections inside a `#Pure fn`
+    /// being checked. While `> 0`, the determinism rejections inside a `@Pure fn`
     /// (E3403 non-deterministic Core call, E3401 impure Core call) are suspended —
     /// the expert "I know this is deterministic" escape. A semantic footgun
     /// (v1-legal per the card); does not relax memory/type safety, only the
@@ -585,11 +654,15 @@ pub(crate) struct Checker<'a> {
     context_allocator_active: bool,
     in_unsafe: bool,
     /// D-IGNORERET2=A: true while inside a `#Suppress(MustUse) { … }` block.
-    /// Suppresses E0402 / E0419 for fallible / `#MustUse` results dropped as statements.
+    /// Suppresses E0402 / E0419 for fallible / `@MustUse` results dropped as statements.
     suppress_must_use: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,
+    /// D-PREPOST1: true while type-checking a `@Pre` clause's condition —
+    /// `result` isn't bound yet at function entry, so a reference to it here
+    /// is E0144 instead of the normal "undefined name" error.
+    in_pre_clause: bool,
     /// True while inferring a comptime binding's RHS or inside a comptime
     /// context — suppresses E2712 for `$name` comptime splice expressions.
     in_comptime: bool,
@@ -726,6 +799,9 @@ pub use Bundle::{
     check_bundle_with_effect_facts,
 };
 pub use Effects::SemIndexEffectFacts;
+// D-EFFBUDGET1: the closed effect vocabulary, exposed so jet-driver can
+// validate `pkg.jet` `effects:`/`grants:` manifest keys against it.
+pub use Effects::{Effect, EffectSet};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::{check, check_with_mode, effect_key};
 pub use FFI::{e3202, e3301, e3302, e3303};

@@ -257,7 +257,7 @@ fn struct_fields_in_items<'a>(items: &'a [Item], name: &str) -> Option<&'a [crat
     None
 }
 
-/// Flatten `#[Codable]` struct parameters into scalar WASM params (D-JSBIND1).
+/// Flatten `@[Codable]` struct parameters into scalar WASM params (D-JSBIND1).
 fn flatten_abi_params(bundle: &ProgramBundle, params: &[(String, Type)]) -> Vec<(String, Type)> {
     let mut out = Vec::new();
     for (name, ty) in params {

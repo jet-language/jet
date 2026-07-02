@@ -166,6 +166,7 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         web_partitions: std::collections::HashMap::new(),
         web_partition_enforced: true,
         web_partition_report: None,
+        dep_roots: std::collections::HashMap::new(),
     };
     bundle.cffi = match CFFI::assemble(&mut bundle) {
         Ok(c) => c,
@@ -400,8 +401,8 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
         vec![Diagnostics::Diagnostic::error(
             "E3401",
             "no `main` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `#Pure fn main()` entry point".to_string(),
-            "add `#Pure fn main() { … }` to the program".to_string(),
+            "pure evaluation needs a `@Pure fn main()` entry point".to_string(),
+            "add `@Pure fn main() { … }` to the program".to_string(),
             None,
         )]
     })?;
@@ -447,8 +448,8 @@ pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic
         vec![Diagnostics::Diagnostic::error(
             "E3401",
             "no `main` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `#Pure fn main()` entry point".to_string(),
-            "add `#Pure fn main() { … }` to the program".to_string(),
+            "pure evaluation needs a `@Pure fn main()` entry point".to_string(),
+            "add `@Pure fn main() { … }` to the program".to_string(),
             None,
         )]
     })?;

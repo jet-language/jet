@@ -364,7 +364,12 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    /// Comparisons don't chain: `a < b < c` is a parse error with guidance.
+    /// D-CHAINCMP1: a run of same-direction relational operators (`<`/`<=`/
+    /// `>`/`>=`) chains into `Expr::CompareChain`, any length. `==`/`!=` never
+    /// chain (with each other or with a relational op) — `a == b == c` and
+    /// `a < b == c` both stay the pre-existing "comparisons can't be chained"
+    /// error (E0003). A mixed-direction relational chain (`a < b > c`) is
+    /// E0333, naming the direction break.
     pub(super) fn expr_cmp(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let lhs = self.expr_bitor(allow_struct_lit)?;
         let op = match &self.peek().kind {
@@ -378,7 +383,7 @@ impl<'a> Parser<'a> {
         };
         let Some(op) = op else { return Ok(lhs) };
         let op_span = self.bump().span;
-        let rhs = if op == BinOp::Eq {
+        if op == BinOp::Eq {
             if let Some(pat) = self.try_pattern_rhs()? {
                 let span = Span::new(lhs.span().start, pat_span(&pat).end.max(op_span.end));
                 return Ok(Expr::PatternTest {
@@ -387,33 +392,87 @@ impl<'a> Parser<'a> {
                     span,
                 });
             }
-            self.expr_bitor(allow_struct_lit)?
-        } else {
-            self.expr_bitor(allow_struct_lit)?
-        };
-        let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
-        let cmp = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
-        if let Some(second) = match &self.peek().kind {
-            TokKind::EqEq
-            | TokKind::NotEq
-            | TokKind::Lt
-            | TokKind::Gt
-            | TokKind::Le
+        }
+        let rhs = self.expr_bitor(allow_struct_lit)?;
+
+        // `==`/`!=` never chain — D-CHAINCMP1 excludes them. Reproduce the
+        // pre-existing behavior exactly: any further relational/equality
+        // token after an `==`/`!=` pair is E0003.
+        if op == BinOp::Eq || op == BinOp::Ne {
+            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            let cmp = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
+            if let Some(second) = self.peek_cmp_span() {
+                return Err(self.chained_eq_error(second));
+            }
+            return Ok(cmp);
+        }
+
+        // Relational op: collect a same-direction chain.
+        let ascending = matches!(op, BinOp::Lt | BinOp::Le);
+        let mut operands = vec![lhs, rhs];
+        let mut ops = vec![op];
+        loop {
+            let next = match &self.peek().kind {
+                TokKind::Lt => Some(BinOp::Lt),
+                TokKind::Le => Some(BinOp::Le),
+                TokKind::Gt => Some(BinOp::Gt),
+                TokKind::Ge => Some(BinOp::Ge),
+                TokKind::EqEq | TokKind::NotEq => {
+                    // `==`/`!=` can't extend a relational chain either.
+                    let bad_span = self.peek().span;
+                    return Err(self.chained_eq_error(bad_span));
+                }
+                _ => None,
+            };
+            let Some(next_op) = next else { break };
+            let next_ascending = matches!(next_op, BinOp::Lt | BinOp::Le);
+            if next_ascending != ascending {
+                let bad_span = self.peek().span;
+                return Err(Diagnostic::error(
+                    "E0333",
+                    "this comparison chain changes direction".to_string(),
+                    "a chain like `0 <= sev < 10` reads in one direction; mixing `<` and `>` in one chain is almost always a mistake and has no single meaning".to_string(),
+                    "split it into two comparisons joined with `&&`".to_string(),
+                    Some(bad_span),
+                ));
+            }
+            self.bump();
+            let next_rhs = self.expr_bitor(allow_struct_lit)?;
+            operands.push(next_rhs);
+            ops.push(next_op);
+        }
+
+        let span = Span::new(
+            operands.first().unwrap().span().start,
+            operands.last().unwrap().span().end,
+        );
+        if ops.len() == 1 {
+            let rhs = operands.pop().unwrap();
+            let lhs = operands.pop().unwrap();
+            return Ok(Expr::Binary(ops[0], Box::new(lhs), Box::new(rhs), span));
+        }
+        Ok(Expr::CompareChain { operands, ops, span })
+    }
+
+    fn peek_cmp_span(&self) -> Option<Span> {
+        match &self.peek().kind {
+            TokKind::EqEq | TokKind::NotEq | TokKind::Lt | TokKind::Gt | TokKind::Le
             | TokKind::Ge => Some(self.peek().span),
             _ => None,
-        } {
-            return Err(Diagnostic::error(
-                "E0003",
-                "comparisons can't be chained".to_string(),
-                format!(
-                    "`a < b < c` doesn't compare all three; check each pair and join with `{}`",
-                    Syntax::OP_AND
-                ),
-                format!("write `a < b {} b < c`", Syntax::OP_AND),
-                Some(second),
-            ));
         }
-        Ok(cmp)
+    }
+
+    fn chained_eq_error(&self, second: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0003",
+            "comparisons can't be chained".to_string(),
+            format!(
+                "`a < b < c` doesn't compare all three; check each pair and join with `{}`",
+                Syntax::OP_AND
+            ),
+            format!("write `a < b {} b < c`", Syntax::OP_AND),
+            Some(second),
+        )
     }
 
     fn expr_bitor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -634,6 +693,8 @@ impl<'a> Parser<'a> {
 
     fn expr_postfix(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let mut expr = self.expr_primary(allow_struct_lit)?;
+        // D-TRAILBLOCK1: a call takes at most one trailing `{ }` block.
+        let mut trailing_block_attached = false;
         loop {
             match &self.peek().kind {
                 TokKind::Dot => {
@@ -855,6 +916,102 @@ impl<'a> Parser<'a> {
                         ));
                         let start = expr.span().start;
                         expr = self.struct_lit_after_import(alias, type_name, start)?;
+                    } else if allow_struct_lit
+                        && matches!(
+                            expr,
+                            Expr::Ident(..)
+                                | Expr::Call(_)
+                                | Expr::MethodCall { .. }
+                                | Expr::CallValue { .. }
+                        )
+                    {
+                        // D-TRAILBLOCK1: `callee(args) { … }` — a bare `{` directly
+                        // after a call's `)` (or after a callable name with no `()`
+                        // at all, `callee { … }`) is a trailing ZERO-PARAMETER
+                        // lambda filling the call's last argument. Jet has no
+                        // bare-block statements, so this slot was free; a PascalCase
+                        // name still takes the E0320 dotless-struct-literal recovery
+                        // above (mirrors the turbofish case rule).
+                        if trailing_block_attached {
+                            let bad_span = self.peek().span;
+                            return Err(Diagnostic::error(
+                                "E0335",
+                                "a call takes only one trailing block".to_string(),
+                                "a trailing `{ }` fills exactly one last argument; a second `{ }` has nothing to fill".to_string(),
+                                "pass the extra block as an ordinary argument inside the parentheses, or remove it".to_string(),
+                                Some(bad_span),
+                            ));
+                        }
+                        let lam = self.parse_task_body_lambda()?;
+                        let lam_span = lam.span;
+                        let arg = CallArg {
+                            convention: AccessConvention::Read,
+                            expr: Expr::Lambda(lam),
+                            span: lam_span,
+                            flags: crate::AST::CallArgFlags {
+                                is_trailing_block: true,
+                                ..Default::default()
+                            },
+                            label: None,
+                            spread: false,
+                        };
+                        expr = match expr {
+                            Expr::Ident(name, name_span) => Expr::Call(Call {
+                                name,
+                                name_span,
+                                args: vec![arg],
+                            }),
+                            Expr::Call(mut c) => {
+                                c.args.push(arg);
+                                Expr::Call(c)
+                            }
+                            Expr::MethodCall {
+                                receiver,
+                                method,
+                                method_span,
+                                type_args,
+                                mut args,
+                                recv_type,
+                                resolved_ret,
+                            } => {
+                                args.push(arg);
+                                Expr::MethodCall {
+                                    receiver,
+                                    method,
+                                    method_span,
+                                    type_args,
+                                    args,
+                                    recv_type,
+                                    resolved_ret,
+                                }
+                            }
+                            Expr::CallValue { callee, mut args, span } => {
+                                args.push(arg);
+                                Expr::CallValue {
+                                    callee,
+                                    args,
+                                    span: Span::new(span.start, lam_span.end),
+                                }
+                            }
+                            _ => unreachable!("guarded by the outer match above"),
+                        };
+                        trailing_block_attached = true;
+                        continue;
+                    } else if allow_struct_lit
+                        && matches!(expr, Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. })
+                    {
+                        // D-TRAILBLOCK1: a trailing `{ }` on something that isn't a
+                        // call at all (a plain field/index read) — teach the shape
+                        // rather than falling through to a generic parse error.
+                        let bad_span = self.peek().span;
+                        return Err(Diagnostic::error(
+                            "E0335",
+                            "a trailing block only follows a call".to_string(),
+                            "a trailing `{ }` fills a call's last argument; this isn't a call"
+                                .to_string(),
+                            "call it first, e.g. `name(){ … }`, or remove the block".to_string(),
+                            Some(bad_span),
+                        ));
                     } else {
                         break;
                     }
@@ -1208,6 +1365,7 @@ impl<'a> Parser<'a> {
                                 type_generic_truncated: false,
                                 arm_head_term: false,
                                 pub_file_default: false,
+                                in_layout_body: self.in_layout_body,
                             };
                             let e = sub.expr()?;
                             if !sub.diags.is_empty() {
@@ -1252,6 +1410,26 @@ impl<'a> Parser<'a> {
             TokKind::Float(v) => {
                 let span = self.bump().span;
                 Ok(Expr::Float(v, span, false))
+            }
+            // D-UNITLIT1: `500ms`, `12.50usd` — a numeric literal with a unit
+            // suffix. The lexer already separated the exponent form; anything
+            // reaching here as `UnitNumber` genuinely carries a suffix.
+            TokKind::UnitNumber { .. } => {
+                let tok = self.bump();
+                let TokKind::UnitNumber { int, float, suffix } = tok.kind else {
+                    unreachable!("guarded by the outer match above")
+                };
+                let span = tok.span;
+                // The suffix sits at the tail of the token's span (no space
+                // between the digits and the suffix — the lexer requires that).
+                let suffix_span = Span::new(span.end - suffix.len(), span.end);
+                Ok(Expr::UnitLit {
+                    int,
+                    float,
+                    suffix,
+                    suffix_span,
+                    span,
+                })
             }
             TokKind::Char(ch) => {
                 let span = self.bump().span;
@@ -1396,9 +1574,16 @@ impl<'a> Parser<'a> {
                     }
                     self.expect_type_args_close(&format!("after `{type_name}<…>`"))?;
                 }
-                if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                if allow_struct_lit
+                    && matches!(self.peek().kind, TokKind::LBrace)
+                    && type_name.chars().next().is_some_and(|c| c.is_uppercase())
+                {
                     // D-DOTCTOR2: old dotless `Type { … }` form — teaching error E0320.
                     // Recover: parse the fields as if the user had written `Type.{ … }`.
+                    // A lowercase name falls through to a plain `Ident`, letting
+                    // `expr_postfix` read a following `{` as a D-TRAILBLOCK1 trailing
+                    // block (`callee { … }`) instead — same case-based split as the
+                    // turbofish check above.
                     let brace_span = self.peek().span;
                     self.diags.push(Diagnostic::error(
                         "E0320",
@@ -2037,6 +2222,7 @@ impl<'a> Parser<'a> {
                         Stmt::SuppressMustUse { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
                         Stmt::TaskGroup { span, .. } => span.end,
+                        Stmt::Layout { span, .. } => span.end,
                         Stmt::Caps { span, .. } => span.end,
                         Stmt::Grant { span, .. } => span.end,
                         Stmt::ComptimeBlock { span, .. } => span.end,

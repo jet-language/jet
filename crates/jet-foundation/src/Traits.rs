@@ -118,6 +118,33 @@ impl TraitRegistry {
                 Item::ErrorConv(ec) => {
                     self.register_error_conv(&ec.from_ty, &ec.to_ty, ec.from_span, diags);
                 }
+                // D-CAPBUNDLE1: a distinct type's capability bundles re-expose
+                // base operations while keeping nominal identity (I8: reuse the
+                // existing Display/derive machinery rather than a second
+                // mechanism). `@Numeric` arithmetic is a separate, older gate
+                // (D-DIST3/E0127) left untouched — see CheckerInfer/binary.rs.
+                Item::Distinct(d) => {
+                    if d.is_printable {
+                        self.trait_impls
+                            .insert((d.name.clone(), DISPLAY.to_string()));
+                    }
+                    if d.is_comparable {
+                        self.derives
+                            .entry(d.name.clone())
+                            .or_default()
+                            .insert(COMPARABLE.to_string());
+                    }
+                    if d.is_codable_as_base {
+                        self.derives
+                            .entry(d.name.clone())
+                            .or_default()
+                            .insert(ENCODE.to_string());
+                        self.derives
+                            .entry(d.name.clone())
+                            .or_default()
+                            .insert(DECODE.to_string());
+                    }
+                }
                 _ => {}
             }
         }

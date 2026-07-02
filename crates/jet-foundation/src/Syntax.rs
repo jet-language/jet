@@ -362,7 +362,7 @@ pub const CTX_FIELD_DEADLINE: &str = "deadline";
 pub const KW_LIVE: &str = "live";
 
 /// D-DET1 (ratified 2026-06-22): the expert determinism-escape block keyword.
-/// `assume_deterministic { … }` inside a `#Pure fn` suspends the determinism
+/// `assume_deterministic { … }` inside a `@Pure fn` suspends the determinism
 /// rejections (E3401/E3403) for its body — the "I know this is deterministic"
 /// hatch. A semantic footgun, v1-legal per the card. A contextual keyword:
 /// recognised only when followed by `{`, so a name `assume_deterministic` still
@@ -370,14 +370,14 @@ pub const KW_LIVE: &str = "live";
 pub const KW_ASSUME_DET: &str = "assume_deterministic";
 
 /// D-DET1 (ratified 2026-06-22): the deterministic injected `Clock` capability
-/// type. A `#Pure fn` taking a `Clock` param may read time **through it**
+/// type. A `@Pure fn` taking a `Clock` param may read time **through it**
 /// (`clock.now()` / `clock.tick(ms)`) — reproducible, because the caller seeded
 /// it (`time.clock(seed)`) — while the ambient `time.now()` stays E3403. An
 /// ordinary value type, not a module alias; methods are pure-from-the-fn's-view.
 pub const CLOCK_TYPE: &str = "Clock";
 
 /// D-DET1 (ratified 2026-06-22): the deterministic injected `Rng` capability
-/// type. A `#Pure fn` taking an `Rng` param may draw randomness **through it**
+/// type. A `@Pure fn` taking an `Rng` param may draw randomness **through it**
 /// (`rng.int(lo, hi)` / `rng.float()`) — reproducible from the caller's seed
 /// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
 /// D-DET-CAPAPI (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
@@ -427,7 +427,36 @@ pub const LINALG_VEC4_TYPE: &str = "Vec4";
 pub const LINALG_MAT3_TYPE: &str = "Mat3";
 pub const LINALG_MAT4_TYPE: &str = "Mat4";
 
-/// D-TERM1 (ratified 2026-06-22): the Core module that provides key reading.
+/// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): the built-in
+/// constraint-layout value types. `HVar`/`VVar` are axis-typed layout
+/// variables (horizontal/vertical); `LengthVar` is an axis-neutral scalar
+/// length that combines with either axis. GATE 1: comparison operators
+/// (`>=`/`<=`/`==`) on these types produce a `Constraint`, not `Bool` — a
+/// closed-operator blessing on this family only (same category as D-SIMD2).
+/// GATE 2: all five names enter the compiler's closed type family
+/// (`core_type_known`). A closed compiler-provided family — no user `+`/
+/// comparison overload. Cross-axis combination (`HVar` with `VVar`) is
+/// E-LAYOUT-AXIS-MISMATCH (E2932). `LayoutHandle` is the `layout NAME { … }`
+/// container/solver value; `Constraint` is a registered, prioritizable
+/// constraint handle (`.required()`/`.strong()`/`.medium()`/`.weak()`).
+pub const LAYOUT_HVAR_TYPE: &str = "HVar";
+pub const LAYOUT_VVAR_TYPE: &str = "VVar";
+pub const LAYOUT_LENGTHVAR_TYPE: &str = "LengthVar";
+pub const LAYOUT_CONSTRAINT_TYPE: &str = "Constraint";
+pub const LAYOUT_HANDLE_TYPE: &str = "LayoutHandle";
+
+/// D-LAYOUT1 (ratified 2026-06-28): `layout NAME { … }` — a lexical block
+/// that binds `NAME` (a `LayoutHandle`) in the enclosing scope (the handle
+/// outlives the block, unlike `taskgroup`/`region`, since solved values are
+/// read after layout is defined). Each line in the body must be a
+/// `>=`/`<=`/`==` comparison of layout values (a `Constraint`); the parser
+/// desugars bare `box.anchor` reads (`left`/`right`/`top`/`bottom`/`width`/
+/// `height`) into `NAME.h(box, anchor)` / `NAME.v(box, anchor)` calls, which
+/// sema/codegen treat exactly like any other `LayoutHandle` method call — no
+/// parallel checking mechanism, GATE 1/2 do all the real work. A lowercase
+/// contextual block keyword (D-CASING1), recognized only when followed by
+/// `name {`.
+pub const KW_LAYOUT: &str = "layout";
 /// `use core.term as term` — exposes `term.read_key() -> Key`.
 pub const CORE_TERM_MODULE: &str = "core.term";
 
@@ -809,7 +838,7 @@ pub const KW_TEST: &str = "Test";
 /// the marker `#Bench "name" { … }` — the exact sibling of `#Test "name" { … }`.
 /// The existing `jet bench` verb (D-TOOL5) discovers and runs these, reporting
 /// per-region ops/sec + ns/iter (today it times a whole program). PascalCase
-/// marker per D-CASING1, joining the `#Test`/`#Pure`/`#Todo`/`#Caps` family.
+/// marker per D-CASING1, joining the `#Test`/`@Pure`/`#Todo`/`#Caps` family.
 /// The `benchmark` manifest target (TARGET_BENCHMARK, c80) points `jet bench`
 /// at a package entry; it is not a new engine — it reuses this exact machinery.
 pub const KW_BENCH: &str = "Bench";
@@ -821,14 +850,14 @@ pub const KW_BENCH: &str = "Bench";
 pub const KW_TODO: &str = "Todo";
 
 /// S60 (ratified 2026-06-12; implemented E2-M16; PascalCase marker D-CASING1
-/// follow-on 2026-06-21): the purity modifier, written as the marker `#Pure fn
-/// name() { … }`. A `#Pure fn` may only call other `#Pure fn`s and pure
+/// follow-on 2026-06-21): the purity modifier, written as the marker `@Pure fn
+/// name() { … }`. A `@Pure fn` may only call other `@Pure fn`s and pure
 /// builtins; impure calls are a compile error (E3401) with the call-trace path.
 /// Bare lowercase `pure` (FOREIGN_PURE) is the retired spelling → E0053 teaching
-/// error pointing at `#Pure`.
+/// error pointing at `@Pure`.
 ///
-/// D-EFF2 (ratified 2026-06-22): `#Pure` also rides the front of a callback
-/// parameter type — `f: #Pure fn(T) -> U` demands a pure callback; passing one
+/// D-EFF2 (ratified 2026-06-22): `@Pure` also rides the front of a callback
+/// parameter type — `f: @Pure fn(T) -> U` demands a pure callback; passing one
 /// with any effect is E0747. Sibling of the `#(E, …) fn(…)` bounded form.
 pub const KW_PURE: &str = "Pure";
 
@@ -845,9 +874,9 @@ pub const KW_TAINTED: &str = "Tainted";
 /// D-TAINT1: the `#Sanitizer fn name(…)` modifier — the one blessed way to strip
 /// taint. A sanitizer's return value is untainted by contract, regardless of
 /// whether its inputs were tainted (it is the audited cleaning step). A fn
-/// modifier in the `#Pure`/`#Unsafe` family; PascalCase per D-CASING1. Erased in
+/// modifier in the `@Pure`/`#Unsafe` family; PascalCase per D-CASING1. Erased in
 /// codegen (I3). NOTE: the ratified card spells the modifier bare `sanitizer fn`;
-/// the D-CASING1 marker convention (which moved `pure fn` → `#Pure fn`) makes
+/// the D-CASING1 marker convention (which moved `pure fn` → `@Pure fn`) makes
 /// `#Sanitizer fn` the consistent default — a spelling fork queued as D-TAINT-SAN.
 pub const KW_SANITIZER: &str = "Sanitizer";
 
@@ -1011,7 +1040,8 @@ pub const TRAIT_INDEX: &str = "Index";
 pub const TRAIT_INDEX_MUT: &str = "IndexMut";
 /// D-DISPLAYDBG2: closed interpolation selector spelling after `@`.
 pub const INTERP_SELECTOR_DEBUG: &str = "Debug";
-/// D-DEBUG-REDACT: hide a field from auto-derived Debug output.
+/// D-DEBUG-REDACT / D-MARKERMOVE1 (contract plane, `@Redact`): hide a field
+/// from auto-derived Debug output.
 pub const ATTR_REDACT: &str = "Redact";
 
 /// D-TXN4: the type of a transaction handle bound by `#Transact(name)`. An
@@ -1020,7 +1050,7 @@ pub const TXN_HANDLE_TYPE: &str = "Transaction";
 
 /// S14 / D-CASING1 follow-on (2026-06-21): the retired lowercase spellings of
 /// the three marker keywords, recognized only for teaching errors that point at
-/// the `#Test` / `#Pure` / `#Todo` marker forms.
+/// the `#Test` / `@Pure` / `#Todo` marker forms.
 pub const FOREIGN_TEST: &str = "test";
 pub const FOREIGN_PURE: &str = "pure";
 pub const FOREIGN_TODO: &str = "todo";
@@ -1482,22 +1512,27 @@ pub const KW_DISTINCT: &str = "distinct";
 /// `value.raw()` yields the base value. Named-cast family (S42).
 pub const METHOD_DISTINCT_RAW: &str = "raw";
 
-/// D-ATTR1 / D-DIST3 (ratified): `#Numeric` marker enables same-type
-/// arithmetic on a distinct type. Written `#Numeric` on the same line
-/// before the distinct-type name (uses the `#` attribute prefix D-ATTR1).
+/// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified): `@Numeric` marker
+/// enables same-type arithmetic on a distinct type. Written `@Numeric` on
+/// the same line before the distinct-type name (contract-plane prefix,
+/// D-MARKER-FAMILY1). This is the single merged spelling for what used to
+/// be two markers doing the same job — the `@Numeric` distinct-type marker
+/// (D-DIST3) and the `@numeric` capability bundle (D-CAPBUNDLE1) — folded
+/// per D-MARKERMOVE1=B (I8: one way to mean it). `CONTRACT_BUNDLE_NUMERIC`
+/// no longer exists as a separate constant; use this one.
 pub const ATTR_NUMERIC: &str = "Numeric";
 
 /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(currency) { usd, eur, gbp }` —
-/// declares a family of units. Each member mints one distinct `#Numeric` type
+/// declares a family of units. Each member mints one distinct `@Numeric` type
 /// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
 /// (`fn subtotal(price: Usd, qty: Int) -> Usd`). The family is the
 /// "upgrade to D-DIST2" framing of D-UNIT1: sugar over the distinct-type
 /// machinery (D-DIST1/D-DIST3). PascalCase tag per D-CASING1.
 pub const ATTR_UNIT_FAMILY: &str = "UnitFamily";
 
-/// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
+/// D-MIGRATE1 (ratified 2026-06-22): `@PublishedSchema` — marks a struct whose
 /// field layout is snapshotted at release time. A breaking field change without
-/// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
+/// a declared migration is E0910. Written `@PublishedSchema` before `struct`.
 pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 
 /// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `#SingleUse` — marks
@@ -1506,17 +1541,17 @@ pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 /// (unconsumed at scope end) / E0141 (unconsumed on one branch); aliasing one
 /// with `&`/`view` is E0142. `#SingleUse` implies `#NoCopy`. The tag is
 /// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
-/// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
+/// `struct`/`enum`, same marker idiom as `@PublishedSchema`.
 pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
 
-/// D-MUSTUSE1 (c18iwxqx): `#MustUse` — marks a type, function, or method whose
+/// D-MUSTUSE1 (c18iwxqx): `@MustUse` — marks a type, function, or method whose
 /// result cannot be silently ignored as a bare expression statement (E0419).
 /// Explicit discard uses `.drop("reason")` or `#Suppress(MustUse) { … }`
 /// (D-IGNORERET2). Compile-time only; erases in codegen (I3).
 pub const ATTR_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
-/// a migration block that declares how a `#PublishedSchema` struct changed between
+/// a migration block that declares how a `@PublishedSchema` struct changed between
 /// releases. Used as `migration TypeName { rename old -> new }`.
 pub const KW_MIGRATION: &str = "migration"; // D-MIGRATE1
 
@@ -1554,7 +1589,7 @@ pub const KW_REORDER_RETIRED: &str = "reorder"; // D-MIGRATE2F
 pub const KW_DROP_RETIRED: &str = "drop"; // D-MIGRATE2D
 
 /// D-MIGRATE2C (ratified): `jet schema` subcommand and its verbs. `status`
-/// reports each `#PublishedSchema` type's pinned shape; `squash --before <ver>`
+/// reports each `@PublishedSchema` type's pinned shape; `squash --before <ver>`
 /// re-baselines snapshots to the current shape. There is NO `check` verb —
 /// `jet build`'s E0910 is already the CI gate.
 pub const CMD_SCHEMA: &str = "schema"; // D-MIGRATE2C
@@ -1620,13 +1655,21 @@ pub const LAYOUT_ALIGN: &str = "align"; // D-REPRC1 (reserved)
 pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 
 // ── Serde derive markers + attributes (D-SERDE2–8, D-ENC1; bracket form D-ATTR2) ──
-// Derive markers (PascalCase per D-CASING1, written `#[…]` before a struct/enum):
-// `#[Codable]` derives BOTH directions (sugar for `#[Encode, Decode]`); `#[Encode]`
-// is write-only; `#[Decode]` is read-only. Owner (D-SERDE4 = B, modified): the
+// Derive markers (PascalCase per D-CASING1, written `@[…]` before a struct/enum,
+// D-MARKERMOVE1=B): `@[Codable]` derives BOTH directions (sugar for `@[Encode,
+// Decode]`); `@[Encode]` is write-only; `@[Decode]` is read-only. Owner (D-SERDE4 = B,
+// modified): the
 // collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
 pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
 pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
 pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
+// D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
+// that join Codable/Encode/Decode on the contract plane (`@`). `TRAIT_DEBUG`
+// ("Debug") is reused as the auto-derive marker name. User derives
+// (`derive T.Wire { … }`, applied as `#[Wire]`) stay `#` — the built-in/user
+// line is the `@`/`#` plane line.
+pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3
+pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
                                         // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
 pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
 pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
@@ -1654,7 +1697,7 @@ pub const ATTR_HARDENED: &str = "Hardened"; // D-MATURITY1
 
 // ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28) ──────────────────
 // `.drop("reason")` — method-style terminal that silences E0402 for a fallible
-// or #MustUse result.  `#Suppress(MustUse) { … }` is the lexical-scope form.
+// or @MustUse result.  `#Suppress(MustUse) { … }` is the lexical-scope form.
 pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 (method form; distinct from BUILTIN_DROP fn)
 pub const ATTR_SUPPRESS: &str = "Suppress"; // D-IGNORERET2  #Suppress(MustUse)
 pub const SUPPRESS_MUST_USE: &str = "MustUse"; // D-IGNORERET2  argument of #Suppress
@@ -1828,47 +1871,171 @@ pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
 /// having it here prevents silent divergence.
 pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "read_all_input"];
 
-// ── Marker family + syntax wave (ratified 2026-07-01) ───────────────────────
+// ── Marker family + syntax wave (ratified 2026-07-01, D-MARKERMOVE2/3 2026-07-02) ──
 //
 // D-MARKER-FAMILY1 (B): two-plane sigil law. `@` precedes a declaration and
 // states a checkable contract about it; `#` instructs the compiler (modes,
 // regions, effects, compile-time values) and may appear in type/expression
 // position where `@` never does; `$` stays splice-only (D-CTMARKER1).
-// NO existing `#` marker is renamed yet: the exact move list is the open
-// follow-up D-MARKERMOVE1, and the `@` plane's casing is the open follow-up
-// D-CONTRACTCASE1 (D-CASING1's PascalCase law is textually scoped to `#`).
-// Constants below use each ballot's as-ratified spelling; expect a mechanical
-// casing pass once D-CONTRACTCASE1 lands.
+//
+// D-CONTRACTCASE1 (A): PascalCase everywhere on the `@` plane — one casing
+// rule for the whole language, extending D-CASING1's `#`-plane rule to `@`.
+//
+// D-MARKERMOVE1 (B): the fixed move list — `Pure`, `MustUse`, `Codable`,
+// `Encode`, `Decode`, `Experimental`, `Tested`, `Hardened`, `PublishedSchema`,
+// `Redact`, `Numeric` move from `#` to `@` (e.g. `@Pure` → `@Pure`), exact
+// PascalCase spelling kept. `@Numeric` (D-DIST3) and the `@numeric` capability
+// bundle (D-CAPBUNDLE1) are the same job (I8) and merge into one `@Numeric` —
+// see `ATTR_NUMERIC` above; there is no separate bundle constant. Serde field +
+// container markers (`#Rename`, `#Skip`, `#Default`, `#Flatten`,
+// `#RenameAll`, `#DenyUnknownFields`, `#Tag`, `#Untagged`) are wire-format
+// machinery, not promises, and stay on `#`.
+//
+// D-MARKERMOVE2 (B, ratified 2026-07-02): whole-move, no carve-out by
+// position — `@Pure` is one spelling everywhere, including the type-position
+// callback bound (`f: @Pure fn(T) -> U`). The plane law gains exactly one
+// exception: a contract marker may prefix a function TYPE to state a bound;
+// "declarations only" reads "declarations, plus contract bounds on function
+// types".
+//
+// D-MARKERMOVE3 (B, ratified 2026-07-02): all built-in derive markers move,
+// user derives stay `#`. `@Debug`, `@Summarize`, `@Comparable` join
+// `@Codable`/`@Encode`/`@Decode` as contract-plane capability promises;
+// `derive T.Wire { … }` bodies applied as `#[Wire]` remain `#` generation
+// machinery — the built-in/user line IS the plane line.
 
 /// D-MARKER-FAMILY1: the contract-plane prefix — sibling of `ATTR_PREFIX` ("#").
-/// `@` markers attach only to declarations (fn, type, field), never to
-/// expressions or type positions. Loop-label suffix `@` (D-LOOPLABEL2) is a
-/// different grammatical slot and unaffected.
+/// `@` markers attach only to declarations (fn, type, field) plus the
+/// D-MARKERMOVE2 function-type bound carve-out, never to other expressions or
+/// type positions. Loop-label suffix `@` (D-LOOPLABEL2) is a different
+/// grammatical slot and unaffected.
 pub const CONTRACT_PREFIX: &str = "@"; // D-MARKER-FAMILY1
 
-/// D-PREPOST1: precondition contract on a function signature —
-/// `@pre(cond, "msg")`. The condition is a pure expression (same checker as
-/// `#Pure`). Checked in every build by default; per-module build-policy strip
-/// is the explicit opt-out. Spelling pending D-CONTRACTCASE1.
-pub const CONTRACT_PRE: &str = "pre"; // D-PREPOST1
-/// D-PREPOST1: postcondition contract — `@post(cond, "msg")`; `result` names
-/// the return value inside `cond`. Spelling pending D-CONTRACTCASE1.
-pub const CONTRACT_POST: &str = "post"; // D-PREPOST1
+/// D-PREPOST1 / D-CONTRACTCASE1: precondition contract on a function
+/// signature — `@Pre(cond, "msg")`. The condition is a pure expression (same
+/// checker as `@Pure`). Checked in every build by default; per-module
+/// build-policy strip is the explicit opt-out.
+pub const CONTRACT_PRE: &str = "Pre"; // D-PREPOST1
+/// D-PREPOST1 / D-CONTRACTCASE1: postcondition contract — `@Post(cond,
+/// "msg")`; `result` names the return value inside `cond`.
+pub const CONTRACT_POST: &str = "Post"; // D-PREPOST1
 
-/// D-PERSIST1: dev-tier contract on a module-level binding — the value
-/// survives `jet dev` hot reloads (identity = module path + binding name).
-/// Inert in release builds. Spelling pending D-CONTRACTCASE1.
-pub const CONTRACT_PERSIST: &str = "persist"; // D-PERSIST1
+/// D-PERSIST1 / D-CONTRACTCASE1: dev-tier contract on a module-level
+/// binding — the value survives `jet dev` hot reloads (identity = module
+/// path + binding name). Inert in release builds.
+pub const CONTRACT_PERSIST: &str = "Persist"; // D-PERSIST1
 
-/// D-CAPBUNDLE1: capability bundles on a nominal distinct type — each
-/// re-exposes a curated slice of the base type's operations while keeping
-/// nominal identity. Stackable. Relationship to `#Numeric` (ATTR_NUMERIC,
-/// D-DIST3) is deliberately unresolved — rides D-MARKERMOVE1. Spellings
-/// pending D-CONTRACTCASE1.
-pub const CONTRACT_BUNDLE_NUMERIC: &str = "numeric"; // D-CAPBUNDLE1
-pub const CONTRACT_BUNDLE_COMPARABLE: &str = "comparable"; // D-CAPBUNDLE1
-pub const CONTRACT_BUNDLE_PRINTABLE: &str = "printable"; // D-CAPBUNDLE1
-pub const CONTRACT_BUNDLE_CODABLE_AS_BASE: &str = "codable_as_base"; // D-CAPBUNDLE1
+/// D-CAPBUNDLE1 / D-CONTRACTCASE1: capability bundles on a nominal distinct
+/// type — each re-exposes a curated slice of the base type's operations
+/// while keeping nominal identity. Stackable. The `numeric` bundle merged
+/// into `ATTR_NUMERIC` (`@Numeric`, D-MARKERMOVE1) — there is no
+/// `CONTRACT_BUNDLE_NUMERIC` constant.
+pub const CONTRACT_BUNDLE_COMPARABLE: &str = "Comparable"; // D-CAPBUNDLE1
+pub const CONTRACT_BUNDLE_PRINTABLE: &str = "Printable"; // D-CAPBUNDLE1
+pub const CONTRACT_BUNDLE_CODABLE_AS_BASE: &str = "CodableAsBase"; // D-CAPBUNDLE1
+
+/// D-CLIFLAG1 (rides D-CONTRACTCASE1/D-MARKERMOVE1, plane+casing fixed
+/// 2026-07-02): struct-level CLI-derive marker — `@Cli`. The CLI-generation
+/// feature itself is a separate card (c7cliflag); this constant exists so
+/// that card builds against a fixed name. Never shipped as `#`, so no
+/// teaching error.
+pub const CONTRACT_CLI: &str = "Cli"; // D-CLIFLAG1
+/// D-CLIFLAG1: field-level doc marker for CLI-derived help text — `@Doc`.
+/// Same status as `CONTRACT_CLI`: registered here, feature built elsewhere.
+pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
+
+/// D-MARKER-FAMILY1 / D-MARKERMOVE1 / D-MARKERMOVE3 (I7/R3 chokepoint): every
+/// name that lives on the `@` contract plane. Union of the D-MARKERMOVE1
+/// move list (§2a), the D-CONTRACTCASE1 recase set (§2b), D-MARKERMOVE3's
+/// three extra built-in derives, and the D-CLIFLAG1 placeholders (G4). One
+/// source of truth for "which plane is this name" — parser, formatter, sema,
+/// and LSP all dispatch off `is_contract_marker`/`is_directive_marker`
+/// instead of hand-rolled match arms.
+pub const CONTRACT_MARKERS: &[&str] = &[
+    // D-MARKERMOVE1 move list (§2a)
+    KW_PURE,
+    ATTR_MUST_USE,
+    ATTR_CODABLE,
+    ATTR_ENCODE,
+    ATTR_DECODE,
+    ATTR_EXPERIMENTAL,
+    ATTR_TESTED,
+    ATTR_HARDENED,
+    ATTR_PUBLISHED_SCHEMA,
+    ATTR_REDACT,
+    ATTR_NUMERIC,
+    // D-MARKERMOVE3: built-in derive markers (user derives stay `#`).
+    // ATTR_COMPARABLE ("Comparable") also names the D-CAPBUNDLE1 capability
+    // bundle below — same spelling, disambiguated by declaration position
+    // (struct/enum derive vs. distinct-type bundle), listed once here.
+    TRAIT_DEBUG,
+    ATTR_SUMMARIZE,
+    ATTR_COMPARABLE,
+    // D-CONTRACTCASE1 recase set (§2b) — pre/post/persist/bundles
+    CONTRACT_PRE,
+    CONTRACT_POST,
+    CONTRACT_PERSIST,
+    CONTRACT_BUNDLE_PRINTABLE,
+    CONTRACT_BUNDLE_CODABLE_AS_BASE,
+    // D-CLIFLAG1 (G4) — registered, feature not yet implemented
+    CONTRACT_CLI,
+    CONTRACT_DOC,
+];
+
+/// D-MARKER-FAMILY1: every `#`-plane directive name that a moved-marker
+/// reader might confuse for a contract, i.e. the E0063 "did you mean `#`"
+/// set (§2c). Not exhaustive of every `#` spelling in the language — just
+/// the ones with parser-visible dispatch that needs to reject a stray `@`.
+pub const DIRECTIVE_MARKERS: &[&str] = &[
+    KW_UNSAFE,
+    KW_IMPURE,
+    KW_REACTIVE,
+    KW_TEST,
+    KW_BENCH,
+    KW_TODO,
+    KW_TAINTED,
+    KW_SANITIZER,
+    KW_STATE,
+    KW_TRANSITION,
+    KW_CAPS,
+    KW_GRANT,
+    KW_TRANSACT,
+    ATTR_TARGET,
+    ATTR_WASM,
+    ATTR_JS,
+    ATTR_WASM_EXPORT,
+    ATTR_HTML,
+    ATTR_UNINIT,
+    ATTR_REF,
+    ATTR_UNIT_FAMILY,
+    ATTR_SINGLE_USE,
+    ATTR_LAYOUT,
+    ATTR_SUPPRESS,
+    ATTR_EXTERN_MODULE,
+    ATTR_BINDGEN,
+    "Caller",
+    ATTR_RENAME,
+    ATTR_SKIP,
+    ATTR_DEFAULT,
+    ATTR_FLATTEN,
+    ATTR_RENAME_ALL,
+    ATTR_DENY_UNKNOWN_FIELDS,
+    ATTR_TAG,
+    ATTR_UNTAGGED,
+];
+
+/// D-MARKER-FAMILY1: is `name` a contract-plane (`@`) marker? The I7/R3
+/// dispatch chokepoint — parser/formatter/sema/LSP ask here, never hand-roll
+/// the move list.
+pub fn is_contract_marker(name: &str) -> bool {
+    CONTRACT_MARKERS.contains(&name)
+}
+
+/// D-MARKER-FAMILY1: is `name` a directive-plane (`#`) marker in the E0063
+/// confusable set? Used to detect `@` written before a directive name.
+pub fn is_directive_marker(name: &str) -> bool {
+    DIRECTIVE_MARKERS.contains(&name)
+}
 
 // D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
 // keyword — the lexer resolves a literal's identifier suffix against
@@ -1889,7 +2056,8 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 // spellings ride D-CONTRACTCASE1/D-MARKERMOVE1 — constants land with them.
 // D-EFFBUDGET1: `effects`/`allow`/`deny`/`grants` are pkg.jet manifest keys
 // (Jetpack/PackageManifest), not language tokens; effect names reuse D-EFF4.
-// D-ANY-JAI1: reuses D-VARIADIC1 `...T` + S45 `<T: A + B>` bounds; no token.
+// D-ANY-JAI1 + D-VARARGBOUND1: reuses D-VARIADIC1 `...T`; multi-trait
+// bounds use the owner-amended list form (`T: [A, B]`, `...items: [A, B]`).
 // D-UFCS1 (B), D-POINTERCHAIN1 (A), D-ERRCTX1 (D): no typeable surface.
 
 // ── Module name resolution helpers ───────────────────────────────────────────
@@ -2087,6 +2255,20 @@ pub fn args_handle_rust_type(name: &str) -> Option<&'static str> {
 pub fn crate_spec_needs_version(spec: &str) -> bool {
     spec != "std" && spec.split_once('@').is_none()
 }
+
+/// D-EFFBUDGET1 (ratified 2026-07-01): the `effects { allow: […], deny: […] }`
+/// block in `pkg.jet` that turns on whole-dependency-graph effect enforcement.
+/// Manifest keys only — no language grammar (§0.4 DO-NOT).
+pub const MANIFEST_BLOCK_EFFECTS: &str = "effects"; // D-EFFBUDGET1
+/// D-EFFBUDGET1: the `allow:` field inside `effects { … }` — the closed list of
+/// effect names the whole dependency graph may use.
+pub const EFFECTS_FIELD_ALLOW: &str = "allow"; // D-EFFBUDGET1
+/// D-EFFBUDGET1: the `deny:` field inside `effects { … }` — effect names the
+/// dependency graph must never use.
+pub const EFFECTS_FIELD_DENY: &str = "deny"; // D-EFFBUDGET1
+/// D-EFFBUDGET1: the `grants { "dep": [Effect] }` block — an audited
+/// per-dependency escape from the `effects:` budget, recorded in the lockfile.
+pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
 
 /// Levenshtein edit distance between two strings (used for "did you mean?" suggestions).
 pub fn edit_distance(a: &str, b: &str) -> usize {

@@ -102,6 +102,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. } => {}
         Expr::Call(c) => {
             for a in &c.args {
@@ -120,6 +121,11 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         Expr::Binary(_, l, r, _) => {
             collect_tuple_shapes_from_expr(l, out);
             collect_tuple_shapes_from_expr(r, out);
+        }
+        Expr::CompareChain { operands, .. } => {
+            for e in operands {
+                collect_tuple_shapes_from_expr(e, out);
+            }
         }
         Expr::Field(inner, _, _) | Expr::OptField { base: inner, .. } => {
             collect_tuple_shapes_from_expr(inner, out);
@@ -265,6 +271,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
         // D-EFF1: a `#Caps` region body is likewise real code.
         Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }

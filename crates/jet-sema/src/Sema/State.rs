@@ -364,6 +364,7 @@ impl<'a> StateCtx<'a> {
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
@@ -524,6 +525,11 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(l);
                 self.check_expr(r);
             }
+            Expr::CompareChain { operands, .. } => {
+                for e in operands {
+                    self.check_expr(e);
+                }
+            }
             Expr::CallValue { callee, args, .. } => {
                 self.check_expr(callee);
                 for a in args {
@@ -600,6 +606,7 @@ impl<'a> StateCtx<'a> {
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
             | Expr::Lambda(_)
+            | Expr::UnitLit { .. }
             | Expr::ComptimeSplice { .. } => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
             Expr::Spread(inner, _) => self.check_expr(inner),

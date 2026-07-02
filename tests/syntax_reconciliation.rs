@@ -25,8 +25,14 @@ const FORBIDDEN: &[&str] = &[
     "#test",
     "#pure",
     "#todo",
-    "mem.Ptr<",
-    "Ptr<",
+    // D-CAP9 retired bare `Ptr<T>` as a standalone TYPE ANNOTATION (`x: Ptr<Int>`,
+    // teaches E0210). It did NOT retire `mem.Ptr<T>.from_addr(addr)` — the
+    // module-qualified generic static-call form for building a typed pointer from
+    // a raw address, which is the current E2-M13 low-level-tier spelling (the
+    // sema's own diagnostic text recommends writing it, `CheckerCoreLib.rs`
+    // `infer_ptr_from_addr`). A blunt substring check can't tell "type position"
+    // from "call position," so this list intentionally omits both `mem.Ptr<` and
+    // bare `Ptr<` rather than false-flag the still-shipped call form.
     "List<",
     "Map<",
     "#[Serialize",

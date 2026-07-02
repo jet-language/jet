@@ -202,6 +202,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         | Stmt::Reactive { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. } => body.iter().for_each(|s| walk_stmt_exprs(s, f)),

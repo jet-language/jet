@@ -440,6 +440,50 @@ pub(crate) fn is_displayable(ty: &Type, trait_reg: &crate::Traits::TraitRegistry
     }
 }
 
+/// D-CAPBUNDLE1: an operation used on a nominal `distinct` type whose
+/// capability bundles don't grant it. `operation` names the thing that was
+/// attempted ("string interpolation", …), `needed_bundle` is the `@Bundle`
+/// spelling that would grant it, and `granted` lists the bundles already
+/// present on the type (empty when the type is still fully inert).
+pub(crate) fn e0138(
+    type_name: &str,
+    operation: &str,
+    needed_bundle: &str,
+    granted: Vec<&'static str>,
+    span: Span,
+) -> Diagnostic {
+    let has = if granted.is_empty() {
+        "no capability bundles".to_string()
+    } else {
+        format!("only {}", granted.join(", "))
+    };
+    Diagnostic::error(
+        "E0138",
+        format!("`{type_name}` doesn't support {operation}"),
+        format!(
+            "a nominal type only gets the operations its capability bundles grant; `{type_name}` has {has}"
+        ),
+        format!(
+            "add `{needed_bundle}` before the declaration, or convert to the base type first"
+        ),
+        Some(span),
+    )
+}
+
+/// D-PREPOST1: a `@Pre`/`@Post` contract condition used an effect — contract
+/// clauses are checked at every call, so they must stay pure (same checker
+/// as `#Pure fn`, E3401). `clause_kw` is `"Pre"`/`"Post"`; `span` is the
+/// impure call site inside the condition (from `Purity::check_pure_expr`).
+pub(crate) fn e0139(clause_kw: &str, span: Option<Span>) -> Diagnostic {
+    Diagnostic::error(
+        "E0139",
+        format!("a `@{clause_kw}` condition can't do I/O"),
+        "a contract is checked at every call and must be a pure claim about values".to_string(),
+        "move the effect out; keep only a pure test".to_string(),
+        span,
+    )
+}
+
 /// D-DISPLAYDBG1: `{value@Debug}` uses auto-derived or explicit `Debug`.
 pub(crate) fn is_debuggable(
     ty: &Type,

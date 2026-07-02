@@ -393,10 +393,10 @@ call, zero boxing. `reflect.Value`/`Data` remain the tooling/expert floor
 (folds in what would've been the "handle" option). Owner's follow-up
 questions (recorded in the ballot's `comment` field) — **"can we do A & B?"**
 and **"can @-varargs bind a set of traits, not just one?"** — read as: yes to
-both, and multi-trait bounds should reuse **S45's already-ratified**
-`<T: A + B>` bound syntax rather than inventing new variadic-bound grammar
-(`parts: ...(Renderable + Debug)` or similar — confirm the exact spelling
-against S45's existing multi-bound syntax, don't invent a second one, I8).
+both. **D-VARARGBOUND1 owner-amended the spelling:** multi-trait bounds use a
+consistent list form everywhere, not `+`: `T: [Renderable, Debug]` and
+`parts: ...[Renderable, Debug]`. Single-trait bounds stay bare (`T: Renderable`,
+`parts: ...Renderable`).
 
 **What exists today:**
 - Variadic parameters — **already implemented**. `name: ...T` parses and
@@ -416,9 +416,9 @@ against S45's existing multi-bound syntax, don't invent a second one, I8).
   net-new stdlib work, not a rename of the comptime types.
 
 **Build order:**
-1. Parser: `name: ...Trait` / `name: ...(TraitA + TraitB)` — extend the
+1. Parser: `name: ...Trait` / `name: ...[TraitA, TraitB]` — extend the
    existing variadic-param grammar (`Items.rs:2622`) to accept a trait-bound
-   position instead of only a concrete type, reusing S45's bound-list parse
+   position instead of only a concrete type, reusing S45's list-bound parse
    function if one already exists as a callable unit (don't copy it).
 2. Sema: at each call site, check every argument against the trait bound(s)
    (same mechanism as ordinary generic-bound checking, `E0905` "type doesn't
@@ -706,12 +706,9 @@ formatter emission + fmt STABILITY test (own-memory rule).
    as binding, but it's worth a one-line owner confirmation since
    D-MARKERMOVE1 was framed as the definitive spelling authority and didn't
    cover this pair.
-4. **Multi-trait variadic bounds** — the ballot's `comment` field ("can @-
-   varargs bind a set of traits, not just one?") is an open owner question
-   inside an otherwise-ratified decision, not itself ratified text. §6 above
-   assumes reuse of S45's `<T: A + B>` syntax as the answer; get that
-   confirmed before locking a `...{A + B}` (or whatever spelling) into a
-   snapshot.
+4. **Multi-trait variadic bounds** — resolved by D-VARARGBOUND1 (2026-07-02):
+   use the list form everywhere (`T: [A, B]`, `...items: [A, B]`), not `+`.
+   Do not lock any `A + B` bound spelling into snapshots.
 5. **c7pointerchain's `mem.cast_ptr<T>`** — the ratified option's own worked
    example uses an API (`mem.cast_ptr<Bool>(...)`) that does not exist in
    `core.mem` today. Confirm whether this card silently also needs to add

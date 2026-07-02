@@ -121,6 +121,8 @@ before continuing.
 | E0058 | parse | *retired by D-S14-PAUSE* (was: `view` keyword teaching) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
+| E0062 | parse | teaching: a contract marker written with `#` → write it with `@` (D-MARKER-FAMILY1, D-MARKERMOVE1/2/3) |
+| E0063 | parse | teaching: a directive marker written with `@` → write it with `#` (D-MARKER-FAMILY1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | teaching: `val`/`var` keyword → `name #=`/`name :=` sigil (D-BIND3) |
 | E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -166,10 +168,18 @@ before continuing.
 | E0131 | sema  | `Float` and `Decimal` mixed (D-DECIMAL1) |
 | E0132 | sema  | `BigInt` and `Decimal` mixed (D-BIGINT1/D-DECIMAL1) |
 | E0133 | sema  | unsupported operator on `BigInt`/`Decimal` (D-BIGINT1/D-DECIMAL1) |
+| E0134 | sema  | a numeric literal's unit suffix isn't a `#UnitFamily` member in scope (D-UNITLIT1) |
+| E0135 | sema  | a compile-time literal outside a range type's declared bounds (D-RANGETYPE1) |
+| E0136 | sema  | a runtime value constructed into a range type without the fallible `?` form (D-RANGETYPE1) |
+| E0137 | parse | a range type's declared bounds are empty/reversed (`lo > hi`) (D-RANGETYPE1) |
+| E0138 | sema  | an operation used on a nominal `distinct` type whose capability bundles don't grant it (D-CAPBUNDLE1) |
+| E0139 | sema  | a `@Pre`/`@Post` contract condition uses an effect (D-PREPOST1) |
 | E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |
 | E0141 | sema  | `#SingleUse` value consumed on only one `if` branch (D-LIN1) |
 | E0142 | sema  | `#SingleUse` value lent/shared instead of moved (D-LIN1) |
 | E0143 | sema  | `drop` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP) |
+| E0144 | sema  | `result` used inside a `@Pre` condition — it only exists once the function has returned (D-PREPOST1) |
+| E0145 | parse | `@Persist` on a binding that isn't module-level (D-PERSIST1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
@@ -214,8 +224,13 @@ before continuing.
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
 | E0324 | sema  | type alias without type parameters — use `struct` for a distinct primitive name (D-TYPEALIAS1) |
 | E0325 | parse | teaching: external inherent method `~~` connector → `.` (D-EXTMETH1) |
+| E0326 | sema  | a partial struct destructure (`.{ … }`) with no trailing `..` (D-DESTRUCT1) |
+| E0327 | sema  | a redundant `..` on a destructure that already names every field (D-DESTRUCT1) |
 | E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
 | E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
+| E0333 | parse | a chained comparison changes direction (`a < b > c`) (D-CHAINCMP1) |
+| E0334 | sema  | a trailing `{ }` block argument's slot isn't a zero-parameter function (D-TRAILBLOCK1) |
+| E0335 | parse | a second trailing block, or a trailing block on a non-call (D-TRAILBLOCK1) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
@@ -236,7 +251,7 @@ before continuing.
 | E0416 | parse | duplicate `#PubFile` marker in one file (D-VISDEFAULT2) |
 | E0417 | parse | conflicting `pub` and `priv` on one item (D-VISDEFAULT2) |
 | E0418 | parse | teaching: `#PublicFile` → `#PubFile` (D-VISDEFAULT2) |
-| E0419 | sema  | `#MustUse` result ignored as a bare statement (D-MUSTUSE1) |
+| E0419 | sema  | `@MustUse` result ignored as a bare statement (D-MUSTUSE1) |
 | E0420 | sema  | `#Uninit` binding read before it is given a value (D-UNINIT1) |
 | E0421 | parse | `#Uninit` binding needs a type annotation (D-UNINIT1) |
 | E0422 | parse | `#Uninit` binding cannot have an initializer (D-UNINIT1) |
@@ -286,9 +301,9 @@ before continuing.
 | E0721 | sema  | an untrusted (`#Tainted`) value reaches a sink effect (`Db`/`Exec`/`Net`) without passing through a `#Sanitizer fn` (D-TAINT1) |
 | E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
-| E0745 | sema  | a `#Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
+| E0745 | sema  | a `@Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
 | E0746 | sema  | an irreversible effect (Net/Fs/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
-| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`#Pure fn(…)` / `#(E) fn(…)`) (D-EFF2) |
+| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`@Pure fn(…)` / `#(E) fn(…)`) (D-EFF2) |
 | E0748 | sema  | `#(via f)` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
 | E0749 | sema  | a function reaches an effect it prohibits with `#(!E)` in its own call graph (D-PROP1=A) |
 | E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
@@ -300,6 +315,7 @@ before continuing.
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
+| E3005 | runtime | a `@Pre`/`@Post` contract clause failed — checked in every build, not a debug/release split (D-PREPOST1) |
 | E3101 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer op gate; canonical raw ops use E0208) |
 | E3102 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer discovery gate) |
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
@@ -326,7 +342,7 @@ before continuing.
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
 | E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
-| E3401 | sema  | impure call inside a `#Pure fn` / pure-eval context (call-trace path) |
+| E3401 | sema  | impure call inside a `@Pure fn` / pure-eval context (call-trace path) |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
@@ -351,7 +367,7 @@ before continuing.
 | E0907 | sema  | trait impl signature mismatch |
 | E0908 | sema  | duplicate trait impl |
 | E0909 | sema  | generic instantiation too deep |
-| E0910 | sema  | `#PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
+| E0910 | sema  | `@PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0912 | sema  | a frozen public capability signature drifted: a param a caller could pass by read now demands `~`/`^`/`&` in an `api: stable`/`api: explicit` library (c129, D-CAP8) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
@@ -438,6 +454,8 @@ before continuing.
 | E1217 | jet   | a dependency in `pkg.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
 | E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
+| E1220 | jet   | a transitive dependency uses an effect outside the `pkg.jet` `effects:` budget (D-EFFBUDGET1) |
+| E1221 | jet   | a malformed `effects:`/`grants:` block in `pkg.jet` (D-EFFBUDGET1) |
 | E1225 | jet   | `jetpack.toml` uses the retired `[packages]` monorepo index (D-WORKSPACE1) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
@@ -460,6 +478,9 @@ before continuing.
 | E2914 | sema  | `#Reactive fn` must not return a value (D-REACTCORE1) |
 | E2930 | sema  | an interactive `UiAriaRole` node has an empty accessible label, lint-only (D-A11YGATE1) |
 | E2931 | sema  | two interactive nodes in an inline focus group share an accessible label, lint-only (D-A11YGATE1) |
+| E2932 | sema  | a `layout { … }` constraint mixes a horizontal and vertical value (D-LAYOUT1 / D-LAYOUT-GATES1) |
+| E2933 | sema  | a line inside `layout { … }` doesn't produce a `Constraint` (D-LAYOUT1) |
+| E2934 | sema  | a `layout { … }` constraint exactly duplicates an earlier one in the same block, lint-only (D-LAYOUT1) |
 
 ## Editions and release policy (E2-M2)
 
@@ -636,13 +657,13 @@ block reserved for M6.
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source -> Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} -> {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} -> {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … -> …` blocks. |
 | E2406 | Can't declare `impl {Source} -> {Target}` — neither type is defined in this program. | Error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined, so conversions between two foreign types can't be added silently. | Define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type. |
-| E2407 | `#[Rename(...)]` needs a string literal. | The wire key a `#[Codable]` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#[Rename("wire_name")]`. |
-| E2408 | `#[Flatten]` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `#[Codable]` struct — not a primitive, list, or map. | Give `{field}` a `#[Codable]` struct type, or drop `#[Flatten]`. |
+| E2407 | `#[Rename(...)]` needs a string literal. | The wire key a `@[Codable]` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#[Rename("wire_name")]`. |
+| E2408 | `#[Flatten]` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `@[Codable]` struct — not a primitive, list, or map. | Give `{field}` a `@[Codable]` struct type, or drop `#[Flatten]`. |
 | E2409 | `#[RenameAll({style})]` isn't a known casing style. | The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3); anything else is rejected so a typo fails at compile time, not on the wire. | Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`. |
-| E2410 | `E2410: missing required field `{field}`` (runtime `DecodeError`). | Decoding into a `#[Codable]`/`#[Decode]` type found no wire value for a required field and the field has no `#[Default]` and isn't optional (D-SERDE5). | Mark the field optional (`T?`), give it `#[Default]`/`#[Default(value)]`, or fix the input so the key is present. Compose with `??` to supply a fallback. |
-| E2411 | `{Type}` can't be serialized / decoded. | Only types that opt in with `#[Codable]`/`#[Encode]`/`#[Decode]` (and whose fields all have a wire form) can cross the wire; a field holding a non-Codable type, closure, or handle has nothing to (de)serialize (D-SERDE1). | Add `#[Codable]`/`#[Encode]`/`#[Decode]` to the offending type, or remove it from the encoded value (e.g. `#[Skip]`). |
+| E2410 | `E2410: missing required field `{field}`` (runtime `DecodeError`). | Decoding into a `@[Codable]`/`@[Decode]` type found no wire value for a required field and the field has no `#[Default]` and isn't optional (D-SERDE5). | Mark the field optional (`T?`), give it `#[Default]`/`#[Default(value)]`, or fix the input so the key is present. Compose with `??` to supply a fallback. |
+| E2411 | `{Type}` can't be serialized / decoded. | Only types that opt in with `@[Codable]`/`@[Encode]`/`@[Decode]` (and whose fields all have a wire form) can cross the wire; a field holding a non-Codable type, closure, or handle has nothing to (de)serialize (D-SERDE1). | Add `@[Codable]`/`@[Encode]`/`@[Decode]` to the offending type, or remove it from the encoded value (e.g. `#[Skip]`). |
 | E2412 | `E2412: unknown field `{field}`` (runtime `DecodeError`). | The struct is marked `#[DenyUnknownFields]` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails fast instead of silently dropping it. | Remove `#[DenyUnknownFields]` to ignore extra keys (the lenient default), add the field, or fix the producer. |
-| E2413 | retired (D-SERDE12) — generic `#[Codable]` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
+| E2413 | retired (D-SERDE12) — generic `@[Codable]` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
 | L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) -> String { … } }`, or use `{value@Debug}` for debug output. |
 
@@ -683,6 +704,8 @@ output is machine-parseable with `--json`.
 | E1217 | `{dep}` is in `pkg.jet` but has no locked revision. | A `--locked` build (and `jet publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
 | E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `pkg.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `pkg.jet`. |
+| E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `effects:` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error. | Add `{effect}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency. |
+| E1221 | `pkg.jet` has a malformed `effects:`/`grants:` block. | `effects: { allow: […], deny: […] }` and `grants: { "dep": […] }` only take effect names from the ten-effect vocabulary (D-EFF4), as lists. | Fix the field name or effect name; see docs/spec/syntax-decisions.md. |
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
@@ -746,6 +769,35 @@ runtime value it can't see.
 | E2930 | this {role} has no accessible label | Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech. | Pass a real label, e.g. `ui.node_role("Submit", w, h, ui.aria_role_button())`. |
 | E2931 | two interactive nodes both have the label "{label}" | Assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3). | Give each interactive node a distinct, descriptive label. |
 
+## Layout constraint diagnostics (D-LAYOUT1 / D-LAYOUT-GATES1)
+
+`layout NAME { … }` (D-LAYOUT1=A) is a Cassowary-style linear constraint
+block. GATE 1 lets `>=`/`<=`/`==` between the closed layout types
+(`HVar`/`VVar`/`LengthVar`) produce a `Constraint` instead of `Bool`; GATE 2
+puts those types (plus `Constraint`/`LayoutHandle`) in the compiler's closed
+type family. E2932/E2933 are ordinary compile errors (shown in `jet build`/
+`jet run`/`jet check` like any other); E2934 is an ordinary warning
+(non-blocking). All three are static — computed from the constraint
+expressions' shapes, not from solved values.
+
+Infeasibility (two required constraints that can't both hold) is NOT one of
+these — it generally depends on values the solver only has at runtime, so it
+isn't a static diagnostic. `LayoutHandle.is_feasible()` / `.conflict()`
+query it explicitly (`.conflict()` names the contradicting required
+constraints, straight from the simplex tableau); `LayoutHandle.value(v)`
+panics with the same conflict list if the layout is infeasible when a value
+is read, rather than silently returning a wrong number (I1 — a loud failure
+beats a quiet wrong one). Detecting infeasibility from a WHOLLY
+comptime-known constraint set, at COMPILE time, is future work (the static-
+layout-evaluation optimization D-LAYOUT1's plan describes) — not yet
+implemented.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2932 | layout constraint mixes a horizontal and vertical value (`{lt}` and `{rt}`) | `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout. | Compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis). |
+| E2933 | this line inside `layout {name}` doesn't produce a constraint (found `{ty}`) | Every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`). | Write a comparison, e.g. `label.width >= 80.0`, or capture it: `c @= label.width >= 80.0`. |
+| E2934 | this constraint repeats one already written in this `layout` block | An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover. | Remove the duplicate line, or change it if a different constraint was meant. |
+
 ## Debugging and observability diagnostics (E2-M12, D-OBS1–3)
 
 Runtime panic reports and structured log shape. E30xx is the M12 block.
@@ -758,6 +810,7 @@ span is embedded in the message (Jet file + line + function name).
 | E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. | The program hit a `panic`, `require`, or `require_eq` call that failed, or a bounds/key check triggered at runtime. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; the source line and locals show what values were in play. |
 | E3002 | `error propagated from: {fn} ({file}:{line}) via ?` — an error-return trace entry appended when a `?` re-raises an error. | Each `?` that propagates an error adds a frame, making the full error path visible. | Follow the trace from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
+| E3005 | `@{Pre\|Post} contract failed: {msg}` — with file:line. | A `@Pre` (argument claim, checked at entry) or `@Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split). | Fix the caller (a failed `@Pre` means an argument violated the function's stated contract) or the function body (a failed `@Post` means it broke its own promise about the result). |
 
 ## Uninitialized binding diagnostics (D-UNINIT1)
 
@@ -828,7 +881,7 @@ already-freed arena), these track the views themselves.
 
 Every function carries an inferred effect set (the ambient powers its body
 reaches — `Net`, `Fs`, `Io`, `Db`, `Time`, …). A `#(…)` list on the signature
-declares an upper bound; `#Pure` declares the empty set. The inferred set must
+declares an upper bound; `@Pure` declares the empty set. The inferred set must
 be a subset of the declared one. Effects are erased in codegen (I3), so these
 are compile-time-only diagnostics. An unknown effect name in a `#(…)` list is
 reported as **E0119** (unknown name).
@@ -837,13 +890,13 @@ reported as **E0119** (unknown name).
 |------|------|-----|-----|
 | E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `#(…)` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `#(…)` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
 | E0741 | This `#Caps` region uses the effect `{effect}`, which it doesn't allow. | `#Caps(…)` restricts a region to a fixed set of effects; anything reached inside — even transitively through a call — must be in that set, so the region is a hard local ceiling. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
-| E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`#Pure fn hash(self)`, `fn render(self) #(Gpu)`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
+| E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`@Pure fn hash(self)`, `fn render(self) #(Gpu)`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0711 | The capability `{handle}` can't escape its `#Grant` block. | `#Grant(…)` grants a capability into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `#Grant` block, or perform the work that needs it there. |
 | E0712 | This `#Grant` region uses the effect `{effect}`, which it has no capability for. | `#Grant(…)` authorizes exactly the listed effects through its handle; the dual of `#Caps`, an effect reached inside — even transitively through a call — that the grant omits has no capability backing it (D-SCAP1). | Add the named effect to the `#Grant(…)` list, or move that work outside the grant. |
 | E0721 | Untrusted (`#Tainted`) data reaches `{api}` without being sanitized. | A `#Tainted` value is untrusted input; it spreads to anything derived from it. `{api}` is a sink effect (`Db`/`Exec`/`Net` — a database query, subprocess command, or network request), and an untrusted value used there unchecked is the classic injection bug (D-TAINT1). | Pass the value through a `#Sanitizer fn` first — its return value is trusted by contract, so it may reach the sink. |
-| E0745 | `{fn}` is `#Pure` but also declares effects. | `#Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `#Pure` to allow the listed effects. |
+| E0745 | `{fn}` is `@Pure` but also declares effects. | `@Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `@Pure` to allow the listed effects. |
 | E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`Fs`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
-| E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `#Pure fn(…)` parameter demands a pure callback, and a `#(E) fn(…)` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `#Pure fn` for a pure parameter), or widen the parameter's effect bound. |
+| E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `@Pure fn(…)` parameter demands a pure callback, and a `#(E) fn(…)` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `@Pure fn` for a pure parameter), or widen the parameter's effect bound. |
 | E0748 | `#(via {param})` on `{fn}` names no such parameter / a parameter that isn't a callback. | `#(via f)` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `#(via …)` annotation. |
 
 ## Web backend partition diagnostics (c123, D-WASM1 / D-JSBIND1)
@@ -851,7 +904,7 @@ reported as **E0119** (unknown name).
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E-WEB-CROSS-PARTITION | `{caller}` is compiled to {caller_bucket} but calls `{callee}`, which lives in {callee_bucket}. | The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet (D-WASM1). | Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust `#Target` / `#Wasm` / `#Js` markers. Run `jet build --target web --explain-partition` to audit assignments. |
-| E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `#[Codable]` to the struct/enum and keep every field ABI-safe. |
+| E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `@[Codable]` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `@[Codable]` to the struct/enum and keep every field ABI-safe. |
 | E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Wasm` / `#WasmExport` pin, move browser work into a `#Js` function, or drop the browser API calls. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
@@ -965,9 +1018,9 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `#Pure fn` may only call other `#Pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `main` is checked transitively; the why-line shows the full chain (`main → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `#Pure fn`, or remove the call from `{pure_fn}`. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `@Pure fn` may only call other `@Pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `main` is checked transitively; the why-line shows the full chain (`main → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `@Pure fn`, or remove the call from `{pure_fn}`. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
-| E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `#Pure`. |
+| E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `@Pure`. |
 
 ## REPL diagnostics (E2-M18 `jet repl`)
 
@@ -1140,7 +1193,7 @@ The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
 (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
 ### E0910 — Published schema breaking change
 
-`#PublishedSchema` pins a record's saved shape at release (D-MIGRATE1/2). A
+`@PublishedSchema` pins a record's saved shape at release (D-MIGRATE1/2). A
 breaking data-shape change is refused unless a `migration` op declares the intent.
 E0910 is the umbrella for every such case; the what/why/fix is case-specific.
 
@@ -1164,7 +1217,7 @@ E0910 checks intent only.
 | Case | What | Why | Fix |
 |------|------|-----|-----|
 | `drop` (D-MIGRATE2D) | `drop` isn't a migration verb — use `remove`. | A migration deletes a field with `remove`; `drop` is not a Jet keyword here. | Write `remove <field>`. |
-| `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `#PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
+| `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `@PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
 | other | `{op}` isn't a known migration verb. | A migration block contains `rename`, `add`, `remove`, or `change` operations. | Use one of those four verbs. |
 
 ### E0914 — Unknown interpolation selector (D-DISPLAYDBG2)
@@ -1185,7 +1238,7 @@ E0910 checks intent only.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{type}` can't auto-derive `Debug` because field `{field}` isn't debuggable ``. | Auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable. | Mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type}`. |
+| `` `{type}` can't auto-derive `Debug` because field `{field}` isn't debuggable ``. | Auto-derived `Debug` requires every non-`@[Redact]` field to be debuggable. | Mark `{field}` with `@[Redact]`, change its type, or implement `Debug` manually for `{type}`. |
 
 ### E0912 — Frozen capability signature drift (c129)
 

@@ -1,4 +1,4 @@
-//! D-MUSTUSE1 (c18iwxqx): `#MustUse` ignored-result diagnostics (E0419).
+//! D-MUSTUSE1 (c18iwxqx): `@MustUse` ignored-result diagnostics (E0419).
 
 use jet_sema::AST::{CFfi, LoadedModule, ProgramBundle};
 use jet_sema::Diagnostics::{Diagnostic, Severity};
@@ -42,6 +42,7 @@ fn err_codes(src: &str) -> Vec<String> {
         web_partitions: HashMap::new(),
         web_partition_enforced: false,
         web_partition_report: None,
+        dep_roots: std::collections::HashMap::new(),
     };
     check_bundle(&mut bundle, CompileMode::Eval)
         .into_iter()
@@ -53,7 +54,7 @@ fn err_codes(src: &str) -> Vec<String> {
 #[test]
 fn must_use_fn_ignored_is_e0419() {
     let src = r#"
-#MustUse fn ticket() -> Int {
+@MustUse fn ticket() -> Int {
     return 1
 }
 fn main() {
@@ -71,7 +72,7 @@ fn main() {
 #[test]
 fn must_use_type_ignored_is_e0419() {
     let src = r#"
-#MustUse struct Receipt {
+@MustUse struct Receipt {
     id: Int
 }
 fn issue() -> Receipt {
@@ -92,7 +93,7 @@ fn main() {
 #[test]
 fn must_use_drop_suppresses_e0419() {
     let src = r#"
-#MustUse fn ping() -> Int {
+@MustUse fn ping() -> Int {
     return 1
 }
 fn main() {
@@ -110,7 +111,7 @@ fn main() {
 #[test]
 fn must_use_enum_ignored_is_e0419() {
     let src = r#"
-#MustUse enum Ticket {
+@MustUse enum Ticket {
     Open
     Closed
 }
@@ -132,8 +133,8 @@ fn main() {
 #[test]
 fn must_use_bound_value_ok() {
     let src = r#"
-#MustUse struct Token { id: Int }
-#MustUse fn mint(id: Int) -> Token {
+@MustUse struct Token { id: Int }
+@MustUse fn mint(id: Int) -> Token {
     return Token.{ id: id }
 }
 fn main() {

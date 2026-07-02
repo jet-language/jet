@@ -49,6 +49,15 @@ test('clear keeps a card in deciding while another decision is open', () => {
   assert.equal(project(s).cards[0].lane.lane, 'decide');
 });
 
+test('project counts open ballots, not just blocked cards', () => {
+  const s = base();
+  s.decisions.push({ id: 'D-TWO', cardId: 'c1', title: 'Pick two', options: [{ key: 'A' }], status: 'open' });
+  const p = project(s);
+  assert.equal(p.counts.decide, 2);
+  assert.equal(p.counts.forYou, 2);
+  assert.equal(p.cards[0].lane.label, '2 decisions to make');
+});
+
 test('project treats a cleared deciding card as agent work', () => {
   const s = base();
   s.decisions[0].status = 'ratified';
@@ -61,4 +70,14 @@ test('current Tower data has no cleared card stuck in deciding', () => {
     .filter(c => c.phase === 'deciding' && !c.decisions.some(d => d.status !== 'ratified'))
     .map(c => `#${c.num} ${c.title}`);
   assert.deepEqual(stuck, []);
+});
+
+test('current Tower data has unique decision ids', () => {
+  const seen = new Set();
+  const dupes = [];
+  for (const d of load().decisions) {
+    if (seen.has(d.id)) dupes.push(d.id);
+    seen.add(d.id);
+  }
+  assert.deepEqual(dupes, []);
 });

@@ -25,7 +25,7 @@
 //! is the *capability* contract specifically.
 //!
 //! Lives at `.jet/cache/api/<package>.api` (committed, durable contract — the same
-//! discipline as the D-MIGRATE1 `#PublishedSchema` snapshot).
+//! discipline as the D-MIGRATE1 `@PublishedSchema` snapshot).
 
 use crate::Syntax;
 use crate::AST::{Func, Item};
@@ -291,6 +291,8 @@ mod tests {
             state_requires: None,
             state_transition: None,
             web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
             body: vec![],

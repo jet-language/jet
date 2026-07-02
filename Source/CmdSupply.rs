@@ -233,11 +233,11 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
         );
     }
 
-    // D-MIGRATE1: snapshot `#PublishedSchema` structs at release time.
+    // D-MIGRATE1: snapshot `@PublishedSchema` structs at release time.
     let snap_count = jet::Publish::write_schema_snapshots_for_entry(&root, &entry_str, version);
     if snap_count > 0 {
         println!(
-            "  schema: {} #PublishedSchema snapshot(s) updated in .jet/cache/schema/",
+            "  schema: {} @PublishedSchema snapshot(s) updated in .jet/cache/schema/",
             snap_count
         );
     }

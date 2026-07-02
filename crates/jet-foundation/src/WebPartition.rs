@@ -130,9 +130,9 @@ pub fn web_abi_type(
     crate::Diagnostics::Diagnostic::error(
         "E-WEB-ABI-TYPE",
         format!("`{ty_show}` cannot cross the JS/WASM boundary {context}"),
-        "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums per D-JSBIND1)"
+        "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `@[Codable]` structs/enums per D-JSBIND1)"
             .to_string(),
-        "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe (D-JSBIND1)"
+        "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `@[Codable]` struct/enum whose fields are ABI-safe (D-JSBIND1)"
             .to_string(),
         span,
     )

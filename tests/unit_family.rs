@@ -1,6 +1,6 @@
 //! D-QUAL3 (ratified 2026-06-24): unit families, `#UnitFamily(name) { m, … }`.
 //!
-//! Each member mints one `#Numeric` distinct type erasing to `Float`
+//! Each member mints one `@Numeric` distinct type erasing to `Float`
 //! (`usd` → `Usd`), so signatures read in plain English and the compiler keeps
 //! the units from mixing. This is pure sugar over the D-DIST1/D-DIST3 distinct
 //! machinery: construct with `Usd(value)`, same-unit arithmetic stays in the

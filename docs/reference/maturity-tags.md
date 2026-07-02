@@ -1,24 +1,24 @@
 # Maturity tags
 
-`#Experimental`, `#Tested`, and `#Hardened` are documentation tags for public APIs.
+`@Experimental`, `@Tested`, and `@Hardened` are documentation tags for public APIs.
 They tell readers how stable an API is without changing compiler behavior.
 
 ```jet
-#Experimental
+@Experimental
 pub fn parse_streaming(src: Stream) -> Doc ? ParseError { ... }
 
-#Tested
+@Tested
 pub fn parse(src: String) -> Doc ? ParseError { ... }
 
-#Hardened
+@Hardened
 pub fn parse_strict(src: String) -> Doc ? ParseError { ... }
 ```
 
 Current contract (D-MATURITY1):
 
-- `#Experimental` marks an API that may still change.
-- `#Tested` marks an API with normal test coverage and expected stability.
-- `#Hardened` marks an API held to the strongest compatibility and review bar.
+- `@Experimental` marks an API that may still change.
+- `@Tested` marks an API with normal test coverage and expected stability.
+- `@Hardened` marks an API held to the strongest compatibility and review bar.
 - These tags do not propagate through callers.
 - The compiler does not warn, error, or alter codegen based on these tags.
 

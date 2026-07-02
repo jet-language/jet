@@ -11,6 +11,7 @@
 
 pub mod CLI;
 pub mod Components;
+pub mod EffectBudget;
 pub mod EnvFile;
 pub mod JSON;
 pub mod JetOS;

@@ -289,14 +289,15 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 ));
             }
         }
-        // c109: struct destructure. Mirrors `emit_stmt`'s `BindPattern::Struct` arm
-        // byte-for-byte: borrow the init into a temp, then bind each field from a
-        // cloned field of it (the field name is both the local and the `.field` read).
+        // c109 / D-DESTRUCT1: struct destructure. Mirrors `emit_stmt`'s
+        // `BindPattern::Struct` arm byte-for-byte: borrow the init into a temp,
+        // then bind each local from a cloned field of it. `local_rust`/
+        // `field_rust` diverge for a renamed field (`severity: sev`).
         TStmt::StructDestructure {
             tmp,
             init,
             kw,
-            fields,
+            binds,
         } => {
             out.push_str(&format!(
                 "{}let {} = &({});\n",
@@ -304,10 +305,10 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 tmp,
                 emit_tir_expr(init, cx)
             ));
-            for field_rust in fields {
+            for (local_rust, field_rust) in binds {
                 out.push_str(&format!(
                     "{}{} {} = ({}).{}.clone();\n",
-                    pad, kw, field_rust, tmp, field_rust
+                    pad, kw, local_rust, tmp, field_rust
                 ));
             }
         }
@@ -788,6 +789,21 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             emit_tir_stmts(body, cx, out, indent + 1);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. NOT wrapped in a
+        // nested Rust block — `name` must stay a live Rust local for
+        // statements AFTER this one (`NAME.value(v)`, `NAME.suggest(…)`),
+        // unlike `Region`/taskgroup, which are genuinely lexical.
+        TStmt::Layout {
+            rust_place,
+            label,
+            body,
+        } => {
+            out.push_str(&format!(
+                "{}let {} = jet_layout::Handle::new({:?});\n",
+                pad, rust_place, label
+            ));
+            emit_tir_stmts(body, cx, out, indent);
+        }
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block — open a
         // transaction guard, emit the body, then `commit()` on the clean fall-through
         // path. An early `?`/`return` skips `commit()`, so registered `on_commit` hooks
@@ -1232,6 +1248,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     a(0),
                     tuple_struct
                 ),
+                // D-HOLE1: `.zip` on `T?` — Rust's native `Option::zip`, wrapped into
+                // the named-tuple struct (present only when both operands are).
+                TBuiltinOp::OptionZip { tuple_struct, .. } => format!(
+                    "({}).clone().zip(({}).clone())\
+                     .map(|(x, y)| {} {{ user_a: x, user_b: y }})",
+                    recv,
+                    a(0),
+                    tuple_struct
+                ),
             }
         }
         // c109 Phase 12: a numeric predicate / bit-pop / width-conversion method. The
@@ -1313,6 +1338,43 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             } else {
                 format!("(({}) {} ({}))", ls, op.spell(), rs)
             }
+        }
+        // D-CHAINCMP1: `0 <= sev < 10` — a Rust block expression binds each
+        // operand to a temp exactly once (single-evaluation for the shared
+        // middle operands), then ANDs the adjacent-pair comparisons over
+        // those temps: `{ let __jcc0 = (e0); let __jcc1 = (e1); …
+        // (__jcc0 op0 __jcc1) && (__jcc1 op1 __jcc2) && … }`.
+        TExprKind::CompareChain { operands, ops } => {
+            let mut block = String::from("{ ");
+            for (i, operand) in operands.iter().enumerate() {
+                let os = emit_tir_expr(operand, cx);
+                block.push_str(&format!("let __jcc{} = ({}); ", i, os));
+            }
+            let pairs: Vec<String> = ops
+                .iter()
+                .enumerate()
+                .map(|(i, op)| format!("(__jcc{} {} __jcc{})", i, op.spell(), i + 1))
+                .collect();
+            block.push_str(&format!("({}) }}", pairs.join(" && ")));
+            block
+        }
+        // D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 1): `>=`/`<=`/`==` between
+        // layout values register a `Constraint`, so it's a function call, not
+        // a Rust operator.
+        TExprKind::LayoutCompare { op, lhs, rhs } => {
+            let ls = emit_tir_expr(lhs, cx);
+            let rs = emit_tir_expr(rhs, cx);
+            let func = match op {
+                BinOp::Ge => "ge",
+                BinOp::Le => "le",
+                BinOp::Eq => "eq_",
+                _ => unreachable!("layout comparisons are only >=, <=, =="),
+            };
+            format!("jet_layout::{}(({}), ({}))", func, ls, rs)
+        }
+        TExprKind::LayoutLit { inner } => {
+            let i = emit_tir_expr(inner, cx);
+            format!("jet_layout::LinExpr::from_const(({}) as f64)", i)
         }
         TExprKind::Unary { op, operand } => {
             let i = emit_tir_expr(operand, cx);
@@ -1775,6 +1837,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .join(", ");
             format!("[{}]", elems)
         }
+        // D-HOLE1: `Option.lift2(f, a, b)` — `a.zip(b).map(|(x, y)| f(x, y))`. `f` is
+        // any lowered function value (lambda or fn ident), called via Rust's
+        // call-operator syntax on the (possibly boxed) closure.
+        TExprKind::OptionLift2 { f, a, b } => {
+            let f = emit_tir_expr(f, cx);
+            let a = emit_tir_expr(a, cx);
+            let b = emit_tir_expr(b, cx);
+            format!(
+                "({}).clone().zip(({}).clone()).map(|(x, y)| ({})(x, y))",
+                a, b, f
+            )
+        }
         // c109 Phase 11: a closure-taking collection method. The receiver-type +
         // Fn-vs-FnMut dispatch was resolved into `op` at lowering; emit only formats,
         // reproducing `emit_builtin_method`'s closure arms byte-for-byte. Args (the
@@ -1789,6 +1863,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             match op {
                 TClosureOp::Map => format!("jet_list_map(({}).clone(), {})", recv, a(0)),
                 TClosureOp::MapMut => format!("jet_list_map_mut(({}).clone(), {})", recv, a(0)),
+                // D-HOLE1: `.map` on `T?` — Rust's native `Option::map`.
+                TClosureOp::OptionMap => format!("({}).clone().map({})", recv, a(0)),
                 TClosureOp::Filter => format!("jet_list_filter(({}).clone(), {})", recv, a(0)),
                 TClosureOp::Each => format!("jet_list_each(({}).clone(), {})", recv, a(0)),
                 TClosureOp::EachMut => format!("jet_list_each_mut(({}).clone(), {})", recv, a(0)),
@@ -2020,6 +2096,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     } else {
                         format!("({}).{}({})", recv, method, a(0))
                     }
+                }
+                // D-LAYOUT1 / D-LAYOUT-GATES1: `LayoutHandle`/`Constraint`
+                // methods — every Jet method name IS the Rust method name.
+                THandleOp::LayoutMethod { method } => {
+                    let joined = (0..args.len()).map(a).collect::<Vec<_>>().join(", ");
+                    format!("({}).{}({})", recv, method, joined)
                 }
                 // D-PENDING1=B: Loadable<T,E> methods.
                 THandleOp::LoadableMethod { method } => {

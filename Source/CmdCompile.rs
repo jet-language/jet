@@ -190,6 +190,49 @@ pub(crate) fn run_compile_cmd(
         print!("{}", rust_code);
     }
 
+    // D-EFFBUDGET1: zero-config, always-on effect summary on every build/run,
+    // plus opt-in whole-graph enforcement when `pkg.jet` declares `effects:`.
+    // The front-end compile above already succeeded; this reruns the
+    // check-only pass to pull the whole-program effect fixpoint
+    // (`Sema::solve`) that ordinary compilation doesn't need to return.
+    if cmd == "build" || cmd == "run" {
+        let (_effect_diags, effect_bundle, effect_facts) =
+            jet::Driver::check_file_with_effect_facts(file, None, false);
+        if let Some(bundle) = &effect_bundle {
+            let entries =
+                jet::Jetpack::EffectBudget::compute_package_effects(bundle, &effect_facts.solved);
+            // Program stdout stays the program's (U7 / D-DEVMODE1); tool
+            // chatter goes to stderr.
+            eprintln!("{}", jet::Jetpack::EffectBudget::summary_line(&entries));
+            let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
+            if let Some(root) = jet::Loader::find_manifest_root(search_from) {
+                let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
+                if let Some(manifest) = fs::read_to_string(&pack_path)
+                    .ok()
+                    .and_then(|raw| jet::Jetpack::PackageManifest::parse(&raw).ok())
+                {
+                    let violations = jet::Jetpack::EffectBudget::enforce(&entries, &manifest);
+                    if !violations.is_empty() {
+                        report_problems(mode, file, &src, &violations);
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                    // Record per-dependency effect provenance + grants in the
+                    // lockfile, when one already exists (`jet fetch` owns
+                    // creating it).
+                    if let Some(mut lock) = jet::Lock::load(&root) {
+                        jet::Jetpack::EffectBudget::update_lock_provenance(
+                            &mut lock, &entries, &manifest,
+                        );
+                        let _ = fs::write(
+                            jet::Jetpack::Store::lock_path(&root),
+                            jet::Lock::write(&lock),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     match cmd {
         "build" => {
             build(

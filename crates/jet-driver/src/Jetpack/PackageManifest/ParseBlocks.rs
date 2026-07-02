@@ -401,6 +401,59 @@ pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
     Ok(profiles)
 }
 
+/// D-EFFBUDGET1: parse the `effects: { allow: […], deny: […] }` body. Either
+/// field may be omitted; an unknown field or an effect name outside the
+/// closed D-EFF4 vocabulary is E1221 (`ManifestError::BadEffectsBlock`).
+pub(super) fn parse_effects(body: &str) -> Result<(Option<Vec<String>>, Option<Vec<String>>), ManifestError> {
+    let mut allow = None;
+    let mut deny = None;
+    for (key, value) in key_value_entries(body) {
+        if key == Syntax::EFFECTS_FIELD_ALLOW {
+            allow = Some(parse_effect_list(Syntax::EFFECTS_FIELD_ALLOW, value.trim())?);
+        } else if key == Syntax::EFFECTS_FIELD_DENY {
+            deny = Some(parse_effect_list(Syntax::EFFECTS_FIELD_DENY, value.trim())?);
+        } else {
+            return Err(ManifestError::BadEffectsBlock {
+                detail: format!(
+                    "unknown field `{key}` in `{}: {{ … }}` — allowed: `{}`, `{}`",
+                    Syntax::MANIFEST_BLOCK_EFFECTS,
+                    Syntax::EFFECTS_FIELD_ALLOW,
+                    Syntax::EFFECTS_FIELD_DENY,
+                ),
+            });
+        }
+    }
+    Ok((allow, deny))
+}
+
+/// D-EFFBUDGET1: parse the `grants: { "dep": [Effect], … }` body — the audited
+/// per-dependency escape from the `effects:` budget.
+pub(super) fn parse_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, ManifestError> {
+    let mut out = Vec::new();
+    for (key, value) in key_value_entries(body) {
+        let dep = unquote(&key);
+        let effects = parse_effect_list(&dep, value.trim())?;
+        out.push((dep, effects));
+    }
+    Ok(out)
+}
+
+/// A `[ Db, Net ]`-shaped list of effect names, each validated against the
+/// closed D-EFF4 vocabulary (`crate::Sema::Effects::Effect`).
+fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, ManifestError> {
+    let names = parse_string_list(value).map_err(|_| ManifestError::BadEffectsBlock {
+        detail: format!("`{field}:` must be a list like `[Db, Net]`"),
+    })?;
+    for name in &names {
+        if crate::Sema::Effect::parse(name).is_none() {
+            return Err(ManifestError::BadEffectsBlock {
+                detail: format!("`{name}` isn't a known effect (see docs/spec — the ten-effect D-EFF4 vocabulary)"),
+            });
+        }
+    }
+    Ok(names)
+}
+
 fn parse_bool(profile: &str, value: &str) -> Result<bool, ManifestError> {
     match value.trim() {
         "true" => Ok(true),

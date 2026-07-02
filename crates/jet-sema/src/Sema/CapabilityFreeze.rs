@@ -17,7 +17,7 @@
 //! `jet publish` wrote it for an `api: stable|explicit` target (D-CAP6 — inference
 //! is the default and never freezes). So this pass is mode-agnostic: a frozen
 //! snapshot present ⇒ enforce; none ⇒ nothing to diff (first release / inferred
-//! library). This mirrors the D-MIGRATE1 `#PublishedSchema` discipline exactly.
+//! library). This mirrors the D-MIGRATE1 `@PublishedSchema` discipline exactly.
 //!
 //! I3: all checking here; codegen sees nothing of the freeze.
 
@@ -178,6 +178,8 @@ mod tests {
             state_requires: None,
             state_transition: None,
             web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
             body: vec![],

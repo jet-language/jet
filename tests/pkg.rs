@@ -158,6 +158,164 @@ fn manifest_parse_e1209_reserved_nonempty() {
     assert_eq!(err.code, "E1209");
 }
 
+// ─────────────────────────────────────────────
+// D-EFFBUDGET1: package effect budget manifest parsing
+// ─────────────────────────────────────────────
+
+#[test]
+fn manifest_parse_effects_block() {
+    let raw = min_manifest("app", "0.1.0")
+        + "\neffects: {\n    allow: [Fs, Time],\n    deny: [Net],\n}\n";
+    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("effects block should parse");
+    assert!(pm.effects_enabled);
+    assert_eq!(pm.effects_allow, Some(vec!["Fs".to_string(), "Time".to_string()]));
+    assert_eq!(pm.effects_deny, Some(vec!["Net".to_string()]));
+}
+
+#[test]
+fn manifest_parse_grants_block() {
+    let raw = min_manifest("app", "0.1.0") + "\ngrants: {\n    \"pdf-lib\": [Net],\n}\n";
+    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("grants block should parse");
+    assert_eq!(
+        pm.grants,
+        vec![("pdf-lib".to_string(), vec!["Net".to_string()])]
+    );
+}
+
+#[test]
+fn manifest_no_effects_block_disables_enforcement() {
+    let raw = min_manifest("app", "0.1.0");
+    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("valid manifest should parse");
+    assert!(!pm.effects_enabled);
+    assert_eq!(pm.effects_allow, None);
+}
+
+#[test]
+fn manifest_parse_effects_e1221_unknown_effect() {
+    let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [NotAnEffect],\n}\n";
+    let err = jet::Jetpack::PackageManifest::parse(&raw)
+        .expect_err("unknown effect name should fail E1221");
+    let diag = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+        .expect_err("should surface through Manifest::parse too");
+    assert_eq!(diag.code, "E1221");
+    assert!(matches!(
+        err,
+        jet::Jetpack::PackageManifest::ManifestError::BadEffectsBlock { .. }
+    ));
+}
+
+#[test]
+fn manifest_parse_effects_e1221_unknown_field() {
+    let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    nope: [Fs],\n}\n";
+    let diag = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+        .expect_err("unknown effects field should fail E1221");
+    assert_eq!(diag.code, "E1221");
+}
+
+#[test]
+fn effect_budget_load_ok_reports_via_compile_with_path() {
+    // A project with a well-formed `effects:` block and no dependencies
+    // reaching a disallowed effect should compile fine end to end — the
+    // manifest gate (Loader/Manifest::parse) never rejects a valid budget.
+    let tmp = tmp_dir("effbudget_ok");
+    write(
+        &tmp,
+        "pkg.jet",
+        &(min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [Io],\n}\n"),
+    );
+    let entry = tmp.join("main.jet");
+    fs::write(&entry, "fn main() { print(\"hi\"); }\n").unwrap();
+
+    let result = jet::compile_with_path("", &entry.to_string_lossy());
+    assert!(
+        result.is_ok(),
+        "a well-formed effects: budget should not block compilation:\n{}",
+        result
+            .err()
+            .map(|d| jet::render_diagnostics("main.jet", "", &d))
+            .unwrap_or_default()
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_build_prints_effect_summary() {
+    // D-EFFBUDGET1: every `jet build` prints a one-line effect summary, with
+    // zero config — no pkg.jet needed.
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_build_prints_effect_summary (run `cargo build` first)");
+        return;
+    }
+    let tmp = tmp_dir("effbudget_summary");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(
+        &tmp,
+        "hello.jet",
+        "use core.fs as fs\nfn main() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\"); }\n",
+    );
+
+    let out = jet_cmd(&["build", "hello.jet"], &tmp, &store);
+    assert!(
+        out.status.success(),
+        "jet build failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("effects:") && stdout.contains("Fs"),
+        "expected an effect summary naming Fs, got:\n{stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_build_enforces_effect_budget_e1220() {
+    // A dependency that reaches `Net` while the root's budget only allows
+    // `Fs` must fail the build naming the dependency (E1220).
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_build_enforces_effect_budget_e1220 (run `cargo build` first)");
+        return;
+    }
+    let tmp = tmp_dir("effbudget_deny");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(&tmp, "netdep/pkg.jet", &min_manifest("netdep", "0.1.0"));
+    write(
+        &tmp,
+        "netdep/netdep.jet",
+        "use core.net as net\npub fn ping() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"e\"); }\n",
+    );
+
+    write(
+        &tmp,
+        "pkg.jet",
+        &(manifest_with_deps("app", "0.1.0", "    netdep: path@netdep,")
+            + "\neffects: {\n    allow: [Fs],\n}\n"),
+    );
+    write(
+        &tmp,
+        "main.jet",
+        "use netdep;\nfn main() { netdep.ping(); }\n",
+    );
+
+    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "expected build to fail on an out-of-budget effect, stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("E1220") && stderr.contains("netdep"),
+        "expected E1220 naming `netdep`, got:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn manifest_toolchain_ok() {
     let raw = min_manifest("myapp", "0.1.0");
@@ -542,6 +700,10 @@ fn lock_file_content_hash_roundtrip() {
         dependencies: vec![],
         layer: Some(jet::Syntax::RuntimeLayer::Core),
         inferred_layer: Some(jet::Syntax::RuntimeLayer::Std),
+
+        effects: vec![],
+
+        effect_grants: vec![],
     };
     let lock = LockFile {
         version: 1,
@@ -1451,6 +1613,10 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             dependencies: vec![],
             layer: None,
             inferred_layer: None,
+
+            effects: vec![],
+
+            effect_grants: vec![],
         }],
         root_dependencies: vec![name.into()],
         workspace_members: vec![],

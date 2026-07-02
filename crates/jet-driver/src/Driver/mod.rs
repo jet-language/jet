@@ -145,6 +145,7 @@ pub fn compile_src(
         web_partitions: std::collections::HashMap::new(),
         web_partition_enforced: false,
         web_partition_report: None,
+        dep_roots: std::collections::HashMap::new(),
     };
     // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
@@ -267,6 +268,7 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         web_partitions: std::collections::HashMap::new(),
         web_partition_enforced: false,
         web_partition_report: None,
+        dep_roots: std::collections::HashMap::new(),
     };
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,

@@ -107,7 +107,7 @@ impl<'a> Parser<'a> {
                     | TokKind::KwTrait
                     | TokKind::KwTag
                     | TokKind::KwComptime
-                    // D-CASING1 follow-on: `#Test`/`#Pure`/`#Unsafe` markers start
+                    // D-CASING1 follow-on: `#Test`/`@Pure`/`#Unsafe` markers start
                     // with `#` inside a code-module body.
                     | TokKind::Hash
                     | TokKind::RBrace => true,
@@ -369,12 +369,14 @@ impl<'a> Parser<'a> {
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwFn => self.func().map(Item::Func),
-            // S60 (D-CASING1 follow-on): `#Pure fn` inside a module body.
-            TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
+            // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn` inside a module
+            // body (old `@Pure fn` spelling is E0062, taught inside `func()`).
+            TokKind::Hash | TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
             // D-TAINT1: `#Sanitizer fn` inside a module body.
             TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
-            // D-MUSTUSE1: `#MustUse fn` inside a module body.
-            TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
+            // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn` inside a module body (old
+            // `@MustUse fn` spelling is E0062, taught inside `func()`).
+            TokKind::Hash | TokKind::At if self.at_must_use_fn() => self.func().map(Item::Func),
             // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` in a module.
             TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
                 self.func().map(Item::Func)
@@ -383,10 +385,17 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
             // D-WASM1=A: `#Wasm` / `#Js` / `#WasmExport fn` inside a module body.
             TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
-            // D-ATTR2 / D-SERDE: `#[Codable] struct …` inside a module body.
-            TokKind::Hash if self.at_marker_list() => self.type_def_with_markers(),
-            // D-ATTR1: `#Codable struct …` inside a module body.
-            TokKind::Hash if self.at_single_type_marker() => self.type_def_with_single_marker(),
+            // D-ATTR2 / D-SERDE: `#[RenameAll(camel)] struct …` inside a module body
+            // (serde stays `#`). D-MARKER-FAMILY1/G2/G3: `@[Codable]` / `@Codable
+            // struct …` — contract-plane derives, stackable with a `#[…]` group.
+            TokKind::Hash | TokKind::At
+                if self.at_marker_list()
+                    || self.at_single_type_marker()
+                    || self.at_contract_marker_list()
+                    || self.at_single_contract_type_marker() =>
+            {
+                self.type_def_with_any_markers()
+            }
             TokKind::KwPriv => match self.peek2().kind {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),

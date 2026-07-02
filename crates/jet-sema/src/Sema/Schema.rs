@@ -1,5 +1,5 @@
 //! D-MIGRATE1 (ratified 2026-06-22): published-schema snapshot — records the
-//! field layout of a `#PublishedSchema` struct at release time.
+//! field layout of a `@PublishedSchema` struct at release time.
 //!
 //! Format (std-only, lockfile-style — no serde, I6):
 //!
@@ -25,7 +25,7 @@ pub struct SnapshotField {
     pub ty: String,
 }
 
-/// The full schema snapshot for one `#PublishedSchema` struct.
+/// The full schema snapshot for one `@PublishedSchema` struct.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaSnapshot {
     pub schema_version: u32,

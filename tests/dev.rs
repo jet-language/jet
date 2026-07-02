@@ -932,3 +932,48 @@ fn enum_variant_change_emits_e2210() {
         }
     }
 }
+
+/// D-PERSIST1: `@Persist` is inert in a release build — the marker carries no
+/// runtime-carry-across machinery yet (named gate: a module+name-keyed value
+/// store in the JIT resident runtime, `crates/jet-jit`, doesn't exist). This
+/// asserts that by construction: the generated Rust for a module-level
+/// `const` is byte-for-byte identical with and without `@Persist`.
+#[test]
+fn persist_marker_is_codegen_inert() {
+    let dir = std::env::temp_dir().join(format!("jet_persist_parity_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let compile = |src: &str, name: &str| {
+        let path = dir.join(name);
+        fs::write(&path, src).unwrap();
+        let shown = path.to_string_lossy().to_string();
+        jet::compile_with_path(src, &shown)
+            .unwrap_or_else(|diags| {
+                panic!(
+                    "front end rejected fixture:\n{}",
+                    jet::render_diagnostics(&shown, src, &diags)
+                )
+            })
+            .rust
+    };
+    // Same file name for both variants so the only possible difference in the
+    // generated `source=` comment is the content, not the path.
+    let strip_source_map = |rust: String| -> String {
+        rust.lines()
+            .filter(|l| !l.starts_with("// jet:source-map"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let plain = strip_source_map(compile(
+        "const counter = 0;\nfn main() {\n    print(counter)\n}\n",
+        "counter.jet",
+    ));
+    fs::remove_file(dir.join("counter.jet")).ok();
+    let persisted = strip_source_map(compile(
+        "@Persist const counter = 0;\nfn main() {\n    print(counter)\n}\n",
+        "counter.jet",
+    ));
+    assert_eq!(
+        plain, persisted,
+        "@Persist must not change generated Rust (inert in release)"
+    );
+}

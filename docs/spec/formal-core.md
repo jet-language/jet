@@ -25,7 +25,7 @@ guaranteeing accuracy.
 | `expr?` / `expr?? fallback` | `TExprKind::Propagate` / `TExprKind::WithDefault` |
 | `for x in iter { … }` | `TExprKind::ForIn` → iterator protocol |
 | `loop { … }` | `TExprKind::Loop` |
-| `#MustUse` / `#SingleUse` markers | `TMarker::MustUse` / `TMarker::SingleUse` |
+| `@MustUse` / `#SingleUse` markers | `TMarker::MustUse` / `TMarker::SingleUse` |
 | `drop(x)` (D-LIN1-DROP=A) | `TExprKind::Drop` |
 | struct/enum auto-derive | comptime derive pass → normal TIR |
 

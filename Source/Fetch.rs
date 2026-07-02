@@ -171,6 +171,11 @@ impl<'a> Resolver<'a> {
             dependencies: root_deps.clone(),
             layer: Lock::layer_from_manifest(manifest),
             inferred_layer: None,
+            // D-EFFBUDGET1: effect provenance is filled in after `jet build`
+            // computes it (fetch/resolve runs before sema); see
+            // `EffectBudget::update_lock_provenance`.
+            effects: Vec::new(),
+            effect_grants: Vec::new(),
         });
 
         // Dependency packages in stable order.
@@ -185,6 +190,8 @@ impl<'a> Resolver<'a> {
                 dependencies: pkg.deps.clone(),
                 layer: None,
                 inferred_layer: None,
+                effects: Vec::new(),
+                effect_grants: Vec::new(),
             });
         }
 

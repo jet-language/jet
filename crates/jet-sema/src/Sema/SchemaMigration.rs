@@ -1,7 +1,7 @@
 //! D-MIGRATE1 / D-MIGRATE2 (ratified 2026-06-22): sema diff pass for
-//! `#PublishedSchema` structs.
+//! `@PublishedSchema` structs.
 //!
-//! After struct registration, for each `#PublishedSchema` struct:
+//! After struct registration, for each `@PublishedSchema` struct:
 //! 1. Load the prior snapshot from `.jet/cache/schema/<TypeName>.snapshot` (if any).
 //! 2. Diff old vs new field layout (keyed by name, so field *order* is ignored —
 //!    D-MIGRATE2F: reordering is never a breaking change).
@@ -107,7 +107,7 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
         }
     }
 
-    // Check each #PublishedSchema struct.
+    // Check each @PublishedSchema struct.
     for item in items {
         let Item::Struct(s) = item else {
             continue;
@@ -290,7 +290,7 @@ fn e0910_dropped(type_name: &str, field: &str, version: &str, span: Span) -> Dia
             type_name, field, version
         ),
         format!(
-            "`#PublishedSchema` pins a record's saved shape at release; old data written with `{}` could no longer be read",
+            "`@PublishedSchema` pins a record's saved shape at release; old data written with `{}` could no longer be read",
             field
         ),
         format!(
@@ -315,7 +315,7 @@ fn e0910_changed_type(
             "the published record `{}` changed `{}` from `{}` to `{}`, with no migration to bridge it",
             type_name, field, old_ty, new_ty
         ),
-        "`#PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read".to_string(),
+        "`@PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read".to_string(),
         format!(
             "add `migration {} {{ change {}: {} -> {} via {{ (old) => … }} }}`, or bump the major version",
             type_name, field, old_ty, new_ty
@@ -356,7 +356,7 @@ fn e0910_added_required(type_name: &str, field: &str, span: Span) -> Diagnostic 
             "the published record `{}` added `{}`, but old data has no value for it",
             type_name, field
         ),
-        "`#PublishedSchema` records already written without this field can't be read unless there's a default to fill it in".to_string(),
+        "`@PublishedSchema` records already written without this field can't be read unless there's a default to fill it in".to_string(),
         format!(
             "add `migration {} {{ add {}: <Type> = <default> }}` to supply the value, or bump the major version",
             type_name, field
@@ -373,7 +373,7 @@ fn e0910_remove_still_present(type_name: &str, field: &str, span: Span) -> Diagn
             "the migration removes `{}`, but `{}` still has that field",
             field, type_name
         ),
-        "a `remove` op declares a field is gone, but the current `#PublishedSchema` struct still defines it".to_string(),
+        "a `remove` op declares a field is gone, but the current `@PublishedSchema` struct still defines it".to_string(),
         format!("delete the field from `struct {}`, or drop the `remove {}` line", type_name, field),
         Some(span),
     )

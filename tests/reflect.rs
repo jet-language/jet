@@ -49,6 +49,8 @@ fn method(name: &str, is_pub: bool) -> Func {
         is_sanitizer: false,
         is_reactive: false,
         declared_effects: None,
+        pre: vec![],
+        post: vec![],
         effect_via: None,
         state_requires: None,
             state_transition: None,

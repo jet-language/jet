@@ -25,7 +25,18 @@ it's time to decide it.
 
 ## Open decisions
 
-_No open full decision cards. Add a new card here when a decision is ready for the owner._
+Three open (raised 2026-07-02; full ballot-ready cards live in Tower
+`decisions[]` and render in the Decide lane / Focus Mode — not duplicated here):
+
+- **D-MIGRATE3** (card #105) — decode-time migration transparency: how a program asks a
+  decoded `#PublishedSchema` value "were you migrated?" (`DecodeResult` follow-up
+  ordered by D-SELFVER1=A). Rec: A — separate `decode_traced`, default `decode` untouched.
+- **D-E4EXIT1** (card #95) — Epoch 4 exit bar: fn-build MVP (§15) vs +typed
+  targets/actions vs full §12 build-graph parity. Rec: C — MVP + targets/actions
+  (Jai-parity bar); toolchains/cache/probes ballot in e5.
+- **D-BUILDFLAGS1** (card #95) — single-file Tier-2 build grant spelling; refines-or-keeps
+  the ratified blanket `--allow-impure`. Rec: A — per-effect `--allow-<effect>` + TTY
+  prompt fallback.
 
 ---
 

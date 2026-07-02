@@ -1,7 +1,8 @@
 # Reactive UI stack — Tower #134
 
-**Status:** deciding — phases 1+7 buildable now; phases 2-6 need 4 ballot cards
-**All primary gates clear:** D-REACTCORE1=D, D-RENDERTGT2=A, D-SIGNAL1=A, D-TYPEDSTYLE1=A, D-MOTION1=A
+**Status:** ready — ALL gates ratified 2026-06-30; every phase buildable
+**Primary gates:** D-REACTCORE1=D, D-RENDERTGT2=A, D-SIGNAL1=A, D-TYPEDSTYLE1=A, D-MOTION1=A
+**Phase gates (ratified):** D-UITREE1=A (typed constructors), D-STYLESHAPE1=A (flat Style record), D-MOTIONTIME1=A (injectable Clock), D-A11YGATE1=B (`jet lint --a11y`)
 
 ## What exists already (do not rebuild)
 
@@ -13,17 +14,15 @@
 - Geometry: Point, Size, Rect, SizeConstraint, UiNode, JetAriaRole
 - Events: JetInputEvent, JetEventResult; Paint: JetPaintCmd
 - `core.ui` sema module (CheckerCoreLib.rs:3368) + codegen dispatch
-- JS DOM runtime shim (`Prelude/DomRuntime.js`) — partial stubs
-- Web codegen stubs (`Codegen/Web.rs`) — partial
-- Examples: 161_reactive_scope, 162_ui_null_backend, 165_ui_tui_reactive
+- JS DOM runtime shim (`Prelude/DomRuntime.js`) — complete (measure/layout/paint/onEvent/reactive signals/WASM loader)
+- Web codegen (`Codegen/Web.rs`) — complete (measure/layout/paint/on_event wired to `jetDom.*`, WASM bridge, JS app emission)
+- Examples: examples/features/ui/reactive_scope.jet, ui_null_backend.jet, ui_tui_reactive.jet; examples/features/web/web_hello.jet, ui_web_reactive.jet, ui_web_click.jet, web_compute.jet, ui_showcase.jet (examples tree moved to topic dirs 2026-07-02, old numbered stems retired)
 - Diagnostics E2910–E2914
-
-**Minor gap:** `"computed"` missing from `KNOWN_CORE_MODULES["jet.reactive"]` export list at `CheckerCoreLib.rs:3360` — Phase 1 cleanup.
 
 ## Build order
 
-### Phase 1 — computed alias fix (buildable now)
-Add `"computed"` to the `jet.reactive` known-names list in `CheckerCoreLib.rs:3360`.
+### Phase 1 — computed alias fix (DONE, verified 2026-07-02)
+`"computed"` is present in the `jet.reactive` export list (`core_module_items` in `CheckerCoreLib.rs`, `"jet.reactive" => &["signal", "derived", "computed", "effect"]`) and fully wired in sema (`CheckerCoreLib.rs:1120`) and codegen (`TIR/lower.rs:5247`, `TIR/subset.rs:3773`). Covered end-to-end by `examples/features/ui/reactive_scope.jet` (golden) + `tests/tir.rs::reactive_scope_marker`. Landed as part of the c134 Phase 7 checkpoint commit (`edfa5f57`); this plan's "buildable now" note was stale.
 
 ### Phase 2 — View model layer (BLOCKED: D-UITREE1)
 Typed node tree over `core.reactive`. Composable, diff-based subtree rerenders.
@@ -40,8 +39,8 @@ Typed node tree over `core.reactive`. Composable, diff-based subtree rerenders.
 ### Phase 6 — A11y (BLOCKED: D-A11YGATE1)
 `JetUiNode` gains `role: Option<JetAriaRole>` and accessible label. Keyboard focus routing. Release-gated lint diagnostics E2930-E2931.
 
-### Phase 7 — Web/DOM backend (buildable now)
-Complete `DomRuntime.js` DOM ops. Complete `Codegen/Web.rs` stubs for measure/layout/paint/on_event via `jetDom.*`. WASM loader. Example `168_ui_web_hello.jet`.
+### Phase 7 — Web/DOM backend (DONE, verified 2026-07-02)
+`DomRuntime.js` DOM ops complete (measure/layout/paint/onEvent/reactive signals, real DOM mounting when `document` exists, scope-keyed element identity). `Codegen/Web.rs` measure/layout/paint/on_event fully wired to `jetDom.*`. WASM loader (`instantiateWasm` in `DomRuntime.js`, `loadWasm`/`bridge_*` in `Web.rs`'s `emit_js_app`) implemented and exercised by `web_compute_wasm_bridge_roundtrip`. `jet dev --target=web` orchestration in `Source/CmdDevWeb.rs`. Reactive-signal-drives-DOM example: `examples/features/web/ui_web_reactive.jet` (a `reactive.signal` re-painting on `.set()`, the counter/click case) — golden-tested natively (`tests/golden.rs`) and end-to-end under `node` via `tests/web_build.rs::web_reactive_dom_snapshot_roundtrip`; `ui_web_click.jet`/`.html` cover the click-driven DOM-mount variant. Landed as part of the c134 Phase 7 checkpoint commit (`edfa5f57`) plus follow-on dogfooding; this plan's "buildable now" note and the `168_ui_web_hello.jet` filename were stale (examples tree moved to topic dirs, no numbered stems).
 
 ### Phase 8 — Native backends
 AppKit/Win32/GTK via `#Extern` C FFI. Each implements `JetBackend`. Platform-gated with `#Target(os)`.
@@ -112,4 +111,4 @@ Design notes for the implementing agent (none of this is separately ratified —
 Exit criteria for Phase 9: 9.1/9.2 doc-comments reworded + syntax-decisions.md rows added + formatter stability tests added and green; 9.3 parses `#Target(Os.*)` on `impl`, both new diagnostics fire with fixtures, codegen emits/links only the matching-OS impl, one dummy (non-GTK) example golden-tested, `tests/cross.rs` covers the gating, formatter round-trips. Phase 8 (real native backend) stays open behind the separate devShell/toolkit-dependency gate.
 
 ## Acceptance
-Phases 1+7 can close today. Full card done when: view model example with diff rerenders; typed Style usable; component added via jetpack; motion spring with deterministic fake-clock tests; a11y example with keyboard nav golden; web DOM snapshot; one native backend behind #Target guard; no second reactive model anywhere.
+Phases 1+7 closed 2026-07-02. Full card done when: view model example with diff rerenders; typed Style usable; component added via jetpack; motion spring with deterministic fake-clock tests; a11y example with keyboard nav golden; web DOM snapshot (done — Phase 7); one native backend behind #Target guard; no second reactive model anywhere.

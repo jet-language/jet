@@ -1,0 +1,13 @@
+// D-UNITLIT1: a numeric literal may carry a unit suffix resolving to a
+// `#UnitFamily` member imported into scope — sugar over the existing
+// distinct-type path (D-QUAL3/D-DIST3), not a new type. Same-unit arithmetic
+// works directly; no implicit cross-unit conversion.
+
+#UnitFamily(time) { ms, s }
+
+fn main() {
+    a #= 500ms
+    b #= 200ms
+    total #= a + b
+    print("{total.raw()}")
+}

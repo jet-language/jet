@@ -2824,10 +2824,10 @@ fn main() {
 }
 
 // ===========================================================================
-// c109 Phase 23: #Pure / #Todo / default params / named args / distinct / tuples
+// c109 Phase 23: @Pure / #Todo / default params / named args / distinct / tuples
 // ===========================================================================
 
-/// c109 Phase 23: a `#Pure fn` (S60) routes through the TIR — purity is a sema-only
+/// c109 Phase 23: a `@Pure fn` (S60) routes through the TIR — purity is a sema-only
 /// check (E3401), erased at codegen, so the fn lowers byte-identically to a plain fn.
 #[test]
 fn pure_fn() {
@@ -2835,10 +2835,10 @@ fn pure_fn() {
         return;
     }
     let src = "\
-#Pure fn double(n: Int) -> Int {
+@Pure fn double(n: Int) -> Int {
     return (n * 2)
 }
-#Pure fn greeting(name: String) -> String {
+@Pure fn greeting(name: String) -> String {
     return \"hi, {name}\"
 }
 fn main() {
@@ -2921,7 +2921,7 @@ fn main() {
 }
 
 /// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Construction `Name(x)` → newtype
-/// `user_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native
+/// `user_Name(x)`; `.raw()` → `(recv).0`; `@Numeric` distinct `+`/`==` use the native
 /// operator. A distinct value type passes/returns/binds byte-identically.
 #[test]
 fn distinct_types() {
@@ -2930,7 +2930,7 @@ fn distinct_types() {
     }
     let src = "\
 UserId #= distinct Int;
-#Numeric Meters #= distinct Float;
+@Numeric Meters #= distinct Float;
 
 fn greet(id: UserId) -> String {
     return \"user {(id.raw())}\"
@@ -4562,10 +4562,10 @@ fn columnar_serialization_is_transparent() {
     }
     let src = "\
 use core.encoding.json as json
-#[Codable]
+@[Codable]
 #Layout(columnar)
 struct Pt { a: Int, b: Int }
-#[Codable]
+@[Codable]
 struct PlainPt { a: Int, b: Int }
 fn main() {
     cs: [Pt] #= [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]

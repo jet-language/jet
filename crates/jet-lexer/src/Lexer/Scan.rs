@@ -308,21 +308,54 @@ impl<'a> Lexer<'a> {
                 self.lex_digits(&mut text);
             }
         }
-        let span = Span::new(start, self.pos(self.i));
+        // D-UNITLIT1: a trailing identifier run right after the number is a
+        // unit-suffix candidate — `500ms`, `12.50usd`. The `e`/`E`+digits
+        // exponent form was already consumed above (`UNIT_SUFFIX_EXPONENT_RESERVED`),
+        // so anything reaching here is never a float exponent; a bare `e`/`E`
+        // with no following digit falls through and IS eligible as a suffix.
+        let suffix = self.lex_unit_suffix();
+
         if is_float {
             // digits '.' digits (with optional exponent) always parses as f64.
             let v: f64 = text.parse().unwrap_or(0.0);
+            if let Some(suffix) = suffix {
+                let span = Span::new(start, self.pos(self.i));
+                return Token {
+                    kind: TokKind::UnitNumber {
+                        int: None,
+                        float: Some(v),
+                        suffix,
+                    },
+                    span,
+                };
+            }
+            let span = Span::new(start, self.pos(self.i));
             return Token {
                 kind: TokKind::Float(v),
                 span,
             };
         }
         match text.parse::<i64>() {
-            Ok(n) => Token {
-                kind: TokKind::Int(n),
-                span,
-            },
+            Ok(n) => {
+                if let Some(suffix) = suffix {
+                    let span = Span::new(start, self.pos(self.i));
+                    return Token {
+                        kind: TokKind::UnitNumber {
+                            int: Some(n),
+                            float: None,
+                            suffix,
+                        },
+                        span,
+                    };
+                }
+                let span = Span::new(start, self.pos(self.i));
+                Token {
+                    kind: TokKind::Int(n),
+                    span,
+                }
+            }
             Err(_) => {
+                let span = Span::new(start, self.pos(self.i));
                 self.diags.push(self.too_big(span));
                 Token {
                     kind: TokKind::Int(0),
@@ -330,6 +363,28 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+    }
+
+    /// D-UNITLIT1: greedily read a trailing identifier run (ASCII letter/`_`
+    /// start, alphanumeric/`_` continue) right after a numeric literal, with
+    /// no space between. Returns `None` when the next char doesn't start an
+    /// identifier (the common case — a plain number).
+    fn lex_unit_suffix(&mut self) -> Option<String> {
+        let c = self.at(self.i);
+        if !(c.is_ascii_alphabetic() || c == '_') {
+            return None;
+        }
+        let mut suffix = String::new();
+        while self.i < self.chars.len() {
+            let ch = self.at(self.i);
+            if ch.is_alphanumeric() || ch == '_' {
+                suffix.push(ch);
+                self.i += 1;
+            } else {
+                break;
+            }
+        }
+        Some(suffix)
     }
 
     /// Consume a run of decimal digits, skipping `_` separators (S34).

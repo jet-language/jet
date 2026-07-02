@@ -406,7 +406,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
 // ──────────────────────────────────────────────────────────────────────────────
 // D-SERDE: built-in `Encode`/`Decode` derive codegen.
 //
-// The `#[Codable]`/`#[Encode]`/`#[Decode]` markers lower here to compiler-owned
+// The `@[Codable]`/`@[Encode]`/`@[Decode]` markers lower here to compiler-owned
 // `impl user_Encode`/`impl user_Decode` blocks that walk the type's fields/variants
 // over the `jet_std::DataTree` model. Plain std Rust — no proc-macros, no `unsafe`
 // (I1/I6). Field/container attributes (D-SERDE3/5/7/8) are applied during the walk.
@@ -1079,7 +1079,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         derives.push("Copy");
     }
     if d.is_numeric {
-        // PartialOrd needed for ordered comparisons; also useful for #Numeric types.
+        // PartialOrd needed for ordered comparisons; also useful for @Numeric types.
         derives.push("PartialOrd");
     }
     out.push_str(&format!(
@@ -1098,7 +1098,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         "impl user_{} {{\n    pub fn raw(&self) -> {} {{ self.0 }}\n}}\n\n",
         d.name, base_rust
     ));
-    // #Numeric: implement Add, Sub, Mul, Div (same-type arithmetic).
+    // @Numeric: implement Add, Sub, Mul, Div (same-type arithmetic).
     if d.is_numeric {
         for (trait_name, op) in &[("Add", "+"), ("Sub", "-"), ("Mul", "*"), ("Div", "/")] {
             out.push_str(&format!(
@@ -1109,6 +1109,29 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
                 op = op
             ));
         }
+    }
+    // D-CAPBUNDLE1 `@Printable`: forward `{value}` interpolation (JetDisplay)
+    // to the base value's own rendering — a distinct type starts inert, so
+    // without this marker sema never lets a value reach here (E0138).
+    if d.is_printable {
+        out.push_str(&format!(
+            "impl JetDisplay for user_{n} {{\n    fn jet_display(&self) -> String {{ (self.0).jet_display() }}\n}}\n\n",
+            n = d.name
+        ));
+    }
+    // D-CAPBUNDLE1 `@CodableAsBase`: encode/decode via the base type's own
+    // wire representation (`user_Encode`/`user_Decode`, the same traits
+    // struct/enum `#[Codable]` derives target — I8: one wire mechanism).
+    if d.is_codable_as_base {
+        out.push_str(&format!(
+            "impl user_Encode for user_{n} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{ (self.0).jet_encode() }}\n}}\n\n",
+            n = d.name
+        ));
+        out.push_str(&format!(
+            "impl user_Decode for user_{n} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{ Ok(user_{n}(<{base} as user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
+            n = d.name,
+            base = base_rust
+        ));
     }
 }
 
@@ -1164,7 +1187,11 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
     // internal compiler error (I2-class), never an AST fallback.
     if TIR::tir_covers(f, cx) {
         let tir = TIR::lower_func(f, cx);
-        TIR::emit_tir_func(&tir, cx, out);
+        if f.pre.is_empty() && f.post.is_empty() {
+            TIR::emit_tir_func(&tir, cx, out);
+        } else {
+            emit_func_with_contracts(cx, f, &tir, out);
+        }
         cx.current_type_params.borrow_mut().clear();
         return;
     }
@@ -1173,6 +1200,72 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
         f.name
     );
+}
+
+/// D-PREPOST1: wrap a function's normally-emitted body with `@Pre`/`@Post`
+/// runtime guards (E3005). `@Pre` clauses are checked entry guards, emitted
+/// right after the opening brace. When `@Post` clauses are present, the
+/// original body is wrapped in an immediately-invoked closure so `result`
+/// binds the return value at every exit point — Rust's own closure `return`
+/// semantics do the "checked before each return" work, instead of a bespoke
+/// control-flow rewrite (R1: dumb codegen; the TIR-emitted body text is
+/// reused byte-for-byte, only re-indented around it). A violated clause
+/// panics via `jet_contract_fail` naming the clause's own message text.
+///
+/// Known v1 limitation: a `@Post` condition that reads a parameter the
+/// original body *moves* can hit a Rust "used after move" error, since the
+/// body now runs inside a closure that may capture that parameter by value.
+/// `@Post` conditions should read `result` (and any parameter the body only
+/// borrows), matching every shipped example.
+fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut String) {
+    let mut body_buf = String::new();
+    TIR::emit_tir_func(tir, cx, &mut body_buf);
+    // The signature line is `"{vis}{unsafe}fn name<gen>(params)[-> ret] {\n"` —
+    // no bare `{`/`}` appears before the opening brace in ordinary Rust type
+    // syntax, so the first `" {\n"` reliably ends the signature.
+    let split_at = body_buf.find(" {\n").map(|i| i + 3).unwrap_or(0);
+    let sig = &body_buf[..split_at];
+    let rest = &body_buf[split_at..];
+    let body_only = &rest[..rest.len().saturating_sub("}\n\n".len())];
+
+    out.push_str(sig);
+    for clause in &f.pre {
+        let cond = TIR::render_contract_cond(f, &clause.cond, None, cx);
+        let (_, line, _) = TIR::tir_src_line_at(&cx.src, clause.span.start);
+        out.push_str(&format!(
+            "    if !({cond}) {{ jet_contract_fail({file}, {line}, \"Pre\", &{msg}); }}\n",
+            cond = cond,
+            file = escape_rust_str(&cx.file),
+            line = line,
+            msg = escape_rust_str(&clause.message),
+        ));
+    }
+    if f.post.is_empty() {
+        out.push_str(body_only);
+    } else {
+        let ret_ty = f
+            .return_type
+            .clone()
+            .unwrap_or(crate::AST::Type::Named("Unit".to_string()));
+        let ret_annot = TIR::rust_return_type(cx, &ret_ty, f.is_view_return);
+        out.push_str(&format!("    let __jet_result = (|| -> {ret_annot} {{\n"));
+        out.push_str(body_only);
+        out.push_str("    })();\n");
+        for clause in &f.post {
+            let cond =
+                TIR::render_contract_cond(f, &clause.cond, Some(("__jet_result", &ret_ty)), cx);
+            let (_, line, _) = TIR::tir_src_line_at(&cx.src, clause.span.start);
+            out.push_str(&format!(
+                "    if !({cond}) {{ jet_contract_fail({file}, {line}, \"Post\", &{msg}); }}\n",
+                cond = cond,
+                file = escape_rust_str(&cx.file),
+                line = line,
+                msg = escape_rust_str(&clause.message),
+            ));
+        }
+        out.push_str("    __jet_result\n");
+    }
+    out.push_str("}\n\n");
 }
 
 /// D-ERR-CONV: emit a standalone Rust function for `impl Source -> Target { body }`.

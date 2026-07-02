@@ -412,19 +412,21 @@ pub enum TStmt {
         /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
         binds: Vec<(String, String)>,
     },
-    /// c109: a STRUCT-destructuring binding `Type { x, y } #= <init>` (S74,
+    /// c109: a STRUCT-destructuring binding `Type.{ x, y } #= <init>` (S74,
     /// `BindPattern::Struct`). Reproduces `emit_stmt`'s `BindPattern::Struct` arm
     /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
-    /// `let[ mut] {field_rust} = ({tmp}).{field_rust}.clone();` per bound field
-    /// (the pattern's field name is BOTH the bound local and the struct field
-    /// read, mangled once). The field's resolved type comes from `cx.struct_fields`
-    /// (the init's `Type::Named`/`Apply` name), resolved at lowering for the slot.
+    /// `let[ mut] {local_rust} = ({tmp}).{field_rust}.clone();` per bound field.
+    /// D-DESTRUCT1: `local_rust`/`field_rust` diverge for a renamed field
+    /// (`severity: sev` binds local `sev` from field `severity`); they're equal
+    /// when unrenamed (pre-D-DESTRUCT1 shape). The field's resolved type comes
+    /// from `cx.struct_fields` (the init's `Type::Named`/`Apply` name), resolved
+    /// at lowering for the slot.
     StructDestructure {
         tmp: String,
         init: TExpr,
         kw: &'static str,
-        /// `field_rust_name` per bound field, source order.
-        fields: Vec<String>,
+        /// `(local_rust_name, field_rust_name)` per bound field, source order.
+        binds: Vec<(String, String)>,
     },
     /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] #= <init>` (S74,
     /// `BindPattern::List`). Reproduces `emit_stmt`'s `BindPattern::List` arm
@@ -650,6 +652,21 @@ pub enum TStmt {
     /// body's `let`s LEAK into the outer scope (the AST shares `&mut env`), so the body is
     /// lowered on the SAME `LowerEnv`.
     Region(Vec<TStmt>),
+    /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a Cassowary-style
+    /// constraint block. Unlike `Region`/the taskgroup path, this DOES need a
+    /// real runtime object: `rust_place` is the emitted `let` binding for a
+    /// fresh `jet_layout::Handle`, `label` is the source name (for the
+    /// handle's debug/conflict-report label), and `body` is the block's
+    /// statements lowered on the SAME env the handle was just bound into (the
+    /// parser already desugared every `box.anchor` read to an ordinary
+    /// `NAME.h(box, anchor)`/`NAME.v(box, anchor)` method call, so `body` is
+    /// nothing but plain statements — no layout-specific TIR shape needed
+    /// beyond the handle construction itself).
+    Layout {
+        rust_place: String,
+        label: String,
+        body: Vec<TStmt>,
+    },
     /// c109 Phase 19: a `#Context(field: value) { … }` smart-context block (D-CTX1). Lowers
     /// to a plain block with one RAII/no-op guard per field (in declaration order)
     /// BEFORE the body: `allocator`/`deadline` push a dynamic context guard in
@@ -799,6 +816,38 @@ pub enum TExprKind {
         line: u32,
         lhs: Box<TExpr>,
         rhs: Box<TExpr>,
+    },
+    /// D-CHAINCMP1: `0 <= sev < 10` — a same-direction relational chain,
+    /// `operands.len() == ops.len() + 1`. Dumb lowering (R1): emit binds each
+    /// shared middle operand to a temp exactly once (a Rust block expression),
+    /// then ANDs the adjacent-pair comparisons over those temps. Relational
+    /// ops never trap on overflow (only `+ - * / << >>` do), so no `overflow`
+    /// flag is needed here.
+    CompareChain {
+        operands: Vec<TExpr>,
+        ops: Vec<BinOp>,
+    },
+    /// D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 1): `>=`/`<=`/`==` between layout
+    /// values (`HVar`/`VVar`/`LengthVar`) produce a `Constraint`, which Rust's
+    /// comparison operators can't do via operator syntax (`PartialOrd`/
+    /// `PartialEq` are hard-locked to `bool`) — so this is a DEDICATED node,
+    /// not `Binary`. Emits the matching `jet_layout::{ge,le,eq_}(lhs, rhs)`
+    /// free function (registers the constraint on whichever side's `LinExpr`
+    /// carries the owning handle). `Add`/`Sub` between layout values stay
+    /// plain `Binary` — `jet_layout::LinExpr` implements `std::ops::{Add,Sub}`.
+    LayoutCompare {
+        op: BinOp,
+        lhs: Box<TExpr>,
+        rhs: Box<TExpr>,
+    },
+    /// D-LAYOUT1: a plain `Int`/`Float` operand used on the other side of a
+    /// layout `+`/`-`/`>=`/`<=`/`==` (axis-neutral, elaborates to `LengthVar`
+    /// — see `layout_axis_of`). Wraps the numeric Rust value into a
+    /// `jet_layout::LinExpr` constant so `Add`/`Sub`/`ge`/`le`/`eq_` only
+    /// ever operate on `LinExpr` (no foreign-type operator-overload games
+    /// with bare `f64`/`i64`).
+    LayoutLit {
+        inner: Box<TExpr>,
     },
     Unary {
         op: UnOp,
@@ -1144,6 +1193,17 @@ pub enum TExprKind {
     FanOut {
         calls: Vec<TExpr>,
     },
+    /// D-HOLE1: `Option.lift2(f, a, b)` — apply `f` to both payloads only when both
+    /// `a`/`b` are present; `null` otherwise. `f`/`a`/`b` are lowered plainly as
+    /// values (`f` via the generic `Expr::Lambda`/fn-value lowering, same as any
+    /// other function-typed argument); emit destructures the zipped pair inside a
+    /// closure. No user-visible tuple struct — the pair never surfaces as a Jet
+    /// value.
+    OptionLift2 {
+        f: Box<TExpr>,
+        a: Box<TExpr>,
+        b: Box<TExpr>,
+    },
     /// c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/
     /// `find`/`any`/`all`/`sort_by`/`reduce`). The receiver-type + Fn-vs-FnMut
     /// dispatch (`emit_builtin_method`'s closure arms) is resolved at lowering into a
@@ -1416,6 +1476,10 @@ pub enum TClosureOp {
     ParFilter,
     /// `par_fold(init, f)` — `jet_list_par_fold((recv).clone(), init, f)`.
     ParFold,
+    // D-HOLE1: Option combinators.
+    /// `map` on `T?` — `(recv).clone().map(f)` (Rust's native `Option::map`, no
+    /// prelude helper needed).
+    OptionMap,
 }
 
 /// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
@@ -1599,6 +1663,13 @@ pub enum TBuiltinOp {
     Enumerate { tuple_struct: String },
     /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
     Zip { tuple_struct: String },
+    // D-HOLE1: Option combinators.
+    /// `zip(U?)` on `T?` → `(recv).clone().zip((a0).clone()).map(|(x,y)| Struct{…})`
+    /// (Rust's native `Option::zip`, wrapped into the named-tuple struct). `elem_ty`
+    /// (`(a: T, b: U)`) is the resolved pair type — carried so the call's own `TExpr`
+    /// type is total (not the generic table's placeholder), even though it's rarely
+    /// load-bearing in emit (a binding carries sema's `b.ty`).
+    OptionZip { tuple_struct: String, elem_ty: Type },
     // D-COLLBREADTH1=A: Set<T> operations.
     /// `Set.from([...])` — recv is the list: `(recv).into_iter().collect::<std::collections::HashSet<_>>()`.
     SetFrom,
@@ -1763,6 +1834,14 @@ pub enum THandleOp {
     /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
     /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
     MeasurementMethod {
+        method: String,
+    },
+    /// D-LAYOUT1 / D-LAYOUT-GATES1: an instance method on `LayoutHandle`
+    /// (`.h`/`.v`/`.value`/`.suggest`/`.is_feasible`/`.conflict`) or
+    /// `Constraint` (`.required`/`.strong`/`.medium`/`.weak`). Every Jet
+    /// method name IS the `jet_layout` Rust method name (no renaming table
+    /// needed, unlike `MathMethod`) — pure passthrough: `(recv).method(args)`.
+    LayoutMethod {
         method: String,
     },
     /// D-PENDING1=B: `Loadable<T,E>` predicate / accessor methods.
@@ -1970,6 +2049,7 @@ mod tests {
             web_partitions: std::collections::HashMap::new(),
             web_partition_enforced: false,
             web_partition_report: None,
+            dep_roots: std::collections::HashMap::new(),
         };
         // No C imports in unit tests; CFfi::default() is the correct empty state.
         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
@@ -3222,9 +3302,9 @@ fn consume(ch: Channel<Int>) -> Int {
 
     #[test]
     fn covers_pure_fn() {
-        // c109 Phase 23: a `#Pure fn` is covered (purity is sema-only, erased at codegen).
+        // c109 Phase 23: a `@Pure fn` is covered (purity is sema-only, erased at codegen).
         assert!(covers(
-            "#Pure fn double(n: Int) -> Int {\n return (n * 2)\n}\n",
+            "@Pure fn double(n: Int) -> Int {\n return (n * 2)\n}\n",
             "double"
         ));
     }

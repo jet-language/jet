@@ -116,9 +116,9 @@ impl<'a> Fmt<'a> {
         self.newline();
         self.with_indent(|f| {
             for m in &t.methods {
-                // D-EFF3: `#Pure` prefix bound on a trait method.
+                // D-EFF3: `@Pure` prefix bound on a trait method.
                 if m.is_pure {
-                    f.write(&format!("#{} ", Syntax::KW_PURE));
+                    f.write(&format!("@{} ", Syntax::KW_PURE));
                 }
                 f.write("fn ");
                 f.write(&m.name);
@@ -282,20 +282,40 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// Render a leading type-marker prefix. One marker is `#A` when it sits
-    /// immediately before `struct`/`enum`; otherwise `#[A]`. Two or more are
-    /// always `#[A, B]` (D-ATTR1/D-ATTR2).
+    /// D-MARKER-FAMILY1/G2: render leading type-marker prefixes, split into the
+    /// contract plane (`@`) and directive/serde plane (`#`) — one marker on a
+    /// plane is `@A`/`#A` when it sits immediately before `struct`/`enum`;
+    /// otherwise `@[A, B]`/`#[A, B]` (D-ATTR1/D-ATTR2). Both groups may stack
+    /// on one declaration (`@[Codable] #[RenameAll(camel)] struct …`).
     fn fmt_type_markers(&mut self, markers: &[Marker], lone_hash_ok: bool) {
         if markers.is_empty() {
             return;
         }
-        if markers.len() == 1 && lone_hash_ok {
-            self.write("#");
-            self.fmt_marker(&markers[0]);
+        let contract: Vec<&Marker> = markers
+            .iter()
+            .filter(|m| Syntax::is_contract_marker(&m.name))
+            .collect();
+        let directive: Vec<&Marker> = markers
+            .iter()
+            .filter(|m| !Syntax::is_contract_marker(&m.name))
+            .collect();
+        self.fmt_marker_group(&contract, Syntax::CONTRACT_PREFIX, lone_hash_ok);
+        self.fmt_marker_group(&directive, Syntax::ATTR_PREFIX, lone_hash_ok);
+    }
+
+    /// One marker-list group on a single plane. `sigil` is `"@"` or `"#"`.
+    fn fmt_marker_group(&mut self, markers: &[&Marker], sigil: &str, lone_ok: bool) {
+        if markers.is_empty() {
+            return;
+        }
+        if markers.len() == 1 && lone_ok {
+            self.write(sigil);
+            self.fmt_marker(markers[0]);
             self.newline();
             return;
         }
-        self.write("#[");
+        self.write(sigil);
+        self.write("[");
         for (i, m) in markers.iter().enumerate() {
             if i > 0 {
                 self.write(", ");
@@ -380,17 +400,17 @@ impl<'a> Fmt<'a> {
         if f.is_reactive {
             self.write(&format!("#{} ", Syntax::KW_REACTIVE));
         }
-        // S60 (D-CASING1 follow-on): `#Pure` marker precedes `pub`/`fn`.
+        // S60 (D-CASING1 follow-on): `@Pure` marker precedes `pub`/`fn`.
         if f.is_pure {
-            self.write(&format!("#{} ", Syntax::KW_PURE));
+            self.write(&format!("@{} ", Syntax::KW_PURE));
         }
         // D-TAINT1: the `#Sanitizer` taint-strip modifier precedes `pub`/`fn`.
         if f.is_sanitizer {
             self.write(&format!("#{} ", Syntax::KW_SANITIZER));
         }
-        // D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method precedes `pub`/`fn`.
+        // D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method precedes `pub`/`fn`.
         if f.is_must_use {
-            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
+            self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));
         }
         // D-STATE1: typestate markers precede `pub`/`fn`. `#State(S)` is the
         // require-state guard; `#Transition(From -> To)` is the transition (the
@@ -407,6 +427,24 @@ impl<'a> Fmt<'a> {
                 from,
                 tr.to
             ));
+        }
+        // D-PREPOST1: `@Pre(cond, "msg")` / `@Post(cond, "msg")` clauses
+        // precede `pub`/`fn`, one call-shaped marker per clause, in source
+        // order — same inline-marker convention as the typestate markers
+        // above (not each on its own line: I8, one marker-placement rule).
+        for clause in &f.pre {
+            self.write(&format!("@{}(", Syntax::CONTRACT_PRE));
+            self.fmt_expr(&clause.cond, Prec::OrFallback);
+            self.write(", \"");
+            self.write(&clause.message.replace('\\', "\\\\").replace('"', "\\\""));
+            self.write("\") ");
+        }
+        for clause in &f.post {
+            self.write(&format!("@{}(", Syntax::CONTRACT_POST));
+            self.fmt_expr(&clause.cond, Prec::OrFallback);
+            self.write(", \"");
+            self.write(&clause.message.replace('\\', "\\\\").replace('"', "\\\""));
+            self.write("\") ");
         }
         if top_level {
             self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
@@ -425,7 +463,7 @@ impl<'a> Fmt<'a> {
         }
         self.write(")");
         // D-EFF1 / D-QUAL1: the `#(Net, Db)` effect bound, between the parameter
-        // list and the return arrow. A `#Pure fn` carries no `#(…)` list.
+        // list and the return arrow. A `@Pure fn` carries no `#(…)` list.
         if let Some(effects) = &f.declared_effects {
             self.write(" #(");
             for (i, (name, _)) in effects.iter().enumerate() {
@@ -502,13 +540,13 @@ impl<'a> Fmt<'a> {
         if s.is_single_use {
             self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
         }
-        // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`struct`, on the same line.
+        // D-MUSTUSE1 (c18iwxqx): `@MustUse` precedes `pub`/`struct`, on the same line.
         if s.is_must_use {
-            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
+            self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));
         }
-        // D-MIGRATE1: `#PublishedSchema` precedes `pub`/`struct`, on the same line.
+        // D-MIGRATE1: `@PublishedSchema` precedes `pub`/`struct`, on the same line.
         if s.is_published_schema {
-            self.write(&format!("#{} ", Syntax::ATTR_PUBLISHED_SCHEMA));
+            self.write(&format!("@{} ", Syntax::ATTR_PUBLISHED_SCHEMA));
         }
         // D-REPRC1/D-SOA1: `#layout(…)` sits on its own line before the struct.
         self.fmt_layout(&s.layout);
@@ -566,9 +604,9 @@ impl<'a> Fmt<'a> {
         if e.is_single_use {
             self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
         }
-        // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`enum`, on the same line.
+        // D-MUSTUSE1 (c18iwxqx): `@MustUse` precedes `pub`/`enum`, on the same line.
         if e.is_must_use {
-            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
+            self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));
         }
         if top_level {
             self.fmt_pub_qualifier(e.is_pub, e.is_package_pub);
@@ -696,6 +734,10 @@ impl<'a> Fmt<'a> {
             self.fmt_expr(&c.value, Prec::OrFallback);
             return;
         }
+        // D-PERSIST1: `@Persist` precedes the const's other attrs.
+        if c.is_persist {
+            self.write(&format!("@{} ", Syntax::CONTRACT_PERSIST));
+        }
         for attr in &c.attrs {
             match attr {
                 ConstAttr::ForceStatic => self.write("#static "),
@@ -769,6 +811,15 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_field(&mut self, field: &Field) {
+        // D-DEBUG-REDACT/D-MARKERMOVE1: `@[Redact]` (contract plane) sits
+        // inline before the field, ahead of any `#[…]` serde group (G2
+        // stacking). Field markers are bracket-only (no bare `@Redact`).
+        if field.redact {
+            self.write(Syntax::CONTRACT_PREFIX);
+            self.write("[");
+            self.write(Syntax::ATTR_REDACT);
+            self.write("] ");
+        }
         // D-SERDE5: per-field `#[Rename("x")]`/`#[Skip]`/`#[Default(…)]`/`#[Flatten]`
         // markers sit inline before the field on the same line.
         if !field.serde_markers.is_empty() {

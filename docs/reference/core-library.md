@@ -100,6 +100,37 @@ automatic conversion between error types in v1.
 
 ---
 
+## Optional values (`T?`) — combinators (D-HOLE1)
+
+`T?` is either `value(x)` (present) or `null` (absent) — see S31/S35 for the
+core pattern-test and `??` fallback forms. Composing two or more optionals
+gets library combinators instead of a general "hole"/absent-propagating value
+type (D-HOLE1 rejected that: it would duplicate `T?` and silently bypass
+distinct-type arithmetic gating like `@Numeric`).
+
+| Method | Type | What it does |
+| --- | --- | --- |
+| `.map(f)` | `(T?, fn(T) -> R) -> R?` | Applies `f` to the payload if present; `null` stays `null` |
+| `.zip(other)` | `(T?, U?) -> (a: T, b: U)?` | Pairs two optionals: present only when **both** are present |
+| `Option.lift2(f, a, b)` | `(fn(T, U) -> R, T?, U?) -> R?` | Applies a two-argument function to `a`/`b` only when both are present |
+
+```jet
+price: Float? #= lookup_price(id)
+qty: Float? #= lookup_qty(id)
+
+// zip: both present -> present pair; either null -> null
+total1 #= price.zip(qty).map((pair) => pair.a * pair.b)
+
+// lift2: same idea, no explicit pair
+total2 #= Option.lift2((p, q) => p * q, price, qty)
+
+// total1, total2: Float? — null unless both price and qty were present
+```
+
+See `examples/features/types/option_combinators.jet`.
+
+---
+
 ## Pay for what you call
 
 Using `core.fs` costs nothing in the generated binary until you **call**
@@ -422,12 +453,12 @@ not for tests.
 | `rng(seed)` | `Rng` | A **deterministic** RNG capability seeded by `seed` (D-DET1) |
 
 The ambient calls above (`int`/`float`/…) read a process-global generator, so a
-`#Pure fn` cannot call them (E3403 — they break reproducibility). To use
-randomness inside a `#Pure fn`, take a seeded `Rng` **as a parameter** and draw
+`@Pure fn` cannot call them (E3403 — they break reproducibility). To use
+randomness inside a `@Pure fn`, take a seeded `Rng` **as a parameter** and draw
 through it — the seed makes the stream reproducible on every machine:
 
 ```jet
-#Pure fn roll(rng: ~Rng) -> Int {
+@Pure fn roll(rng: ~Rng) -> Int {
     return rng.int(1, 6)            // inclusive; advances the stream (needs ~Rng)
 }
 fn main() {
@@ -483,13 +514,13 @@ fn main() {
 integer, `time.now()` returns that value instead of the real clock. Tests use
 this to pin output; normal programs ignore it.
 
-A `#Pure fn` cannot call ambient `time.now()` (E3403 — the wall clock is not
-reproducible). To use time inside a `#Pure fn`, take a seeded `Clock` **as a
+A `@Pure fn` cannot call ambient `time.now()` (E3403 — the wall clock is not
+reproducible). To use time inside a `@Pure fn`, take a seeded `Clock` **as a
 parameter** and read through it; the clock only moves when you `tick` it, so the
 result is reproducible:
 
 ```jet
-#Pure fn at(clock: Clock) -> Int {
+@Pure fn at(clock: Clock) -> Int {
     return clock.now()             // current value in ms; pure read
 }
 fn main() {
@@ -512,7 +543,7 @@ A `Duration` is a deterministic span of milliseconds minted by `time.ms(n)` /
 |-------------------|---------|--------------|
 | `millis()` | `Int` | The span in milliseconds (read) |
 
-**Expert escape — `assume_deterministic { … }`.** Inside a `#Pure fn`, a block
+**Expert escape — `assume_deterministic { … }`.** Inside a `@Pure fn`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)
 for its body — the "I know this is deterministic" hatch. It is a semantic
 footgun: nothing verifies the claim, so use it only when you can guarantee
@@ -596,8 +627,8 @@ abstraction, `T?` for absence, and `Data` for parsed dynamic input. Writing
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 
-Mark a type `#[Codable]` and it crosses the wire in any format. `#[Codable]` is
-both directions; the one-way markers are `#[Encode]` (write-only) and `#[Decode]`
+Mark a type `@[Codable]` and it crosses the wire in any format. `@[Codable]` is
+both directions; the one-way markers are `@[Encode]` (write-only) and `@[Decode]`
 (read-only). The derive is compiler-owned (like `derive Comparable`) — no macros,
 no runtime reflection.
 
@@ -605,7 +636,7 @@ no runtime reflection.
 use core.encoding.csv as csv
 use core.encoding.json as json
 
-#[Codable]
+@[Codable]
 struct Order {
     id: Int
     #[Rename("customer")] who: String      // wire key overrides the field name
@@ -623,7 +654,7 @@ fn main() {
 }
 ```
 
-**Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `#[Codable]`/`#[Encode]`
+**Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `@[Codable]`/`@[Encode]`
 value (the dynamic `JSON` tree and the `[[String]]`/`Map` forms still work too). Field
 order is preserved.
 
@@ -647,7 +678,7 @@ print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}
 | `#[Rename("k")]` | use `k` as the wire key for this field |
 | `#[Skip]` | never serialize; on decode use the field's default |
 | `#[Default]` / `#[Default(8080)]` | when the key is absent, use the type's default (or the given literal) |
-| `#[Flatten]` | inline a `#[Codable]` struct field's keys into the parent object |
+| `#[Flatten]` | inline a `@[Codable]` struct field's keys into the parent object |
 
 **Container attributes:**
 
@@ -668,7 +699,7 @@ required field, runtime), E2411 (type isn't serializable — also fires at the u
 site for a non-codable generic argument), E2412 (unknown field, runtime). E2413 is
 retired (D-SERDE12).
 
-Generic `#[Codable]` is first-class (D-SERDE9-12): the derive auto-injects
+Generic `@[Codable]` is first-class (D-SERDE9-12): the derive auto-injects
 `T: Encode`/`T: Decode` bounds on exactly the type params that reach the wire —
 the user never spells them. A phantom or `#[Skip]`-only param carries no serde
 bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
@@ -1089,7 +1120,7 @@ the package system fully stabilizes.
 | `examples/features/io/cli.jet` | Args, environment, exit codes |
 | `examples/features/io/cli_args.jet` | `core.args` — flag/option/positional spec + parse |
 | `examples/features/io/dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
-| `examples/features/serde/serde_derive.jet` | `#[Codable]` encode + typed `decode<T>` with `#[Rename]` |
+| `examples/features/serde/serde_derive.jet` | `@[Codable]` encode + typed `decode<T>` with `#[Rename]` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
 

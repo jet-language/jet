@@ -1,6 +1,7 @@
 use super::*;
 use crate::AST::{
-    BinOp, BindPattern, Binding, ElseBranch, Expr, ForKind, IfStmt, LValue, Stmt, SwitchArm,
+    BinOp, BindPattern, Binding, ElseBranch, Expr, ForKind, IfStmt, LValue, Stmt, StrPart,
+    SwitchArm,
 };
 
 impl<'a> Fmt<'a> {
@@ -215,6 +216,21 @@ impl<'a> Fmt<'a> {
                 self.write(&format!("{} {} {{", Syntax::KW_TASKGROUP, name));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
+            // D-LAYOUT1: `layout form { … }`. The parser desugared every
+            // `box.anchor` read into a `NAME.h(box, anchor)`/`NAME.v(box,
+            // anchor)` method call at parse time (D-LAYOUT1, `Parser/
+            // Statements.rs`); re-sugar those calls back to `box.anchor`
+            // before formatting so `layout` round-trips byte-for-byte
+            // (original spans are reused end-to-end, so leading/trailing
+            // trivia lookups on the re-sugared clone still land correctly).
+            Stmt::Layout { name, body, .. } => {
+                self.write(&format!("{} {} {{", Syntax::KW_LAYOUT, name));
+                self.newline();
+                let resugared: Vec<Stmt> =
+                    body.iter().map(|s| resugar_layout_stmt(name, s)).collect();
+                self.with_indent(|f| f.fmt_block_stmts(&resugared));
                 self.end_block();
             }
             // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
@@ -588,9 +604,13 @@ impl<'a> Fmt<'a> {
     fn fmt_bind_pattern(&mut self, pat: &BindPattern) {
         match pat {
             BindPattern::Struct {
-                type_name, fields, ..
+                type_name,
+                fields,
+                rest,
+                ..
             } => {
-                // D-DOTCTOR1: emit `Type.{ x, y }` (auto-fixes E0320 recovery).
+                // D-DOTCTOR1: emit `Type.{x, y}` (auto-fixes E0320 recovery).
+                // D-DESTRUCT1: preserve a `field: rename` and a trailing `..`.
                 self.write(type_name);
                 self.write(".{");
                 for (i, f) in fields.iter().enumerate() {
@@ -598,6 +618,16 @@ impl<'a> Fmt<'a> {
                         self.write(", ");
                     }
                     self.write(&f.name);
+                    if let Some((rn, _)) = &f.rename {
+                        self.write(": ");
+                        self.write(rn);
+                    }
+                }
+                if rest.is_some() {
+                    if !fields.is_empty() {
+                        self.write(", ");
+                    }
+                    self.write("..");
                 }
                 self.write("}");
             }
@@ -640,5 +670,109 @@ impl<'a> Fmt<'a> {
                 self.write(field);
             }
         }
+    }
+}
+
+/// D-LAYOUT1: the inverse of `Parser::desugar_layout_anchors` — turns a
+/// `NAME.h(box, anchor)` / `NAME.v(box, anchor)` call back into the
+/// `box.anchor` source spelling before formatting. Only fires on the EXACT
+/// shape the parser's desugar produces (receiver is a bare `Ident` equal to
+/// `layout_name`, method is `h`/`v`, exactly two single-literal `Str` args);
+/// anything else (a real user call, e.g. `form.h(a, b)` written by hand
+/// against an unrelated `form`, or any other method) is left as-is, so this
+/// never corrupts a program that merely happens to call `.h`/`.v`.
+fn single_str_lit(e: &Expr) -> Option<&str> {
+    if let Expr::Str(parts, _) = e {
+        if let [StrPart::Lit(s)] = parts.as_slice() {
+            return Some(s.as_str());
+        }
+    }
+    None
+}
+
+fn resugar_layout_stmt(layout_name: &str, stmt: &Stmt) -> Stmt {
+    match stmt {
+        Stmt::Expr(e) => Stmt::Expr(resugar_layout_expr(layout_name, e)),
+        Stmt::Val(b) => {
+            let mut b2 = b.clone();
+            b2.init = resugar_layout_expr(layout_name, &b.init);
+            Stmt::Val(b2)
+        }
+        other => other.clone(),
+    }
+}
+
+fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
+    if let Expr::MethodCall {
+        receiver,
+        method,
+        method_span,
+        args,
+        ..
+    } = e
+    {
+        if (method == "h" || method == "v") && args.len() == 2 {
+            if let Expr::Ident(recv_name, recv_span) = receiver.as_ref() {
+                if recv_name == layout_name {
+                    if let (Some(box_name), Some(anchor)) =
+                        (single_str_lit(&args[0].expr), single_str_lit(&args[1].expr))
+                    {
+                        return Expr::Field(
+                            Box::new(Expr::Ident(box_name.to_string(), *recv_span)),
+                            anchor.to_string(),
+                            *method_span,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    match e {
+        Expr::Binary(op, l, r, span) => Expr::Binary(
+            *op,
+            Box::new(resugar_layout_expr(layout_name, l)),
+            Box::new(resugar_layout_expr(layout_name, r)),
+            *span,
+        ),
+        Expr::Unary(op, x, span) => {
+            Expr::Unary(*op, Box::new(resugar_layout_expr(layout_name, x)), *span)
+        }
+        Expr::Field(base, field, span) => Expr::Field(
+            Box::new(resugar_layout_expr(layout_name, base)),
+            field.clone(),
+            *span,
+        ),
+        Expr::MethodCall {
+            receiver,
+            method,
+            method_span,
+            type_args,
+            args,
+            recv_type,
+            resolved_ret,
+        } => Expr::MethodCall {
+            receiver: Box::new(resugar_layout_expr(layout_name, receiver)),
+            method: method.clone(),
+            method_span: *method_span,
+            type_args: type_args.clone(),
+            args: args
+                .iter()
+                .map(|a| {
+                    let mut a2 = a.clone();
+                    a2.expr = resugar_layout_expr(layout_name, &a.expr);
+                    a2
+                })
+                .collect(),
+            recv_type: recv_type.clone(),
+            resolved_ret: resolved_ret.clone(),
+        },
+        Expr::Call(call) => {
+            let mut call2 = call.clone();
+            for a in &mut call2.args {
+                a.expr = resugar_layout_expr(layout_name, &a.expr);
+            }
+            Expr::Call(call2)
+        }
+        _ => e.clone(),
     }
 }

@@ -683,7 +683,7 @@ mod jet_std {
     }
 
     // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
-    // The one tree every format adapter speaks. The built-in `#[Codable]` derive
+    // The one tree every format adapter speaks. The built-in `@[Codable]` derive
     // (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
     // into / parses it from wire text. Distinct from the dynamic `Json` enum:
     // `DataTree` preserves field order (ordered `Object`) and keeps Int vs Float.
@@ -3313,7 +3313,7 @@ fn jet_std_time_start() -> jet_std::Stopwatch {
 }
 
 // ── D-DET1: deterministic injected Clock / Rng capabilities ───────────────────
-// Built from a caller-supplied seed (a pure value), so a `#Pure fn` may read
+// Built from a caller-supplied seed (a pure value), so a `@Pure fn` may read
 // time/randomness THROUGH the handle and stay reproducible. No wall-clock or
 // OS-RNG read; std-only (no external crate, I6).
 fn jet_std_clock_new(seed: i64) -> jet_std::Clock {
@@ -3627,7 +3627,7 @@ fn jet_math_Mat4_transpose(m: &jet_std::Mat4) -> jet_std::Mat4 {
 }
 
 // ── core.encoding: Encode / Decode traits + blanket impls (D-SERDE1/2/4) ──────
-// The built-in `#[Codable]`/`#[Encode]`/`#[Decode]` derive (D-ENC1) lowers to
+// The built-in `@[Codable]`/`@[Encode]`/`@[Decode]` derive (D-ENC1) lowers to
 // these traits. `jet_encode`/`jet_decode` are codegen-internal method names the
 // user never types (they write the verbs `encode`/`decode` only in a hand-impl,
 // D-SERDE2 — a later increment). Pure safe std Rust, no proc-macros (I1/I6).

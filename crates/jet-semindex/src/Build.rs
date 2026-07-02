@@ -568,6 +568,7 @@ fn collect_view_return_hints(stmts: &[AST::Stmt], mp: &str, ctx: &mut WalkCtx<'_
             | AST::Stmt::Grant { body, .. }
             | AST::Stmt::Region { body, .. }
             | AST::Stmt::TaskGroup { body, .. }
+            | AST::Stmt::Layout { body, .. }
             | AST::Stmt::Transact { body, .. }
             | AST::Stmt::AssumeDet { body, .. }
             | AST::Stmt::CountedLoop { body, .. }
@@ -707,6 +708,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::Reactive { body, .. }
         | AST::Stmt::Region { body, .. }
         | AST::Stmt::TaskGroup { body, .. }
+        | AST::Stmt::Layout { body, .. }
         | AST::Stmt::Caps { body, .. }
         | AST::Stmt::Grant { body, .. }
         | AST::Stmt::Transact { body, .. }
@@ -894,6 +896,11 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             collect_expr(l, mp, ctx);
             collect_expr(r, mp, ctx);
         }
+        AST::Expr::CompareChain { operands, .. } => {
+            for e in operands {
+                collect_expr(e, mp, ctx);
+            }
+        }
         AST::Expr::Unary(_, inner, _) | AST::Expr::IncDec { operand: inner, .. } => {
             collect_expr(inner, mp, ctx)
         }
@@ -1033,6 +1040,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::Absent(_)
         | AST::Expr::ReduceMarker(_, _)
         | AST::Expr::Todo { .. }
+        | AST::Expr::UnitLit { .. }
         | AST::Expr::ComptimeSplice { .. } => {}
         AST::Expr::Paren(inner, _) => collect_expr(inner, mp, ctx),
     }

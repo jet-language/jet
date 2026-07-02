@@ -546,9 +546,16 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
-                            if let Type::List(inner) = recv_ty {
-                                refined_ret = Some(Type::List(Box::new((**r).clone())));
-                                let _ = inner;
+                            match recv_ty {
+                                Type::List(inner) => {
+                                    refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                    let _ = inner;
+                                }
+                                // D-HOLE1: `opt.map(f: T -> R) -> R?`.
+                                Type::Option(_) => {
+                                    refined_ret = Some(Type::Option(Box::new((**r).clone())));
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -623,6 +630,145 @@ impl<'a> Checker<'a> {
     /// Both advance the stream, so the `rng` receiver must have edit access (`~`);
     /// `shuffle` edits its list in place, so the list arg must be `~` too. Mirrors
     /// the ambient `random.pick`/`random.shuffle` (CheckerCoreLib).
+    /// D-HOLE1: `Option.lift2(f, a, b)` — lifts a two-argument function into
+    /// `Option`: `f(a, b)` when both are present, `null` if either is absent. `f`'s
+    /// expected param types come from `a`/`b`'s payload types, so `a`/`b` are
+    /// elaborated FIRST (out of source order — the closure `f` is written first but
+    /// typed last), mirroring how `.zip` resolves its pair before a chained
+    /// `.map(f)` would type its closure.
+    fn check_option_lift2(
+        &mut self,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+        resolved_ret_out: &mut Option<Type>,
+    ) -> Option<Type> {
+        if args.len() != 3 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`Option.lift2` takes 3 arguments (f, a, b), got {}",
+                    args.len()
+                ),
+                "`Option.lift2(f, a, b)` applies a two-argument function only when both optionals are present"
+                    .to_string(),
+                "call `Option.lift2((x, y) => ..., a, b)`".to_string(),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        let a_ty = self.infer(&mut args[1].expr);
+        let b_ty = self.infer(&mut args[2].expr);
+        let (Some(Type::Option(a_inner)), Some(Type::Option(b_inner))) = (a_ty.clone(), b_ty.clone())
+        else {
+            if !matches!(a_ty, Some(Type::Option(_))) {
+                self.diags.push(Diagnostic::error(
+                    "E0108",
+                    format!(
+                        "`Option.lift2`'s second argument must be optional, got {}",
+                        a_ty.map(|t| t.show()).unwrap_or_else(|| "an unknown type".to_string())
+                    ),
+                    "`Option.lift2(f, a, b)` needs `a: T?`".to_string(),
+                    "pass a `T?` value".to_string(),
+                    Some(args[1].expr.span()),
+                ));
+            }
+            if !matches!(b_ty, Some(Type::Option(_))) {
+                self.diags.push(Diagnostic::error(
+                    "E0108",
+                    format!(
+                        "`Option.lift2`'s third argument must be optional, got {}",
+                        b_ty.map(|t| t.show()).unwrap_or_else(|| "an unknown type".to_string())
+                    ),
+                    "`Option.lift2(f, a, b)` needs `b: U?`".to_string(),
+                    "pass a `T?` value".to_string(),
+                    Some(args[2].expr.span()),
+                ));
+            }
+            self.infer(&mut args[0].expr);
+            return None;
+        };
+        let expected_fn = Type::Fn {
+            params: vec![(*a_inner).clone(), (*b_inner).clone()],
+            ret: None, // sema refines R from the closure's actual return
+            effect_bound: None,
+        };
+        let saved_esc = self.lambda_escapes;
+        self.lambda_escapes = false;
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(expected_fn);
+        let f_ty = self.infer(&mut args[0].expr);
+        self.expected_type = saved_exp;
+        self.lambda_escapes = saved_esc;
+        match f_ty {
+            Some(Type::Fn { ret: Some(r), .. }) => {
+                let ret = Type::Option(r);
+                *resolved_ret_out = Some(ret.clone());
+                Some(ret)
+            }
+            Some(other) => {
+                self.diags.push(Diagnostic::error(
+                    "E0108",
+                    format!(
+                        "`Option.lift2`'s first argument must be a function, got {}",
+                        other.show()
+                    ),
+                    "`Option.lift2(f, a, b)` needs `f: fn(T, U) -> R`".to_string(),
+                    "pass a two-argument function or lambda".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?` — present only when both
+    /// operands are present, `null` if either is. See the call site's comment for why
+    /// this bypasses the flat builtin-method-arg table (heterogeneous `U`).
+    fn finish_option_zip(
+        &mut self,
+        a_inner: Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+        resolved_ret_out: &mut Option<Type>,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`.zip()` takes one optional argument, got {}", args.len()),
+                "`.zip(other)` pairs this optional with another: present only when both are"
+                    .to_string(),
+                "call `a.zip(b)` with exactly one `T?` argument".to_string(),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        let got = self.infer(&mut args[0].expr);
+        let Some(Type::Option(b_inner)) = got else {
+            let shown = got
+                .map(|t| t.show())
+                .unwrap_or_else(|| "that".to_string());
+            self.diags.push(Diagnostic::error(
+                "E0108",
+                format!("`.zip()` needs an optional argument, got {}", shown),
+                "`.zip(other)` combines two optionals into one paired optional".to_string(),
+                "pass a `T?` value".to_string(),
+                Some(args[0].expr.span()),
+            ));
+            return None;
+        };
+        let elem_ty = Collections::zip_elem_ty(&a_inner, &b_inner);
+        let ret = Type::Option(Box::new(elem_ty));
+        *resolved_ret_out = Some(ret.clone());
+        Some(ret)
+    }
+
     fn finish_rng_generic(
         &mut self,
         receiver: &Expr,
@@ -971,6 +1117,14 @@ impl<'a> Checker<'a> {
                     self.infer(&mut a.expr);
                 }
                 return Some(Type::Named("Path".to_string()));
+            }
+            // D-HOLE1: `Option.lift2(f, a, b)` — apply a two-argument function to
+            // `a`/`b` only when both are present; `null` otherwise. A static
+            // combinator (both optionals are plain arguments, not the receiver), so
+            // it's resolved directly here, the same static-constructor shape as
+            // `Set.from`/`Deque.new`/`Path.from` above.
+            if type_name == "Option" && method == "lift2" && !self.registry.contains("Option") {
+                return self.check_option_lift2(args, span, resolved_ret_out);
             }
             // D-SIMD2 / D-LINALG1: a STATIC method on a built-in math type —
             // `F32x4.splat(x)` / `Vec3.from_array([…])`. The arg is elaborated
@@ -1746,6 +1900,78 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+            // D-LAYOUT1 / D-LAYOUT-GATES1: methods on the built-in
+            // `LayoutHandle`/`Constraint` types (`form.h("label","width")`,
+            // `form.value(v)`, `form.suggest(v, 90.0)`, `c.medium()`, …).
+            // `.h`/`.v`/`suggest`'s var argument (index 0 for `.value`/
+            // `.suggest`) accepts any axis type (`HVar`/`VVar`/`LengthVar`),
+            // so it's checked with `is_layout_axis_type` instead of the
+            // single-fixed-`Type` table `layout_method_arg_ty` covers.
+            if is_layout_type(tn) {
+                if let Some(ret) = layout_method_return(tn, method, args.len()) {
+                    for (i, arg) in args.iter_mut().enumerate() {
+                        let axis_arg = (tn == "LayoutHandle"
+                            && ((method == "value" && i == 0)
+                                || (method == "suggest" && i == 0)))
+                            .then_some(());
+                        let want = layout_method_arg_ty(method, i);
+                        let old = self.expected_type.take();
+                        if let Some(w) = &want {
+                            self.expected_type = Some(w.clone());
+                        }
+                        let got = self.infer(&mut arg.expr);
+                        self.expected_type = old;
+                        if axis_arg.is_some() {
+                            let ok = matches!(&got, Some(Type::Named(n)) if is_layout_axis_type(n));
+                            if !ok {
+                                self.diags.push(Diagnostic::error(
+                                    "E0128",
+                                    format!(
+                                        "`.{}()` on `{}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{}`",
+                                        method,
+                                        tn,
+                                        got.as_ref().map(|t| t.name()).unwrap_or_default()
+                                    ),
+                                    "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout { … }` block".to_string(),
+                                    "pass a layout variable, not a plain value".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
+                        } else if let (Some(w), Some(g)) = (&want, &got) {
+                            if g != w {
+                                self.diags.push(Diagnostic::error(
+                                    "E0128",
+                                    format!(
+                                        "`.{}()` on `{}` expects a `{}`, got `{}`",
+                                        method,
+                                        tn,
+                                        w.name(),
+                                        g.name()
+                                    ),
+                                    format!("`{}.{}(…)` operates on a `{}`", tn, method, w.name()),
+                                    format!("pass a `{}` value", w.name()),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
+                        }
+                    }
+                    *recv_type_out = Some(tn.clone());
+                    return Some(ret);
+                }
+            }
+        }
+        // D-HOLE1: `.zip` on `T?` pairs two optionals into `(a: T, b: U)?` — present
+        // only when both operands are present. `U` is independent of the receiver's
+        // `T`, which doesn't fit `Collections::builtin_method_arg_types`'s
+        // one-fixed-placeholder-type table (that table's `[T].zip([T])` entry works
+        // around the same limitation by forcing the same element type instead);
+        // handled directly here, the same shape as `finish_rng_generic`'s hand-rolled
+        // generic dispatch below.
+        if let Type::Option(a_inner) = &recv_ty {
+            if method == "zip" {
+                let a_inner = (**a_inner).clone();
+                return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
+            }
         }
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
             // D-NUMOPS1: hand codegen the receiver's numeric width so it picks the
@@ -2465,6 +2691,37 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                 }
+                // D-RANGETYPE1: `Severity #= distinct Int(0..10)` — a literal
+                // argument is checked NOW (E0135); a runtime value needs the
+                // fallible `?` form (E0136 otherwise). "Parse, don't
+                // validate" as a type.
+                if let Some((lo, hi)) = self.registry.distinct_range(&call.name) {
+                    match &call.args[0].expr {
+                        Expr::Int(n, span, _) => {
+                            if *n < lo || *n > hi {
+                                self.diags.push(Diagnostic::error(
+                                    "E0135",
+                                    format!("`{}` is outside `{}`'s range {}..{}", n, call.name, lo, hi),
+                                    format!(
+                                        "a range type only holds values inside its bounds; `{}` can never be a `{}`",
+                                        n, call.name
+                                    ),
+                                    format!("use a value in `{}..{}`, or widen the type's range", lo, hi),
+                                    Some(*span),
+                                ));
+                            }
+                        }
+                        _ => {
+                            self.diags.push(Diagnostic::error(
+                                "E0136",
+                                format!("making a `{}` from a runtime value can fail", call.name),
+                                "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
+                                format!("write `{}(raw)?` and handle the failure", call.name),
+                                Some(call.args[0].expr.span()),
+                            ));
+                        }
+                    }
+                }
                 return Some(Some(Type::Named(call.name.clone())));
             }
         }
@@ -2804,19 +3061,36 @@ impl<'a> Checker<'a> {
                         && matches!(&arg_ty, Type::Fn { .. })
                         && fn_types_compatible(&param_ty, &arg_ty));
                 if !reported && !compatible {
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        format!(
-                            "`{}` wants {} for argument {}, but this is {}",
-                            call.name,
-                            param_ty.show(),
-                            i + 1,
-                            arg_ty.show()
-                        ),
-                        "every argument must match its parameter's type".to_string(),
-                        type_fix_hint(&param_ty, &arg_ty),
-                        Some(arg.expr.span()),
-                    ));
+                    // D-TRAILBLOCK1: a trailing `{ }` block always desugars to a
+                    // ZERO-parameter lambda argument. If the parameter it lands in
+                    // isn't a zero-parameter function, that's not an ordinary type
+                    // mismatch — teach the actual shape instead of a generic E0112.
+                    if arg.flags.is_trailing_block {
+                        self.diags.push(Diagnostic::error(
+                            "E0334",
+                            format!("`{}` doesn't take a trailing block", call.name),
+                            format!(
+                                "a trailing `{{ }}` block fills a last argument that is a function taking no parameters; this call's last parameter is {}",
+                                param_ty.show()
+                            ),
+                            "pass it inside the parentheses, or give the function a zero-parameter last argument".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`{}` wants {} for argument {}, but this is {}",
+                                call.name,
+                                param_ty.show(),
+                                i + 1,
+                                arg_ty.show()
+                            ),
+                            "every argument must match its parameter's type".to_string(),
+                            type_fix_hint(&param_ty, &arg_ty),
+                            Some(arg.expr.span()),
+                        ));
+                    }
                 }
             }
 

@@ -403,6 +403,11 @@ impl<'a> Interp<'a> {
             // comptime interpreter has no arenas, so a `region` block is declined.
             Stmt::Region { span, .. } => Err(unsupported("a `region` block", *span)),
             Stmt::TaskGroup { span, .. } => Err(unsupported("a `taskgroup` block", *span)),
+            // D-LAYOUT1: the constraint solver is a runtime construct (real
+            // `Rc<RefCell<..>>` handle state); the comptime interpreter has
+            // no solver, so a `layout` block is declined, same as `region`/
+            // `taskgroup`.
+            Stmt::Layout { span, .. } => Err(unsupported("a `layout` block", *span)),
             Stmt::Caps { span, .. } => Err(unsupported("a `#Caps` block", *span)),
             Stmt::Grant { span, .. } => Err(unsupported("a `#grant` block", *span)),
             // D-TXN1–D-TXN4: a transaction block is a runtime/codegen construct; the

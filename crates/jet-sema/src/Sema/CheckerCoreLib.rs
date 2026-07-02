@@ -318,7 +318,7 @@ impl<'a> Checker<'a> {
         )
     }
 
-    /// D-SERDE: a value type the `#[Codable]`/`#[Encode]` derive (or a blanket impl)
+    /// D-SERDE: a value type the `@[Codable]`/`@[Encode]` derive (or a blanket impl)
     /// can serialize. Primitives, the dynamic `Json` tree, and lists/options/maps of
     /// encodables qualify; a user type must derive `Encode`.
     fn is_encodable(&self, t: &Type) -> bool {
@@ -454,8 +454,8 @@ impl<'a> Checker<'a> {
             }
             return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
         }
-        // D-EFF1: `#Pure` is the empty effect set, so any effectful Core call —
-        // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `#Pure fn`.
+        // D-EFF1: `@Pure` is the empty effect set, so any effectful Core call —
+        // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `@Pure fn`.
         // (Time/Rand return early above via E3403; stdin via the E3401 check
         // above, so this catches the remaining effect-carrying Core modules.)
         if self.in_pure && self.det_suppress == 0 && core_effect(module, name).is_some() {
@@ -480,7 +480,7 @@ impl<'a> Checker<'a> {
         match (module, name) {
             // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
             // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
-            // `Json` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
+            // `Json` / `[[String]]` / `Map` forms AND a `@[Codable]` value); the
             // codegen routes by the lowered arg type. `decode<T>` is the typed decode
             // (→ `T`, or `[T]` for CSV) keyed by the call-site type argument.
             (
@@ -2096,6 +2096,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
         | "F32x4" | "F64x2"
         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+        // D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 2, ratified 2026-06-28/29): the
+        // built-in constraint-layout value types.
+        | "HVar" | "VVar" | "LengthVar" | "Constraint" | "LayoutHandle"
         // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
         | "Signal" | "Derived"
         // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
@@ -2581,6 +2584,134 @@ pub fn math_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Ty
         // Division: lane÷lane element-wise (linalg has no `/`).
         BinOp::Div if same && is_simd_lane_type(lt) => Some(Type::Named(lt.to_string())),
         BinOp::Eq | BinOp::Ne if same && is_math_type(lt) => Some(Type::Bool),
+        _ => None,
+    }
+}
+
+/// D-LAYOUT1 / D-LAYOUT-GATES1: is `name` an axis-typed layout variable
+/// (`HVar`/`VVar`/`LengthVar`)? `LengthVar` is axis-neutral: it combines with
+/// either `HVar` or `VVar` without a mismatch, and is what a bare numeric
+/// literal elaborates to in a layout-value position.
+pub fn is_layout_axis_type(name: &str) -> bool {
+    matches!(name, "HVar" | "VVar" | "LengthVar")
+}
+
+/// D-LAYOUT1: the full closed layout-value family (axis types + the
+/// `Constraint`/`LayoutHandle` handles).
+pub fn is_layout_type(name: &str) -> bool {
+    is_layout_axis_type(name) || matches!(name, "Constraint" | "LayoutHandle")
+}
+
+/// D-LAYOUT1: the axis a value belongs to, for cross-axis checking. Plain
+/// `Int`/`Float` are axis-neutral too (a bare numeric literal is allowed
+/// anywhere a `LengthVar` is — same neutrality as `LengthVar` itself, so
+/// `label.width >= 80.0` never needs an explicit `LengthVar(80.0)` wrapper).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LayoutAxis {
+    H,
+    V,
+    Neutral,
+}
+
+pub fn layout_axis_of(ty: &Type) -> Option<LayoutAxis> {
+    match ty {
+        Type::Named(n) if n == "HVar" => Some(LayoutAxis::H),
+        Type::Named(n) if n == "VVar" => Some(LayoutAxis::V),
+        Type::Named(n) if n == "LengthVar" => Some(LayoutAxis::Neutral),
+        Type::Int | Type::Float => Some(LayoutAxis::Neutral),
+        _ => None,
+    }
+}
+
+/// D-LAYOUT1: combine two axes for `+`/`-` (same-axis closure) or a
+/// comparison (`>=`/`<=`/`==`, GATE 1). `None` = cross-axis mismatch
+/// (E2932, `E-LAYOUT-AXIS-MISMATCH`).
+fn layout_axis_combine(a: LayoutAxis, b: LayoutAxis) -> Option<LayoutAxis> {
+    use LayoutAxis::*;
+    match (a, b) {
+        (H, V) | (V, H) => None,
+        (H, _) | (_, H) => Some(H),
+        (V, _) | (_, V) => Some(V),
+        (Neutral, Neutral) => Some(Neutral),
+    }
+}
+
+fn layout_axis_type_name(axis: LayoutAxis) -> &'static str {
+    match axis {
+        LayoutAxis::H => "HVar",
+        LayoutAxis::V => "VVar",
+        LayoutAxis::Neutral => "LengthVar",
+    }
+}
+
+/// D-LAYOUT1 / D-LAYOUT-GATES1: type-check a binary operator between two
+/// layout values — mirrors `math_binop_result`'s closed-operator pattern
+/// exactly (GATE 1 is what lets the comparison arms return `Constraint`
+/// instead of `Bool`; this is the ONLY place that blessing is wired, no
+/// parallel mechanism). `Some(Ok(ty))` = success; `Some(Err(()))` = axis
+/// mismatch (caller emits E2932 naming both axes); `None` = not a layout
+/// combination at all (caller falls through to normal operator checking).
+pub fn layout_binop_result(
+    op: crate::AST::BinOp,
+    lt: &Type,
+    rt: &Type,
+) -> Option<Result<Type, ()>> {
+    use crate::AST::BinOp;
+    // At least one side must be an actual layout axis type — `Int + Float`
+    // (both merely "neutral") is not our concern.
+    let l_is_layout = matches!(lt, Type::Named(n) if is_layout_axis_type(n));
+    let r_is_layout = matches!(rt, Type::Named(n) if is_layout_axis_type(n));
+    if !l_is_layout && !r_is_layout {
+        return None;
+    }
+    let (Some(la), Some(ra)) = (layout_axis_of(lt), layout_axis_of(rt)) else {
+        return None;
+    };
+    match op {
+        BinOp::Add | BinOp::Sub => match layout_axis_combine(la, ra) {
+            Some(axis) => Some(Ok(Type::Named(layout_axis_type_name(axis).to_string()))),
+            None => Some(Err(())),
+        },
+        BinOp::Ge | BinOp::Le | BinOp::Eq => match layout_axis_combine(la, ra) {
+            Some(_) => Some(Ok(Type::Named("Constraint".to_string()))),
+            None => Some(Err(())),
+        },
+        _ => None,
+    }
+}
+
+/// D-LAYOUT1: type-check an instance method on `LayoutHandle`/`Constraint`.
+/// Mirrors `math_method_return`'s pattern (a plain match table, not a
+/// HashMap — this family is tiny).
+pub fn layout_method_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
+    match name {
+        "LayoutHandle" => match (method, n_args) {
+            ("h", 2) => Some(Type::Named("HVar".to_string())),
+            ("v", 2) => Some(Type::Named("VVar".to_string())),
+            ("value", 1) => Some(Type::Float),
+            ("suggest", 2) => Some(Type::Named("Unit".to_string())),
+            ("is_feasible", 0) => Some(Type::Bool),
+            ("conflict", 0) => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        },
+        "Constraint" => match (method, n_args) {
+            ("required" | "strong" | "medium" | "weak", 0) => {
+                Some(Type::Named("Constraint".to_string()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// D-LAYOUT1: the fixed argument type a `LayoutHandle` method expects, by
+/// position. `None` means "no plain fixed type" — `.value(v)`/`.suggest(v, _)`'s
+/// first argument accepts ANY of `HVar`/`VVar`/`LengthVar` (checked by the
+/// caller via `is_layout_axis_type`, not a single `Type`).
+pub fn layout_method_arg_ty(method: &str, arg_index: usize) -> Option<Type> {
+    match (method, arg_index) {
+        ("h", 0) | ("h", 1) | ("v", 0) | ("v", 1) => Some(Type::String),
+        ("suggest", 1) => Some(Type::Float),
         _ => None,
     }
 }
@@ -3242,7 +3373,7 @@ pub fn core_fixed_sig(
             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
         }
         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
-        // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
+        // reproducible `Rng` from a caller-supplied seed (a pure value); a `@Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
         // ambient `random.int(…)` stays E3403.
         ("core.random", "rng") => Some((
@@ -3254,7 +3385,7 @@ pub fn core_fixed_sig(
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
         // D-DET1: deterministic injected Clock capability. `time.clock(seed)` builds a
         // reproducible `Clock` from a caller-supplied start instant (a pure Int, ms);
-        // a `#Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
+        // a `@Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
         // while the ambient `time.now()` stays E3403.
         ("core.time", "clock") => Some((
             vec![(read, Type::Int)],
@@ -3868,7 +3999,7 @@ pub(crate) fn ui_backend_method_return(
 /// c-devserver (owner-directed 2026-07-01): type-check builder method calls
 /// on a `DevServer` value (`.html`/`.port`/`.serve`). `.html`/`.port` return
 /// `DevServer` for chaining, but are equally valid as bare statements (they
-/// are not `#MustUse`) — the reference example calls them as plain
+/// are not `@MustUse`) — the reference example calls them as plain
 /// statements without reassigning. `.serve()` blocks forever and returns
 /// nothing.
 pub(crate) fn devserver_method_return(
@@ -4135,12 +4266,12 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
 
 /// E2411 (D-SERDE): a type used with an encoding verb can't be (de)serialized — it
 /// holds something with no wire form (a closure, handle, …), or a user type that
-/// hasn't opted in with `#[Codable]`/`#[Encode]`/`#[Decode]`.
+/// hasn't opted in with `@[Codable]`/`@[Encode]`/`@[Decode]`.
 pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
     let (verb, marker) = if encode {
-        ("serialized", "`#[Codable]` or `#[Encode]`")
+        ("serialized", "`@[Codable]` or `@[Encode]`")
     } else {
-        ("decoded", "`#[Codable]` or `#[Decode]`")
+        ("decoded", "`@[Codable]` or `@[Decode]`")
     };
     Diagnostic::error(
         "E2411",
@@ -4167,8 +4298,8 @@ pub(crate) fn e2408(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2408",
         format!("`#[Flatten]` on `{field}` needs a struct-typed field"),
-        "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map".to_string(),
-        format!("give `{field}` a `#[Codable]` struct type, or drop `#[Flatten]`"),
+        "flatten splices another struct's keys into this object, so the field must be a `@[Codable]` struct — not a primitive, list, or map".to_string(),
+        format!("give `{field}` a `@[Codable]` struct type, or drop `#[Flatten]`"),
         Some(span),
     )
 }
@@ -4273,7 +4404,7 @@ fn marker_is_string_literal(m: &crate::AST::Marker) -> bool {
     )
 }
 
-/// D-SERDE: validate serde markers on every `#[Codable]`/`#[Encode]`/`#[Decode]` type
+/// D-SERDE: validate serde markers on every `@[Codable]`/`@[Encode]`/`@[Decode]` type
 /// (E2407–E2412). Runs after the trait registry is built so field types resolve. This
 /// keeps generated code rustc-clean (I2): a field with no wire form is caught here, not
 /// by rustc on the emitted `impl`.
@@ -4294,7 +4425,7 @@ pub(crate) fn validate_serde_items(
         if !enc && !dec {
             continue;
         }
-        // D-SERDE12: generic `#[Codable]` is first-class — no `type_params > 0`
+        // D-SERDE12: generic `@[Codable]` is first-class — no `type_params > 0`
         // gate. The per-field checks below run on generic types unchanged; a type
         // param `T` reads as a non-local `Type::Named`, so it's trusted here and
         // the codability obligation falls on the use site (E0905).

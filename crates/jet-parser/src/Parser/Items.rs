@@ -464,22 +464,43 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
-                // S60 (D-CASING1 follow-on): `#Pure fn name(…)` purity modifier.
-                // D-MATURITY1=B: `#Experimental`/`#Tested`/`#Hardened` before fn/pub fn —
-                // consumed and silently ignored (docs/reference/maturity-tags.md).
-                TokKind::Hash if self.at_maturity_fn() => {
-                    self.bump(); // `#`
-                    self.bump(); // tag name — erase, no AST field
+                // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
+                // purity modifier (old `@Pure` spelling is E0062, taught in `func()`).
+                // D-MATURITY1=B / D-MARKERMOVE1: `@Experimental`/`@Tested`/`@Hardened`
+                // before fn/pub fn — consumed and silently ignored
+                // (docs/reference/maturity-tags.md). Old `#` spelling is E0062.
+                TokKind::Hash | TokKind::At if self.at_maturity_fn() => {
+                    let sigil = self.bump(); // `#` or `@`
+                    let tag_tok = self.bump(); // tag name — erase, no AST field
+                    if matches!(sigil.kind, TokKind::Hash) {
+                        let tag_name = match &tag_tok.kind {
+                            TokKind::Ident(n) => n.clone(),
+                            _ => String::new(),
+                        };
+                        self.diags.push(Self::e0062_contract_on_hash(
+                            &tag_name,
+                            Span::new(sigil.span.start, tag_tok.span.end),
+                        ));
+                    }
                     continue; // re-enter item loop; next token is `fn` or `pub`
                 }
-                TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
+                TokKind::Hash | TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
                 // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
                 TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
-                // D-MUSTUSE1: `#MustUse fn name(…)` — result cannot be silently ignored.
-                TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
+                // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn name(…)` — result cannot be
+                // silently ignored (old `@MustUse` spelling is E0062, taught in `func()`).
+                TokKind::Hash | TokKind::At if self.at_must_use_fn() => self.func().map(Item::Func),
                 // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` typestate
                 // markers on a free function.
                 TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
+                    self.func().map(Item::Func)
+                }
+                // D-PREPOST1: `@Pre(cond, "msg")` / `@Post(cond, "msg")` before a
+                // free function — parsed (and repeated/mixed) inside `func()`.
+                TokKind::Hash | TokKind::At
+                    if self.at_contract_clause_fn(Syntax::CONTRACT_PRE)
+                        || self.at_contract_clause_fn(Syntax::CONTRACT_POST) =>
+                {
                     self.func().map(Item::Func)
                 }
                 TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
@@ -616,8 +637,9 @@ impl<'a> Parser<'a> {
                                 self.bump(); // consume `pub`
                                 self.layout_struct_def(true).map(Item::Struct)
                             }
-                            // D-MIGRATE1: `pub #PublishedSchema struct Name { … }`
-                            TokKind::Hash
+                            // D-MIGRATE1/D-MARKERMOVE1: `pub @PublishedSchema struct
+                            // Name { … }` (retired `pub @PublishedSchema` teaches E0062).
+                            TokKind::Hash | TokKind::At
                                 if {
                                     matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
                                 } =>
@@ -634,8 +656,9 @@ impl<'a> Parser<'a> {
                                 self.bump(); // consume `pub`
                                 self.single_use_type_def(true)
                             }
-                            // D-MUSTUSE1: `pub #MustUse struct|enum Name { … }`
-                            TokKind::Hash
+                            // D-MUSTUSE1/D-MARKERMOVE1: `pub @MustUse struct|enum Name
+                            // { … }` (retired `pub @MustUse` teaches E0062).
+                            TokKind::Hash | TokKind::At
                                 if {
                                     matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
                                 } =>
@@ -711,10 +734,18 @@ impl<'a> Parser<'a> {
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                 TokKind::KwImpl => self.impl_or_error_conv(),
-                // D-ATTR2 / D-SERDE: `#[Codable, RenameAll(camel)] struct …`.
-                TokKind::Hash if self.at_marker_list() => self.type_def_with_markers(),
-                // D-ATTR1: `#Codable struct …` — one marker, no brackets.
-                TokKind::Hash if self.at_single_type_marker() => self.type_def_with_single_marker(),
+                // D-ATTR2 / D-SERDE: `#[RenameAll(camel)] struct …` (serde stays `#`).
+                // D-ATTR1: `#Rename(...) struct …` — one marker, no brackets.
+                // D-MARKER-FAMILY1/G2/G3: `@[Codable, Debug]` / `@Codable struct …`
+                // — contract-plane derives, stackable with a `#[…]` serde group.
+                TokKind::Hash | TokKind::At
+                    if self.at_marker_list()
+                        || self.at_single_type_marker()
+                        || self.at_contract_marker_list()
+                        || self.at_single_contract_type_marker() =>
+                {
+                    self.type_def_with_any_markers()
+                }
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::At if self.at_retired_at_c_module() => {
                     self.retired_at_c_module().map(Item::CModule)
@@ -725,7 +756,7 @@ impl<'a> Parser<'a> {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
                     self.unit_family_def(is_pub, is_package_pub).map(Item::UnitFamily)
                 }
-                TokKind::Hash if self.at_numeric_distinct_def() => {
+                TokKind::Hash | TokKind::At if self.at_bundle_distinct_def() => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
                     self.distinct_def(is_pub, is_package_pub).map(Item::Distinct)
                 }
@@ -733,14 +764,16 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_layout_struct() => {
                     self.layout_struct_def(false).map(Item::Struct)
                 }
-                // D-MIGRATE1: `#PublishedSchema struct Name { … }`
-                TokKind::Hash if self.at_published_schema_struct() => {
+                // D-MIGRATE1/D-MARKERMOVE1: `@PublishedSchema struct Name { … }`
+                TokKind::Hash | TokKind::At if self.at_published_schema_struct() => {
                     self.published_schema_struct_def(false).map(Item::Struct)
                 }
                 // D-LIN1: `#SingleUse struct|enum Name { … }`
                 TokKind::Hash if self.at_single_use_type() => self.single_use_type_def(false),
-                // D-MUSTUSE1: `#MustUse struct|enum Name { … }`
-                TokKind::Hash if self.at_must_use_type() => self.must_use_type_def(false),
+                // D-MUSTUSE1/D-MARKERMOVE1: `@MustUse struct|enum Name { … }`
+                TokKind::Hash | TokKind::At if self.at_must_use_type() => {
+                    self.must_use_type_def(false)
+                }
                 // D-MIGRATE1: `migration TypeName { rename a -> b }`
                 TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
                     self.migration_decl().map(Item::Migration)
@@ -764,6 +797,33 @@ impl<'a> Parser<'a> {
                 // D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored derive.
                 TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
                 TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
+                // D-PERSIST1: `@Persist const NAME = expr;` — module-level
+                // binding that survives a `jet dev` hot reload.
+                TokKind::At if self.at_persist_const() => self.const_def().map(Item::Const),
+                // D-MARKER-FAMILY1: a `@` not already claimed by a contract-marker
+                // arm above. If the name is a known `#` directive, teach E0063
+                // (wrong plane); otherwise it's the old bare-attribute spelling
+                // (E0990, D-ATTR1) — unknown name, or `@` not followed by an ident.
+                // `Unsafe` is a dedicated lexer keyword token (`KwUnsafe`), not a
+                // generic `Ident`, so it needs its own arm of this same guard.
+                TokKind::At
+                    if matches!(&self.peek2().kind, TokKind::Ident(n) if Syntax::is_directive_marker(n))
+                        || matches!(self.peek2().kind, TokKind::KwUnsafe) =>
+                {
+                    let t = self.bump(); // `@`
+                    let name_tok = self.bump(); // the directive name
+                    let name = match &name_tok.kind {
+                        TokKind::Ident(n) => n.clone(),
+                        TokKind::KwUnsafe => Syntax::KW_UNSAFE.to_string(),
+                        _ => String::new(),
+                    };
+                    self.diags.push(Self::e0063_directive_on_at(
+                        &name,
+                        Span::new(t.span.start, name_tok.span.end),
+                    ));
+                    self.sync_top();
+                    continue;
+                }
                 TokKind::At => {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
@@ -771,7 +831,7 @@ impl<'a> Parser<'a> {
                         format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
                         "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)"
                             .to_string(),
-                        "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`"
+                        "write `#Unsafe(\"…\")`, `#Test(\"…\")`, or `@Codable`/`@[Codable, MustUse]` instead of `@…`"
                             .to_string(),
                         Some(t.span),
                     ));
@@ -1067,11 +1127,14 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-MATURITY1=B: true when the cursor is at a maturity-tag marker before `fn`/`pub`.
-    /// Handles both `#Experimental fn` (same line) and `#Experimental\npub fn` (next line,
-    /// where the lexer inserts a synthetic `;` terminator after the marker).
+    /// D-MATURITY1=B / D-MARKERMOVE1: true when the cursor is at a maturity-tag
+    /// marker before `fn`/`pub`. Handles both `@Experimental fn` (same line) and
+    /// `@Experimental\npub fn` (next line, where the lexer inserts a synthetic
+    /// `;` terminator after the marker). Matches on either sigil — a stray
+    /// `@Experimental` is still recognized here so `func()` can teach E0062
+    /// instead of falling through to an unrelated parse error.
     pub(super) fn at_maturity_fn(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
+        matches!(self.peek().kind, TokKind::Hash | TokKind::At)
             && matches!(&self.peek2().kind, TokKind::Ident(n)
                 if n == Syntax::ATTR_EXPERIMENTAL
                     || n == Syntax::ATTR_TESTED
@@ -1082,9 +1145,11 @@ impl<'a> Parser<'a> {
             )
     }
 
-    /// S60 (D-CASING1 follow-on): true when the cursor is at `#Pure fn`/`#Pure pub`.
+    /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: true when the cursor is at
+    /// `@Pure fn`/`@Pure pub` — or the retired `@Pure` spelling, so `func()`
+    /// can consume it and teach E0062 instead of falling through elsewhere.
     pub(super) fn at_pure_fn(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
+        matches!(self.peek().kind, TokKind::Hash | TokKind::At)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
     }
@@ -1096,9 +1161,11 @@ impl<'a> Parser<'a> {
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): true when the cursor is at `#MustUse fn` / `#MustUse pub fn`.
+    /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when the cursor is at
+    /// `@MustUse fn` / `@MustUse pub fn` — or the retired `@MustUse` spelling,
+    /// so `func()` can consume it and teach E0062.
     pub(super) fn at_must_use_fn(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
+        matches!(self.peek().kind, TokKind::Hash | TokKind::At)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
     }
@@ -1129,7 +1196,7 @@ impl<'a> Parser<'a> {
     /// taint-strip modifier, recognized only when `fn`/`pub` follows (so an
     /// ordinary identifier named `sanitizer` elsewhere is unaffected). The
     /// modifier is now the marker `#Sanitizer` — point the user at it (E0059),
-    /// mirroring `pure` → `#Pure` (E0053).
+    /// mirroring `pure` → `@Pure` (E0053).
     fn foreign_sanitizer_follows(&self) -> bool {
         matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
     }
@@ -1769,21 +1836,44 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// D-MUSTUSE1 / D-MARKERMOVE1 (I7/R3 chokepoint): consume a `@MustUse` /
+    /// retired `@MustUse` prefix already confirmed present by `at_must_use_fn`.
+    /// Teaches E0062 and keeps parsing when the retired `#` spelling is used,
+    /// instead of cascading into an unrelated parse error.
+    fn bump_must_use_marker(&mut self) -> Result<Span, Diagnostic> {
+        let start = self.peek().span;
+        let sigil = self.bump(); // `#` or `@`
+        let (name, name_span) = self.expect_ident("after the marker sigil")?;
+        if matches!(sigil.kind, TokKind::Hash) {
+            self.diags.push(Self::e0062_contract_on_hash(&name, name_span));
+        }
+        Ok(Span::new(start.start, name_span.end))
+    }
+
+    /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: consume a `@Pure` /
+    /// retired `@Pure` prefix already confirmed present by `at_pure_fn`.
+    /// Teaches E0062 when the retired `#` spelling is used.
+    fn bump_pure_marker(&mut self) {
+        let sigil = self.bump(); // `#` or `@`
+        let name_tok = self.bump(); // `Pure`
+        if matches!(sigil.kind, TokKind::Hash) {
+            self.diags.push(Self::e0062_contract_on_hash(
+                Syntax::KW_PURE,
+                Span::new(sigil.span.start, name_tok.span.end),
+            ));
+        }
+    }
+
     pub(super) fn func(&mut self) -> Result<Func, Diagnostic> {
-        // D-MUSTUSE1: `#MustUse fn` / `#MustUse pub fn`.
+        // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn` / `@MustUse pub fn`.
         let (is_must_use, must_use_span) = if self.at_must_use_fn() {
-            let start = self.peek().span;
-            self.bump(); // `#`
-            let (_, name_span) = self.expect_ident("after `#`")?;
-            (true, Some(Span::new(start.start, name_span.end)))
+            (true, Some(self.bump_must_use_marker()?))
         } else {
             (false, None)
         };
-        // S60 (D-CASING1 follow-on): `#Pure fn` / `#Pure pub fn` — consume the
-        // `#Pure` marker (guaranteed by `at_pure_fn` when present).
+        // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn` / `@Pure pub fn`.
         let is_pure = if self.at_pure_fn() {
-            self.bump(); // `#`
-            self.bump(); // `Pure`
+            self.bump_pure_marker();
             true
         } else {
             false
@@ -1799,15 +1889,31 @@ impl<'a> Parser<'a> {
         };
         // D-STATE1: `#State(S) fn …` / `#Transition(From -> To) fn …` typestate
         // markers. Each appears at most once before `fn`; either may precede the
-        // (already-consumed) `#Pure`/`#Sanitizer` slots or follow them.
+        // (already-consumed) `@Pure`/`#Sanitizer` slots or follow them.
         let mut state_requires = None;
         let mut state_transition = None;
         let mut web_marker = None;
+        // D-PREPOST1: `@Pre(cond, "msg")` / `@Post(cond, "msg")` — repeatable,
+        // any order, alongside the typestate/web markers above.
+        let mut pre = Vec::new();
+        let mut post = Vec::new();
         loop {
+            // D-PREPOST1: a stacked marker sequence (`@Pre(…)` / `@Post(…)` /
+            // typestate / web) may have a lexer-inserted `;` between lines —
+            // skip it before checking for the next marker, not just once
+            // after the whole loop (the pre-existing single skip below only
+            // covered the tail, before `fn`/`pub`).
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
             if state_requires.is_none() && self.at_state_fn() {
                 state_requires = Some(self.parse_state_require_marker()?);
             } else if state_transition.is_none() && self.at_transition_fn() {
                 state_transition = Some(self.parse_transition_marker()?);
+            } else if self.at_contract_clause_fn(Syntax::CONTRACT_PRE) {
+                pre.push(self.parse_contract_clause(Syntax::CONTRACT_PRE)?);
+            } else if self.at_contract_clause_fn(Syntax::CONTRACT_POST) {
+                post.push(self.parse_contract_clause(Syntax::CONTRACT_POST)?);
             } else if web_marker.is_none() {
                 if let Some(m) = self.try_parse_web_partition_marker()? {
                     web_marker = Some(m);
@@ -1831,7 +1937,7 @@ impl<'a> Parser<'a> {
         while matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        self.func_with_modifiers_full(
+        let f = self.func_with_modifiers_full(
             is_pure,
             is_sanitizer,
             state_requires,
@@ -1839,7 +1945,39 @@ impl<'a> Parser<'a> {
             web_marker,
             is_must_use,
             must_use_span,
-        )
+        )?;
+        Ok(Func { pre, post, ..f })
+    }
+
+    /// D-PREPOST1: is the cursor at `@Pre(`/`@Post(` (or the retired `#`
+    /// spelling, so `parse_contract_clause` can teach E0062)?
+    fn at_contract_clause_fn(&self, kw: &str) -> bool {
+        matches!(self.peek().kind, TokKind::Hash | TokKind::At)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == kw)
+            && matches!(self.peek3().kind, TokKind::LParen)
+    }
+
+    /// D-PREPOST1: parse `@Pre(cond, "msg")` / `@Post(cond, "msg")`; cursor on
+    /// the sigil. `kw` is `CONTRACT_PRE` or `CONTRACT_POST`.
+    fn parse_contract_clause(&mut self, kw: &str) -> Result<crate::AST::ContractClause, Diagnostic> {
+        let start = self.peek().span;
+        let sigil = self.bump(); // `#` or `@`
+        let (_, name_span) = self.expect_ident("after the marker sigil")?;
+        if matches!(sigil.kind, TokKind::Hash) {
+            self.diags.push(Self::e0062_contract_on_hash(kw, name_span));
+        }
+        self.expect(TokKind::LParen, &format!("after `@{kw}`"))?;
+        let cond = self.expr_no_struct_lit()?;
+        self.expect(TokKind::Comma, &format!("between the condition and message in `@{kw}(…)`"))?;
+        let (message, message_span) = self.expect_marker_name(kw)?;
+        let end = self.peek().span;
+        self.expect(TokKind::RParen, &format!("to close `@{kw}(…)`"))?;
+        Ok(crate::AST::ContractClause {
+            cond,
+            message,
+            message_span,
+            span: Span::new(start.start, end.end),
+        })
     }
 
     /// D-WASM1=A: is the cursor at `#Target(Wasm|Js)`?
@@ -2307,7 +2445,7 @@ impl<'a> Parser<'a> {
         self.func_with_modifiers(is_pure, false)
     }
 
-    /// Parse a function whose `#Pure`/`#Sanitizer` modifiers are already known.
+    /// Parse a function whose `@Pure`/`#Sanitizer` modifiers are already known.
     pub(super) fn func_with_modifiers(
         &mut self,
         is_pure: bool,
@@ -2316,7 +2454,7 @@ impl<'a> Parser<'a> {
         self.func_with_modifiers_full(is_pure, is_sanitizer, None, None, None, false, None)
     }
 
-    /// Parse a function whose `#Pure`/`#Sanitizer` and D-STATE1 typestate markers
+    /// Parse a function whose `@Pure`/`#Sanitizer` and D-STATE1 typestate markers
     /// are already known.
     pub(super) fn func_with_modifiers_full(
         &mut self,
@@ -2455,6 +2593,8 @@ impl<'a> Parser<'a> {
                 web_marker,
                 is_must_use,
                 must_use_span,
+                pre: Vec::new(),
+                post: Vec::new(),
                 body,
             });
         }
@@ -2481,6 +2621,8 @@ impl<'a> Parser<'a> {
             web_marker,
             is_must_use,
             must_use_span,
+            pre: Vec::new(),
+            post: Vec::new(),
             body,
         })
     }
@@ -2703,8 +2845,10 @@ impl<'a> Parser<'a> {
                 continue;
             }
             // D-SERDE5: `#[Rename("x")] who: String` — field-level serde markers.
-            if self.at_marker_list() {
-                let field_markers = self.parse_marker_groups()?;
+            // D-DEBUG-REDACT/D-MARKERMOVE1: `@[Redact] who: String` — contract
+            // plane; stackable with a `#[…]` serde group on the same field.
+            if self.at_marker_list() || self.at_contract_marker_list() {
+                let field_markers = self.parse_field_markers()?;
                 let mut f = self.field()?;
                 let mut redact = false;
                 let mut serde_markers = Vec::new();
@@ -3072,6 +3216,12 @@ impl<'a> Parser<'a> {
         matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
     }
 
+    /// D-MARKER-FAMILY1/G2: true at a `@[ … ]` contract-derive bracket group —
+    /// the `@` sibling of `at_marker_list`.
+    pub(super) fn at_contract_marker_list(&self) -> bool {
+        matches!(self.peek().kind, TokKind::At) && matches!(self.peek2().kind, TokKind::LBracket)
+    }
+
     /// D-ATTR1/D-MARKER-CANON1: a PascalCase `#Marker` immediately before `struct`/`enum`.
     pub(super) fn at_single_type_marker(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::Hash) {
@@ -3084,6 +3234,33 @@ impl<'a> Parser<'a> {
             return false;
         }
         self.type_marker_prefix_leads_to_type_def(self.pos + 2)
+    }
+
+    /// D-MARKER-FAMILY1/G3: a PascalCase `@Marker` immediately before
+    /// `struct`/`enum` — the `@` sibling of `at_single_type_marker` (contract
+    /// derives: Codable, Encode, Decode, Debug, Summarize, Comparable).
+    pub(super) fn at_single_contract_type_marker(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::At) {
+            return false;
+        }
+        let TokKind::Ident(name) = &self.peek2().kind else {
+            return false;
+        };
+        if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_at_item_prefix(name) {
+            return false;
+        }
+        self.type_marker_prefix_leads_to_type_def(self.pos + 2)
+    }
+
+    /// `@` markers that own their own item parser (MustUse/PublishedSchema
+    /// struct dispatch, Numeric distinct-type dispatch) — not bare
+    /// contract-derive prefixes routed through the generic marker-list
+    /// mechanism.
+    fn is_reserved_at_item_prefix(name: &str) -> bool {
+        matches!(
+            name,
+            Syntax::ATTR_MUST_USE | Syntax::ATTR_PUBLISHED_SCHEMA | Syntax::ATTR_NUMERIC
+        )
     }
 
     fn is_pascal_type_marker_name(name: &str) -> bool {
@@ -3123,28 +3300,43 @@ impl<'a> Parser<'a> {
         if i >= self.toks.len() {
             return false;
         }
-        if matches!(self.toks[i].kind, TokKind::LParen) {
-            let mut depth = 0usize;
-            loop {
-                if i >= self.toks.len() {
-                    return false;
-                }
-                match self.toks[i].kind {
-                    TokKind::LParen => depth += 1,
-                    TokKind::RParen => {
-                        depth = depth.saturating_sub(1);
-                        if depth == 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
+        // Skip this marker's own optional `(args)`.
+        i = match Self::skip_balanced_parens(&self.toks, i) {
+            Some(n) => n,
+            None => return false,
+        };
+        // D-MARKER-FAMILY1/G2: a type declaration may carry several stacked
+        // marker prefixes (`@[Codable] #[RenameAll(camel)] struct …`, or
+        // `@MustUse @[Codable] struct …`) — keep skipping marker-shaped
+        // prefixes (bracket groups or lone `#Name`/`@Name(args)?`) until none
+        // remain, then require `pub`? `struct`/`enum`.
+        loop {
+            while i < self.toks.len() && matches!(self.toks[i].kind, TokKind::Semi) {
                 i += 1;
             }
-        }
-        while i < self.toks.len() && matches!(self.toks[i].kind, TokKind::Semi) {
-            i += 1;
+            if i >= self.toks.len() {
+                return false;
+            }
+            let is_marker_sigil = matches!(self.toks[i].kind, TokKind::Hash | TokKind::At);
+            if !is_marker_sigil {
+                break;
+            }
+            match self.toks.get(i + 1).map(|t| &t.kind) {
+                Some(TokKind::LBracket) => {
+                    i = match Self::skip_bracket_group(&self.toks, i + 1) {
+                        Some(n) => n,
+                        None => return false,
+                    };
+                }
+                Some(TokKind::Ident(name)) if Self::is_pascal_type_marker_name(name) => {
+                    i += 2; // `#`/`@` and the ident
+                    i = match Self::skip_balanced_parens(&self.toks, i) {
+                        Some(n) => n,
+                        None => return false,
+                    };
+                }
+                _ => break,
+            }
         }
         if i < self.toks.len() && matches!(self.toks[i].kind, TokKind::KwPub) {
             i += 1;
@@ -3154,6 +3346,56 @@ impl<'a> Parser<'a> {
                 self.toks[i].kind,
                 TokKind::KwStruct | TokKind::KwEnum
             )
+    }
+
+    /// If `toks[i]` is `(`, returns the index just past its matching `)`;
+    /// otherwise returns `i` unchanged. `None` on an unbalanced/unterminated
+    /// paren group.
+    fn skip_balanced_parens(toks: &[Token], mut i: usize) -> Option<usize> {
+        if i >= toks.len() || !matches!(toks[i].kind, TokKind::LParen) {
+            return Some(i);
+        }
+        let mut depth = 0usize;
+        loop {
+            if i >= toks.len() {
+                return None;
+            }
+            match toks[i].kind {
+                TokKind::LParen => depth += 1,
+                TokKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(i + 1);
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    /// `toks[i]` is the `[` opening a `#[…]`/`@[…]` marker-bracket group;
+    /// returns the index just past its matching `]`, or `None` if
+    /// unterminated.
+    fn skip_bracket_group(toks: &[Token], mut i: usize) -> Option<usize> {
+        debug_assert!(matches!(toks[i].kind, TokKind::LBracket));
+        let mut depth = 0usize;
+        loop {
+            if i >= toks.len() {
+                return None;
+            }
+            match toks[i].kind {
+                TokKind::LBracket => depth += 1,
+                TokKind::RBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(i + 1);
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
     }
 
     /// Parse one marker name and optional `(args)`; cursor sits on the name.
@@ -3188,7 +3430,9 @@ impl<'a> Parser<'a> {
         self.bump(); // `[`
         let mut group = Vec::new();
         loop {
-            group.push(self.parse_one_marker()?);
+            let m = self.parse_one_marker()?;
+            self.check_marker_plane(&m, false);
+            group.push(m);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
             } else {
@@ -3200,6 +3444,76 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         Ok(group)
+    }
+
+    /// D-MARKER-FAMILY1/G2: parse one `@[ Name (, …)* ]` contract-derive
+    /// group; cursor on `@`. The `@` sibling of `parse_marker_bracket_group`.
+    fn parse_contract_marker_bracket_group(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        self.bump(); // `@`
+        self.bump(); // `[`
+        let mut group = Vec::new();
+        loop {
+            let m = self.parse_one_marker()?;
+            self.check_marker_plane(&m, true);
+            group.push(m);
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::RBracket, "to close a `@[…]` marker list")?;
+        while matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        Ok(group)
+    }
+
+    /// D-MARKER-FAMILY1 (I7/R3 chokepoint): after parsing a marker name in a
+    /// bracket/single-marker group, check it landed on the plane its sigil
+    /// implies. `on_at` is true when the enclosing group opened with `@`. A
+    /// moved contract marker (§2a/§2b/G3) written after `#` is E0062; a
+    /// directive name written after `@` is E0063. Any other name (a user
+    /// derive on `#`, or an unrecognized `@` name) is left for downstream —
+    /// derive resolution, or the generic `@` teaching error — to judge.
+    fn check_marker_plane(&mut self, marker: &Marker, on_at: bool) {
+        if on_at {
+            if Syntax::is_directive_marker(&marker.name) {
+                self.diags
+                    .push(Self::e0063_directive_on_at(&marker.name, marker.name_span));
+            }
+        } else if Syntax::is_contract_marker(&marker.name) {
+            self.diags
+                .push(Self::e0062_contract_on_hash(&marker.name, marker.name_span));
+        }
+    }
+
+    /// E0062: a contract marker (moved to `@` by D-MARKERMOVE1/2/3) was
+    /// written with `#`. `name` is the marker's bare name (no sigil).
+    pub(super) fn e0062_contract_on_hash(name: &str, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0062",
+            format!("`#{name}` states a contract — write it with `@`, not `#`"),
+            "`@` marks a promise about the declaration below it (`@Pure`, `@MustUse`, \
+             `@Codable`); `#` is for compiler directives (`#Unsafe`, `#Test`). One glance \
+             at the first character tells a reader which it is (D-MARKER-FAMILY1)."
+                .to_string(),
+            format!("write `@{name}` (`@` + the same PascalCase name)."),
+            Some(span),
+        )
+    }
+
+    /// E0063: a directive marker (stays on `#`) was written with `@`.
+    pub(super) fn e0063_directive_on_at(name: &str, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0063",
+            format!("`@{name}` is a compiler directive — write it with `#`, not `@`"),
+            "`#` changes what compiles or runs (`#Test`, `#Unsafe`, `#Caps`); `@` is \
+             reserved for contracts stated on the declaration below (D-MARKER-FAMILY1)."
+                .to_string(),
+            format!("write `#{name}` instead of `@{name}`."),
+            Some(span),
+        )
     }
 
     /// D-ATTR2 / D-SERDE2–8: parse `#[ … ]` bracket-marker groups. A second
@@ -3214,7 +3528,7 @@ impl<'a> Parser<'a> {
                     "E0999",
                     "multiple `#[…]` marker lines belong in one comma-separated list".to_string(),
                     "Jet attaches every marker on a type in a single `#[A, B]` group (D-ATTR2); one marker alone is `#A`".to_string(),
-                    "merge them: `#[Summarize, Debug] struct …`, or use `#Summarize` when there is only one".to_string(),
+                    "merge them: `#[RenameAll(camel), Skip]`, or use `#RenameAll(camel)` when there is only one".to_string(),
                     Some(self.peek().span),
                 ));
             }
@@ -3223,15 +3537,72 @@ impl<'a> Parser<'a> {
         Ok(out)
     }
 
+    /// D-MARKER-FAMILY1/G2: parse `@[ … ]` contract-marker bracket groups. A
+    /// second consecutive `@[ … ]` line is E0999 (same rule, same plane only
+    /// — a `@[…]` group and a `#[…]` group may stack on one declaration, so
+    /// this never fires across planes).
+    fn parse_contract_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        let mut out = Vec::new();
+        let mut groups = 0usize;
+        while self.at_contract_marker_list() {
+            groups += 1;
+            if groups > 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0999",
+                    "multiple `@[…]` marker lines belong in one comma-separated list".to_string(),
+                    "Jet attaches every contract marker on a declaration in a single `@[A, B]` group (D-MARKER-FAMILY1); one marker alone is `@A`".to_string(),
+                    "merge them: `@[Codable, Debug]`, or use `@Codable` when there is only one".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+            out.extend(self.parse_contract_marker_bracket_group()?);
+        }
+        Ok(out)
+    }
+
     /// D-ATTR1: parse a lone `#Marker` (or `#Marker(args)`) before `struct`/`enum`.
     fn parse_single_type_prefix_marker(&mut self) -> Result<Marker, Diagnostic> {
         self.bump(); // `#`
-        self.parse_one_marker()
+        let m = self.parse_one_marker()?;
+        self.check_marker_plane(&m, false);
+        Ok(m)
+    }
+
+    /// D-MARKER-FAMILY1/G3: parse a lone `@Marker` (or `@Marker(args)`) before
+    /// `struct`/`enum` — the `@` sibling of `parse_single_type_prefix_marker`.
+    fn parse_single_contract_type_marker(&mut self) -> Result<Marker, Diagnostic> {
+        self.bump(); // `@`
+        let m = self.parse_one_marker()?;
+        self.check_marker_plane(&m, true);
+        Ok(m)
+    }
+
+    /// D-MARKER-FAMILY1/G2: parse leading `@[…]` contract-marker groups
+    /// and/or `#[…]` directive+serde-marker groups before a struct/enum
+    /// field, both optional and stackable (e.g. `@[Redact] #[Rename("x")]`).
+    /// Used at field position, which only ever supports the bracket form
+    /// (no bare `@Redact`/`#Rename` without brackets).
+    fn parse_field_markers(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        let mut out = Vec::new();
+        loop {
+            if self.at_contract_marker_list() {
+                out.extend(self.parse_contract_marker_groups()?);
+            } else if self.at_marker_list() {
+                out.extend(self.parse_marker_groups()?);
+            } else {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     /// Split parsed markers on a struct/enum: derive-trait markers
-    /// (`Codable`→`Encode`+`Decode`, `Encode`, `Decode`, `Comparable`, user traits)
-    /// are pushed onto `derives`; serde *attribute* markers are returned raw for sema.
+    /// (`Codable`→`Encode`+`Decode`, `Encode`, `Decode`, `Debug`, `Summarize`,
+    /// `Comparable`, user traits) are pushed onto `derives`; serde *attribute*
+    /// markers are returned raw for sema. Markers arrive already validated for
+    /// plane (E0062/E0063 pushed by the caller if misplaced, D-MARKER-FAMILY1)
+    /// — this only classifies what job each name does, independent of which
+    /// sigil it came from.
     fn split_type_markers(markers: Vec<Marker>, derives: &mut Vec<(String, Span)>) -> Vec<Marker> {
         let mut serde = Vec::new();
         for m in markers {
@@ -3250,7 +3621,9 @@ impl<'a> Parser<'a> {
                 | Syntax::ATTR_SKIP
                 | Syntax::ATTR_DEFAULT
                 | Syntax::ATTR_FLATTEN => serde.push(m),
-                // Any other name is a derive-trait (D-ATTR2: `#[Comparable]`, user traits).
+                // Any other name is a derive-trait: the D-MARKERMOVE3 built-ins
+                // (`@[Debug]`, `@[Summarize]`, `@[Comparable]`) or a `#[…]` user
+                // derive-trait name.
                 _ => derives.push((m.name.clone(), m.name_span)),
             }
         }
@@ -3294,7 +3667,7 @@ impl<'a> Parser<'a> {
             {
                 self.layout_struct_def(is_pub).map(Item::Struct)
             }
-            TokKind::Hash
+            TokKind::Hash | TokKind::At
                 if matches!(
                     &self.peek2().kind,
                     TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA
@@ -3308,27 +3681,43 @@ impl<'a> Parser<'a> {
                     "type markers must sit before a struct or enum, found {}",
                     describe(other)
                 ),
-                "derive markers like `#Codable` / `#[Codable]` and serde attributes attach to a type"
+                "derive markers like `@Codable` / `@[Codable]` and serde attributes attach to a type"
                     .to_string(),
-                "write `#Codable struct Name { … }` or `#[Codable, RenameAll(camel)] struct …`"
+                "write `@Codable struct Name { … }` or `@[Codable] #[RenameAll(camel)] struct …`"
                     .to_string(),
                 Some(self.peek().span),
             )),
         }
     }
 
-    /// D-ATTR1: `#Marker [pub] (struct|enum) …` — one marker, no brackets.
-    pub(super) fn type_def_with_single_marker(&mut self) -> Result<Item, Diagnostic> {
-        let marker = self.parse_single_type_prefix_marker()?;
-        let item = self.parse_type_after_markers()?;
-        Ok(Self::attach_type_markers(vec![marker], item))
-    }
-
-    /// D-ATTR2: `#[markers] [pub] [#layout|#PublishedSchema] (struct|enum) …`.
-    /// Parses the leading bracket markers, then the type that follows, and attaches
-    /// derives + raw serde markers to it.
-    pub(super) fn type_def_with_markers(&mut self) -> Result<Item, Diagnostic> {
-        let markers = self.parse_marker_groups()?;
+    /// D-MARKER-FAMILY1/G2: parse leading `@[…]`/`@Name` contract markers
+    /// and/or `#[…]`/`#Name` directive+serde markers, in either order, both
+    /// optional, both stackable on one declaration (E0999 only fires for two
+    /// groups on the SAME plane — a `@[…]` group and a `#[…]` group may
+    /// stack). Then parses the struct/enum they attach to. Single dispatch
+    /// entry point for both sigils at type-marker position (Items.rs top
+    /// match, Modules.rs inline-module body).
+    pub(super) fn type_def_with_any_markers(&mut self) -> Result<Item, Diagnostic> {
+        let mut markers = Vec::new();
+        loop {
+            // A marker line may end with an auto-inserted/explicit `;` before
+            // the next stacked marker line or the `struct`/`enum` (G2 — both
+            // `@[…]` and `#[…]` groups, or lone forms, may stack).
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            if self.at_contract_marker_list() {
+                markers.extend(self.parse_contract_marker_groups()?);
+            } else if self.at_single_contract_type_marker() {
+                markers.push(self.parse_single_contract_type_marker()?);
+            } else if self.at_marker_list() {
+                markers.extend(self.parse_marker_groups()?);
+            } else if self.at_single_type_marker() {
+                markers.push(self.parse_single_type_prefix_marker()?);
+            } else {
+                break;
+            }
+        }
         let item = self.parse_type_after_markers()?;
         Ok(Self::attach_type_markers(markers, item))
     }
@@ -3361,11 +3750,10 @@ impl<'a> Parser<'a> {
                     continue;
                 }
             }
-            // D-EFF3: a trait method may carry a `#Pure` prefix declaring the
-            // empty effect set as its upper bound.
+            // D-EFF3 / D-MARKERMOVE2: a trait method may carry a `@Pure` prefix
+            // declaring the empty effect set as its upper bound.
             let is_pure = if self.at_pure_fn() {
-                self.bump(); // `#`
-                self.bump(); // `Pure`
+                self.bump_pure_marker();
                 true
             } else {
                 false
@@ -3407,8 +3795,7 @@ impl<'a> Parser<'a> {
                 // A `tag` carries no methods. We still parse a stray `fn …` so the
                 // parser recovers cleanly; sema flags it as E0732.
                 let is_pure = if self.at_pure_fn() {
-                    self.bump();
-                    self.bump();
+                    self.bump_pure_marker();
                     true
                 } else {
                     false
@@ -3486,18 +3873,14 @@ impl<'a> Parser<'a> {
     /// S27: method inside a type body or `impl` block.
     fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
         let (is_must_use, must_use_span) = if self.at_must_use_fn() {
-            let start = self.peek().span;
-            self.bump(); // `#`
-            let (_, name_span) = self.expect_ident("after `#`")?;
-            (true, Some(Span::new(start.start, name_span.end)))
+            (true, Some(self.bump_must_use_marker()?))
         } else {
             (false, None)
         };
-        // S60 (D-CASING1 follow-on): allow `#Pure fn` on methods too; the marker
-        // precedes `pub`.
+        // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: allow `@Pure fn` on methods
+        // too; the marker precedes `pub`.
         let is_pure = if self.at_pure_fn() {
-            self.bump(); // `#`
-            self.bump(); // `Pure`
+            self.bump_pure_marker();
             true
         } else if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PURE)
             && self.foreign_pure_follows()
@@ -3629,7 +4012,30 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-PERSIST1: true at `@Persist` immediately before `const`/`#` (module
+    /// top level only — this predicate is never consulted by the statement
+    /// parser, so a local binding's `@Persist` falls through to the E0145
+    /// teaching diagnostic in `Statements.rs` instead).
+    fn at_persist_const(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::At)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
+    }
+
     pub(super) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        // D-PERSIST1: optional `@Persist` (retired `#Persist` teaches E0062).
+        let (is_persist, persist_span) = if matches!(&self.peek().kind, TokKind::At | TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
+        {
+            let sigil = self.bump(); // `#` or `@`
+            let name_tok = self.bump(); // `Persist`
+            let span = Span::new(sigil.span.start, name_tok.span.end);
+            if matches!(sigil.kind, TokKind::Hash) {
+                self.diags.push(Self::e0062_contract_on_hash(Syntax::CONTRACT_PERSIST, span));
+            }
+            (true, Some(span))
+        } else {
+            (false, None)
+        };
         let mut attrs = Vec::new();
         while matches!(self.peek().kind, TokKind::Hash) {
             self.bump();
@@ -3662,6 +4068,8 @@ impl<'a> Parser<'a> {
             rust_kind: crate::AST::RustConstKind::Const,
             is_comptime: false,
             ct: None,
+            is_persist,
+            persist_span,
         })
     }
 
@@ -3705,6 +4113,8 @@ impl<'a> Parser<'a> {
             rust_kind: crate::AST::RustConstKind::Const,
             is_comptime: true,
             ct: None,
+            is_persist: false,
+            persist_span: None,
         })
     }
 
@@ -3722,49 +4132,116 @@ impl<'a> Parser<'a> {
             && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
     }
 
-    /// D-DIST3 (ratified 2026-06-20): true when `#Numeric Name #= distinct` is at
-    /// the cursor — the `#Numeric` marker followed by a distinct type declaration.
-    /// Also accepts retired `#=` / `@=` forms (for E0991 teaching error).
-    fn at_numeric_distinct_def(&self) -> bool {
-        if !matches!(&self.peek().kind, TokKind::Hash) {
-            return false;
-        }
-        // peek2 = Numeric, peek3 = name, peek4 = #= (or retired sigil), peek5 = distinct
-        let peek4 = &self.toks[(self.pos + 3).min(self.toks.len() - 1)].kind;
-        let peek5 = &self.toks[(self.pos + 4).min(self.toks.len() - 1)].kind;
-        matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NUMERIC)
-            && matches!(&self.peek3().kind, TokKind::Ident(_))
-            && matches!(peek4, TokKind::HashEq | TokKind::AtEq | TokKind::ColonColon)
-            && matches!(peek5, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
+    /// D-CAPBUNDLE1: is `name` one of the four capability-bundle marker names
+    /// (`@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase`) that may
+    /// stack before a `distinct` type declaration?
+    fn is_capability_bundle_marker(name: &str) -> bool {
+        name == Syntax::ATTR_NUMERIC
+            || name == Syntax::CONTRACT_BUNDLE_COMPARABLE
+            || name == Syntax::CONTRACT_BUNDLE_PRINTABLE
+            || name == Syntax::CONTRACT_BUNDLE_CODABLE_AS_BASE
     }
 
-    /// D-DIST1/D-DIST3: parse `[#Numeric] Name #= distinct BaseType`.
+    /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified 2026-06-20 /
+    /// 2026-07-01): true when a stack of one or more capability-bundle
+    /// markers (`@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase`,
+    /// any order, retired `#` spelling included so `distinct_def` can teach
+    /// E0062) precedes `Name #= distinct` at the cursor. The `@Numeric`-only
+    /// sibling of the old `at_numeric_distinct_def` predicate, generalized to
+    /// the four fixed bundles.
+    fn at_bundle_distinct_def(&self) -> bool {
+        let mut i = self.pos;
+        let mut saw_marker = false;
+        loop {
+            match self.toks.get(i).map(|t| &t.kind) {
+                Some(TokKind::Hash) | Some(TokKind::At) => {
+                    match self.toks.get(i + 1).map(|t| &t.kind) {
+                        Some(TokKind::Ident(n)) if Self::is_capability_bundle_marker(n) => {
+                            saw_marker = true;
+                            i += 2;
+                        }
+                        _ => break,
+                    }
+                }
+                _ => break,
+            }
+        }
+        if !saw_marker {
+            return false;
+        }
+        matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_)))
+            && matches!(
+                self.toks.get(i + 1).map(|t| &t.kind),
+                Some(TokKind::HashEq) | Some(TokKind::AtEq) | Some(TokKind::ColonColon)
+            )
+            && matches!(
+                self.toks.get(i + 2).map(|t| &t.kind),
+                Some(TokKind::Ident(n)) if n == Syntax::KW_DISTINCT
+            )
+    }
+
+    /// D-DIST1/D-DIST3/D-CAPBUNDLE1/D-MARKERMOVE1: parse
+    /// `[@Numeric] [@Comparable] [@Printable] [@CodableAsBase] Name #= distinct BaseType`
+    /// — a stack of zero or more capability-bundle markers, any order.
     pub(super) fn distinct_def(
         &mut self,
         is_pub: bool,
         is_package_pub: bool,
     ) -> Result<crate::AST::DistinctDef, Diagnostic> {
         let start = self.peek().span;
-        // optional `#Numeric` attribute
-        let is_numeric = if matches!(&self.peek().kind, TokKind::Hash) {
-            self.bump(); // consume `#`
-            let (attr, _) = self.expect_ident("after `#`")?;
-            if attr != Syntax::ATTR_NUMERIC {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    format!(
-                        "`#{}` isn't a valid attribute on a distinct type declaration",
-                        attr
-                    ),
-                    "only `#Numeric` is supported before a distinct type".to_string(),
-                    "write `#Numeric` before the declaration, or remove the attribute".to_string(),
-                    Some(self.peek().span),
-                ));
+        // D-CAPBUNDLE1: zero or more stacked bundle markers (retired `#`
+        // spelling on any of them teaches E0062).
+        let mut is_numeric = false;
+        let mut is_comparable = false;
+        let mut comparable_span = None;
+        let mut is_printable = false;
+        let mut printable_span = None;
+        let mut is_codable_as_base = false;
+        let mut codable_as_base_span = None;
+        while matches!(&self.peek().kind, TokKind::Hash | TokKind::At)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if Self::is_capability_bundle_marker(n))
+        {
+            let sigil = self.bump(); // consume `#` or `@`
+            let (attr, attr_span) = self.expect_ident("after the marker sigil")?;
+            if matches!(sigil.kind, TokKind::Hash) {
+                self.diags.push(Self::e0062_contract_on_hash(&attr, attr_span));
             }
-            true
-        } else {
-            false
-        };
+            if attr == Syntax::ATTR_NUMERIC {
+                is_numeric = true;
+            } else if attr == Syntax::CONTRACT_BUNDLE_COMPARABLE {
+                is_comparable = true;
+                comparable_span = Some(attr_span);
+            } else if attr == Syntax::CONTRACT_BUNDLE_PRINTABLE {
+                is_printable = true;
+                printable_span = Some(attr_span);
+            } else if attr == Syntax::CONTRACT_BUNDLE_CODABLE_AS_BASE {
+                is_codable_as_base = true;
+                codable_as_base_span = Some(attr_span);
+            }
+        }
+        // A `#`/`@` here that isn't one of the four bundle markers is a
+        // mistake — teach the closed set instead of falling through to a
+        // confusing "expected a name" error.
+        if matches!(&self.peek().kind, TokKind::Hash | TokKind::At) {
+            let sigil = self.peek().kind.clone();
+            let attr_span = self.peek2().span;
+            let attr = if let TokKind::Ident(n) = &self.peek2().kind {
+                n.clone()
+            } else {
+                String::new()
+            };
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "`{}{}` isn't a valid attribute on a distinct type declaration",
+                    if matches!(sigil, TokKind::At) { "@" } else { "#" },
+                    attr
+                ),
+                "only the four capability bundles — `@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase` — are supported before a distinct type".to_string(),
+                "use one of the four capability bundles, or remove the attribute".to_string(),
+                Some(attr_span),
+            ));
+        }
         let (name, name_span) = self.expect_ident("as the distinct type name")?;
         // D-BIND3: accept `#=` or retired `#=` / `@=` (E0991 teaching error).
         match self.peek().kind {
@@ -3851,18 +4328,67 @@ impl<'a> Parser<'a> {
         }
         let (base, base_ty_span) = self.type_()?;
         let base_span = base_ty_span;
+        // D-RANGETYPE1: an optional literal range constraint right after the
+        // base type — `distinct Int(0..10)`. `..` is inclusive (S22).
+        let range = if matches!(self.peek().kind, TokKind::LParen) {
+            let open = self.bump().span;
+            let (lo, lo_span) = self.expect_range_bound_int("as the range's lower bound")?;
+            self.expect(TokKind::DotDot, "between the range's bounds")?;
+            let (hi, hi_span) = self.expect_range_bound_int("as the range's upper bound")?;
+            let close = self.peek().span;
+            self.expect(TokKind::RParen, "to close the range constraint")?;
+            let range_span = Span::new(open.start, close.end);
+            if lo > hi {
+                self.diags.push(Diagnostic::error(
+                    "E0137",
+                    format!("this range is empty — {} is after {}", lo, hi),
+                    "a range's low bound must not be greater than its high bound".to_string(),
+                    format!("write `{}..{}` (swap the bounds), or fix the values", hi, lo),
+                    Some(Span::new(lo_span.start, hi_span.end)),
+                ));
+            }
+            Some((lo, hi, range_span))
+        } else {
+            None
+        };
         self.expect(TokKind::Semi, "after a distinct type declaration")?;
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::AST::DistinctDef {
             is_pub,
             is_package_pub,
             is_numeric,
+            is_comparable,
+            comparable_span,
+            is_printable,
+            printable_span,
+            is_codable_as_base,
+            codable_as_base_span,
             name,
             name_span,
             base,
             base_span,
+            range,
             span: Span::new(start.start, end),
         })
+    }
+
+    /// D-RANGETYPE1: a plain (non-negative — S34 doesn't lex a leading `-` into
+    /// the literal) integer literal used as one bound of a `distinct
+    /// Base(lo..hi)` range constraint.
+    fn expect_range_bound_int(&mut self, where_: &str) -> Result<(i64, Span), Diagnostic> {
+        match self.peek().kind {
+            TokKind::Int(n) => {
+                let span = self.bump().span;
+                Ok((n, span))
+            }
+            _ => Err(Diagnostic::error(
+                "E0003",
+                format!("expected a whole number {}, found {}", where_, describe(&self.peek().kind)),
+                "a range constraint's bounds are literal whole numbers".to_string(),
+                "write a plain integer, e.g. `0..10`".to_string(),
+                Some(self.peek().span),
+            )),
+        }
     }
 
     /// D-TYPEALIAS1: `alias Name<T, E> = T ? E;`
@@ -3901,7 +4427,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-QUAL3: parse `#UnitFamily(family) { m1, m2, … }`. Each member mints a
-    /// `#Numeric` distinct type erasing to `Float` (lowered in sema/codegen).
+    /// `@Numeric` distinct type erasing to `Float` (lowered in sema/codegen).
     pub(super) fn unit_family_def(
         &mut self,
         is_pub: bool,
@@ -4025,13 +4551,15 @@ impl<'a> Parser<'a> {
 
     // --- published-schema marker + migration blocks (D-MIGRATE1) -----------
 
-    /// D-MIGRATE1 (ratified 2026-06-22): true when `#PublishedSchema struct` or
-    /// `#PublishedSchema pub struct` is at the cursor.
+    /// D-MIGRATE1 / D-MARKERMOVE1 (ratified 2026-06-22 / 2026-07-01): true when
+    /// `@PublishedSchema struct` or `@PublishedSchema pub struct` is at the
+    /// cursor. Also matches the retired `@PublishedSchema` spelling so
+    /// `published_schema_struct_def` can teach E0062.
     /// Note: the lexer inserts a `Semi` after an identifier at end-of-line, so the
-    /// token stream is `# PublishedSchema [Semi] struct` — we check peek4 (pos+3)
+    /// token stream is `@ PublishedSchema [Semi] struct` — we check peek4 (pos+3)
     /// when peek3 is a `Semi`, or peek3 when the marker is on the same line.
     fn at_published_schema_struct(&self) -> bool {
-        if !matches!(&self.peek().kind, TokKind::Hash) {
+        if !matches!(&self.peek().kind, TokKind::Hash | TokKind::At) {
             return false;
         }
         if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) {
@@ -4114,9 +4642,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): true when `#MustUse struct` / `#MustUse enum` is at the cursor.
+    /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when `@MustUse struct` /
+    /// `@MustUse enum` is at the cursor. Also matches the retired `@MustUse`
+    /// spelling so `must_use_type_def` can teach E0062.
     fn at_must_use_type(&self) -> bool {
-        if !matches!(&self.peek().kind, TokKind::Hash) {
+        if !matches!(&self.peek().kind, TokKind::Hash | TokKind::At) {
             return false;
         }
         if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE) {
@@ -4133,13 +4663,16 @@ impl<'a> Parser<'a> {
         false
     }
 
-    /// D-MUSTUSE1: parse `#MustUse [pub] (struct|enum) Name { … }`.
+    /// D-MUSTUSE1/D-MARKERMOVE1: parse `@MustUse [pub] (struct|enum) Name { … }`.
     fn must_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
         let attr_start = self.peek().span;
-        self.bump(); // consume `#`
-        let (attr, attr_name_span) = self.expect_ident("after `#`")?;
+        let sigil = self.bump(); // consume `#` or `@`
+        let (attr, attr_name_span) = self.expect_ident("after the marker sigil")?;
         debug_assert_eq!(attr, Syntax::ATTR_MUST_USE);
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
+        if matches!(sigil.kind, TokKind::Hash) {
+            self.diags.push(Self::e0062_contract_on_hash(&attr, attr_name_span));
+        }
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
@@ -4162,9 +4695,9 @@ impl<'a> Parser<'a> {
             }
             _ => Err(Diagnostic::error(
                 "E0003",
-                "`#MustUse` marks a `struct` or `enum`".to_string(),
+                "`@MustUse` marks a `struct` or `enum`".to_string(),
                 "the marker says values of this type must not be silently ignored — only a type can carry that rule".to_string(),
-                "write `#MustUse struct Name { … }` or `#MustUse enum Name { … }`".to_string(),
+                "write `@MustUse struct Name { … }` or `@MustUse enum Name { … }`".to_string(),
                 Some(attr_span),
             )),
         }
@@ -4177,25 +4710,31 @@ impl<'a> Parser<'a> {
             && matches!(&self.peek3().kind, TokKind::LBrace)
     }
 
-    /// D-MIGRATE1 (ratified 2026-06-22): parse `#PublishedSchema [pub] struct Name { … }`.
+    /// D-MIGRATE1/D-MARKERMOVE1 (ratified 2026-06-22 / 2026-07-01): parse
+    /// `@PublishedSchema [pub] struct Name { … }`. The retired `@PublishedSchema`
+    /// spelling teaches E0062.
     fn published_schema_struct_def(
         &mut self,
         outer_is_pub: bool,
     ) -> Result<crate::AST::StructDef, Diagnostic> {
         let attr_start = self.peek().span;
-        self.bump(); // consume `#`
-        let (attr, attr_name_span) = self.expect_ident("after `#`")?;
+        let sigil = self.bump(); // consume `#` or `@`
+        let (attr, attr_name_span) = self.expect_ident("after the marker sigil")?;
         if attr != Syntax::ATTR_PUBLISHED_SCHEMA {
             return Err(Diagnostic::error(
                 "E0003",
                 format!(
-                    "`#{}` isn't a valid attribute on a struct declaration",
+                    "`{}{}` isn't a valid attribute on a struct declaration",
+                    if matches!(sigil.kind, TokKind::At) { "@" } else { "#" },
                     attr
                 ),
-                "only `#PublishedSchema` is supported here".to_string(),
-                "write `#PublishedSchema` before the struct".to_string(),
+                "only `@PublishedSchema` is supported here".to_string(),
+                "write `@PublishedSchema` before the struct".to_string(),
                 Some(attr_name_span),
             ));
+        }
+        if matches!(sigil.kind, TokKind::Hash) {
+            self.diags.push(Self::e0062_contract_on_hash(&attr, attr_name_span));
         }
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         // The lexer may insert a `Semi` after the marker identifier when `struct` is
@@ -4242,8 +4781,10 @@ impl<'a> Parser<'a> {
                 continue;
             }
             // D-SERDE5: `#[Rename("x")] who: String` — field-level serde markers.
-            if self.at_marker_list() {
-                let field_markers = self.parse_marker_groups()?;
+            // D-DEBUG-REDACT/D-MARKERMOVE1: `@[Redact] who: String` — contract
+            // plane; stackable with a `#[…]` serde group on the same field.
+            if self.at_marker_list() || self.at_contract_marker_list() {
+                let field_markers = self.parse_field_markers()?;
                 let mut f = self.field()?;
                 let mut redact = false;
                 let mut serde_markers = Vec::new();
@@ -4422,7 +4963,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0911",
                         "`reorder` isn't a migration verb — field order isn't a breaking change".to_string(),
-                        "a `#PublishedSchema` record is keyed by field name, so reordering fields is safe and needs no migration".to_string(),
+                        "a `@PublishedSchema` record is keyed by field name, so reordering fields is safe and needs no migration".to_string(),
                         "delete the `reorder` line; just write the fields in the order you want".to_string(),
                         Some(op_tok.span),
                     ));

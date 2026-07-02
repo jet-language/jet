@@ -4,14 +4,14 @@
 //! ambient power its body exercises (network, filesystem, clock, …). The set is
 //! inferred per-function, propagated along the call graph (Koka-style rows), and
 //! **fully erased in codegen** (I3): effects are a compile-time proof with no
-//! runtime value, handler, or monad. A `#Pure fn` is the function whose inferred
+//! runtime value, handler, or monad. A `@Pure fn` is the function whose inferred
 //! set is empty (the ⊥ of the lattice).
 //!
 //! This module owns the effect vocabulary, the per-function summary the checker
 //! accumulates during its walk, the whole-program fixpoint that turns those
 //! summaries into transitive inferred sets, and the boundary diagnostics
 //! (E0740 out-of-set against a declared `#(…)` bound; E0745 a non-empty bound on
-//! a `#Pure fn`). Casing is PascalCase per D-CASING1.
+//! a `@Pure fn`). Casing is PascalCase per D-CASING1.
 //!
 //! D-WASM1=A amends D-EFF4 with `Browser` — DOM / browser API use (c123).
 
@@ -139,8 +139,8 @@ impl<'a> super::Checker<'a> {
     /// D-EFF2 (callback param bound): record an obligation that the callback just
     /// walked (whose effect contribution is the delta of `fx_direct`/`fx_edges`/
     /// `fx_maximal` between `before` and now) satisfies the parameter's declared
-    /// bound. `bound_names` is the raw `#Pure`/`#(…)` list off the parameter type
-    /// (empty = `#Pure`); names are validated here (E0119) and the obligation is
+    /// bound. `bound_names` is the raw `@Pure`/`#(…)` list off the parameter type
+    /// (empty = `@Pure`); names are validated here (E0119) and the obligation is
     /// checked against the resolved callback effects in the post-pass (E0747).
     pub(crate) fn record_callback_obligation(
         &mut self,
@@ -202,7 +202,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
     // the resulting handle (`clock.now()` / `rng.int(…)`) is a method call on a
     // value, not a module call, so it never reaches `core_effect`. This lets a
-    // `#Pure fn` take and use an injected `Clock`/`Rng` while ambient `time.now()`
+    // `@Pure fn` take and use an injected `Clock`/`Rng` while ambient `time.now()`
     // / `random.int(…)` stay rejected (E3403).
     // D-DET-CAPAPI: `time.ms`/`time.secs` mint a `Duration` from a pure Int — a
     // deterministic value constructor, so (like `time.clock`) it carries no effect.
@@ -283,7 +283,7 @@ pub struct EffectSummary {
     pub regions: Vec<RegionSummary>,
     /// D-EFF2 (callback param bound): obligations recorded at each call to a
     /// higher-order fn whose function-typed parameter carries an effect bound
-    /// (`#Pure fn(…)` / `#(E) fn(…)`). Checked against the actual callback's
+    /// (`@Pure fn(…)` / `#(E) fn(…)`). Checked against the actual callback's
     /// resolved effects in the post-pass — E0747.
     pub callback_obligations: Vec<CallbackObligation>,
 }
@@ -297,7 +297,7 @@ pub struct SemIndexEffectFacts {
 }
 
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed
-/// to a `#Pure fn(…)` / `#(E) fn(…)` parameter satisfies the declared bound. The
+/// to a `@Pure fn(…)` / `#(E) fn(…)` parameter satisfies the declared bound. The
 /// callback's own effect contribution is captured as the delta of the function's
 /// effect accumulator across the argument walk (its direct effects, its
 /// call-graph edges, and whether it forced the maximal set). Edges are resolved
@@ -396,7 +396,7 @@ pub fn solve(summaries: &HashMap<String, EffectSummary>) -> HashMap<String, Effe
 ///
 /// - `f` must be a parameter of this function whose type is a function type
 ///   (`Type::Fn`), else E0748.
-/// - `f`'s declared bound (`#Pure` → empty, `#(E)` → that set) is the pass-through
+/// - `f`'s declared bound (`@Pure` → empty, `#(E)` → that set) is the pass-through
 ///   set. An **unbounded** callback param (`f: fn(T)`) publishes the maximal set
 ///   (sound: an unconstrained callback may do anything).
 /// - `#(via f)` and a `#(…)` effect list are mutually exclusive at parse time, so
@@ -531,13 +531,13 @@ pub fn check_callback_bounds(
 }
 
 /// E0747 (D-EFF2): a callback argument carries an effect the parameter's bound
-/// doesn't allow — a `#Pure fn(…)` parameter handed an impure callback, or a
+/// doesn't allow — a `@Pure fn(…)` parameter handed an impure callback, or a
 /// `#(E) fn(…)` parameter handed one that reaches an effect outside `E`.
 pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
         format!(
-            "the parameter is `#{} fn(…)`, so the callback must be pure",
+            "the parameter is `@{} fn(…)`, so the callback must be pure",
             crate::Syntax::KW_PURE
         )
     } else {
@@ -548,7 +548,7 @@ pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
     };
     let fix = if bound.is_empty() {
         format!(
-            "pass a `#{} fn` (or a lambda that uses no effects), or widen the parameter's bound",
+            "pass a `@{} fn` (or a lambda that uses no effects), or widen the parameter's bound",
             crate::Syntax::KW_PURE
         )
     } else {
@@ -733,6 +733,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
@@ -820,6 +821,9 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::Binary(_, l, r, _) => {
             expr_handle_escape(l, handle).or_else(|| expr_handle_escape(r, handle))
         }
+        Expr::CompareChain { operands, .. } => {
+            operands.iter().find_map(|e| expr_handle_escape(e, handle))
+        }
         Expr::Call(c) => c.args.iter().find_map(|a| expr_handle_escape(&a.expr, handle)),
         Expr::CallValue { callee, args, .. } => expr_handle_escape(callee, handle)
             .or_else(|| args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))),
@@ -886,6 +890,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. } => None,
         Expr::Paren(inner, _) => expr_handle_escape(inner, handle),
         Expr::Spread(inner, _) => expr_handle_escape(inner, handle),
@@ -952,7 +957,7 @@ pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
 }
 
 /// E0742 (D-EFF3): an impl of a trait method uses effects beyond the upper
-/// bound the trait method declares (`#Pure fn …` / `fn … #(Gpu)`).
+/// bound the trait method declares (`@Pure fn …` / `fn … #(Gpu)`).
 pub fn e0742(
     trait_name: &str,
     method: &str,
@@ -963,7 +968,7 @@ pub fn e0742(
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
         format!(
-            "`{}` declares `{}` `#{}`, so impls must be pure",
+            "`{}` declares `{}` `@{}`, so impls must be pure",
             trait_name,
             method,
             crate::Syntax::KW_PURE
@@ -993,7 +998,7 @@ pub fn e0742(
 
 /// D-EFF3: enforce trait-method effect upper bounds against each impl's inferred
 /// effects. `trait_bounds[(trait, method)]` is `Some(bound)` when the trait
-/// method declares one (`#Pure` → empty set). Impl methods are keyed
+/// method declares one (`@Pure` → empty set). Impl methods are keyed
 /// `Type::method` in `solved`. An impl whose inferred set exceeds the bound is
 /// E0742.
 pub fn check_trait_obligations(
@@ -1015,16 +1020,16 @@ pub fn check_trait_obligations(
     }
 }
 
-/// E0745: a `#Pure fn` also carries a non-empty `#(…)` bound — a contradiction.
+/// E0745: a `@Pure fn` also carries a non-empty `#(…)` bound — a contradiction.
 pub fn e0745(fn_name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0745",
-        format!("`{}` is `#{}` but also declares effects", fn_name, crate::Syntax::KW_PURE),
+        format!("`{}` is `@{}` but also declares effects", fn_name, crate::Syntax::KW_PURE),
         format!(
-            "`#{}` means the empty effect set; a `#(…)` list on the same function asks for both empty and non-empty",
+            "`@{}` means the empty effect set; a `#(…)` list on the same function asks for both empty and non-empty",
             crate::Syntax::KW_PURE
         ),
-        format!("drop the `#(…)` list to keep `{}` pure, or remove `#{}`", fn_name, crate::Syntax::KW_PURE),
+        format!("drop the `#(…)` list to keep `{}` pure, or remove `@{}`", fn_name, crate::Syntax::KW_PURE),
         Some(span),
     )
 }

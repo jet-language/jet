@@ -92,10 +92,11 @@ export function project(s) {
     return { ...c, clearance, decisions, questions, openQ, lane: laneOf(c, s.decisions, s.cards) };
   });
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
+  const openDecisions = s.decisions.filter(d => d.status !== 'ratified');
   const counts = {
     byPhase: Object.fromEntries(PHASE_IDS.map(p => [p, cards.filter(c => c.phase === p).length])),
-    forYou: inLane('decide').length + inLane('activate').length,
-    decide: inLane('decide').length,
+    forYou: openDecisions.length + inLane('activate').length,
+    decide: openDecisions.length,
     activate: inLane('activate').length,
     agentReady: inLane('plan').length + inLane('implement').length + inLane('building').length + inLane('verify').length,
     sidequests: cards.filter(c => c.track === 'sidequest' && ACTIVE.includes(c.phase)).length,

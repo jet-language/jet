@@ -317,6 +317,8 @@ mod tests {
             dependencies: vec![],
             layer: None,
             inferred_layer: None,
+            effects: Vec::new(),
+            effect_grants: Vec::new(),
         }
     }
 

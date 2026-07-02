@@ -379,7 +379,30 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
                 Syntax::RuntimeLayer::STD,
             ),
         ),
+        ManifestError::BadEffectsBlock { detail } => e1221(&file, detail),
     }
+}
+
+/// D-EFFBUDGET1 (E1221): a malformed `effects:`/`grants:` block — an unknown
+/// field, a non-list value, or an effect name outside the closed D-EFF4
+/// vocabulary.
+fn e1221(_file: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1221",
+        format!(
+            "`{}` has a malformed `{}`/`{}` block",
+            Syntax::PAYLOAD_FILE,
+            Syntax::MANIFEST_BLOCK_EFFECTS,
+            Syntax::MANIFEST_BLOCK_GRANTS,
+        ),
+        detail.to_string(),
+        format!(
+            "`{}: {{ allow: […], deny: […] }}` and `{}: {{ \"dep\": […] }}` only take effect names from the ten-effect vocabulary",
+            Syntax::MANIFEST_BLOCK_EFFECTS,
+            Syntax::MANIFEST_BLOCK_GRANTS,
+        ),
+        None,
+    )
 }
 
 fn e1206(_file: &str, detail: &str) -> Diagnostic {

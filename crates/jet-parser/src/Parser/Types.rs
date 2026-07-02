@@ -36,10 +36,14 @@ impl<'a> Parser<'a> {
             self.peek().kind,
             TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
         )
-        // D-EFF2: `#Pure fn(…)` / `#(E) fn(…)` — an effect-bounded function type.
-        || (matches!(self.peek().kind, TokKind::Hash)
-            && (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
-                || matches!(self.peek2().kind, TokKind::LParen)))
+        // D-EFF2/D-MARKERMOVE2: `@Pure fn(…)` — a pure-bounded function type
+        // (G1: the one carve-out where a contract marker prefixes a TYPE, not a
+        // declaration). Retired `@Pure fn(…)` still recognized here so the
+        // callback-bound parser can teach E0062. `#(E) fn(…)` — the general
+        // effect-bound list — stays on `#`.
+        || (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
+            && matches!(self.peek().kind, TokKind::Hash | TokKind::At))
+        || (matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LParen))
     }
 
     pub(super) fn return_type(&mut self) -> Result<(Type, Span), Diagnostic> {
@@ -357,14 +361,20 @@ impl<'a> Parser<'a> {
                 ));
             }
             TokKind::KwFn => self.fn_type(None)?,
-            // D-EFF2: a callback effect bound rides the front of a function type —
-            // `#Pure fn(T) -> U` (the callback must be pure) or `#(Net) fn(T) -> U`
-            // (at most the listed effects). The `#` must be followed by either the
-            // `Pure` marker + `fn`, or `(` … `)` + `fn`; anything else is not a
-            // type and falls through to the normal "expected a type" error.
+            // D-EFF2/D-MARKERMOVE2 (G1): a callback effect bound rides the front
+            // of a function type — `@Pure fn(T) -> U` (the callback must be pure;
+            // the retired `@Pure fn(T) -> U` spelling teaches E0062) or
+            // `#(Net) fn(T) -> U` (at most the listed effects, directive-only,
+            // `#` never `@`). Anything else is not a type and falls through to
+            // the normal "expected a type" error.
             TokKind::Hash
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
                     || matches!(self.peek2().kind, TokKind::LParen) =>
+            {
+                let bound = self.parse_fn_type_effect_bound()?;
+                self.fn_type(Some(bound))?
+            }
+            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) =>
             {
                 let bound = self.parse_fn_type_effect_bound()?;
                 self.fn_type(Some(bound))?
@@ -701,7 +711,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a function type `fn(T1, …) -> R`, the cursor at `fn`. `effect_bound`
-    /// is the D-EFF2 callback bound parsed off the front (`#Pure` → `Some([])`,
+    /// is the D-EFF2 callback bound parsed off the front (`@Pure` → `Some([])`,
     /// `#(E,…)` → `Some([(name, span), …])`), or `None` for an unbounded type.
     fn fn_type(&mut self, effect_bound: Option<Vec<(String, Span)>>) -> Result<Type, Diagnostic> {
         self.expect(TokKind::KwFn, "to start a function type")?;
@@ -733,15 +743,33 @@ impl<'a> Parser<'a> {
     }
 
     /// D-EFF2: parse the effect bound on the front of a function type, the cursor
-    /// at `#`. `#Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
+    /// at `#`. `@Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
     /// listed names (validated against the effect vocabulary in sema, not here).
     /// The caller has confirmed via lookahead that a `fn` follows.
+    /// D-EFF2/D-MARKERMOVE2 (G1): parse a callback effect bound. `@Pure fn(…)`
+    /// is the one carve-out where a contract marker prefixes a function TYPE
+    /// instead of a declaration — the retired `@Pure fn(…)` spelling still
+    /// parses here so it can teach E0062. The general effect-list form,
+    /// `#(Net) fn(…)`, is a directive and stays on `#` only.
     fn parse_fn_type_effect_bound(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
-        self.expect(TokKind::Hash, "to start a callback effect bound")?;
+        let sigil = if matches!(self.peek().kind, TokKind::Hash | TokKind::At) {
+            self.bump()
+        } else {
+            self.expect(TokKind::Hash, "to start a callback effect bound")?;
+            unreachable!()
+        };
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) {
-            self.bump(); // `Pure`
+            let name_tok = self.bump(); // `Pure`
+            if matches!(sigil.kind, TokKind::Hash) {
+                self.diags.push(Self::e0062_contract_on_hash(
+                    Syntax::KW_PURE,
+                    Span::new(sigil.span.start, name_tok.span.end),
+                ));
+            }
             return Ok(Vec::new());
         }
+        // Effect-list form: only ever reached via `#`, since `type_starts_here`
+        // and the `fn_type` dispatch only route `@` here when the name is `Pure`.
         self.expect(TokKind::LParen, "after `#` to start a callback effect list")?;
         let mut effects = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {

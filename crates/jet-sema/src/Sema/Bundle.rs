@@ -403,6 +403,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
+            | Stmt::Layout { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
             | Stmt::Grant { body: inner, .. }
             | Stmt::Transact { body: inner, .. }
@@ -473,6 +474,7 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. } => {}
         Expr::Str(parts, _) => {
             for p in parts.iter_mut() {
@@ -529,6 +531,11 @@ pub(crate) fn rewrite_inline_calls_expr(
         Expr::Binary(_, l, r, _) => {
             rewrite_inline_calls_expr(l, siblings, modname);
             rewrite_inline_calls_expr(r, siblings, modname);
+        }
+        Expr::CompareChain { operands, .. } => {
+            for e in operands.iter_mut() {
+                rewrite_inline_calls_expr(e, siblings, modname);
+            }
         }
         Expr::ListLit(elems, _) => {
             for e in elems.iter_mut() {
@@ -740,7 +747,7 @@ pub(crate) fn check_bundle_opts(
                         .insert(a.name.clone(), a.is_pub && !a.is_package_pub);
                     st.type_pkg_pub.insert(a.name.clone(), a.is_package_pub);
                 }
-                // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
+                // D-QUAL3: a unit family lowers to one `@Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
                     for d in uf.distinct_defs() {
@@ -962,7 +969,7 @@ pub(crate) fn check_bundle_opts(
         st.trait_reg.register_synthetic_display_debug();
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_items(&module.items, &mut diags);
-        // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2412)
+        // D-SERDE: validate `@[Codable]`/`@[Encode]`/`@[Decode]` markers (E2407–E2412)
         // now that the trait registry resolves field/variant types — keeps the emitted
         // `impl`s rustc-clean (I2).
         diags.extend(validate_serde_items(&module.items, &st.trait_reg));
@@ -1843,6 +1850,7 @@ pub(crate) fn collect_core_stmts(
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
@@ -2093,6 +2101,11 @@ pub(crate) fn collect_core_expr(
             collect_core_expr(lhs, imports, used, spans);
             collect_core_expr(rhs, imports, used, spans);
         }
+        Expr::CompareChain { operands, .. } => {
+            for e in operands.iter() {
+                collect_core_expr(e, imports, used, spans);
+            }
+        }
         Expr::Slice {
             base, start, end, ..
         } => {
@@ -2185,6 +2198,7 @@ pub(crate) fn collect_core_expr(
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. } => {}
         Expr::Paren(inner, _) => collect_core_expr(inner, imports, used, spans),
         Expr::Spread(inner, _) => collect_core_expr(inner, imports, used, spans),
@@ -2312,6 +2326,8 @@ pub(crate) fn check_module_bodies(
                     state_requires: None,
                     state_transition: None,
                     web_marker: None,
+                    pre: Vec::new(),
+                    post: Vec::new(),
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -2355,6 +2371,8 @@ pub(crate) fn check_module_bodies(
                     state_requires: None,
                     state_transition: None,
                     web_marker: None,
+                    pre: Vec::new(),
+                    post: Vec::new(),
                     body: std::mem::take(&mut b.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -2471,6 +2489,7 @@ pub(crate) fn check_func_body_bundle(
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
         in_pure: f.is_pure,
+        in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,

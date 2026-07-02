@@ -17,8 +17,11 @@
 //           syntax-decisions.md but has no shipped evidence (not in canon.jet,
 //           no golden example, no parser/sema support). Verify before relying.
 //
-// `#` in the actual code below (e.g. `#Pure`, `#Unsafe`, `#[Codable]`,
-// `[T#N]`) is REAL Jet syntax — an attribute/marker sigil — not a comment.
+// `#`/`@` in the actual code below (e.g. `@Pure`, `#Unsafe`, `@[Codable]`,
+// `[T#N]`) is REAL Jet syntax — two marker planes (D-MARKER-FAMILY1): `@`
+// states a checkable contract about the declaration below it (`@Pure`,
+// `@MustUse`, `@Codable`); `#` is a compiler directive and may appear in
+// type/expression position (`#Unsafe`, `[T#N]`). Neither is a comment.
 // Only a full line beginning `# RATIFIED…` is a not-yet-implemented marker.
 //
 // Implemented features are written as live code. Ratified-but-UNIMPLEMENTED
@@ -370,7 +373,9 @@ impl App.Logger using logger
 //>>> tracked: #33 D-IMPLDOT1
 
 // Built-in derives (S55): auto Printable/Equatable; opt-in Comparable/Codable.
-#[Comparable, Codable]                          // multi-marker list (D-ATTR2/D-SERDE-CANON1)
+// D-MARKER-FAMILY1/D-MARKERMOVE1/D-MARKERMOVE3: built-in derives are contract
+// markers on the `@` plane.
+@[Comparable, Codable]                          // multi-marker list (D-ATTR2/D-SERDE-CANON1)
 struct Score {
     value: Int
 }
@@ -476,12 +481,14 @@ module web-app { }
 
 
 // ============================================================================
-// EFFECTS  (#Pure / #(Io))
+// EFFECTS  (@Pure / #(Io))
 // ============================================================================
 // Every fn carries an inferred, erased effect set; a `#(…)` list bounds it (D-EFF1).
 // Effect tags are PascalCase (D-CASING1). Effects flow through calls (D-EFF2).
+// `@Pure` is a contract marker (D-MARKER-FAMILY1/D-MARKERMOVE1); the general
+// `#(…)` effect-list bound is a directive and stays on `#`.
 
-#Pure fn square(n: Int) -> Int {              // empty effect set (S60/#Pure)
+@Pure fn square(n: Int) -> Int {              // empty effect set (S60/@Pure)
     return n * n
 }
 
@@ -490,7 +497,9 @@ fn announce(label: String, n: Int) #(Io) {    // upper bound: may use Io
 }
 
 // Expert levers (D-EFF2): demand/bound a callback, or publish a pass-through.
-fn run_all(cb: #Pure fn(Int) -> Int) { }      // lever 1: param-type effect bound
+// D-MARKERMOVE2 (G1): `@Pure` is the one carve-out where a contract marker
+// prefixes a function TYPE, not a declaration.
+fn run_all(cb: @Pure fn(Int) -> Int) { }      // lever 1: param-type effect bound
 fn map_each(f: fn(Int) -> Int) #(via f) { }   // lever 2: `#(via f)` pass-through
 
 // Scoped capability: granted into a lexical scope, revoked at scope end (D-SCAP1).
@@ -628,9 +637,10 @@ fn taint(raw: String) {
 #SingleUse
 struct Ticket { id: Int }
 
-// Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare statement (E0419).
-#MustUse fn ack() -> Int { return 1 }
-#MustUse struct Receipt { id: Int }
+// Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare
+// statement (E0419). D-MARKERMOVE1: `@MustUse` is a contract marker.
+@MustUse fn ack() -> Int { return 1 }
+@MustUse struct Receipt { id: Int }
 
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
 #UnitFamily(currency) { usd, eur }
@@ -712,7 +722,8 @@ fn invariants(n: Int) {
 }
 
 // Published schema + migration block; `rename` ships (D-MIGRATE1).
-#PublishedSchema
+// D-MARKERMOVE1: `@PublishedSchema` is a contract marker.
+@PublishedSchema
 struct UserRecord {
     display_name: String
     age: Int

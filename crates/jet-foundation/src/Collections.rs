@@ -107,6 +107,12 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == "Deque" => {
             deque_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
+        // D-HOLE1: `.map` on `T?` (no general "hole"/absent-propagating value type —
+        // Option composition gets library combinators instead). `.zip` is handled
+        // directly in the checker dispatch (its second operand's type is independent
+        // of the receiver's, which doesn't fit this table's one-fixed-placeholder-type
+        // shape), so it is NOT listed here.
+        Type::Option(inner) => option_method_return(inner, method, arg_count),
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
             builtin_static_return(recv_ty, method, arg_count)
         }
@@ -337,6 +343,18 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("par_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
         ("par_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("par_fold", 2) => Some(Some(Type::Int)), // sema refines acc
+        _ => None,
+    }
+}
+
+/// D-HOLE1: `opt.map(f: T -> R) -> R?` — the return element type `R` is a
+/// placeholder (refined from the closure's actual return type in
+/// `finish_builtin_method`, the same "sema refines" convention `list_method_return`'s
+/// `map` uses).
+fn option_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    let _ = inner;
+    match (method, nargs) {
+        ("map", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         _ => None,
     }
 }
@@ -663,6 +681,16 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Int | Type::Float => match method {
             "parse" => Some(vec![Type::String]),
             _ => None,
+        },
+        // D-HOLE1: `opt.map(f: T -> R)`. `.zip` isn't listed — it's checked directly
+        // (see `Collections::builtin_method_return`'s `Type::Option` arm comment).
+        Type::Option(inner) => match method {
+            "map" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: None, // sema refines R from the closure's actual return
+                effect_bound: None,
+            }]),
+            _ => Some(vec![]),
         },
         Type::Apply { name, args } if name == "Sender" => match method {
             "send" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),

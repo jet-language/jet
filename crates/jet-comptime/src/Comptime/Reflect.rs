@@ -192,6 +192,8 @@ mod tests {
             state_requires: None,
             state_transition: None,
             web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
             body: Vec::new(),

@@ -384,7 +384,7 @@ impl<'a> Checker<'a> {
         false
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): true when `ty` is a `#MustUse` struct/enum or a
+    /// D-MUSTUSE1 (c18iwxqx): true when `ty` is a `@MustUse` struct/enum or a
     /// built-in guard/handle type whose result must not be silently ignored.
     pub(crate) fn type_is_must_use(&self, ty: &Type) -> bool {
         let Some(name) = ty.base_name() else {
@@ -406,7 +406,7 @@ impl<'a> Checker<'a> {
         false
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): name of a `#MustUse` fn/method call when `expr` is
+    /// D-MUSTUSE1 (c18iwxqx): name of a `@MustUse` fn/method call when `expr` is
     /// that call, else `None`.
     pub(crate) fn ignored_must_use_call_target(&self, expr: &Expr) -> Option<String> {
         if let Expr::Call(call) = expr {
@@ -473,7 +473,7 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E0419",
             format!("`{target}` must be used — it was dropped as a bare statement"),
-            "a `#MustUse` result carries work or a resource that is lost when nothing checks it"
+            "a `@MustUse` result carries work or a resource that is lost when nothing checks it"
                 .to_string(),
             format!(
                 "bind it (`x := …`), use `{}`, `{} …`, or `.drop(\"reason\")` to discard intentionally",

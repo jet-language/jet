@@ -772,7 +772,7 @@ fn core_module_items_covers_known_core_modules() {
     );
 }
 
-/// c136 / D-SERDE9-12: generic `#[Codable]` is first-class. The derive injects
+/// c136 / D-SERDE9-12: generic `@[Codable]` is first-class. The derive injects
 /// `T: Encode`/`T: Decode` on exactly the wire-reaching params (D-SERDE9/10); a
 /// phantom/skip-only param gets no serde bound (it still gets structural Clone).
 /// E2413 is retired (D-SERDE12).
@@ -783,12 +783,12 @@ fn generic_codable_injects_wire_param_bounds() {
         r#"
 use core.encoding.json as json
 
-#[Codable]
+@[Codable]
 struct Wrap<T> {
     value: T
 }
 
-#[Codable]
+@[Codable]
 struct Id<K> {
     raw: Int
     #[Skip] marker: K?
@@ -824,7 +824,7 @@ fn main() {
     );
 }
 
-/// c136: a generic `#[Codable]` value round-trips through json encode/decode, and
+/// c136: a generic `@[Codable]` value round-trips through json encode/decode, and
 /// a phantom-param type serializes regardless of its phantom argument (D-SERDE10).
 #[test]
 fn generic_codable_round_trips() {
@@ -842,12 +842,12 @@ fn generic_codable_round_trips() {
         r#"
 use core.encoding.json as json
 
-#[Codable]
+@[Codable]
 struct Wrap<T> {
     value: T
 }
 
-#[Codable]
+@[Codable]
 struct Id<K> {
     raw: Int
     #[Skip] marker: K?
@@ -874,7 +874,7 @@ fn main() {
 
 // ── c152: full TOML adapter (D-ENC-DYN1=A+) ──────────────────────────────────
 // Nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars decode into
-// nested `#[Codable]` structs, and the rich tree round-trips through `to_string`.
+// nested `@[Codable]` structs, and the rich tree round-trips through `to_string`.
 #[test]
 fn toml_full_nested_decode_and_round_trip() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
@@ -892,9 +892,9 @@ fn toml_full_nested_decode_and_round_trip() {
         "toml_typed",
         r#"
 use core.encoding.toml as toml
-#[Codable]
+@[Codable]
 struct Server { host: String  port: Int }
-#[Codable]
+@[Codable]
 struct Config { title: String  server: Server  ports: [Int] }
 fn main() {
     raw #= "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
@@ -955,9 +955,9 @@ fn yaml_full_nested_decode_and_features() {
         "yaml_typed",
         r#"
 use core.encoding.yaml as yaml
-#[Codable]
+@[Codable]
 struct Service { name: String  port: Int }
-#[Codable]
+@[Codable]
 struct Config { app: String  services: [Service] }
 fn main() {
     raw #= "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
@@ -1001,5 +1001,51 @@ fn main() {
     );
     assert_eq!(code2, 0, "yaml advanced features failed: {stderr2}");
     assert_eq!(stdout2, "3\n2\ntrue\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn option_zip_and_lift2_combinators() {
+    // D-HOLE1: `.zip`/`Option.lift2` — both present -> a present result; either
+    // absent -> `null`. No general "hole" type; these are plain library combinators
+    // on `T?`.
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping option combinator test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_option_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "option_combinators",
+        r#"
+fn main() {
+    both_a: Float? #= value(2.0)
+    both_b: Float? #= value(5.0)
+    print(both_a.zip(both_b).map((pair) => pair.a * pair.b))
+    print(Option.lift2((x, y) => x * y, both_a, both_b))
+
+    a_only: Float? #= value(2.0)
+    b_missing: Float? #= null
+    print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
+    print(Option.lift2((x, y) => x * y, a_only, b_missing))
+
+    both_missing_a: Float? #= null
+    both_missing_b: Float? #= null
+    print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
+    print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "option combinator fixture failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "10.0\n10.0\nnull\nnull\nnull\nnull\n",
+        "unexpected option combinator output: {stdout}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }

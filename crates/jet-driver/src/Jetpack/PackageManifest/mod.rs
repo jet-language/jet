@@ -46,7 +46,7 @@ pub use ParseBlocks::parse_build;
 use super::RefSpec::{RefError, Source};
 use crate::Syntax;
 use Helpers::block_body;
-use ParseBlocks::{parse_deps, parse_package, parse_packages};
+use ParseBlocks::{parse_deps, parse_effects, parse_grants, parse_package, parse_packages};
 
 /// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
 /// `Build.{ optimize: … }` inside `pkg.jet`'s `build { }` block.
@@ -222,6 +222,18 @@ pub struct PackManifest {
     /// D-BUILDPROFILE1: named build profiles from the `build { }` block, in
     /// declaration order. Empty when no `build: { … }` block is present.
     pub build_profiles: Vec<BuildProfileDef>,
+    /// D-EFFBUDGET1: whether an `effects: { … }` block is present at all. Its
+    /// presence (even empty) turns on whole-graph enforcement; absence means
+    /// report-only (the always-on summary still prints).
+    pub effects_enabled: bool,
+    /// D-EFFBUDGET1: `effects: { allow: […], deny: […] }` halves. `None` for a
+    /// half means that half imposes no restriction; `Some(vec![])` (an
+    /// explicit empty list) restricts to nothing.
+    pub effects_allow: Option<Vec<String>>,
+    pub effects_deny: Option<Vec<String>>,
+    /// D-EFFBUDGET1: `grants: { "dep": [Effect], … }` — the audited
+    /// per-dependency escape from the `effects:` budget, in declaration order.
+    pub grants: Vec<(String, Vec<String>)>,
 }
 
 /// Why a `pkg.jet` package manifest could not be parsed. These are internal
@@ -259,6 +271,9 @@ pub enum ManifestError {
     BadBuildProfile { name: String, reason: &'static str },
     /// D-RINGLAYER1=A: `layer:` in `payload` is not `core`, `alloc`, or `std`.
     BadLayer { value: String },
+    /// D-EFFBUDGET1 (E1221): a malformed `effects:`/`grants:` block — an
+    /// unknown field, a non-list value, or an effect name outside D-EFF4.
+    BadEffectsBlock { detail: String },
 }
 
 /// Top-level keys reserved for a future Jet feature; using them non-empty
@@ -320,6 +335,21 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         None => Vec::new(),
     };
 
+    // D-EFFBUDGET1: `effects: { allow: […], deny: […] }` turns on whole-graph
+    // enforcement; absent entirely means report-only (no enforcement).
+    let effects_block = block_body(&text, Syntax::MANIFEST_BLOCK_EFFECTS, '{', '}');
+    let effects_enabled = effects_block.is_some();
+    let (effects_allow, effects_deny) = match effects_block {
+        Some(body) => parse_effects(&body)?,
+        None => (None, None),
+    };
+
+    // D-EFFBUDGET1: `grants: { "dep": [Effect], … }` — the audited per-dep escape.
+    let grants = match block_body(&text, Syntax::MANIFEST_BLOCK_GRANTS, '{', '}') {
+        Some(body) => parse_grants(&body)?,
+        None => Vec::new(),
+    };
+
     for &section in RESERVED_SECTIONS {
         if let Some(body) = block_body(&text, section, '{', '}') {
             if !body.trim().is_empty() {
@@ -333,6 +363,10 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         deps,
         packages,
         build_profiles,
+        effects_enabled,
+        effects_allow,
+        effects_deny,
+        grants,
     })
 }
 

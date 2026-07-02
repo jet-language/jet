@@ -76,7 +76,10 @@ function card(c) {
         <span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span>
       </div>
     </button>`);
-  node.addEventListener('click', () => showDetail(c.id));
+  node.addEventListener('click', () => {
+    if (c.lane.lane === 'decide' && c.lane.decisions?.length) focusAll(c.lane.decisions[0]);
+    else showDetail(c.id);
+  });
   return node;
 }
 const grid = (cards) => { const g = el('<div class="cardgrid"></div>'); cards.forEach(c => g.appendChild(card(c))); return g; };
@@ -166,7 +169,7 @@ function viewDecisions() {
     DECISION_GROUPS.forEach(([key, name, blurb]) => {
       const ds = open.filter(d => decisionGroupOf(d) === key);
       if (!ds.length) return;
-      const g = group('dec-group:' + key, { name, blurb, n: ds.length }, (body) => {
+      const g = group('dec-open-group:' + key, { name, blurb, n: ds.length, def: true }, (body) => {
         ds.forEach(d => body.appendChild(decisionCard(d)));
       });
       feed.appendChild(g);
@@ -188,7 +191,8 @@ function decisionCard(d) {
   const decided = d.status === 'ratified';
   const groupName = (DECISION_GROUPS.find(([k]) => k === decisionGroupOf(d)) || [null, 'Other'])[1];
   const meta = `${groupName} · ${(d.options || []).length} options · ${(d.comparisons || []).length} language comparisons${c && c.openQ ? ` · ${c.openQ} open question${c.openQ > 1 ? 's' : ''}` : ''}`;
-  const node = el(`<article class="deccard ${decided ? 'deccard--decided' : ''}">
+  const tag = decided ? 'article' : 'button';
+  const node = el(`<${tag} class="deccard ${decided ? 'deccard--decided' : ''}" ${decided ? '' : 'type="button"'}>
       <div class="deccard__head">
         <span class="deccard__id">${esc(d.id)}</span>
         <span class="deccard__for">card <b>${c ? ticket(c) : '—'}</b> · ${c ? esc(c.title).slice(0, 46) : 'unlinked'}</span>
@@ -199,10 +203,13 @@ function decisionCard(d) {
       <div class="deccard__foot">
         <span style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">${meta}</span>
         ${decided ? `<button class="btn btn--ghost btn--sm" style="margin-left:auto" data-reopen>Reopen</button>`
-      : `<button class="btn btn--red btn--sm" style="margin-left:auto" data-focus>Decide →</button>`}
+      : `<span class="btn btn--red btn--sm" style="margin-left:auto" data-focus>Decide →</span>`}
       </div>
-    </article>`);
-  $('[data-focus]', node)?.addEventListener('click', () => focusAll(d.id));
+    </${tag}>`);
+  if (!decided) {
+    node.addEventListener('click', () => focusAll(d.id));
+    $('[data-focus]', node)?.addEventListener('click', (e) => { e.stopPropagation(); focusAll(d.id); });
+  }
   $('[data-reopen]', node)?.addEventListener('click', () => api('clearance/reopen', { decisionId: d.id }));
   return node;
 }
@@ -239,6 +246,15 @@ function facetBody(d, fk) {
 }
 function renderFocus() {
   const f = $('#focus');
+  f.hidden = false;
+  try {
+    renderFocusDeck(f);
+  } catch (err) {
+    renderFocusFallback(f, err);
+  }
+}
+
+function renderFocusDeck(f) {
   focusIds = focusIds.filter(id => {
     const x = S.decisions.find(d => d.id === id);
     return x && x.status !== 'ratified';
@@ -322,6 +338,39 @@ function renderFocus() {
   });
   $('#f-record', f)?.addEventListener('click', recordFocusBatch);
   f.hidden = false;
+}
+
+function renderFocusFallback(f, err) {
+  const ids = (focusIds || []).filter(id => S.decisions.some(d => d.id === id && d.status !== 'ratified'));
+  if (!ids.length) return exitFocus();
+  focusIds = ids;
+  focusIdx = Math.max(0, Math.min(focusIdx, focusIds.length - 1));
+  const d = S.decisions.find(x => x.id === focusIds[focusIdx]);
+  const c = d ? cardById(d.cardId) : null;
+  if (!d) return exitFocus();
+  f.innerHTML = `<div class="focustop">
+      <span class="focustop__ctr">Decision <b>${focusIdx + 1}</b> / ${focusIds.length}</span>
+      <div class="focus__nav">
+        <button class="btn btn--sm" id="f-prev" ${focusIdx === 0 ? 'disabled' : ''}>←</button>
+        <button class="btn btn--sm" id="f-next" ${focusIdx === focusIds.length - 1 ? 'disabled' : ''}>→</button>
+        <button class="btn btn--sm" id="f-close">Esc</button>
+      </div>
+    </div>
+    <div class="focusscroll"><div class="fdeck">
+      <div class="fdeck__head"><span class="fdeck__id">${esc(d.id)}</span>
+        <span class="fdeck__for">card ${c ? ticket(c) : '—'}${c ? ' · ' + esc(c.title) : ''}</span></div>
+      <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
+      ${d.story ? `<p class="modal__prose">${esc(d.story)}</p>` : ''}
+      <div class="optslabel">Choose one</div>
+      <div class="opts">${(d.options || []).map((o, idx) => `<button class="opt__h" data-opt="${esc(o.key)}">
+        <span class="opt__num">${idx + 1}</span><span class="opt__name">Option ${esc(o.key)} — ${esc(o.name)}</span>
+      </button>`).join('')}</div>
+      <p class="modal__prose">Focus renderer fallback: ${esc(err?.message || err || 'unknown error')}</p>
+    </div></div>`;
+  f.querySelectorAll('[data-opt]').forEach(b => b.addEventListener('click', () => api('clearance', { decisionId: d.id, outcome: b.dataset.opt })));
+  $('#f-prev', f).onclick = () => focusGo(-1);
+  $('#f-next', f).onclick = () => focusGo(1);
+  $('#f-close', f).onclick = exitFocus;
 }
 function recordLabel(ids) {
   if (!ids.length) return 'Record decisions';
@@ -611,8 +660,10 @@ function showDetail(id) {
   c.decisions.forEach(de => {
     const box = el(`<div class="modal__decision">
         <div class="modal__dhead"><span class="modal__did">${esc(de.id)}</span>
-          <span class="card__lane ${de.status === 'ratified' ? 'lane-agent' : 'lane-owner'}">${de.status === 'ratified' ? '✓ ' + esc(de.outcome) : 'to decide'}</span></div>
+          <span class="card__lane ${de.status === 'ratified' ? 'lane-agent' : 'lane-owner'}">${de.status === 'ratified' ? '✓ ' + esc(de.outcome) : 'to decide'}</span>
+          ${de.status === 'ratified' ? '' : '<button class="btn btn--red btn--sm modal__focus" type="button">Focus</button>'}</div>
         <div class="modal__prose" style="font-size:13px">${esc(de.title)}</div><div class="modal__opts"></div></div>`);
+    $('.modal__focus', box)?.addEventListener('click', () => { closeDetail(); focusAll(de.id); });
     const row = $('.modal__opts', box);
     (de.options || []).forEach(o => {
       const b = el(`<button class="modal__opt ${de.outcome === o.key ? 'win' : ''}">${esc(o.key)} · ${esc(o.name)}</button>`);

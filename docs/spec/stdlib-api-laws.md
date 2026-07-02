@@ -54,7 +54,7 @@ existing drift found during review.
   showing the error message a user sees when misusing it (I4).
 - Error messages follow the voice and format in `docs/spec/diagnostics.md`:
   what happened, why it happened, how to fix it.
-- When a type or method is `#MustUse`, the diagnostic names the missed call.
+- When a type or method is `@MustUse`, the diagnostic names the missed call.
 
 ## Law 7 — Examples
 

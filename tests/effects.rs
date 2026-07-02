@@ -1,5 +1,5 @@
 //! Effect system tests (D-EFF1, D-QUAL1): per-function effect inference over the
-//! call graph, the `#(…)` boundary check (E0740), and `#Pure` reconciliation.
+//! call graph, the `#(…)` boundary check (E0740), and `@Pure` reconciliation.
 
 fn codes(src: &str) -> Vec<&'static str> {
     match jet::compile(src) {
@@ -8,17 +8,17 @@ fn codes(src: &str) -> Vec<&'static str> {
     }
 }
 
-/// I3 / D-EFF1: effect annotations (`#(…)`, `#Pure`, trait-method bounds) are a
+/// I3 / D-EFF1: effect annotations (`#(…)`, `@Pure`, trait-method bounds) are a
 /// compile-time proof only — they must leave NO trace in generated Rust. The
 /// annotated program and its annotation-stripped twin generate byte-identical
 /// Rust.
 #[test]
 fn effect_annotations_are_erased() {
     let annotated = r#"
-trait Shape { #Pure fn area(self) -> Int; }
+trait Shape { @Pure fn area(self) -> Int; }
 struct Square { side: Int }
 impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
-#Pure fn sq(n: Int) -> Int { return n * n; }
+@Pure fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) #(Io) { print(p); }
 fn run(n: Int) #(Io) { load("{sq(n)}"); }
 fn main() { s #= Square.{ side: 3 }; print("{s.area()}"); run(2); }
@@ -166,11 +166,11 @@ fn main() { print(load("x")); }
     );
 }
 
-/// `#Pure fn` with a non-empty `#(…)` list is the contradiction E0745.
+/// `@Pure fn` with a non-empty `#(…)` list is the contradiction E0745.
 #[test]
 fn pure_with_effects_is_e0745() {
     let src = r#"
-#Pure fn calc() #(Fs) -> Int { return 1; }
+@Pure fn calc() #(Fs) -> Int { return 1; }
 fn main() { print(calc()); }
 "#;
     assert!(
@@ -180,12 +180,12 @@ fn main() { print(calc()); }
     );
 }
 
-/// D-EFF3: an impl of a `#Pure` trait method that reaches an effect is E0742.
+/// D-EFF3: an impl of a `@Pure` trait method that reaches an effect is E0742.
 #[test]
 fn trait_impl_exceeding_bound_is_e0742() {
     let src = r#"
 use core.fs as fs
-trait Hasher { #Pure fn hash(self) -> Int; }
+trait Hasher { @Pure fn hash(self) -> Int; }
 struct Doc { path: String }
 impl Doc.Hasher {
     fn hash(self) -> Int { body #= fs.read(self.path) ?? ""; return body.len(); }
@@ -194,7 +194,7 @@ fn main() { d #= Doc.{ path: "x" }; print(d.hash()); }
 "#;
     assert!(
         codes(src).contains(&"E0742"),
-        "impl exceeding #Pure bound should be E0742: {:?}",
+        "impl exceeding @Pure bound should be E0742: {:?}",
         codes(src)
     );
 }
@@ -203,7 +203,7 @@ fn main() { d #= Doc.{ path: "x" }; print(d.hash()); }
 #[test]
 fn trait_impl_within_bound_ok() {
     let src = r#"
-trait Shape { #Pure fn area(self) -> Int; }
+trait Shape { @Pure fn area(self) -> Int; }
 struct Square { side: Int }
 impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }
@@ -272,19 +272,19 @@ fn main() { caller(); }
     );
 }
 
-/// D-EFF1 reconciliation: `#Pure` is the empty effect set, so an effectful Core
-/// call (here `Fs`) inside a `#Pure fn` is a purity violation (E3401) — even
+/// D-EFF1 reconciliation: `@Pure` is the empty effect set, so an effectful Core
+/// call (here `Fs`) inside a `@Pure fn` is a purity violation (E3401) — even
 /// though the legacy purity list only knew about stdin/time/random.
 #[test]
 fn pure_fn_with_core_effect_is_e3401() {
     let src = r#"
 use core.fs as fs
-#Pure fn readit(p: String) -> String { return fs.read(p) ?? ""; }
+@Pure fn readit(p: String) -> String { return fs.read(p) ?? ""; }
 fn main() { print(readit("x")); }
 "#;
     assert!(
         codes(src).contains(&"E3401"),
-        "Fs in #Pure fn should be E3401: {:?}",
+        "Fs in @Pure fn should be E3401: {:?}",
         codes(src)
     );
 }
@@ -834,28 +834,28 @@ fn main() {
 // D-EFF2 expert levers: callback param effect bounds + `#(via f)` pass-through.
 // ---------------------------------------------------------------------------
 
-/// Lever 1: a `#Pure fn(…)` parameter handed a pure callback compiles clean.
+/// Lever 1: a `@Pure fn(…)` parameter handed a pure callback compiles clean.
 #[test]
 fn callback_pure_bound_pure_arg_ok() {
     let src = r#"
-fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
+fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
     return items.map((x) => f(x));
 }
-#Pure fn inc(n: Int) -> Int { return n + 1; }
+@Pure fn inc(n: Int) -> Int { return n + 1; }
 fn main() { print("{transform([1, 2], inc)}"); }
 "#;
     assert!(
         codes(src).is_empty(),
-        "pure callback to a #Pure bound is clean: {:?}",
+        "pure callback to a @Pure bound is clean: {:?}",
         codes(src)
     );
 }
 
-/// Lever 1: a `#Pure fn(…)` parameter handed an impure callback is E0747.
+/// Lever 1: a `@Pure fn(…)` parameter handed an impure callback is E0747.
 #[test]
 fn callback_pure_bound_impure_arg_is_e0747() {
     let src = r#"
-fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
+fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
     return items.map((x) => f(x));
 }
 fn noisy(n: Int) -> Int { print("{n}"); return n; }
@@ -864,7 +864,7 @@ fn main() { print("{transform([1, 2], noisy)}"); }
     assert_eq!(
         codes(src),
         vec!["E0747"],
-        "impure callback to a #Pure bound is E0747"
+        "impure callback to a @Pure bound is E0747"
     );
 }
 
@@ -919,7 +919,7 @@ fn main() { run(5, show); }
     );
 }
 
-/// Lever 2: `#(via f)` publishes the callback's effects — a `#Pure fn` calling a
+/// Lever 2: `#(via f)` publishes the callback's effects — a `@Pure fn` calling a
 /// via-fn whose callback carries `Io` is rejected (E3401), proving the
 /// pass-through surfaced the effect even though the body only calls a fn-value.
 #[test]
@@ -929,7 +929,7 @@ fn run(n: Int, act: #(Io) fn(Int)) #(via act) {
     act(n);
 }
 fn show(n: Int) { print("{n}"); }
-#Pure fn caller() -> Int { run(5, show); return 0; }
+@Pure fn caller() -> Int { run(5, show); return 0; }
 fn main() { print("{caller()}"); }
 "#;
     assert_eq!(
@@ -964,16 +964,16 @@ fn main() { run(5); }
     );
 }
 
-/// I3: the D-EFF2 levers are erased — a program using `#Pure fn(…)` callback
+/// I3: the D-EFF2 levers are erased — a program using `@Pure fn(…)` callback
 /// bounds and `#(via f)` generates the same Rust as its annotation-stripped twin.
 #[test]
 fn eff2_levers_are_erased() {
     let annotated = r#"
-fn transform(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] {
+fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
     return items.map((x) => f(x));
 }
 fn run(n: Int, act: #(Io) fn(Int)) #(via act) { act(n); }
-#Pure fn inc(n: Int) -> Int { return n + 1; }
+@Pure fn inc(n: Int) -> Int { return n + 1; }
 fn show(n: Int) { print("{n}"); }
 fn main() { print("{transform([1], inc)}"); run(5, show); }
 "#;

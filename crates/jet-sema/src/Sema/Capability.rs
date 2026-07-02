@@ -243,6 +243,7 @@ fn scan_stmt(
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Live { body, .. }

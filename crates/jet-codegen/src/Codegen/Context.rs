@@ -181,6 +181,25 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     }
 }
 
+/// D-LAYOUT1 / D-LAYOUT-GATES1: `layout` runtime types live in their own
+/// top-level `mod jet_layout` (NOT nested inside `mod jet_std`, unlike
+/// `core_rust_type_name`'s entries) — same reason `alloc_handle_rust_type`/
+/// `file_handle_rust_type`/`net_handle_rust_type` are separate functions
+/// rather than folded into `core_rust_type_name` (that table's caller always
+/// prepends `jet_std::`). `HVar`/`VVar`/`LengthVar` all erase to the SAME
+/// runtime type (`jet_layout::LinExpr`) — the axis distinction is
+/// compile-time-only (sema, GATE 1/2), nothing to represent at runtime.
+pub(crate) fn layout_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "HVar" => Some("jet_layout::LinExpr"),
+        "VVar" => Some("jet_layout::LinExpr"),
+        "LengthVar" => Some("jet_layout::LinExpr"),
+        "Constraint" => Some("jet_layout::Constraint"),
+        "LayoutHandle" => Some("jet_layout::Handle"),
+        _ => None,
+    }
+}
+
 /// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
 pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
@@ -456,6 +475,18 @@ impl Cx {
                     "{}{}",
                     self.root_prefix,
                     args_handle_rust_type(name).unwrap()
+                )
+            }
+            // D-LAYOUT1 / D-LAYOUT-GATES1: `layout` runtime types are top-level
+            // in their own `jet_layout` module (like the alloc/file/net handles
+            // above, not nested in `jet_std`).
+            Type::Named(name)
+                if layout_handle_rust_type(name).is_some() && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    layout_handle_rust_type(name).unwrap()
                 )
             }
             // A user struct/enum sharing a built-in Core type name (e.g. a user
@@ -915,7 +946,7 @@ pub(crate) fn build_cx_items(
                 cx.distinct_types
                     .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
             }
-            // D-QUAL3: each unit-family member registers as a `#Numeric` distinct
+            // D-QUAL3: each unit-family member registers as a `@Numeric` distinct
             // type erasing to `Float`.
             Item::UnitFamily(uf) => {
                 for d in uf.distinct_defs() {

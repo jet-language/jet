@@ -86,7 +86,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-IGNORERET2=A: parse `#Suppress(MustUse) { … }` in statement position.
-    /// Suppresses E0402 for all fallible / `#MustUse` results dropped inside the block.
+    /// Suppresses E0402 for all fallible / `@MustUse` results dropped inside the block.
     fn at_suppress_must_use_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.expect(TokKind::Hash, "expected `#`")?;
@@ -1053,6 +1053,44 @@ impl<'a> Parser<'a> {
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
             }
+            // D-PERSIST1 (E0145): `@Persist` on a local binding — persistence
+            // is keyed by module + name, and a local has no stable identity
+            // across a reload. Takes priority over the loop-label-typo arm
+            // below for the same reason as the directive-marker guard.
+            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST) =>
+            {
+                let t = self.bump(); // `@`
+                let name_tok = self.bump(); // `Persist`
+                Err(Diagnostic::error(
+                    "E0145",
+                    "only module-level state can persist across reloads".to_string(),
+                    "persistence is keyed by module + name; a local has no stable identity across a reload".to_string(),
+                    "move it to module level, or drop `@Persist`".to_string(),
+                    Some(Span::new(t.span.start, name_tok.span.end)),
+                ))
+            }
+            // D-MARKER-FAMILY1: `@Unsafe(...)` / `@Test(...)` etc mid-statement —
+            // a directive marker misspelled on the contract plane. Takes priority
+            // over the loop-label-typo interpretation below (a directive name is
+            // never a plausible loop label). `Unsafe` is a dedicated lexer
+            // keyword token (`KwUnsafe`), not a generic `Ident`, so it needs its
+            // own arm of this same guard.
+            TokKind::At
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if Syntax::is_directive_marker(n))
+                    || matches!(self.peek2().kind, TokKind::KwUnsafe) =>
+            {
+                let t = self.bump(); // `@`
+                let name_tok = self.bump(); // the directive name
+                let name = match &name_tok.kind {
+                    TokKind::Ident(n) => n.clone(),
+                    TokKind::KwUnsafe => Syntax::KW_UNSAFE.to_string(),
+                    _ => String::new(),
+                };
+                Err(Self::e0063_directive_on_at(
+                    &name,
+                    Span::new(t.span.start, name_tok.span.end),
+                ))
+            }
             TokKind::At => {
                 // D-LOOPLABEL2=A: `@name loop { }` is the OLD prefix form — emit E0988
                 // teaching error pointing at the new `name@ loop { }` suffix form.
@@ -1086,7 +1124,7 @@ impl<'a> Parser<'a> {
                     format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
                     "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)"
                         .to_string(),
-                    "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`"
+                    "write `#Unsafe(\"…\")`, `#Test(\"…\")`, or `@Codable`/`@[Codable, MustUse]` instead of `@…`"
                         .to_string(),
                     Some(t.span),
                 ))
@@ -1165,6 +1203,37 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end),
                 });
             }
+            // D-LAYOUT1 / D-LAYOUT-GATES1: `layout form { … }` — a Cassowary-
+            // style constraint block. `layout` is a lowercase contextual
+            // keyword (D-CASING1): recognized only when followed by `name {`,
+            // so a variable named `layout` still works everywhere else.
+            // `box.anchor` reads inside the body are desugared here (parse
+            // time, purely structural) into `NAME.h(box, anchor)` /
+            // `NAME.v(box, anchor)` method calls — GATE 1/2's general
+            // HVar/VVar/LengthVar/Constraint machinery does all real
+            // checking downstream; no parallel sema path.
+            TokKind::Ident(n)
+                if n == Syntax::KW_LAYOUT
+                    && matches!(&self.peek2().kind, TokKind::Ident(_))
+                    && matches!(self.peek3().kind, TokKind::LBrace) =>
+            {
+                let start = self.bump().span; // `layout`
+                let (name, name_span) = self.expect_ident("for the layout name")?;
+                self.expect(TokKind::LBrace, "after the layout name")?;
+                self.in_layout_body += 1;
+                let mut body = self.block_stmts();
+                self.in_layout_body -= 1;
+                let end = self.toks[self.pos - 1].span.end;
+                for stmt in &mut body {
+                    desugar_layout_anchors(&name, stmt);
+                }
+                return Ok(Stmt::Layout {
+                    name,
+                    name_span,
+                    body,
+                    span: Span::new(start.start, end),
+                });
+            }
             // `self.items.push(x);` — method bodies state effects on `self`
             // exactly like on any other name (S27).
             TokKind::Ident(_) | TokKind::KwSelf => {
@@ -1194,6 +1263,15 @@ impl<'a> Parser<'a> {
                     | Expr::Try(_, _, _)
                     | Expr::OrFallback { .. }
                     | Expr::IncDec { .. } => {}
+                    // D-LAYOUT1: inside a `layout NAME { … }` body, a bare
+                    // `>=`/`<=`/`==` line is a constraint statement — GATE 1
+                    // gives it a real side effect (registers into the
+                    // solver), so it isn't a no-op the way an ordinary
+                    // comparison-as-statement would be. Sema (E2932/E2933)
+                    // still enforces that it's actually a valid constraint.
+                    Expr::Binary(op, ..)
+                        if self.in_layout_body > 0
+                            && matches!(op, BinOp::Ge | BinOp::Le | BinOp::Eq) => {}
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",
@@ -2606,7 +2684,7 @@ impl<'a> Parser<'a> {
                 if !matches!(self.peek().kind, TokKind::RBracket) {
                     loop {
                         let (name, span) = self.expect_ident("for a list-pattern binding")?;
-                        elems.push(BindName { name, span });
+                        elems.push(BindName { name, span, rename: None });
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
                             continue;
@@ -2629,25 +2707,16 @@ impl<'a> Parser<'a> {
                 let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
                 self.expect(TokKind::Dot, "in a struct pattern")?;
                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
-                let mut fields = Vec::new();
-                if !matches!(self.peek().kind, TokKind::RBrace) {
-                    loop {
-                        let (name, span) = self.expect_ident("for a struct-pattern field")?;
-                        fields.push(BindName { name, span });
-                        if matches!(self.peek().kind, TokKind::Comma) {
-                            self.bump();
-                            continue;
-                        }
-                        break;
-                    }
-                }
+                let (fields, rest) = self.struct_pattern_fields()?;
                 let end = self.peek().span;
                 self.expect(TokKind::RBrace, "to close the struct pattern")?;
+                let close_span = Span::new(type_span.start, end.end);
                 Ok(Some(BindPattern::Struct {
                     type_name,
                     type_span,
                     fields,
-                    span: Span::new(type_span.start, end.end),
+                    rest,
+                    span: close_span,
                 }))
             }
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
@@ -2665,25 +2734,16 @@ impl<'a> Parser<'a> {
                     Some(brace_span),
                 ));
                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
-                let mut fields = Vec::new();
-                if !matches!(self.peek().kind, TokKind::RBrace) {
-                    loop {
-                        let (name, span) = self.expect_ident("for a struct-pattern field")?;
-                        fields.push(BindName { name, span });
-                        if matches!(self.peek().kind, TokKind::Comma) {
-                            self.bump();
-                            continue;
-                        }
-                        break;
-                    }
-                }
+                let (fields, rest) = self.struct_pattern_fields()?;
                 let end = self.peek().span;
                 self.expect(TokKind::RBrace, "to close the struct pattern")?;
+                let close_span = Span::new(type_span.start, end.end);
                 Ok(Some(BindPattern::Struct {
                     type_name,
                     type_span,
                     fields,
-                    span: Span::new(type_span.start, end.end),
+                    rest,
+                    span: close_span,
                 }))
             }
             TokKind::LParen if !self.looks_like_named_tuple(false) => {
@@ -2692,7 +2752,7 @@ impl<'a> Parser<'a> {
                 if !matches!(self.peek().kind, TokKind::RParen) {
                     loop {
                         let (name, span) = self.expect_ident("for a tuple-pattern binding")?;
-                        elems.push(BindName { name, span });
+                        elems.push(BindName { name, span, rename: None });
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
                             continue;
@@ -2711,6 +2771,47 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// D-DESTRUCT1: the field list inside a struct destructure's `{ … }` —
+    /// `field` (bind same name), `field: name` (rename), and an optional
+    /// trailing `..` (rest marker, `OP_RANGE`). Shared by the binding-position
+    /// `Type.{ … }` pattern (both the D-DOTCTOR1 and E0320-recovery spellings).
+    fn struct_pattern_fields(&mut self) -> Result<(Vec<BindName>, Option<Span>), Diagnostic> {
+        let mut fields = Vec::new();
+        let mut rest = None;
+        if !matches!(self.peek().kind, TokKind::RBrace) {
+            loop {
+                if matches!(self.peek().kind, TokKind::DotDot) {
+                    rest = Some(self.bump().span);
+                    break;
+                }
+                let (name, span) = self.expect_ident("for a struct-pattern field")?;
+                let rename = if matches!(self.peek().kind, TokKind::Colon) {
+                    self.bump();
+                    let (rn, rs) = self.expect_ident("as the renamed binding")?;
+                    Some((rn, rs))
+                } else {
+                    None
+                };
+                fields.push(BindName { name, span, rename });
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek().kind, TokKind::RBrace) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        Ok((fields, rest))
+    }
+
+    /// D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't name every
+    /// field of `type_name` (E0326), and redundant when it does (E0327). The
+    /// parser doesn't know the struct's full field list (that's sema's job),
+    /// so this only catches the REDUNDANT case structurally — cases genuinely
+    /// requiring the struct's field count are re-checked in sema, which has
+    /// the registry. A `..` present with zero named fields is never redundant.
     /// D-CTMARKER1 (ratified 2026-06-25, piece 2): parse `comptime { … }`.
     /// Erases at codegen (build-time only). `$name` splice deferred to c155.
     fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -2807,4 +2908,96 @@ impl<'a> Parser<'a> {
     }
 
     // --- expressions -----------------------------------------------------
+}
+
+/// D-LAYOUT1: is `field` one of the recognized box-anchor names? `left`/
+/// `right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are
+/// vertical (`VVar`). Returns the `LayoutHandle` accessor method name (`h`/
+/// `v`) or `None` if `field` isn't an anchor (an ordinary field access,
+/// left untouched).
+fn layout_anchor_method(field: &str) -> Option<&'static str> {
+    match field {
+        "left" | "right" | "width" => Some("h"),
+        "top" | "bottom" | "height" => Some("v"),
+        _ => None,
+    }
+}
+
+/// D-LAYOUT1: purely structural, parse-time rewrite. Inside `layout NAME { … }`,
+/// a bare `box.anchor` read (`Expr::Field(Expr::Ident(box), anchor, _)`, where
+/// `anchor` is a recognized anchor name) becomes `NAME.h(box, anchor)` /
+/// `NAME.v(box, anchor)` — an ordinary `MethodCall` on the layout handle.
+/// Any other field access (unrecognized anchor name, non-`Ident` base) is left
+/// alone and falls through to normal resolution (and normal errors) in sema.
+/// No type information is used here (I3: all checking still lives in sema —
+/// this only changes which AST shape sema sees, it decides nothing).
+fn desugar_layout_anchors(layout_name: &str, stmt: &mut Stmt) {
+    match stmt {
+        Stmt::Expr(e) => desugar_layout_expr(layout_name, e),
+        Stmt::Val(b) => desugar_layout_expr(layout_name, &mut b.init),
+        _ => {}
+    }
+}
+
+fn desugar_layout_expr(layout_name: &str, e: &mut Expr) {
+    // Rewrite this node in place if it's a `box.anchor` read.
+    if let Expr::Field(base, field, field_span) = e {
+        if let Expr::Ident(box_name, ident_span) = base.as_ref() {
+            if let Some(method) = layout_anchor_method(field) {
+                let box_name = box_name.clone();
+                let anchor = field.clone();
+                let span = *field_span;
+                let ident_span = *ident_span;
+                *e = Expr::MethodCall {
+                    receiver: Box::new(Expr::Ident(layout_name.to_string(), ident_span)),
+                    method: method.to_string(),
+                    method_span: span,
+                    type_args: Vec::new(),
+                    args: vec![
+                        CallArg {
+                            convention: AccessConvention::Read,
+                            expr: Expr::Str(vec![StrPart::Lit(box_name)], ident_span),
+                            span: ident_span,
+                            flags: crate::AST::CallArgFlags::default(),
+                            label: None,
+                            spread: false,
+                        },
+                        CallArg {
+                            convention: AccessConvention::Read,
+                            expr: Expr::Str(vec![StrPart::Lit(anchor)], span),
+                            span,
+                            flags: crate::AST::CallArgFlags::default(),
+                            label: None,
+                            spread: false,
+                        },
+                    ],
+                    recv_type: None,
+                    resolved_ret: None,
+                };
+                return;
+            }
+        }
+    }
+    // Recurse structurally so anchors nested in arithmetic/comparisons are
+    // still found: `label.right + 16.0 == input.left`, `.priority()` chains, …
+    match e {
+        Expr::Binary(_, l, r, _) => {
+            desugar_layout_expr(layout_name, l);
+            desugar_layout_expr(layout_name, r);
+        }
+        Expr::Unary(_, x, _) => desugar_layout_expr(layout_name, x),
+        Expr::Field(base, _, _) => desugar_layout_expr(layout_name, base),
+        Expr::MethodCall { receiver, args, .. } => {
+            desugar_layout_expr(layout_name, receiver);
+            for a in args {
+                desugar_layout_expr(layout_name, &mut a.expr);
+            }
+        }
+        Expr::Call(call) => {
+            for a in &mut call.args {
+                desugar_layout_expr(layout_name, &mut a.expr);
+            }
+        }
+        _ => {}
+    }
 }

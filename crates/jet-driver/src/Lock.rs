@@ -39,6 +39,12 @@ pub struct LockedPackage {
     pub layer: Option<crate::Syntax::RuntimeLayer>,
     /// D-RINGLAYER1=A M2: minimum runtime layer inferred at last build.
     pub inferred_layer: Option<crate::Syntax::RuntimeLayer>,
+    /// D-EFFBUDGET1: this dependency's effect provenance — the effect names
+    /// (D-EFF4 vocabulary) its code was found to use at the last build.
+    pub effects: Vec<String>,
+    /// D-EFFBUDGET1: effect names granted to this dependency via `pkg.jet`'s
+    /// `grants: { … }` block — recorded so an audited exception is a diff.
+    pub effect_grants: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +140,17 @@ pub fn write(lock: &LockFile) -> String {
                 "inferred-layer = \"{}\"\n",
                 inferred.as_str()
             ));
+        }
+
+        // D-EFFBUDGET1: per-dependency effect provenance + audited grants.
+        if !pkg.effects.is_empty() {
+            let effects: Vec<String> = pkg.effects.iter().map(|e| format!("\"{}\"", e)).collect();
+            out.push_str(&format!("effects = [{}]\n", effects.join(", ")));
+        }
+        if !pkg.effect_grants.is_empty() {
+            let grants: Vec<String> =
+                pkg.effect_grants.iter().map(|e| format!("\"{}\"", e)).collect();
+            out.push_str(&format!("effect-grants = [{}]\n", grants.join(", ")));
         }
     }
 
@@ -320,6 +337,8 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                         val.trim_matches('"'),
                     );
                 }
+                "effects" => pkg.effects = parse_string_array(val),
+                "effect-grants" => pkg.effect_grants = parse_string_array(val),
                 _ => {}
             }
         }
@@ -399,6 +418,8 @@ struct PartialPkg {
     deps: Vec<String>,
     layer: Option<crate::Syntax::RuntimeLayer>,
     inferred_layer: Option<crate::Syntax::RuntimeLayer>,
+    effects: Vec<String>,
+    effect_grants: Vec<String>,
 }
 
 impl PartialPkg {
@@ -418,6 +439,8 @@ impl PartialPkg {
             dependencies: self.deps,
             layer: self.layer,
             inferred_layer: self.inferred_layer,
+            effects: self.effects,
+            effect_grants: self.effect_grants,
         })
     }
 }

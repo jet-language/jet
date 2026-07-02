@@ -6,7 +6,7 @@ use super::*;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{Expr, IndexKind, StrPart, Type, UnOp};
+use crate::AST::{AccessConvention, Call, CallArg, Expr, IndexKind, StrPart, Type, UnOp};
 use std::collections::HashSet;
 
 impl<'a> Checker<'a> {
@@ -193,6 +193,50 @@ impl<'a> Checker<'a> {
                     Some(Type::Float)
                 }
             }
+            // D-UNITLIT1: `500ms` — resolve the suffix against an in-scope
+            // `#UnitFamily` member (PascalCased to its minted `@Numeric
+            // distinct Float` type name) and rewrite this node in place to an
+            // ordinary constructor call — sugar over the existing
+            // distinct-type path, so every downstream check (cross-unit
+            // E0127, arithmetic, `.raw()`) is the SAME machinery a
+            // hand-written `Ms(500.0)` already goes through.
+            Expr::UnitLit {
+                int,
+                float,
+                suffix,
+                suffix_span,
+                span,
+            } => {
+                let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
+                let is_unit_member = self.registry.is_distinct(&type_name)
+                    && self.registry.distinct_is_numeric(&type_name)
+                    && self.registry.distinct_base(&type_name) == Some(&Type::Float);
+                if !is_unit_member {
+                    self.diags.push(Diagnostic::error(
+                        "E0134",
+                        format!("`{}` isn't a unit in scope", suffix),
+                        "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here".to_string(),
+                        format!("import the family that defines `{}`, or write the number without a suffix", suffix),
+                        Some(*suffix_span),
+                    ));
+                    return None;
+                }
+                let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
+                let call_span = *span;
+                *e = Expr::Call(Call {
+                    name: type_name,
+                    name_span: *suffix_span,
+                    args: vec![CallArg {
+                        convention: AccessConvention::Read,
+                        expr: Expr::Float(value, call_span, false),
+                        span: call_span,
+                        flags: crate::AST::CallArgFlags::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                });
+                self.infer(e)
+            }
             Expr::Bool(_, _) => Some(Type::Bool),
             Expr::Str(parts, _) => {
                 for p in parts.iter_mut() {
@@ -207,7 +251,19 @@ impl<'a> Checker<'a> {
                                         // Migration: auto-printable structs without Display get a lint
                                         // and still compile via jet_show fallback in codegen.
                                         if let Type::Named(n) = &t {
-                                            if self.trait_reg.auto_printable.contains(n)
+                                            // D-CAPBUNDLE1: a nominal `distinct` type
+                                            // starts inert — interpolating one without
+                                            // `@Printable` names the granted bundles
+                                            // instead of the generic E0915 wording.
+                                            if self.registry.is_distinct(n) {
+                                                self.diags.push(e0138(
+                                                    n,
+                                                    "string interpolation",
+                                                    "@Printable",
+                                                    self.registry.distinct_granted_bundles(n),
+                                                    inner.span(),
+                                                ));
+                                            } else if self.trait_reg.auto_printable.contains(n)
                                                 && !self.trait_reg.implements_trait(
                                                     n,
                                                     crate::Generics::DISPLAY,
@@ -257,6 +313,19 @@ impl<'a> Checker<'a> {
                 Some(Type::String)
             }
             Expr::Ident(name, span) => {
+                // D-PREPOST1 (E0144): `result` names the return value inside a
+                // `@Post` condition; at function entry (a `@Pre` condition)
+                // there is no return value yet.
+                if self.in_pre_clause && name == "result" {
+                    self.diags.push(Diagnostic::error(
+                        "E0144",
+                        "`result` isn't available in a `@Pre` condition".to_string(),
+                        "`result` names the return value, which only exists once the function has returned — a `@Pre` condition runs at entry, before there is one".to_string(),
+                        "use `result` only in a `@Post` condition".to_string(),
+                        Some(*span),
+                    ));
+                    return None;
+                }
                 if let Some(moved_at) = self.moved.get(name).copied() {
                     let (line_note, _) = (moved_at, ());
                     let _ = line_note;
@@ -430,6 +499,11 @@ impl<'a> Checker<'a> {
             Expr::Binary(op, lhs, rhs, span) => {
                 let (op, span) = (*op, *span);
                 self.infer_binary(op, lhs, rhs, span)
+            }
+            Expr::CompareChain { operands, ops, span } => {
+                let span = *span;
+                let ops = ops.clone();
+                self.infer_compare_chain(operands, &ops, span)
             }
             Expr::Deref(inner, span) => {
                 // D-CAP9: postfix `p.*` dereferences a raw pointer — a raw

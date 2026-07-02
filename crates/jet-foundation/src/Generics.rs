@@ -12,8 +12,8 @@ pub const DEBUG: &str = "Debug";
 pub const EQUATABLE: &str = "Equatable";
 pub const COMPARABLE: &str = "Comparable";
 pub const SERIALIZE: &str = "Serialize";
-/// D-SERDE4 (= B, owner-modified): the serde derive traits. `#[Codable]` derives
-/// both; `#[Encode]`/`#[Decode]` derive one. They lower to `user_Encode`/`user_Decode`.
+/// D-SERDE4 (= B, owner-modified): the serde derive traits. `@[Codable]` derives
+/// both; `@[Encode]`/`@[Decode]` derive one. They lower to `user_Encode`/`user_Decode`.
 pub const ENCODE: &str = "Encode";
 pub const DECODE: &str = "Decode";
 
@@ -382,10 +382,10 @@ pub fn e0916(type_show: &str, field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0916",
         format!("`{type_show}` can't auto-derive `Debug` because field `{field}` isn't debuggable"),
-        "auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable"
+        "auto-derived `Debug` requires every non-`@[Redact]` field to be debuggable"
             .to_string(),
         format!(
-            "mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type_show}`"
+            "mark `{field}` with `@[Redact]`, change its type, or implement `Debug` manually for `{type_show}`"
         ),
         Some(span),
     )
@@ -635,8 +635,8 @@ pub fn collect_type_param_mentions(
     }
 }
 
-/// D-SERDE9/D-SERDE10: extra Rust serde bounds for a generic `#[Codable]`/
-/// `#[Encode]`/`#[Decode]` impl. The compiler injects `T: user_Encode` /
+/// D-SERDE9/D-SERDE10: extra Rust serde bounds for a generic `@[Codable]`/
+/// `@[Encode]`/`@[Decode]` impl. The compiler injects `T: user_Encode` /
 /// `T: user_Decode` — never spelled by the user — for *exactly* the type params
 /// that reach the wire (D-SERDE10: those mentioned by some non-skipped field
 /// type in `wire_types`). A phantom/skip-only param gets no serde bound, so e.g.

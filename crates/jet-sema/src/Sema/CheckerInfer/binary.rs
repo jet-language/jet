@@ -135,15 +135,15 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0127",
                             format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
-                            format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
-                            format!("add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"),
+                            format!("`{}` is a distinct type but isn't marked `@Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+                            format!("add `@Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"),
                             Some(span),
                         ));
                     } else {
                         self.diags.push(Diagnostic::error(
                             "E0127",
                             format!("operator `{}` is not available between `{}` and `{}`", op.spell(), lt.name(), rt.name()),
-                            format!("`#Numeric` distinct types only support arithmetic between the same type"),
+                            format!("`@Numeric` distinct types only support arithmetic between the same type"),
                             format!("both sides must be `{}`", distinct_name),
                             Some(span),
                         ));
@@ -155,13 +155,23 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0127",
                         format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
-                        format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
-                        "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value".to_string(),
+                        format!("`{}` is a distinct type but isn't marked `@Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+                        "add `@Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value".to_string(),
                         Some(span),
                     ));
                     return None;
                 }
-                // Same #Numeric distinct type — arithmetic is allowed, returns the same type.
+                // Same @Numeric distinct type — arithmetic is allowed, returns the same type.
+                //
+                // D-RANGETYPE1 gap: the ratified text also wants a range
+                // type's arithmetic to WIDEN to the base (`Severity + Severity
+                // -> Int`, since a sum can leave the declared bounds). Doing
+                // that in sema alone breaks codegen (the TIR `Binary` lowering
+                // reads the operand's Rust newtype and emits a raw `+` on it;
+                // widening the SEMA type to `Int` without also unwrapping each
+                // operand to `.raw()` in codegen produced an I2-class rustc
+                // rejection). Left as same-type arithmetic (like any other
+                // `@Numeric` distinct type) until the codegen unwrap is wired.
                 return Some(lt);
             }
             if (lt_is_distinct || rt_is_distinct) && is_eq {
@@ -199,6 +209,31 @@ impl<'a> Checker<'a> {
                 return Some(Type::Bool);
             }
             // Implicit coercion check (non-arithmetic, non-eq): handled at assignment.
+        }
+
+        // D-LAYOUT1 / D-LAYOUT-GATES1: operator overloading on the closed
+        // built-in layout family (`HVar`/`VVar`/`LengthVar`/`Constraint`).
+        // GATE 1 is exactly this: `>=`/`<=`/`==` return `Constraint` instead
+        // of `Bool` for this family — the ONLY place that blessing is wired.
+        // A cross-axis combination (`HVar` with `VVar`, on `+`/`-` OR a
+        // comparison) is E2932, `E-LAYOUT-AXIS-MISMATCH`.
+        match layout_binop_result(op, &lt, &rt) {
+            Some(Ok(result)) => return Some(result),
+            Some(Err(())) => {
+                self.diags.push(Diagnostic::error(
+                    "E2932",
+                    format!(
+                        "layout constraint mixes a horizontal and vertical value (`{}` and `{}`)",
+                        lt.name(),
+                        rt.name()
+                    ),
+                    "`left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout".to_string(),
+                    "compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis)".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+            None => {}
         }
 
         // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math
@@ -390,30 +425,59 @@ impl<'a> Checker<'a> {
                     None
                 }
             }
-            BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
-                if lt == rt && matches!(lt, Type::Int | Type::Float) {
-                    Some(Type::Bool)
-                } else if lt == rt
-                    && (types_comparable(&lt, self.registry)
-                        || self.type_param_has_bound(&lt, COMPARABLE))
-                {
-                    Some(Type::Bool)
-                } else if lt == rt && lt == Type::String {
-                    self.diags.push(Diagnostic::error(
-                        "E0109",
-                        format!("text isn't ordered with `{}`", op.spell()),
-                        "comparing text for order isn't supported yet".to_string(),
-                        "compare with `==` or `!=`, or compare lengths/numbers instead".to_string(),
-                        Some(span),
-                    ));
-                    None
-                } else {
-                    self.op_mismatch(op, &lt, &rt, span);
-                    None
-                }
-            }
+            BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => self.check_relational(op, &lt, &rt, span),
             BinOp::And | BinOp::Or => unreachable!(),
         }
+    }
+
+    /// D-CHAINCMP1: the `</<=/>/>=` type-check, shared by a plain `Binary`
+    /// pair and each adjacent pair of a `CompareChain`. No new *type* rule —
+    /// every pair type-checks exactly as a standalone relational comparison.
+    pub(crate) fn check_relational(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) -> Option<Type> {
+        if lt == rt && matches!(lt, Type::Int | Type::Float) {
+            Some(Type::Bool)
+        } else if lt == rt
+            && (types_comparable(lt, self.registry) || self.type_param_has_bound(lt, COMPARABLE))
+        {
+            Some(Type::Bool)
+        } else if lt == rt && *lt == Type::String {
+            self.diags.push(Diagnostic::error(
+                "E0109",
+                format!("text isn't ordered with `{}`", op.spell()),
+                "comparing text for order isn't supported yet".to_string(),
+                "compare with `==` or `!=`, or compare lengths/numbers instead".to_string(),
+                Some(span),
+            ));
+            None
+        } else {
+            self.op_mismatch(op, lt, rt, span);
+            None
+        }
+    }
+
+    /// D-CHAINCMP1: `0 <= sev < 10` — infer each operand once, type-check
+    /// every adjacent pair via `check_relational`. The chain's own type is
+    /// `Bool`; a bad pair pushes its own diagnostic and the overall result
+    /// is `None` (mirrors a plain mismatched `Binary` comparison).
+    pub(crate) fn infer_compare_chain(
+        &mut self,
+        operands: &mut [Expr],
+        ops: &[BinOp],
+        span: Span,
+    ) -> Option<Type> {
+        let types: Vec<Option<Type>> = operands.iter_mut().map(|e| self.infer(e)).collect();
+        let mut ok = true;
+        for (i, op) in ops.iter().enumerate() {
+            match (&types[i], &types[i + 1]) {
+                (Some(lt), Some(rt)) => {
+                    if self.check_relational(*op, lt, rt, span).is_none() {
+                        ok = false;
+                    }
+                }
+                _ => ok = false,
+            }
+        }
+        if ok { Some(Type::Bool) } else { None }
     }
 
     pub(crate) fn op_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {

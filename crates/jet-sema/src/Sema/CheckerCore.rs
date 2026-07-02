@@ -1668,7 +1668,7 @@ impl<'a> Checker<'a> {
                 }
                 self.check_block(body, true);
             }
-            // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — any fallible / #MustUse
+            // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — any fallible / @MustUse
             // result dropped as a bare statement within this block is allowed without
             // an explicit `.drop("reason")` call. Semantically a plain block otherwise.
             Stmt::SuppressMustUse { body, .. } => {
@@ -1716,6 +1716,130 @@ impl<'a> Checker<'a> {
                     self.check_stmt(s);
                 }
                 self.taskgroup_stack.pop();
+                self.pop_scope();
+            }
+            // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a
+            // Cassowary-style constraint block. Unlike `region`/`taskgroup`,
+            // `name` is declared in the CURRENT scope (not pushed/popped
+            // around it) so the handle outlives the block — later code reads
+            // solved values (`NAME.value(v)`) or calls `NAME.suggest(...)`.
+            // The parser already desugared every `box.anchor` read into a
+            // `NAME.h(box, anchor)`/`NAME.v(box, anchor)` call, so every line
+            // is an ordinary expression checked by the general GATE-1/GATE-2
+            // machinery (`infer_binary`'s layout block, `layout_method_return`)
+            // — the only layout-specific rule left to enforce here is that
+            // each line's RESULT is a `Constraint` (E2933 otherwise).
+            Stmt::Layout {
+                name,
+                name_span,
+                body,
+                ..
+            } => {
+                self.declare(
+                    name,
+                    *name_span,
+                    LocalInfo {
+                        ty: Type::Named(Syntax::LAYOUT_HANDLE_TYPE.to_string()),
+                        mutable: false,
+                        param_conv: None,
+                        decl_loop_depth: self.loop_depth,
+                        sendable: true,
+                        task_lint_span: None,
+                        single_use_span: None,
+                        task_has_view_capture: false,
+                    },
+                );
+                self.push_scope();
+                // D-LAYOUT1: E2934 (lint) — a constraint line that is a
+                // byte-for-byte structural duplicate of an earlier one in the
+                // SAME block is almost always a copy-paste mistake (a real,
+                // if narrow, notion of "redundant": exact duplicates only —
+                // proving general LP redundancy, i.e. "implied by the
+                // others", is a much larger problem than this lint needs).
+                let mut seen_constraints: HashSet<String> = HashSet::new();
+                for stmt in body.iter_mut() {
+                    if let Stmt::Expr(_) = stmt {
+                        let Stmt::Expr(e) = stmt else {
+                            unreachable!()
+                        };
+                        let fp = layout_constraint_fingerprint(e);
+                        let t = self.infer(e);
+                        let is_constraint =
+                            matches!(&t, Some(Type::Named(n)) if n == Syntax::LAYOUT_CONSTRAINT_TYPE);
+                        if !is_constraint && t.is_some() {
+                            self.diags.push(Diagnostic::error(
+                                "E2933",
+                                format!(
+                                    "this line inside `{} {}` doesn't produce a constraint (found `{}`)",
+                                    Syntax::KW_LAYOUT,
+                                    name,
+                                    t.as_ref().map(|ty| ty.name()).unwrap_or_default()
+                                ),
+                                "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`)".to_string(),
+                                "write a comparison, e.g. `label.width >= 80.0`, or capture it: `c @= label.width >= 80.0`".to_string(),
+                                Some(e.span()),
+                            ));
+                        } else if is_constraint && !seen_constraints.insert(fp) {
+                            self.diags.push(Diagnostic::lint(
+                                "E2934",
+                                "this constraint repeats one already written in this `layout` block".to_string(),
+                                "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover".to_string(),
+                                "remove the duplicate line, or change it if a different constraint was meant".to_string(),
+                                Some(e.span()),
+                            ));
+                        }
+                    } else if let Stmt::Val(_) = stmt {
+                        let fp = if let Stmt::Val(b) = stmt {
+                            layout_constraint_fingerprint(&b.init)
+                        } else {
+                            unreachable!()
+                        };
+                        self.check_stmt(stmt);
+                        if let Stmt::Val(b) = stmt {
+                            let bname = b.name.clone();
+                            let name_span = b.name_span;
+                            let is_constraint = self
+                                .lookup(&bname)
+                                .map(|info| {
+                                    matches!(&info.ty, Type::Named(n) if n == Syntax::LAYOUT_CONSTRAINT_TYPE)
+                                })
+                                .unwrap_or(false);
+                            if !is_constraint {
+                                self.diags.push(Diagnostic::error(
+                                    "E2933",
+                                    format!(
+                                        "this binding inside `{} {}` doesn't capture a constraint",
+                                        Syntax::KW_LAYOUT,
+                                        name
+                                    ),
+                                    "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `@=`".to_string(),
+                                    "bind a comparison: `c @= label.width >= 80.0`".to_string(),
+                                    Some(name_span),
+                                ));
+                            } else if !seen_constraints.insert(fp) {
+                                self.diags.push(Diagnostic::lint(
+                                    "E2934",
+                                    "this constraint repeats one already written in this `layout` block".to_string(),
+                                    "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover".to_string(),
+                                    "remove the duplicate line, or change it if a different constraint was meant".to_string(),
+                                    Some(name_span),
+                                ));
+                            }
+                        }
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E2933",
+                            format!(
+                                "only constraint lines belong directly inside a `{} {}` block",
+                                Syntax::KW_LAYOUT,
+                                name
+                            ),
+                            "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `@=`".to_string(),
+                            "write a comparison, e.g. `label.width >= 80.0`".to_string(),
+                            Some(stmt.span()),
+                        ));
+                    }
+                }
                 self.pop_scope();
             }
             // D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction
@@ -1839,7 +1963,7 @@ impl<'a> Checker<'a> {
             // block body checking. Q2 = Cβ: restore is per-block (RAII guard).
             // D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input
             // block. No type-checking beyond the body; the block is impure (IO
-            // effect), so it is rejected inside `#Pure fn` (same rule as `io.input`).
+            // effect), so it is rejected inside `@Pure fn` (same rule as `io.input`).
             // `use core.term` is NOT required to write a `live` block — the block
             // is its own syntactic gate. `term.read_key()` does need the import.
             // E3301: freestanding builds have no terminal device.
@@ -1863,7 +1987,7 @@ impl<'a> Checker<'a> {
             }
             // D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the
             // expert determinism-escape. Raise the suppression depth so the
-            // determinism rejections inside a `#Pure fn` (E3403 non-deterministic
+            // determinism rejections inside a `@Pure fn` (E3403 non-deterministic
             // Core call / E3401 impure Core call) are suspended for the body. This
             // does NOT relax memory/type safety — only the determinism check. A
             // lexical scope; erased in codegen (I3 — a plain Rust block).
@@ -2919,7 +3043,7 @@ impl<'a> Checker<'a> {
             // The initializer itself didn't type-check; declare error
             // placeholders so the bound names don't cascade into E0107.
             for n in pattern.names() {
-                self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
             }
             return;
         };
@@ -2929,7 +3053,8 @@ impl<'a> Checker<'a> {
                 type_name,
                 type_span,
                 fields,
-                ..
+                rest,
+                span: pat_span,
             } => {
                 let actual = match &it {
                     Type::Named(n) => Some(n.clone()),
@@ -2958,7 +3083,7 @@ impl<'a> Checker<'a> {
                         Some(*type_span),
                     ));
                     for n in pattern.names() {
-                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                        self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
                     }
                     return;
                 }
@@ -2973,7 +3098,7 @@ impl<'a> Checker<'a> {
                         Some(*type_span),
                     ));
                     for n in pattern.names() {
-                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                        self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
                     }
                     return;
                 }
@@ -2981,7 +3106,35 @@ impl<'a> Checker<'a> {
                     // `field_type` resolves the field's type and reports E0302
                     // with a suggestion if the field name is unknown.
                     let fty = self.field_type(&it, &f.name, f.span).unwrap_or(Type::Int);
-                    self.declare_bound(&f.name, f.span, fty, b.mutable);
+                    self.declare_bound(f.local_name(), f.span, fty, b.mutable);
+                }
+                // D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't
+                // name every field, and redundant when it already does.
+                let total_fields = self
+                    .struct_owner_module(&actual, None)
+                    .and_then(|m| self.struct_fields_of(m, &actual))
+                    .map(|fs| fs.len());
+                if let Some(total) = total_fields {
+                    let partial = fields.len() < total;
+                    if partial && rest.is_none() {
+                        self.diags.push(Diagnostic::error(
+                            "E0326",
+                            format!("this pattern leaves out fields of `{}`", type_name),
+                            "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
+                            "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
+                            Some(*pat_span),
+                        ));
+                    } else if !partial {
+                        if let Some(rest_span) = rest {
+                            self.diags.push(Diagnostic::error(
+                                "E0327",
+                                format!("`..` is redundant — this pattern already names every field of `{}`", type_name),
+                                "a trailing `..` only makes sense when some fields are left unnamed".to_string(),
+                                "remove the `..`".to_string(),
+                                Some(*rest_span),
+                            ));
+                        }
+                    }
                 }
             }
             BindPattern::List { elems, span } => {
@@ -3002,7 +3155,7 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                         for n in pattern.names() {
-                            self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                            self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
                         }
                         return;
                     }
@@ -3070,7 +3223,7 @@ impl<'a> Checker<'a> {
                         Some(*span),
                     ));
                     for n in pattern.names() {
-                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                        self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
                     }
                     return;
                 };
@@ -3412,6 +3565,43 @@ pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
         Type::IntN { .. } | Type::Float32 => true,
         Type::FixedList { elem, .. } => is_pod_uninit_type(elem),
         _ => false,
+    }
+}
+
+/// D-LAYOUT1 (E2934): a structural fingerprint of a (parser-desugared)
+/// layout constraint expression, used only to catch EXACT duplicate lines
+/// within one `layout { … }` block. Not a general expression hasher — it
+/// only needs to be stable and injective enough for the small shapes a
+/// constraint line can take (`Binary`/`MethodCall`/`Ident`/literals).
+fn layout_constraint_fingerprint(e: &Expr) -> String {
+    match e {
+        Expr::Binary(op, l, r, _) => format!(
+            "({} {:?} {})",
+            layout_constraint_fingerprint(l),
+            op,
+            layout_constraint_fingerprint(r)
+        ),
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let recv = layout_constraint_fingerprint(receiver);
+            let a: Vec<String> = args
+                .iter()
+                .map(|a| layout_constraint_fingerprint(&a.expr))
+                .collect();
+            format!("{}.{}({})", recv, method, a.join(","))
+        }
+        Expr::Ident(n, _) => n.clone(),
+        Expr::Str(parts, _) => match parts.as_slice() {
+            [crate::AST::StrPart::Lit(s)] => format!("{:?}", s),
+            _ => "<str>".to_string(),
+        },
+        Expr::Float(f, _, _) => f.to_string(),
+        Expr::Int(i, _, _) => i.to_string(),
+        _ => "<?>".to_string(),
     }
 }
 

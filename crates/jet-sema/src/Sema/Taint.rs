@@ -115,6 +115,7 @@ impl<'a> TaintCtx<'a> {
 
             // Derivations — taint flows through if any operand is tainted.
             Expr::Binary(_, l, r, _) => self.is_tainted(l) || self.is_tainted(r),
+            Expr::CompareChain { operands, .. } => operands.iter().any(|e| self.is_tainted(e)),
             Expr::Unary(_, inner, _)
             | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
@@ -172,6 +173,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
             | Expr::Lambda(_)
+            | Expr::UnitLit { .. }
             | Expr::ComptimeSplice { .. } => false,
             Expr::Paren(inner, _) => self.is_tainted(inner),
             Expr::Spread(inner, _) => self.is_tainted(inner),
@@ -222,6 +224,11 @@ impl<'a> TaintCtx<'a> {
             Expr::Binary(_, l, r, _) => {
                 self.check_expr(l);
                 self.check_expr(r);
+            }
+            Expr::CompareChain { operands, .. } => {
+                for e in operands {
+                    self.check_expr(e);
+                }
             }
             Expr::Unary(_, inner, _)
             | Expr::IncDec { operand: inner, .. }
@@ -301,6 +308,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Absent(_)
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
+            | Expr::UnitLit { .. }
             | Expr::ComptimeSplice { .. } => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
             Expr::Spread(inner, _) => self.check_expr(inner),
@@ -430,6 +438,7 @@ impl<'a> TaintCtx<'a> {
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
@@ -490,7 +499,9 @@ impl<'a> TaintCtx<'a> {
 fn pattern_names(pat: &crate::AST::BindPattern) -> Vec<String> {
     use crate::AST::BindPattern;
     match pat {
-        BindPattern::Struct { fields, .. } => fields.iter().map(|b| b.name.clone()).collect(),
+        BindPattern::Struct { fields, .. } => {
+            fields.iter().map(|b| b.local_name().to_string()).collect()
+        }
         BindPattern::List { elems, .. } | BindPattern::Tuple { elems, .. } => {
             elems.iter().map(|b| b.name.clone()).collect()
         }

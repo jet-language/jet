@@ -24,10 +24,10 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // c109 Phase 18: an `#Unsafe fn` (S58) IS covered — it lowers to a Rust `unsafe fn`
     // (the `is_unsafe` flag drives the signature prefix), and its gated body ops are
     // covered below.
-    // c109 Phase 23: a `#Pure fn` (S60, E2-M16) IS covered — purity is a sema-only
-    // check (E3401: a `#Pure fn` may only call other `#Pure fn`s), validated entirely
+    // c109 Phase 23: a `@Pure fn` (S60, E2-M16) IS covered — purity is a sema-only
+    // check (E3401: a `@Pure fn` may only call other `@Pure fn`s), validated entirely
     // in sema; codegen erases the annotation (no codegen path reads `f.is_pure` outside
-    // these gates). So a `#Pure fn` lowers + emits byte-identically to a plain fn — the
+    // these gates). So a `@Pure fn` lowers + emits byte-identically to a plain fn — the
     // body's calls are ordinary `Call`/`MethodCall` nodes covered by earlier phases.
     // c109 Phase 17: GENERIC free functions are covered when every type parameter is a
     // plain `<T>` / bounded `<T: Trait>` form (the clause renders via `render_generics`)
@@ -117,7 +117,7 @@ pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
 pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` method IS covered
     // (it lowers to an `unsafe fn`, the `is_unsafe` flag driving the prefix). c109
-    // Phase 23: a `#Pure fn` method IS covered (purity is sema-only; codegen erases it).
+    // Phase 23: a `@Pure fn` method IS covered (purity is sema-only; codegen erases it).
     if !f.type_params.is_empty() {
         return false;
     }
@@ -194,7 +194,7 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
     // view methods: `lower_trait_method` sets `env.view_return = f.is_view_return` and
     // `TFunc.is_view`, so lowering routes returns through `lower_view_return` and the
     // emit renders `-> &T`.
-    // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
+    // c109 Phase 23: a `@Pure` trait method is covered (purity is sema-only; erased).
     if !f.type_params.is_empty() {
         return false;
     }
@@ -376,7 +376,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
 /// but the param convention (`Read`→deref for a non-scalar Named) is decided exactly as
 /// for a struct, so passing/binding/returning one is byte-identical to the AST path with
 /// no new emit. Construction is the `is_distinct_ctor` `Call` shape; `.raw()` is the
-/// dedicated DistinctRaw method shape; `+`/`==` on a `#Numeric` distinct emit the native
+/// dedicated DistinctRaw method shape; `+`/`==` on a `@Numeric` distinct emit the native
 /// operator (`ast_operand_is_integer` returns `None` for a distinct-typed operand, so the
 /// overflow trap is never claimed — matching the AST path's plain `+`).
 pub(crate) fn is_covered_distinct_ty(ty: &Type, cx: &Cx) -> bool {
@@ -455,6 +455,9 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
         || file_handle_rust_type(name).is_some()
         || net_handle_rust_type(name).is_some()
         || alloc_handle_rust_type(name).is_some()
+        // D-LAYOUT1 / D-LAYOUT-GATES1: layout runtime types (opaque handles,
+        // no literal form — like the alloc/file/net handles above).
+        || layout_handle_rust_type(name).is_some()
 }
 
 /// c109 Phase 17: a PRELUDE STRUCT name with a struct-literal construction form — the
@@ -1032,7 +1035,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 Some(BindPattern::Struct { fields, .. }) => {
                     let ok = !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
                     for f in fields {
-                        locals.insert(f.name.clone());
+                        // D-DESTRUCT1: the LOCAL (possibly renamed) name is what's
+                        // in scope, not the source field name.
+                        locals.insert(f.local_name().to_string());
                     }
                     ok
                 }
@@ -1249,6 +1254,15 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // so the gate checks the body on the SAME `locals`.
         Stmt::Region { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         Stmt::TaskGroup { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. UNLIKE `Region`/
+        // `TaskGroup`, `name` is a REAL runtime binding that must stay valid
+        // for statements AFTER this one (`lower_stmt`/`TStmt::Layout` binds
+        // it before lowering the body) — register it into `locals` here too,
+        // so a later `form.value(…)` etc. is itself recognized as in-subset.
+        Stmt::Layout { name, body, .. } => {
+            locals.insert(name.clone());
+            body.iter().all(|s| stmt_in_subset(s, cx, locals))
+        }
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1) — a plain block
         // with a per-field guard. Each field value + the body must be in-subset (the body
         // leaks like a region).
@@ -1851,6 +1865,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         }
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => expr_in_subset(inner, cx, locals),
         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
+        // D-CHAINCMP1: `0 <= sev < 10` — in-subset iff every operand is.
+        Expr::CompareChain { operands, .. } => {
+            operands.iter().all(|e| expr_in_subset(e, cx, locals))
+        }
         Expr::Call(c) => {
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
             // parses as `Expr::Call { name: "f" }`, NOT `Expr::CallValue`. The AST path
@@ -2718,6 +2736,15 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
+                    // D-HOLE1: `Option.lift2(f, a, b)` — static combinator, not a
+                    // user type. `f` is a plain in-subset lambda arg (no closure-arg
+                    // gate needed here — `expr_in_subset`'s `Expr::Lambda` arm already
+                    // routes through `lambda_in_subset`).
+                    ("Option", "lift2", 3) if !cx.type_names.contains("Option") => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
                     _ => {}
                 }
             }
@@ -2913,6 +2940,19 @@ pub(crate) fn method_call_in_subset(
     }
     if let Some(handle) = recv_type {
         if handle_method_op(handle, method, args.len()).is_some() {
+            return expr_in_subset(receiver, cx, locals)
+                && args
+                    .iter()
+                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+        }
+    }
+    // D-LAYOUT1 / D-LAYOUT-GATES1: a method on `LayoutHandle`/`Constraint`
+    // (mirrors the D-SIMD2 math-method carve-out immediately above). Admitted
+    // when the receiver + args are in-subset.
+    if let Some(handle) = recv_type {
+        if crate::Sema::is_layout_type(handle)
+            && crate::Sema::layout_method_return(handle, method, args.len()).is_some()
+        {
             return expr_in_subset(receiver, cx, locals)
                 && args
                     .iter()
@@ -3231,6 +3271,9 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         // `from` is the static constructor for Set — admitted here so the static-call
         // shape below can claim it before `is_intercepted_method_name` blocks it.
         | "from"
+        // D-HOLE1: `zip` is already listed above (D-ITER1); `lift2` is `Option`'s
+        // static combinator, admitted the same way `from`/`new` are.
+        | "lift2"
     )
 }
 

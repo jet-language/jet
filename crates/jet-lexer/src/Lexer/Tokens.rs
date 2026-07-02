@@ -58,6 +58,18 @@ pub enum TokKind {
     Str(Vec<StrTokPart>),
     Int(i64),
     Float(f64),
+    /// D-UNITLIT1: a numeric literal immediately followed by an identifier
+    /// suffix that isn't a float exponent — `500ms`, `12.50usd`. A NEW,
+    /// SEPARATE token kind (not a field added to `Int`/`Float`) so every
+    /// existing `TokKind::Int`/`Float` match across the parser is completely
+    /// unaffected when no suffix is present. The lexer only carries the
+    /// value + suffix text; resolving the suffix against an in-scope
+    /// `#UnitFamily` member is sema's job (imports aren't known here).
+    UnitNumber {
+        int: Option<i64>,
+        float: Option<f64>,
+        suffix: String,
+    },
     /// S41: `'a'` character literal.
     Char(char),
     LParen,
@@ -213,6 +225,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Str(_) => "a piece of quoted text".to_string(),
         TokKind::Int(_) => "a number".to_string(),
         TokKind::Float(_) => "a decimal number".to_string(),
+        TokKind::UnitNumber { .. } => "a number with a unit suffix".to_string(),
         TokKind::Char(_) => "a character".to_string(),
         TokKind::LParen => "`(`".to_string(),
         TokKind::RParen => "`)`".to_string(),

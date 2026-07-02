@@ -278,6 +278,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::ContextBlock { body, .. }
@@ -371,6 +372,37 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         body,
         kind: TFuncKind::TopLevel,
     }
+}
+
+/// D-PREPOST1: lower a `@Pre`/`@Post` condition expression to a Rust bool
+/// expression string, in a fresh env with `f`'s params bound exactly as
+/// `lower_func` binds them (same place/deref rules) — `@Post` additionally
+/// binds `result` to `result_binding` (Rust name, type). Standalone: does not
+/// lower/emit the function body itself, so it can run before or independently
+/// of the normal body lowering.
+pub(crate) fn render_contract_cond(
+    f: &Func,
+    cond: &Expr,
+    result_binding: Option<(&str, &Type)>,
+    cx: &Cx,
+) -> String {
+    let mut env = LowerEnv::new(f.name.clone());
+    for p in &f.params {
+        let rust_name = cx.mangle_name(&p.name);
+        let param_ty = if p.variadic {
+            Type::List(Box::new(p.ty.clone()))
+        } else {
+            p.ty.clone()
+        };
+        let mut slot_param = p.clone();
+        slot_param.ty = param_ty.clone();
+        let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
+        env.bind(&p.name, place, Some(param_ty));
+    }
+    if let Some((rust_name, ty)) = result_binding {
+        env.bind("result", rust_name.to_string(), Some(ty.clone()));
+    }
+    emit_tir_expr(&lower_expr(cond, cx, &mut env), cx)
 }
 
 /// c109: lower + emit a `#Test` block body through the TIR, reproducing the legacy
@@ -736,17 +768,18 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
             let tmp = format!("__jet_d{}", span.start);
             let kw = if b.mutable { "let mut" } else { "let" };
-            let mut field_names = Vec::new();
+            let mut binds = Vec::new();
             for f in fields {
-                let m = mangle(&f.name).to_string();
-                field_names.push(m.clone());
-                env.bind(&f.name, m, field_tys.get(&f.name).cloned());
+                let field_rust = mangle(&f.name).to_string();
+                let local_rust = mangle(f.local_name()).to_string();
+                binds.push((local_rust.clone(), field_rust));
+                env.bind(f.local_name(), local_rust, field_tys.get(&f.name).cloned());
             }
             return TStmt::StructDestructure {
                 tmp,
                 init,
                 kw,
-                fields: field_names,
+                binds,
             };
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
@@ -1301,6 +1334,25 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Region { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
         // D-TASKSCOPE1=A: taskgroup erases to a plain block at codegen (I3).
         Stmt::TaskGroup { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` needs a REAL
+        // runtime object (unlike Region/TaskGroup, which erase) — bind `name`
+        // to a fresh `jet_layout::Handle` BEFORE lowering the body, so the
+        // desugared `NAME.h(box, anchor)` calls inside resolve to it, exactly
+        // like an ordinary `NAME #= jet_layout::Handle::new(…)` binding would.
+        Stmt::Layout { name, body, .. } => {
+            let place = mangle(name);
+            env.bind(
+                name,
+                place.clone(),
+                Some(Type::Named(Syntax::LAYOUT_HANDLE_TYPE.to_string())),
+            );
+            let lowered_body = lower_stmts(body, cx, env);
+            TStmt::Layout {
+                rust_place: place,
+                label: name.clone(),
+                body: lowered_body,
+            }
+        }
         // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region` — a plain block with the body lowered
         // on the SAME `&mut env` (its `let`s leak). Effects erase at codegen (I3); reuse the
@@ -2487,6 +2539,64 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Binary(op, l, r, span) => {
             let lhs = lower_expr(l, cx, env);
             let rhs = lower_expr(r, cx, env);
+            // D-LAYOUT1 / D-LAYOUT-GATES1: layout-typed `+`/`-`/`>=`/`<=`/`==`.
+            // Recompute via the SAME table sema used (mirrors the math/BigInt
+            // early-return pattern below) rather than trusting `lhs.ty.clone()`
+            // — that default is wrong here: e.g. `16.0 + label.right` has a
+            // plain `Float` LEFT operand, so the result axis (`HVar`) comes
+            // from the RIGHT side. Comparisons need a DEDICATED node
+            // (`LayoutCompare`) since Rust's `>=`/`==` can't return a custom
+            // type; `+`/`-` stay plain `Binary` (`jet_layout::LinExpr`
+            // implements `std::ops::{Add,Sub}`).
+            {
+                let l_axis = matches!(&lhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
+                let r_axis = matches!(&rhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
+                if (l_axis || r_axis)
+                    && matches!(op, BinOp::Ge | BinOp::Le | BinOp::Eq | BinOp::Add | BinOp::Sub)
+                {
+                    if let Some(Ok(result_ty)) = crate::Sema::layout_binop_result(*op, &lhs.ty, &rhs.ty)
+                    {
+                        // A bare `Int`/`Float` operand (axis-neutral) isn't a
+                        // `jet_layout::LinExpr` at the Rust level yet — wrap it
+                        // so `+`/`-`/`ge`/`le`/`eq_` only ever see `LinExpr`.
+                        let wrap = |t: TExpr| -> TExpr {
+                            if matches!(t.ty, Type::Int | Type::Float) {
+                                TExpr {
+                                    ty: Type::Named(
+                                        crate::Syntax::LAYOUT_LENGTHVAR_TYPE.to_string(),
+                                    ),
+                                    kind: TExprKind::LayoutLit { inner: Box::new(t) },
+                                }
+                            } else {
+                                t
+                            }
+                        };
+                        let lhs = wrap(lhs);
+                        let rhs = wrap(rhs);
+                        if matches!(op, BinOp::Add | BinOp::Sub) {
+                            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+                            return TExpr {
+                                ty: result_ty,
+                                kind: TExprKind::Binary {
+                                    op: *op,
+                                    overflow: false,
+                                    line,
+                                    lhs: Box::new(lhs),
+                                    rhs: Box::new(rhs),
+                                },
+                            };
+                        }
+                        return TExpr {
+                            ty: result_ty,
+                            kind: TExprKind::LayoutCompare {
+                                op: *op,
+                                lhs: Box::new(lhs),
+                                rhs: Box::new(rhs),
+                            },
+                        };
+                    }
+                }
+            }
             // Overflow decision, computed here once — this is the fact today's
             // `operand_is_integer` re-derives in codegen. It must mirror that
             // function EXACTLY (Codegen/Expression.rs): only a *resolvable*
@@ -2562,6 +2672,20 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     line,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
+                },
+            }
+        }
+        // D-CHAINCMP1: `0 <= sev < 10` — lower each operand plainly, once each
+        // (the shared-middle-operand single-evaluation guarantee is emit's
+        // job: it binds each operand to a temp in a Rust block before ANDing
+        // the pairwise comparisons). Always `Bool`; relational ops never trap.
+        Expr::CompareChain { operands, ops, .. } => {
+            let toperands: Vec<TExpr> = operands.iter().map(|e| lower_expr(e, cx, env)).collect();
+            TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::CompareChain {
+                    operands: toperands,
+                    ops: ops.clone(),
                 },
             }
         }
@@ -4449,7 +4573,14 @@ pub(crate) fn lower_method_call(
         if let Some(op) = resolve_builtin_op(receiver, method, method_span, args, env, cx) {
             let recv_t = lower_expr(receiver, cx, env);
             let recv_ast_ty = tir_recv_jet_ty(receiver, env);
-            let result_ty = builtin_result_ty(method, args.len(), recv_ast_ty.as_ref());
+            // D-HOLE1: `Option.zip`'s `b` type is heterogeneous (arg-dependent), so
+            // the generic single-receiver-type table (`builtin_result_ty`) can't
+            // resolve it; `resolve_builtin_op` already worked it out for the tuple
+            // struct name above — reuse it here instead of guessing a placeholder.
+            let result_ty = match &op {
+                TBuiltinOp::OptionZip { elem_ty, .. } => Type::Option(Box::new(elem_ty.clone())),
+                _ => builtin_result_ty(method, args.len(), recv_ast_ty.as_ref()),
+            };
             // Args are emitted plainly (no clone/borrow wrappers), exactly as
             // `emit_builtin_method`'s `arg(i)` = raw `emit_expr`.
             let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -4943,6 +5074,28 @@ pub(crate) fn lower_method_call(
             }
         }
     }
+    // D-LAYOUT1 / D-LAYOUT-GATES1: a method on `LayoutHandle`/`Constraint`.
+    // Every Jet method name IS the `jet_layout` Rust method name (pure
+    // passthrough, no reduce-marker-style special casing needed).
+    if let Some(handle) = recv_type {
+        if crate::Sema::is_layout_type(handle) {
+            if let Some(ret) = crate::Sema::layout_method_return(handle, method, args.len()) {
+                let recv_t = lower_expr(receiver, cx, env);
+                let value_args: Vec<TExpr> =
+                    args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                return TExpr {
+                    ty: ret,
+                    kind: TExprKind::HandleMethod {
+                        recv: Box::new(recv_t),
+                        op: THandleOp::LayoutMethod {
+                            method: method.to_string(),
+                        },
+                        args: value_args,
+                    },
+                };
+            }
+        }
+    }
     if let Some(handle) = recv_type {
         if let Some(op) = handle_method_op(handle, method, args.len()) {
             let recv_t = lower_expr(receiver, cx, env);
@@ -5033,6 +5186,55 @@ pub(crate) fn lower_method_call(
                     type_prefix: format!("std::collections::VecDeque::<{}>", elem_rust),
                     method_rust: "new".to_string(),
                     args: vec![],
+                },
+            };
+        }
+        // D-HOLE1: `Option.lift2(f, a, b)` → apply `f` to both payloads only when
+        // both are present. `a`/`b` lower plainly as values; `R` comes from sema's
+        // `resolved_ret` (the arg-dependent return type, same mechanism the
+        // polymorphic core specials use — see the AST `MethodCall.resolved_ret` doc).
+        if type_name == "Option" && method == "lift2" && !cx.type_names.contains("Option") {
+            let a_ty = match tir_recv_jet_ty(&args[1].expr, env) {
+                Some(Type::Option(inner)) => (*inner).clone(),
+                _ => Type::Int,
+            };
+            let b_ty = match tir_recv_jet_ty(&args[2].expr, env) {
+                Some(Type::Option(inner)) => (*inner).clone(),
+                _ => Type::Int,
+            };
+            // c142: a bare `f` lambda is called immediately here (inside the
+            // `.zip().map(...)` emit below), not stored — but rustc still needs its
+            // param types written out whenever the body resolves a trait method on a
+            // param (e.g. interpolation's `.jet_display()`), the same reason
+            // `lower_one_call_arg` annotates a lambda flowing into a fn-typed
+            // parameter. Reuse that mechanism with `a`/`b`'s payload types as the
+            // expected params.
+            let f_t = match &args[0].expr {
+                Expr::Lambda(lam) => {
+                    let tl = lower_lambda_expecting(lam, cx, env, Some(&[a_ty, b_ty]));
+                    TExpr {
+                        ty: Type::Fn {
+                            params: Vec::new(),
+                            ret: None,
+                            effect_bound: None,
+                        },
+                        kind: TExprKind::Lambda(Box::new(tl)),
+                    }
+                }
+                _ => lower_expr(&args[0].expr, cx, env),
+            };
+            let a_t = lower_expr(&args[1].expr, cx, env);
+            let b_t = lower_expr(&args[2].expr, cx, env);
+            let ret_ty = match resolved_ret {
+                Some(Type::Option(inner)) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            return TExpr {
+                ty: Type::Option(Box::new(ret_ty)),
+                kind: TExprKind::OptionLift2 {
+                    f: Box::new(f_t),
+                    a: Box::new(a_t),
+                    b: Box::new(b_t),
                 },
             };
         }
@@ -5535,6 +5737,8 @@ pub(crate) fn resolve_builtin_op(
     let is_string = matches!(rty, Some(Type::String));
     let is_map = matches!(rty, Some(Type::Map { .. }));
     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
+    // D-HOLE1: `.zip` on `T?` (vs. `[T].zip`).
+    let is_option = matches!(rty, Some(Type::Option(_)));
     Some(match (method, args.len()) {
         ("len", 0) => {
             if is_string {
@@ -5628,6 +5832,24 @@ pub(crate) fn resolve_builtin_op(
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::Enumerate { tuple_struct: ts }
         }
+        ("zip", 1) if is_option => {
+            // D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?` — heterogeneous, so
+            // (unlike list zip below) the real `b` type is read from the argument.
+            let a_ty = match &rty {
+                Some(Type::Option(inner)) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
+                Some(Type::Option(inner)) => *inner,
+                _ => Type::Int,
+            };
+            let fields = vec![("a".to_string(), a_ty.clone()), ("b".to_string(), b_ty.clone())];
+            let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            TBuiltinOp::OptionZip {
+                tuple_struct: ts,
+                elem_ty: crate::Collections::zip_elem_ty(&a_ty, &b_ty),
+            }
+        }
         ("zip", 1) => {
             // Build the tuple struct name for `(a: T, b: U)`.
             let a_ty = match &rty {
@@ -5694,7 +5916,11 @@ pub(crate) fn resolve_closure_op(
         matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(l)) if l.meta.needs_fn_mut);
     match method {
         "map" => {
-            if fn_mut {
+            // D-HOLE1: `.map` on `T?` uses Rust's native `Option::map` directly —
+            // never the mutable-list form.
+            if matches!(rty, Some(Type::Option(_))) {
+                TClosureOp::OptionMap
+            } else if fn_mut {
                 TClosureOp::MapMut
             } else {
                 TClosureOp::Map

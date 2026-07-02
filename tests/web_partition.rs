@@ -122,6 +122,7 @@ fn dom_fn() {
         web_partitions: Default::default(),
         web_partition_enforced: false,
         web_partition_report: None,
+        dep_roots: Default::default(),
     };
     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert_eq!(

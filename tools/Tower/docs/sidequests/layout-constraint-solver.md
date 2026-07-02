@@ -1,6 +1,9 @@
 # ca3ynsl — Reversible computation / layout constraint solver
 
-**Status:** DECIDING — D-LAYOUT-GATES1 (closed-type language gates) open.
+**Status:** IMPLEMENTED 2026-07-02 — both gates ratified (D-LAYOUT-GATES1=A),
+Path A built in full. See `docs/spec/syntax-decisions.md` D-LAYOUT1 for the
+implementation log (files touched, adaptations from this doc's illustrative
+flavor text, deferred items).
 
 ## Goal
 

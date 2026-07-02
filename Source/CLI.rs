@@ -155,7 +155,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "schema",
-        summary: "inspect or re-baseline #PublishedSchema snapshots (status | squash)",
+        summary: "inspect or re-baseline @PublishedSchema snapshots (status | squash)",
         headline: false,
     },
     CommandSpec {

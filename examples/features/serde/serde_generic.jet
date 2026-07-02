@@ -1,16 +1,16 @@
-// 120 — generic #[Codable] (D-SERDE9-12). The derive auto-adds `T: Encode`/
+// 120 — generic @[Codable] (D-SERDE9-12). The derive auto-adds `T: Encode`/
 // `T: Decode` bounds for the type params that reach the wire — the user never
 // spells them. `Wrap<T>` round-trips for any codable `T`; `Id<K>`'s `K` is
 // phantom (its only field is `#[Skip]`), so `Id` serializes regardless of `K`
 // (D-SERDE10) — the derive injects no Encode/Decode bound on `K`.
 use core.encoding.json as json
 
-#[Codable]
+@[Codable]
 struct Wrap<T> {
     value: T
 }
 
-#[Codable]
+@[Codable]
 struct Id<K> {
     raw: Int
     #[Skip] marker: K?

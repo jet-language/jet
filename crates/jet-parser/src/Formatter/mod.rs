@@ -227,11 +227,18 @@ fn func_decl_start(f: &Func, src: &str) -> usize {
     } else {
         fn_pos
     };
-    // S60 (D-CASING1 follow-on): the `#Pure` marker precedes `pub`/`fn`.
+    // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: the `@Pure` marker precedes
+    // `pub`/`fn`. The retired `@Pure` spelling still parses (E0062) so it's
+    // searched too, preferring whichever match sits closer to `pos`.
     if f.is_pure {
-        before[..pos]
-            .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_PURE))
-            .unwrap_or(pos)
+        let at_pos = before[..pos].rfind(&format!("{}{}", Syntax::CONTRACT_PREFIX, Syntax::KW_PURE));
+        let hash_pos = before[..pos].rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_PURE));
+        match (at_pos, hash_pos) {
+            (Some(a), Some(h)) => a.max(h),
+            (Some(a), None) => a,
+            (None, Some(h)) => h,
+            (None, None) => pos,
+        }
     } else {
         pos
     }
@@ -334,6 +341,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::SuppressMustUse { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Region { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::TaskGroup { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::Layout { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Caps { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Grant { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
@@ -659,6 +667,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::SuppressMustUse { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,
         Stmt::TaskGroup { span, .. } => span.start,
+        Stmt::Layout { span, .. } => span.start,
         Stmt::Caps { span, .. } => span.start,
         Stmt::Grant { span, .. } => span.start,
         Stmt::ComptimeBlock { span, .. } => span.start,

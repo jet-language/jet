@@ -246,6 +246,12 @@ const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 /// D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` runtime (stripped when unused).
 const GC_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
+/// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): the `layout NAME { … }`
+/// constraint-solver runtime (`jet_layout`). Pure safe Rust (no `unsafe`), so —
+/// unlike `MEM_PRELUDE` — it never needs stripping; included everywhere
+/// `MEM_PRELUDE`/`GC_PRELUDE` are (not just the UI-specific sites), since a
+/// `layout {}` block isn't limited to UI code.
+const LAYOUT_PRELUDE: &str = include_str!("../Prelude/Layout.rs");
 
 /// I1: native scheduler IO uses `unsafe` syscalls; keep them in `jet_codegen::scheduler`
 /// but strip from emitted user Rust so archive/golden programs stay `unsafe`-free.
@@ -580,6 +586,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
+    out.push_str(LAYOUT_PRELUDE);
     out.push('\n');
 
     let cx = build_cx(prog, src, file);
@@ -681,6 +688,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
+    out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if any_property_test(&tests) {
         out.push_str(PROP_PRELUDE);
@@ -959,6 +967,7 @@ pub fn emit_bundle_dbg(bundle: &ProgramBundle, link: Option<&FfiLink>, debug_lin
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
+    out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
@@ -1068,6 +1077,7 @@ pub fn emit_bundle_tests_cov(
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
+    out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
@@ -1185,6 +1195,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
+    out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);

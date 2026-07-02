@@ -351,8 +351,8 @@ impl Circle {
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
-  `Printable`/`Equatable`; explicit `#[Comparable]`, `#[Codable]`,
-  `#[Encode]`, `#[Decode]`.
+  `Printable`/`Equatable`; explicit `@[Comparable]`, `@[Codable]`,
+  `@[Encode]`, `@[Decode]`.
 - **Tags (D-QUAL2):** `tag Name;` or `tag Name { }` — a marker qualifier with
   no methods that erases at runtime (codegen emits nothing). Tags are the second
   and only other qualifier kind beside traits; the beginner rule is one
@@ -363,7 +363,7 @@ impl Circle {
   (D-CASING1).
 - **Markers (D-ATTR1/D-ATTR2/D-MARKER-CANON1):** `#Marker` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
-  arguments when arguments exist. `#Pure fn` is a prefix marker; `comptime`
+  arguments when arguments exist. `@Pure fn` is a prefix marker; `comptime`
   stays a prefix keyword.
 - **Build-time embedding (D-CTIO1):** inside a `comptime` binding,
   **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
@@ -374,7 +374,7 @@ impl Circle {
   absolute and never escaping the project via `..` (**E0957**). A missing or
   unreadable file is **E0955**; for `embed_file`, a non-UTF-8 file is also
   **E0955**, with a fix pointing at `embed_bytes`.
-- **Published schema migrations (D-MIGRATE1/D-MIGRATE2):** `#PublishedSchema struct
+- **Published schema migrations (D-MIGRATE1/D-MIGRATE2):** `@PublishedSchema struct
   Name { ... }` marks a public record whose field layout is snapshotted at release
   under `.jet/cache/schema/`. On later project builds, sema compares the current
   shape to the saved snapshot (keyed by field name, so order is ignored). A
@@ -411,7 +411,7 @@ impl Circle {
   snapshot exists.
 
   **`jet schema` (D-MIGRATE2C):** `jet schema status` lists every snapshotted
-  `#PublishedSchema` type with its pinned published version and fields, flagging any
+  `@PublishedSchema` type with its pinned published version and fields, flagging any
   type that has a pending breaking change vs its snapshot (reusing the E0910 diff).
   `jet schema squash --before <ver>` re-baselines: it rewrites each snapshot to the
   *current* struct shape and records `squashed_before = <ver>`, so future builds
@@ -458,7 +458,7 @@ Cross-type **`?`** conversion supports two forms:
   full **`if subject { … }`**, or **`panic`**.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
-ignored **`#MustUse`** results (**E0419**), bad propagation (**E0403**),
+ignored **`@MustUse`** results (**E0419**), bad propagation (**E0403**),
 `ok`/`err` outside a result context (**E0404**), and fallback type mismatches
 (**E0405**) are compile errors with fixes that name **`?`**, **`??`**, pattern
 tests, binding, and **`.drop("reason")`** / **`#Suppress(MustUse)`** for
@@ -624,6 +624,31 @@ sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
 (`tests/ui/lowlevel_e310*`, `tests/ui/mem_arena_gate`, `tests/ui/mem_use_after_free`,
 `tests/ui_lint/unsafe_missing_audit`); the audited end-to-end example is
 `examples/features/lowlevel/lowlevel.jet`.
+
+### Jai transliteration: compact cast/deref chains (D-POINTERCHAIN1=A, docs-only)
+
+Jai allows a single compact expression that casts and dereferences a raw pointer
+in one chain, e.g. `slot.value_pointer.(*Bool).* = true`. Jet rejects that
+compact form outright — there is no cast-and-deref operator. The equivalent is
+two explicit, audited lines: reinterpret an address through
+`mem.Ptr<T>.from_addr(addr)` (the cast step), then read or write through it
+with postfix `p.*` (the deref step), both inside `#Unsafe`:
+
+```jet
+use core.mem
+
+flag: Bool #= true
+#Unsafe("flag is live on this stack frame and the pointer never escapes") {
+    addr: Int #= mem.address_of(flag)
+    p #= mem.Ptr<Bool>.from_addr(addr)
+    print(p.*)
+}
+```
+
+No new syntax, sema, or codegen — this section only names the existing
+`mem.address_of` / `mem.Ptr<T>.from_addr` / postfix `.*` vocabulary (§E2-M13
+above) as the answer to "what does Jai's chain do in Jet." Example:
+`examples/features/lowlevel/pointer_cast_deref.jet`.
 
 ### Allocators (D-ALLOC1, D-ALLOC-C, D-ALLOC-D; ratified 2026-06-19, implemented)
 
@@ -849,7 +874,7 @@ Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
 generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
 math, random, time, args, sized numeric types with checked-by-default
 overflow, and unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
-one `Data` value, plus `#[Codable]` derive). Every fallible call returns
+one `Data` value, plus `@[Codable]` derive). Every fallible call returns
 `T ? E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
@@ -1117,7 +1142,7 @@ body exercises — touching the network, the filesystem, the clock, and so on.
 The set is **inferred**, never declared by default, **propagated along calls**
 (a caller's set includes every callee's set), and **fully erased in codegen**
 (I3) — effects are a compile-time proof, with no runtime value, handler, or
-monad. A `#Pure fn` is exactly the function whose inferred set is empty.
+monad. A `@Pure fn` is exactly the function whose inferred set is empty.
 
 ### The effect vocabulary
 
@@ -1164,12 +1189,12 @@ naming the effect, the call that introduced it, and the declared set. `#(…)` i
 an assertion the author makes a contract — the inferred set may be *smaller*
 than the bound (the bound is a ceiling, not an exact set), but never larger.
 
-`#Pure fn` is the same contract with an empty bound: any effect at all is a
+`@Pure fn` is the same contract with an empty bound: any effect at all is a
 purity violation (reported as **E3401**, the established purity diagnostic).
-Writing `#Pure fn f() #(Fs)` — a non-empty bound on a `#Pure` function — is a
+Writing `@Pure fn f() #(Fs)` — a non-empty bound on a `@Pure` function — is a
 contradiction, **E0745**.
 
-Effects are erased: `#(Fs)`, `#Pure`, and an unannotated function with the same
+Effects are erased: `#(Fs)`, `@Pure`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
 ### Restricting a region — `#Caps(…) { … }`
@@ -1220,7 +1245,7 @@ fn run() #(Io) {
   call, so it defaults to the **maximal** effect set — sound, conservative.
 
 Two expert levers refine this (ratified D-EFF2, additive to the default above):
-`#Pure fn(…)` / `#(Net) fn(…)` **parameter types** demand/bound a callback
+`@Pure fn(…)` / `#(Net) fn(…)` **parameter types** demand/bound a callback
 (passing one with effects outside the bound is **E0744**), and `#(via f)` on a
 signature publishes a tight pass-through that holds even when the value escapes.
 The conservative default is correct without them; they trade syntax for
@@ -1228,7 +1253,7 @@ precision.
 
 ### Effects on trait methods (D-EFF3)
 
-A trait method may declare an effect upper bound — `#Pure fn hash(self)` (the
+A trait method may declare an effect upper bound — `@Pure fn hash(self)` (the
 empty set) or `fn render(self) #(Gpu)`. The bound is two things at once:
 
 - **The impl obligation.** Every implementation's inferred effects must fit
@@ -1240,7 +1265,7 @@ empty set) or `fn render(self) #(Gpu)`. The bound is two things at once:
 
 ```jet
 trait Shape {
-    #Pure fn area(self) -> Int;   // every impl must be pure
+    @Pure fn area(self) -> Int;   // every impl must be pure
 }
 impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }   // OK — pure
@@ -1297,7 +1322,7 @@ if k == F(n)    { print("F{n}") }
 Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
 
 **Restrictions:**
-- E3401: `live { … }` is impure — rejected in a `#Pure fn`.
+- E3401: `live { … }` is impure — rejected in a `@Pure fn`.
 - E3301: rejected in `--freestanding` builds (no OS terminal device).
 - REPL: rejected in interactive mode.
 

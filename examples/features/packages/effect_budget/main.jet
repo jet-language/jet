@@ -1,0 +1,13 @@
+// D-EFFBUDGET1: the effect budget is a `pkg.jet` manifest feature (see the
+// `effects: { allow: [Fs, Time] }` block in this example's pkg.jet), not new
+// language grammar — this program just uses the effects that budget allows.
+// `jet build` always prints a one-line effect summary; with the `effects:`
+// block present, it also fails the build if a dependency reached an effect
+// outside the list (E1220), unless `grants:` names an audited exception.
+use core.fs as fs
+fn main() {
+    path #= "/tmp/jet_effect_budget_demo.txt"
+    fs.write(path, "budget ok") ?? panic("write failed")
+    text #= fs.read(path) ?? panic("read failed")
+    print(text)
+}

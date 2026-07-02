@@ -288,6 +288,13 @@ pub fn load_entry_with_overlay(
         }
     }
 
+    // D-EFFBUDGET1: dependency name → resolved source root, for both `deps:`
+    // entries and hangar-realized `use <pkg>` libraries (U17).
+    let mut dep_roots = pkg_dep_dirs.clone();
+    for (name, dir) in &pkg_resolution.realized_libs {
+        dep_roots.entry(name.clone()).or_insert_with(|| dir.clone());
+    }
+
     let mut bundle = ProgramBundle {
         entry: entry_idx,
         project_root,
@@ -302,6 +309,7 @@ pub fn load_entry_with_overlay(
         web_partitions: HashMap::new(),
         web_partition_enforced: false,
         web_partition_report: None,
+        dep_roots,
     };
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.

@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only Epoch 3 + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows, so he never has to retype the context.
+description: "Act on what the owner just recorded in Tower - implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only Epoch 3 + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to process tower, act on my decisions, do the tower work, work the board, or sweep the board. The owner only ever does two things (decide, greenlight); this skill does everything that follows, so he never has to retype the context."
 ---
 
 # Tower — act on the board
@@ -18,9 +18,9 @@ and in parallel; he only picks.
 
 ## The model (read this first)
 
-Every card has a computed **lane** (see `app/store.mjs` → `laneOf`). Only two
-lanes are the owner's: `decide` and `activate` (greenlight). **Never touch those,
-and never touch `frozen`.** Your lanes are:
+Every card has a computed **lane** (see `tools/Tower/app/store.mjs` → `laneOf`).
+Only two lanes are the owner's: `decide` and `activate` (greenlight). **Never
+touch those, and never touch `frozen`.** Your lanes are:
 
 - **plan** — write a thorough plan for the card + raise any decisions it needs
   (queue them as `decisions` so they show up for the owner).
@@ -31,13 +31,26 @@ and never touch `frozen`.** Your lanes are:
 Plus: any **open question** (`questions[]` with `status:"open"`) is the owner
 asking you something on a card — answer it.
 
+Keep **lanes** and **phases** distinct:
+
+- Lanes are computed ownership buckets: `decide`, `activate`, `plan`,
+  `implement`, `building`, `verify`, `blocked`, `frozen`, `done`.
+- Phases are stored workflow stages: `triage`, `deciding`, `planning`, `ready`,
+  `building`, `verify`, `done`, `frozen`.
+- A card with open decisions is always lane `decide`, even if its stored phase is
+  `planning`, `ready`, or `building`.
+- A cleared `deciding` card with a plan computes to lane `implement`; a cleared
+  `deciding` card without a plan computes to lane `plan`.
+
 ## Scope & work order — Epoch 3 burndown
 
 When the owner asks to work the board, burn down Epoch 3, or continue the
 milestone, **stay inside two sections only** until both are empty:
 
-1. **Epoch 3** — `track:"epoch"` + `epoch:"e3"` + agent lane (`planning` /
-   `ready` / `building` / `verify`). This is the on-plan Epoch 3 section in Tower.
+1. **Epoch 3** — `track:"epoch"` + `epoch:"e3"` + agent lane (`plan` /
+   `implement` / `building` / `verify`). This is the on-plan Epoch 3 section in
+   Tower. In stored phases this usually means `planning`, `ready`, `building`,
+   or `verify`, plus a cleared `deciding` card that `laneOf` maps to agent work.
 2. **Sidequests** — `track:"sidequest"` + agent lane. Off-plan work the board
    surfaces above the epoch list.
 
@@ -56,19 +69,21 @@ parked; do not freeze to avoid finishing work).
 ### How to pick the next card
 
 Sort the in-scope agent queue by **`workOrder` ascending** (lowest number first).
-Tower UI uses the same sort (`app/ui/tower.js` → `orderOf` / `byOrderThenPhaseThenPrio`).
-Within the same `workOrder`, prefer **`building`** (continue in-flight) over
-**`verify`** (close claimed work) over **`implement`** / **`ready`** (start new)
-over **`planning`** (write/vet plan). Respect `blockedBy` — skip blocked cards
-and surface the blocker; do not invent spellings to bypass a gate.
+Tower UI uses the same sort (`tools/Tower/app/ui/tower.js` → `orderOf` /
+`byOrderThenPhaseThenPrio`).
+Within the same `workOrder`, prefer lane **`building`** (continue in-flight) over
+**`verify`** (close claimed work) over **`implement`** (start ready work) over
+**`plan`** (write/vet plan). Respect `blockedBy` — skip blocked cards and
+surface the blocker; do not invent spellings to bypass a gate.
 
 If a card has no `workOrder`, treat it as last — after all numbered cards in
-that section. Prefer setting `workOrder` when you activate or advance a card so
-the board stays honest.
+that section. Prefer preserving or setting `workOrder` when you advance an
+agent-owned card so the board stays honest. Do not activate owner-owned cards.
 
 ### Session loop
 
-1. `node tools/Tower/Tower.mjs status` (or read `tower.json`) — count active
+1. From repo root, run `node tools/Tower/Tower.mjs status` (or read
+   `tools/Tower/tower.json`) — count active
    **e3** + **sidequest** agent cards.
 2. Pick the lowest `workOrder` unblocked card; finish a vertical slice; log it;
    move phase forward only on real verification.
@@ -76,11 +91,12 @@ the board stays honest.
    anything still in owner lanes (`decide`, `activate`) or blocked on ratification.
 
 
-1. **Read** `tools/Tower/tower.json` (or run `node Tower.mjs status` and read the
-   AGENT sections). Build work-lists **scoped to Epoch 3 + sidequests** (see
-   above). Within that scope:
-   - Ratified decisions (`status:"ratified"`) whose card is in `ready`/`building`
-     and whose work isn't done — implement to the chosen `outcome`.
+1. **Read** `tools/Tower/tower.json` (or run `node tools/Tower/Tower.mjs status`
+   from repo root and read the AGENT sections). Build work-lists **scoped to
+   Epoch 3 + sidequests** (see above). Within that scope:
+   - Ratified decisions (`status:"ratified"`) whose card is in lane
+     `implement`/`building` and whose work isn't done — implement to the chosen
+     `outcome`.
    - Cards in `plan` / `implement` / `building` / `verify` (lane logic in `laneOf`).
    - Open questions (`questions[]`, `status:"open"`).
 
@@ -96,16 +112,19 @@ the board stays honest.
    end-to-end before closing.
 
 4. **Advance the card** as you go — append a dated entry to the card's `log`, and
-   move `phase` forward: `planning`→(needs decisions? `deciding` #= `ready`);
+   move `phase` forward: `planning`→(needs decisions? `deciding` : `ready`);
    `ready`→`building`; `building`→`verify` when you claim done; `verify`→`done`
-   only after real verification. Leave `num`/`id` alone.
+   only after real verification. Leave `num`/`id` alone. If a `deciding` card is
+   already cleared, follow `laneOf`: with a plan, implement it; without one, plan
+   it.
 
 5. **Write back.** Prefer the running server's API (start it if needed:
-   `node Tower.mjs serve`), e.g. `POST /api/card/update` `{id, phase, logEntry}`,
-   `POST /api/question/answer` `{id, answer}`, `POST /api/clearance` only if the
-   owner explicitly delegated a decision (normally you do NOT decide). If no
-   server, edit `tower.json` directly using the shapes in `app/store.mjs` and keep
-   it valid JSON.
+   `node tools/Tower/Tower.mjs serve` from repo root), e.g.
+   `POST /api/card/update` `{id, phase, logEntry}`,
+   `POST /api/question/answer` `{id, answer}`, `POST /api/decision/add` for new
+   ballots, and `POST /api/clearance` only if the owner explicitly delegated a
+   decision (normally you do NOT decide). If no server, edit `tower.json` directly
+   using the shapes in `tools/Tower/app/store.mjs` and keep it valid JSON.
 
 6. **Report** a short summary: what you implemented, what you answered, which cards
    advanced, and anything newly blocked on the owner (new decisions raised, or a
@@ -167,9 +186,10 @@ Ratifying into `syntax-decisions.md` is step one of several, not the whole job:
 2. **Ratify** into `syntax-decisions.md` (Ratified section + decision log); set the
    decision's `status:"ratified"` + `outcome` in `tower.json`.
 3. **Reconcile the card:** all its decisions answered and nothing upstream gates it
-   → `building`, build now. Sub-decisions still open, or gated on an unratified
-   decision → keep `deciding`, note the gate. Once-blocking decision just ratified →
-   now unblocked → `building`.
+   → `ready` if it has a vetted plan, otherwise `planning`; then immediately take
+   the resulting agent lane (`implement` or `plan`). Sub-decisions still open, or
+   gated on an unratified decision → keep `deciding`, note the gate. Once-blocking
+   decision just ratified → now unblocked → take the resulting agent lane.
 4. **Implement end to end** (standard above). When green, `done`.
 
 ## Rules

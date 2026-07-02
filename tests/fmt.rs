@@ -520,7 +520,7 @@ fn fmt_preserves_single_line_if_expr_branch() {
 //
 // `fmt_is_idempotent_on_examples` only checks that fmt(fmt(x)) == fmt(x); it does
 // NOT catch a formatter that silently drops a token on the FIRST pass (the lost
-// `#[Rename]`/`#[Codable]`/turbofish bug). These tests assert that the load-bearing
+// `#[Rename]`/`@Codable`/turbofish bug). These tests assert that the load-bearing
 // surface tokens SURVIVE one fmt pass, then that the result is stable.
 
 /// Assert every needle appears in `format_source(src)`, then that fmt is stable.
@@ -546,10 +546,11 @@ fn assert_fmt_keeps(src: &str, needles: &[&str], label: &str) {
 
 #[test]
 fn fmt_keeps_codable_and_field_rename_and_turbofish() {
-    // The exact c-fmt regression: `#Codable` / `#[Codable]`, a field `#[Rename("…")]`, and a
-    // method-call turbofish `decode<Order>` must all survive.
+    // The exact c-fmt regression: `@Codable` (contract plane) / `#[Rename("…")]`
+    // (directive/serde plane, D-MARKERMOVE1=B), and a method-call turbofish
+    // `decode<Order>` must all survive.
     let src = "\
-#[Codable]
+@Codable
 struct Order {
     id: Int
     #[Rename(\"customer\")] who: String
@@ -563,34 +564,32 @@ fn main() {
 ";
     assert_fmt_keeps(
         src,
-        &["#Codable", "#[Rename(\"customer\")]", "decode<Order>"],
+        &["@Codable", "#[Rename(\"customer\")]", "decode<Order>"],
         "codable + rename + turbofish",
     );
 }
 
 #[test]
 fn fmt_keeps_container_rename_all() {
-    // A combined derive + container serde marker `#[Codable, RenameAll(camel)]`
-    // round-trips as the single bracket list the user wrote.
+    // A derive (`@Codable`, contract plane) plus a container serde marker
+    // (`#RenameAll(camel)`, directive plane) split across the two planes
+    // (D-MARKERMOVE1=B/G2) and both survive.
     let src = "\
-#[Codable, RenameAll(camel)]
+@Codable
+#RenameAll(camel)
 struct Person {
     full_name: String
 }
 ";
-    assert_fmt_keeps(
-        src,
-        &["#[Codable, RenameAll(camel)]"],
-        "container RenameAll",
-    );
+    assert_fmt_keeps(src, &["@Codable", "#RenameAll(camel)"], "container RenameAll");
 }
 
 #[test]
 fn fmt_keeps_layout_columnar_and_codable() {
-    // `#Codable` then `#Layout(columnar)` on the same struct — both survive,
+    // `@[Codable]` then `#Layout(columnar)` on the same struct — both survive,
     // neither is rewritten into body `derive` lines.
     let src = "\
-#[Codable]
+@[Codable]
 #Layout(columnar)
 struct Particle {
     x: Float
@@ -598,7 +597,7 @@ struct Particle {
 ";
     assert_fmt_keeps(
         src,
-        &["#[Codable]", "#Layout(columnar)"],
+        &["@[Codable]", "#Layout(columnar)"],
         "layout columnar + codable",
     );
     // And no `derive Encode`/`derive Decode` body lines leak in.
@@ -611,6 +610,28 @@ struct Particle {
         !out.contains("derive Decode"),
         "no leaked body derive:\n{out}"
     );
+}
+
+#[test]
+fn fmt_stable_at_marked_fn_and_struct() {
+    // D-MARKER-FAMILY1/D-MARKERMOVE1: a byte-identical round-trip (not just
+    // idempotence — idempotence alone misses a formatter that drops a token
+    // on the FIRST pass) for an `@`-marked fn and an `@`-marked struct.
+    let fn_src = "\
+@Pure fn double(n: Int) -> Int {
+    return (n * 2)
+}
+";
+    assert_fmt_stable(fn_src, "@Pure fn round-trip");
+
+    let struct_src = "\
+@[Codable]
+#Layout(columnar)
+struct Particle {
+    x: Float
+}
+";
+    assert_fmt_stable(struct_src, "@Codable + #Layout struct round-trip");
 }
 
 #[test]
@@ -646,19 +667,21 @@ struct Score {
 }
 ";
     assert_fmt_keeps(src, &["derive Comparable"], "body derive line");
-    // And it must NOT be promoted to a bracket marker.
+    // And it must NOT be promoted to a bracket marker (contract plane: `@[Comparable]`).
     let out = jet::format_source(src).unwrap();
     assert!(
-        !out.contains("#[Comparable]"),
+        !out.contains("@[Comparable]") && !out.contains("@Comparable"),
         "body derive must not become bracket:\n{out}"
     );
 }
 
 #[test]
 fn fmt_keeps_enum_variant_rename_and_tag() {
-    // Enum container `#[Tag("type")]` + a per-variant `#[Rename("…")]` both survive.
+    // Enum derive `@Codable` (contract) + container `#Tag("type")` (directive) +
+    // a per-variant `#[Rename("…")]` all survive, split across planes (G2).
     let src = "\
-#[Codable, Tag(\"type\")]
+@Codable
+#Tag(\"type\")
 enum Shape {
     #[Rename(\"circle\")] Circle(Float)
     Square(Float)
@@ -666,7 +689,7 @@ enum Shape {
 ";
     assert_fmt_keeps(
         src,
-        &["#[Codable, Tag(\"type\")]", "#[Rename(\"circle\")]"],
+        &["@Codable", "#Tag(\"type\")", "#[Rename(\"circle\")]"],
         "enum tag + variant rename",
     );
 }
@@ -1075,4 +1098,188 @@ fn main() {
     let once = jet::format_source(src).expect("fmt should accept value-tag types");
     let twice = jet::format_source(&once).expect("second fmt of value-tag types must succeed");
     assert_eq!(once, twice, "value-tag type fmt must be idempotent");
+}
+
+#[test]
+fn fmt_layout_block_round_trips_byte_for_byte() {
+    // D-LAYOUT1: the parser desugars every `box.anchor` read inside
+    // `layout NAME { … }` into a `NAME.h(box, anchor)`/`NAME.v(box, anchor)`
+    // method call (a purely structural rewrite, `Parser/Statements.rs`); the
+    // formatter must re-sugar those calls back to `box.anchor` so `layout`
+    // round-trips STABILITY, not just idempotence (memory: a prior formatter
+    // change silently dropped tokens while only idempotence was checked).
+    let src = "\
+fn main() {
+    layout form {
+        label.width >= 80.0
+        label.right + 16.0 == input.left
+        label.width + 16.0 + input.width == form.width
+    }
+    w #= form.value(form.h(\"label\", \"width\"))
+    print(w)
+}
+";
+    let out = jet::format_source(src).expect("fmt should accept a `layout` block");
+    assert_eq!(
+        out, src,
+        "`layout {{ … }}` must round-trip byte-for-byte, not just idempotently"
+    );
+    let twice = jet::format_source(&out).expect("second fmt of a layout block must succeed");
+    assert_eq!(out, twice, "layout block fmt must be idempotent");
+}
+
+#[test]
+fn fmt_preserves_trailing_block() {
+    // D-TRAILBLOCK1: a bare-name call with only a trailing block (`twice { … }`,
+    // no `()` at all) and a call with args plus a trailing block
+    // (`ui.button("Save") { save() }`) must both round-trip byte-for-byte — the
+    // block must not migrate back inside the parens, and no argument is dropped.
+    let src = "\
+fn twice(f: fn()) {
+    f()
+    f()
+}
+
+fn main() {
+    twice {
+        print(\"hi\")
+    }
+}
+";
+    assert_fmt_stable(src, "trailing block, no parens");
+}
+
+#[test]
+fn fmt_preserves_bare_lambda_params() {
+    // D-LAMBDAINFER1: fmt must NOT re-insert an inferred parameter type — that
+    // would be reading noise the ballot explicitly rejects. `(x) => …` stays
+    // exactly as written; an already-annotated `(n: Int) => …` also survives.
+    let src = "\
+fn main() {
+    nums #= [1, 2, 3, 4, 5]
+    big #= nums.filter((x) => x > 3)
+    print(big)
+}
+";
+    assert_fmt_stable(src, "bare lambda params");
+}
+
+#[test]
+fn fmt_preserves_destructure_rest() {
+    // D-DESTRUCT1: a rename (`severity: sev`) and a trailing mandatory `..`
+    // must both survive byte-for-byte — this is exactly the class of drop
+    // idempotence-only checks miss.
+    let src = "\
+struct Incident {
+    id: Int
+    severity: Int
+    title: String
+}
+
+fn main() {
+    Incident.{id, severity: sev, ..} #= Incident.{id: 1, severity: 5, title: \"boom\"}
+    print(\"{id} {sev}\")
+}
+";
+    assert_fmt_stable(src, "destructure rename + rest");
+}
+
+#[test]
+fn fmt_preserves_unit_literal() {
+    // D-UNITLIT1: `500ms` must survive with no space inserted between the
+    // number and the suffix, and the suffix itself must not be dropped.
+    let src = "\
+#UnitFamily(time) { ms, s }
+
+fn main() {
+    a #= 500ms
+    print(\"{a.raw()}\")
+}
+";
+    assert_fmt_stable(src, "unit literal");
+}
+
+#[test]
+fn fmt_preserves_range_constraint() {
+    // D-RANGETYPE1: `distinct Int(0..10)` — distinct declarations are emitted
+    // verbatim, so the `(0..10)` clause survives structurally; this pins it
+    // down explicitly rather than relying on that being an accident.
+    let src = "\
+Severity #= distinct Int(0..10);
+
+fn main() {
+    sev #= Severity(3)
+    print(\"{sev.raw()}\")
+}
+";
+    assert_fmt_stable(src, "range constraint");
+}
+
+#[test]
+fn fmt_preserves_chained_comparison() {
+    // D-CHAINCMP1: a same-direction relational chain (`Expr::CompareChain`)
+    // must survive byte-for-byte — single spaces around each operator, no
+    // operand dropped, no extra parens inserted between pairs.
+    let src = "\
+fn main() {
+    sev #= 5
+    if 0 <= sev < 10 {
+        print(\"in range\")
+    }
+}
+";
+    assert_fmt_stable(src, "chained comparison");
+}
+
+#[test]
+fn fmt_preserves_capbundle_markers() {
+    // D-CAPBUNDLE1: a stack of capability-bundle markers before a `distinct`
+    // type declaration must survive byte-for-byte — no marker dropped, no
+    // reordering, the whole stack round-trips (distinct decls format
+    // verbatim from source span, but the span must actually start at the
+    // first marker, not the type name).
+    let src = "\
+@Numeric @Comparable Usd #= distinct Int;
+
+@Printable @CodableAsBase CustomerId #= distinct Int;
+
+fn main() {
+    a #= Usd(100)
+    print(a.raw())
+}
+";
+    assert_fmt_stable(src, "capability bundle markers");
+}
+
+#[test]
+fn fmt_preserves_contracts() {
+    // D-PREPOST1: `@Pre`/`@Post` clauses (condition + message) must survive
+    // byte-for-byte, in declared order. Emitted inline before `fn`, space-
+    // separated — the same one-marker-placement convention every other `fn`
+    // marker uses (`#State(…)`, `#Transition(…)`, `@Pure`, `@MustUse`, …;
+    // I8: one way to mean it), not one clause per line.
+    let src = "\
+@Pre(cents > 0, \"cents must be positive\") @Post(result > cents, \"result must exceed cents\") fn add_fee(cents: Int) -> Int {
+    return cents + 5
+}
+
+fn main() {
+    print(\"{(add_fee(100))}\")
+}
+";
+    assert_fmt_stable(src, "pre/post contracts");
+}
+
+#[test]
+fn fmt_preserves_persist() {
+    // D-PERSIST1: `@Persist` on a module-level `const` must survive
+    // byte-for-byte.
+    let src = "\
+@Persist const counter = 0
+
+fn main() {
+    print(\"{counter}\")
+}
+";
+    assert_fmt_stable(src, "persist marker");
 }

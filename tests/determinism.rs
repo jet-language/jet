@@ -1,8 +1,8 @@
-//! D-DET1 (ratified 2026-06-22): `#Pure` ⇒ reproducible.
+//! D-DET1 (ratified 2026-06-22): `@Pure` ⇒ reproducible.
 //!
 //! Two ratified pieces beyond the base purity checks (which already ship as
 //! E3401/E3403):
-//!   1. Injected deterministic `Clock` / `Rng` capabilities — a `#Pure fn` may
+//!   1. Injected deterministic `Clock` / `Rng` capabilities — a `@Pure fn` may
 //!      read time/randomness THROUGH a `Clock`/`Rng` parameter (seeded by the
 //!      caller, hence reproducible), while ambient `time.now()`/`random.int()`
 //!      stay E3403.
@@ -11,11 +11,11 @@
 
 // ── Piece 1: injected deterministic Clock / Rng ───────────────────────────────
 
-/// A `#Pure fn` reading time through an injected `Clock` param compiles.
+/// A `@Pure fn` reading time through an injected `Clock` param compiles.
 #[test]
 fn pure_fn_injected_clock_ok() {
     let src = r#"
-#Pure fn at(clock: Clock) -> Int {
+@Pure fn at(clock: Clock) -> Int {
     return clock.now()
 }
 fn main() {
@@ -32,12 +32,12 @@ use core.time as time;
     );
 }
 
-/// A `#Pure fn` drawing randomness through an injected `~Rng` param compiles.
+/// A `@Pure fn` drawing randomness through an injected `~Rng` param compiles.
 #[test]
 fn pure_fn_injected_rng_ok() {
     let src = r#"
 use core.random as random;
-#Pure fn draw(rng: ~Rng) -> Int {
+@Pure fn draw(rng: ~Rng) -> Int {
     return rng.int(1, 6)
 }
 fn main() {
@@ -50,13 +50,13 @@ fn main() {
 }
 
 /// The deterministic capability constructors (`time.clock`, `random.rng`) are
-/// themselves usable inside a `#Pure fn` — they carry no ambient effect.
+/// themselves usable inside a `@Pure fn` — they carry no ambient effect.
 #[test]
 fn pure_fn_constructs_caps_ok() {
     let src = r#"
 use core.time as time;
 use core.random as random;
-#Pure fn seeded() -> Int {
+@Pure fn seeded() -> Int {
     c #= time.clock(10)
     r := random.rng(1)
     return c.now() + r.int(0, 0)
@@ -71,19 +71,19 @@ fn main() { print("{seeded()}") }
     );
 }
 
-/// Ambient `time.now()` inside a `#Pure fn` is STILL E3403 — the injection is
+/// Ambient `time.now()` inside a `@Pure fn` is STILL E3403 — the injection is
 /// not a backdoor around the determinism rule.
 #[test]
 fn pure_fn_ambient_time_still_e3403() {
     let src = r#"
 use core.time as time;
-#Pure fn bad() -> Int {
+@Pure fn bad() -> Int {
     return time.now()
 }
 fn main() { print("{bad()}") }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "ambient time.now() in #Pure fn must fail");
+    assert!(res.is_err(), "ambient time.now() in @Pure fn must fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
@@ -92,18 +92,18 @@ fn main() { print("{bad()}") }
     );
 }
 
-/// Ambient `random.int(…)` inside a `#Pure fn` is STILL E3403.
+/// Ambient `random.int(…)` inside a `@Pure fn` is STILL E3403.
 #[test]
 fn pure_fn_ambient_random_still_e3403() {
     let src = r#"
 use core.random as random;
-#Pure fn bad() -> Int {
+@Pure fn bad() -> Int {
     return random.int(1, 6)
 }
 fn main() { print("{bad()}") }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "ambient random.int() in #Pure fn must fail");
+    assert!(res.is_err(), "ambient random.int() in @Pure fn must fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
@@ -114,12 +114,12 @@ fn main() { print("{bad()}") }
 
 // ── Piece 2: assume_deterministic { } expert escape ───────────────────────────
 
-/// `assume_deterministic { … }` suspends E3403 for ambient time inside a `#Pure fn`.
+/// `assume_deterministic { … }` suspends E3403 for ambient time inside a `@Pure fn`.
 #[test]
 fn assume_deterministic_suppresses_e3403() {
     let src = r#"
 use core.time as time;
-#Pure fn risky() -> Int {
+@Pure fn risky() -> Int {
     t := 0
     assume_deterministic {
         t = time.now()
@@ -140,7 +140,7 @@ fn main() { print("{risky()}") }
 #[test]
 fn assume_deterministic_suppresses_e3401() {
     let src = r#"
-#Pure fn risky() -> Int {
+@Pure fn risky() -> Int {
     assume_deterministic {
         print("side effect")
     }
@@ -161,7 +161,7 @@ fn main() { print("{risky()}") }
 fn assume_deterministic_is_scoped() {
     let src = r#"
 use core.time as time;
-#Pure fn risky() -> Int {
+@Pure fn risky() -> Int {
     assume_deterministic {
         a := time.now()
     }
@@ -207,12 +207,12 @@ fn main() {
 // the `Duration` value (`time.ms`/`time.secs`, `duration.millis()`). All stay
 // pure-callable through the injected, seeded handles.
 
-/// The widened `Rng` draws (`bool`/`pick`/`shuffle`) compile inside a `#Pure fn`.
+/// The widened `Rng` draws (`bool`/`pick`/`shuffle`) compile inside a `@Pure fn`.
 #[test]
 fn pure_fn_widened_rng_ok() {
     let src = r#"
 use core.random as random;
-#Pure fn draws(rng: ~Rng) -> Bool {
+@Pure fn draws(rng: ~Rng) -> Bool {
     flip := rng.bool()
     xs := [1, 2, 3]
     chosen := rng.pick(xs) ?? 0
@@ -238,7 +238,7 @@ fn main() {
 fn rng_pick_returns_element_option() {
     let src = r#"
 use core.random as random;
-#Pure fn choose(rng: ~Rng) -> String {
+@Pure fn choose(rng: ~Rng) -> String {
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
 }
@@ -301,12 +301,12 @@ fn main() {
     );
 }
 
-/// The widened `Clock` surface (`advance` / `wait`) compiles inside a `#Pure fn`.
+/// The widened `Clock` surface (`advance` / `wait`) compiles inside a `@Pure fn`.
 #[test]
 fn pure_fn_widened_clock_ok() {
     let src = r#"
 use core.time as time;
-#Pure fn run(clock: ~Clock) -> Int {
+@Pure fn run(clock: ~Clock) -> Int {
     base := clock.advance(5000)
     span := time.secs(1)
     return base + clock.wait(span)
@@ -346,12 +346,12 @@ fn main() {
 }
 
 /// `Duration` constructors (`time.ms`/`time.secs`) and `duration.millis()` are
-/// pure — usable inside a `#Pure fn` (they mint a value, carry no ambient effect).
+/// pure — usable inside a `@Pure fn` (they mint a value, carry no ambient effect).
 #[test]
 fn pure_fn_duration_ok() {
     let src = r#"
 use core.time as time;
-#Pure fn span_ms() -> Int {
+@Pure fn span_ms() -> Int {
     d := time.secs(3)
     return d.millis()
 }

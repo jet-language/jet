@@ -590,7 +590,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E2403", // E2-M6 (library authoring) — staged
         "E2410", // D-SERDE: runtime decode error (missing required field) — emitted as a DecodeError string in generated code, not a compile Diagnostic
         "E2412", // D-SERDE: runtime decode error (unknown field under #[DenyUnknownFields]) — emitted as a DecodeError string, not a compile Diagnostic
-        "E2413", // retired (D-SERDE12): generic #[Codable] is first-class; no gate
+        "E2413", // retired (D-SERDE12): generic @[Codable] is first-class; no gate
         "E2701", // E2-M9 (ring library) — staged
         "E2702", // E2-M9 — staged
         "E2712", // retired by D-CTBLOCKEXPOSE1; runtime `$name` now uses E2713 only on missing comptime value
@@ -601,6 +601,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E2902", // E2-M11 (#Todo typed holes) — staged
         "E3001", // E2-M12 runtime panic report — runtime, not compile-time
         "E3002", // E2-M12 error propagation trace — runtime
+        "E3005", // D-PREPOST1 @Pre/@Post contract failure — runtime (jet_contract_fail in generated code), not a compile Diagnostic
         "E3208", // emitted via eprintln! in CmdDevTools.rs
         "L2301", // E2-M5 advisory — staged
         "L2501", // reserved (path-normalisation issue noted in spec)

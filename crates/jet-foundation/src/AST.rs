@@ -73,14 +73,14 @@ pub enum Type {
     /// S47 (M8): function type `fn(T1, T2) -> R` (`ret` omitted = no return value).
     ///
     /// D-EFF2 (callback param effect bound): an optional effect annotation may
-    /// ride the *front* of a function type — `#Pure fn(T) -> U` (the callback
+    /// ride the *front* of a function type — `@Pure fn(T) -> U` (the callback
     /// must be pure) or `#(Net) fn(T) -> U` (the callback may use at most the
     /// listed effects). `effect_bound` is `None` when unannotated, `Some(empty)`
-    /// for `#Pure`, and `Some([(name, span), …])` for `#(…)`. Names are validated
+    /// for `@Pure`, and `Some([(name, span), …])` for `#(…)`. Names are validated
     /// against the effect vocabulary in sema, not the parser. The bound is a
     /// call-site obligation on whatever callback is passed (E0747) — it is **not**
     /// part of structural type identity (see the manual `PartialEq for Type`,
-    /// which ignores it in the `Fn` arm), so `#Pure fn(Int)` and `fn(Int)` are the
+    /// which ignores it in the `Fn` arm), so `@Pure fn(Int)` and `fn(Int)` are the
     /// same type for assignability; the bound is an *extra* check, not a subtype.
     Fn {
         params: Vec<Type>,
@@ -130,7 +130,7 @@ pub enum Type {
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
 /// except the `Fn` arm ignores `effect_bound`: a callback effect bound is a
 /// call-site obligation, not part of a function type's identity, so a
-/// `#Pure fn(Int)` value is assignable wherever a `fn(Int)` is expected. The
+/// `@Pure fn(Int)` value is assignable wherever a `fn(Int)` is expected. The
 /// bound is enforced separately at the call site (E0747).
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
@@ -541,6 +541,12 @@ pub struct ProgramBundle {
     pub web_partition_enforced: bool,
     /// D-WASM1: human-readable partition report (`--explain-partition`).
     pub web_partition_report: Option<String>,
+    /// D-EFFBUDGET1: dependency name → its resolved on-disk source root, for
+    /// both `deps:` (path/git/provider) entries and hangar-realized `use <pkg>`
+    /// libraries. Lets a downstream pass (the effect budget) attribute a
+    /// loaded module's path back to the dependency that owns it. Empty for a
+    /// single-file program with no `pkg.jet`.
+    pub dep_roots: std::collections::HashMap<String, std::path::PathBuf>,
 }
 
 #[derive(Debug)]
@@ -647,7 +653,7 @@ pub enum Item {
     /// type alias for generic shortcuts. Erases at codegen (I3).
     TypeAlias(TypeAliasDef),
     /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(currency) { usd, eur, gbp }` —
-    /// a unit family. Sugar: each member mints one `#Numeric` distinct type
+    /// a unit family. Sugar: each member mints one `@Numeric` distinct type
     /// (`usd` → `Usd`) erasing to `Float`. Lowers to a `DistinctDef` per member
     /// in sema registration and codegen — it rides the D-DIST1/D-DIST3 machinery.
     UnitFamily(UnitFamilyDef),
@@ -681,7 +687,7 @@ pub enum Item {
     /// error conversion; `?` applies it when propagating Source into a Target context.
     ErrorConv(ErrorConvDef),
     /// D-MIGRATE1 (ratified 2026-06-22): `migration TypeName { rename a -> b }`
-    /// block — declares field renames on a `#PublishedSchema` struct.
+    /// block — declares field renames on a `@PublishedSchema` struct.
     Migration(MigrationDecl),
     /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
     /// declares the bounded set of states for a typestate machine. The set erases at
@@ -1117,7 +1123,7 @@ pub struct TraitMethodSig {
     pub span: Span,
     /// D-LIB2: optional default body for a trait method.
     pub default_body: Option<Vec<Stmt>>,
-    /// D-EFF3: `#Pure fn hash(self)` — the method declares the empty effect set
+    /// D-EFF3: `@Pure fn hash(self)` — the method declares the empty effect set
     /// as its upper bound. Every impl's inferred effects must be empty (E0742),
     /// and a dynamic-dispatch call sees the empty set.
     pub is_pure: bool,
@@ -1240,13 +1246,30 @@ pub struct Func {
     pub state_transition: Option<StateTransition>,
     /// D-REACTCORE1: `#Reactive fn` — reactive effect scope; must not return a value.
     pub is_reactive: bool,
-    /// D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / `#MustUse` method — callers must not
+    /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / `@MustUse` method — callers must not
     /// drop the return value as a bare expression statement (E0419).
     pub is_must_use: bool,
     pub must_use_span: Option<Span>,
     /// D-WASM1: `#Wasm` / `#Js` / `#WasmExport` partition marker on the function.
     pub web_marker: Option<crate::WebPartition::WebPartitionMarker>,
+    /// D-PREPOST1: `@Pre(cond, "msg")` clauses — a claim about the arguments,
+    /// checked at function entry. Repeatable; empty when none.
+    pub pre: Vec<ContractClause>,
+    /// D-PREPOST1: `@Post(cond, "msg")` clauses — a claim about `result` (the
+    /// return value), checked before each return. Repeatable; empty when none.
+    pub post: Vec<ContractClause>,
     pub body: Vec<Stmt>,
+}
+
+/// D-PREPOST1: one `@Pre`/`@Post` contract clause — a pure condition plus the
+/// message shown when it's violated (E3005 at runtime). `message_span` points
+/// at the message string literal for diagnostics.
+#[derive(Debug, Clone)]
+pub struct ContractClause {
+    pub cond: Expr,
+    pub message: String,
+    pub message_span: Span,
+    pub span: Span,
 }
 
 /// D-STATE1: the parsed `#Transition(From -> To)` declaration on a function. `from`
@@ -1315,7 +1338,7 @@ pub struct StructDef {
     pub trait_impls: Vec<TraitImplBlock>,
     /// S55: `derive Comparable;` / `derive Serialize;` lines.
     pub derives: Vec<(String, Span)>,
-    /// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` marker was present
+    /// D-MIGRATE1 (ratified 2026-06-22): `@PublishedSchema` marker was present
     /// before `struct`. The span is retained for pointing at the annotation in E0910.
     pub is_published_schema: bool,
     pub published_schema_span: Option<Span>,
@@ -1325,7 +1348,7 @@ pub struct StructDef {
     /// marker for diagnostics.
     pub is_single_use: bool,
     pub single_use_span: Option<Span>,
-    /// D-MUSTUSE1 (c18iwxqx): `#MustUse` marker before `struct` — values of this
+    /// D-MUSTUSE1 (c18iwxqx): `@MustUse` marker before `struct` — values of this
     /// type cannot be silently ignored as a bare expression statement (E0419).
     pub is_must_use: bool,
     pub must_use_span: Option<Span>,
@@ -1359,24 +1382,42 @@ pub struct TypeAliasDef {
     pub span: Span,
 }
 
-/// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name @= distinct Base`.
+/// D-DIST1/D-DIST3: distinct type declaration — `[@Numeric] Name @= distinct Base`.
 #[derive(Debug)]
 pub struct DistinctDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) Name @= distinct Base`.
     pub is_package_pub: bool,
-    /// D-DIST3: whether `#Numeric` marker was present — enables same-type arithmetic.
+    /// D-DIST3: whether `@Numeric` marker was present — enables same-type arithmetic.
     pub is_numeric: bool,
+    /// D-CAPBUNDLE1: `@Comparable` was present — grants hash/sort on top of the
+    /// ordering the base type already carries (D-DIST1 makes every distinct type
+    /// `==`/`<`-comparable unconditionally already; that overlap is left alone
+    /// per the ballot). Stacks with the other three bundles.
+    pub is_comparable: bool,
+    pub comparable_span: Option<Span>,
+    /// D-CAPBUNDLE1: `@Printable` was present — grants `{value}` string
+    /// interpolation (Display), forwarding to the base type's rendering.
+    pub is_printable: bool,
+    pub printable_span: Option<Span>,
+    /// D-CAPBUNDLE1: `@CodableAsBase` was present — grants encode/decode via
+    /// the base type's wire representation.
+    pub is_codable_as_base: bool,
+    pub codable_as_base_span: Option<Span>,
     pub name: String,
     pub name_span: Span,
     pub base: Type,
     pub base_span: Span,
+    /// D-RANGETYPE1: an optional literal range constraint — `distinct
+    /// Int(0..10)` provably holds `0..=10` (`..` inclusive, S22). `(lo, hi,
+    /// span-of-the-`(lo..hi)`-clause)`.
+    pub range: Option<(i64, i64, Span)>,
     pub span: Span,
 }
 
 /// D-QUAL3 (ratified 2026-06-24): unit-family declaration —
 /// `#UnitFamily(currency) { usd, eur, gbp }`. Each member mints a distinct
-/// `#Numeric` type erasing to `Float`. `members` carries each member's source
+/// `@Numeric` type erasing to `Float`. `members` carries each member's source
 /// spelling (lowercase, e.g. `usd`) and span; the minted type name is the
 /// PascalCase form (`Usd`).
 #[derive(Debug)]
@@ -1412,7 +1453,7 @@ impl UnitFamilyDef {
         }
     }
 
-    /// The minted `DistinctDef` for each member (`#Numeric`, base `Float`).
+    /// The minted `DistinctDef` for each member (`@Numeric`, base `Float`).
     /// Used by sema registration and codegen to lower the family.
     pub fn distinct_defs(&self) -> Vec<DistinctDef> {
         self.members
@@ -1421,10 +1462,17 @@ impl UnitFamilyDef {
                 is_pub: self.is_pub,
                 is_package_pub: self.is_package_pub,
                 is_numeric: true,
+                is_comparable: false,
+                comparable_span: None,
+                is_printable: false,
+                printable_span: None,
+                is_codable_as_base: false,
+                codable_as_base_span: None,
                 name: Self::type_name(member),
                 name_span: *span,
                 base: Type::Float,
                 base_span: *span,
+                range: None,
                 span: *span,
             })
             .collect()
@@ -1447,7 +1495,7 @@ pub struct EnumDef {
     /// `StructDef::is_single_use`.
     pub is_single_use: bool,
     pub single_use_span: Option<Span>,
-    /// D-MUSTUSE1 (c18iwxqx): `#MustUse` marker before `enum`. See
+    /// D-MUSTUSE1 (c18iwxqx): `@MustUse` marker before `enum`. See
     /// `StructDef::is_must_use`.
     pub is_must_use: bool,
     pub must_use_span: Option<Span>,
@@ -1517,7 +1565,7 @@ pub struct Field {
     /// D-SERDE5: per-field serde markers (`Rename`/`Skip`/`Default`/`Flatten`)
     /// attached before this field. Empty when none.
     pub serde_markers: Vec<Marker>,
-    /// D-DEBUG-REDACT: `#[Redact]` — omit/redact in auto-derived Debug output.
+    /// D-DEBUG-REDACT: `@[Redact]` — omit/redact in auto-derived Debug output.
     pub redact: bool,
 }
 
@@ -1584,6 +1632,18 @@ pub enum Pattern {
 pub struct BindName {
     pub name: String,
     pub span: Span,
+    /// D-DESTRUCT1: `severity: sev` — the local binding name when the struct
+    /// field is renamed. `None` means bind under the field's own name
+    /// (`self.name`). Always `None` for `List`/`Tuple` patterns.
+    pub rename: Option<(String, Span)>,
+}
+
+impl BindName {
+    /// The name actually bound in scope: the rename if present, else the
+    /// field/element name itself.
+    pub fn local_name(&self) -> &str {
+        self.rename.as_ref().map(|(n, _)| n.as_str()).unwrap_or(&self.name)
+    }
 }
 
 /// S74: the destructuring target on the left of a `val`/`var` binding.
@@ -1591,11 +1651,15 @@ pub struct BindName {
 /// `[ elems ]` for lists, `( a, b )` for named tuples (S73/S74).
 #[derive(Debug, Clone)]
 pub enum BindPattern {
-    /// `val Point { x, y } = p;` — binds a subset of the struct's fields.
+    /// `Point.{ x, y } #= p;` — binds a subset of the struct's fields.
+    /// D-DESTRUCT1: `rest` is `Some(span)` of a trailing `..` — MANDATORY
+    /// whenever `fields` doesn't name every field of the struct (E0326); a
+    /// `..` on a pattern that already names every field is E0327.
     Struct {
         type_name: String,
         type_span: Span,
         fields: Vec<BindName>,
+        rest: Option<Span>,
         span: Span,
     },
     /// `val [a, b] = xs;` — binds list elements by position.
@@ -1676,6 +1740,11 @@ pub struct ConstDef {
     /// Filled by sema for comptime bindings: the evaluated constant value,
     /// serialized to a Rust literal at use sites by codegen.
     pub ct: Option<CtValue>,
+    /// D-PERSIST1: `@Persist` was present before this module-level binding —
+    /// its value survives a `jet dev` hot reload instead of resetting
+    /// (identity = module path + binding name). Inert in release builds.
+    pub is_persist: bool,
+    pub persist_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1793,7 +1862,7 @@ pub enum Stmt {
         span: Span,
     },
     /// D-IGNORERET2=A (ratified 2026-06-28): `#Suppress(MustUse) { … }` — a
-    /// lexical scope in which all fallible / `#MustUse` statement results are
+    /// lexical scope in which all fallible / `@MustUse` statement results are
     /// allowed to be silently dropped without `.drop("reason")`.  Erases to a
     /// plain block at codegen; the gate is enforced entirely in sema (I3).
     SuppressMustUse {
@@ -1815,6 +1884,21 @@ pub enum Stmt {
     /// owns child tasks. `g.task { … }` spawns; scope exit joins/cancels children.
     /// Emitted as a plain block at codegen; lifetime is enforced in sema (I3).
     TaskGroup {
+        name: String,
+        name_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): `layout NAME { … }`
+    /// — a Cassowary-style constraint block. Unlike `region`/`taskgroup`, `name`
+    /// is declared in the ENCLOSING scope and outlives the block (solved values
+    /// are read after the layout is defined). The parser desugars each
+    /// `box.anchor` read inside `body` into a `NAME.h(box, anchor)` /
+    /// `NAME.v(box, anchor)` method call before sema ever sees it, so every line
+    /// is an ordinary `Stmt::Expr`/`Stmt::Bind` comparison expression checked by
+    /// the general GATE-1/GATE-2 machinery — `body` carries no layout-specific
+    /// AST shape of its own.
+    Layout {
         name: String,
         name_span: Span,
         body: Vec<Stmt>,
@@ -1899,7 +1983,7 @@ pub enum Stmt {
         span: Span,
     },
     /// D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the expert
-    /// determinism-escape block. Inside a `#Pure fn`, the body's determinism
+    /// determinism-escape block. Inside a `@Pure fn`, the body's determinism
     /// rejections (E3401 impure-call / E3403 non-deterministic Core call) are
     /// **suspended** — the "I know this is deterministic" hatch. A semantic
     /// footgun, v1-legal per the card. A lexical scope emitted as a plain Rust
@@ -1954,6 +2038,7 @@ impl Stmt {
             | Stmt::SuppressMustUse { span, .. }
             | Stmt::Region { span, .. }
             | Stmt::TaskGroup { span, .. }
+            | Stmt::Layout { span, .. }
             | Stmt::Caps { span, .. }
             | Stmt::Grant { span, .. }
             | Stmt::ComptimeIf { span, .. }
@@ -2070,6 +2155,12 @@ pub struct Call {
 pub struct CallArgFlags {
     pub implicit_clone: bool,
     pub shared_auto_clone: bool,
+    /// D-TRAILBLOCK1: this argument is the desugared zero-parameter lambda
+    /// from a trailing `{ }` block (`callee(args) { … }`). Sema reads this to
+    /// give the specific E0334 teaching message instead of a generic
+    /// argument-type mismatch when the parameter it lands in isn't a
+    /// zero-parameter function.
+    pub is_trailing_block: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2246,6 +2337,33 @@ pub enum Expr {
     Call(Call),
     Unary(UnOp, Box<Expr>, Span),
     Binary(BinOp, Box<Expr>, Box<Expr>, Span),
+    /// D-CHAINCMP1: a same-direction relational chain `0 <= sev < 10`, any
+    /// length ≥ 2 pairs (`operands.len() == ops.len() + 1`). Only `<`/`<=`/
+    /// `>`/`>=` chain; `==`/`!=` never appear here (they stay plain `Binary`,
+    /// non-chainable). Each shared middle operand is evaluated exactly once —
+    /// a lowering fact resolved by TIR (R1), not a parser/sema concern. A
+    /// single relational pair stays plain `Binary` (this node only appears for
+    /// chains of length ≥ 2 ops).
+    CompareChain {
+        operands: Vec<Expr>,
+        ops: Vec<BinOp>,
+        span: Span,
+    },
+    /// D-UNITLIT1: a numeric literal with a unit suffix — `500ms`, `12.50usd`.
+    /// The lexer only carries the raw value + suffix text (imports aren't
+    /// known to it); sema resolves `suffix` against an in-scope `#UnitFamily`
+    /// member (PascalCased to its minted distinct-type name) and REWRITES
+    /// this node in place to an ordinary distinct-type constructor call
+    /// (`Ms(500.0)`) — sugar over the existing distinct-type path, not a new
+    /// type or a new TIR/codegen shape (E0134 if the suffix isn't a member in
+    /// scope).
+    UnitLit {
+        int: Option<i64>,
+        float: Option<f64>,
+        suffix: String,
+        suffix_span: Span,
+        span: Span,
+    },
     /// D-CAP9: postfix `p.*` — dereference a raw pointer. Lowers to Rust `*p`;
     /// gated to `#Unsafe` (E0208). Composes with `.field` as `p.*.field`.
     Deref(Box<Expr>, Span),
@@ -2462,6 +2580,8 @@ impl Expr {
             | Expr::FanOut { span: s, .. }
             | Expr::PtrFromAddr { span: s, .. }
             | Expr::ComptimeSplice { span: s, .. }
+            | Expr::CompareChain { span: s, .. }
+            | Expr::UnitLit { span: s, .. }
             | Expr::IncDec { span: s, .. } => *s,
             Expr::Paren(_, s) => *s,
             Expr::Lambda(l) => l.span,
@@ -2500,7 +2620,7 @@ pub struct FuncSig {
     pub is_pure: bool,
     /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
     pub is_sanitizer: bool,
-    /// D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method — return value cannot be
+    /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method — return value cannot be
     /// silently ignored as a bare expression statement (E0419).
     pub is_must_use: bool,
     /// S61: parameter names and default-value presence, parallel to `params`.

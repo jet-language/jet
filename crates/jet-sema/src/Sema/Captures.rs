@@ -73,6 +73,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
+            | Stmt::Layout { body: inner, .. }
             | Stmt::Caps { body: inner, .. }
             | Stmt::Grant { body: inner, .. }
             | Stmt::Transact { body: inner, .. }
@@ -201,7 +202,16 @@ pub(crate) fn walk_expr_for_const_refs(
             walk_expr_for_const_refs(l, const_names, taken);
             walk_expr_for_const_refs(r, const_names, taken);
         }
-        Expr::Char(_, _) | Expr::Int(_, _, _) | Expr::Float(_, _, _) | Expr::Bool(_, _) => {}
+        Expr::CompareChain { operands, .. } => {
+            for e in operands {
+                walk_expr_for_const_refs(e, const_names, taken);
+            }
+        }
+        Expr::Char(_, _)
+        | Expr::Int(_, _, _)
+        | Expr::Float(_, _, _)
+        | Expr::Bool(_, _)
+        | Expr::UnitLit { .. } => {}
         Expr::ListLit(elems, _) => {
             for e in elems {
                 walk_expr_for_const_refs(e, const_names, taken);
@@ -282,6 +292,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
             expr_refs_name(inner, name)
         }
         Expr::Binary(_, l, r, _) => expr_refs_name(l, name) || expr_refs_name(r, name),
+        Expr::CompareChain { operands, .. } => operands.iter().any(|e| expr_refs_name(e, name)),
         Expr::Call(c) => c.args.iter().any(|a| expr_refs_name(&a.expr, name)),
         Expr::CallValue { callee, args, .. } => {
             expr_refs_name(callee, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
@@ -354,6 +365,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. } => false,
         Expr::Paren(inner, _) => expr_refs_name(inner, name),
         Expr::Spread(inner, _) => expr_refs_name(inner, name),
@@ -422,6 +434,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
@@ -534,6 +547,7 @@ pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Optio
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
@@ -619,6 +633,11 @@ pub(crate) fn expr_collect_captures(
         Expr::Binary(_, l, r, _) => {
             expr_collect_captures(l, bound, read, mut_cap);
             expr_collect_captures(r, bound, read, mut_cap);
+        }
+        Expr::CompareChain { operands, .. } => {
+            for e in operands {
+                expr_collect_captures(e, bound, read, mut_cap);
+            }
         }
         Expr::Call(c) => {
             for a in &c.args {
@@ -856,6 +875,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }

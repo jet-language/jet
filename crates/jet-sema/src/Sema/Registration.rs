@@ -77,10 +77,10 @@ impl<'a> Checker<'a> {
             if f.is_pure {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`#Reactive fn` can't also be `#Pure fn`".to_string(),
+                    "`#Reactive fn` can't also be `@Pure fn`".to_string(),
                     "a reactive effect re-runs when signals change, so it is not a pure function"
                         .to_string(),
-                    "drop `#Pure` or use `reactive.effect` inside a plain `fn`".to_string(),
+                    "drop `@Pure` or use `reactive.effect` inside a plain `fn`".to_string(),
                     Some(f.name_span),
                 ));
             }
@@ -99,6 +99,52 @@ impl<'a> Checker<'a> {
                     Some(f.name_span),
                 ));
             }
+        }
+        // D-PREPOST1: check `@Pre`/`@Post` contract clauses. Params are already
+        // in scope above; a condition is pure (same checker as `#Pure fn`,
+        // E0139) and must be `Bool` (E0110 via `require_bool`). `@Post`
+        // additionally binds `result` to the return type while its own
+        // conditions are checked — `result` inside a `@Pre` is E0144 (see
+        // the `Expr::Ident` dispatch in `CheckerInfer/expr.rs`).
+        for clause in &mut f.pre {
+            self.in_pre_clause = true;
+            self.require_bool(&mut clause.cond, "a `@Pre` condition");
+            self.in_pre_clause = false;
+            if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs)
+            {
+                self.diags.push(e0139(Syntax::CONTRACT_PRE, d.span));
+            }
+        }
+        if !f.post.is_empty() {
+            let result_ty = self.resolve_type(
+                f.return_type
+                    .clone()
+                    .unwrap_or(Type::Named("Unit".to_string())),
+            );
+            self.push_scope();
+            self.declare(
+                "result",
+                f.name_span,
+                LocalInfo {
+                    ty: result_ty,
+                    mutable: false,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                    sendable: true,
+                    task_lint_span: None,
+                    single_use_span: None,
+                    task_has_view_capture: false,
+                },
+            );
+            for clause in &mut f.post {
+                self.require_bool(&mut clause.cond, "a `@Post` condition");
+                if let Some(d) =
+                    check_pure_expr(&clause.cond, &f.name, self.funcs)
+                {
+                    self.diags.push(e0139(Syntax::CONTRACT_POST, d.span));
+                }
+            }
+            self.pop_scope();
         }
         let prev_unsafe = self.in_unsafe;
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
@@ -248,7 +294,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::TypeAlias(a) => {
                 register_type_alias(a, &mut registry, &mut diags, &funcs, &consts);
             }
-            // D-QUAL3: a unit family lowers to one `#Numeric` distinct type per
+            // D-QUAL3: a unit family lowers to one `@Numeric` distinct type per
             // member, each erasing to `Float` — register them via the same path.
             Item::UnitFamily(uf) => {
                 for d in uf.distinct_defs() {
@@ -681,6 +727,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         state_requires: None,
             state_transition: None,
             web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
                     body: std::mem::take(&mut t.body),
@@ -810,9 +858,9 @@ fn check_program_taint(
 
 /// D-EFF1: enforce declared `#(…)` effect bounds against inferred sets. For each
 /// function (and method) carrying a `#(…)` list, the inferred set must be a
-/// subset of the declared set — any extra effect is E0740. A `#Pure fn` with a
+/// subset of the declared set — any extra effect is E0740. A `@Pure fn` with a
 /// non-empty `#(…)` list is the contradiction E0745 (the empty-set contract of
-/// `#Pure` is otherwise enforced by E3401). `#Pure` with no list needs no check
+/// `@Pure` is otherwise enforced by E3401). `@Pure` with no list needs no check
 /// here: its purity is the E3401 path.
 pub(crate) fn check_effect_boundaries(
     items: &[Item],
@@ -828,7 +876,7 @@ pub(crate) fn check_effect_boundaries(
         let Some(declared_list) = &f.declared_effects else {
             return;
         };
-        // E0745: `#Pure` already pins the empty set; a `#(…)` list contradicts it.
+        // E0745: `@Pure` already pins the empty set; a `#(…)` list contradicts it.
         if f.is_pure && !declared_list.is_empty() {
             diags.push(e0745(&f.name, f.name_span));
             return;
@@ -930,7 +978,7 @@ pub(crate) fn check_effect_boundaries(
         if let Item::Trait(t) = item {
             for m in &t.methods {
                 let bound = match (m.is_pure, &m.declared_effects) {
-                    (true, _) => Some(EffectSet::new()), // `#Pure` → empty bound
+                    (true, _) => Some(EffectSet::new()), // `@Pure` → empty bound
                     (false, Some(list)) => {
                         let mut set = EffectSet::new();
                         let mut ok = true;
@@ -1048,12 +1096,34 @@ pub(crate) fn register_distinct(
             return;
         }
     }
+    // D-RANGETYPE1: a range constraint (`distinct Int(0..10)`) only makes
+    // sense on `Int` — reject it on any other base rather than silently
+    // ignoring it.
+    if let Some((lo, hi, range_span)) = &d.range {
+        if d.base != Type::Int {
+            diags.push(Diagnostic::error(
+                "E0003",
+                format!(
+                    "a range constraint only works on `Int`, but `{}` is {}",
+                    d.name,
+                    d.base.show()
+                ),
+                "`distinct Base(lo..hi)` provably bounds a whole-number value".to_string(),
+                format!("use `distinct Int({}..{})`, or drop the range", lo, hi),
+                Some(*range_span),
+            ));
+        }
+    }
     registry.types.insert(
         d.name.clone(),
         TypeDef::Distinct {
             name_span: d.name_span,
             base: d.base.clone(),
             is_numeric: d.is_numeric,
+            is_comparable: d.is_comparable,
+            is_printable: d.is_printable,
+            is_codable_as_base: d.is_codable_as_base,
+            range: d.range.map(|(lo, hi, _)| (lo, hi)),
         },
     );
 }
@@ -1661,6 +1731,7 @@ pub(crate) fn check_func_body(
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
         in_pure: f.is_pure,
+        in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,
@@ -1786,6 +1857,8 @@ pub(crate) fn check_error_conv_body(
         state_requires: None,
             state_transition: None,
             web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
         body: std::mem::take(&mut ec.body),
     };
     let d = check_func_body(
@@ -2101,6 +2174,8 @@ pub(crate) fn synthesize_delegation_method(
         state_requires: None,
             state_transition: None,
             web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
         body: vec![body_stmt],
     }
 }
@@ -2152,6 +2227,8 @@ pub(crate) fn synthesize_default_method(
         state_requires: None,
             state_transition: None,
             web_marker: None,
+            pre: Vec::new(),
+            post: Vec::new(),
         body: body.to_vec(),
     }
 }

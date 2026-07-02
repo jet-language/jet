@@ -30,7 +30,8 @@ executable spec: a milestone ships with new `examples/` programs and new
 | Open owner ballots | [`decision-ballots.md`](../../tools/Tower/docs/ballots/decision-ballots.md) |
 | Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
-| Jetpack & jetos sequencing + live status | [`tools/Tower/docs/plans/epoch-5/`](../../tools/Tower/docs/plans/epoch-5/) |
+| Epoch 5 (Jai metaprogramming) plan | [`tools/Tower/docs/plans/epoch-5/`](../../tools/Tower/docs/plans/epoch-5/) → [`metaprogramming.md`](../../tools/Tower/docs/plans/epoch-5/metaprogramming.md) |
+| Jetpack & jetos sequencing + live status | [`tools/Tower/docs/plans/epoch-4/`](../../tools/Tower/docs/plans/epoch-4/) |
 | Implementing-agent protocol | [`tools/Tower/docs/plans/README.md`](../../tools/Tower/docs/plans/README.md) |
 
 Plans are gated on ratified decisions in `syntax-decisions.md` (see
@@ -143,7 +144,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `*T`, volatile; I1 amendment (D-LL1).
 - **E2-M14** — C FFI: `#Bindgen`/`#Extern module`, `use c.<lib>`, link discovery.
 - **E2-M15** — cross-compilation + freestanding: `jet build --target`, `--freestanding`, QEMU smoke.
-- **E2-M16** — pure evaluation + layer 3: `#Pure fn`, `jet eval --pure`, package recipes, sandboxed builds.
+- **E2-M16** — pure evaluation + layer 3: `@Pure fn`, `jet eval --pure`, package recipes, sandboxed builds.
 - **E2-M17** — Epoch 2 GA: six showcase programs, diagnostics audit, size/perf budgets.
 - **E2-M18** — REPL: `jet repl`, interpreter-backed, 16 transcript tests.
 
@@ -170,14 +171,13 @@ git-based dependencies. `jet gc` is a stub pending M12.2. TLS requires the
 **jetos is deferred to post-Epoch-3** (owner, 2026-06-18) — research track only;
 do not ratify its config/surface syntax during Epoch 2 or 3. **Jetpack** Phase 1
 environments and the typed `module { … }` surface stay active: see
-[`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/epoch-5/README.md). **Live
-built-vs-pending status:**
-[`jetpack-jetos/IMPLEMENTATION-STATUS.md`](../../tools/Tower/docs/plans/epoch-5/IMPLEMENTATION-STATUS.md).
+[`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/epoch-4/README.md) for
+the live built-vs-pending status and current decisions.
 
 ### Epoch 1 tail
 
 **M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
-(architecture: [`unified-ecosystem.md`](../../tools/Tower/docs/plans/epoch-5/unified-ecosystem.md) §10). M12.1 verified
+(architecture: [`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/epoch-4/README.md)). M12.1 verified
 2026-06-13.
 
 ---

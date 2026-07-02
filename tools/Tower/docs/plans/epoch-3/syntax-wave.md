@@ -69,12 +69,12 @@ sections** (they have no such dependency). When you update Syntax.rs, flip
   **D-LAMBDAINFER1**, **D-DESTRUCT1**, and **D-TYPEDTEXT1**.
 - **Taint/sanitizer model** (`crates/jet-sema/src/Sema/Taint.rs`, E0721 family) is
   the enforcement engine for **D-TYPEDTEXT1**.
-- **E3 runtime** (JIT hot-reload + structured-concurrency/coroutine machinery, an
-  E3 exit criterion not yet built) is the runtime for **D-PERSIST1**,
-  **D-STREAMYIELD1**, and the trace half of **D-ERRCTX1**. Their *surface* is
-  fixed now; wire surface + sema + the dumb lowering, and land the runtime piece
-  against the E3 machinery as it arrives (name that gate in the section, per
-  philosophy "do it right / name the gate").
+- **E3 runtime** is the runtime for **D-PERSIST1**, **D-STREAMYIELD1**, and the
+  trace half of **D-ERRCTX1** — and it is **already shipped** (verified
+  2026-07-02): the M:N scheduler (D-ASYNCRT1=A, card #126), coroutines
+  (D-COROUTINE1=A, #101), and nursery/structured scope (D-NURSERY1=A, #102) are
+  all done; `JetScheduler*` machinery lives in `Prelude/CoreLib.rs`. Build
+  these sections directly against it — no runtime gate remains.
 
 ### 0.3 Build order (DAG)
 

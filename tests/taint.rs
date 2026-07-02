@@ -175,7 +175,7 @@ fn main() {
 // --- D-TAINT-SAN (ratified 2026-06-25): bare `sanitizer fn` teaching error ---
 
 /// Bare lowercase `sanitizer fn` is the retired spelling → E0059, pointing at
-/// the PascalCase marker `#Sanitizer fn` (mirrors `pure` → `#Pure` / E0053).
+/// the PascalCase marker `#Sanitizer fn` (mirrors `pure` → `@Pure` / E0053).
 #[test]
 fn bare_sanitizer_fn_is_e0059() {
     let src = r#"

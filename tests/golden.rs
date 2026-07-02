@@ -159,6 +159,7 @@ fn examples_compile_and_run() {
         // inside an inline `unsafe { }` block). Their generated `unsafe` is allowed, but
         // ONLY in the gated block/fn form — never ungated (I1).
         if stem == "lowlevel/lowlevel"
+            || stem == "lowlevel/pointer_cast_deref"
             || stem == "memory/rawptr"
             || stem == "effects/single_use_discard"
             || stem == "memory/uninit"

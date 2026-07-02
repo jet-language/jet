@@ -93,7 +93,7 @@ impl<'a> Fmt<'a> {
                 ret,
                 effect_bound,
             } => {
-                // D-EFF2: render the callback effect bound prefix — `#Pure ` for an
+                // D-EFF2: render the callback effect bound prefix — `@Pure ` for an
                 // empty bound, `#(E1, E2) ` for a listed one.
                 if let Some(bound) = effect_bound {
                     if bound.is_empty() {
@@ -209,6 +209,15 @@ impl<'a> Fmt<'a> {
             }
             Expr::Int(n, _, _) => self.write(&n.to_string()),
             Expr::Float(v, _, _) => self.write(&fmt_float(*v)),
+            // D-UNITLIT1: `500ms` — no space between the number and the suffix.
+            Expr::UnitLit { int, float, suffix, .. } => {
+                if let Some(n) = int {
+                    self.write(&n.to_string());
+                } else if let Some(v) = float {
+                    self.write(&fmt_float(*v));
+                }
+                self.write(suffix);
+            }
             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),
             Expr::Char(c, _) => self.write(&fmt_char(*c)),
             Expr::ListLit(elems, _) => {
@@ -333,6 +342,25 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                 }
             }
+            // D-CHAINCMP1: `0 <= sev < 10` — same-direction relational chain.
+            // Single spaces around each operator, no parens between pairs
+            // (chain reads left to right at uniform precedence).
+            Expr::CompareChain { operands, ops, .. } => {
+                let op_prec = Prec::of_bin(ops[0]);
+                if prec > op_prec {
+                    self.write("(");
+                }
+                self.fmt_expr(&operands[0], op_prec);
+                for (op, operand) in ops.iter().zip(operands.iter().skip(1)) {
+                    self.write(" ");
+                    self.write(op.spell());
+                    self.write(" ");
+                    self.fmt_expr(operand, op_prec.add_rhs());
+                }
+                if prec > op_prec {
+                    self.write(")");
+                }
+            }
             // D-CAP9: postfix `p.*` deref.
             Expr::Deref(inner, _) => {
                 self.fmt_expr(inner, Prec::Postfix);
@@ -384,17 +412,13 @@ impl<'a> Fmt<'a> {
                         f.write(".");
                         f.write(method);
                         f.fmt_method_type_args(type_args);
-                        f.write("(");
-                        f.fmt_call_args(args);
-                        f.write(")");
+                        f.fmt_call_args_or_trailing_block(args);
                     });
                 } else {
                     self.write(".");
                     self.write(method);
                     self.fmt_method_type_args(type_args);
-                    self.write("(");
-                    self.fmt_call_args(args);
-                    self.write(")");
+                    self.fmt_call_args_or_trailing_block(args);
                 }
             }
             Expr::StructLit {
@@ -523,9 +547,7 @@ impl<'a> Fmt<'a> {
                     self.write("(");
                 }
                 self.fmt_expr(callee, Prec::Postfix);
-                self.write("(");
-                self.fmt_call_args(args);
-                self.write(")");
+                self.fmt_call_args_or_trailing_block(args);
                 if prec > Prec::Postfix {
                     self.write(")");
                 }
@@ -688,9 +710,7 @@ impl<'a> Fmt<'a> {
 
     fn fmt_call(&mut self, c: &Call) {
         self.write(&c.name);
-        self.write("(");
-        self.fmt_call_args(&c.args);
-        self.write(")");
+        self.fmt_call_args_or_trailing_block(&c.args);
     }
 
     /// D-SERDE6: call-site turbofish `<T, …>` on a method call (`decode<Order>(…)`).
@@ -707,6 +727,37 @@ impl<'a> Fmt<'a> {
             self.fmt_type(t);
         }
         self.write(">");
+    }
+
+    /// D-TRAILBLOCK1: emit `(args) { … }` — or bare `{ … }` when the block is
+    /// the call's only argument — when the LAST arg is the desugared
+    /// trailing-block lambda; otherwise the ordinary `(args)`. Shared by
+    /// `Expr::Call`, `Expr::MethodCall`, and `Expr::CallValue` so all three
+    /// call shapes round-trip the sugar identically.
+    fn fmt_call_args_or_trailing_block(&mut self, args: &[CallArg]) {
+        if let Some((last, init)) = args.split_last() {
+            if last.flags.is_trailing_block {
+                if !init.is_empty() {
+                    self.write("(");
+                    self.fmt_call_args(init);
+                    self.write(")");
+                }
+                self.write(" ");
+                if let Expr::Lambda(lam) = &last.expr {
+                    if let crate::AST::LambdaBody::Block(stmts) = &lam.body {
+                        self.write("{");
+                        self.newline();
+                        self.with_indent(|f| f.fmt_block_stmts(stmts));
+                        self.end_block();
+                        return;
+                    }
+                }
+                // Defensive: not the shape the parser produces, fall through.
+            }
+        }
+        self.write("(");
+        self.fmt_call_args(args);
+        self.write(")");
     }
 
     fn fmt_call_args(&mut self, args: &[CallArg]) {

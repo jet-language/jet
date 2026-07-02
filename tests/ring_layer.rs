@@ -228,6 +228,8 @@ fn lock_roundtrip_layer_metadata() {
         dependencies: vec![],
         layer: Some(jet::Syntax::RuntimeLayer::Alloc),
         inferred_layer: Some(jet::Syntax::RuntimeLayer::Std),
+        effects: vec![],
+        effect_grants: vec![],
     };
     let lock = LockFile {
         version: 1,
