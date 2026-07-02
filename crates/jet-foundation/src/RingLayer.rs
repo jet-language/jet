@@ -72,6 +72,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.encoding.yaml"
         | "core.text.unicode"
         | "core.args"
+        | "core.reflect"
         | "core.async.loadable"
         | "core.time.expiring"
         | "core.secrets"

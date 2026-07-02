@@ -579,6 +579,39 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
+            // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` — the runtime reflection
+            // floor. Legal wherever `x` is interpolatable (`"{x}"`) — the SAME
+            // gate a trait-bounded variadic's `...Renderable` bound uses
+            // (`is_displayable`, reuse, I8), not the looser `is_printable`
+            // `print`/`io.eprint` accept: `Value.display()` is backed by
+            // `jet_display()` (JetDisplay), not `jet_show()`/`{:?}`, so it
+            // shows exactly what `"{x}"` would — never codegen's mangled Rust
+            // field names, which `is_printable` would let through for a
+            // struct with no auto/explicit `Display`.
+            ("core.reflect", "of") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return Some(Type::Named("Value".to_string()));
+                }
+                let arg = &mut args[0];
+                if let Some(ty) = self.infer(&mut arg.expr) {
+                    if !is_displayable(&ty, self.trait_reg) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("{} can't be reflected yet", ty.show()),
+                            "`reflect.of` inspects the same values `\"{x}\"` interpolation can show"
+                                .to_string(),
+                            "implement `Display` for its type, or pass one of its fields instead"
+                                .to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                    }
+                }
+                return Some(Type::Named("Value".to_string()));
+            }
             ("core.io", "input") => {
                 if args.len() > 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -2098,6 +2131,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Arena" | "Bump" | "Pool" | "Fixed"
         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing types.
         | "ArgsSpec" | "ParsedArgs"
+        // D-ANY-JAI1 (c7jaiany §6): runtime reflection floor handle types.
+        | "Value" | "Field"
         // D-TERM1 (ratified 2026-06-22): terminal key-event enum.
         | "Key"
         // D-SERDE2: the format-agnostic value tree + typed-decode error.
@@ -4117,6 +4152,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.scope" => &["guard"],
         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing.
         "core.args" => &["spec"],
+        // D-ANY-JAI1 (c7jaiany §6): the runtime reflection floor.
+        "core.reflect" => &["of"],
         // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
         "core.term" => &["read_key"],
         "core" => &[],
@@ -4757,4 +4794,24 @@ pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {
         ("is_null", 0) => Some(Type::Bool),
         _ => None,
     }
+}
+
+/// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s handle types. `Value` is the
+/// whole-value handle; `.fields()` returns `[Field]` (only populated for a
+/// struct receiver — every other displayable shape gets an empty list,
+/// resolved at codegen from `cx.struct_fields`, I3: sema only decides the
+/// TYPES here, codegen does the per-call-site enumeration).
+pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Option<Type> {
+    match (type_name, method, n_args) {
+        ("Value", "type_name", 0) => Some(Type::String),
+        ("Value", "display", 0) => Some(Type::String),
+        ("Value", "fields", 0) => Some(Type::List(Box::new(Type::Named("Field".to_string())))),
+        ("Field", "name", 0) => Some(Type::String),
+        ("Field", "value", 0) => Some(Type::String),
+        _ => None,
+    }
+}
+
+pub fn is_reflect_type_name(name: &str) -> bool {
+    matches!(name, "Value" | "Field")
 }

@@ -1970,6 +1970,22 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+            // D-ANY-JAI1 (c7jaiany §6): accessor methods on `reflect.of(x)`'s
+            // `Value`/`Field` handles — same zero-arg-getter shape as `DbValue`
+            // above. `Value`/`Field` are common enough words a user struct might
+            // reuse them (`examples/features/memory/zerocopy.jet` already has its
+            // own `struct Field`) — `!self.registry.contains(tn)` makes a
+            // user-declared type of that name win, same principle as codegen's
+            // `!self.type_names.contains(name)` guard on the Rust-type-name side.
+            if is_reflect_type_name(tn) && !self.registry.contains(tn) {
+                if let Some(ret) = reflect_method_return(tn, method, args.len()) {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    *recv_type_out = Some(tn.clone());
+                    return Some(ret);
+                }
+            }
             // D-LAYOUT1 / D-LAYOUT-GATES1: methods on the built-in
             // `LayoutHandle`/`Constraint` types (`form.h("label","width")`,
             // `form.value(v)`, `form.suggest(v, 90.0)`, `c.medium()`, …).
@@ -2067,24 +2083,50 @@ impl<'a> Checker<'a> {
             }
             return result;
         }
-        if let Type::TraitObject(trait_name) = &recv_ty {
-            let sig = self
-                .trait_reg
-                .traits
-                .get(trait_name)
-                .and_then(|t| t.methods.get(method));
-            if let Some(msig) = sig {
+        if let Type::TraitObject(trait_names) = &recv_ty {
+            // D-ANY-JAI1: a multi-trait bound (`...[A, B]`) types its loop element as a
+            // multi-name `TraitObject` — check EVERY bound trait for the method, not
+            // just the first, so a call inside the body can reach a method on any of
+            // them. First match wins (S48 single-trait dispatch is the n=1 case of
+            // this loop, unchanged).
+            let sig = trait_names
+                .iter()
+                .find_map(|tn| {
+                    self.trait_reg
+                        .traits
+                        .get(tn)
+                        .and_then(|t| t.methods.get(method))
+                        .map(|msig| (tn, msig))
+                });
+            if let Some((trait_name, msig)) = sig {
                 *recv_type_out = Some(trait_name.clone());
+                let ret = msig.return_type.clone();
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }
-                return msig.return_type.clone();
+                return ret;
             }
+            // Keep the original single-trait wording byte-for-byte (it's snapshot-
+            // pinned product copy, docs/spec/diagnostics.md) when there's only one
+            // bound trait; only the multi-bound case needs the "none of" phrasing.
+            let (headline, fix) = match trait_names.as_slice() {
+                [only] => (
+                    format!("trait `{only}` has no method `{method}`"),
+                    format!("add `fn {method}(…)` to `trait {only}`"),
+                ),
+                many => (
+                    format!(
+                        "none of {} has a method `{method}`",
+                        many.iter().map(|t| format!("`{t}`")).collect::<Vec<_>>().join(" + ")
+                    ),
+                    format!("add `fn {method}(…)` to one of the bound traits"),
+                ),
+            };
             self.diags.push(Diagnostic::error(
                 "E0102",
-                format!("trait `{trait_name}` has no method `{method}`"),
+                headline,
                 "check the method name on this trait value".to_string(),
-                format!("add `fn {method}(…)` to `trait {trait_name}`"),
+                fix,
                 Some(span),
             ));
             for a in args.iter_mut() {

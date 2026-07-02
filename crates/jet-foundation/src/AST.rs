@@ -95,7 +95,14 @@ pub enum Type {
         args: Vec<Type>,
     },
     /// S48 (M9): trait object — dynamic dispatch with invisible boxing.
-    TraitObject(String),
+    /// D-ANY-JAI1/D-VARARGBOUND1: a trait-bounded variadic loop element
+    /// (`...[A, B]`) types its body binding as a multi-name `TraitObject` so
+    /// method dispatch and interpolation can check EVERY bound trait, not
+    /// just the first — codegen never constructs (or sees) more than one
+    /// name here; it always synthesizes a real generic type param with all
+    /// bounds instead (`Codegen/VariadicBound.rs`), so every codegen-side
+    /// `TraitObject` match arm still only ever handles a singleton list.
+    TraitObject(Vec<String>),
     /// S73 (D-SG7): named tuple `(x: Int, y: Int)` — fields stored sorted by name.
     Tuple(Vec<(String, Box<Type>)>),
     /// S76 (2026-06-16): fixed-size list `[T#N]` — a compile-time refinement of
@@ -271,7 +278,7 @@ impl Type {
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("`{}`<{}>", name, a)
             }
-            Type::TraitObject(t) => format!("`{}` (a trait value)", t),
+            Type::TraitObject(t) => format!("`{}` (a trait value)", t.join(" + ")),
             Type::Tuple(fields) => {
                 let parts = fields
                     .iter()
@@ -331,7 +338,7 @@ impl Type {
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", name, a)
             }
-            Type::TraitObject(t) => t.clone(),
+            Type::TraitObject(t) => t.join(" + "),
             Type::Tuple(fields) => {
                 let parts = fields
                     .iter()
@@ -352,7 +359,7 @@ impl Type {
         match self {
             Type::Named(n) => Some(n.as_str()),
             Type::Apply { name, .. } => Some(name.as_str()),
-            Type::TraitObject(t) => Some(t.as_str()),
+            Type::TraitObject(t) => t.first().map(String::as_str),
             _ => None,
         }
     }

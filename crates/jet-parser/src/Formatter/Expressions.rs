@@ -143,7 +143,11 @@ impl<'a> Fmt<'a> {
                 self.write(">");
             }
             Type::TraitObject(t) => {
-                self.write(t);
+                // Only the parser's `dyn`/`Box<dyn>` teaching-error recovery paths
+                // ever construct this AST-facing arm with more than a formatting
+                // concern in mind, and those are always single-name; join
+                // defensively rather than assume (never emit "" silently, I2).
+                self.write(&t.join(" + "));
             }
             Type::Tuple(fields) => {
                 self.write("(");

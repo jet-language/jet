@@ -956,16 +956,25 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(Type::List(expected_inner)) = self.expected_type.clone() {
-            if let Type::TraitObject(trait_name) = expected_inner.as_ref() {
+            if let Type::TraitObject(trait_names) = expected_inner.as_ref() {
+                // D-ANY-JAI1: coercion to a struct-literal's blessed single trait name
+                // (`as_trait`) only applies to the S48 single-trait-object shape — a
+                // multi-trait `TraitObject` (only ever produced for a variadic loop
+                // element, never a list-literal's declared element type) has no one
+                // trait to coerce toward, so it falls through to the ordinary
+                // `check_type_assignable` path below (which checks every bound).
+                let trait_name = trait_names.first().filter(|_| trait_names.len() == 1);
                 for e in elems.iter_mut() {
                     if let Some(t) = self.infer(e) {
-                        match &t {
-                            Type::Named(n) if self.trait_reg.implements_trait(n, trait_name) => {
+                        match (&t, trait_name) {
+                            (Type::Named(n), Some(trait_name))
+                                if self.trait_reg.implements_trait(n, trait_name) =>
+                            {
                                 if let Expr::StructLit { as_trait, .. } = e {
                                     *as_trait = Some(trait_name.clone());
                                 }
                             }
-                            Type::Apply { name, .. }
+                            (Type::Apply { name, .. }, Some(trait_name))
                                 if self.trait_reg.implements_trait(name, trait_name) =>
                             {
                                 if let Expr::StructLit { as_trait, .. } = e {

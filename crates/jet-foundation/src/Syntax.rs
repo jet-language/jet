@@ -2101,6 +2101,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.args",
     // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
     "core.term",
+    // D-ANY-JAI1 (c7jaiany §6, ratified 2026-07-01): runtime reflection floor —
+    // `reflect.of(x) -> Value` with `.type_name()`/`.display()`/`.fields()`.
+    "core.reflect",
     // D-ENC1 (ratified 2026-06-24): unified serialization library `core.encoding` with
     // per-format submodules. Supersedes `core.json` + `jet.{csv,toml,yaml}` (clean break).
     "core.encoding",
@@ -2248,6 +2251,16 @@ pub fn args_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "ArgsSpec" => Some("JetArgsSpec"),
         "ParsedArgs" => Some("JetParsedArgs"),
+        _ => None,
+    }
+}
+
+/// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s handle types are top-level
+/// prelude structs, same shape as `args_handle_rust_type` above.
+pub fn reflect_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "Value" => Some("JetReflectValue"),
+        "Field" => Some("JetReflectField"),
         _ => None,
     }
 }

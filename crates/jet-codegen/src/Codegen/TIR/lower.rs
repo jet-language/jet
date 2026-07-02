@@ -3590,7 +3590,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
             // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
             let ty = match as_trait {
-                Some(t) => Type::TraitObject(t.clone()),
+                Some(t) => Type::TraitObject(vec![t.clone()]),
                 None => Type::Named(type_name.clone()),
             };
             TExpr {

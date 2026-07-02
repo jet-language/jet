@@ -300,15 +300,17 @@ impl<'a> Checker<'a> {
                     self.check_declared_type(arg, span);
                 }
             }
-            Type::TraitObject(t) => {
-                if !self.trait_reg.is_trait_name(t) {
-                    self.diags.push(Diagnostic::error(
-                        "E0119",
-                        format!("there's no trait called `{t}`"),
-                        "a trait name in type position must name a declared trait".to_string(),
-                        format!("add `trait {t} {{ … }}` first"),
-                        Some(span),
-                    ));
+            Type::TraitObject(ts) => {
+                for t in ts {
+                    if !self.trait_reg.is_trait_name(t) {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!("there's no trait called `{t}`"),
+                            "a trait name in type position must name a declared trait".to_string(),
+                            format!("add `trait {t} {{ … }}` first"),
+                            Some(span),
+                        ));
+                    }
                 }
             }
             Type::Option(inner) => {
@@ -443,22 +445,26 @@ impl<'a> Checker<'a> {
             {
                 return false;
             }
-            (Type::TraitObject(trait_name), Type::Named(type_name)) => {
-                if self.trait_reg.implements_trait(type_name, trait_name) {
-                    return false;
+            (Type::TraitObject(trait_names), Type::Named(type_name)) => {
+                for trait_name in trait_names {
+                    if !self.trait_reg.implements_trait(type_name, trait_name) {
+                        let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
+                        self.diags
+                            .push(e0905(type_name, trait_name, span, needs_derive));
+                        return true;
+                    }
                 }
-                let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
-                self.diags
-                    .push(e0905(type_name, trait_name, span, needs_derive));
-                return true;
+                return false;
             }
-            (Type::TraitObject(trait_name), Type::Apply { name, .. }) => {
-                if self.trait_reg.implements_trait(name, trait_name) {
-                    return false;
+            (Type::TraitObject(trait_names), Type::Apply { name, .. }) => {
+                for trait_name in trait_names {
+                    if !self.trait_reg.implements_trait(name, trait_name) {
+                        let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
+                        self.diags.push(e0905(name, trait_name, span, needs_derive));
+                        return true;
+                    }
                 }
-                let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
-                self.diags.push(e0905(name, trait_name, span, needs_derive));
-                return true;
+                return false;
             }
             _ => {}
         }
@@ -2683,7 +2689,7 @@ impl<'a> Checker<'a> {
                 Type::Named(crate::Syntax::TYPE_DATA.to_string())
             }
             Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
-                Type::TraitObject(n)
+                Type::TraitObject(vec![n])
             }
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
             Type::Apply { name, args } if self.registry.is_type_alias(&name) => {

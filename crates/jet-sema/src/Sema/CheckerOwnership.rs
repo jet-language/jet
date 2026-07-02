@@ -684,10 +684,10 @@ impl<'a> Checker<'a> {
                     .find_map(|arg| self.sendability_problem_inner(arg, true, seen))
             }
             Type::Apply { name, args } => self.named_sendability_problem(name, args, seen),
-            Type::TraitObject(name) => Some(SendabilityProblem {
+            Type::TraitObject(names) => Some(SendabilityProblem {
                 root: None,
                 path: Vec::new(),
-                kind: SendProblemKind::TraitValue(name.clone()),
+                kind: SendProblemKind::TraitValue(names.join(" + ")),
             }),
             Type::Tuple(fields) => fields
                 .iter()

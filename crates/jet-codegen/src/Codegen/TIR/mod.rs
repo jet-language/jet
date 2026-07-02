@@ -1802,6 +1802,14 @@ pub enum THandleOp {
     ParsedArgsOption,
     /// D-ARGS1: ParsedArgs `.positional(n)` → `{root}jet_args_positional(&(recv), a0)` → `Option<String>`.
     ParsedArgsPositional,
+    /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s `Value` handle — plain
+    /// inherent-method passthrough, same shape as `ArgsSpecHelp`.
+    ReflectValueTypeName,
+    ReflectValueDisplay,
+    ReflectValueFields,
+    /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x).fields()`'s `Field` handle.
+    ReflectFieldName,
+    ReflectFieldValue,
     /// c109 Phase 21: Task `join()` → `(recv).join()` (the no-arg `join` arm of
     /// `emit_builtin_method`, Source/Codegen/Expression.rs ~L967 — shared with the dead
     /// list no-arg join, but here it's the JetTask method). Returns the task's value `T`.
@@ -3001,6 +3009,12 @@ fn mk() {
         assert!(handle_method_op("ParsedArgs", "flag", 1).is_some());
         assert!(handle_method_op("ParsedArgs", "option", 1).is_some());
         assert!(handle_method_op("ParsedArgs", "positional", 1).is_some());
+        // D-ANY-JAI1 (c7jaiany §6): reflect.of(x)'s Value/Field handle methods.
+        assert!(handle_method_op("Value", "type_name", 0).is_some());
+        assert!(handle_method_op("Value", "display", 0).is_some());
+        assert!(handle_method_op("Value", "fields", 0).is_some());
+        assert!(handle_method_op("Field", "name", 0).is_some());
+        assert!(handle_method_op("Field", "value", 0).is_some());
         // Excluded: dead `lines` (E2502).
         assert!(handle_method_op("FileReader", "lines", 0).is_none());
         // Wrong arity declines.

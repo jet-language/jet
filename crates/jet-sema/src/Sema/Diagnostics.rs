@@ -464,7 +464,10 @@ pub(crate) fn is_displayable(ty: &Type, trait_reg: &crate::Traits::TraitRegistry
         // (see `TraitRegistry::implements_trait`), so a `Renderable` trait-object
         // value (the loop element of a trait-bounded variadic) is interpolatable.
         // Every other bare trait-object stays non-displayable.
-        Type::TraitObject(t) => t == Generics::RENDERABLE,
+        // D-ANY-JAI1: displayable if ANY bound trait is `Renderable` — a
+        // multi-trait-bounded variadic loop element (`...[Renderable, Debug]`)
+        // is still interpolatable via its `Renderable` bound.
+        Type::TraitObject(t) => t.iter().any(|n| n == Generics::RENDERABLE),
         Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_displayable(elem, trait_reg),
         Type::Tagged { inner, .. } => is_displayable(inner, trait_reg),

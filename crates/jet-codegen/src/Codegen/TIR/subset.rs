@@ -528,7 +528,7 @@ pub(crate) fn is_covered_fn_ty(ty: &Type, cx: &Cx) -> bool {
 /// never a foreign/prelude name.
 pub(crate) fn is_covered_trait_object_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
-        Type::TraitObject(t) => cx.trait_names.contains(t),
+        Type::TraitObject(t) => t.iter().all(|n| cx.trait_names.contains(n)),
         Type::Named(n) => cx.trait_names.contains(n),
         _ => false,
     }
@@ -3863,6 +3863,14 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.io" && method == "input" {
         return true;
     }
+    // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`. NOT in `core_fixed_sig` (the
+    // param type is "any printable value", not a fixed `Type`), but the
+    // return type IS fixed regardless of the arg (always `Value`) — total,
+    // not arg-dependent, so it's covered like the other fixed-but-not-in-
+    // the-table specials above.
+    if module == "core.reflect" && method == "of" {
+        return true;
+    }
     // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `JetMeasurement<f64>`. NOT in
     // `core_fixed_sig` — the return type is `Measurement<Float>` (generic Apply).
     if module == "core.science.measurement" && method == "from" {
@@ -4076,6 +4084,12 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ArgsSpec", "positional", 2) => THandleOp::ArgsSpecPositional,
         ("ArgsSpec", "help", 0) => THandleOp::ArgsSpecHelp,
         ("ArgsSpec", "parse", 1) => THandleOp::ArgsSpecParse,
+        // D-ANY-JAI1 (c7jaiany §6): reflect.of(x)'s Value/Field handle methods.
+        ("Value", "type_name", 0) => THandleOp::ReflectValueTypeName,
+        ("Value", "display", 0) => THandleOp::ReflectValueDisplay,
+        ("Value", "fields", 0) => THandleOp::ReflectValueFields,
+        ("Field", "name", 0) => THandleOp::ReflectFieldName,
+        ("Field", "value", 0) => THandleOp::ReflectFieldValue,
         // D-ARGS1: ParsedArgs query methods.
         ("ParsedArgs", "flag", 1) => THandleOp::ParsedArgsFlag,
         ("ParsedArgs", "option", 1) => THandleOp::ParsedArgsOption,
@@ -4161,6 +4175,16 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         .or_else(|| {
             if is_db_value_type_name(handle) {
                 Some(crate::Sema::db_value_method_return(method, nargs))
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            // D-ANY-JAI1 (c7jaiany §6): `Value`/`Field` (`reflect.of(x)`) —
+            // needed so `.fields()`'s element type (`[Field]`) is total for a
+            // chained/looped access (`loop f in v.fields() { f.name() }`).
+            if crate::Sema::is_reflect_type_name(handle) {
+                Some(crate::Sema::reflect_method_return(handle, method, nargs))
             } else {
                 None
             }
@@ -4253,6 +4277,9 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 args: vec![Type::Named("Unknown".to_string()), Type::String], // sema refines E
             };
         }
+        // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` always returns `Value`,
+        // regardless of the arg's type.
+        ("core.reflect", "of") => return Type::Named("Value".to_string()),
         // D-APPROX1=A: sketch constructors → opaque named types.
         ("core.sketch.hll", "new") => return Type::Named("HyperLogLog".to_string()),
         ("core.sketch.tdigest", "new") => return Type::Named("TDigest".to_string()),

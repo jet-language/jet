@@ -255,6 +255,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
 // Re-export from Syntax so submodules (lower.rs, subset.rs) find them via `use super::*`.
 pub(crate) use crate::Syntax::alloc_handle_rust_type;
 pub(crate) use crate::Syntax::args_handle_rust_type;
+pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
 impl Cx {
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
@@ -504,6 +505,20 @@ impl Cx {
                     args_handle_rust_type(name).unwrap()
                 )
             }
+            // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s Value/Field handles. `Value`
+            // and `Field` are common enough words that a user struct sharing the name
+            // is likely (`examples/features/memory/zerocopy.jet` already declares its
+            // own `Field`) — same guard as the layout/core-rust-type-name arms below:
+            // a user type of that name always wins.
+            Type::Named(name)
+                if reflect_handle_rust_type(name).is_some() && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    reflect_handle_rust_type(name).unwrap()
+                )
+            }
             // D-LAYOUT1 / D-LAYOUT-GATES1: `layout` runtime types are top-level
             // in their own `jet_layout` module (like the alloc/file/net handles
             // above, not nested in `jet_std`).
@@ -638,7 +653,13 @@ impl Cx {
                     )
                 }
             }
-            Type::TraitObject(t) => format!("Box<dyn {}>", Generics::user_trait_rust(t)),
+            // Codegen only ever constructs/sees a singleton `TraitObject` (the
+            // D-ANY-JAI1 multi-trait bound loop element never reaches codegen —
+            // see the type's doc comment); join defensively rather than assume.
+            Type::TraitObject(t) => format!(
+                "Box<dyn {}>",
+                t.iter().map(|n| Generics::user_trait_rust(n)).collect::<Vec<_>>().join(" + ")
+            ),
             Type::Fn { params, ret, .. } => self.rust_fn_trait(params, ret.as_deref(), false),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
             // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].

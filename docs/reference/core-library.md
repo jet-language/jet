@@ -276,6 +276,58 @@ Example: `examples/features/io/cli_args.jet`.
 
 ---
 
+### `core.reflect` — runtime reflection floor (D-ANY-JAI1)
+
+`reflect.of(x)` inspects any value that `"{x}"` interpolation could show —
+same requirement, `Display` (auto-derived or explicit):
+
+```jet
+use core.reflect as reflect
+
+struct Point {
+    x: Int
+    y: Int
+
+    impl Display {
+        fn display(self) -> String {
+            return "({self.x}, {self.y})"
+        }
+    }
+}
+
+fn main() {
+    p :: Point.{ x: 3, y: 4 }
+    v :: reflect.of(p)
+    print(v.type_name())    // "Point"
+    print(v.display())      // "(3, 4)" — exactly what "{p}" would print
+    loop f in v.fields() {
+        print("{f.name()} = {f.value()}")
+    }
+}
+```
+
+`reflect.of(x)` returns a `Value` handle:
+
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `.type_name()` | `() → String` | the value's declared type name |
+| `.display()` | `() → String` | the same string `"{x}"` interpolation shows |
+| `.fields()` | `() → [Field]` | one entry per struct field; `[]` for anything else (primitives, enums, tuples, lists) |
+
+Each `Field` carries a name and its rendered value:
+
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `.name()` | `() → String` | the field's declared name |
+| `.value()` | `() → String` | the field's rendered value |
+
+A value that isn't `Display`-able (a closure, a `Shared<T>`) is **E0112** at
+the `reflect.of(...)` call site — the fix is the same as for a failed `"{x}"`
+interpolation: add `impl Display`, or reflect one of its fields instead.
+Example: `examples/features/reflection/reflect-value.jet`.
+
+---
+
 ### `core.env` — environment and working directory
 
 ```jet
@@ -1100,6 +1152,7 @@ These shipped in Epoch 2:
 | `core.compress.gzip` | standalone gzip compress/decompress, no archive container (D-CODECS1) |
 | `core.compress.zstd` | standalone zstd compress/decompress, no archive container (D-CODECS1) |
 | `core.db` | SQLite — parameterized `DbConnection.query`/`.query_one`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` via rusqlite bundled (D-DBDRIVER1) |
+| `core.reflect` | `reflect.of(x) -> Value` runtime reflection floor — `.type_name()`/`.display()`/`.fields()` (D-ANY-JAI1) |
 
 ---
 
@@ -1123,5 +1176,6 @@ the package system fully stabilizes.
 | `examples/features/serde/serde_derive.jet` | `@[Codable]` encode + typed `decode<T>` with `#[Rename]` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
+| `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.

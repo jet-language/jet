@@ -1,0 +1,38 @@
+// D-ANY-JAI1/D-VARARGBOUND1: `parts: ...[A, B]` — a trait-bounded variadic
+// with a multi-trait bound. Every call-site argument is checked against
+// EVERY listed trait (E1313), and the loop body can call a method from ANY
+// of the bound traits — not just the first one in the list. This is what
+// distinguishes `announce` from the single-trait `log_all` example: it
+// calls `{p}` (needs `Renderable`, listed first) AND `p.shout()` (needs
+// `Loud`, listed second) on the same loop variable.
+trait Loud {
+    fn shout(self) -> String
+}
+
+struct Point {
+    x: Int
+    y: Int
+
+    impl Display {
+        fn display(self) -> String {
+            return "({self.x}, {self.y})"
+        }
+    }
+
+    impl Loud {
+        fn shout(self) -> String {
+            return "POINT!"
+        }
+    }
+}
+
+fn announce(parts: ...[Renderable, Loud]) {
+    loop p in parts {
+        print("{p} says {p.shout()}")
+    }
+}
+
+fn main() {
+    p :: Point.{ x: 3, y: 4 }
+    announce(p)
+}

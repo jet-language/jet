@@ -50,25 +50,18 @@ impl<'a> Checker<'a> {
                 let pty = self.resolve_type(if p.variadic {
                     // D-ANY-JAI1: a trait-bounded variadic (`...Trait` /
                     // `...[A, B]`) binds its loop element as a `Type::TraitObject`
-                    // of the bound trait, reusing the existing boxed-dispatch
-                    // method/interpolation checking unchanged for the body-check
-                    // pass only (codegen never sees this type — its own
+                    // carrying every bound trait name, reusing the existing
+                    // boxed-dispatch method/interpolation checking unchanged for the
+                    // body-check pass only (codegen never sees this type — its own
                     // per-call-site synthesis in `Codegen/VariadicBound.rs` binds
                     // the loop var to a bare generic type param instead, so
-                    // there's no boxing in the generated Rust).
-                    // KNOWN v1 GAP: `Type::TraitObject` holds one trait name, so a
-                    // multi-bound list (`...[A, B]`) only wires up `bounds[0]` here
-                    // — a method call on the loop var resolves against the FIRST
-                    // bound trait only. Interpolation (`{p}`, gated by
-                    // `Diagnostics::is_displayable`) and call-site bound checking
-                    // (E1313, `CheckerInfer/calls.rs::check_variadic_bound_tail`,
-                    // which DOES check every bound) are unaffected — this only
-                    // narrows what the loop *body* can call on `p` when there's
-                    // more than one bound trait and the method lives on a
-                    // non-first one. Fixing it needs `Type::TraitObject` to carry
-                    // a trait list, a broader change than this card's scope.
+                    // there's no boxing in the generated Rust). `Type::TraitObject`
+                    // carries the full bound list (not just the first), so a method
+                    // call in the loop body resolves against ALL bound traits —
+                    // fixed from the v1 known gap (`Type::TraitObject` used to hold
+                    // one name only).
                     match p.variadic_trait_bounds(|n| self.trait_reg.is_trait_name(n)) {
-                        Some(bounds) => Type::List(Box::new(Type::TraitObject(bounds[0].clone()))),
+                        Some(bounds) => Type::List(Box::new(Type::TraitObject(bounds))),
                         None => Type::List(Box::new(p.ty.clone())),
                     }
                 } else {

@@ -495,7 +495,7 @@ impl TraitRegistry {
         if type_param_scope.iter().any(|p| p.name == name) {
             Type::Named(name.to_string())
         } else if self.is_trait_name(name) {
-            Type::TraitObject(name.to_string())
+            Type::TraitObject(vec![name.to_string()])
         } else {
             Type::Named(name.to_string())
         }
@@ -1043,7 +1043,12 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Type::TraitObject(t) => format!("Box<dyn user_{t}>"),
+        // Codegen only ever constructs a singleton `TraitObject` (see the type's
+        // doc comment) — join defensively rather than assume, never panic on I2.
+        Type::TraitObject(t) => format!(
+            "Box<dyn {}>",
+            t.iter().map(|n| format!("user_{n}")).collect::<Vec<_>>().join(" + ")
+        ),
         Type::Option(inner) => format!("Option<{}>", rust_type_name_assoc(inner, assoc)),
         Type::Map { key, value } => format!(
             "std::collections::BTreeMap<{}, {}>",

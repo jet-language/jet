@@ -494,7 +494,7 @@ fn type_key(ty: &Type) -> String {
             "{name}<{}>",
             args.iter().map(type_key).collect::<Vec<_>>().join(",")
         ),
-        Type::TraitObject(t) => format!("dyn {t}"),
+        Type::TraitObject(t) => format!("dyn {}", t.join(" + ")),
         Type::Tuple(fields) => format!(
             "({})",
             fields

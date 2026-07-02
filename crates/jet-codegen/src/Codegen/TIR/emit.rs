@@ -2109,6 +2109,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ParsedArgsPositional => {
                     format!("{}jet_parsed_positional(&({}), {})", root, recv, a(0))
                 }
+                // D-ANY-JAI1 (c7jaiany §6): Value/Field are plain inherent-method
+                // passthroughs, same shape as `ArgsSpecHelp`.
+                THandleOp::ReflectValueTypeName => format!("({}).type_name()", recv),
+                THandleOp::ReflectValueDisplay => format!("({}).display()", recv),
+                THandleOp::ReflectValueFields => format!("({}).fields()", recv),
+                THandleOp::ReflectFieldName => format!("({}).name()", recv),
+                THandleOp::ReflectFieldValue => format!("({}).value()", recv),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
                 THandleOp::TaskDetach => format!("{{ let _detach = ({}); }}", recv),
                 THandleOp::TaskPause => format!("({}).pause()", recv),
@@ -2714,6 +2721,50 @@ pub(crate) fn emit_tir_core_call(
         ("core.io", "args") => format!("{}()", helper("jet_std_io_args")),
         // D-ARGS1: `args.spec()` → empty builder.
         ("core.args", "spec") => format!("{}()", helper("jet_args_spec")),
+        // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` — built entirely at this call
+        // site (no generic runtime trait needed, I3: sema already gated
+        // legality via `is_displayable` in `CheckerCoreLib::infer_core_call`,
+        // the SAME check `"{x}"` interpolation uses). `x` is bound once
+        // (`__reflect_v`) so a side-effecting argument expression isn't
+        // evaluated twice. `.display()` calls `jet_display()` (JetDisplay) —
+        // never `jet_show()`/`{:?}` — so it shows exactly what `"{x}"` would,
+        // never codegen's mangled Rust field names. `.fields()`'s per-field
+        // values use `jet_show()` (universal — every type has it, primitives
+        // included, so this never needs its own displayability check) and are
+        // populated only when the arg's resolved sema type is a known user
+        // struct (`cx.struct_fields`); every other shape (primitives, enums,
+        // tuples, lists) gets an empty list, never a guess.
+        ("core.reflect", "of") => {
+            let arg_ty = args.first().map(|a| &a.ty);
+            let type_name = arg_ty.map(|t| t.name()).unwrap_or_default();
+            let fields_code = match arg_ty {
+                Some(Type::Named(struct_name)) => match cx.struct_fields.get(struct_name) {
+                    Some(fields) if !fields.is_empty() => {
+                        let items: Vec<String> = fields
+                            .iter()
+                            .map(|(fname, _)| {
+                                format!(
+                                    "{root}JetReflectField {{ name: \"{fname}\".to_string(), value: (__reflect_v.{mangled}).jet_show() }}",
+                                    root = cx.root_prefix,
+                                    fname = fname,
+                                    mangled = mangle(fname)
+                                )
+                            })
+                            .collect();
+                        format!("vec![{}]", items.join(", "))
+                    }
+                    _ => "Vec::new()".to_string(),
+                },
+                _ => "Vec::new()".to_string(),
+            };
+            format!(
+                "{{ let __reflect_v = &({arg0}); {root}JetReflectValue {{ type_name: \"{type_name}\".to_string(), display: __reflect_v.jet_display(), fields: {fields_code} }} }}",
+                arg0 = arg(0),
+                root = cx.root_prefix,
+                type_name = type_name,
+                fields_code = fields_code
+            )
+        }
         // c109 Phase 29: qualified `io.input(prompt)`, byte-for-byte `emit_core_call`
         // (Expression.rs ~L1294): no arg → `jet_std_io_input(None)`; a prompt arg →
         // `jet_std_io_input(Some(&(prompt)))`. Same emitted helper as the ambient bare

@@ -546,7 +546,7 @@ impl<'a> Parser<'a> {
                     Syntax::FOREIGN_DYN => {
                         self.diags.push(Generics::e0036(Syntax::FOREIGN_DYN, start));
                         let (trait_name, _) = self.expect_ident("after `dyn`")?;
-                        Type::TraitObject(trait_name)
+                        Type::TraitObject(vec![trait_name])
                     }
                     Syntax::FOREIGN_BOX => {
                         self.diags.push(Generics::e0036(Syntax::FOREIGN_BOX, start));
@@ -558,7 +558,7 @@ impl<'a> Parser<'a> {
                                 let (trait_name, _) =
                                     self.expect_ident("after `dyn` in `Box<dyn …>`")?;
                                 self.maybe_close_type_args("after `Box<dyn …>`")?;
-                                Type::TraitObject(trait_name)
+                                Type::TraitObject(vec![trait_name])
                             } else {
                                 let (inner, _) = self.type_()?;
                                 self.maybe_close_type_args("after `Box<…>`")?;
