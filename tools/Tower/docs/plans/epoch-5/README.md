@@ -11,6 +11,9 @@
 > mechanics live in [`jetos-design.md`](jetos-design.md). Ratified decisions
 > (D-JPK*, U1–U10, D-OS1/7) live only in `docs/spec/syntax-decisions.md`; this
 > file no longer restates them.
+> Non-pack/non-flake repos and prebuilt binaries are covered by the proposed
+> adapter-package path in [`ad-hoc-adapters.md`](ad-hoc-adapters.md); it needs an
+> owner ballot before implementation.
 
 Ratified file structure: monorepo manifest **`jetpack.toml`** (TOML), project env
 **`env.jet`** (Jet), both at repo root; package definitions **`pkg.jet`** (Jet, in
@@ -135,6 +138,7 @@ Provider sub-roadmap (was native-resolver R0–R3; D-JPK16/17 ratified):
 | **R1** | named sources (`sources: { name: provider@target }`), used inline as `Pkg` refs | ✅ shipped |
 | **R2** | first-party `core` provider: fetch-and-place Jet packages, content-addressed, no Nix | ✅ shipped |
 | **R3** | `nix` provider with **no installed `nix`** — **tvix** (`tvix-eval` + store/substituter glue) behind the `nix` provider, isolated by a jetpack-scoped cargo feature (I6 waiver per D-JPK16). `tvix-eval` evaluates Nix but does not substitute — R3 also needs binary-cache client glue. | ⏳ **pending — the large remaining piece** |
+| **R4** | adapter packages for refs with no `pack.jet`, no flake, and no jet/nix equivalent; recipes turn fetched bytes into normal `Pkg` outputs | 📄 proposed in [`ad-hoc-adapters.md`](ad-hoc-adapters.md) |
 
 ---
 

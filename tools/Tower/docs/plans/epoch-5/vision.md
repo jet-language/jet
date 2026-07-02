@@ -289,7 +289,9 @@ later); env pinning makes "works on my GPU box" a lockfile fact.
 
 **General/scripting.** Rung 0 + `jet run github@owner/tool` ephemeral runs
 (`nix run`, typed). The fastest path from "saw a tool" to "ran it, nothing
-installed".
+installed". When the repo or binary has no `pack.jet`, no flake, and no nixpkgs
+equivalent, the proposed adapter-package path lets the user define the missing
+recipe at the call site and lock it like any other package.
 
 ## The CLI — one command, one verb per intent
 
@@ -344,6 +346,7 @@ jet push prod                       # needs fleet.prod
 | U16 bridge | `jet bridge flake` + foreign devshell consumption scope |
 | U17 jetos name | "jetos" is still a working title (naming ledger) |
 | U18 two-names rule | One reserved file (`pack.jet`, module namespaces carry roles) + one command (`jet`, external dispatch to jetpack/jetos engines). Revises U10, D-WORKSPACE2, D-PM4. |
+| U20 ad-hoc adapters | `Pkg` adapter recipes for repos/binaries with no `pack.jet`, flake, or jet/nix equivalent; see [`ad-hoc-adapters.md`](ad-hoc-adapters.md). |
 
 Everything else in this vision rides already-ratified machinery: U1–U10,
 D-PM1–8, D-BUILDENTRY1/D-BUILDPOLICY1 (open, recs updated), D-EFFBUDGET1
