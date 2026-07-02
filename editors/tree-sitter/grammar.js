@@ -5,7 +5,7 @@
 // examples/features/*.jet. This grammar exists for editor syntax highlighting
 // (Zed), not full compilation: it is permissive where the real parser is
 // strict, but every keyword/sigil/marker it names is a *current* one. Retired
-// spellings (`val`/`var`/`#=`, `mut`/`take`/`view`, `when`/`switch`/`while`/
+// spellings (`val`/`var`, `mut`/`take`/`view`, `when`/`switch`/`while`/
 // `for`, bare `test`/`pure`/`todo`) are deliberately NOT recognized here.
 //
 // Run `tree-sitter generate` in this directory after editing, then rebuild the
@@ -25,7 +25,7 @@ module.exports = grammar({
     // field/method-sig or a method — fork until `fn`/name disambiguates.
     [$.function_def, $.struct_field],
     [$.function_def, $.trait_method_sig],
-    // `(a, b)` — destructure target vs tuple expr vs lambda params; the `@=`/
+    // `(a, b)` — destructure target vs tuple expr vs lambda params; the `::`/
     // `=>` after the `)` disambiguates.
     [$.tuple_pattern, $._expr, $.lambda_param],
     // In a bindings module body, `fn name(…)` may be an extern fn (`= "path"`)
@@ -44,31 +44,40 @@ module.exports = grammar({
     // ── Markers / attributes (D-ATTR1/2/3, D-CASING1) ──────────────────────
     // `#Marker`, `#Marker(args)`, `#[Marker, Marker(args)]` bracket lists, and
     // `#(Effect, …)` effect annotations. Loop labels keep `@` (D-ATTR3=B).
-    _marker: ($) =>
-      choice($.attribute, $.attribute_list, $.effect_set),
+    _marker: ($) => choice($.attribute, $.attribute_list, $.effect_set),
 
     attribute: ($) =>
-      prec.right(seq("#", field("name", $.marker_name), optional($.marker_args))),
+      prec.right(
+        seq("#", field("name", $.marker_name), optional($.marker_args)),
+      ),
 
     attribute_list: ($) =>
       seq(
         "#",
         "[",
         commaSep1(seq(field("name", $.marker_name), optional($.marker_args))),
-        "]"
+        "]",
       ),
 
     // `#(Io, Db)` effect set on a signature, and `#(via name)` pass-through.
     effect_set: ($) =>
-      seq("#", "(", commaSep1(choice(seq("via", $.identifier), $.type_identifier)), ")"),
+      seq(
+        "#",
+        "(",
+        commaSep1(choice(seq("via", $.identifier), $.type_identifier)),
+        ")",
+      ),
 
     marker_name: (_) => /[A-Z][a-zA-Z0-9_]*/,
 
     // Lowercase markers also exist: `#grant`, `#layout`, `#context`.
     _lower_marker: ($) =>
-      prec.right(seq("#", field("name", $.lower_marker_name), optional($.marker_args))),
+      prec.right(
+        seq("#", field("name", $.lower_marker_name), optional($.marker_args)),
+      ),
 
-    lower_marker_name: (_) => choice("grant", "layout", "context", "bindgen", "extern"),
+    lower_marker_name: (_) =>
+      choice("grant", "layout", "context", "bindgen", "extern"),
 
     marker_args: ($) => seq("(", commaSep($._marker_arg), ")"),
 
@@ -97,23 +106,30 @@ module.exports = grammar({
         $.bench_block,
         $.marker_decl,
         $.migration_block,
-        $.config_field
+        $.config_field,
       ),
 
     // Top-level manifest/config record field: `payload: { … }`, `name: "x"`,
     // `system.my-host: { … }` in a `pkg.jet` / `env.jet` / `config.jet`. The
     // declarative-config dialect.
     config_field: ($) =>
-      seq(field("key", $.config_key), ":", choice($._expr, $.record_literal), optional(",")),
+      seq(
+        field("key", $.config_key),
+        ":",
+        choice($._expr, $.record_literal),
+        optional(","),
+      ),
 
     // A dotted config key whose segments may be kebab-case (S84 dashed names):
     // `system.my-host`, `users.nate.shell`, `net.hostName`.
-    config_key: (_) => token(/[a-z_][A-Za-z0-9_]*(-[A-Za-z0-9_]+)*(\.[a-z_][A-Za-z0-9_]*(-[A-Za-z0-9_]+)*)*/),
+    config_key: (_) =>
+      token(
+        /[a-z_][A-Za-z0-9_]*(-[A-Za-z0-9_]+)*(\.[a-z_][A-Za-z0-9_]*(-[A-Za-z0-9_]+)*)*/,
+      ),
 
     // A marker that introduces a top-level brace-list declaration:
     // `#UnitFamily(currency) { usd, eur }` (D-QUAL3) mints one type per member.
-    marker_decl: ($) =>
-      seq($.attribute, "{", commaSep($.identifier), "}"),
+    marker_decl: ($) => seq($.attribute, "{", commaSep($.identifier), "}"),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────
     // `use core.encoding.json as json`, `use "./file.jet"`, or a group
@@ -124,12 +140,13 @@ module.exports = grammar({
         "use",
         field("path", choice($.module_path, $.string_literal)),
         optional(field("group", $.use_group)),
-        optional(seq("as", field("alias", $.identifier)))
+        optional(seq("as", field("alias", $.identifier))),
       ),
 
     // `.{ a, b }` import-group suffix on a `use` path (D-MOD3). The whole `.{`
     // is one token so it never competes with a path-extending `.`.
-    use_group: ($) => seq(alias(token(/\.\s*\{/), "."), commaSep1($.identifier), "}"),
+    use_group: ($) =>
+      seq(alias(token(/\.\s*\{/), "."), commaSep1($.identifier), "}"),
 
     module_path: ($) => sep1($.identifier, "."),
 
@@ -142,7 +159,7 @@ module.exports = grammar({
         repeat(choice($._marker, $._lower_marker)),
         "module",
         field("name", $.module_path),
-        optional(seq("{", repeat(choice($._item, $.extern_fn)), "}"))
+        optional(seq("{", repeat(choice($._item, $.extern_fn)), "}")),
       ),
 
     // ── Migration block (D-MIGRATE1/2) ─────────────────────────────────────
@@ -153,7 +170,7 @@ module.exports = grammar({
         field("type", $.type_identifier),
         "{",
         repeat($.migration_op),
-        "}"
+        "}",
       ),
 
     migration_op: ($) =>
@@ -161,7 +178,15 @@ module.exports = grammar({
         seq("rename", $.identifier, "->", $.identifier),
         seq("add", $.identifier, ":", $._type, optional(seq("=", $._expr))),
         seq("remove", $.identifier),
-        seq("change", $.identifier, ":", $._simple_type, "->", $._simple_type, optional($.via_clause))
+        seq(
+          "change",
+          $.identifier,
+          ":",
+          $._simple_type,
+          "->",
+          $._simple_type,
+          optional($.via_clause),
+        ),
       ),
 
     via_clause: ($) => seq("via", $.block),
@@ -175,7 +200,7 @@ module.exports = grammar({
         $.type_identifier,
         $.option_type,
         $.list_type,
-        $.map_type
+        $.map_type,
       ),
 
     // ── Extern (S50) ───────────────────────────────────────────────────────
@@ -190,7 +215,7 @@ module.exports = grammar({
         field("name", choice($.identifier, $.type_identifier)),
         $.param_list,
         optional(seq("->", field("return_type", $._type))),
-        optional(seq("=", field("rust_path", $.string_literal)))
+        optional(seq("=", field("rust_path", $.string_literal))),
       ),
 
     // ── Function definition (S1) ───────────────────────────────────────────
@@ -206,7 +231,7 @@ module.exports = grammar({
         $.param_list,
         optional(seq("->", field("return_type", $._type))),
         optional($.effect_set),
-        $.block
+        $.block,
       ),
 
     // ── Struct definition ──────────────────────────────────────────────────
@@ -218,8 +243,15 @@ module.exports = grammar({
         field("name", $.type_identifier),
         optional($.type_params),
         "{",
-        repeat(choice($.struct_field, $.derive_stmt, $.function_def, $.trait_impl_block)),
-        "}"
+        repeat(
+          choice(
+            $.struct_field,
+            $.derive_stmt,
+            $.function_def,
+            $.trait_impl_block,
+          ),
+        ),
+        "}",
       ),
 
     struct_field: ($) =>
@@ -230,7 +262,7 @@ module.exports = grammar({
         field("name", $.identifier),
         ":",
         field("type", $._type),
-        optional(",")
+        optional(","),
       ),
 
     derive_stmt: ($) => seq("derive", commaSep1($.type_identifier)),
@@ -244,21 +276,25 @@ module.exports = grammar({
         field("name", $.type_identifier),
         optional($.type_params),
         "{",
-        repeat(choice($.enum_variant, $.derive_stmt, $.function_def, $.trait_impl_block)),
-        "}"
+        repeat(
+          choice(
+            $.enum_variant,
+            $.derive_stmt,
+            $.function_def,
+            $.trait_impl_block,
+          ),
+        ),
+        "}",
       ),
 
     enum_variant: ($) =>
-      seq(
-        field("name", $.type_identifier),
-        optional($.variant_payload)
-      ),
+      seq(field("name", $.type_identifier), optional($.variant_payload)),
 
     // Tuple payload `Char(c)` or record payload `{ x: Int }`.
     variant_payload: ($) =>
       choice(
         seq("(", commaSep($._type), ")"),
-        seq("{", repeat($.struct_field), "}")
+        seq("{", repeat($.struct_field), "}"),
       ),
 
     // ── Tag definition (D-QUAL2) ───────────────────────────────────────────
@@ -268,7 +304,7 @@ module.exports = grammar({
         optional("pub"),
         "tag",
         field("name", $.type_identifier),
-        optional(seq("{", "}"))
+        optional(seq("{", "}")),
       ),
 
     // ── Impl block (S27) ───────────────────────────────────────────────────
@@ -283,17 +319,21 @@ module.exports = grammar({
           field("type", choice($.type_identifier, $.generic_type)),
           "->",
           field("into", choice($.type_identifier, $.generic_type)),
-          $.block
+          $.block,
         ),
         // Inherent / trait / delegation impl — body is method definitions.
         seq(
           "impl",
           field("type", choice($.type_identifier, $.generic_type)),
           optional(
-            seq(":", field("trait", $.type_identifier), optional(seq("using", $.identifier)))
+            seq(
+              ":",
+              field("trait", $.type_identifier),
+              optional(seq("using", $.identifier)),
+            ),
           ),
-          optional(seq("{", repeat($.function_def), "}"))
-        )
+          optional(seq("{", repeat($.function_def), "}")),
+        ),
       ),
 
     trait_impl_block: ($) =>
@@ -302,7 +342,7 @@ module.exports = grammar({
         field("trait", $.type_identifier),
         "{",
         repeat($.function_def),
-        "}"
+        "}",
       ),
 
     // ── Trait definition (S28) ─────────────────────────────────────────────
@@ -314,7 +354,7 @@ module.exports = grammar({
         optional($.type_params),
         "{",
         repeat(choice($.function_def, $.trait_method_sig)),
-        "}"
+        "}",
       ),
 
     // A method signature with no body: `fn greet(self) -> String;`, optionally
@@ -326,7 +366,7 @@ module.exports = grammar({
         field("name", $.identifier),
         optional($.type_params),
         $.param_list,
-        optional(seq("->", field("return_type", $._type)))
+        optional(seq("->", field("return_type", $._type))),
       ),
 
     // ── Const definition ───────────────────────────────────────────────────
@@ -337,17 +377,17 @@ module.exports = grammar({
         field("name", $._value_name),
         optional(seq(":", field("type", $._type))),
         "=",
-        field("value", $._expr)
+        field("value", $._expr),
       ),
 
-    // ── Distinct type (D-DIST1): `UserId @= distinct Int`, `#Numeric M @= …` ──
+    // ── Distinct type (D-DIST1): `UserId :: distinct Int`, `#Numeric M :: …` ──
     distinct_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
         field("name", $.type_identifier),
-        "@=",
+        "::",
         "distinct",
-        field("base", $._type)
+        field("base", $._type),
       ),
 
     // ── Test / Bench blocks (S43, D-BENCH1, D-CASING1) ─────────────────────
@@ -374,7 +414,7 @@ module.exports = grammar({
         field("name", $.identifier),
         ":",
         field("type", $._type),
-        optional(seq("=", field("default", $._expr)))
+        optional(seq("=", field("default", $._expr))),
       ),
 
     // ── Types ──────────────────────────────────────────────────────────────
@@ -390,7 +430,7 @@ module.exports = grammar({
         $.map_type,
         $.fn_type,
         $.tuple_type,
-        $.paren_type
+        $.paren_type,
       ),
 
     // `(T, U)` or named `(max: Int, min: Int)` tuple type. At least one named
@@ -398,7 +438,7 @@ module.exports = grammar({
     tuple_type: ($) =>
       choice(
         seq("(", $.named_type_field, repeat(seq(",", $.named_type_field)), ")"),
-        seq("(", $._type, ",", commaSep1($._type), ")")
+        seq("(", $._type, ",", commaSep1($._type), ")"),
       ),
 
     named_type_field: ($) => seq($.identifier, ":", $._type),
@@ -410,8 +450,22 @@ module.exports = grammar({
 
     primitive_type: (_) =>
       choice(
-        "Int", "Float", "Bool", "String", "Char", "Error",
-        "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"
+        "Int",
+        "Float",
+        "Bool",
+        "String",
+        "Char",
+        "Error",
+        "I8",
+        "I16",
+        "I32",
+        "I64",
+        "U8",
+        "U16",
+        "U32",
+        "U64",
+        "F32",
+        "F64",
       ),
 
     type_identifier: (_) => /[A-Z][a-zA-Z0-9_]*/,
@@ -419,7 +473,12 @@ module.exports = grammar({
     // Generics: `Pair<T>`, `Stack<Int>`. The `<` is adjacent (no space) so a
     // spaced `T < x` in expression position stays a comparison.
     generic_type: ($) =>
-      seq(field("base", $.type_identifier), token.immediate("<"), commaSep1($._type), ">"),
+      seq(
+        field("base", $.type_identifier),
+        token.immediate("<"),
+        commaSep1($._type),
+        ">",
+      ),
 
     // `T?` optional (S32).
     option_type: ($) => prec(1, seq($._type, "?")),
@@ -432,14 +491,14 @@ module.exports = grammar({
       choice(
         seq("[", $._type, "]"),
         seq("[", $._type, "#", $.integer_literal, "]"),
-        seq("List", "<", $._type, ">")
+        seq("List", "<", $._type, ">"),
       ),
 
     // `[K, V]` map, or `Map<K, V>` (S38/S65).
     map_type: ($) =>
       choice(
         seq("[", $._type, ",", $._type, "]"),
-        seq("Map", "<", $._type, ",", $._type, ">")
+        seq("Map", "<", $._type, ",", $._type, ">"),
       ),
 
     // `#Pure fn(T) -> U` or `#(Io) fn(T) -> U` callback type (D-EFF2).
@@ -450,7 +509,7 @@ module.exports = grammar({
         "(",
         commaSep($._type),
         ")",
-        optional(seq("->", $._type))
+        optional(seq("->", $._type)),
       ),
 
     paren_type: ($) => seq("(", $._type, ")"),
@@ -471,7 +530,7 @@ module.exports = grammar({
         $.region_stmt,
         $.live_stmt,
         $.marker_block_stmt,
-        $.expr_stmt
+        $.expr_stmt,
       ),
 
     // A marker-introduced block: `#Caps(Io) { … }` (D-EFF1), `#grant(Fs) { caps
@@ -480,26 +539,52 @@ module.exports = grammar({
       seq(choice($.attribute, $._lower_marker), $.scoped_block),
 
     scoped_block: ($) =>
-      seq("{", optional(seq(field("handle", $.identifier), "->")), repeat($._stmt), "}"),
-
-    // Binding sigils (D-BIND3): `name #= expr` immutable, `name := expr` mutable.
-    bind_stmt: ($) =>
       seq(
-        field("name", choice($.identifier, $.type_identifier, $.list_pattern, $.tuple_pattern)),
-        optional(seq(":", field("type", $._type))),
-        choice("#=", ":="),
-        field("value", $._expr)
+        "{",
+        optional(seq(field("handle", $.identifier), "->")),
+        repeat($._stmt),
+        "}",
       ),
 
-    // Destructuring bind targets: `[a, b, c] #= …`, `(a, b) #= …`.
+    // Binding sigils (D-BIND4): `name :: expr` immutable, `name := expr` mutable.
+    bind_stmt: ($) =>
+      seq(
+        field(
+          "name",
+          choice(
+            $.identifier,
+            $.type_identifier,
+            $.list_pattern,
+            $.tuple_pattern,
+          ),
+        ),
+        optional(seq(":", field("type", $._type))),
+        choice("::", ":="),
+        field("value", $._expr),
+      ),
+
+    // Destructuring bind targets: `[a, b, c] :: …`, `(a, b) :: …`.
     list_pattern: ($) => seq("[", commaSep($.identifier), "]"),
-    tuple_pattern: ($) => seq("(", $.identifier, repeat(seq(",", $.identifier)), ")"),
+    tuple_pattern: ($) =>
+      seq("(", $.identifier, repeat(seq(",", $.identifier)), ")"),
 
     assign_stmt: ($) =>
       seq(
         field("target", $._expr),
-        choice("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="),
-        field("value", $._expr)
+        choice(
+          "=",
+          "+=",
+          "-=",
+          "*=",
+          "/=",
+          "%=",
+          "&=",
+          "|=",
+          "^=",
+          "<<=",
+          ">>=",
+        ),
+        field("value", $._expr),
       ),
 
     return_stmt: ($) => prec.right(seq("return", optional($._expr))),
@@ -507,20 +592,14 @@ module.exports = grammar({
     dispatch_arm: ($) =>
       seq(field("pattern", $._expr), "->", choice($.block, seq($._expr))),
 
-    dispatch_else: ($) =>
-      seq("else", "->", choice($.block, seq($._expr))),
+    dispatch_else: ($) => seq("else", "->", choice($.block, seq($._expr))),
 
     break_stmt: ($) => prec.right(seq("break", optional($.loop_label))),
     continue_stmt: ($) => prec.right(seq("continue", optional($.loop_label))),
 
     // `loop { }`, `loop cond { }`, `loop x in iter { }`, optional `@label`.
     loop_stmt: ($) =>
-      seq(
-        optional($.loop_label),
-        "loop",
-        optional($._loop_head),
-        $.block
-      ),
+      seq(optional($.loop_label), "loop", optional($._loop_head), $.block),
 
     _loop_head: ($) =>
       choice(
@@ -529,9 +608,9 @@ module.exports = grammar({
           optional(seq(",", field("var2", $.identifier))),
           "in",
           field("iter", $._expr),
-          optional(seq("step", $._expr))
+          optional(seq("step", $._expr)),
         ),
-        field("cond", $._expr)
+        field("cond", $._expr),
       ),
 
     loop_label: (_) => /@[a-z_][a-zA-Z0-9_]*/,
@@ -541,8 +620,8 @@ module.exports = grammar({
         "comptime",
         field("name", $._value_name),
         optional(seq(":", field("type", $._type))),
-        choice("@=", ":=", "="),
-        field("value", $._expr)
+        choice("::", ":=", "="),
+        field("value", $._expr),
       ),
 
     // Binding names are usually lower_snake, but constants are UPPER (a
@@ -555,13 +634,12 @@ module.exports = grammar({
         "if",
         field("cond", $._expr),
         $.block,
-        optional(seq("else", choice($.comptime_if_stmt, $.block)))
+        optional(seq("else", choice($.comptime_if_stmt, $.block))),
       ),
 
     // Expert region/live/assume_deterministic blocks (contextual keywords).
     region_stmt: ($) => seq("region", optional($.identifier), $.block),
-    live_stmt: ($) =>
-      seq(choice("live", "assume_deterministic"), $.block),
+    live_stmt: ($) => seq(choice("live", "assume_deterministic"), $.block),
 
     expr_stmt: ($) => seq($._expr),
 
@@ -600,7 +678,7 @@ module.exports = grammar({
         $.if_expr,
         $.marked_expr,
         $.generic_access,
-        $.source_ref
+        $.source_ref,
       ),
 
     // A `provider@target` source/dependency ref (U6, S59): `c@system`,
@@ -609,7 +687,7 @@ module.exports = grammar({
       seq(
         field("provider", $.identifier),
         token.immediate("@"),
-        field("target", choice($.string_literal, $.ref_target))
+        field("target", choice($.string_literal, $.ref_target)),
       ),
 
     ref_target: (_) => token.immediate(/[A-Za-z0-9_./:-]+/),
@@ -623,7 +701,7 @@ module.exports = grammar({
     generic_access: ($) =>
       prec.left(4, seq($._expr, token.immediate("<"), commaSep1($._type), ">")),
 
-    // `if` as a value (S/D-IF): `x @= if c { a } else { b }`. Both the plain and
+    // `if` as a value (S/D-IF): `x :: if c { a } else { b }`. Both the plain and
     // the `== { … }` dispatch forms can produce a value.
     if_expr: ($) =>
       prec.right(
@@ -632,7 +710,7 @@ module.exports = grammar({
             "if",
             field("cond", $._expr),
             field("then", $.block),
-            optional(seq("else", choice($.if_expr, $.block)))
+            optional(seq("else", choice($.if_expr, $.block))),
           ),
           seq(
             "if",
@@ -641,9 +719,9 @@ module.exports = grammar({
             "{",
             repeat($.dispatch_arm),
             optional($.dispatch_else),
-            "}"
-          )
-        )
+            "}",
+          ),
+        ),
       ),
 
     integer_literal: (_) =>
@@ -652,8 +730,8 @@ module.exports = grammar({
           /0x[0-9a-fA-F][0-9a-fA-F_]*/,
           /0o[0-7][0-7_]*/,
           /0b[01][01_]*/,
-          /[0-9][0-9_]*/
-        )
+          /[0-9][0-9_]*/,
+        ),
       ),
     float_literal: (_) => token(/[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9]+)?/),
     boolean_literal: (_) => choice("true", "false"),
@@ -664,19 +742,28 @@ module.exports = grammar({
     string_literal: ($) =>
       seq(
         '"',
-        repeat(choice($.escape_sequence, $.string_interpolation, $._string_content)),
-        '"'
+        repeat(
+          choice($.escape_sequence, $.string_interpolation, $._string_content),
+        ),
+        '"',
       ),
 
     // Triple-quoted multiline string `"""…"""` (D-SG5); interpolation stays live.
     multiline_string: ($) =>
       seq(
         '"""',
-        repeat(choice($.escape_sequence, $.string_interpolation, $._ml_string_content)),
-        '"""'
+        repeat(
+          choice(
+            $.escape_sequence,
+            $.string_interpolation,
+            $._ml_string_content,
+          ),
+        ),
+        '"""',
       ),
 
-    _ml_string_content: (_) => token.immediate(prec(1, /([^"\\{}]|"[^"]|""[^"])+/)),
+    _ml_string_content: (_) =>
+      token.immediate(prec(1, /([^"\\{}]|"[^"]|""[^"])+/)),
 
     _string_content: (_) => token.immediate(prec(1, /[^"\\{}]+/)),
 
@@ -693,9 +780,17 @@ module.exports = grammar({
       prec(
         2,
         seq(
-          field("name", choice($.identifier, $.type_identifier, $.primitive_type, $.ok_err_literal)),
-          $.arg_list
-        )
+          field(
+            "name",
+            choice(
+              $.identifier,
+              $.type_identifier,
+              $.primitive_type,
+              $.ok_err_literal,
+            ),
+          ),
+          $.arg_list,
+        ),
       ),
 
     // Turbofish: `decode<Order>(raw)`, `make_pair<Int>(…)`. The `<` is adjacent
@@ -708,13 +803,14 @@ module.exports = grammar({
           token.immediate("<"),
           commaSep1($._type),
           ">",
-          $.arg_list
-        )
+          $.arg_list,
+        ),
       ),
 
     // The opening `(` must be adjacent to the callee (no whitespace) so a
     // parenthesized expression on the next line is not read as a call.
-    arg_list: ($) => seq(token.immediate("("), commaSep(choice($.named_arg, $._expr)), ")"),
+    arg_list: ($) =>
+      seq(token.immediate("("), commaSep(choice($.named_arg, $._expr)), ")"),
 
     // `Type { field: value, … }` / `Type<T> { … }` struct literal. Negative
     // precedence so that after `if`/`loop`/`comptime if` the trailing `{ … }` is
@@ -726,8 +822,8 @@ module.exports = grammar({
         -1,
         seq(
           field("name", choice($.type_identifier, $.generic_type)),
-          $.record_body
-        )
+          $.record_body,
+        ),
       ),
 
     // An anonymous record literal `{ key: value, … }` (used as a config/manifest
@@ -737,8 +833,15 @@ module.exports = grammar({
     record_body: ($) =>
       seq(
         "{",
-        repeat(seq(field("field", $.identifier), ":", choice($._expr, $.record_literal), optional(","))),
-        "}"
+        repeat(
+          seq(
+            field("field", $.identifier),
+            ":",
+            choice($._expr, $.record_literal),
+            optional(","),
+          ),
+        ),
+        "}",
       ),
 
     list_literal: ($) => seq("[", commaSep($._expr), "]"),
@@ -747,14 +850,18 @@ module.exports = grammar({
     map_literal: ($) =>
       choice(
         seq("[", ":", "]"),
-        seq("[", commaSep1(seq(field("key", $._expr), ":", field("value", $._expr))), "]")
+        seq(
+          "[",
+          commaSep1(seq(field("key", $._expr), ":", field("value", $._expr))),
+          "]",
+        ),
       ),
 
     // `(a, b)` tuple, or named `(min: 0, max: 10)` tuple literal.
     tuple_expr: ($) =>
       choice(
         seq("(", $.named_arg, repeat(seq(",", $.named_arg)), ")"),
-        seq("(", $._expr, ",", commaSep1($._expr), ")")
+        seq("(", $._expr, ",", commaSep1($._expr), ")"),
       ),
 
     // `recv.method(…)` and qualified constructor `Enum.Variant(…)` /
@@ -766,8 +873,8 @@ module.exports = grammar({
           field("receiver", $._expr),
           choice(".", "?."),
           field("method", choice($.identifier, $.type_identifier)),
-          $.arg_list
-        )
+          $.arg_list,
+        ),
       ),
 
     // `obj.field`, `Enum.Variant`, `Type.CONST`, `mod.Type` — member is lower or
@@ -778,8 +885,8 @@ module.exports = grammar({
         seq(
           field("object", $._expr),
           choice(".", "?."),
-          field("field", choice($.identifier, $.type_identifier))
-        )
+          field("field", choice($.identifier, $.type_identifier)),
+        ),
       ),
 
     // Postfix deref `p.*` (D-CAP7).
@@ -787,7 +894,16 @@ module.exports = grammar({
 
     // Fan-out `f.[a, b, c]` (S75) — `.[` is adjacency-detected (no space).
     fan_out_expr: ($) =>
-      prec.left(4, seq(field("fn", $._expr), ".", token.immediate("["), commaSep1($._expr), "]")),
+      prec.left(
+        4,
+        seq(
+          field("fn", $._expr),
+          ".",
+          token.immediate("["),
+          commaSep1($._expr),
+          "]",
+        ),
+      ),
 
     lambda_expr: ($) =>
       prec.right(
@@ -797,8 +913,8 @@ module.exports = grammar({
           commaSep($.lambda_param),
           ")",
           "=>",
-          choice($.block, $._expr)
-        )
+          choice($.block, $._expr),
+        ),
       ),
 
     // Move-capture prefix on a lambda: `take(sender, router) () => { … }`.
@@ -815,19 +931,34 @@ module.exports = grammar({
         ["||", 1],
         ["&&", 2],
         ["??", 3],
-        ["==", 4], ["!=", 4], ["<", 4], [">", 4], ["<=", 4], [">=", 4],
-        ["|", 5], ["^", 5], ["&", 5],
-        ["<<", 6], [">>", 6],
-        ["+", 7], ["-", 7],
-        ["*", 8], ["/", 8], ["%", 8],
+        ["==", 4],
+        ["!=", 4],
+        ["<", 4],
+        [">", 4],
+        ["<=", 4],
+        [">=", 4],
+        ["|", 5],
+        ["^", 5],
+        ["&", 5],
+        ["<<", 6],
+        [">>", 6],
+        ["+", 7],
+        ["-", 7],
+        ["*", 8],
+        ["/", 8],
+        ["%", 8],
       ];
       return choice(
         ...table.map(([op, prc]) =>
           prec.left(
             prc,
-            seq(field("left", $._expr), field("op", op), field("right", $._expr))
-          )
-        )
+            seq(
+              field("left", $._expr),
+              field("op", op),
+              field("right", $._expr),
+            ),
+          ),
+        ),
       );
     },
 
@@ -844,13 +975,13 @@ module.exports = grammar({
 
     // `xs[i]` — `[` must be adjacent (no whitespace), so a list literal on the
     // next line is not swallowed as an index (source has no `;` terminators).
-    index_expr: ($) => prec.left(4, seq($._expr, token.immediate("["), $._expr, "]")),
+    index_expr: ($) =>
+      prec.left(4, seq($._expr, token.immediate("["), $._expr, "]")),
 
     // ── Comments (S5) ──────────────────────────────────────────────────────
     line_comment: (_) => token(seq("//", /[^/].*/)),
     doc_comment: (_) => token(seq("///", /.*/)),
-    block_comment: (_) =>
-      token(seq("/*", /[^*]*\*+([^/*][^*]*\*+)*/, "/")),
+    block_comment: (_) => token(seq("/*", /[^*]*\*+([^/*][^*]*\*+)*/, "/")),
   },
 });
 

@@ -674,7 +674,7 @@ pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
 /// or `None` if the handle is only ever used in place (as the receiver of a
 /// method call / field access / `?` on itself). The receiver of `handle.read(…)`
 /// is an in-place use (performing the granted effect); everything else — `return
-/// handle`, `x #= handle`, `f(handle)`, `[handle]`, a struct field, an `or`
+/// handle`, `x :: handle`, `f(handle)`, `[handle]`, a struct field, an `or`
 /// fallback — lets the revoked authority leak past the grant (E0711).
 pub fn grant_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
     body.iter().find_map(|s| stmt_handle_escape(s, handle))
@@ -684,7 +684,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
     use crate::AST::{ForKind, Stmt};
     let block = |b: &[Stmt]| b.iter().find_map(|s| stmt_handle_escape(s, handle));
     match stmt {
-        Stmt::Expr(e) => expr_handle_escape(e, handle),
+        Stmt::Expr(e) | Stmt::Yield(e, _) => expr_handle_escape(e, handle),
         Stmt::Val(b) => expr_handle_escape(&b.init, handle),
         Stmt::Assign { value, .. } => expr_handle_escape(value, handle),
         Stmt::Return(Some(e), _) => expr_handle_escape(e, handle),

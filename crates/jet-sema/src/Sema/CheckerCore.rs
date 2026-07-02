@@ -1,8 +1,8 @@
 use super::*;
-use crate::Sema::CheckerOwnership::e0141_unconsumed_branch;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
+use crate::Sema::CheckerOwnership::e0141_unconsumed_branch;
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch, Expr, ForKind, IfStmt,
@@ -232,10 +232,7 @@ impl<'a> Checker<'a> {
                         .zip(args.iter())
                         .map(|(p, a)| (p.name.clone(), a.clone()))
                         .collect();
-                    self.check_declared_type(
-                        &substitute_type(target, &subst),
-                        span,
-                    );
+                    self.check_declared_type(&substitute_type(target, &subst), span);
                     return;
                 }
                 let is_core_generic = matches!(
@@ -246,6 +243,8 @@ impl<'a> Checker<'a> {
                         | "BigInt" | "Decimal"
                         // D-REACT1=B: reactive handle types.
                         | "Signal" | "Derived"
+                        // D-STREAMYIELD1: generator return type.
+                        | "Stream"
                 );
                 if !is_core_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
@@ -696,9 +695,7 @@ impl<'a> Checker<'a> {
                         match &base_ty {
                             Some(Type::Map { .. }) => *kind = IndexKind::Map,
                             Some(Type::List(_)) => *kind = IndexKind::List,
-                            Some(Type::Named(n))
-                                if self.trait_reg.index_types.contains_key(n) =>
-                            {
+                            Some(Type::Named(n)) if self.trait_reg.index_types.contains_key(n) => {
                                 *kind = IndexKind::User(n.clone());
                             }
                             _ => {}
@@ -729,10 +726,7 @@ impl<'a> Checker<'a> {
                         }
                         // Writing through `[ ]` changes the owner: the root
                         // name must be changeable and not under a `for` borrow.
-                        if matches!(
-                            base_ty,
-                            Some(Type::Map { .. }) | Some(Type::List(_))
-                        ) {
+                        if matches!(base_ty, Some(Type::Map { .. }) | Some(Type::List(_))) {
                             if let Some(root) = expr_root_ident(base) {
                                 let root = root.to_string();
                                 if self.iter_borrowed.contains(&root) {
@@ -908,7 +902,7 @@ impl<'a> Checker<'a> {
                     }
                     // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place
                     // must be a CHANGEABLE place: a `mut self` receiver, or a `:=`/`mut`
-                    // local. A non-`mut` `self` (shared-read receiver) or a `#=`/shared
+                    // local. A non-`mut` `self` (shared-read receiver) or an immutable/shared
                     // binding is E0205, pointed at the assignment, with a "write the
                     // receiver as `mut self`" / "make it changeable" fix (owner Q1).
                     LValue::Field { base, field, span } => {
@@ -1166,6 +1160,24 @@ impl<'a> Checker<'a> {
                 // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
                 // (`Json`/`Toml`/…); canonicalize it so it unifies with the returned value.
                 let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
+                // D-STREAMYIELD1: a generator (`-> Stream<T>`) yields values; `return`
+                // only ever ends the stream early — bare `return;` is fine, `return
+                // value;` is E0806 (a generator body yields, it doesn't return a value).
+                if let Some(Type::Apply { name, args }) = &resolved_ret {
+                    if name == Syntax::TYPE_STREAM && args.len() == 1 {
+                        if let Some(e) = expr {
+                            self.infer(e);
+                            self.diags.push(Diagnostic::error(
+                                "E0806",
+                                format!("`{}` yields values, so `return` can't carry one", self.fn_name),
+                                "a generator body produces values with `yield`; `return` only ends the stream early".to_string(),
+                                "write `yield ...;` to hand back a value, or a bare `return;` to end the stream".to_string(),
+                                Some(e.span()),
+                            ));
+                        }
+                        return;
+                    }
+                }
                 match (&mut *expr, resolved_ret) {
                     (Some(e), Some(rt)) => {
                         let saved_expected = self.expected_type.clone();
@@ -1325,6 +1337,49 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     (None, None) => {}
+                }
+            }
+            // D-STREAMYIELD1: `yield expr` — legal only in a function whose return
+            // type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 on mismatch).
+            Stmt::Yield(e, span) => {
+                let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
+                let elem_ty = match &resolved_ret {
+                    Some(Type::Apply { name, args }) if name == Syntax::TYPE_STREAM && args.len() == 1 => {
+                        Some(args[0].clone())
+                    }
+                    _ => None,
+                };
+                let Some(elem_ty) = elem_ty else {
+                    self.diags.push(Diagnostic::error(
+                        "E0805",
+                        format!("`{}` outside a generator", Syntax::KW_YIELD),
+                        "`yield` hands a value to a `Stream<T>` consumer — only a function declared `-> Stream<T>` may use it".to_string(),
+                        format!("declare `-> {}<T>` on this function, or remove the `{}`", Syntax::TYPE_STREAM, Syntax::KW_YIELD),
+                        Some(*span),
+                    ));
+                    self.infer(e);
+                    return;
+                };
+                let saved_expected = self.expected_type.clone();
+                self.expected_type = Some(elem_ty.clone());
+                let got = self.infer(e);
+                self.expected_type = saved_expected;
+                if let Some(got) = got {
+                    let got = self.resolve_type(got);
+                    if got != elem_ty {
+                        self.diags.push(Diagnostic::error(
+                            "E0807",
+                            format!(
+                                "this yields {}, but the stream is `{}<{}>`",
+                                got.show(),
+                                Syntax::TYPE_STREAM,
+                                elem_ty.show()
+                            ),
+                            "every `yield` in a generator must hand back the stream's element type".to_string(),
+                            type_fix_hint(&elem_ty, &got),
+                            Some(e.span()),
+                        ));
+                    }
                 }
             }
             Stmt::If(ifs) => self.check_if(ifs),
@@ -1513,6 +1568,14 @@ impl<'a> Checker<'a> {
                                         .unwrap_or(Type::Int);
                                     self.declare_loop_var(var.clone(), *var_span, &item_ty);
                                 }
+                            }
+                            // D-STREAMYIELD1: `loop x in a_stream { }` — pull one value
+                            // at a time from a generator's `Stream<T>`, blocking until
+                            // the producer yields (or ends the stream by returning).
+                            Some(Type::Apply { name, args })
+                                if name == crate::Syntax::TYPE_STREAM && args.len() == 1 =>
+                            {
+                                self.declare_loop_var(var.clone(), *var_span, &args[0]);
                             }
                             Some(other) => {
                                 self.diags.push(Diagnostic::error(
@@ -1759,13 +1822,10 @@ impl<'a> Checker<'a> {
                 let mut seen_constraints: HashSet<String> = HashSet::new();
                 for stmt in body.iter_mut() {
                     if let Stmt::Expr(_) = stmt {
-                        let Stmt::Expr(e) = stmt else {
-                            unreachable!()
-                        };
+                        let Stmt::Expr(e) = stmt else { unreachable!() };
                         let fp = layout_constraint_fingerprint(e);
                         let t = self.infer(e);
-                        let is_constraint =
-                            matches!(&t, Some(Type::Named(n)) if n == Syntax::LAYOUT_CONSTRAINT_TYPE);
+                        let is_constraint = matches!(&t, Some(Type::Named(n)) if n == Syntax::LAYOUT_CONSTRAINT_TYPE);
                         if !is_constraint && t.is_some() {
                             self.diags.push(Diagnostic::error(
                                 "E2933",
@@ -1776,7 +1836,7 @@ impl<'a> Checker<'a> {
                                     t.as_ref().map(|ty| ty.name()).unwrap_or_default()
                                 ),
                                 "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`)".to_string(),
-                                "write a comparison, e.g. `label.width >= 80.0`, or capture it: `c @= label.width >= 80.0`".to_string(),
+                                "write a comparison, e.g. `label.width >= 80.0`, or capture it: `c :: label.width >= 80.0`".to_string(),
                                 Some(e.span()),
                             ));
                         } else if is_constraint && !seen_constraints.insert(fp) {
@@ -1812,8 +1872,8 @@ impl<'a> Checker<'a> {
                                         Syntax::KW_LAYOUT,
                                         name
                                     ),
-                                    "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `@=`".to_string(),
-                                    "bind a comparison: `c @= label.width >= 80.0`".to_string(),
+                                    "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`".to_string(),
+                                    "bind a comparison: `c :: label.width >= 80.0`".to_string(),
                                     Some(name_span),
                                 ));
                             } else if !seen_constraints.insert(fp) {
@@ -1834,7 +1894,7 @@ impl<'a> Checker<'a> {
                                 Syntax::KW_LAYOUT,
                                 name
                             ),
-                            "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `@=`".to_string(),
+                            "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`".to_string(),
                             "write a comparison, e.g. `label.width >= 80.0`".to_string(),
                             Some(stmt.span()),
                         ));
@@ -2558,22 +2618,52 @@ impl<'a> Checker<'a> {
                 }
             }
         } else if else_body.is_none() {
-            self.diags.push(Diagnostic::error(
-                "E0003",
-                format!(
-                    "this `{}` needs an `{}` arm",
-                    Syntax::KW_IF,
-                    Syntax::KW_ELSE
-                ),
-                "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)"
-                    .to_string(),
-                format!(
-                    "add `{} {} {{ ... }}` after the last arm",
-                    Syntax::KW_ELSE,
-                    Syntax::OP_ARM_ARROW
-                ),
-                Some(span),
-            ));
+            // D-PARSESTR1: a str-match pattern arm is always refutable — the
+            // literal text might not match, and a typed hole's read can fail
+            // — so it gets its own E0148 instead of the generic E0003.
+            let has_str_match_arm = arms.iter().any(|a| {
+                matches!(
+                    &a.cond,
+                    Expr::PatternTest {
+                        pattern: Pattern::StrMatch { .. },
+                        ..
+                    }
+                )
+            });
+            if has_str_match_arm {
+                self.diags.push(Diagnostic::error(
+                    "E0148",
+                    format!(
+                        "this `{}` matches text but has no `{}` arm",
+                        Syntax::KW_IF,
+                        Syntax::KW_ELSE
+                    ),
+                    "a text pattern can always fail to match — the fixed text might differ, or a typed hole might not read as that type".to_string(),
+                    format!(
+                        "add `{} {} {{ ... }}` to handle text that doesn't match",
+                        Syntax::KW_ELSE,
+                        Syntax::OP_ARM_ARROW
+                    ),
+                    Some(span),
+                ));
+            } else {
+                self.diags.push(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "this `{}` needs an `{}` arm",
+                        Syntax::KW_IF,
+                        Syntax::KW_ELSE
+                    ),
+                    "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)"
+                        .to_string(),
+                    format!(
+                        "add `{} {} {{ ... }}` after the last arm",
+                        Syntax::KW_ELSE,
+                        Syntax::OP_ARM_ARROW
+                    ),
+                    Some(span),
+                ));
+            }
         }
         if let Some(body) = else_body {
             self.moved = move_before.clone();
@@ -2912,6 +3002,10 @@ impl<'a> Checker<'a> {
                             format!("construct a `{}`: `{}({})`", dt, dt, "expr"),
                             Some(b.init.span()),
                         ));
+                    } else if let Some(diag) =
+                        crate::Sema::Diagnostics::typed_text_mismatch(&annot, &actual, b.init.span())
+                    {
+                        self.diags.push(diag);
                     } else {
                         self.diags.push(Diagnostic::error(
                             "E0108",
@@ -2937,15 +3031,10 @@ impl<'a> Checker<'a> {
             b.ty = Some(final_ty.clone());
         }
         // D-DECIMAL1: default-on float-money lint for money-like binding names.
-        if final_ty.is_float()
-            && crate::Numeric::is_money_like_name(&b.name)
-        {
+        if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
             self.diags.push(Diagnostic::lint(
                 "L0504",
-                format!(
-                    "binding `{}` looks like money but has type `Float`",
-                    b.name
-                ),
+                format!("binding `{}` looks like money but has type `Float`", b.name),
                 "floating-point money loses cents on common values like `0.1 + 0.2`".to_string(),
                 "use `Decimal` for exact money: `price: Decimal := Decimal(\"9.99\")`".to_string(),
                 Some(b.name_span),
@@ -2987,18 +3076,18 @@ impl<'a> Checker<'a> {
             None
         };
         // D-LIN1: a binding that owns a `#SingleUse` value carries the duty to
-        // consume it exactly once. The duty transfers on `y #= x` (the move marks
+        // consume it exactly once. The duty transfers on `y :: x` (the move marks
         // `x` consumed via `note_move_if_direct_ident`; `y` now owns it).
         let single_use_span = if self.type_is_single_use(&final_ty) {
             Some(b.name_span)
         } else {
             None
         };
-        // D-ALLOC2: `x #= arena.alloc(v)` makes `x` a scope-bound view into
+        // D-ALLOC2: `x :: arena.alloc(v)` makes `x` a scope-bound view into
         // `arena`. Record it so E0631 (escape) / E0632 (use-after-reset) can
         // fire, and flag the binding for codegen (it lowers to a `&mut T`, read
         // through a deref). E0631: a binding whose *initializer is itself a view
-        // name* (`y #= x`) would move the view to a new — possibly
+        // name* (`y :: x`) would move the view to a new — possibly
         // longer-lived — binding; reject it (views are non-reassignable
         // non-escaping locals, I8).
         if let Some(arena) = self.arena_alloc_source(&b.init) {
@@ -3484,7 +3573,10 @@ impl<'a> Checker<'a> {
                         if info.ty.is_float() {
                             format!("use `{} += 1.0` / `{} -= 1.0` instead", name, name)
                         } else {
-                            format!("use `{} += 1` / `{} -= 1` on an integer binding", name, name)
+                            format!(
+                                "use `{} += 1` / `{} -= 1` on an integer binding",
+                                name, name
+                            )
                         },
                         Some(span),
                     ));
@@ -3492,7 +3584,11 @@ impl<'a> Checker<'a> {
                 }
                 info.ty.clone()
             }
-            LValue::Field { base, field, span: field_span } => {
+            LValue::Field {
+                base,
+                field,
+                span: field_span,
+            } => {
                 self.borrow_ctx = true;
                 let mut base_expr = base.as_ref().clone();
                 let base_ty = self.infer(&mut base_expr)?;
@@ -3520,11 +3616,7 @@ impl<'a> Checker<'a> {
                                     Syntax::KW_SELF
                                 )
                             } else {
-                                format!(
-                                    "declare `{} {} ...`",
-                                    root,
-                                    Syntax::SIGIL_BIND_MUT
-                                )
+                                format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT)
                             };
                             self.diags.push(Diagnostic::error(
                                 "E0161",
@@ -3541,7 +3633,11 @@ impl<'a> Checker<'a> {
                 if !field_ty.is_integer() {
                     self.diags.push(Diagnostic::error(
                         "E0162",
-                        format!("`++`/`--` is not defined for field `{}` ({})", field, field_ty.show()),
+                        format!(
+                            "`++`/`--` is not defined for field `{}` ({})",
+                            field,
+                            field_ty.show()
+                        ),
                         "increment and decrement work on integer fields only".to_string(),
                         format!("use `self.{field} += 1` / `self.{field} -= 1` instead"),
                         Some(span),

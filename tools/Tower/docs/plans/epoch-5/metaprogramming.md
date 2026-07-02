@@ -89,7 +89,7 @@ stays pure and value-level, so there is exactly one place to audit.
 
 ```jet
 fn build(b: BuildContext) #(Fs) -> BuildPlan ? {
-    migrations #= b.find("schema/*.sql")
+    migrations :: b.find("schema/*.sql")
     b.generate("db_client", gen_db(migrations))?
     return b.plan(sources: ["src/main.jet"], generated: ["db_client"])
 }
@@ -583,7 +583,7 @@ that dependency. Every granted capability is recorded in lock/provenance.
 **API surface (Jet).**
 ```jet
 fn build(b: BuildContext) #(Fs) -> BuildPlan ? {        // Tier-1 effect declaration
-    migrations #= b.find("schema/*.sql")                 // Tier 1: locked, ambient-free
+    migrations :: b.find("schema/*.sql")                 // Tier 1: locked, ambient-free
     #Impure("probe local openssl for a legacy C dep") {  // Tier 2: gated + permitted
         b.exec(["pkg-config", "--libs", "openssl"])?
     }

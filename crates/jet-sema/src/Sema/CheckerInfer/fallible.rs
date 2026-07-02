@@ -90,6 +90,11 @@ impl<'a> Checker<'a> {
         span: Span,
         convert: &mut TryConvert,
     ) -> Option<Type> {
+        if let Expr::Call(call) = inner.as_mut() {
+            if self.registry.distinct_range(&call.name).is_some() {
+                call.range_checked = true;
+            }
+        }
         let inner_ty = self.infer(inner)?;
         match inner_ty {
             Type::Result { ok, err } => {
@@ -351,6 +356,7 @@ impl<'a> Checker<'a> {
                     name: Syntax::BUILTIN_PANIC.to_string(),
                     name_span: *name_span,
                     args: std::mem::take(args),
+                    range_checked: false,
                 };
                 self.check_panic_call(&mut call);
                 *args = call.args;

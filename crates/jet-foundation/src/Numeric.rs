@@ -1,8 +1,8 @@
 //! D-BIGINT1 / D-DECIMAL1: arbitrary-precision `BigInt` and base-10 `Decimal`.
 //! Shared name/method tables for sema and codegen.
 
-use crate::AST::{Expr, Marker, Type};
 use crate::Syntax;
+use crate::AST::{Expr, Marker, Type};
 
 pub const MONEY_LINT_NAMES: &[&str] =
     &["price", "cost", "amount", "total", "fee", "balance", "tax"];
@@ -29,18 +29,16 @@ pub fn type_is_decimal(ty: &Type) -> bool {
 
 pub fn is_money_like_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    MONEY_LINT_NAMES
-        .iter()
-        .any(|m| lower.contains(m))
+    MONEY_LINT_NAMES.iter().any(|m| lower.contains(m))
 }
 
 /// D-DECIMAL1: `#[allow(float_money)]` suppresses the default-on money lint.
 pub fn allows_float_money(markers: &[Marker]) -> bool {
     markers.iter().any(|m| {
         m.name == "allow"
-            && m.args.iter().any(|a| {
-                matches!(a, Expr::Ident(s, _) if s == "float_money")
-            })
+            && m.args
+                .iter()
+                .any(|a| matches!(a, Expr::Ident(s, _) if s == "float_money"))
     })
 }
 

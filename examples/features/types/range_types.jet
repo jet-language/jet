@@ -3,10 +3,18 @@
 // runtime value needs the fallible `?` form. "Parse, don't validate" as a
 // type.
 
-Severity #= distinct Int(0..10);
+@Numeric Severity :: distinct Int(0..10);
+
+fn checked(raw: Int) -> Severity ? String {
+    return ok(Severity(raw)?)
+}
 
 fn main() {
     // Checked at compile time — always in range.
-    sev #= Severity(7)
+    sev :: Severity(7)
     print("{sev.raw()}")
+    from_runtime :: checked(3) ?? Severity(0)
+    print("{from_runtime.raw()}")
+    widened: Int :: sev + from_runtime
+    print("{widened}")
 }

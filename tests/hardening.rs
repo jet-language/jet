@@ -33,7 +33,7 @@ fn list_index_assign_requires_var() {
     expect_error(
         r#"
 fn main() {
-    xs #= [1, 2, 3]
+    xs :: [1, 2, 3]
     xs[0] = 9
 }
 "#,
@@ -53,8 +53,8 @@ struct Greeter {
 }
 
 fn main() {
-    g #= Greeter.{ prefix: "hi" }
-    name #= "bob"
+    g :: Greeter.{ prefix: "hi" }
+    name :: "bob"
     print(g.greet(name))
 }
 "#;
@@ -74,9 +74,9 @@ struct P {
 }
 
 fn main() {
-    p #= P.{ name: "x" }
-    s #= p.name
-    t #= p.name
+    p :: P.{ name: "x" }
+    s :: p.name
+    t :: p.name
     print(s)
     print(t)
 }
@@ -99,7 +99,7 @@ fn maybe() -> (Int?) {
 fn main() {
     m: Map<String, Int> := [:]
     m["k"] = 7
-    x #= maybe() ?? m["k"]
+    x :: maybe() ?? m["k"]
     print(x)
 }
 "#;
@@ -122,7 +122,7 @@ fn parse_count(raw: String) -> Int? {
 }
 
 fn main() {
-    n #= parse_count("") ?? 0
+    n :: parse_count("") ?? 0
     print(n)
 }
 "#;
@@ -180,8 +180,8 @@ fn pick(items: List<String>) -> &List<String> {
 }
 
 fn main() {
-    xs #= ["a", "b"]
-    ys #= pick(xs)
+    xs :: ["a", "b"]
+    ys :: pick(xs)
     print(ys.len())
 }
 "#,
@@ -197,13 +197,13 @@ struct Bag {
     n: Int
 
     fn poke(~self) {
-        x #= self.n
+        x :: self.n
         print(x)
     }
 }
 
 fn main() {
-    b #= Bag.{ n: 1 }
+    b :: Bag.{ n: 1 }
     b.poke()
 }
 "#,
@@ -240,7 +240,7 @@ fn if_pattern_binding_moves_subject() {
     expect_error(
         r#"
 fn main() {
-o: String? #= value("hi")
+o: String? :: value("hi")
     if o == value(n) {
         print(n)
     }
@@ -261,7 +261,7 @@ enum Shape {
 }
 
 fn main() {
-    s #= Shape.Circle("big")
+    s :: Shape.Circle("big")
     if s == {
         Circle(label) -> {
             print(label)
@@ -337,7 +337,7 @@ fn eat(v: ^NoClone) {
 }
 
 fn main() {
-    v #= NoClone.{ n: 1 }
+    v :: NoClone.{ n: 1 }
     eat(v)
 }
 "#;
@@ -379,7 +379,7 @@ fn bump(n: ~Int) {
 }
 
 fn main() {
-    s #= S.{ n: 1 }
+    s :: S.{ n: 1 }
     bump(~s.n)
 }
 "#,
@@ -432,7 +432,7 @@ fn imported_struct_constructs_and_reads_fields() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"shapes\"\nfn main() {\n    p #= shapes.Point.{ x: 1, y: 2 }\n    print(p.x)\n}\n",
+        "use \"shapes\"\nfn main() {\n    p :: shapes.Point.{ x: 1, y: 2 }\n    print(p.x)\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");

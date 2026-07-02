@@ -87,7 +87,9 @@ pub fn run_scripted(
         inputs: queue,
         out: String::new(),
     };
-    let (_code, captured) = run_with_io(binary, rust_file, rust_src, jet_file, jet_src, raw_frames, io);
+    let (_code, captured) = run_with_io(
+        binary, rust_file, rust_src, jet_file, jet_src, raw_frames, io,
+    );
     captured
 }
 
@@ -354,7 +356,9 @@ impl Session {
                 // compiler-internal temp (no prefix) is filtered, never shown.
                 let body: Vec<String> = Inferior::parse_locals(&out)
                     .iter()
-                    .filter_map(|(n, v)| Inferior::rust_local_to_jet(n).map(|jn| format!("{} = {}", jn, v)))
+                    .filter_map(|(n, v)| {
+                        Inferior::rust_local_to_jet(n).map(|jn| format!("{} = {}", jn, v))
+                    })
                     .collect();
                 if body.is_empty() {
                     return "locals:  (none)".to_string();
@@ -366,7 +370,10 @@ impl Session {
     }
 
     fn cmd_break(&mut self, arg: Option<&str>) {
-        let Some(n) = arg.and_then(|a| a.parse::<usize>().ok()).filter(|n| *n >= 1) else {
+        let Some(n) = arg
+            .and_then(|a| a.parse::<usize>().ok())
+            .filter(|n| *n >= 1)
+        else {
             self.emit("break needs a line number, e.g. `break 7`");
             return;
         };
@@ -413,7 +420,10 @@ impl Session {
         let jet_file = self.jet_file.clone();
         for (i, f) in frames.iter().enumerate() {
             if self.raw_frames {
-                self.emit(&format!("#{}  {}()  at {}:{}", i, f.func, f.rust_file, f.rust_line));
+                self.emit(&format!(
+                    "#{}  {}()  at {}:{}",
+                    i, f.func, f.rust_file, f.rust_line
+                ));
             } else if let Some(jline) = self.map.jet_line_for(f.rust_line) {
                 let func = Inferior::rust_func_to_jet(&f.func);
                 self.emit(&format!("#{}  {}()  at {}:{}", i, func, jet_file, jline));
@@ -500,7 +510,10 @@ commands:
                 v if v == Syntax::DBG_QUIT || v == "q" => {
                     return ExitCodes::USER_ERROR;
                 }
-                other => self.emit(&format!("unknown command `{}` — type `help` for the verbs", other)),
+                other => self.emit(&format!(
+                    "unknown command `{}` — type `help` for the verbs",
+                    other
+                )),
             }
         }
     }
@@ -515,7 +528,11 @@ commands:
     }
 
     fn step(&mut self, into: bool) {
-        let cmd = if into { "thread step-in" } else { "thread step-over" };
+        let cmd = if into {
+            "thread step-in"
+        } else {
+            "thread step-over"
+        };
         match self.inf.resume_and_locate(cmd) {
             Ok(r) => self.handle_resume(r),
             Err(e) => self.emit(&format!("step failed: {}", e)),

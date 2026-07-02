@@ -1,11 +1,11 @@
 use super::*;
+use crate::Diagnostics::Span;
 use crate::Generics;
 use crate::Syntax;
 use crate::AST::FfiLink;
 use crate::AST::{
     AccessConvention, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type, VariantPayload,
 };
-use crate::Diagnostics::Span;
 use std::collections::{HashMap, HashSet};
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
@@ -169,6 +169,12 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DbValue" => Some("DbValue"),
         "DbError" => Some("DbError"),
+        // D-TYPEDTEXT1=D: `Sql`/`Html` — this table's `.is_some()` is only a
+        // "known core value type" gate for the TIR subset check; the actual Rust
+        // spelling for these two comes from the earlier explicit `rust_type` arms
+        // (`(String, Vec<String>)` / `String`), not this placeholder.
+        "Sql" => Some("Sql"),
+        "Html" => Some("Html"),
         // D-SIMD2 / D-LINALG1: built-in math value types (lane + linalg structs).
         "F32x4" => Some("F32x4"),
         "F64x2" => Some("F64x2"),
@@ -406,6 +412,11 @@ impl Cx {
             // D-REGEX1: a regex `Match` is a list of capture groups (index 0 = whole
             // match), each `Some` if it participated. `.group(n)` is plain indexing.
             Type::Named(name) if name == "Match" => "Vec<Option<String>>".to_string(),
+            // D-TYPEDTEXT1=D: `Sql` is a checked (template, bound params) pair — the
+            // params never re-enter the template text. `Html` is already the fully
+            // escaped text, so it's just a `String` underneath.
+            Type::Named(name) if name == "Sql" => "(String, Vec<String>)".to_string(),
+            Type::Named(name) if name == "Html" => "String".to_string(),
             // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
             // so Rust infers the monomorphised type from the initialiser expression.
             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
@@ -530,6 +541,13 @@ impl Cx {
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
+            }
+            // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
+            // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
+            // which is exactly `loop x in stream { }`'s pull-one-block-until-ready
+            // shape (no coroutine machinery needed).
+            Type::Apply { name, args } if name == "Stream" && !args.is_empty() => {
+                format!("std::sync::mpsc::Receiver<{}>", self.rust_type(&args[0]))
             }
             // D-REACT1=B: reactive handle types lower to the std-only jet_std runtime.
             Type::Apply { name, args } if name == Syntax::TYPE_SIGNAL && !args.is_empty() => {
@@ -1076,10 +1094,7 @@ pub(crate) fn build_cx_items(
 }
 
 fn assoc_type_impl<'a>(assoc: &'a [(String, Span, Type)], name: &str) -> Option<&'a Type> {
-    assoc
-        .iter()
-        .find(|(n, _, _)| n == name)
-        .map(|(_, _, t)| t)
+    assoc.iter().find(|(n, _, _)| n == name).map(|(_, _, t)| t)
 }
 
 fn trait_impl_assoc(
@@ -1148,8 +1163,7 @@ fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
         }
     }
     for (coll_type, iter_type) in iterable_pairs {
-        if let Some(item_type) =
-            trait_impl_assoc(items, &iter_type, Syntax::TRAIT_ITERATOR, "Item")
+        if let Some(item_type) = trait_impl_assoc(items, &iter_type, Syntax::TRAIT_ITERATOR, "Item")
         {
             cx.iterable_hooks.insert(
                 coll_type,
@@ -1186,13 +1200,12 @@ fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
     }
     for type_name in index_types {
         let value_type = trait_impl_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Value");
-        if let (Some(_key_type), Some(value_type)) =
-            (trait_impl_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Key"), value_type)
-        {
-            cx.index_hooks.insert(
-                type_name.clone(),
-                IndexHook { value_type },
-            );
+        if let (Some(_key_type), Some(value_type)) = (
+            trait_impl_assoc(items, &type_name, Syntax::TRAIT_INDEX, "Key"),
+            value_type,
+        ) {
+            cx.index_hooks
+                .insert(type_name.clone(), IndexHook { value_type });
         }
     }
 }

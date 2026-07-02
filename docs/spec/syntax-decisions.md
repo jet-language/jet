@@ -59,17 +59,17 @@ first-party library (built-in module or ring package) is `core.<name>`. No
 
 ### Bindings & assignment
 
-**S2 — Bindings** *(current law = D-BIND3; supersedes val/var, `::`, `@=`)*:
+**S2 — Bindings** *(current law = D-BIND4; supersedes val/var keywords)*:
 
 ```jet
-name #= expr            // immutable binding
+name :: expr            // immutable binding
 name := expr            // mutable binding
-name: Type #= expr      // explicit-typed immutable
+name: Type :: expr      // explicit-typed immutable
 name: Type := expr      // explicit-typed mutable
 name = expr             // reassignment of an existing := binding
 ```
 
-`val`/`var`/`let` and the retired `::`/`@=` sigils are errors (E0991/E0998).
+`val`/`var`/`let` are teaching errors; bindings use the sigils above.
 
 **S4 — Type annotations**: `name: Type` after the name, everywhere (bindings,
 params, fields). Never `Type name`.
@@ -176,7 +176,7 @@ removed; E0115).
 D-MATCHARM1/2)*: `if` is the only branching keyword.
 
 - Statement form `if cond { } else { }`; parens optional, fmt strips them.
-- Expression form `m #= if a > b { a } else { b }` — `else` required (E0003),
+- Expression form `m :: if a > b { a } else { b }` — `else` required (E0003),
   branch types must match (E0124).
 - **Dispatch form** — `==` between subject and `{` is required (bare
   `if subject { arm -> … }` is E0992, auto-fixed):
@@ -217,11 +217,11 @@ type is known (`.Red`; E0330 fallback). `Color.Red` always valid.
 destructure structs, tuples, and lists:
 
 ```jet
-.{ id, severity: sev } #= incident      // struct: bind id, rename severity
-.{ kind, .. } #= event                  // partial needs mandatory `..` (E0326)
-(x, y) #= point                         // named tuple, canonical order
-[a, b] #= xs                            // list, runtime length check (E0315)
-value(n) #= maybe_port() ?? return      // refutable bind needs ?? fallback
+.{ id, severity: sev } :: incident      // struct: bind id, rename severity
+.{ kind, .. } :: event                  // partial needs mandatory `..` (E0326)
+(x, y) :: point                         // named tuple, canonical order
+[a, b] :: xs                            // list, runtime length check (E0315)
+value(n) :: maybe_port() ?? return      // refutable bind needs ?? fallback
 ```
 
 Redundant `..` on a full pattern is E0327. Nesting one level.
@@ -292,11 +292,11 @@ grammar by D-SERDE6).
 (D-VARARGBOUND1). No `where`. **D-LIB2**: associated types + default method
 bodies; no higher-kinded types.
 
-**S73 — Tuples**: named members only — `p #= (x: 1, y: 2)`, `p.x`, type
+**S73 — Tuples**: named members only — `p :: (x: 1, y: 2)`, `p.x`, type
 position `(min: Int, max: Int)`. No positional tuples, no `.0`.
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
-refinement of `[T]`, lowered to a **real stack array**. `#=` + literal/fan-out
+refinement of `[T]`, lowered to a **real stack array**. `::` + literal/fan-out
 ⇒ `[T#N]`; widens one-way to `[T]` (by copy); `.map` preserves N; `.len` is a
 compile-time constant; length-changing ops rejected (E0963–E0965).
 
@@ -320,11 +320,15 @@ enum Shape {
 Value spelling `Shape.Circle(2.0)` or `.Circle(2.0)` where the type is known;
 patterns take the leading dot (D-ENUMDOT1).
 
-**D-DIST1 / D-DIST3 — Distinct types**: `Usd #= distinct Decimal` mints a
+**D-DIST1 / D-DIST3 — Distinct types**: `Usd :: distinct Decimal` mints a
 nominal type over a base; no inherited operators. **D-CAPBUNDLE1**: capability
 bundles re-expose curated slices, stackable — `@Numeric` (`+ - * /`, ordering,
 same-type only; E0138), `@Comparable`, `@Printable`, `@CodableAsBase`.
-`Usd + Eur` stays a type error; `.raw()` strips.
+`Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
+types**: `distinct Int(0..10)` is an `Int` provably within bounds; literal
+construction checks at compile time (E0135 out of bounds), runtime construction
+is fallible (`Severity(raw)?`, else E0136); an empty/reversed range is E0137;
+arithmetic widens to the base type.
 
 **D-QUAL3 — Unit families**: `#UnitFamily(currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);
@@ -408,11 +412,30 @@ a range.
 opening and before closing dropped; closing-quote column sets stripped
 indent); escapes and `{interp}` stay active; unterminated is E0002.
 
-**D-PARSESTR2 — Parse patterns**: two interpolation holes with no literal
-text between them is a compile error (add an anchor); bare pattern binding is
-fallible. **D-TYPEDTEXT2 — Typed text**: hole-free string literals elaborate
-to `Sql`/`Html` when the expected type says so; `sql"…"`/`html"…"` prefixes
-for bindings without one; user-defined prefixes deferred to E4.
+**D-PARSESTR1 — Interpolation literal as pattern**: the same `"…{hole}…"`
+literal that formats a string may sit in pattern position (if-table arm
+head, `subject == pattern`) and match instead: it matches the fixed text and
+binds each `{hole}` to a name (untyped binds `String`). A typed hole
+(`{id:Int}`; `Int`/`Float`/`Bool`/`String`) is a fallible read — it binds
+only if the matched text reads as that type. Holes are non-greedy, anchored
+by the literal text between them. Always refutable (a typed hole can fail to
+read, and the literal text might not match), so an `if == {}` table needs an
+`else` arm (E0148). **D-PARSESTR2 — ambiguity rule**: two interpolation
+holes with no literal text between them is E0147 (add an anchor, or type
+them so the boundary is unambiguous); a hole-free string in pattern position
+is plain text equality, not a pattern (I8). **D-TYPEDTEXT1 — Typed text**: a
+string literal (with or without interpolation) in a position whose expected
+type is `Sql`/`Html` elaborates to that checked value instead of `String` —
+each `{hole}` becomes a bound parameter (Sql) or an HTML-escaped insertion
+(Html); a runtime `String` reaching the position directly is E0149.
+`Sql.raw("…")`/`Html.raw("…")` is the sole audited escape. Implemented for
+the expected-type path (function params, bindings); `.template()`/
+`.params()` (Sql) and `.text()` (Html) read the checked value back.
+**D-TYPEDTEXT2 — Typed text amendment**: hole-free string literals also
+elaborate (not just interpolated ones); `sql"…"`/`html"…"` prefixes for
+bindings without an expected type — **not yet implemented** (lexer prefix-
+scan gap, no upstream gate; the no-prefix expected-type path is the common
+case and covers it); user-defined prefixes deferred to E4.
 
 ### Errors
 
@@ -558,6 +581,18 @@ stay `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 in-body config as a type body's first statements. `comptime` stays a prefix
 keyword. LSP surfaces applicable markers per item.
 
+**D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a
+statement-position `.name { … }` / `.name(args) { … }` resolves against that
+marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
+`.timeout`, `.skip`); this is the ONLY spelling for scope vocabulary (I8 —
+no nested per-scope markers, no block-valued args for the same job). Unknown
+member is a teaching error listing the scope's vocabulary. Typing `.` in
+statement position inside a marker block completes members. Disambiguation:
+the required trailing block separates it from leading-dot enum values
+(D-ENUMDOT1); the identifier after the dot separates it from `.{ }`
+construction and S74 destructuring. Other block markers may declare members
+under the same law — each addition is an API decision, not a syntax one.
+
 **D-QUAL2 — Tag vs trait**: exactly two qualifier kinds — `trait` (has
 methods, dispatches) and `tag` (no methods, erases). Methods on a tag E0732;
 tag where dispatch expected E0731. **D-QUAL4**: type-position value tags are
@@ -685,6 +720,15 @@ effect summary and records per-dependency provenance in the lock.
 (E1220 names the dependency); `grants: { "dep": [Effect] }` per-dep escape;
 malformed block E1221.
 
+**D-STREAMYIELD1 — Generators**: `fn f() -> Stream<T>` uses `yield expr` to
+hand a value to the consumer and suspend until the next pull; falling off
+the end (or a bare `return;`) ends the stream; `return value;` is E0806.
+Consumers are ordinary `loop x in f() { }` loops — one keyword, one type, no
+async/await coloring. Implemented on a real OS thread + a rendezvous
+channel (`std::sync::mpsc::sync_channel(0)`): `yield` blocks the producer
+thread until the consumer's loop pulls, exactly reproducing suspend/resume
+with zero coroutine machinery.
+
 ### Comptime & metaprogramming
 
 **S26 — Comptime, value-level**: layered, value-only. **One law: comptime
@@ -755,7 +799,7 @@ proof. *(sema green; codegen rides D-FIXARR1 stack arrays)*
 
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
 and scope-inferred by default (the region is the arena binding's lexical
-scope); explicit `region r { … }` for the expert tier. `arena #=
+scope); explicit `region r { … }` for the expert tier. `arena ::
 mem.Arena.new(capacity: 4096)`; `arena.alloc(value)` returns a scope-bound
 view — escape E0631, use-after-`reset`/`free` E0632. Arenas live flat in
 `core.mem` (D-REF2); arena values are not `#Unsafe`.
@@ -850,6 +894,26 @@ Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `pkg.jet`
 `jet bind` uses a native std-only C-prototype parser (`Source/CBind.rs`);
 binds scalars and `char*`↔String; `#define` constants only. Old
 `@extern`/`#extern` spellings E0060. `#Bindgen`/`#Extern` PascalCase.
+
+**D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
+namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
+tier (`use "xxhash.h" as xx` — bind on first compile), project tier
+(`use py.h5instrument as h5`, dep pinned in `pkg.jet` as
+`<lib>: <lang>@"ref"`), overlay tier (`#Extern module <lang>.<lib> { … }`,
+overlay wins). `jet bind <lang>` is a per-language binder emitting
+inspectable bindings in `.jet/bindings/<lang>/<lib>.jet`. Generated bindings
+are safe wrappers by construction (marshaling internals compiler-vetted like
+std internals — I1); calling a foreign symbol outside a binding requires
+`#Unsafe("reason")`. In-situ replacement: any `<lang>.<lib>` can be shadowed
+by a Jet package exporting the same surface — call sites never change.
+Binder diagnostics are Jet diagnostics with codes and snapshots (I2/I4); no
+foreign toolchain error reaches the user unlaundered. One structure for all
+languages (I8) — S59 is the C instance; S50's block becomes the rust
+binder's declaration format inside `rust.*`; D-NPMTYPE1 stubs are the js
+binder's v1; D-DEP1 vendoring/hash-pinning extends to every language's refs.
+Per-language binder depth (typed projection / runtime broker / shallow
+decls) is a follow-up ballot per language (D-FFI-PY1, D-FFI-JS1,
+D-FFI-SWIFT1 honoring D-JSWIFTFFI1 sequencing).
 
 **D-DEP1 — Dependency law**: the compiler stays zero-external-crate (I6).
 Any crate-backed capability ships as a Jet package wrapping the crate via
@@ -988,6 +1052,17 @@ deps: {
     parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
 }
 ```
+
+**U30 / D-JPK-TOOLCHAIN1 — Toolchain pin**: `pkg.jet` may carry a top-level
+`jet:` field pinning the toolchain (channel semantics per D-JPK-CHANNEL1;
+`.jet/lock` records the exact version). A jet whose version differs realizes
+the pinned toolchain into the hangar (prebuilt objects via D-JPK-CACHE1,
+offline thereafter per D-JPK-OFFLINE1, GC per D-JPK-GC1, no Nix required per
+D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
+(D-JPK-DISPATCH1). Frozen-forward identity block: the `payload:` block and
+`jet:` line stay parseable by every future jet, so an old jet can always
+read enough of any manifest to fetch the right toolchain. `jet toolchain`
+shows the pin; `jet update jet` moves it deliberately.
 
 **U9 — Provider inference**: a source is always `name: provider@target`; core
 vs nix is inferred by probing the target for `pkg.jet` (cheap manifest-only

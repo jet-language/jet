@@ -21,7 +21,7 @@ impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
 @Pure fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) #(Io) { print(p); }
 fn run(n: Int) #(Io) { load("{sq(n)}"); }
-fn main() { s #= Square.{ side: 3 }; print("{s.area()}"); run(2); }
+fn main() { s :: Square.{ side: 3 }; print("{s.area()}"); run(2); }
 "#;
     let plain = r#"
 trait Shape { fn area(self) -> Int; }
@@ -30,7 +30,7 @@ impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
 fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) { print(p); }
 fn run(n: Int) { load("{sq(n)}"); }
-fn main() { s #= Square.{ side: 3 }; print("{s.area()}"); run(2); }
+fn main() { s :: Square.{ side: 3 }; print("{s.area()}"); run(2); }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
@@ -188,9 +188,9 @@ use core.fs as fs
 trait Hasher { @Pure fn hash(self) -> Int; }
 struct Doc { path: String }
 impl Doc.Hasher {
-    fn hash(self) -> Int { body #= fs.read(self.path) ?? ""; return body.len(); }
+    fn hash(self) -> Int { body :: fs.read(self.path) ?? ""; return body.len(); }
 }
-fn main() { d #= Doc.{ path: "x" }; print(d.hash()); }
+fn main() { d :: Doc.{ path: "x" }; print(d.hash()); }
 "#;
     assert!(
         codes(src).contains(&"E0742"),
@@ -208,7 +208,7 @@ struct Square { side: Int }
 impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }
 }
-fn main() { s #= Square.{ side: 5 }; print("{s.area()}"); }
+fn main() { s :: Square.{ side: 5 }; print("{s.area()}"); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -244,7 +244,7 @@ use core.fs as fs
 fn apply(f: fn() -> String) -> String { return f(); }
 fn main() {
     #Caps(Net) {
-        r #= apply(() => fs.read("x") ?? "");
+        r :: apply(() => fs.read("x") ?? "");
         print(r);
     }
 }
@@ -314,7 +314,7 @@ fn caps_region_out_of_set_is_e0741() {
 use core.fs as fs
 fn main() {
     #Caps(Net) {
-        text #= fs.read("x") ?? "";
+        text :: fs.read("x") ?? "";
         print(text);
     }
 }
@@ -335,7 +335,7 @@ use core.fs as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn main() {
     #Caps(Io) {
-        text #= helper("x");
+        text :: helper("x");
         print(text);
     }
 }
@@ -373,7 +373,7 @@ fn grant_within_set_ok() {
 use core.fs as fs
 fn main() {
     #Grant(Fs, Io) { caps ->
-        text #= fs.read("x") ?? "";
+        text :: fs.read("x") ?? "";
         print(text);
     }
 }
@@ -393,7 +393,7 @@ fn grant_out_of_set_is_e0712() {
 use core.fs as fs
 fn main() {
     #Grant(Net) { caps ->
-        text #= fs.read("x") ?? "";
+        text :: fs.read("x") ?? "";
         print(text);
     }
 }
@@ -414,7 +414,7 @@ use core.fs as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn main() {
     #Grant(Io) { caps ->
-        text #= helper("x");
+        text :: helper("x");
         print(text);
     }
 }
@@ -433,7 +433,7 @@ fn grant_handle_alias_is_e0711() {
     let src = r#"
 fn main() {
     #Grant(Io) { caps ->
-        alias #= caps;
+        alias :: caps;
         print("hi");
     }
 }
@@ -559,7 +559,7 @@ fn transact_irreversible_fs_is_e0746() {
 use core.fs as fs
 fn main() {
     #Transact(tx) {
-        text #= fs.read("x") ?? "";
+        text :: fs.read("x") ?? "";
         print(text);
     }
 }
@@ -578,7 +578,7 @@ fn transact_irreversible_net_is_e0746() {
 use core.http as http
 fn main() {
     #Transact(tx) {
-        r #= http.get("http://x") ?? "";
+        r :: http.get("http://x") ?? "";
         print(r);
     }
 }
@@ -742,7 +742,7 @@ fn transfer(from: ~Int, to: ~Int, amount: Int) -> Int ? Fail {
 fn main() {
     a: Int := 100
     b: Int := 0
-    n #= transfer(~a, ~b, 40) ?? (-1)
+    n :: transfer(~a, ~b, 40) ?? (-1)
     print("{n}")
 }
 "#;
@@ -777,7 +777,7 @@ fn bump(x: ~Int) -> Int ? Fail {
     }
     return ok(0);
 }
-fn main() { a: Int := 0; n #= bump(~a) ?? (-1); print("{n}"); }
+fn main() { a: Int := 0; n :: bump(~a) ?? (-1); print("{n}"); }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     // The only `unsafe` is inside `mod jet_txn { … }`. Strip it and assert none remain.
@@ -894,7 +894,7 @@ use core.fs as fs
 fn run(p: String, act: #(Io) fn(String)) {
     act(p);
 }
-fn read_it(p: String) { x #= fs.read(p) ?? ""; print("{x}"); }
+fn read_it(p: String) { x :: fs.read(p) ?? ""; print("{x}"); }
 fn main() { run("f.txt", read_it); }
 "#;
     assert_eq!(

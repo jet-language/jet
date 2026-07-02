@@ -1146,8 +1146,11 @@ impl<'a> Checker<'a> {
                         }
                     }
                     Some(other) => {
-                        self.diags
-                            .push(reactive_not_lambda("computed", other, args[0].expr.span()));
+                        self.diags.push(reactive_not_lambda(
+                            "computed",
+                            other,
+                            args[0].expr.span(),
+                        ));
                         return None;
                     }
                     None => return None,
@@ -1923,7 +1926,12 @@ impl<'a> Checker<'a> {
     /// by `.query`/`.query_one`/`.execute` — SQL text plus a separate bind list,
     /// never a raw execute(sql) escape (the ratified build plan is explicit that
     /// a generic `execute_raw(sql)` must not exist).
-    fn check_db_sql_params_args(&mut self, name: &str, args: &mut [crate::AST::CallArg], span: Span) {
+    fn check_db_sql_params_args(
+        &mut self,
+        name: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) {
         if args.len() != 2 {
             self.diags.push(wrong_core_arity(name, 2, args.len(), span));
             for a in args.iter_mut() {
@@ -1973,7 +1981,8 @@ impl<'a> Checker<'a> {
             }
             "begin" | "commit" | "rollback" | "close" => {
                 if !args.is_empty() {
-                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity(method, 0, args.len(), span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -2121,6 +2130,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Date" | "DateTime"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp"
+        // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
+        // expected-type elaboration of a string literal (E0149 guards a plain
+        // runtime `String` from filling this position).
+        | "Sql" | "Html"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -2156,10 +2169,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("Point", "x" | "y") => Some(Type::Float),
         ("Size", "width" | "height") => Some(Type::Float),
         ("Rect", "x" | "y" | "width" | "height") => Some(Type::Float),
-        (
-            "SizeConstraint",
-            "min_width" | "min_height" | "max_width" | "max_height",
-        ) => Some(Type::Float),
+        ("SizeConstraint", "min_width" | "min_height" | "max_width" | "max_height") => {
+            Some(Type::Float)
+        }
         ("UiNode", "label") => Some(Type::String),
         ("UiNode", "width" | "height") => Some(Type::Float),
         ("ProcessResult", "code") => Some(Type::Int),
@@ -2718,8 +2730,8 @@ pub fn layout_method_arg_ty(method: &str, arg_index: usize) -> Option<Type> {
 
 /// D-BIGINT1 / D-DECIMAL1: binary ops on precise numeric types (no Int promotion).
 pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Type> {
-    use crate::AST::BinOp;
     use crate::Numeric::{is_bigint_type_name, is_decimal_type_name};
+    use crate::AST::BinOp;
     let same = lt == rt;
     match op {
         BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_bigint_type_name(lt) => {
@@ -2728,9 +2740,7 @@ pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option
         BinOp::Add | BinOp::Sub | BinOp::Mul if same && is_decimal_type_name(lt) => {
             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()))
         }
-        BinOp::Eq | BinOp::Ne
-            if same && (is_bigint_type_name(lt) || is_decimal_type_name(lt)) =>
-        {
+        BinOp::Eq | BinOp::Ne if same && (is_bigint_type_name(lt) || is_decimal_type_name(lt)) => {
             Some(Type::Bool)
         }
         _ => None,
@@ -2761,11 +2771,11 @@ pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, 
                 lt.show(),
                 rt.show()
             ),
-            "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science".to_string(),
+            "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science"
+                .to_string(),
         ));
     }
-    if (type_is_bigint(lt) && type_is_decimal(rt)) || (type_is_bigint(rt) && type_is_decimal(lt))
-    {
+    if (type_is_bigint(lt) && type_is_decimal(rt)) || (type_is_bigint(rt) && type_is_decimal(lt)) {
         return Some((
             "E0132",
             format!(
@@ -3464,9 +3474,7 @@ pub fn core_fixed_sig(
         ("core.text.unicode", "scalar_count" | "byte_count") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))
         }
-        ("core.text.unicode", "is_ascii") => {
-            Some((vec![(read, Type::String)], Some(Type::Bool)))
-        }
+        ("core.text.unicode", "is_ascii") => Some((vec![(read, Type::String)], Some(Type::Bool))),
         ("core.text.unicode", "lower" | "upper") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
@@ -3495,15 +3503,24 @@ pub fn core_fixed_sig(
         )),
         // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
         ("jet.crypto", "seal") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         ("jet.crypto", "open") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         ("jet.crypto", "sign") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         ("jet.crypto", "verify") => Some((
@@ -3516,11 +3533,17 @@ pub fn core_fixed_sig(
         )),
         // D-CRYPTOENV1=A: expert-only raw AEAD (requires #Unsafe + expert import).
         ("core.crypto.expert", "aes256_gcm_seal" | "chacha20_seal") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         ("core.crypto.expert", "aes256_gcm_open" | "chacha20_open") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
@@ -3753,8 +3776,14 @@ pub fn core_fixed_sig(
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
         ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
         ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TuiBackend".to_string())))),
-        ("core.ui", "point") => Some((vec![(read, float.clone()), (read, float)], Some(Type::Named("Point".to_string())))),
-        ("core.ui", "size") => Some((vec![(read, float.clone()), (read, float)], Some(Type::Named("Size".to_string())))),
+        ("core.ui", "point") => Some((
+            vec![(read, float.clone()), (read, float)],
+            Some(Type::Named("Point".to_string())),
+        )),
+        ("core.ui", "size") => Some((
+            vec![(read, float.clone()), (read, float)],
+            Some(Type::Named("Size".to_string())),
+        )),
         ("core.ui", "rect") => Some((
             vec![
                 (read, float.clone()),
@@ -3810,10 +3839,10 @@ pub fn core_fixed_sig(
             ],
             Some(Type::Named("UiNode".to_string())),
         )),
-        ("core.ui", "aria_role_button" | "aria_role_text_input" | "aria_role_label"
-        | "aria_role_container") => {
-            Some((vec![], Some(Type::Named("UiAriaRole".to_string()))))
-        }
+        (
+            "core.ui",
+            "aria_role_button" | "aria_role_text_input" | "aria_role_label" | "aria_role_container",
+        ) => Some((vec![], Some(Type::Named("UiAriaRole".to_string())))),
         // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)` —
         // the constructor for a configurable `jet dev` server value. The
         // builder methods (`.html`/`.port`/`.serve`) are instance methods on
@@ -3827,9 +3856,7 @@ pub fn core_fixed_sig(
         // (passed to the running program via JET_DEV_FILE). The common case:
         // the file defining `fn dev()` is the file to watch, so no path is
         // spelled out at all.
-        ("core.devserver", "app") => {
-            Some((vec![], Some(Type::Named("DevServer".to_string()))))
-        }
+        ("core.devserver", "app") => Some((vec![], Some(Type::Named("DevServer".to_string())))),
         _ => None,
     }
 }
@@ -4106,7 +4133,12 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         "jet.crypto" => &["sha256", "sha256_bytes", "seal", "open", "sign", "verify"],
         // D-CRYPTOENV1=A: expert-only raw primitives — misuse lint at call site.
-        "core.crypto.expert" => &["aes256_gcm_seal", "aes256_gcm_open", "chacha20_seal", "chacha20_open"],
+        "core.crypto.expert" => &[
+            "aes256_gcm_seal",
+            "aes256_gcm_open",
+            "chacha20_seal",
+            "chacha20_open",
+        ],
         // D-TTLVAL1=A: TTL-wrapped values and rotting secrets.
         "core.time.expiring" => &["new"],
         "core.secrets" => &["rotting_new"],

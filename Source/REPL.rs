@@ -207,11 +207,9 @@ impl Session {
     /// current input tries to use them (D-REPL8=A).
     fn binding_stub_name(stub: &str) -> &str {
         let before_marker = stub
-            .split_once("#=")
+            .split_once("::")
             .map(|(name, _)| name)
             .or_else(|| stub.split_once(":=").map(|(name, _)| name))
-            .or_else(|| stub.split_once("@=").map(|(name, _)| name))
-            .or_else(|| stub.split_once("::").map(|(name, _)| name))
             .unwrap_or(stub);
         before_marker
             .split_once(':')
@@ -227,10 +225,10 @@ impl Session {
             if self.moved_names.contains(name) {
                 // Re-declare, then synthetically consume so sema sees it moved.
                 lines.push(stub.clone());
-                // `__moved_<name>__ #= name` — a binding whose init is `name`
+                // `__moved_<name>__ :: name` — a binding whose init is `name`
                 // (a non-scalar Ident). Sema's `note_move_if_direct_ident` marks
                 // `name` as moved immediately after this declaration.
-                lines.push(format!("__moved_{}__ #= {};", name, name));
+                lines.push(format!("__moved_{}__ :: {};", name, name));
             } else {
                 lines.push(stub.clone());
             }
@@ -239,7 +237,7 @@ impl Session {
     }
 
     /// Register a val binding for sema visibility after it was evaluated.
-    /// `mutable` must match the original `#=` / `:=` sigil (D-BIND3).
+    /// `mutable` must match the original `::` / `:=` sigil (D-BIND4).
     pub fn record_binding(&mut self, name: &str, v: &CtValue, mutable: bool) {
         let sigil = if mutable {
             crate::Syntax::SIGIL_BIND_MUT
@@ -285,7 +283,7 @@ fn val_binding_mutable(stmts: &[Stmt], name: &str) -> bool {
 /// Scan the successfully-parsed stmts for names that were moved from the
 /// session's current bindings. A move occurs when:
 ///
-/// 1. `val t = s` (or `t #= s`) — the init is a bare identifier that names a
+/// 1. `val t = s` (or `t :: s`) — the init is a bare identifier that names a
 ///    session binding of non-scalar type. Sema's `note_move_if_direct_ident`
 ///    marks non-scalar bindings moved at this point.
 /// 2. A call argument uses `take name` convention — `CallArg::convention == Move`
@@ -750,13 +748,11 @@ fn reject_feature(text: &str) -> Option<&'static str> {
 }
 
 /// Detect whether text is a statement (vs. a bare expression to echo).
-/// D-BIND2: a sigil binding (`name #= v` / `name := v`) is a statement; D-IF1:
+/// D-BIND4: a sigil binding (`name :: v` / `name := v`) is a statement; D-IF1:
 /// `if` covers multi-arm dispatch (former `when`/`switch`); loops are `loop`.
 fn starts_with_stmt_keyword(t: &str) -> bool {
-    // A sigil binding contains `#=` or `:=` (D-BIND3). Also accept retired `::` / `@=` (E0991).
-    t.contains("#=")
-        || t.contains("::")
-        || t.contains("@=")
+    // A sigil binding contains `::` or `:=` (D-BIND4).
+    t.contains("::")
         || t.contains(":=")
         || t.starts_with("return ")
         || t.starts_with("return")
@@ -870,8 +866,8 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         }
     };
     let plain_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, plain_input);
-    // Echo-sentinel wrapping (D-BIND3: `#=` sigil binding).
-    let echo_stmt = format!("__repl_echo__ #= {}", trimmed);
+    // Echo-sentinel wrapping (D-BIND4: `::` sigil binding).
+    let echo_stmt = format!("__repl_echo__ :: {}", trimmed);
     let echo_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, echo_stmt);
 
     if try_stmt_first {
@@ -1654,11 +1650,11 @@ mod tests {
 
     #[test]
     fn sigil_binding_is_classified_as_statement() {
-        let kind = classify("t #= s", 1).expect("classify");
+        let kind = classify("t :: s", 1).expect("classify");
         match kind {
             InputKind::Stmts(stmts, suppress, check_src) => {
                 assert!(!suppress);
-                assert_eq!(check_src, "t #= s;");
+                assert_eq!(check_src, "t :: s;");
                 assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
             }
             _ => panic!("expected statement input"),
@@ -1667,7 +1663,7 @@ mod tests {
 
     #[test]
     fn sigil_binding_from_string_session_name_marks_move() {
-        let kind = classify("t #= s", 1).expect("classify");
+        let kind = classify("t :: s", 1).expect("classify");
         let InputKind::Stmts(stmts, _, _) = kind else {
             panic!("expected statement input");
         };
@@ -1681,6 +1677,6 @@ mod tests {
 
     #[test]
     fn typed_binding_stub_name_matches_moved_name() {
-        assert_eq!(Session::binding_stub_name("s: String #= \"\""), "s");
+        assert_eq!(Session::binding_stub_name("s: String :: \"\""), "s");
     }
 }

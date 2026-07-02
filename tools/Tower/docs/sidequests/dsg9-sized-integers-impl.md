@@ -19,7 +19,7 @@ four. Companion to the existing `sized-floats.md` stub (F32/F64 ride the same ma
 ## 2. Failing-test-first targets
 
 1. **`examples/features/76_sized_ints.jet`** + `expected/76_sized_ints.out` (golden,
-   I5): bind `a: I32 #= 7`, `b: U8 #= 255`, do width-correct arithmetic, convert
+   I5): bind `a: I32 :: 7`, `b: U8 :: 255`, do width-correct arithmetic, convert
    (`a.to_i64()`, `b.to_i32()`), print. Golden output proves widths behave (e.g. `U8`
    wrap/overflow behaviour documented; arithmetic on `I32` stays i32).
 2. **`tests/ui/sized_no_implicit_widen.rs`**: `i32_val + i64_val` → **E0151** "these are

@@ -161,8 +161,16 @@ impl Inferior {
         static SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = std::env::temp_dir();
-        let stdout_path = tmp.join(format!("jet_debug_native_{}_{}.stdout", std::process::id(), n));
-        let stderr_path = tmp.join(format!("jet_debug_native_{}_{}.stderr", std::process::id(), n));
+        let stdout_path = tmp.join(format!(
+            "jet_debug_native_{}_{}.stdout",
+            std::process::id(),
+            n
+        ));
+        let stderr_path = tmp.join(format!(
+            "jet_debug_native_{}_{}.stderr",
+            std::process::id(),
+            n
+        ));
         std::fs::write(&stdout_path, b"")?;
         std::fs::write(&stderr_path, b"")?;
 
@@ -177,8 +185,14 @@ impl Inferior {
             stderr_pos: 0,
         };
         inf.write_lines(&[])?;
-        let out_setting = format!("settings set target.output-path {}", inf.stdout_path.display());
-        let err_setting = format!("settings set target.error-path {}", inf.stderr_path.display());
+        let out_setting = format!(
+            "settings set target.output-path {}",
+            inf.stdout_path.display()
+        );
+        let err_setting = format!(
+            "settings set target.error-path {}",
+            inf.stderr_path.display()
+        );
         inf.write_lines(&[&out_setting, &err_setting])?;
         Ok(inf)
     }
@@ -235,7 +249,9 @@ impl Inferior {
         // `\n(lldb) __jet_dbg_sentinel_9f3c__` line) so callers see only the
         // real command(s)' output.
         let text = String::from_utf8_lossy(&buf).into_owned();
-        let cut = text.rfind(&format!("(lldb) {}", SENTINEL)).unwrap_or(text.len());
+        let cut = text
+            .rfind(&format!("(lldb) {}", SENTINEL))
+            .unwrap_or(text.len());
         Ok(text[..cut].to_string())
     }
 
@@ -289,7 +305,11 @@ impl Inferior {
 
     /// `breakpoint set -f <file> -l <line>` — set on the RUST file/line (already
     /// translated from a Jet line by the caller via `LineMap::rust_line_for`).
-    pub(crate) fn set_breakpoint(&mut self, rust_file: &str, rust_line: usize) -> std::io::Result<()> {
+    pub(crate) fn set_breakpoint(
+        &mut self,
+        rust_file: &str,
+        rust_line: usize,
+    ) -> std::io::Result<()> {
         self.cmd(&format!("breakpoint set -f {} -l {}", rust_file, rust_line))?;
         Ok(())
     }
@@ -303,7 +323,10 @@ impl Inferior {
     /// `frame variable <name>` — a single local by its JET name (translated to
     /// the mangled Rust name lldb needs — see [`jet_local_to_rust`]).
     pub(crate) fn print_var(&mut self, jet_name: &str) -> std::io::Result<String> {
-        self.cmd(&format!("frame variable {}", Self::jet_local_to_rust(jet_name)))
+        self.cmd(&format!(
+            "frame variable {}",
+            Self::jet_local_to_rust(jet_name)
+        ))
     }
 
     /// `bt` — the full native call stack (parsed by [`Self::parse_frames`]).
@@ -424,7 +447,11 @@ impl Inferior {
 /// friendly one-line value — a real Rust binary the compiler already needs
 /// to produce this build, not an optional tool like lldb itself).
 fn rust_pretty_printer_files() -> Option<(PathBuf, PathBuf)> {
-    let out = Command::new("rustc").arg("--print").arg("sysroot").output().ok()?;
+    let out = Command::new("rustc")
+        .arg("--print")
+        .arg("sysroot")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -550,7 +577,10 @@ mod tests {
 
     #[test]
     fn local_name_translation_round_trips() {
-        assert_eq!(Inferior::rust_local_to_jet("user_total"), Some("total".to_string()));
+        assert_eq!(
+            Inferior::rust_local_to_jet("user_total"),
+            Some("total".to_string())
+        );
         assert_eq!(Inferior::jet_local_to_rust("total"), "user_total");
         // A compiler-internal temp (no `user_` prefix) is filtered, not shown raw.
         assert_eq!(Inferior::rust_local_to_jet("_jet_switch_subject"), None);
@@ -558,10 +588,19 @@ mod tests {
 
     #[test]
     fn func_name_strips_crate_path_and_hash() {
-        assert_eq!(Inferior::rust_func_to_jet("prog::main::h40021039c79c235b"), "main");
-        assert_eq!(Inferior::rust_func_to_jet("prog::user_helper::h991a2b3c4d5e6f70"), "helper");
+        assert_eq!(
+            Inferior::rust_func_to_jet("prog::main::h40021039c79c235b"),
+            "main"
+        );
+        assert_eq!(
+            Inferior::rust_func_to_jet("prog::user_helper::h991a2b3c4d5e6f70"),
+            "helper"
+        );
         // No hash suffix and no `::` path (e.g. a libc frame, already past
         // `parse_frame_line`'s own backtick split) — passes through as-is.
-        assert_eq!(Inferior::rust_func_to_jet("__libc_start_main"), "__libc_start_main");
+        assert_eq!(
+            Inferior::rust_func_to_jet("__libc_start_main"),
+            "__libc_start_main"
+        );
     }
 }

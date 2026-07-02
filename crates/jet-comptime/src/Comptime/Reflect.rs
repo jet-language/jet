@@ -100,13 +100,7 @@ pub fn build_type_param_info(param: &TypeParam) -> CtValue {
             ("name", ct_str(param.name.clone())),
             (
                 "bounds",
-                ct_list(
-                    param
-                        .bounds
-                        .iter()
-                        .map(|b| ct_str(b.clone()))
-                        .collect(),
-                ),
+                ct_list(param.bounds.iter().map(|b| ct_str(b.clone())).collect()),
             ),
         ],
     )
@@ -131,11 +125,7 @@ fn type_level_markers(s: &StructDef) -> Vec<CtValue> {
 pub fn build_struct_type_info(s: &StructDef) -> CtValue {
     let fields_info: Vec<CtValue> = s.fields.iter().map(build_field_info).collect();
     let methods_info: Vec<CtValue> = s.methods.iter().map(build_method_info).collect();
-    let type_params_info: Vec<CtValue> = s
-        .type_params
-        .iter()
-        .map(build_type_param_info)
-        .collect();
+    let type_params_info: Vec<CtValue> = s.type_params.iter().map(build_type_param_info).collect();
     ct_struct(
         "TypeInfo",
         &[
@@ -151,7 +141,7 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AST::Type, Diagnostics::Span};
+    use crate::{Diagnostics::Span, AST::Type};
 
     fn span() -> Span {
         Span::new(0, 1)
@@ -254,6 +244,8 @@ mod tests {
         let CtValue::List(markers) = get("markers") else {
             panic!("markers");
         };
-        assert!(markers.iter().any(|m| matches!(m, CtValue::Str(s) if s == "Debug")));
+        assert!(markers
+            .iter()
+            .any(|m| matches!(m, CtValue::Str(s) if s == "Debug")));
     }
 }

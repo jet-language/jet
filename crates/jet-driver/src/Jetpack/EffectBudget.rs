@@ -17,10 +17,10 @@
 //! for both `deps:` (path/git/provider) entries and hangar-realized
 //! `use <pkg>` libraries (U17).
 
-use crate::AST::{Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Jetpack::PackageManifest::PackManifest;
 use crate::Sema::{Effect, EffectSet};
+use crate::AST::{Item, ProgramBundle};
 use std::collections::{BTreeMap, HashMap};
 
 /// One package's (root, or a dependency) aggregated effect set.
@@ -68,7 +68,9 @@ fn collect_item_effects(item: &Item, solved: &HashMap<String, EffectSet>, out: &
         }
         Item::Impl(im) => {
             for m in &im.methods {
-                if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&im.type_name), &m.name)) {
+                if let Some(set) =
+                    solved.get(&crate::Sema::effect_key(Some(&im.type_name), &m.name))
+                {
                     out.extend(set.iter().copied());
                 }
             }
@@ -81,7 +83,8 @@ fn collect_item_effects(item: &Item, solved: &HashMap<String, EffectSet>, out: &
             }
             for block in &s.trait_impls {
                 for m in &block.methods {
-                    if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&s.name), &m.name)) {
+                    if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&s.name), &m.name))
+                    {
                         out.extend(set.iter().copied());
                     }
                 }
@@ -108,7 +111,10 @@ pub fn summary_line(entries: &[PackageEffects]) -> String {
     if all.is_empty() {
         return "effects: none".to_string();
     }
-    let dep_count = entries.iter().filter(|e| e.name != "root" && !e.effects.is_empty()).count();
+    let dep_count = entries
+        .iter()
+        .filter(|e| e.name != "root" && !e.effects.is_empty())
+        .count();
     let names: Vec<&str> = all.iter().map(|e| e.name()).collect();
     if dep_count == 0 {
         format!("effects: {}", names.join(", "))
@@ -155,7 +161,10 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackManifest) -> Vec<Diagn
         .map(|(dep, effects)| {
             (
                 dep.as_str(),
-                effects.iter().filter_map(|n| Effect::parse(n)).collect::<EffectSet>(),
+                effects
+                    .iter()
+                    .filter_map(|n| Effect::parse(n))
+                    .collect::<EffectSet>(),
             )
         })
         .collect();

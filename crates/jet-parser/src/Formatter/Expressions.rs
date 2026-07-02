@@ -210,7 +210,9 @@ impl<'a> Fmt<'a> {
             Expr::Int(n, _, _) => self.write(&n.to_string()),
             Expr::Float(v, _, _) => self.write(&fmt_float(*v)),
             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
-            Expr::UnitLit { int, float, suffix, .. } => {
+            Expr::UnitLit {
+                int, float, suffix, ..
+            } => {
                 if let Some(n) = int {
                     self.write(&n.to_string());
                 } else if let Some(v) = float {
@@ -704,6 +706,59 @@ impl<'a> Fmt<'a> {
                     }
                     self.fmt_pattern(alt);
                 }
+            }
+            // D-DESTRUCT1: struct-shaped dispatch arm head.
+            Pattern::Struct { fields, rest, .. } => {
+                self.write(".{");
+                for (i, field) in fields.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    match field {
+                        crate::AST::StructPatField::Bind { field, local, .. } if field == local => {
+                            self.write(field)
+                        }
+                        crate::AST::StructPatField::Bind { field, local, .. } => {
+                            self.write(field);
+                            self.write(": ");
+                            self.write(local);
+                        }
+                        crate::AST::StructPatField::Value { field, value, .. } => {
+                            self.write(field);
+                            self.write(": ");
+                            self.fmt_expr(value, Prec::OrFallback);
+                        }
+                    }
+                }
+                if rest.is_some() {
+                    if !fields.is_empty() {
+                        self.write(", ");
+                    }
+                    self.write("..");
+                }
+                self.write("}");
+            }
+            // D-PARSESTR1: an interpolation literal used as a pattern —
+            // formats identically to the same text as a format literal, plus
+            // a `:Type` suffix on typed holes (which format literals never
+            // have).
+            Pattern::StrMatch { parts, .. } => {
+                self.write("\"");
+                for part in parts {
+                    match part {
+                        crate::AST::StrMatchPart::Lit(s) => self.write(&escape_str_lit(s)),
+                        crate::AST::StrMatchPart::Hole { name, ty, .. } => {
+                            self.write("{");
+                            self.write(name);
+                            if let Some(t) = ty {
+                                self.write(":");
+                                self.fmt_type(t);
+                            }
+                            self.write("}");
+                        }
+                    }
+                }
+                self.write("\"");
             }
         }
     }

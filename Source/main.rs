@@ -19,9 +19,9 @@ use jet::ExitCodes;
 mod CmdCompile;
 mod CmdDevTools;
 mod CmdDevWeb;
+mod CmdImpact;
 mod CmdPkg;
 mod CmdSchema;
-mod CmdImpact;
 mod CmdSemIndex;
 mod CmdSupply;
 
@@ -34,12 +34,12 @@ use CmdDevTools::{
     run_explain, run_lint_a11y, run_repl, run_serve, watch_policy_from, WatchPolicy,
 };
 use CmdDevWeb::run_dev_web;
+use CmdImpact::run_impact;
 use CmdPkg::{
     run_add, run_fetch, run_gc, run_remove, run_store_generations, run_store_rollback,
     run_store_verify, run_update,
 };
 use CmdSchema::run_schema;
-use CmdImpact::run_impact;
 use CmdSemIndex::run_semindex;
 use CmdSupply::{run_audit, run_publish, run_sbom, run_vendor, run_yank};
 
@@ -263,10 +263,7 @@ pub(crate) enum BuildProfile {
     /// D-BUILDPROFILE1: `--profile=ci`. Optimized with debug symbols for CI.
     Ci,
     /// D-BUILDPROFILE1: user-defined or manifest-overridden profile settings.
-    Named {
-        name: String,
-        config: ProfileConfig,
-    },
+    Named { name: String, config: ProfileConfig },
     /// S15: size-oriented (`opt-level=z`, fat LTO, `panic=abort`).
     Small,
     /// E2-M15: freestanding / embedded — no OS, only core APIs; `panic=abort`.
@@ -417,10 +414,7 @@ flags:
 /// false so E2101 still fires for typos like `buld`.
 fn looks_like_jet_source(arg: &str) -> bool {
     let path = Path::new(arg);
-    if path
-        .extension()
-        .is_some_and(|e| e == jet::Syntax::FILE_EXT)
-    {
+    if path.extension().is_some_and(|e| e == jet::Syntax::FILE_EXT) {
         return true;
     }
     if path.exists() {
@@ -1064,7 +1058,8 @@ fn main() {
                                 } else {
                                     args.iter().skip(1).copied().collect()
                                 };
-                                let effective = effective_target(cmd, &entry_str, cross_target.as_deref());
+                                let effective =
+                                    effective_target(cmd, &entry_str, cross_target.as_deref());
                                 run_compile_cmd(
                                     cmd,
                                     &entry_str,

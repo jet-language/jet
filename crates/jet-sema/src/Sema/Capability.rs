@@ -167,7 +167,7 @@ fn scan_stmt(
     param_types: &HashMap<String, String>,
 ) {
     match stmt {
-        Stmt::Expr(e) => scan_expr(e, caps, method_map, param_types),
+        Stmt::Expr(e) | Stmt::Yield(e, _) => scan_expr(e, caps, method_map, param_types),
         Stmt::Val(b) => scan_expr(&b.init, caps, method_map, param_types),
         Stmt::Assign { target, value, .. } => {
             // A through-reference mutation of a param requires Write. A bare
@@ -344,7 +344,9 @@ fn scan_expr(
             scan_expr(lhs, caps, method_map, param_types);
             scan_expr(rhs, caps, method_map, param_types);
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => scan_expr(inner, caps, method_map, param_types),
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+            scan_expr(inner, caps, method_map, param_types)
+        }
         Expr::Deref(inner, _) | Expr::RawOf(inner, _) => {
             scan_expr(inner, caps, method_map, param_types)
         }

@@ -1,9 +1,9 @@
 //! D-WASM1=A (c123 M1): classify functions into JS/WASM buckets and diagnose crossings.
 
-use crate::AST::{EnumDef, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use crate::Diagnostics::Diagnostic;
 use crate::Generics::{DECODE, ENCODE};
 use crate::Syntax::{self, WebBucket, WebPartitionMarker};
+use crate::AST::{EnumDef, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use std::collections::HashMap;
 
 use super::effect_key;
@@ -162,9 +162,9 @@ impl AbiTypeIndex {
             return e.variants.iter().all(|v| match &v.payload {
                 VariantPayload::Unit => true,
                 VariantPayload::Single(t, _) => is_abi_safe_type_full(t, self),
-                VariantPayload::Named(fields) => fields
-                    .iter()
-                    .all(|f| is_abi_safe_type_full(&f.ty, self)),
+                VariantPayload::Named(fields) => {
+                    fields.iter().all(|f| is_abi_safe_type_full(&f.ty, self))
+                }
             });
         }
         false
@@ -323,10 +323,7 @@ pub fn format_partition_report(
     let mut rows: Vec<_> = metas.iter().collect();
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     for f in rows {
-        let bucket = partitions
-            .get(&f.key)
-            .copied()
-            .unwrap_or(WebBucket::Wasm);
+        let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);
         let effects = solved.get(&f.key).cloned().unwrap_or_default();
         lines.push(format!(
             "{:<24} -> {:<4}  {}  effects: {}",
@@ -402,11 +399,7 @@ pub fn check_web_partition(
     bundle.web_partitions = partitions.clone();
 
     if bundle.web_partition_enforced {
-        bundle.web_partition_report = Some(format_partition_report(
-            &metas,
-            &partitions,
-            solved,
-        ));
+        bundle.web_partition_report = Some(format_partition_report(&metas, &partitions, solved));
     }
 
     if !web_partition_active(bundle) {
@@ -417,10 +410,7 @@ pub fn check_web_partition(
     let mut diags = Vec::new();
     for f in &metas {
         let effects = solved.get(&f.key).cloned().unwrap_or_default();
-        let bucket = partitions
-            .get(&f.key)
-            .copied()
-            .unwrap_or(WebBucket::Wasm);
+        let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);
         check_abi_export(f, &abi_idx, &mut diags);
         check_target_browser(f, bucket, &effects, &mut diags);
     }
@@ -443,9 +433,7 @@ pub fn check_web_partition(
                 let callee_meta = meta_by_key.get(callee_key.as_str());
                 let wasm_export_bridge = *caller_bucket == WebBucket::Js
                     && *callee_bucket == WebBucket::Wasm
-                    && callee_meta
-                        .and_then(|m| m.marker)
-                        == Some(WebPartitionMarker::WasmExport);
+                    && callee_meta.and_then(|m| m.marker) == Some(WebPartitionMarker::WasmExport);
                 if wasm_export_bridge {
                     continue;
                 }

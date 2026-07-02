@@ -663,7 +663,9 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             emit_func(&cx, f, &mut out);
         }
     }
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
+        strip_unused_mem_prelude(out),
+    )))
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
@@ -774,7 +776,9 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main(&tests, &mut out);
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
+        strip_unused_mem_prelude(out),
+    )))
 }
 
 /// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
@@ -950,7 +954,11 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
 /// (`TStmt::LineMarker`) the native debug backend's line table reads back. Used ONLY
 /// by the `jet debug` native build path; `emit_bundle` (linemap off) stays
 /// byte-identical to today's output for every other build (golden tests, JIT).
-pub fn emit_bundle_dbg(bundle: &ProgramBundle, link: Option<&FfiLink>, debug_linemap: bool) -> String {
+pub fn emit_bundle_dbg(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    debug_linemap: bool,
+) -> String {
     let entry = &bundle.modules[bundle.entry];
     let mut out = String::new();
     out.push_str(&format!(
@@ -1034,7 +1042,9 @@ pub fn emit_bundle_dbg(bundle: &ProgramBundle, link: Option<&FfiLink>, debug_lin
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
+        strip_unused_mem_prelude(out),
+    )))
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
@@ -1154,7 +1164,9 @@ pub fn emit_bundle_tests_cov(
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main_cov(&tests, &mut out, coverage);
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
+        strip_unused_mem_prelude(out),
+    )))
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
@@ -1327,5 +1339,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    }\n");
     }
     out.push_str("}\n");
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))))
+    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
+        strip_unused_mem_prelude(out),
+    )))
 }

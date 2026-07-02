@@ -80,10 +80,10 @@ fn gzip_compress_decompress_round_trip() {
 use core.archive as ar
 
 fn main() {
-original: [U8] #= [72, 101, 108, 108, 111]
-    compressed #= ar.gzip_compress(original)
+original: [U8] :: [72, 101, 108, 108, 111]
+    compressed :: ar.gzip_compress(original)
     print((compressed.len() > 5))
-    restored #= ar.gzip_decompress(compressed)
+    restored :: ar.gzip_decompress(compressed)
     print((restored == original))
 }
 "#;
@@ -102,14 +102,14 @@ fn gzip_compress_reduces_repetitive_data() {
 use core.archive as ar
 
 fn main() {
-data: [U8] #= [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+data: [U8] :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    compressed #= ar.gzip_compress(data)
+    compressed :: ar.gzip_compress(data)
     print((compressed.len() < data.len()))
-    restored #= ar.gzip_decompress(compressed)
+    restored :: ar.gzip_decompress(compressed)
     print((restored.len() == data.len()))
 }
 "#;

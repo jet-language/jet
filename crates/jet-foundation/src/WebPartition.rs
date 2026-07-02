@@ -1,7 +1,7 @@
 //! D-WASM1=A (c123 M1): JS/WASM partition buckets and ABI-safe type checks.
 
-use crate::AST::Type;
 use crate::Syntax;
+use crate::AST::Type;
 
 /// Compile target bucket for the web backend (D-WASM1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,9 +66,7 @@ pub fn is_abi_safe_type(ty: &Type) -> bool {
         | Type::IntN { .. }
         | Type::Float32 => true,
         Type::Named(n) if n == "String" => true,
-        Type::List(inner) | Type::Option(inner) | Type::Shared(inner) => {
-            is_abi_safe_type(inner)
-        }
+        Type::List(inner) | Type::Option(inner) | Type::Shared(inner) => is_abi_safe_type(inner),
         Type::FixedList { elem, .. } => is_abi_safe_type(elem),
         Type::Map { key, value } => matches!(**key, Type::String) && is_abi_safe_type(value),
         _ => false,

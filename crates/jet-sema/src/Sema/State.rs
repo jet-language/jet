@@ -245,7 +245,9 @@ impl<'a> StateCtx<'a> {
     fn entry_state_of(&self, init: &Expr) -> Option<String> {
         match init {
             // `Type.ctor(…)` / `Ns.Type.ctor(…)` — static entry transition.
-            Expr::MethodCall { receiver, method, .. } => {
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
                 let type_name = Self::static_method_type_name(receiver)?;
                 let key = format!("{type_name}::{method}");
                 self.tbl.entry_ctors.get(&key).cloned()
@@ -267,7 +269,7 @@ impl<'a> StateCtx<'a> {
 
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
-            Stmt::Expr(e) => {
+            Stmt::Expr(e) | Stmt::Yield(e, _) => {
                 self.check_expr(e);
             }
             Stmt::Val(b) => {

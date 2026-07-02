@@ -91,7 +91,10 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                         .iter()
                         .enumerate()
                         .map(|(i, p)| {
-                            let name = real_names.get(i).cloned().unwrap_or_else(|| format!("f{i}"));
+                            let name = real_names
+                                .get(i)
+                                .cloned()
+                                .unwrap_or_else(|| format!("f{i}"));
                             format!("{name}: {p}")
                         })
                         .collect();
@@ -124,6 +127,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 .collect();
             pats.join(" | ")
         }
+        // D-PARSESTR1: str-match patterns are lowered as their own scan/split/parse
+        // control flow (TIR/lower.rs), never as a single Rust match pattern.
+        Pattern::Struct { .. } | Pattern::StrMatch { .. } => "_".to_string(),
     }
 }
 
@@ -222,7 +228,11 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
             .first()
             .map(|a| emit_if_let_pattern(cx, a))
             .unwrap_or_default(),
-        Pattern::Range { .. } => "_".to_string(),
+        // D-PARSESTR1: str-match, like struct patterns, isn't reachable here —
+        // it has its own dedicated lowering (TIR/lower.rs).
+        Pattern::Range { .. } | Pattern::Struct { .. } | Pattern::StrMatch { .. } => {
+            "_".to_string()
+        }
     }
 }
 

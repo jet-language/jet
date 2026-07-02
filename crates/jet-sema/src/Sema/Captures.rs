@@ -3,7 +3,7 @@ use crate::Diagnostics::Span;
 use crate::Syntax;
 use crate::AST::{
     ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, LValue, LambdaBody, OrFallback, Pattern, Stmt,
-    StrPart,
+    StrPart, StructPatField,
 };
 use std::collections::HashSet;
 
@@ -14,7 +14,7 @@ pub(crate) fn walk_stmts_for_const_refs(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) => walk_expr_for_const_refs(e, const_names, taken),
+            Stmt::Expr(e) | Stmt::Yield(e, _) => walk_expr_for_const_refs(e, const_names, taken),
             Stmt::Val(b) => walk_expr_for_const_refs(&b.init, const_names, taken),
             Stmt::Assign { value, .. } => walk_expr_for_const_refs(value, const_names, taken),
             Stmt::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
@@ -197,7 +197,16 @@ pub(crate) fn walk_expr_for_const_refs(
             }
             let _ = is_option;
         }
-        Expr::PatternTest { subject, .. } => walk_expr_for_const_refs(subject, const_names, taken),
+        Expr::PatternTest { subject, pattern, .. } => {
+            walk_expr_for_const_refs(subject, const_names, taken);
+            if let Pattern::Struct { fields, .. } = pattern {
+                for field in fields {
+                    if let StructPatField::Value { value, .. } = field {
+                        walk_expr_for_const_refs(value, const_names, taken);
+                    }
+                }
+            }
+        }
         Expr::Binary(_, l, r, _) => {
             walk_expr_for_const_refs(l, const_names, taken);
             walk_expr_for_const_refs(r, const_names, taken);
@@ -288,9 +297,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _) => {
-            expr_refs_name(inner, name)
-        }
+        | Expr::RawOf(inner, _) => expr_refs_name(inner, name),
         Expr::Binary(_, l, r, _) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::CompareChain { operands, .. } => operands.iter().any(|e| expr_refs_name(e, name)),
         Expr::Call(c) => c.args.iter().any(|a| expr_refs_name(&a.expr, name)),
@@ -332,7 +339,18 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
                     _ => false,
                 }
         }
-        Expr::PatternTest { subject, .. } => expr_refs_name(subject, name),
+        Expr::PatternTest {
+            subject, pattern, ..
+        } => {
+            expr_refs_name(subject, name)
+                || match pattern {
+                    Pattern::Struct { fields, .. } => fields.iter().any(|field| match field {
+                        StructPatField::Value { value, .. } => expr_refs_name(value, name),
+                        StructPatField::Bind { .. } => false,
+                    }),
+                    _ => false,
+                }
+        }
         Expr::Lambda(_) => false,
         Expr::Str(parts, _) => parts.iter().any(|p| {
             if let StrPart::Interp(e, _) = p {
@@ -374,7 +392,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
 
 pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
     match stmt {
-        Stmt::Expr(e) => expr_refs_name(e, name),
+        Stmt::Expr(e) | Stmt::Yield(e, _) => expr_refs_name(e, name),
         Stmt::Val(b) => expr_refs_name(&b.init, name),
         Stmt::Assign { target, value, .. } => {
             lvalue_refs_name(target, name) || expr_refs_name(value, name)
@@ -716,7 +734,16 @@ pub(crate) fn expr_collect_captures(
                 _ => {}
             }
         }
-        Expr::PatternTest { subject, .. } => expr_collect_captures(subject, bound, read, mut_cap),
+        Expr::PatternTest { subject, pattern, .. } => {
+            expr_collect_captures(subject, bound, read, mut_cap);
+            if let Pattern::Struct { fields, .. } = pattern {
+                for field in fields {
+                    if let crate::AST::StructPatField::Value { value, .. } = field {
+                        expr_collect_captures(value, bound, read, mut_cap);
+                    }
+                }
+            }
+        }
         Expr::Str(parts, _) => {
             for p in parts {
                 if let StrPart::Interp(ex, _) = p {
@@ -737,7 +764,7 @@ pub(crate) fn stmt_collect_captures(
     mut_cap: &mut HashSet<String>,
 ) {
     match stmt {
-        Stmt::Expr(e) => expr_collect_captures(e, bound, read, mut_cap),
+        Stmt::Expr(e) | Stmt::Yield(e, _) => expr_collect_captures(e, bound, read, mut_cap),
         Stmt::Val(b) => {
             expr_collect_captures(&b.init, bound, read, mut_cap);
             bound.insert(b.name.clone());
@@ -833,6 +860,13 @@ pub(crate) fn stmt_collect_captures(
                             }
                         }
                         Pattern::Absent(_) | Pattern::Range { .. } => {}
+                        Pattern::Struct { fields, .. } => {
+                            for field in fields {
+                                if let crate::AST::StructPatField::Bind { local, .. } = field {
+                                    arm_bound.insert(local.clone());
+                                }
+                            }
+                        }
                         Pattern::Or(alts, _) => {
                             // Insert bindings from first alt (all alts bind same names).
                             if let Some(first) = alts.first() {
@@ -842,6 +876,14 @@ pub(crate) fn stmt_collect_captures(
                                             arm_bound.insert(b.clone());
                                         }
                                     }
+                                }
+                            }
+                        }
+                        // D-PARSESTR1: every hole binds a name into the arm body.
+                        Pattern::StrMatch { parts, .. } => {
+                            for part in parts {
+                                if let crate::AST::StrMatchPart::Hole { name, .. } = part {
+                                    arm_bound.insert(name.clone());
                                 }
                             }
                         }

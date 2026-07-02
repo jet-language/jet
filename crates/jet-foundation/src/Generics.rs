@@ -195,10 +195,9 @@ pub fn sig_matches_trait(
     }
     match (&ret, &expected.return_type) {
         (None, None) => !is_view && !expected.is_view_return,
-        (Some(r), Some(er)) => types_equal_modulo_self(
-            &substitute_type(r, assoc),
-            &substitute_type(er, assoc),
-        ),
+        (Some(r), Some(er)) => {
+            types_equal_modulo_self(&substitute_type(r, assoc), &substitute_type(er, assoc))
+        }
         _ => false,
     }
 }

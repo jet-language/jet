@@ -1,11 +1,11 @@
 //! D-MUSTUSE1 (c18iwxqx): `@MustUse` ignored-result diagnostics (E0419).
 
-use jet_sema::AST::{CFfi, LoadedModule, ProgramBundle};
 use jet_sema::Diagnostics::{Diagnostic, Severity};
 use jet_sema::Lexer;
 use jet_sema::Parser;
 use jet_sema::Sema::{check_bundle, CompileMode};
 use jet_sema::Syntax;
+use jet_sema::AST::{CFfi, LoadedModule, ProgramBundle};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 

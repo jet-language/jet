@@ -398,7 +398,7 @@ pub enum TStmt {
         ty_clause: String,
         init: TExpr,
     },
-    /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) #= <init>` (S74,
+    /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
     /// `BindPattern::Tuple`). Reproduces `emit_stmt`'s destructure form byte-for-byte:
     /// a `let {tmp} = &({init});` temp (borrowed — never moves out of a shared ref, I2),
     /// then one `let[ mut] {elem_rust} = ({tmp}).{field_rust}.clone();` per element,
@@ -412,7 +412,7 @@ pub enum TStmt {
         /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
         binds: Vec<(String, String)>,
     },
-    /// c109: a STRUCT-destructuring binding `Type.{ x, y } #= <init>` (S74,
+    /// c109: a STRUCT-destructuring binding `Type.{ x, y } :: <init>` (S74,
     /// `BindPattern::Struct`). Reproduces `emit_stmt`'s `BindPattern::Struct` arm
     /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
     /// `let[ mut] {local_rust} = ({tmp}).{field_rust}.clone();` per bound field.
@@ -428,7 +428,7 @@ pub enum TStmt {
         /// `(local_rust_name, field_rust_name)` per bound field, source order.
         binds: Vec<(String, String)>,
     },
-    /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] #= <init>` (S74,
+    /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] :: <init>` (S74,
     /// `BindPattern::List`). Reproduces `emit_stmt`'s `BindPattern::List` arm
     /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
     /// `let[ mut] {elem_rust} = jet_unpack_vec({tmp}, {want}, {i}, {file:?}, {line});`
@@ -612,6 +612,10 @@ pub enum TStmt {
         /// `({coll}).iter_aos()` (yields owned gathered `S`) instead of
         /// `({coll}).iter().cloned()`. Always `false` for the map/method forms.
         columnar: bool,
+        /// D-STREAMYIELD1: the collection is a `Stream<T>` (`Receiver<T>`) —
+        /// iterate it directly BY VALUE (`for x in (coll) { }`; `Receiver<T>`
+        /// already implements `IntoIterator<Item = T>`), not `.iter().cloned()`.
+        by_value: bool,
         body: Vec<TStmt>,
     },
     /// c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picked the
@@ -645,7 +649,9 @@ pub enum TStmt {
     /// body is lowered on the SAME `LowerEnv` (not a cloned scope).
     Unsafe(Vec<TStmt>),
     /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
-    Reactive { closure: String },
+    Reactive {
+        closure: String,
+    },
     /// c109 Phase 19: an explicit `region r { … }` (D-REGION1 opt B). Lowers to a plain
     /// Rust block `{ … }` — a lexical scope. The region's escape bound (E0631) and arena
     /// drop ordering (S63 RAII) are enforced entirely in sema; codegen is dumb (I3). The
@@ -765,6 +771,13 @@ pub enum TExprKind {
     Call {
         name: String,
         args: Vec<TCallArg>,
+    },
+    /// D-RANGETYPE1: checked constructor for `distinct Int(lo..hi)` under
+    /// postfix `?`. Emits `user_T::try_new(arg)` returning `Result<user_T,
+    /// String>`; the enclosing `Try` node handles propagation.
+    RangeCheckedCtor {
+        name: String,
+        arg: Box<TExpr>,
     },
     /// D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
     /// `Vec3(x,y,z)` / `Mat3(…)`, or a static method `F32x4.splat(x)` /
@@ -963,7 +976,9 @@ pub enum TExprKind {
     /// literal site — `emit_expr` per element).
     ListLit(Vec<TExpr>),
     /// D-VARIADIC1: `[a, ...xs, b]` — one growable list built via `extend`.
-    ListSpread { parts: Vec<ListSpreadPart> },
+    ListSpread {
+        parts: Vec<ListSpreadPart>,
+    },
     /// D-SOA1: a list literal whose element is a `#layout(columnar)` struct `S`.
     /// Lowers to `user_<S>_columns::from_aos(vec![…])` — the elements build the
     /// array-of-structs, then `from_aos` distributes them across the columns.
@@ -1915,10 +1930,14 @@ pub enum THandleOp {
     /// D-PATHFS1: `path.walk()` → `{root}jet_path_walk(&(recv))` → `Vec<JetPath>`.
     PathWalk,
     /// D-RENDERTGT2=A (c133 M1): NullBackend measure/layout/paint/on_event/commands.
-    UiBackendMethod { method: String },
+    UiBackendMethod {
+        method: String,
+    },
     /// c-devserver (owner-directed 2026-07-01): `DevServer` builder methods
     /// (`.html`/`.port`/`.serve`).
-    DevServerMethod { method: String },
+    DevServerMethod {
+        method: String,
+    },
     /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DbError>`. Encodes
     /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
     /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.
@@ -2258,7 +2277,7 @@ fn make(n: String) -> Person {
         // (E0422) before; the fix prefixes the foreign module.
         let src = "\
 fn mk() {
-    n #= Note.{ text: \"hi\" }
+    n :: Note.{ text: \"hi\" }
     print(n.text)
 }
 ";
@@ -2269,7 +2288,7 @@ fn mk() {
     fn covers_unsafe_fn_with_ptr_ops() {
         // c109 Phase 18: a `#Unsafe fn` (S58) is covered — it lowers to `unsafe fn`, and
         // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
-        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) -> Int {\n p #= mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) -> Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
         assert!(covers_with_mem(src, "read_reg"));
     }
 
@@ -2277,7 +2296,7 @@ fn mk() {
     fn covers_unsafe_block_and_address_of() {
         // c109 Phase 18: a `#Unsafe("…") { … }` audited region + `mem.address_of` (the
         // inert address cast, legal outside unsafe) are covered.
-        let src = "use core.mem\nfn main() {\n cell: Int #= 7\n addr #= mem.address_of(cell)\n #Unsafe(\"live\") {\n p #= mem.Ptr<Int>.from_addr(addr)\n seen #= mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
+        let src = "use core.mem\nfn main() {\n cell: Int :: 7\n addr :: mem.address_of(cell)\n #Unsafe(\"live\") {\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
         assert!(covers_with_mem(src, "main"));
     }
 
@@ -2334,7 +2353,7 @@ fn mk() {
     #[test]
     fn rejects_method_call_in_body() {
         // A method call (`.bumped()`) is not a covered construct.
-        let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x #= C.{ n: 1 }\n return x.bumped()\n}\n";
+        let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x :: C.{ n: 1 }\n return x.bumped()\n}\n";
         assert!(!covers(src, "caller"));
     }
 
@@ -2400,13 +2419,13 @@ fn mk() {
 
     #[test]
     fn covers_infinite_loop_with_break() {
-        let src = "fn f() {\n x #= 0\n loop {\n x = (x + 1)\n if (x > 3) {\n break\n }\n }\n print(x)\n}\n";
+        let src = "fn f() {\n x :: 0\n loop {\n x = (x + 1)\n if (x > 3) {\n break\n }\n }\n print(x)\n}\n";
         assert!(covers(src, "f"));
     }
 
     #[test]
     fn covers_while_form() {
-        let src = "fn f() {\n x #= 0\n loop (x < 3) {\n x = (x + 1)\n }\n print(x)\n}\n";
+        let src = "fn f() {\n x :: 0\n loop (x < 3) {\n x = (x + 1)\n }\n print(x)\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -2469,7 +2488,7 @@ fn mk() {
     #[test]
     fn covers_enum_local_and_literal_in_main() {
         // An enum-typed local bound from a literal, passed to a covered helper.
-        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start #= Light.Red\n print(label(start))\n}\n";
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start :: Light.Red\n print(label(start))\n}\n";
         assert!(covers(src, "main"));
     }
 
@@ -2808,7 +2827,7 @@ fn mk() {
         // scalar-payload *error enum* literal is `Bad.Code(1)`, which parses as a
         // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
         // proven end-to-end by `tests/tir.rs::fallible_try_and_or_fallback`.)
-        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return err(\"bad\")\n }\n return ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n #= f(x)?\n return ok((n + 1))\n}\n";
+        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return err(\"bad\")\n }\n return ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n :: f(x)?\n return ok((n + 1))\n}\n";
         assert!(covers(src, "f"));
         assert!(covers(src, "g"));
     }
@@ -3063,7 +3082,7 @@ fn build() -> Rect { return Rect.new(4, 3) }
         // `input` fn). It composes with the `??` value fallback (Phase 8).
         let src = "\
 fn greet() -> String {
-    name #= input() ?? \"world\"
+    name :: input() ?? \"world\"
     return \"hi {name}\"
 }
 ";
@@ -3103,9 +3122,9 @@ fn greet() -> String { return input() }
         // c109: a single-uppercase-letter DECLARED struct name (`P`) is a concrete
         // type, not a type variable — the `is_type_var_name` heuristic is now guarded
         // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
-        // `P{x} #= p` struct-destructure are both covered; the fn routes through TIR.
+        // `P{x} :: p` struct-destructure are both covered; the fn routes through TIR.
         assert!(covers(
-            "struct P { x: Int }\nfn f() { p #= P.{x: 1}\n#Caps(Io) { P.{x} #= p\nprint(x) } }",
+            "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#Caps(Io) { P.{x} :: p\nprint(x) } }",
             "f"
         ));
     }
@@ -3126,21 +3145,21 @@ fn greet() -> String { return input() }
 
     #[test]
     fn covers_list_destructure() {
-        // c109 Phase 26: a list-destructuring binding `[a, b, c] #= <init>` (S74) routes
+        // c109 Phase 26: a list-destructuring binding `[a, b, c] :: <init>` (S74) routes
         // when the init is in-subset — the fan-out result destructure (`41_fan_out`).
         assert!(covers(
-            "fn f() { xs #= [1, 2, 3]\n[a, b, c] #= xs\nprint(a) }",
+            "fn f() { xs :: [1, 2, 3]\n[a, b, c] :: xs\nprint(a) }",
             "f"
         ));
     }
 
     #[test]
     fn covers_struct_destructure() {
-        // c109: a struct-destructuring binding `Type { x, y } #= <init>` (S74) routes
+        // c109: a struct-destructuring binding `Type { x, y } :: <init>` (S74) routes
         // when the init is in-subset — the AST `BindPattern::Struct` arm is covered
         // byte-for-byte (per-field type from `cx.struct_fields`).
         assert!(covers(
-            "struct Point { x: Int, y: Int }\nfn f() { p #= Point.{ x: 1, y: 2 }\nPoint.{ x, y } #= p\nprint(x + y) }",
+            "struct Point { x: Int, y: Int }\nfn f() { p :: Point.{ x: 1, y: 2 }\nPoint.{ x, y } :: p\nprint(x + y) }",
             "f"
         ));
     }
@@ -3148,12 +3167,12 @@ fn greet() -> String { return input() }
     #[test]
     fn covers_named_fn_value_binding() {
         // c109 Phase 27: a bare top-level fn name bound to a local as a VALUE
-        // (`double_fn #= double`). The init `Ident("double")` resolves to a `Type::Fn`
+        // (`double_fn :: double`). The init `Ident("double")` resolves to a `Type::Fn`
         // value (`emit_named_fn_value`), in-subset via `ident_is_named_fn_value`. (This
         // binding-site coercion was already wired in lowering; the live-suite `24_callbacks`
         // never routed only because the struct fn-field / fn-field-call were uncovered.)
         assert!(covers(
-            "fn dbl(x: Int) -> Int { return (x * 2) }\nfn f() { g #= dbl\nprint(g(3)) }",
+            "fn dbl(x: Int) -> Int { return (x * 2) }\nfn f() { g :: dbl\nprint(g(3)) }",
             "f"
         ));
     }
@@ -3336,9 +3355,9 @@ fn consume(ch: Channel<Int>) -> Int {
     fn covers_distinct_value_type_and_ctor() {
         // c109 Phase 23: a distinct param type + `.raw()` + the `Name(x)` constructor are
         // covered. The build_cx-only helper registers the distinct in `distinct_types`.
-        let src = "UserId #= distinct Int;\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
+        let src = "UserId :: distinct Int;\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
         assert!(covers(src, "greet"));
-        let src2 = "UserId #= distinct Int;\nfn mk() -> UserId {\n return UserId(42)\n}\n";
+        let src2 = "UserId :: distinct Int;\nfn mk() -> UserId {\n return UserId(42)\n}\n";
         assert!(covers(src2, "mk"));
     }
 
@@ -3380,7 +3399,7 @@ fn consume(ch: Channel<Int>) -> Int {
         let cx = build_cx(&prog, cx_src, "t.jet");
         let locals = HashSet::new();
         let lam = |body: &str| -> Vec<crate::AST::CallArg> {
-            let s = format!("fn g() {{ x #= scope.guard({})\n}}\n", body);
+            let s = format!("fn g() {{ x :: scope.guard({})\n}}\n", body);
             let (t, _) = crate::Lexer::lex(&s);
             let p = crate::Parser::parse(&t).expect("parse lam");
             // Pull the single call arg from the guard call.
@@ -3726,7 +3745,7 @@ struct Tree {
     child: Tree?
 }
 fn build() {
-    root #= Tree.{ value: 1, child: value(Tree.{ value: 2, child: null }) }
+    root :: Tree.{ value: 1, child: value(Tree.{ value: 2, child: null }) }
     print(root.value)
 }
 ";
@@ -3745,7 +3764,7 @@ struct Tree {
     child: Tree?
 }
 fn first_child(t: Tree) -> Int {
-    kid: Tree? #= t.child
+    kid: Tree? :: t.child
     if kid == {
         value(c) -> {
             return c.value
@@ -3762,7 +3781,7 @@ fn first_child(t: Tree) -> Int {
 
     #[test]
     fn covers_owning_nonscalar_field_read_clone() {
-        // c109: an owning field read of a NON-SCALAR field (`s #= p.name`, `name:
+        // c109: an owning field read of a NON-SCALAR field (`s :: p.name`, `name:
         // String`) — sema rewrites the read to `(p.name).clone()` (a `MethodCall`
         // clone shape). With the single-uppercase-letter struct name `P` now treated
         // as a concrete declared type (not a type var), the whole `main` routes
@@ -3773,9 +3792,9 @@ struct P {
 }
 
 fn main() {
-    p #= P.{ name: "x" }
-    s #= p.name
-    t #= p.name
+    p :: P.{ name: "x" }
+    s :: p.name
+    t :: p.name
     print(s)
     print(t)
 }
@@ -3882,7 +3901,7 @@ enum Wrapper {
     None
 }
 fn main() {
-    w #= Wrapper.Some(42)
+    w :: Wrapper.Some(42)
     if w == Some(_) {
         print(\"has value\")
     }

@@ -3,10 +3,10 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0901, e0904};
+use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Syntax;
 use crate::AST::{AccessConvention, BinOp, Call, EnumLitArg, Expr, Lambda, LambdaBody, Stmt, Type};
 use std::collections::{HashMap, HashSet};
@@ -661,14 +661,16 @@ impl<'a> Checker<'a> {
         }
         let a_ty = self.infer(&mut args[1].expr);
         let b_ty = self.infer(&mut args[2].expr);
-        let (Some(Type::Option(a_inner)), Some(Type::Option(b_inner))) = (a_ty.clone(), b_ty.clone())
+        let (Some(Type::Option(a_inner)), Some(Type::Option(b_inner))) =
+            (a_ty.clone(), b_ty.clone())
         else {
             if !matches!(a_ty, Some(Type::Option(_))) {
                 self.diags.push(Diagnostic::error(
                     "E0108",
                     format!(
                         "`Option.lift2`'s second argument must be optional, got {}",
-                        a_ty.map(|t| t.show()).unwrap_or_else(|| "an unknown type".to_string())
+                        a_ty.map(|t| t.show())
+                            .unwrap_or_else(|| "an unknown type".to_string())
                     ),
                     "`Option.lift2(f, a, b)` needs `a: T?`".to_string(),
                     "pass a `T?` value".to_string(),
@@ -680,7 +682,8 @@ impl<'a> Checker<'a> {
                     "E0108",
                     format!(
                         "`Option.lift2`'s third argument must be optional, got {}",
-                        b_ty.map(|t| t.show()).unwrap_or_else(|| "an unknown type".to_string())
+                        b_ty.map(|t| t.show())
+                            .unwrap_or_else(|| "an unknown type".to_string())
                     ),
                     "`Option.lift2(f, a, b)` needs `b: U?`".to_string(),
                     "pass a `T?` value".to_string(),
@@ -751,9 +754,7 @@ impl<'a> Checker<'a> {
         }
         let got = self.infer(&mut args[0].expr);
         let Some(Type::Option(b_inner)) = got else {
-            let shown = got
-                .map(|t| t.show())
-                .unwrap_or_else(|| "that".to_string());
+            let shown = got.map(|t| t.show()).unwrap_or_else(|| "that".to_string());
             self.diags.push(Diagnostic::error(
                 "E0108",
                 format!("`.zip()` needs an optional argument, got {}", shown),
@@ -854,6 +855,33 @@ impl<'a> Checker<'a> {
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — the sole audited
+        // escape from a runtime `String` into a typed-text position. `Sql`/
+        // `Html` here name the type, not a value (checked via `lookup` so a
+        // shadowing local of that name still resolves normally below).
+        if method == "raw" {
+            if let Expr::Ident(n, _) = receiver.as_ref() {
+                if (n == "Sql" || n == "Html") && self.lookup(n).is_none() {
+                    let type_name = n.clone();
+                    if args.len() != 1 {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!("`{}.raw()` takes exactly one argument", type_name),
+                            "`.raw()` wraps one already-audited `String` as the escape hatch"
+                                .to_string(),
+                            format!("write `{}.raw(text)`", type_name),
+                            Some(span),
+                        ));
+                        return Some(Type::Named(type_name));
+                    }
+                    let arg_ty = self.infer(&mut args[0].expr);
+                    if let Some(t) = arg_ty {
+                        self.check_type_assignable(&Type::String, &t, args[0].expr.span());
+                    }
+                    return Some(Type::Named(type_name));
+                }
+            }
+        }
         // D-PATHFS1 / E0340: `read_dir` is not a Jet API — teach the typed path path.
         if method == "read_dir" {
             self.infer(receiver); // still type-check the receiver
@@ -1170,22 +1198,65 @@ impl<'a> Checker<'a> {
         let recv_ty = self.infer(receiver)?;
         if let Type::Named(ref n) | Type::Apply { name: ref n, .. } = &recv_ty {
             if n == Syntax::TYPE_TASKGROUP {
-                return self.infer_taskgroup_method(
-                    receiver,
-                    method,
-                    span,
-                    args,
-                    recv_type_out,
-                );
+                return self.infer_taskgroup_method(receiver, method, span, args, recv_type_out);
             }
             if n == Syntax::TYPE_SELECT_BUILDER {
-                return self.infer_select_method(
-                    receiver,
-                    method,
-                    span,
-                    args,
-                    recv_type_out,
-                );
+                return self.infer_select_method(receiver, method, span, args, recv_type_out);
+            }
+            // D-TYPEDTEXT1=D: inspect a checked `Sql`/`Html` value. `.template()`/
+            // `.params()` expose the bound-parameter split (Sql never re-embeds a
+            // hole's text into the query string); `.text()` reads the escaped Html.
+            if n == "Sql" && matches!(method, "template" | "params") {
+                if !args.is_empty() {
+                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                }
+                *recv_type_out = Some(n.clone());
+                return Some(if method == "template" {
+                    Type::String
+                } else {
+                    Type::List(Box::new(Type::String))
+                });
+            }
+            if n == "Html" && method == "text" {
+                if !args.is_empty() {
+                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                }
+                *recv_type_out = Some(n.clone());
+                return Some(Type::String);
+            }
+        }
+        // D-ERRCTX1=D: `<fallible>.context("loading config {path}")` — a lazily-
+        // evaluated human boundary message added to the error chain. Ordinary
+        // method: arity/type errors go through the normal call-arity/type-mismatch
+        // paths (no new diagnostic code), per the ratified text.
+        if method == "context" {
+            if let Type::Result { err, .. } = &recv_ty {
+                // A custom error type (`T ? MyError`) isn't the string-erased
+                // `Error` surface `.context()` targets — fall through so the
+                // normal "unknown method" path teaches the actual shape.
+                if matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR) {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("context", 1, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return Some(recv_ty);
+                    }
+                    let saved = self.expected_type.clone();
+                    self.expected_type = Some(Type::String);
+                    let msg_ty = self.infer(&mut args[0].expr);
+                    self.expected_type = saved;
+                    if let Some(t) = msg_ty {
+                        self.check_type_assignable(&Type::String, &t, args[0].expr.span());
+                    }
+                    // D-ERRCTX1=D: cheap "receiver is `Result<_, Error>`" signal for
+                    // the TIR subset gate (mirrors how a named type's method sets
+                    // `recv_type_out`) — codegen/subset re-derive the shape from this
+                    // rather than re-inferring the receiver's full type.
+                    *recv_type_out = Some("__Fallible__".to_string());
+                    return Some(recv_ty);
+                }
             }
         }
         // E0964: length-changing methods are forbidden on a fixed-size [T#N].
@@ -1510,8 +1581,7 @@ impl<'a> Checker<'a> {
         if let Type::Named(handle_ty) = &recv_ty {
             let handle_ty_s = handle_ty.clone();
             if handle_ty_s == Syntax::GC_TYPE {
-                if let Some(ret) =
-                    gc_method_return(method, type_args, args, span, &mut self.diags)
+                if let Some(ret) = gc_method_return(method, type_args, args, span, &mut self.diags)
                 {
                     *recv_type_out = Some(handle_ty_s);
                     if method == "new" {
@@ -1911,8 +1981,7 @@ impl<'a> Checker<'a> {
                 if let Some(ret) = layout_method_return(tn, method, args.len()) {
                     for (i, arg) in args.iter_mut().enumerate() {
                         let axis_arg = (tn == "LayoutHandle"
-                            && ((method == "value" && i == 0)
-                                || (method == "suggest" && i == 0)))
+                            && ((method == "value" && i == 0) || (method == "suggest" && i == 0)))
                             .then_some(());
                         let want = layout_method_arg_ty(method, i);
                         let old = self.expected_type.take();
@@ -2589,7 +2658,8 @@ impl<'a> Checker<'a> {
                         "`BigInt` takes exactly one argument, got {}",
                         call.args.len()
                     ),
-                    "`BigInt` constructs an arbitrary-precision integer from an `Int` or `String`".to_string(),
+                    "`BigInt` constructs an arbitrary-precision integer from an `Int` or `String`"
+                        .to_string(),
                     "write `BigInt(100)` or `BigInt(\"999…\")`".to_string(),
                     Some(call.name_span),
                 ));
@@ -2604,10 +2674,7 @@ impl<'a> Checker<'a> {
                 Some(other) => {
                     self.diags.push(Diagnostic::error(
                         "E0128",
-                        format!(
-                            "`BigInt` expects `Int` or `String`, got `{}`",
-                            other.name()
-                        ),
+                        format!("`BigInt` expects `Int` or `String`, got `{}`", other.name()),
                         "`BigInt` never converts from `Float` or promotes silently".to_string(),
                         "pass an integer literal or a decimal string".to_string(),
                         Some(call.args[0].expr.span()),
@@ -2691,7 +2758,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                 }
-                // D-RANGETYPE1: `Severity #= distinct Int(0..10)` — a literal
+                // D-RANGETYPE1: `Severity :: distinct Int(0..10)` — a literal
                 // argument is checked NOW (E0135); a runtime value needs the
                 // fallible `?` form (E0136 otherwise). "Parse, don't
                 // validate" as a type.
@@ -2712,13 +2779,20 @@ impl<'a> Checker<'a> {
                             }
                         }
                         _ => {
-                            self.diags.push(Diagnostic::error(
-                                "E0136",
-                                format!("making a `{}` from a runtime value can fail", call.name),
-                                "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
-                                format!("write `{}(raw)?` and handle the failure", call.name),
-                                Some(call.args[0].expr.span()),
-                            ));
+                            if call.range_checked {
+                                return Some(Some(Type::Result {
+                                    ok: Box::new(Type::Named(call.name.clone())),
+                                    err: Box::new(Type::String),
+                                }));
+                            } else {
+                                self.diags.push(Diagnostic::error(
+                                    "E0136",
+                                    format!("making a `{}` from a runtime value can fail", call.name),
+                                    "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
+                                    format!("write `{}(raw)?` and handle the failure", call.name),
+                                    Some(call.args[0].expr.span()),
+                                ));
+                            }
                         }
                     }
                 }
@@ -3061,6 +3135,12 @@ impl<'a> Checker<'a> {
                         && matches!(&arg_ty, Type::Fn { .. })
                         && fn_types_compatible(&param_ty, &arg_ty));
                 if !reported && !compatible {
+                    // D-TYPEDTEXT1=D: a plain runtime `String` reaching a `Sql`/
+                    // `Html` parameter — teach the injection-safety fix instead of
+                    // a generic E0112.
+                    if let Some(diag) = typed_text_mismatch(&param_ty, &arg_ty, arg.expr.span()) {
+                        self.diags.push(diag);
+                    } else
                     // D-TRAILBLOCK1: a trailing `{ }` block always desugars to a
                     // ZERO-parameter lambda argument. If the parameter it lands in
                     // isn't a zero-parameter function, that's not an ordinary type
@@ -3343,8 +3423,12 @@ impl<'a> Checker<'a> {
                                     call.name,
                                     elem_ty.name()
                                 ),
-                                "call spread expands a list into the callee's variadic tail".to_string(),
-                                format!("pass a `[{}]` list, or change the element types", elem_ty.name()),
+                                "call spread expands a list into the callee's variadic tail"
+                                    .to_string(),
+                                format!(
+                                    "pass a `[{}]` list, or change the element types",
+                                    elem_ty.name()
+                                ),
                                 Some(arg.expr.span()),
                             ));
                         }

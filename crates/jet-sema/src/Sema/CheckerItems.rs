@@ -1,7 +1,10 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, Type, VariantPayload};
+use crate::AST::{
+    AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
+    VariantPayload,
+};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
@@ -920,6 +923,14 @@ impl<'a> Checker<'a> {
         subj_ty: &Type,
     ) -> Option<Pattern> {
         match cond {
+            // D-PARSESTR1: a str-match pattern is never provably exhaustive
+            // (literal text might not match; a typed hole's parse can fail),
+            // so it must never join the `all_pattern` provable-coverage path —
+            // it always needs its own E0148 (missing `else`) check instead.
+            Expr::PatternTest {
+                pattern: Pattern::StrMatch { .. },
+                ..
+            } => None,
             Expr::PatternTest {
                 subject, pattern, ..
             } => {
@@ -999,7 +1010,9 @@ impl<'a> Checker<'a> {
             return HashMap::new();
         };
         let bindings = self.validate_pattern(&st, pattern, span);
-        self.mark_pattern_subject_moved(subject, &bindings);
+        if !matches!(pattern, Pattern::Struct { .. }) {
+            self.mark_pattern_subject_moved(subject, &bindings);
+        }
         bindings
     }
 
@@ -1057,6 +1070,106 @@ impl<'a> Checker<'a> {
                         Syntax::LIT_OK,
                         Syntax::LIT_ERR
                     ),
+                    Some(span),
+                ));
+                HashMap::new()
+            }
+            (
+                Type::Named(type_name)
+                | Type::Apply {
+                    name: type_name, ..
+                },
+                Pattern::Struct { fields, rest, .. },
+            ) => {
+                let all_fields: Option<Vec<String>> = self
+                    .struct_owner_module(type_name, None)
+                    .and_then(|m| self.struct_fields_of(m, type_name))
+                    .map(|fs| fs.iter().map(|(name, ..)| name.clone()).collect());
+                let Some(all_fields) = all_fields else {
+                    self.diags.push(Diagnostic::error(
+                        "E0313",
+                        format!(
+                            "`{{ … }}` can only match a struct value, but this is {}",
+                            subject_ty.show()
+                        ),
+                        "a struct pattern reads named fields from a struct value".to_string(),
+                        "match a struct value, or use an enum/optional pattern instead".to_string(),
+                        Some(span),
+                    ));
+                    return HashMap::new();
+                };
+                let mut named = HashSet::new();
+                let mut result = HashMap::new();
+                for f in fields {
+                    let field_name = f.field_name();
+                    named.insert(field_name.to_string());
+                    let fty = self
+                        .field_type(subject_ty, field_name, f.field_span())
+                        .unwrap_or(Type::Int);
+                    match f {
+                        StructPatField::Bind {
+                            local, local_span, ..
+                        } => {
+                            result.insert(local.clone(), fty);
+                            let _ = local_span;
+                        }
+                        StructPatField::Value { value, .. } => {
+                            let mut value = (**value).clone();
+                            let saved_expected = self.expected_type.clone();
+                            self.expected_type = Some(fty.clone());
+                            let got = self.infer(&mut value);
+                            self.expected_type = saved_expected;
+                            if let Some(got) = got {
+                                let reported = self.check_type_assignable(&fty, &got, value.span());
+                                if !reported && got != fty {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0108",
+                                        format!(
+                                            "field `{}` is {}, but this pattern value is {}",
+                                            field_name,
+                                            fty.show(),
+                                            got.show()
+                                        ),
+                                        "a field pattern value must have the field's type"
+                                            .to_string(),
+                                        type_fix_hint(&fty, &got),
+                                        Some(value.span()),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                if rest.is_none() && named.len() < all_fields.len() {
+                    self.diags.push(Diagnostic::error(
+                        "E0326",
+                        format!("this pattern leaves out fields of `{}`", type_name),
+                        "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
+                        "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
+                        Some(span),
+                    ));
+                } else if let Some(rest_span) = rest {
+                    if named.len() >= all_fields.len() && !all_fields.is_empty() {
+                        self.diags.push(Diagnostic::error(
+                            "E0327",
+                            "this `..` is redundant".to_string(),
+                            format!("the pattern already names every field of `{}`", type_name),
+                            "remove `..` or leave out at least one field".to_string(),
+                            Some(*rest_span),
+                        ));
+                    }
+                }
+                result
+            }
+            (_, Pattern::Struct { .. }) => {
+                self.diags.push(Diagnostic::error(
+                    "E0313",
+                    format!(
+                        "`{{ … }}` can only match a struct value, but this is {}",
+                        subject_ty.show()
+                    ),
+                    "a struct pattern reads named fields from a struct value".to_string(),
+                    "match a struct value, or use an enum/optional pattern instead".to_string(),
                     Some(span),
                 ));
                 HashMap::new()
@@ -1334,6 +1447,55 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 HashMap::new() // range patterns bind nothing at arm-head level
+            }
+            // D-PARSESTR1: the same interpolation literal that formats a
+            // string can sit in pattern position — matches the fixed text
+            // and binds each hole. Always refutable; E0148 (missing `else`)
+            // is enforced in `check_switch`, not here.
+            (_, Pattern::StrMatch { parts, .. }) => {
+                if !matches!(subject_ty, Type::String) {
+                    self.diags.push(Diagnostic::error(
+                        "E0305",
+                        format!(
+                            "this pattern matches text, but the subject is {}",
+                            subject_ty.show()
+                        ),
+                        "a string-interpolation pattern only matches a `String` value".to_string(),
+                        "match a `String` subject, or use a pattern for this type instead"
+                            .to_string(),
+                        Some(span),
+                    ));
+                    return HashMap::new();
+                }
+                let mut result = HashMap::new();
+                for part in parts {
+                    let StrMatchPart::Hole { name, ty, span: hole_span } = part else {
+                        continue;
+                    };
+                    let bound_ty = match ty {
+                        None => Type::String,
+                        Some(t @ (Type::Int | Type::Float | Type::Bool | Type::String)) => {
+                            t.clone()
+                        }
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0305",
+                                format!(
+                                    "`{{{}:{}}}` can't read text as {} — only `Int`, `Float`, `Bool`, or `String` can come out of a pattern hole",
+                                    name,
+                                    other.show(),
+                                    other.show()
+                                ),
+                                "a typed hole reads the matched text into that type, and only these four types know how to read text".to_string(),
+                                "use `Int`, `Float`, `Bool`, or `String`, or drop the type to bind `String`".to_string(),
+                                Some(*hole_span),
+                            ));
+                            Type::String
+                        }
+                    };
+                    result.insert(name.clone(), bound_ty);
+                }
+                result
             }
             // D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
             (_, Pattern::Or(alts, _)) => {

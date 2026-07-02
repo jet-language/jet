@@ -5,7 +5,7 @@
 
 This plan is executable as-written. Every design question is settled; do **not**
 re-derive any decision. Where a ballot's illustrative code used v5 notation
-(`::` bindings, `type X :: Base`), the *live* spelling is D-BIND3 (`#=`/`:=`) and
+(`::` bindings, `type X :: Base`), the live spelling is D-BIND4 (`::`/`:=`) and
 the D-DIST1/D-DIST3 `distinct` machinery — build against current law, below.
 
 Read first (once): `CLAUDE.md` (I1–I8), `docs/spec/philosophy.md` (ranked
@@ -256,7 +256,7 @@ already fixes it; required elsewhere. Inference is local and one-directional
 ## 4. D-DESTRUCT1 — struct destructuring + mandatory `..`  *(Tier 1: reuses `.{ }`; carries a breaking migration)*
 
 **Ratified (A).** The dot-construction shape (D-DOTCTOR1/2) runs backwards. In
-binding position, `.{ id, severity: sev } #= incident` binds `id` and `severity`
+binding position, `.{ id, severity: sev } :: incident` binds `id` and `severity`
 (renamed `sev`). The same shape is an if-table pattern head —
 `.{ kind: "page", target, .. } -> page(target)` — matching named field values and
 binding the rest. **`..` is mandatory whenever the pattern does not name every
@@ -268,7 +268,7 @@ requiring a migration pass across examples/tests. One nesting level only.
   parser (S74 path; see `enum_lit_named_fields` for the sibling construction
   parser). Accept `field` (bind same name), `field: name` (rename), and a
   trailing `..` rest token (reuse `OP_RANGE` `..`). Both in binding position
-  (`.{ … } #= expr`) and in if-table arm heads.
+  (`.{ … } :: expr`) and in if-table arm heads.
 - **Sema:** reuse existing S74 checks — `E0313` (shape mismatch), `E0315`
   (list-pattern arity). New:
   - `E0326` (parse) — a partial struct destructure with no `..`.
@@ -337,10 +337,10 @@ literal spelling).
   family member [ ] E0134 fixture [ ] cross-unit still E0127 (fixture) [ ] fmt
   stability [ ] example + expected [ ] docs row implemented.
 
-## 6. D-RANGETYPE1 — range-constrained types `Severity #= distinct Int(0..10)`  *(Tier 2: distinct-type machinery)*
+## 6. D-RANGETYPE1 — range-constrained types `Severity :: distinct Int(0..10)`  *(Tier 2: distinct-type machinery)*
 
 **Ratified (A).** Extend the nominal `distinct Base` form with a literal range
-constraint: `Severity #= distinct Int(0..10)` is an `Int` that provably holds
+constraint: `Severity :: distinct Int(0..10)` is an `Int` that provably holds
 0–10 (`..` is inclusive, S22). Construction from a **literal** is checked at
 compile time; from a **runtime value** it is **fallible** (`Severity(raw)?`).
 Arithmetic **widens to the base** (`Int`); converting back re-checks.
@@ -376,7 +376,7 @@ illustration; live form is `distinct Int(0..10)` via D-DIST1.)
 - **Formatter:** emit `distinct Int(0..10)`; fmt STABILITY test
   `fmt_preserves_range_constraint` (assert the `(0..10)` is not dropped).
 - **Example:** `examples/features/types/range_types.jet` — declare
-  `Severity #= distinct Int(0..10)`, construct one from a literal, one fallibly
+  `Severity :: distinct Int(0..10)`, construct one from a literal, one fallibly
   from input; expected out.
 - **Exit:** [ ] range constraint parses + stores [ ] literal check E0135
   [ ] fallible runtime E0136 [ ] empty range E0137 [ ] widen-to-base arithmetic
@@ -736,7 +736,7 @@ under-specified. I chose a default for each (used above); flag for owner confirm
 1. **D-PARSESTR1** — option A says holes are *"non-greedy holes anchored by
    literal text; else arm catches non-matches."* It does **not** define (a) two
    holes with **no literal text between them** (`"{a}{b}"`), nor (b) whether a
-   **bare binding** use `.{…} #= s` (outside an if-table) is refutable/fallible or
+   **bare binding** use `.{…} :: s` (outside an if-table) is refutable/fallible or
    a hard error on non-match. **My defaults:** (a) adjacent untyped holes = compile
    error `E0147` (unanchorable); (b) a refutable interpolation pattern needs an
    `else` (if-table) or fallible form (`E0148`). Confirm both.

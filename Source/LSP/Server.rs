@@ -686,7 +686,11 @@ fn execute_command_response(
     let doc = match server.docs.get(uri) {
         Some(d) => d,
         None => {
-            return Some(error_response(id, -32602, "document not open in LSP session"));
+            return Some(error_response(
+                id,
+                -32602,
+                "document not open in LSP session",
+            ));
         }
     };
 

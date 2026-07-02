@@ -5,10 +5,10 @@
 // outside comptime.
 
 derive T.Label {
-    info #= T.reflect()
-    tname #= info.name
+    info :: T.reflect()
+    tname :: info.name
     // $tname is Expr::ComptimeSplice; resolves to the same value as `tname`
-    lbl #= $tname
+    lbl :: $tname
     emit("impl $lbl {{ fn label(self) -> String {{ return \"$lbl\" }} }}")
 }
 
@@ -18,6 +18,6 @@ struct Cube {
 }
 
 fn main() {
-    c #= Cube.{ side: 5 }
+    c :: Cube.{ side: 5 }
     print(c.label())
 }

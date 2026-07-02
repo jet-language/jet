@@ -2,13 +2,13 @@
 //! `packages:`, `build:`.
 
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
-use std::collections::HashSet;
 use super::{
     ApiMode, BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry,
     PackageMeta, Target,
 };
 use crate::Jetpack::RefSpec;
 use crate::Syntax;
+use std::collections::HashSet;
 
 pub(super) fn parse_package(body: &str) -> Result<PackageMeta, ManifestError> {
     let mut meta = PackageMeta::default();
@@ -33,13 +33,11 @@ pub(super) fn parse_package(body: &str) -> Result<PackageMeta, ManifestError> {
             "target" => meta.target = Some(v),
             "layer" => {
                 let raw = value.trim().trim_matches('"');
-                meta.layer = Some(
-                    crate::Syntax::RuntimeLayer::parse_manifest(raw).ok_or_else(|| {
-                        ManifestError::BadLayer {
-                            value: raw.to_string(),
-                        }
-                    })?,
-                );
+                meta.layer = Some(crate::Syntax::RuntimeLayer::parse_manifest(raw).ok_or_else(
+                    || ManifestError::BadLayer {
+                        value: raw.to_string(),
+                    },
+                )?);
             }
             // Unknown keys are tolerated for forward-compat; the wired loader
             // will turn unknown keys into an E-coded diagnostic.
@@ -404,12 +402,17 @@ pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
 /// D-EFFBUDGET1: parse the `effects: { allow: […], deny: […] }` body. Either
 /// field may be omitted; an unknown field or an effect name outside the
 /// closed D-EFF4 vocabulary is E1221 (`ManifestError::BadEffectsBlock`).
-pub(super) fn parse_effects(body: &str) -> Result<(Option<Vec<String>>, Option<Vec<String>>), ManifestError> {
+pub(super) fn parse_effects(
+    body: &str,
+) -> Result<(Option<Vec<String>>, Option<Vec<String>>), ManifestError> {
     let mut allow = None;
     let mut deny = None;
     for (key, value) in key_value_entries(body) {
         if key == Syntax::EFFECTS_FIELD_ALLOW {
-            allow = Some(parse_effect_list(Syntax::EFFECTS_FIELD_ALLOW, value.trim())?);
+            allow = Some(parse_effect_list(
+                Syntax::EFFECTS_FIELD_ALLOW,
+                value.trim(),
+            )?);
         } else if key == Syntax::EFFECTS_FIELD_DENY {
             deny = Some(parse_effect_list(Syntax::EFFECTS_FIELD_DENY, value.trim())?);
         } else {

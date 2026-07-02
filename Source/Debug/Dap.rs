@@ -83,7 +83,13 @@ impl DapServer {
         let args = json_get(msg, "arguments");
         match command {
             "initialize" => {
-                self.respond(out, request_seq, "initialize", true, "{\"supportsConfigurationDoneRequest\":true}");
+                self.respond(
+                    out,
+                    request_seq,
+                    "initialize",
+                    true,
+                    "{\"supportsConfigurationDoneRequest\":true}",
+                );
                 self.event(out, "initialized", "{}");
                 Some(())
             }
@@ -124,7 +130,13 @@ impl DapServer {
                 }
                 let verified: Vec<String> = lines
                     .iter()
-                    .map(|l| format!("{{\"verified\":{},\"line\":{}}}", self.map.rust_line_for(*l).is_some(), l))
+                    .map(|l| {
+                        format!(
+                            "{{\"verified\":{},\"line\":{}}}",
+                            self.map.rust_line_for(*l).is_some(),
+                            l
+                        )
+                    })
                     .collect();
                 let body = format!("{{\"breakpoints\":[{}]}}", verified.join(","));
                 self.respond(out, request_seq, command, true, &body);
@@ -166,7 +178,11 @@ impl DapServer {
                         ))
                     })
                     .collect();
-                let body = format!("{{\"stackFrames\":[{}],\"totalFrames\":{}}}", entries.join(","), entries.len());
+                let body = format!(
+                    "{{\"stackFrames\":[{}],\"totalFrames\":{}}}",
+                    entries.join(","),
+                    entries.len()
+                );
                 self.respond(out, request_seq, command, true, &body);
                 Some(())
             }
@@ -205,14 +221,23 @@ impl DapServer {
                 Some(())
             }
             "continue" | "next" | "stepIn" | "stepOut" => {
-                self.respond(out, request_seq, command, true, "{\"allThreadsContinued\":true}");
+                self.respond(
+                    out,
+                    request_seq,
+                    command,
+                    true,
+                    "{\"allThreadsContinued\":true}",
+                );
                 let resume_cmd = match command {
                     "continue" => "continue",
                     "next" => "thread step-over",
                     "stepIn" => "thread step-in",
                     _ => "thread step-out",
                 };
-                let result = self.inf.as_mut().and_then(|inf| inf.resume_and_locate(resume_cmd).ok());
+                let result = self
+                    .inf
+                    .as_mut()
+                    .and_then(|inf| inf.resume_and_locate(resume_cmd).ok());
                 if let Some(result) = result {
                     self.emit_resume(out, result);
                 }
@@ -240,7 +265,10 @@ impl DapServer {
                 }
             }
         }
-        let result = self.inf.as_mut().and_then(|inf| inf.resume_and_locate("run").ok());
+        let result = self
+            .inf
+            .as_mut()
+            .and_then(|inf| inf.resume_and_locate("run").ok());
         if let Some(result) = result {
             self.emit_resume(out, result);
         }
@@ -299,7 +327,14 @@ impl DapServer {
         }
     }
 
-    fn respond(&mut self, out: &mut impl Write, request_seq: i64, command: &str, success: bool, body: &str) {
+    fn respond(
+        &mut self,
+        out: &mut impl Write,
+        request_seq: i64,
+        command: &str,
+        success: bool,
+        body: &str,
+    ) {
         let seq = self.next_seq();
         let json = format!(
             "{{\"seq\":{},\"type\":\"response\",\"request_seq\":{},\"success\":{},\"command\":\"{}\",\"body\":{}}}",
@@ -308,7 +343,13 @@ impl DapServer {
         let _ = write_message(out, &json);
     }
 
-    fn respond_err(&mut self, out: &mut impl Write, request_seq: i64, command: &str, message: &str) {
+    fn respond_err(
+        &mut self,
+        out: &mut impl Write,
+        request_seq: i64,
+        command: &str,
+        message: &str,
+    ) {
         let seq = self.next_seq();
         let json = format!(
             "{{\"seq\":{},\"type\":\"response\",\"request_seq\":{},\"success\":false,\"command\":\"{}\",\"message\":\"{}\"}}",

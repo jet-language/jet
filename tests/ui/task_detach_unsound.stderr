@@ -1,7 +1,7 @@
 Error [E1102]: `h` can't cross into a task because `Holder` isn't sendable
   --> tests/ui/task_detach_unsound.jet:8:22
     |
-  8 |     t #= tasks.spawn(() => h)
+  8 |     t :: tasks.spawn(() => h)
     |                      ^^^^^^^
  Why: `Holder` contains `name`, which is a `ref` field; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or remove the shared-view field before spawning
@@ -9,7 +9,7 @@ Error [E1102]: `h` can't cross into a task because `Holder` isn't sendable
 Error [E1102]: this task returns `Holder`, which isn't sendable
   --> tests/ui/task_detach_unsound.jet:8:22
     |
-  8 |     t #= tasks.spawn(() => h)
+  8 |     t :: tasks.spawn(() => h)
     |                      ^^^^^^^
  Why: `Holder` contains `name`, which is a `ref` field; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or remove the shared-view field before spawning

@@ -604,7 +604,9 @@ pub fn run_native_scripted(
     raw_frames: bool,
     inputs: &[&str],
 ) -> String {
-    Native::run_scripted(binary, rust_file, rust_src, jet_file, jet_src, raw_frames, inputs)
+    Native::run_scripted(
+        binary, rust_file, rust_src, jet_file, jet_src, raw_frames, inputs,
+    )
 }
 
 /// D-DBG3 step 2: the DAP JSON-over-stdio server (editor wiring) — same native

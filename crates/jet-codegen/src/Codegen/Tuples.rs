@@ -216,7 +216,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
 
 fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
     match stmt {
-        Stmt::Expr(e) => collect_tuple_shapes_from_expr(e, out),
+        Stmt::Expr(e) | Stmt::Yield(e, _) => collect_tuple_shapes_from_expr(e, out),
         Stmt::Val(b) => {
             if let Some(ty) = &b.ty {
                 collect_tuple_shapes_from_type(ty, out);

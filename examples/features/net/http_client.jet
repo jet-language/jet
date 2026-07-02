@@ -6,17 +6,17 @@ use core.tasks as tasks
 
 fn main() {
     // Spin up a minimal loopback server to respond to our client.
-ch: Channel<String> #= tasks.channel()
-    sender #= ch.sender()
-    t #= tasks.spawn(take(sender) () => {
-        listener #= net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+ch: Channel<String> :: tasks.channel()
+    sender :: ch.sender()
+    t :: tasks.spawn(take(sender) () => {
+        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         sender.send(listener.local_addr())
-        stream #= listener.accept() ?? panic("accept failed")
-        _req #= stream.read() ?? panic("read failed")
+        stream :: listener.accept() ?? panic("accept failed")
+        _req :: stream.read() ?? panic("read failed")
         net.tcp_reply(stream, "200 OK", "hello from core.http.client")
     })
-    addr #= ch.receive() ?? panic("no addr")
-    resp #= Client.get("http://{addr}/") ?? panic("client get failed")
+    addr :: ch.receive() ?? panic("no addr")
+    resp :: Client.get("http://{addr}/") ?? panic("client get failed")
     print(resp.status())
     print(resp.body())
     t.join()

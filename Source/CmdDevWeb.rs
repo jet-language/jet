@@ -196,7 +196,10 @@ fn bind_dev_server(port: Option<u16>) -> TcpListener {
             Err(e) => {
                 eprintln!("error: couldn't bind to port {}: {}", port, e);
                 if e.kind() == std::io::ErrorKind::AddrInUse {
-                    eprintln!(" fix: stop whatever's using port {}, or pick another with --port=<N>", port);
+                    eprintln!(
+                        " fix: stop whatever's using port {}, or pick another with --port=<N>",
+                        port
+                    );
                 }
                 exit(ExitCodes::USER_ERROR);
             }
@@ -220,9 +223,7 @@ fn bind_dev_server(port: Option<u16>) -> TcpListener {
         "error: every port from {} to {} is already in use{}",
         PORT_RANGE.start(),
         PORT_RANGE.end(),
-        last_err
-            .map(|e| format!(" ({})", e))
-            .unwrap_or_default()
+        last_err.map(|e| format!(" ({})", e)).unwrap_or_default()
     );
     eprintln!(" fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>");
     exit(ExitCodes::USER_ERROR);
@@ -274,7 +275,12 @@ fn handle_connection(stream: TcpStream, version: &AtomicU64) -> std::io::Result<
     let path = target.split('?').next().unwrap_or("/");
     if path == "/__jet_dev_version" {
         let body = version.load(Ordering::SeqCst).to_string();
-        return write_response(&mut stream, "200 OK", "text/plain; charset=utf-8", body.as_bytes());
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "text/plain; charset=utf-8",
+            body.as_bytes(),
+        );
     }
     serve_static(&mut stream, path)
 }
@@ -285,7 +291,12 @@ fn handle_connection(stream: TcpStream, version: &AtomicU64) -> std::io::Result<
 /// none of that.
 fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<()> {
     if path.contains("..") {
-        return write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", b"bad path");
+        return write_response(
+            stream,
+            "400 Bad Request",
+            "text/plain; charset=utf-8",
+            b"bad path",
+        );
     }
     let rel = if path == "/" {
         "index.html"
@@ -297,7 +308,12 @@ fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<()> {
         Ok(b) => b,
         Err(_) => {
             let body = format!("not found: {}", path);
-            return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", body.as_bytes());
+            return write_response(
+                stream,
+                "404 Not Found",
+                "text/plain; charset=utf-8",
+                body.as_bytes(),
+            );
         }
     };
 

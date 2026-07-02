@@ -732,7 +732,8 @@ fn ffi_example_compiles_and_runs() {
 
     let run = Command::new(&bin).output().unwrap();
     assert!(run.status.success(), "22_ffi runtime failed");
-    let expected = fs::read_to_string(root.join("examples/features/expected/lowlevel/ffi.out")).unwrap();
+    let expected =
+        fs::read_to_string(root.join("examples/features/expected/lowlevel/ffi.out")).unwrap();
     assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
 }
 

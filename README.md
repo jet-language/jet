@@ -60,7 +60,7 @@ you. Expert unsafe is opt-in via `#Unsafe("reason") { … }`, not the default.
 
 **How is Jet different from Go?**  
 Jet is statically typed with generics and traits, and stricter error handling —
-you cannot ignore a fallible result. Bindings are `name #= value` (immutable)
+you cannot ignore a fallible result. Bindings are `name :: value` (immutable)
 or `name := value` (mutable). Use `core.tasks` channels for concurrency
 (blocking; async is deferred to a later epoch).
 

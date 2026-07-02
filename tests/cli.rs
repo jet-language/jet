@@ -75,7 +75,11 @@ fn exit_code_user_error_check() {
 fn exit_code_no_args_starts_repl() {
     // c6vz465: bare `jet` starts the REPL — exit 0 after EOF on piped stdin.
     let out = Command::new(jet()).output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "no args should start REPL (exit 0)");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "no args should start REPL (exit 0)"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("interactive REPL"),
@@ -635,7 +639,8 @@ fn ext_optional_missing_path_keeps_original_name() {
 fn simple_exec_runs_without_a_manifest() {
     // A single file with a top-level `fn main` and no pkg.jet runs as an
     // executable with zero ceremony (R9 / D-ILE1).
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/main.jet");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/main.jet");
     let out = Command::new(jet()).arg("run").arg(&path).output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -657,7 +662,7 @@ fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
     fs::write(
         &p,
-        "use core.io as io\nfn main() {\n    args #= io.args()\n    print(args.len())\n}\n",
+        "use core.io as io\nfn main() {\n    args :: io.args()\n    print(args.len())\n}\n",
     )
     .unwrap();
     p

@@ -25,7 +25,7 @@ fn e3301_fs_read_in_freestanding() {
     let src = r#"use core.fs as fs
 
 fn main() {
-    _ #= fs.read("config.txt")
+    _ :: fs.read("config.txt")
 }
 "#;
     let out = check_freestanding_src(src, "fs_read");
@@ -46,7 +46,7 @@ fn e3301_http_in_freestanding() {
     let src = r#"use core.http as http
 
 fn main() {
-    _ #= http.get("http://example.com")
+    _ :: http.get("http://example.com")
 }
 "#;
     let out = check_freestanding_src(src, "http");
@@ -62,7 +62,7 @@ fn e3301_tasks_in_freestanding() {
     let src = r#"use core.tasks as tasks
 
 fn main() {
-    t #= tasks.spawn(() => 42)
+    t :: tasks.spawn(() => 42)
     t.join()
 }
 "#;
@@ -80,7 +80,7 @@ fn freestanding_allows_core_math() {
     let src = r#"use core.math as math
 
 fn main() {
-    x #= math.sqrt(4.0)
+    x :: math.sqrt(4.0)
     print(x)
 }
 "#;
@@ -98,7 +98,7 @@ fn freestanding_allows_core_json() {
     let src = r#"use core.encoding.json as json
 
 fn main() {
-    s #= json.to_string("hello")
+    s :: json.to_string("hello")
     print(s)
 }
 "#;

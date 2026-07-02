@@ -53,11 +53,11 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 stmt     = binding | assign | if | loop
          | "break" NL | "continue" NL | "return" [ expr ] NL
          | expr NL ;
-binding  = ident "#=" expr NL                 // inferred immutable
+binding  = ident "::" expr NL                 // inferred immutable
          | ident ":=" expr NL                 // inferred mutable
-         | ident ":" type "#=" expr NL        // explicit immutable
+         | ident ":" type "::" expr NL        // explicit immutable
          | ident ":" type ":=" expr NL        // explicit mutable
-         | destructure ( "#=" | ":=" ) expr NL ;
+         | destructure ( "::" | ":=" ) expr NL ;
 destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -91,8 +91,8 @@ expr     = precedence climbing over:
   bindings are optional; mismatched annotations are E0108.
 - A program must define `fn main` with no parameters and no return type
   (E0101, E0122); execution starts there. `main` never takes `pub` (S12).
-- `name #= value` and `name: Type #= value` are immutable; `name := value` and
-  `name: Type := value` are mutable (D-BIND3).
+- `name :: value` and `name: Type :: value` are immutable; `name := value` and
+  `name: Type := value` are mutable (D-BIND4).
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
@@ -637,10 +637,10 @@ with postfix `p.*` (the deref step), both inside `#Unsafe`:
 ```jet
 use core.mem
 
-flag: Bool #= true
+flag: Bool :: true
 #Unsafe("flag is live on this stack frame and the pointer never escapes") {
-    addr: Int #= mem.address_of(flag)
-    p #= mem.Ptr<Bool>.from_addr(addr)
+    addr: Int :: mem.address_of(flag)
+    p :: mem.Ptr<Bool>.from_addr(addr)
     print(p.*)
 }
 ```
@@ -952,7 +952,7 @@ Combinators are methods on the group handle only (no detached work):
 - `g.select()` — fluent scoped multiplex (D-CONCSELECT1=A):
 
 ```jet
-winner #= g.select().recv(ch1).recv(ch2).after(ms).wait()?
+winner :: g.select().recv(ch1).recv(ch2).after(ms).wait()?
 ```
 
 `.recv(channel)` registers a channel arm; `.after(ms)` a timer arm; `.read(stream)`
@@ -1108,7 +1108,7 @@ fan_out = expr ".[" [ expr { "," expr } [ "," ] ] "]" ;
 ```jet
 fn double(n: Int) -> Int { return n * 2; }
 
-doubled #= double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
+doubled :: double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
 ```
 
 Errors: **E0961** if the callee is not a one-argument function; **E0962** if an
@@ -1126,7 +1126,7 @@ type_fixed_list = "[" type "#" int_literal "]" ;
 
 ```jet
 result@ [Int#3]=  double.[1, 2, 3];
-[a, b, c] @= result;   // OK — 3 names for 3 elements
+[a, b, c] :: result;   // OK — 3 names for 3 elements
 ```
 
 - Destructuring a `[T#N]` with the wrong number of names is **E0963**.
@@ -1212,7 +1212,7 @@ caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 ```jet
 fn main() {
     #Caps(Fs, Io) {
-        text #= core.fs.read("x") ?? "";   // Fs — allowed
+        text :: core.fs.read("x") ?? "";   // Fs — allowed
         print(text);                            // Io — allowed
     }
 }
@@ -1286,7 +1286,7 @@ unwind) via a RAII scope guard (D-DEFER1).
 use core.term as term
 
 live {
-    k #= term.read_key()
+    k :: term.read_key()
     if k == Enter { return }
     print("got: {k}")
 }

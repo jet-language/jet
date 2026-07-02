@@ -1,7 +1,7 @@
 use super::*;
-use crate::AST::{CallArg, Expr, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{CallArg, Expr, Stmt};
 use std::collections::HashSet;
 
 /// A child task spawned inside the active `taskgroup` scope.
@@ -60,7 +60,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E1110",
                     format!(
-                "`.task` must be called on the active taskgroup handle `{}`, not `{}`",
+                        "`.task` must be called on the active taskgroup handle `{}`, not `{}`",
                         active, name
                     ),
                     "each `taskgroup` block owns spawns on its bound handle only".to_string(),
@@ -240,7 +240,9 @@ impl<'a> Checker<'a> {
         self.in_taskgroup_spawn = true;
         let lam_ty = self.infer(&mut args[0].expr);
         let view_return_span = match &args[0].expr {
-            Expr::Lambda(lam) => crate::Sema::Captures::lambda_body_view_return_span(self, &lam.body),
+            Expr::Lambda(lam) => {
+                crate::Sema::Captures::lambda_body_view_return_span(self, &lam.body)
+            }
             expr if self.is_view_call(expr) => Some(expr.span()),
             _ => None,
         };
@@ -330,13 +332,16 @@ impl<'a> Checker<'a> {
         let arg_ty = self.infer(&mut args[0].expr);
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
-                Type::Apply { ref name, ref args, .. } if name == "Task" && args.len() == 1 => {
-                    args[0].clone()
-                }
+                Type::Apply {
+                    ref name, ref args, ..
+                } if name == "Task" && args.len() == 1 => args[0].clone(),
                 other => {
                     self.diags.push(Diagnostic::error(
                         "E0112",
-                        format!("`.all()` needs a list of task handles, not `[{}]`", other.show()),
+                        format!(
+                            "`.all()` needs a list of task handles, not `[{}]`",
+                            other.show()
+                        ),
                         "each element must be a `Task<T>` handle returned from `g.task { … }`"
                             .to_string(),
                         "write `g.all([h1, h2])` where each handle came from `g.task`".to_string(),
@@ -348,7 +353,10 @@ impl<'a> Checker<'a> {
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!("`.all()` needs a list of task handles, not {}", other.show()),
+                    format!(
+                        "`.all()` needs a list of task handles, not {}",
+                        other.show()
+                    ),
                     "pass a `[Task<T>]` list of handles from `g.task { … }`".to_string(),
                     "write `g.all([h1, h2])`".to_string(),
                     Some(args[0].expr.span()),
@@ -362,11 +370,21 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_taskgroup_race(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
-        self.infer_taskgroup_first_task(args, span, "`.race()`", "`.race([h1, h2, …])` returns the first completed result")
+        self.infer_taskgroup_first_task(
+            args,
+            span,
+            "`.race()`",
+            "`.race([h1, h2, …])` returns the first completed result",
+        )
     }
 
     fn infer_taskgroup_any(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
-        self.infer_taskgroup_first_task(args, span, "`.any()`", "`.any([h1, h2, …])` returns the first completed result")
+        self.infer_taskgroup_first_task(
+            args,
+            span,
+            "`.any()`",
+            "`.any([h1, h2, …])` returns the first completed result",
+        )
     }
 
     fn infer_taskgroup_first_task(
@@ -396,9 +414,9 @@ impl<'a> Checker<'a> {
         let arg_ty = self.infer(&mut args[0].expr);
         let elem = match arg_ty {
             Some(Type::List(inner)) => match *inner {
-                Type::Apply { ref name, ref args, .. } if name == "Task" && args.len() == 1 => {
-                    args[0].clone()
-                }
+                Type::Apply {
+                    ref name, ref args, ..
+                } if name == "Task" && args.len() == 1 => args[0].clone(),
                 other => {
                     self.diags.push(Diagnostic::error(
                         "E0112",
@@ -417,7 +435,10 @@ impl<'a> Checker<'a> {
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!("{method_label} needs a list of task handles, not {}", other.show()),
+                    format!(
+                        "{method_label} needs a list of task handles, not {}",
+                        other.show()
+                    ),
                     "pass a `[Task<T>]` list of handles from `g.task { … }`".to_string(),
                     "write `g.race([h1, h2])`".to_string(),
                     Some(args[0].expr.span()),
@@ -535,9 +556,9 @@ impl<'a> Checker<'a> {
         }
         let ch_ty = self.infer(&mut args[0].expr)?;
         let inner = match ch_ty {
-            Type::Apply { ref name, ref args, .. } if name == "Channel" && args.len() == 1 => {
-                args[0].clone()
-            }
+            Type::Apply {
+                ref name, ref args, ..
+            } if name == "Channel" && args.len() == 1 => args[0].clone(),
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0112",

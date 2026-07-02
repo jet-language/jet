@@ -1,7 +1,7 @@
 Error [E0746]: `fs.read` has the `Fs` effect, which can't be rolled back inside a `#Transact` block
   --> tests/ui/transact_irreversible_effect.jet:5:20
     |
-  5 |         text #= fs.read("ledger.txt") ?? "missing"
+  5 |         text :: fs.read("ledger.txt") ?? "missing"
     |                    ^^^^
  Why: a `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Fs`) leaves committed external state a rollback can't take back
  Fix: move this call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only on a clean commit

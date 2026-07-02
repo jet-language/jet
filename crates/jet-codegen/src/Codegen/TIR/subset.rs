@@ -6,8 +6,8 @@ use super::*;
 use crate::Syntax;
 use crate::AST::{
     BinOp, BindPattern, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, IndexKind, LValue,
-    Lambda, LambdaBody, OrFallback, PatSlot, Pattern, Stmt, StrPart, SwitchArm, Type,
-    VariantPayload,
+    Lambda, LambdaBody, OrFallback, PatSlot, Pattern, Stmt, StrPart, StructPatField, SwitchArm,
+    Type, VariantPayload,
 };
 use std::collections::HashSet;
 
@@ -311,7 +311,7 @@ pub(crate) fn is_covered_concurrency_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    matches!(name.as_str(), "Task" | "Channel" | "Sender")
+    matches!(name.as_str(), "Task" | "Channel" | "Sender" | "Stream")
         && args.len() == 1
         && concurrency_elem_covered(&args[0], cx)
 }
@@ -369,7 +369,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
         .all(|a| is_type_var_param_ty(a, cx) || is_subset_param_ty(a, cx))
 }
 
-/// c109 Phase 23: a DISTINCT type (`UserId #= distinct Int`, D-DIST1) usable as a
+/// c109 Phase 23: a DISTINCT type (`UserId :: distinct Int`, D-DIST1) usable as a
 /// param/return/local *value* type. A distinct type renders via `cx.rust_type` to its
 /// newtype `user_<Name>` (the `Type::Named` fallthrough in Context.rs), and the emitted
 /// `#[repr(transparent)]` newtype is `Copy` iff its base is (sema/codegen derive set) —
@@ -587,6 +587,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
     }
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
+        || is_covered_distinct_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
@@ -990,13 +991,13 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
 pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
     match s {
         Stmt::Val(b) => {
-            // c109 Phase 19: an `arena_view` binding (`x #= arena.alloc(v)` / `x #=
+            // c109 Phase 19: an `arena_view` binding (`x :: arena.alloc(v)` / `x ::
             // arena.alloc(v)`) IS covered — it lowers to a plain `let <x> = <init>;` (no
             // type, no mut) with a deref'd slot, exactly as `emit_let`'s `arena_view`
             // branch (the init is a covered `arena.alloc(v)` handle call). The escape/
             // use-after-reset rules (E0631/E0632) are enforced entirely in sema.
             match &b.pattern {
-                // c109 Phase 23: a TUPLE-destructuring binding `(a, b) #= <init>` (S74,
+                // c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
                 // `BindPattern::Tuple`). The AST `emit_stmt` borrows the init into a temp,
                 // then binds each name from `(tmp).user_<canonical-field>.clone()` (pairing
                 // elems to the type's canonical fields BY POSITION). Covered when the init
@@ -1011,7 +1012,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     }
                     ok
                 }
-                // c109 Phase 26: a LIST-destructuring binding `[a, b, c] #= <init>` (S74,
+                // c109 Phase 26: a LIST-destructuring binding `[a, b, c] :: <init>` (S74,
                 // `BindPattern::List`). The AST `emit_stmt` borrows the init into a temp,
                 // then binds each name via `jet_unpack_vec(tmp, want, i, file, line)`
                 // (a runtime bounds-checked element move). Covered when the init is
@@ -1025,7 +1026,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     }
                     ok
                 }
-                // c109: a STRUCT-destructuring binding `Type { x, y } #= <init>`
+                // c109: a STRUCT-destructuring binding `Type { x, y } :: <init>`
                 // (S74, `BindPattern::Struct`). The AST `emit_stmt` borrows the init
                 // into a temp, then binds each field via `(tmp).user_<field>.clone()`
                 // (the pattern's field name is both the bound local and the read).
@@ -1095,6 +1096,8 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         },
         Stmt::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         Stmt::Return(None, _) => true,
+        // D-STREAMYIELD1: `yield e` inside a generator.
+        Stmt::Yield(e, _) => expr_in_subset(e, cx, locals),
         // D-IGNORERET2=A: `.drop("reason")` lowers to an ExprStmt of the receiver;
         // the method call itself is erased. Covered iff the receiver is in-subset.
         Stmt::Expr(Expr::MethodCall {
@@ -1628,6 +1631,9 @@ pub(crate) fn switch_in_subset(
     // `subject >= lo && subject <= hi`, so a value+range mix (`200 -> …` next to
     // `400..499 -> …`) is covered — provided the subject is a scalar ident local so the
     // emitted range condition type-checks (the same constraint shape B imposes).
+    // D-DESTRUCT1: a struct-pattern arm head (`.{ kind: "page", title, .. }`) also
+    // lowers through this chain: value fields become boolean equality checks, and bind
+    // fields clone from the borrowed `_jet_switch_subject` at the top of the arm body.
     // Conservative: a variant/fallible pattern-test arm in the chain excludes the whole
     // switch (stays on the AST path). The `else` is optional.
     let has_range = arms
@@ -1635,18 +1641,35 @@ pub(crate) fn switch_in_subset(
         .any(|a| arm_head_range(cx, &a.cond, subject).is_some());
     let subject_is_scalar_ident = matches!(subject, Expr::Ident(name, _) if locals.contains(name));
     if arms.iter().all(|a| {
-        arm_is_plain_cond(cx, &a.cond, subject) || arm_head_range(cx, &a.cond, subject).is_some()
+        arm_is_plain_cond(cx, &a.cond, subject)
+            || arm_head_range(cx, &a.cond, subject).is_some()
+            || arm_struct_pattern(cx, &a.cond, subject).is_some()
+            || arm_str_match_pattern(cx, &a.cond, subject).is_some()
     }) && (!has_range || subject_is_scalar_ident)
     {
+        // D-PARSESTR1: sema already proved a str-match arm's subject is
+        // `String` (E0305 otherwise) — trusted here, same as shape C trusts
+        // sema for `ok`/`err`/`value` subject types (I3).
         for a in arms {
             // A range head lowers to a comparison string from `subject_str`; only the
             // PLAIN-cond arms carry a sub-expression that must itself be in-subset.
             if arm_head_range(cx, &a.cond, subject).is_none()
+                && arm_struct_pattern(cx, &a.cond, subject).is_none()
+                && arm_str_match_pattern(cx, &a.cond, subject).is_none()
                 && !expr_in_subset(&a.cond, cx, locals)
             {
                 return false;
             }
             let mut body_locals = locals.clone();
+            if let Some(pat) = arm_struct_pattern(cx, &a.cond, subject) {
+                if !struct_pattern_values_in_subset(&pat, cx, locals) {
+                    return false;
+                }
+                add_struct_pattern_binding_names(&pat, &mut body_locals);
+            }
+            if let Some(pat) = arm_str_match_pattern(cx, &a.cond, subject) {
+                add_str_match_pattern_binding_names(&pat, &mut body_locals);
+            }
             if !a
                 .body
                 .iter()
@@ -1685,6 +1708,52 @@ pub(crate) fn arm_is_plain_cond(cx: &Cx, cond: &Expr, subject: &Expr) -> bool {
         return false;
     }
     true
+}
+
+/// D-PARSESTR1: a str-match arm head over the switch subject — an
+/// interpolation literal in pattern position (`subject == "prefix-{id:Int}"`).
+pub(crate) fn arm_str_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
+    match cond {
+        Expr::PatternTest {
+            subject: s,
+            pattern: pattern @ Pattern::StrMatch { .. },
+            ..
+        } if pattern_subjects_match(cx, s, subject) => Some(pattern.clone()),
+        _ => None,
+    }
+}
+
+/// D-DESTRUCT1: a struct-shaped arm head over the switch subject.
+pub(crate) fn arm_struct_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
+    match cond {
+        Expr::PatternTest {
+            subject: s,
+            pattern: Pattern::Struct { .. },
+            ..
+        } if pattern_subjects_match(cx, s, subject) => {
+            if let Expr::PatternTest { pattern, .. } = cond {
+                Some(pattern.clone())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Value checks inside a struct arm head are ordinary expressions and must be lowerable.
+pub(crate) fn struct_pattern_values_in_subset(
+    pattern: &Pattern,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    match pattern {
+        Pattern::Struct { fields, .. } => fields.iter().all(|f| match f {
+            StructPatField::Value { value, .. } => expr_in_subset(value, cx, locals),
+            StructPatField::Bind { .. } => true,
+        }),
+        _ => true,
+    }
 }
 
 /// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
@@ -1839,6 +1908,28 @@ pub(crate) fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<
     }
 }
 
+/// Record names bound by a struct-pattern arm head.
+pub(crate) fn add_struct_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
+    if let Pattern::Struct { fields, .. } = pattern {
+        for field in fields {
+            if let StructPatField::Bind { local, .. } = field {
+                locals.insert(local.clone());
+            }
+        }
+    }
+}
+
+/// D-PARSESTR1: record names bound by a str-match arm head's holes.
+pub(crate) fn add_str_match_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
+    if let Pattern::StrMatch { parts, .. } = pattern {
+        for part in parts {
+            if let crate::AST::StrMatchPart::Hole { name, .. } = part {
+                locals.insert(name.clone());
+            }
+        }
+    }
+}
+
 pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
     match e {
         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => true,
@@ -1863,7 +1954,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || locals.contains(name)
                 || ident_is_named_fn_value(name, cx, locals)
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => expr_in_subset(inner, cx, locals),
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+            expr_in_subset(inner, cx, locals)
+        }
         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
         // D-CHAINCMP1: `0 <= sev < 10` — in-subset iff every operand is.
         Expr::CompareChain { operands, .. } => {
@@ -1976,6 +2069,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             let is_precise_ctor = !locals.contains(&c.name)
                 && (c.name == crate::Syntax::TYPE_BIGINT || c.name == crate::Syntax::TYPE_DECIMAL)
                 && !cx.type_names.contains(&c.name);
+            // D-TYPEDTEXT1=D: the synthetic `Sql`/`Html` call sema rewrote a typed
+            // text literal into (see `lower_expr`'s matching case).
+            let is_typed_text_ctor = !locals.contains(&c.name)
+                && (c.name == "Sql" || c.name == "Html")
+                && !cx.type_names.contains(&c.name);
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s
             // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
@@ -2012,6 +2110,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || is_distinct_ctor
                 || is_math_ctor
                 || is_precise_ctor
+                || is_typed_text_ctor
                 || is_extern
                 || is_unqual_inline
                 || is_unqual_file)
@@ -2493,7 +2592,33 @@ pub(crate) fn method_call_in_subset(
     // value (E0311 otherwise), so any `.raw()` that survives to codegen is on a distinct
     // — covering an in-subset 0-arg `.raw()` is safe (and `recv_type` is `None` here,
     // since sema's `.raw()` arm returns the base type without the recv_type writeback).
+    // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — `Sql`/`Html` name the
+    // type (not a value), so `recv_type` is unset here. Checked BEFORE the
+    // distinct-type `.raw()` below (same method name, disjoint receiver shape —
+    // a distinct value's `.raw()` never takes an argument).
+    if method == "raw" {
+        if let Expr::Ident(n, _) = receiver {
+            if n == "Sql" || n == "Html" {
+                return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+            }
+        }
+    }
+    // D-ERRCTX1=D: `<fallible>.context("…")` — sema marks the receiver via
+    // `recv_type_out` (see `infer_method_call`).
+    if method == "context" && recv_type.as_deref() == Some("__Fallible__") {
+        return args.len() == 1
+            && expr_in_subset(receiver, cx, locals)
+            && expr_in_subset(&args[0].expr, cx, locals);
+    }
     if method == Syntax::METHOD_DISTINCT_RAW {
+        return args.is_empty() && expr_in_subset(receiver, cx, locals);
+    }
+    // D-TYPEDTEXT1=D: `.template()`/`.params()` (Sql) and `.text()` (Html) —
+    // 0-arg accessors on a checked typed-text value.
+    if recv_type.as_deref() == Some("Sql") && matches!(method, "template" | "params") {
+        return args.is_empty() && expr_in_subset(receiver, cx, locals);
+    }
+    if recv_type.as_deref() == Some("Html") && method == "text" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
     // D-OPTGC1: `handle.with` / `handle.with_mut` on a traced `Gc<T>` value.
@@ -2799,8 +2924,10 @@ pub(crate) fn method_call_in_subset(
     // Sema sets `recv_type == Some("Signal"|"Derived")` (CheckerInfer's reactive arm), so
     // these are keyed on recv_type — NOT the bare name (`get`/0 would alias a list `get`).
     // `Signal.get()`/`Derived.get()` → `(recv).get()`; `Signal.set(v)` → `(recv).set(v)`.
-    if matches!(recv_type.as_deref(), Some("Signal") | Some("Derived") | Some("Computed"))
-        && is_reactive_method_name(method, args.len())
+    if matches!(
+        recv_type.as_deref(),
+        Some("Signal") | Some("Derived") | Some("Computed")
+    ) && is_reactive_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -2826,7 +2953,10 @@ pub(crate) fn method_call_in_subset(
     }
     // D-TTLVAL1=A: Expiring<T> / Rotting<T> methods.
     if matches!(recv_type.as_deref(), Some("Expiring" | "Rotting"))
-        && matches!((method, args.len()), ("get", 1) | ("is_valid", 1) | ("force", 1))
+        && matches!(
+            (method, args.len()),
+            ("get", 1) | ("is_valid", 1) | ("force", 1)
+        )
     {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -3438,11 +3568,7 @@ pub(crate) fn is_loadable_method_name(method: &str, nargs: usize) -> bool {
 }
 
 /// D-RENDERTGT2=A (c133 M1/M2): is `(backend, method, nargs)` a UI backend method?
-pub(crate) fn is_ui_backend_method_name(
-    backend: Option<&str>,
-    method: &str,
-    nargs: usize,
-) -> bool {
+pub(crate) fn is_ui_backend_method_name(backend: Option<&str>, method: &str, nargs: usize) -> bool {
     match (backend, method, nargs) {
         (_, "measure", 2) | (_, "layout", 2) | (_, "paint", 1) | (_, "on_event", 1) => true,
         (Some("NullBackend"), "commands", 0) => true,

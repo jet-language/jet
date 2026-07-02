@@ -198,7 +198,11 @@ fn every_feature_example_has_expected_output() {
         if !topic_path.is_dir() {
             continue;
         }
-        let topic = topic_path.file_name().unwrap().to_string_lossy().into_owned();
+        let topic = topic_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         if topic == "expected" {
             continue;
         }

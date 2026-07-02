@@ -86,18 +86,16 @@ pub(crate) fn compute_hover(
                 SymKind::Field { ty, parent } => {
                     format!("`{}`: {} (field of `{}`)", name, ty.name(), parent)
                 }
-                SymKind::Local { mutable, ty } => {
-                    match ty {
-                        Some(t) if *mutable => {
-                            format!("`{}`: {} (mutable)", name, t.name())
-                        }
-                        Some(t) => format!("`{}`: {} (immutable)", name, t.name()),
-                        None => {
-                            let kw = if *mutable { "mutable" } else { "immutable" };
-                            format!("`{}` ({})", name, kw)
-                        }
+                SymKind::Local { mutable, ty } => match ty {
+                    Some(t) if *mutable => {
+                        format!("`{}`: {} (mutable)", name, t.name())
                     }
-                }
+                    Some(t) => format!("`{}`: {} (immutable)", name, t.name()),
+                    None => {
+                        let kw = if *mutable { "mutable" } else { "immutable" };
+                        format!("`{}` ({})", name, kw)
+                    }
+                },
                 SymKind::Param { ty } => format!("`{}`: {} (parameter)", name, ty.name()),
             }
         } else {

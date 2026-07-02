@@ -311,8 +311,7 @@ fn native_session_steps_and_shows_locals() {
     }
     let file = native_fixture("native_session", LOOPS);
     let out = jet::compile_for_debug(&file).expect("compiles for debug");
-    let dir =
-        std::env::temp_dir().join(format!("jet_debug_native_build_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_debug_native_build_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let rs = dir.join("prog.rs");
     let bin = dir.join("prog");
@@ -342,7 +341,14 @@ fn native_session_steps_and_shows_locals() {
         &file,
         &jet_src,
         false,
-        &["locals", "next", "next", "print total", "backtrace", "continue"],
+        &[
+            "locals",
+            "next",
+            "next",
+            "print total",
+            "backtrace",
+            "continue",
+        ],
     );
     assert!(
         transcript.contains("breakpoint hit"),

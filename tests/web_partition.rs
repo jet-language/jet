@@ -35,7 +35,7 @@ fn browser_effect_infers_js_bucket_without_marker() {
 use core.ui as ui
 
 fn dom_fn() {
-    _b #= ui.null_backend()
+    _b :: ui.null_backend()
 }
 
 #Wasm
@@ -93,7 +93,7 @@ fn browser_effect_partition_metadata() {
 use core.ui as ui
 
 fn dom_fn() {
-    _b #= ui.null_backend()
+    _b :: ui.null_backend()
 }
 "#;
     let (toks, _) = jet::Lexer::lex(src);

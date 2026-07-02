@@ -14,14 +14,14 @@ protocol Payment {
 }
 
 fn drive(h: ^Payment.Client) {
-    h1 #= h.Hello(1) ?? panic("hello failed")
-    h2 #= h1.recv_Ack() ?? panic("ack failed")
-    h3 #= h2.Charge(500) ?? panic("charge failed")
+    h1 :: h.Hello(1) ?? panic("hello failed")
+    h2 :: h1.recv_Ack() ?? panic("ack failed")
+    h3 :: h2.Charge(500) ?? panic("charge failed")
     h3.recv_Receipt()
 }
 
 fn main() {
-    h #= Payment.Client.client()
+    h :: Payment.Client.client()
     drive(^h)
     print("payment complete")
 }

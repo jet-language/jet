@@ -152,7 +152,9 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
 
 fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
     match s {
-        Stmt::Expr(e) | Stmt::Val(crate::AST::Binding { init: e, .. }) => f(e),
+        Stmt::Expr(e) | Stmt::Val(crate::AST::Binding { init: e, .. }) | Stmt::Yield(e, _) => {
+            f(e)
+        }
         Stmt::Assign { value, .. } => f(value),
         Stmt::Return(Some(e), _) => f(e),
         Stmt::Return(None, _) => {}

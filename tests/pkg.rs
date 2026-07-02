@@ -168,7 +168,10 @@ fn manifest_parse_effects_block() {
         + "\neffects: {\n    allow: [Fs, Time],\n    deny: [Net],\n}\n";
     let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("effects block should parse");
     assert!(pm.effects_enabled);
-    assert_eq!(pm.effects_allow, Some(vec!["Fs".to_string(), "Time".to_string()]));
+    assert_eq!(
+        pm.effects_allow,
+        Some(vec!["Fs".to_string(), "Time".to_string()])
+    );
     assert_eq!(pm.effects_deny, Some(vec!["Net".to_string()]));
 }
 
@@ -262,10 +265,12 @@ fn cli_build_prints_effect_summary() {
         "jet build failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The summary goes to stderr so program/tool stdout stays clean
+    // (U7 / D-DEVMODE1 byte-identity).
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stdout.contains("effects:") && stdout.contains("Fs"),
-        "expected an effect summary naming Fs, got:\n{stdout}"
+        stderr.contains("effects:") && stderr.contains("Fs"),
+        "expected an effect summary naming Fs on stderr, got:\n{stderr}"
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -276,7 +281,9 @@ fn cli_build_enforces_effect_budget_e1220() {
     // A dependency that reaches `Net` while the root's budget only allows
     // `Fs` must fail the build naming the dependency (E1220).
     if !jet_bin().is_file() {
-        eprintln!("note: skipping cli_build_enforces_effect_budget_e1220 (run `cargo build` first)");
+        eprintln!(
+            "note: skipping cli_build_enforces_effect_budget_e1220 (run `cargo build` first)"
+        );
         return;
     }
     let tmp = tmp_dir("effbudget_deny");
@@ -727,7 +734,10 @@ fn lock_file_content_hash_roundtrip() {
         parsed.packages[0].content_hash,
         Some("sha256-deadbeef".into())
     );
-    assert_eq!(parsed.packages[0].layer, Some(jet::Syntax::RuntimeLayer::Core));
+    assert_eq!(
+        parsed.packages[0].layer,
+        Some(jet::Syntax::RuntimeLayer::Core)
+    );
     assert_eq!(
         parsed.packages[0].inferred_layer,
         Some(jet::Syntax::RuntimeLayer::Std)
@@ -2137,7 +2147,7 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     .unwrap();
     fs::write(
         s.join("main.jet"),
-        "use helper;\n\nfn main() {\n    s #= helper.make()\n    print(s.value)\n}\n",
+        "use helper;\n\nfn main() {\n    s :: helper.make()\n    print(s.value)\n}\n",
     )
     .unwrap();
 

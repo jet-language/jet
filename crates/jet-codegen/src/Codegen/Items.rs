@@ -1098,16 +1098,36 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         "impl user_{} {{\n    pub fn raw(&self) -> {} {{ self.0 }}\n}}\n\n",
         d.name, base_rust
     ));
+    if let Some((lo, hi, _)) = d.range {
+        out.push_str(&format!(
+            "impl user_{n} {{\n    pub fn try_new(__v: {base}) -> Result<user_{n}, String> {{\n        if __v >= {lo} && __v <= {hi} {{ Ok(user_{n}(__v)) }} else {{ Err(format!(\"value {{}} is outside {n}'s range {lo}..{hi}\", __v)) }}\n    }}\n}}\n\n",
+            n = d.name,
+            base = base_rust,
+            lo = lo,
+            hi = hi
+        ));
+    }
     // @Numeric: implement Add, Sub, Mul, Div (same-type arithmetic).
     if d.is_numeric {
         for (trait_name, op) in &[("Add", "+"), ("Sub", "-"), ("Mul", "*"), ("Div", "/")] {
-            out.push_str(&format!(
-                "impl std::ops::{}<user_{n}> for user_{n} {{\n    type Output = user_{n};\n    fn {lc}(self, rhs: user_{n}) -> user_{n} {{ user_{n}(self.0 {op} rhs.0) }}\n}}\n\n",
-                trait_name,
-                n = d.name,
-                lc = trait_name.to_lowercase(),
-                op = op
-            ));
+            if d.range.is_some() {
+                out.push_str(&format!(
+                    "impl std::ops::{}<user_{n}> for user_{n} {{\n    type Output = {base};\n    fn {lc}(self, rhs: user_{n}) -> {base} {{ self.0 {op} rhs.0 }}\n}}\n\n",
+                    trait_name,
+                    n = d.name,
+                    base = base_rust,
+                    lc = trait_name.to_lowercase(),
+                    op = op
+                ));
+            } else {
+                out.push_str(&format!(
+                    "impl std::ops::{}<user_{n}> for user_{n} {{\n    type Output = user_{n};\n    fn {lc}(self, rhs: user_{n}) -> user_{n} {{ user_{n}(self.0 {op} rhs.0) }}\n}}\n\n",
+                    trait_name,
+                    n = d.name,
+                    lc = trait_name.to_lowercase(),
+                    op = op
+                ));
+            }
         }
     }
     // D-CAPBUNDLE1 `@Printable`: forward `{value}` interpolation (JetDisplay)

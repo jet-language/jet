@@ -31,8 +31,9 @@ fn jet_test_example_output() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let expected = fs::read_to_string(root.join("examples/features/expected/tooling/tests.test.out"))
-        .expect("examples/features/expected/tooling/tests.test.out");
+    let expected =
+        fs::read_to_string(root.join("examples/features/expected/tooling/tests.test.out"))
+            .expect("examples/features/expected/tooling/tests.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 }
 

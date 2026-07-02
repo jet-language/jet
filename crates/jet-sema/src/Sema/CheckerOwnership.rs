@@ -8,9 +8,9 @@ use std::collections::{HashMap, HashSet};
 /// Root binding for a `#Ref` field initializer (unwraps auto `.clone()`).
 pub(crate) fn ref_field_init_root<'a>(e: &'a Expr) -> Option<&'a str> {
     match e {
-        Expr::MethodCall { receiver, method, .. } if method == "clone" => {
-            expr_root_ident(receiver)
-        }
+        Expr::MethodCall {
+            receiver, method, ..
+        } if method == "clone" => expr_root_ident(receiver),
         _ => expr_root_ident(e),
     }
 }
@@ -108,21 +108,23 @@ impl<'a> Checker<'a> {
             if !ref_fields.contains(fname) {
                 continue;
             }
-            let owner = self
-                .registry
-                .ref_field_label(type_name, fname)
-                .map(str::to_string)
-                .or_else(|| {
-                    let fields = self.struct_fields_of(owner_mod, type_name)?;
-                    let legacy = self.structs.get(type_name)?;
-                    fields.iter().zip(legacy.iter()).find_map(|((n, _, _, is_ref, _), (lab, _))| {
-                        if n == fname && *is_ref {
-                            Some(lab.clone().unwrap_or_else(|| "src".to_string()))
-                        } else {
-                            None
-                        }
-                    })
-                });
+            let owner =
+                self.registry
+                    .ref_field_label(type_name, fname)
+                    .map(str::to_string)
+                    .or_else(|| {
+                        let fields = self.struct_fields_of(owner_mod, type_name)?;
+                        let legacy = self.structs.get(type_name)?;
+                        fields.iter().zip(legacy.iter()).find_map(
+                            |((n, _, _, is_ref, _), (lab, _))| {
+                                if n == fname && *is_ref {
+                                    Some(lab.clone().unwrap_or_else(|| "src".to_string()))
+                                } else {
+                                    None
+                                }
+                            },
+                        )
+                    });
             let root = ref_field_init_root(fexpr);
             if let (Some(owner), Some(root)) = (owner.as_deref(), root) {
                 if let Expr::Index { .. } | Expr::Slice { .. } = fexpr {
@@ -256,7 +258,7 @@ impl<'a> Checker<'a> {
     // ──────────────────────────────────────────────────────────────────────
     // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): scope-bound arena `view`s.
     //
-    // `x #= arena.alloc(v)` makes `x` a *view* into `arena`'s storage — Rust
+    // `x :: arena.alloc(v)` makes `x` a *view* into `arena`'s storage — Rust
     // `&'arena mut T`. The view is sound only while it stays inside its region
     // (the lexical scope of the `arena` binding / an explicit `region`) and only
     // until `arena` is `reset`/`free`d. Two diagnostics enforce that, both
@@ -414,7 +416,10 @@ impl<'a> Checker<'a> {
                 return Some(call.name.clone());
             }
         }
-        if let Expr::MethodCall { receiver, method, .. } = expr {
+        if let Expr::MethodCall {
+            receiver, method, ..
+        } = expr
+        {
             if let Some(type_name) = self.receiver_type_name(receiver) {
                 if self.method_is_must_use(&type_name, method) {
                     return Some(format!("{type_name}.{method}"));
@@ -502,7 +507,7 @@ impl<'a> Checker<'a> {
                 "L0505",
                 "heap growth inside a loop — consider an arena".to_string(),
                 "each `push` may allocate on the global heap; in a hot loop that adds up".to_string(),
-                "bind `arena #= mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data".to_string(),
+                "bind `arena :: mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data".to_string(),
                 Some(span),
             ));
         }

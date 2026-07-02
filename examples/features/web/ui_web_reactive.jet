@@ -4,14 +4,14 @@ use core.ui as ui
 use core.reactive as reactive
 
 fn main() {
-    backend #= ui.null_backend()
-    label #= reactive.signal("hello")
+    backend :: ui.null_backend()
+    label :: reactive.signal("hello")
 
     ui.reactive_render(() => {
-        node #= ui.node(label.get(), 100.0, 20.0)
-        constraint #= ui.constraint(0.0, 0.0, 200.0, 100.0)
-        size #= backend.measure(node, constraint)
-        frame #= ui.rect(0.0, 0.0, size.width, size.height)
+        node :: ui.node(label.get(), 100.0, 20.0)
+        constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+        size :: backend.measure(node, constraint)
+        frame :: ui.rect(0.0, 0.0, size.width, size.height)
         backend.layout(node, frame)
         backend.paint(node)
     })

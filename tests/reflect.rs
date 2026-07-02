@@ -1,10 +1,8 @@
 //! Integration tests for D-METAREFLECT1 / D-REFLECT1 rich reflection.
 
-use jet::AST::{
-    AccessConvention, Field, Func, Param, StructDef, Type, TypeParam,
-};
 use jet::Comptime::{build_struct_type_info, CtValue};
 use jet::Diagnostics::Span;
+use jet::AST::{AccessConvention, Field, Func, Param, StructDef, Type, TypeParam};
 
 fn span() -> Span {
     Span::new(0, 1)
@@ -53,8 +51,8 @@ fn method(name: &str, is_pub: bool) -> Func {
         post: vec![],
         effect_via: None,
         state_requires: None,
-            state_transition: None,
-            web_marker: None,
+        state_transition: None,
+        web_marker: None,
         is_must_use: false,
         must_use_span: None,
         body: Vec::new(),
@@ -141,7 +139,11 @@ fn field_info_carries_visibility() {
     let CtValue::List(fields) = struct_field(&info, "fields") else {
         panic!("fields");
     };
-    let CtValue::Struct { fields: hidden_fields, .. } = &fields[1] else {
+    let CtValue::Struct {
+        fields: hidden_fields,
+        ..
+    } = &fields[1]
+    else {
         panic!("field struct");
     };
     let is_pub = &hidden_fields.iter().find(|(n, _)| n == "is_pub").unwrap().1;

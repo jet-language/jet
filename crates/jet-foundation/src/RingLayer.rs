@@ -49,24 +49,45 @@ pub fn core_module_layer(module: &str) -> Option<RuntimeLayer> {
 fn layer_of_normalized(module: &str) -> RuntimeLayer {
     match module {
         // ── core: no heap, no OS ─────────────────────────────────────────
-        "core" | "core.math" | "core.science.measurement" | "core.perf" | "core.scope"
-            | "core.ui"
-        | "core.encoding.hex" | "core.encoding.base64" | "jet.crypto" => RuntimeLayer::Core,
+        "core"
+        | "core.math"
+        | "core.science.measurement"
+        | "core.perf"
+        | "core.scope"
+        | "core.ui"
+        | "core.encoding.hex"
+        | "core.encoding.base64"
+        | "jet.crypto" => RuntimeLayer::Core,
 
         // ── alloc: heap / growable data, no direct OS I/O ──────────────────
-        "core.mem" | "core.mem.alloc" | "core.random" | "core.crypto.random" | "core.uuid"
-        | "core.encoding" | "core.encoding.json" | "core.encoding.csv"
-        | "core.encoding.toml" | "core.encoding.yaml" | "core.text.unicode" | "core.args"
-        | "core.async.loadable" | "core.time.expiring" | "core.secrets" | "jet.reactive" | "core.sketch.hll"
-        | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir" | "jet.log"
+        "core.mem"
+        | "core.mem.alloc"
+        | "core.random"
+        | "core.crypto.random"
+        | "core.uuid"
+        | "core.encoding"
+        | "core.encoding.json"
+        | "core.encoding.csv"
+        | "core.encoding.toml"
+        | "core.encoding.yaml"
+        | "core.text.unicode"
+        | "core.args"
+        | "core.async.loadable"
+        | "core.time.expiring"
+        | "core.secrets"
+        | "jet.reactive"
+        | "core.sketch.hll"
+        | "core.sketch.tdigest"
+        | "core.sketch.cms"
+        | "core.sketch.reservoir"
+        | "jet.log"
         | "jet.regex" => RuntimeLayer::Alloc,
 
         // ── std: OS I/O, networking, processes ─────────────────────────────
         "core.fs" | "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
         | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
-        | "core.compress.gzip" | "core.compress.zstd"
-        | "jet.db" => RuntimeLayer::Std,
+        | "core.compress.gzip" | "core.compress.zstd" | "jet.db" => RuntimeLayer::Std,
 
         // Unknown modules default to std so new OS-facing modules stay conservative.
         other if Syntax::is_known_core_module(other) => RuntimeLayer::Std,
@@ -150,7 +171,10 @@ mod tests {
     #[test]
     fn helper_usage_keys_map_to_layer() {
         assert_eq!(core_usage_layer("core.io::input"), Some(RuntimeLayer::Std));
-        assert_eq!(core_usage_layer("core.math::__mathtypes__"), Some(RuntimeLayer::Core));
+        assert_eq!(
+            core_usage_layer("core.math::__mathtypes__"),
+            Some(RuntimeLayer::Core)
+        );
         assert_eq!(core_usage_layer("core::json"), Some(RuntimeLayer::Alloc));
         assert_eq!(core_usage_layer("core.reactive"), Some(RuntimeLayer::Alloc));
     }

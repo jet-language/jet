@@ -3,22 +3,22 @@ use core.crypto as crypto
 use core.crypto.expert as expert
 
 fn main() {
-    key: [U8] #= [
+    key: [U8] :: [
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
         0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
         0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
         0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
     ]
-    msg: [U8] #= [1, 2, 3]
+    msg: [U8] :: [1, 2, 3]
     // Default seal uses ChaCha20-Poly1305 (algo id 1).
-    new_box #= crypto.seal(key, msg) ?? panic("seal failed")
-    _ #= crypto.open(key, new_box) ?? panic("open new failed")
+    new_box :: crypto.seal(key, msg) ?? panic("seal failed")
+    _ :: crypto.open(key, new_box) ?? panic("open new failed")
     print("chacha ok: true")
     // Legacy AES-256-GCM envelope (algo id 2), sealed under #Unsafe expert tier.
     old_box: [U8] := []
     #Unsafe("migration golden: legacy AES envelope") {
         old_box = expert.aes256_gcm_seal(key, msg) ?? panic("legacy seal failed")
     }
-    legacy #= crypto.open(key, old_box) ?? panic("legacy open failed")
+    legacy :: crypto.open(key, old_box) ?? panic("legacy open failed")
     print("legacy ok: {legacy == msg}")
 }

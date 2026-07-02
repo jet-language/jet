@@ -330,7 +330,7 @@ impl<'a> TaintCtx<'a> {
 
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
-            Stmt::Expr(e) => self.check_expr(e),
+            Stmt::Expr(e) | Stmt::Yield(e, _) => self.check_expr(e),
             Stmt::Val(b) => {
                 self.check_expr(&b.init);
                 // A binding takes on its initializer's taint. A destructuring

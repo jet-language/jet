@@ -234,10 +234,70 @@ impl<'a> Checker<'a> {
                         label: None,
                         spread: false,
                     }],
+                    range_checked: false,
                 });
                 self.infer(e)
             }
             Expr::Bool(_, _) => Some(Type::Bool),
+            // D-TYPEDTEXT1=D: a string literal in a position whose expected
+            // type is `Sql`/`Html` elaborates to that typed value instead of
+            // `String` — the same expected-type law as `.{ }` construction.
+            // Each `{hole}` becomes a bound parameter (Sql) or an escaped
+            // insertion (Html) at codegen; it is checked here like any other
+            // value, not run through the Display-ability check below (a hole
+            // is never printed as text).
+            Expr::Str(_, str_span) if matches!(&self.expected_type, Some(Type::Named(n)) if n == "Sql" || n == "Html") =>
+            {
+                let Some(Type::Named(type_name)) = self.expected_type.clone() else {
+                    unreachable!()
+                };
+                let span = *str_span;
+                let old = std::mem::replace(e, Expr::Absent(span));
+                let Expr::Str(parts, _) = old else { unreachable!() };
+                // Rewrite to `Call { name: "Sql"|"Html", args }` — a literal
+                // segment then a hole, alternating, always closing on a
+                // literal (`literals.len() == holes.len() + 1`). Codegen
+                // recognizes this synthetic call by name (like D-UNITLIT1's
+                // rewrite) and builds the template/params split from the
+                // literal-vs-hole position parity — no runtime string
+                // formatting touches a hole's text.
+                let mk_lit = |s: String, span: Span| CallArg {
+                    convention: AccessConvention::Read,
+                    expr: Expr::Str(vec![StrPart::Lit(s)], span),
+                    span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                };
+                let mut args: Vec<CallArg> = Vec::new();
+                let mut cur_lit = String::new();
+                for p in parts {
+                    match p {
+                        StrPart::Lit(s) => cur_lit.push_str(&s),
+                        StrPart::Interp(mut inner, _fmt) => {
+                            args.push(mk_lit(std::mem::take(&mut cur_lit), span));
+                            self.borrow_ctx = true;
+                            self.infer(&mut inner);
+                            args.push(CallArg {
+                                convention: AccessConvention::Read,
+                                span: inner.span(),
+                                expr: *inner,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            });
+                        }
+                    }
+                }
+                args.push(mk_lit(cur_lit, span));
+                *e = Expr::Call(Call {
+                    name: type_name.clone(),
+                    name_span: span,
+                    args,
+                    range_checked: false,
+                });
+                Some(Type::Named(type_name))
+            }
             Expr::Str(parts, _) => {
                 for p in parts.iter_mut() {
                     if let StrPart::Interp(inner, fmt) = p {
@@ -264,10 +324,9 @@ impl<'a> Checker<'a> {
                                                     inner.span(),
                                                 ));
                                             } else if self.trait_reg.auto_printable.contains(n)
-                                                && !self.trait_reg.implements_trait(
-                                                    n,
-                                                    crate::Generics::DISPLAY,
-                                                )
+                                                && !self
+                                                    .trait_reg
+                                                    .implements_trait(n, crate::Generics::DISPLAY)
                                             {
                                                 self.diags.push(Diagnostic::lint(
                                                     "L0520",
@@ -300,8 +359,10 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!("{} can't be shown with @Debug yet", t.show()),
-                                            "debug interpolation needs a debuggable value".to_string(),
-                                            "implement `Debug` or use a debuggable part".to_string(),
+                                            "debug interpolation needs a debuggable value"
+                                                .to_string(),
+                                            "implement `Debug` or use a debuggable part"
+                                                .to_string(),
                                             Some(inner.span()),
                                         ));
                                     }
@@ -500,7 +561,11 @@ impl<'a> Checker<'a> {
                 let (op, span) = (*op, *span);
                 self.infer_binary(op, lhs, rhs, span)
             }
-            Expr::CompareChain { operands, ops, span } => {
+            Expr::CompareChain {
+                operands,
+                ops,
+                span,
+            } => {
                 let span = *span;
                 let ops = ops.clone();
                 self.infer_compare_chain(operands, &ops, span)
@@ -852,7 +917,7 @@ impl<'a> Checker<'a> {
                     "list spread can't build a fixed-size `[T#N]` list".to_string(),
                     "spread expands a growable list — a `[T#N]` has a fixed compile-time length"
                         .to_string(),
-                    "use a growable `[T]` binding (`#=`/`:=`) instead of `[T#N]`".to_string(),
+                    "use a growable `[T]` binding (`::`/`:=`) instead of `[T#N]`".to_string(),
                     Some(span),
                 ));
                 return None;
@@ -1524,10 +1589,7 @@ impl<'a> Checker<'a> {
                         };
                         self.diags.push(Diagnostic::error(
                             "E3110",
-                            format!(
-                                "lane `{}` isn't valid on `{}`",
-                                lane, type_name
-                            ),
+                            format!("lane `{}` isn't valid on `{}`", lane, type_name),
                             format!(
                                 "swizzle members name lanes with x/y/z/w — `{}` only has {}",
                                 type_name, valid

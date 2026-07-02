@@ -124,10 +124,9 @@ before continuing.
 | E0062 | parse | teaching: a contract marker written with `#` → write it with `@` (D-MARKER-FAMILY1, D-MARKERMOVE1/2/3) |
 | E0063 | parse | teaching: a directive marker written with `@` → write it with `#` (D-MARKER-FAMILY1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
-| E0985 | parse | teaching: `val`/`var` keyword → `name #=`/`name :=` sigil (D-BIND3) |
+| E0985 | parse | teaching: `val`/`var` keyword → `name ::`/`name :=` sigil (D-BIND4) |
 | E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
-| E0991 | parse | teaching: `::` / `@=` retired immutable-binding sigil → `#=` (D-BIND3) |
-| E0998 | parse | teaching: retired explicit binding forms → `: Type #=` / `: Type :=` (D-BIND3) |
+| E0998 | parse | teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4) |
 | E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs `==` between the subject and `{` (D-IF3) |
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
 | E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
@@ -142,7 +141,7 @@ before continuing.
 | E0108 | sema  | binding type doesn't match its value      |
 | E0109 | sema  | operator type mismatch (incl. Int/Float mixing, `+` on text) |
 | E0110 | sema  | condition isn't `Bool` (`if`/`while`/arm/logic operand) |
-| E0111 | sema  | changing a `#=`, const, or read-only parameter |
+| E0111 | sema  | changing a `::`, const, or read-only parameter |
 | E0112 | sema  | value doesn't fit where it's used (argument/print/interpolation) |
 | E0113 | sema  | `return` value mismatch (wrong/missing/unexpected) |
 | E0114 | sema  | a path reaches the end without `return`   |
@@ -180,6 +179,9 @@ before continuing.
 | E0143 | sema  | `drop` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP) |
 | E0144 | sema  | `result` used inside a `@Pre` condition — it only exists once the function has returned (D-PREPOST1) |
 | E0145 | parse | `@Persist` on a binding that isn't module-level (D-PERSIST1) |
+| E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
+| E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
+| E0149 | sema  | a runtime `String` used where `Sql`/`Html` is expected (D-TYPEDTEXT1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
@@ -188,6 +190,9 @@ before continuing.
 | E0162 | sema  | `++`/`--` on a non-integer type (D-INCR1) |
 | E0163 | sema  | `++`/`--` can't target an indexed slot (D-INCR1) |
 | E0154 | parse | protocol message endpoint pair is not `client -> server` or `server -> client` (D-PROTO2) |
+| E0805 | sema  | `yield` used outside a function declared `-> Stream<T>` (D-STREAMYIELD1) |
+| E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
+| E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S -> …)` — a dead-end state (D-STATE-DECL, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`~`) required at call site — write access not granted |
@@ -653,7 +658,7 @@ block reserved for M6.
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
 | E2402 | `?` can't convert `{err}` into `Error` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Error` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Error`. | Add `impl {err}: Fallible { fn to_error(self) -> Error { Error(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
-| E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name #= …;` before the struct literal, or write the long form `Type { field_name: value }`. |
+| E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name :: …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source -> Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} -> {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} -> {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … -> …` blocks. |
 | E2406 | Can't declare `impl {Source} -> {Target}` — neither type is defined in this program. | Error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined, so conversions between two foreign types can't be added silently. | Define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type. |
@@ -795,7 +800,7 @@ implemented.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2932 | layout constraint mixes a horizontal and vertical value (`{lt}` and `{rt}`) | `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout. | Compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis). |
-| E2933 | this line inside `layout {name}` doesn't produce a constraint (found `{ty}`) | Every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`). | Write a comparison, e.g. `label.width >= 80.0`, or capture it: `c @= label.width >= 80.0`. |
+| E2933 | this line inside `layout {name}` doesn't produce a constraint (found `{ty}`) | Every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`). | Write a comparison, e.g. `label.width >= 80.0`, or capture it: `c :: label.width >= 80.0`. |
 | E2934 | this constraint repeats one already written in this `layout` block | An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover. | Remove the duplicate line, or change it if a different constraint was meant. |
 
 ## Debugging and observability diagnostics (E2-M12, D-OBS1–3)

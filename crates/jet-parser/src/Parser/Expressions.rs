@@ -58,7 +58,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// S73: `( name #= … )` — named tuple literal or type, not grouping.
+    /// S73: `( name :: … )` — named tuple literal or type, not grouping.
     /// When `lparen_consumed` is true, `self.pos` is already on the first member name.
     pub(super) fn looks_like_named_tuple(&self, lparen_consumed: bool) -> bool {
         let i = if lparen_consumed {
@@ -451,12 +451,20 @@ impl<'a> Parser<'a> {
             let lhs = operands.pop().unwrap();
             return Ok(Expr::Binary(ops[0], Box::new(lhs), Box::new(rhs), span));
         }
-        Ok(Expr::CompareChain { operands, ops, span })
+        Ok(Expr::CompareChain {
+            operands,
+            ops,
+            span,
+        })
     }
 
     fn peek_cmp_span(&self) -> Option<Span> {
         match &self.peek().kind {
-            TokKind::EqEq | TokKind::NotEq | TokKind::Lt | TokKind::Gt | TokKind::Le
+            TokKind::EqEq
+            | TokKind::NotEq
+            | TokKind::Lt
+            | TokKind::Gt
+            | TokKind::Le
             | TokKind::Ge => Some(self.peek().span),
             _ => None,
         }
@@ -722,11 +730,7 @@ impl<'a> Parser<'a> {
                             if let Expr::Ident(alias, _) = inner.as_ref() {
                                 let alias = alias.clone();
                                 let type_name = type_name.clone();
-                                if alias
-                                    .chars()
-                                    .next()
-                                    .is_some_and(|c| c.is_ascii_uppercase())
-                                {
+                                if alias.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
                                     let full = format!("{alias}.{type_name}");
                                     let span = expr.span();
                                     expr = self.struct_lit_after_name(full, Vec::new(), span)?;
@@ -960,6 +964,7 @@ impl<'a> Parser<'a> {
                                 name,
                                 name_span,
                                 args: vec![arg],
+                                range_checked: false,
                             }),
                             Expr::Call(mut c) => {
                                 c.args.push(arg);
@@ -985,7 +990,11 @@ impl<'a> Parser<'a> {
                                     resolved_ret,
                                 }
                             }
-                            Expr::CallValue { callee, mut args, span } => {
+                            Expr::CallValue {
+                                callee,
+                                mut args,
+                                span,
+                            } => {
                                 args.push(arg);
                                 Expr::CallValue {
                                     callee,
@@ -998,7 +1007,10 @@ impl<'a> Parser<'a> {
                         trailing_block_attached = true;
                         continue;
                     } else if allow_struct_lit
-                        && matches!(expr, Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. })
+                        && matches!(
+                            expr,
+                            Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }
+                        )
                     {
                         // D-TRAILBLOCK1: a trailing `{ }` on something that isn't a
                         // call at all (a plain field/index read) — teach the shape
@@ -1377,7 +1389,8 @@ impl<'a> Parser<'a> {
                             let mut format = crate::AST::StrFormat::Display;
                             if matches!(sub.peek().kind, TokKind::At) {
                                 sub.bump();
-                                let (sel, sel_span) = sub.expect_ident("after `@` in interpolation")?;
+                                let (sel, sel_span) =
+                                    sub.expect_ident("after `@` in interpolation")?;
                                 if sel == crate::Syntax::INTERP_SELECTOR_DEBUG {
                                     format = crate::AST::StrFormat::Debug;
                                 } else {
@@ -1895,6 +1908,14 @@ impl<'a> Parser<'a> {
     /// sema when `Red` is not a variable but is a variant on the subject.
     pub(super) fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
         match &self.peek().kind {
+            // D-PARSESTR1: an interpolation literal in pattern position —
+            // `subject == "prefix-{id:Int}-suffix"`. Each hole must reduce to
+            // a bare identifier with an optional `:Type` suffix; anything
+            // else (an arbitrary expression) isn't part of this decision, so
+            // fall through to ordinary `Expr::Str` parsing instead.
+            TokKind::Str(_) => {
+                return self.try_str_match_pattern();
+            }
             TokKind::KwNull => {
                 let span = self.bump().span;
                 return Ok(Some(Pattern::Absent(span)));
@@ -1928,6 +1949,16 @@ impl<'a> Parser<'a> {
                     binding,
                     span: Span::new(start.start, binding_span.end),
                 }));
+            }
+            // D-DESTRUCT1: struct-shaped dispatch arm head:
+            // `.{ kind: "page", title, .. } -> ...`.
+            TokKind::Dot
+                if matches!(
+                    self.toks.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokKind::LBrace)
+                ) =>
+            {
+                return self.struct_pattern_rhs().map(Some);
             }
             TokKind::Ident(variant)
                 if matches!(
@@ -2121,6 +2152,213 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// D-PARSESTR1: try to read the string-literal token at the cursor as a
+    /// str-match pattern — `"prefix-{id:Int}-suffix"`. Each hole must reduce
+    /// to a bare identifier, optionally followed by `:Type`; any other hole
+    /// shape (an arbitrary expression) means this string isn't a pattern, so
+    /// the token is left untouched and the caller falls back to ordinary
+    /// `Expr::Str` parsing. E0147 (two holes with nothing to split on between
+    /// them) is checked here, at parse time, once we've committed.
+    fn try_str_match_pattern(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+        let TokKind::Str(parts) = &self.peek().kind else {
+            return Ok(None);
+        };
+        let parts = parts.clone();
+        // I8: a hole-free string literal is plain text equality — ordinary
+        // `Expr::Str`/`==`, not a pattern (one way to mean it). Only a string
+        // with at least one `{hole}` is a str-match pattern.
+        if !parts.iter().any(|p| matches!(p, StrTokPart::Interp(_))) {
+            return Ok(None);
+        }
+        // First pass: every hole must be a bare identifier, optionally
+        // followed by `:Type`, with nothing else in the sub-token-stream.
+        for part in &parts {
+            if let StrTokPart::Interp(toks) = part {
+                let Some(Token {
+                    kind: TokKind::Ident(_),
+                    ..
+                }) = toks.first()
+                else {
+                    return Ok(None);
+                };
+                match toks.get(1).map(|t| &t.kind) {
+                    None | Some(TokKind::Eof) => {}
+                    Some(TokKind::Colon) => {
+                        // `name : Type` — the rest (from index 2) must parse
+                        // as a type and consume the whole remaining stream.
+                        if toks.len() < 3 {
+                            return Ok(None);
+                        }
+                    }
+                    _ => return Ok(None),
+                }
+            }
+        }
+
+        let span = self.bump().span;
+        let mut match_parts: Vec<StrMatchPart> = Vec::new();
+        for part in parts {
+            match part {
+                StrTokPart::Lit(s) => match_parts.push(StrMatchPart::Lit(s)),
+                StrTokPart::Interp(toks) => {
+                    let mut sub = Parser {
+                        toks: &toks,
+                        pos: 0,
+                        diags: Vec::new(),
+                        pending_type_gt: false,
+                        depth: self.depth,
+                        type_generic_depth: 0,
+                        type_generic_chain: Vec::new(),
+                        type_generic_truncated: false,
+                        arm_head_term: false,
+                        pub_file_default: false,
+                        in_layout_body: self.in_layout_body,
+                    };
+                    let (name, name_span) = sub.expect_ident("in a pattern hole")?;
+                    let ty = if matches!(sub.peek().kind, TokKind::Colon) {
+                        sub.bump();
+                        let (t, _) = sub.type_()?;
+                        Some(t)
+                    } else {
+                        None
+                    };
+                    if !sub.diags.is_empty() {
+                        let mut ds = sub.diags;
+                        let first = ds.remove(0);
+                        self.diags.extend(ds);
+                        return Err(first);
+                    }
+                    let hole_span = if matches!(sub.peek().kind, TokKind::Eof) {
+                        name_span
+                    } else {
+                        Span::new(name_span.start, sub.peek().span.end)
+                    };
+                    match_parts.push(StrMatchPart::Hole {
+                        name,
+                        ty,
+                        span: hole_span,
+                    });
+                }
+            }
+        }
+
+        // E0147: two holes with no literal text (or only an empty literal)
+        // between them — a pattern splits text at the fixed characters
+        // between holes, so back-to-back holes are ambiguous. Pushed (not
+        // returned as `Err`) so the rest of this arm table — and the rest of
+        // the file — still parses and reports its own problems (M1 recovery),
+        // matching the `..=`/E0318 arm-head recovery convention.
+        let mut i = 0;
+        while i + 1 < match_parts.len() {
+            let adjacent_holes = matches!(match_parts[i], StrMatchPart::Hole { .. })
+                && match match_parts.get(i + 1) {
+                    Some(StrMatchPart::Hole { .. }) => true,
+                    Some(StrMatchPart::Lit(s)) => {
+                        s.is_empty()
+                            && matches!(match_parts.get(i + 2), Some(StrMatchPart::Hole { .. }))
+                    }
+                    None => false,
+                };
+            if adjacent_holes {
+                let StrMatchPart::Hole { span: s1, .. } = &match_parts[i] else {
+                    unreachable!()
+                };
+                let next_hole_idx = if matches!(match_parts[i + 1], StrMatchPart::Hole { .. }) {
+                    i + 1
+                } else {
+                    i + 2
+                };
+                let StrMatchPart::Hole { span: s2, .. } = &match_parts[next_hole_idx] else {
+                    unreachable!()
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0147",
+                    "these two `{}` holes have nothing between them to split on".to_string(),
+                    "a pattern splits the matched text at the fixed characters between holes; \
+                     back-to-back holes give it nothing to split on"
+                        .to_string(),
+                    "put literal text between them, or type them so the boundary is unambiguous"
+                        .to_string(),
+                    Some(Span::new(s1.start, s2.end)),
+                ));
+            }
+            i += 1;
+        }
+
+        Ok(Some(Pattern::StrMatch {
+            parts: match_parts,
+            span,
+        }))
+    }
+
+    fn struct_pattern_rhs(&mut self) -> Result<Pattern, Diagnostic> {
+        let dot_span = self.bump().span;
+        self.expect(TokKind::LBrace, "after `.` in a struct pattern")?;
+        let mut fields = Vec::new();
+        let mut rest = None;
+        if !matches!(self.peek().kind, TokKind::RBrace) {
+            loop {
+                if matches!(self.peek().kind, TokKind::DotDot) {
+                    rest = Some(self.bump().span);
+                    break;
+                }
+                let (field, field_span) = self.expect_ident("for a struct-pattern field")?;
+                if matches!(self.peek().kind, TokKind::Colon) {
+                    self.bump();
+                    if let TokKind::Ident(local) = self.peek().kind.clone() {
+                        let local_span = self.peek().span;
+                        let next = self.toks.get(self.pos + 1).map(|t| &t.kind);
+                        if matches!(next, Some(TokKind::Comma | TokKind::RBrace)) {
+                            self.bump();
+                            fields.push(crate::AST::StructPatField::Bind {
+                                field,
+                                field_span,
+                                local,
+                                local_span,
+                            });
+                        } else {
+                            let value = self.expr_no_struct_lit()?;
+                            fields.push(crate::AST::StructPatField::Value {
+                                field,
+                                field_span,
+                                value: Box::new(value),
+                            });
+                        }
+                    } else {
+                        let value = self.expr_no_struct_lit()?;
+                        fields.push(crate::AST::StructPatField::Value {
+                            field,
+                            field_span,
+                            value: Box::new(value),
+                        });
+                    }
+                } else {
+                    fields.push(crate::AST::StructPatField::Bind {
+                        local: field.clone(),
+                        local_span: field_span,
+                        field,
+                        field_span,
+                    });
+                }
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek().kind, TokKind::RBrace) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(TokKind::RBrace, "after struct-pattern fields")?;
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok(Pattern::Struct {
+            fields,
+            rest,
+            span: Span::new(dot_span.start, end),
+        })
+    }
+
     /// S46: `(` … `) =>` without scanning nested `(` for the `=>` probe.
     fn after_lparen_is_lambda(&self) -> bool {
         let mut i = self.pos + 1;
@@ -2234,6 +2472,7 @@ impl<'a> Parser<'a> {
                         Stmt::AssumeDet { span, .. } => span.end,
                         // D-TXN1–D-TXN4: transaction block span end.
                         Stmt::Transact { span, .. } => span.end,
+                        Stmt::Yield(e, _) => e.span().end,
                     }
                 } else {
                     close_paren.end
@@ -2281,6 +2520,7 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             args,
+            range_checked: false,
         })
     }
 

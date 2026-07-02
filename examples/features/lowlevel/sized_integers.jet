@@ -9,46 +9,46 @@
 
 fn main() {
     // A literal takes the width of its binding, checked to fit at compile time.
-red: U8 #= 255
-channel: I32 #= 100000
-depth: I8 #= -120
+red: U8 :: 255
+channel: I32 :: 100000
+depth: I8 :: -120
 
     print(red)
     print(channel)
     print(depth)
 
     // `I64` is the same type as `Int`, so they combine without conversion.
-total: I64 #= 9000000000
+total: I64 :: 9000000000
     print(total + 1)
 
     // Arithmetic stays within one width and keeps that width.
-half: U8 #= 100
+half: U8 :: 100
     print(half + half)
 
     // A list expected at a fixed width elaborates every element to it — this is
     // what binary/byte APIs work in.
-bytes: [U8] #= [104, 105, 33]
+bytes: [U8] :: [104, 105, 33]
     print(bytes)
 
     // Width conversions are named methods (D-NUMOPS1). Widening is infallible;
     // narrowing is fallible (`?`/`??`) because a value might not fit.
-wide: I64 #= red.to_i64()
+wide: I64 :: red.to_i64()
     print(wide)
-clamped: U8 #= channel.to_u8() ?? 255
+clamped: U8 :: channel.to_u8() ?? 255
     print(clamped)
 
     // Numeric surface (D-NUMOPS1): per-type bounds, bit queries, float consts.
     print(U8.MAX)
     print(I32.MIN)
-flags: U8 #= 13
+flags: U8 :: 13
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
 
     // Bit operators (D-NUMOPS1). `&`/`|`/`^` keep the operand width; a shift's
     // count may be any integer (it's a bit-count, not a value of the same width),
     // and a count past the type's width traps instead of leaking a Rust panic.
-mask: U8 #= 12
-bits: U8 #= 10
+mask: U8 :: 12
+bits: U8 :: 10
     print(mask & bits)
     print(mask | bits)
     print(mask ^ bits)
@@ -63,10 +63,10 @@ bits: U8 #= 10
 
     // Overflow is checked by default — `200 + 100` as a U8 would trap. Opt a
     // single op out at the use site: wrap, saturate, or get a checked `T?`.
-hi: U8 #= 200
-lo: U8 #= 100
+hi: U8 :: 200
+lo: U8 :: 100
     print(wrapping(hi + lo))
     print(saturating(hi + lo))
-fallback: U8 #= 0
+fallback: U8 :: 0
     print(checked(hi + lo) ?? fallback)
 }

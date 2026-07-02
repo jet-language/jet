@@ -531,10 +531,8 @@ impl<'a> Fmt<'a> {
     fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
         // D-ATTR2/D-SERDE: the leading `#[…]` bracket-marker list (derives +
         // container serde attrs), verbatim as the user wrote it.
-        let lone_hash_ok = s.layout.is_none()
-            && !s.is_published_schema
-            && !s.is_single_use
-            && !s.is_must_use;
+        let lone_hash_ok =
+            s.layout.is_none() && !s.is_published_schema && !s.is_single_use && !s.is_must_use;
         self.fmt_type_markers(&s.type_markers, lone_hash_ok);
         // D-LIN1: `#SingleUse` precedes `pub`/`struct`, on the same line.
         if s.is_single_use {
@@ -837,12 +835,7 @@ impl<'a> Fmt<'a> {
             self.write("#");
             self.write(crate::Syntax::ATTR_REF);
             self.write("(");
-            self.write(
-                field
-                    .stored_ref_label
-                    .as_deref()
-                    .unwrap_or("src"),
-            );
+            self.write(field.stored_ref_label.as_deref().unwrap_or("src"));
             self.write(") ");
         }
         self.write(&field.name);

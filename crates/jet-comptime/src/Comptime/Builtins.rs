@@ -378,10 +378,8 @@ pub(super) fn apply_method(
                 }) = args.first()
                 {
                     if dur_ty == crate::Syntax::DURATION_TYPE {
-                        if let Some(CtValue::Int(ms)) = dur_fields
-                            .iter()
-                            .find(|(n, _)| n == "ms")
-                            .map(|(_, v)| v)
+                        if let Some(CtValue::Int(ms)) =
+                            dur_fields.iter().find(|(n, _)| n == "ms").map(|(_, v)| v)
                         {
                             now += ms;
                         }
@@ -408,9 +406,7 @@ pub(super) fn apply_method(
                 .map(|(_, v)| v)
                 .unwrap_or(CtValue::Int(0)))
         }
-        (CtValue::Struct { type_name, fields }, "int")
-            if type_name == crate::Syntax::RNG_TYPE =>
-        {
+        (CtValue::Struct { type_name, fields }, "int") if type_name == crate::Syntax::RNG_TYPE => {
             let mut state = fields
                 .iter()
                 .find(|(n, _)| n == "state")

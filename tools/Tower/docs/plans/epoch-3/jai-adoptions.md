@@ -339,7 +339,7 @@ example already works):**
   Expressions.rs:646` (D-CAP9), gated to `#Unsafe` in sema (E0208, "raw
   pointer op outside `#Unsafe`").
 - `mem.cast_ptr<T>(ptr)` — **does not exist**. The ballot's own worked
-  example (`ptr: *Bool #= mem.cast_ptr<Bool>(slot.value_pointer)`) uses an
+  example (`ptr: *Bool :: mem.cast_ptr<Bool>(slot.value_pointer)`) uses an
   API that isn't shipped. Two choices: (a) find/name whatever raw-pointer
   cast primitive *does* exist in `core.mem` today and rewrite the doc
   example around it, or (b) this card quietly also needs `mem.cast_ptr<T>`
@@ -364,7 +364,7 @@ short "Jai transliteration" note: chain expression → two Jet lines inside
 **New diagnostics:** none.
 
 **Example:** `examples/lowlevel/pointer-cast-deref.jet` — mirrors the
-existing `#Unsafe("...") { p: *Bool #= ...; p.* = true }` shape already
+existing `#Unsafe("...") { p: *Bool :: ...; p.* = true }` shape already
 legal today; if no `cast_ptr` exists, use whatever the current raw-cast
 spelling actually is (check `core.mem` or the raw-pointer type's own cast
 method before writing).

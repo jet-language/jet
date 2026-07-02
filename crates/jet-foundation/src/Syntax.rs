@@ -42,25 +42,19 @@ pub const MARKER_PUBLIC_FILE: &str = "PublicFile";
 /// access to sibling packages in the same payload/workspace.
 pub const PUB_PACKAGE_QUALIFIER: &str = "package";
 
-/// S2 / D-BIND1 / D-BIND3: immutable binding sigil `name #= expr`.
-/// D-BIND3: explicit-type immutable form is `name: Type #= expr`; explicit mutable is
+/// S2 / D-BIND1 / D-BIND4: immutable binding sigil `name :: expr`.
+/// D-BIND4: explicit-type immutable form is `name: Type :: expr`; explicit mutable is
 /// `name: Type := expr`. Inferred mutable stays `name := expr`; `=` reassigns `:=`
-/// bindings (S17). Retired: `::`, `@=`, `name: Type :`, and `name: Type =`.
-pub const SIGIL_BIND_IMMUT: &str = "#=";
-
-/// D-BIND2: retired immutable-binding sigil `::`. Recognized only for E0991.
-pub const SIGIL_BIND_IMMUT_RETIRED: &str = "::";
-
-/// D-BIND2: retired immutable-binding sigil `@=`. Recognized only for E0991.
-pub const SIGIL_BIND_IMMUT_RETIRED2: &str = "@=";
+/// bindings (S17).
+pub const SIGIL_BIND_IMMUT: &str = "::";
 
 /// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`
 /// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
-/// D-BIND3: explicit-type mutable form is `name: Type := expr`.
+/// D-BIND4: explicit-type mutable form is `name: Type := expr`.
 pub const SIGIL_BIND_MUT: &str = ":=";
 
 /// S2 / D-BIND1: the retired binding keywords, recognized only for the E0985
-/// teaching error that points at the `#=` / `:=` sigils.
+/// teaching error that points at the `::` / `:=` sigils.
 pub const FOREIGN_VAL: &str = "val";
 pub const FOREIGN_VAR: &str = "var";
 
@@ -195,6 +189,14 @@ pub const KW_RETURN: &str = "return";
 
 /// M2: loop statement (for SharedHandle lint checks).
 pub const KW_LOOP: &str = "loop";
+
+/// D-STREAMYIELD1 (ratified): `yield expr` — hand a value to a `Stream<T>`
+/// consumer and suspend until the next pull. Legal only in a function whose
+/// return type is `Stream<T>`.
+pub const KW_YIELD: &str = "yield";
+
+/// D-STREAMYIELD1: the generator return-type constructor `Stream<T>`.
+pub const TYPE_STREAM: &str = "Stream";
 
 /// D-UNSAFE2 (ratified 2026-06-22, opt B; prev S58 2026-06-12): the audited
 /// expert gate. Block form: `#Unsafe("reason") { … }`. Whole-function form:
@@ -1502,9 +1504,9 @@ pub const SIGIL_SPREAD: &str = "...";
 /// case — the parser resolves by position.
 pub const TYPE_FIXED_SIZE_SEP: &str = "#";
 
-/// D-DIST1 (ratified 2026-06-19): `UserId #= distinct Int` — declares a
+/// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — declares a
 /// distinct type (a separate nominal type sharing the base's representation).
-/// Used in the value position of a `#=` immutable binding at item level;
+/// Used in the value position of a `::` immutable binding at item level;
 /// `distinct`-over-`distinct` chaining is rejected in v1.
 pub const KW_DISTINCT: &str = "distinct";
 
@@ -1663,14 +1665,14 @@ pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
 pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
 pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
-// D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
-// that join Codable/Encode/Decode on the contract plane (`@`). `TRAIT_DEBUG`
-// ("Debug") is reused as the auto-derive marker name. User derives
-// (`derive T.Wire { … }`, applied as `#[Wire]`) stay `#` — the built-in/user
-// line is the `@`/`#` plane line.
+                                        // D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
+                                        // that join Codable/Encode/Decode on the contract plane (`@`). `TRAIT_DEBUG`
+                                        // ("Debug") is reused as the auto-derive marker name. User derives
+                                        // (`derive T.Wire { … }`, applied as `#[Wire]`) stay `#` — the built-in/user
+                                        // line is the `@`/`#` plane line.
 pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3
 pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
-                                        // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
+                                                // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
 pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
 pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
 pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]

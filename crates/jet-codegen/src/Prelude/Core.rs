@@ -697,6 +697,16 @@ fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) ->
     }
     r
 }
+// D-ERRCTX1=D: `.context(msg)` — a lazily-evaluated human boundary message
+// prepended to the error chain (errors are plain `String`s in Jet, so the
+// chain is just accumulated text: origin, then each `.context()` crossed on
+// the way out). `msg` runs only on the `Err` branch.
+fn jet_context<T, F: FnOnce() -> String>(r: Result<T, String>, msg: F) -> Result<T, String> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) => Err(format!("{}: {}", msg(), e)),
+    }
+}
 // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
@@ -737,6 +747,22 @@ fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> 
 }
 fn jet_char_len(s: &String) -> i64 { s.chars().count() as i64 }
 fn jet_string_split(s: &String, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
+// D-TYPEDTEXT1=D: escape a hole's text before it joins an `Html` template —
+// the audited insertion point for every non-`.raw()` interpolation.
+fn jet_html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
 fn jet_string_lines(s: &String) -> Vec<String> { s.lines().map(|x| x.to_string()).collect() }
 fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
     let chars: Vec<char> = s.chars().collect();

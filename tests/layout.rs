@@ -88,8 +88,8 @@ fn main() {
         a.width == b.width
         a.width + b.width == 200.0
     }
-    aw #= form.value(form.h("a", "width"))
-    bw #= form.value(form.h("b", "width"))
+    aw :: form.value(form.h("a", "width"))
+    bw :: form.value(form.h("b", "width"))
     print("a={aw} b={bw}")
 }
 "#;
@@ -114,7 +114,7 @@ fn main() {
         x.width >= 50.0
         x.width <= 80.0
     }
-    xv #= form.h("x", "width")
+    xv :: form.h("x", "width")
     form.suggest(xv, 1000.0)
     print("x={(form.value(xv))}")
 }
@@ -140,8 +140,8 @@ fn main() {
         a.width == b.width + b.width
         a.width + b.width == 300.0
     }
-    aw #= form.value(form.h("a", "width"))
-    bw #= form.value(form.h("b", "width"))
+    aw :: form.value(form.h("a", "width"))
+    bw :: form.value(form.h("b", "width"))
     print("a={aw} b={bw}")
 }
 "#;
@@ -171,7 +171,7 @@ fn main() {
 fn non_comparison_line_is_e2933() {
     let src = r#"
 fn main() {
-    x #= 1
+    x :: 1
     layout form {
         x == 1
     }

@@ -646,7 +646,7 @@ pub enum Item {
     Func(Func),
     Struct(StructDef),
     Enum(EnumDef),
-    /// D-DIST1 (ratified 2026-06-19): `UserId @= distinct Int` — a distinct type
+    /// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — a distinct type
     /// declaration. `distinct`-over-`distinct` base is rejected in sema.
     Distinct(DistinctDef),
     /// D-TYPEALIAS1 (ratified 2026-06-28): `alias Name<T> = …` — a transparent
@@ -1382,11 +1382,11 @@ pub struct TypeAliasDef {
     pub span: Span,
 }
 
-/// D-DIST1/D-DIST3: distinct type declaration — `[@Numeric] Name @= distinct Base`.
+/// D-DIST1/D-DIST3: distinct type declaration — `[@Numeric] Name :: distinct Base`.
 #[derive(Debug)]
 pub struct DistinctDef {
     pub is_pub: bool,
-    /// D-PUBPKG1=A: true for `pub(package) Name @= distinct Base`.
+    /// D-PUBPKG1=A: true for `pub(package) Name :: distinct Base`.
     pub is_package_pub: bool,
     /// D-DIST3: whether `@Numeric` marker was present — enables same-type arithmetic.
     pub is_numeric: bool,
@@ -1625,6 +1625,70 @@ pub enum Pattern {
     /// D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
     /// All alternatives must bind the same names at the same types (E0317).
     Or(Vec<Pattern>, Span),
+    /// D-DESTRUCT1: a struct-shaped dispatch arm head:
+    /// `.{ kind: "page", title, .. } -> ...`.
+    Struct {
+        fields: Vec<StructPatField>,
+        rest: Option<Span>,
+        span: Span,
+    },
+    /// D-PARSESTR1: the same interpolation literal that formats a string can
+    /// sit in pattern position — matches the fixed text and binds each
+    /// `{hole}` to a name (untyped binds `String`; `{hole:Type}` binds `Type`
+    /// and is a fallible parse). Always refutable (D-PARSESTR2 amendment):
+    /// the literal text might not match, and a typed hole's parse can fail.
+    StrMatch {
+        parts: Vec<StrMatchPart>,
+        span: Span,
+    },
+}
+
+/// D-PARSESTR1: one piece of a string-interpolation-literal used as a
+/// pattern — fixed text to match, or a hole to bind (optionally typed).
+#[derive(Debug, Clone)]
+pub enum StrMatchPart {
+    Lit(String),
+    Hole {
+        name: String,
+        /// `None` binds `String`; `Some(t)` binds `t` via a fallible parse
+        /// from the matched substring (E0148 if unhandled by an `else`).
+        ty: Option<Type>,
+        span: Span,
+    },
+}
+
+/// D-DESTRUCT1: one field inside a struct pattern arm head.
+#[derive(Debug, Clone)]
+pub enum StructPatField {
+    /// `field` or `field: local` — bind the field value into the arm body.
+    Bind {
+        field: String,
+        field_span: Span,
+        local: String,
+        local_span: Span,
+    },
+    /// `field: value` — require the field to equal this value.
+    Value {
+        field: String,
+        field_span: Span,
+        value: Box<Expr>,
+    },
+}
+
+impl StructPatField {
+    pub fn field_name(&self) -> &str {
+        match self {
+            StructPatField::Bind { field, .. } | StructPatField::Value { field, .. } => field,
+        }
+    }
+
+    pub fn field_span(&self) -> Span {
+        match self {
+            StructPatField::Bind { field_span, .. } | StructPatField::Value { field_span, .. } => {
+                *field_span
+            }
+        }
+    }
 }
 
 /// S74: a single name bound by a destructuring target.
@@ -1642,7 +1706,10 @@ impl BindName {
     /// The name actually bound in scope: the rename if present, else the
     /// field/element name itself.
     pub fn local_name(&self) -> &str {
-        self.rename.as_ref().map(|(n, _)| n.as_str()).unwrap_or(&self.name)
+        self.rename
+            .as_ref()
+            .map(|(n, _)| n.as_str())
+            .unwrap_or(&self.name)
     }
 }
 
@@ -1651,7 +1718,7 @@ impl BindName {
 /// `[ elems ]` for lists, `( a, b )` for named tuples (S73/S74).
 #[derive(Debug, Clone)]
 pub enum BindPattern {
-    /// `Point.{ x, y } #= p;` — binds a subset of the struct's fields.
+    /// `Point.{ x, y } :: p;` — binds a subset of the struct's fields.
     /// D-DESTRUCT1: `rest` is `Some(span)` of a trailing `..` — MANDATORY
     /// whenever `fields` doesn't name every field of the struct (E0326); a
     /// `..` on a pattern that already names every field is E0327.
@@ -1712,6 +1779,8 @@ impl Pattern {
             | Pattern::Range { span, .. } => *span,
             Pattern::Absent(span) => *span,
             Pattern::Or(_, span) => *span,
+            Pattern::Struct { span, .. } => *span,
+            Pattern::StrMatch { span, .. } => *span,
         }
     }
 }
@@ -2010,6 +2079,10 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-STREAMYIELD1: `yield expr` — hand a value to a `Stream<T>` consumer
+    /// and suspend until the next pull. Legal only in a function whose return
+    /// type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 otherwise).
+    Yield(Expr, Span),
 }
 
 impl Stmt {
@@ -2047,6 +2120,7 @@ impl Stmt {
             | Stmt::Live { span, .. }
             | Stmt::AssumeDet { span, .. }
             | Stmt::Transact { span, .. } => *span,
+            Stmt::Yield(_, span) => *span,
             Stmt::If(ifs) => ifs.cond.span(),
         }
     }
@@ -2149,6 +2223,11 @@ pub struct Call {
     pub name: String,
     pub name_span: Span,
     pub args: Vec<CallArg>,
+    /// D-RANGETYPE1: sema sets this on a range-constrained distinct
+    /// constructor when it appears under postfix `?`. Codegen then emits the
+    /// checked constructor as a `Result`, while the ordinary constructor form
+    /// still stays infallible and is rejected for runtime values.
+    pub range_checked: bool,
 }
 
 #[derive(Debug, Default, Clone)]

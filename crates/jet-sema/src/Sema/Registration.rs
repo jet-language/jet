@@ -1,8 +1,8 @@
 use super::*;
 use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Syntax;
 use crate::Numeric::{allows_float_money, is_money_like_name};
+use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
     AccessConvention, ConstAttr, DistinctDef, EnumDef, Expr, Func, Item, Param, Program,
@@ -84,8 +84,7 @@ impl<'a> Checker<'a> {
                     Some(f.name_span),
                 ));
             }
-            if f
-                .return_type
+            if f.return_type
                 .as_ref()
                 .is_some_and(|t| !matches!(t, Type::Named(n) if n == "Unit"))
             {
@@ -110,8 +109,7 @@ impl<'a> Checker<'a> {
             self.in_pre_clause = true;
             self.require_bool(&mut clause.cond, "a `@Pre` condition");
             self.in_pre_clause = false;
-            if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs)
-            {
+            if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
                 self.diags.push(e0139(Syntax::CONTRACT_PRE, d.span));
             }
         }
@@ -138,9 +136,7 @@ impl<'a> Checker<'a> {
             );
             for clause in &mut f.post {
                 self.require_bool(&mut clause.cond, "a `@Post` condition");
-                if let Some(d) =
-                    check_pure_expr(&clause.cond, &f.name, self.funcs)
-                {
+                if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
                     self.diags.push(e0139(Syntax::CONTRACT_POST, d.span));
                 }
             }
@@ -154,7 +150,11 @@ impl<'a> Checker<'a> {
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
         self.check_single_use_consumed_in_current_scope();
-        if f.return_type.is_some() && !block_definitely_returns(&f.body) {
+        // D-STREAMYIELD1: a generator (`-> Stream<T>`) falling off the end is
+        // exactly a bare `return;` — it just ends the stream. Never E0114.
+        let is_generator =
+            matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
+        if !is_generator && f.return_type.is_some() && !block_definitely_returns(&f.body) {
             let rt = f.return_type.clone().unwrap();
             self.diags.push(Diagnostic::error(
                 "E0114",
@@ -1855,10 +1855,10 @@ pub(crate) fn check_error_conv_body(
         declared_effects: None,
         effect_via: None,
         state_requires: None,
-            state_transition: None,
-            web_marker: None,
-            pre: Vec::new(),
-            post: Vec::new(),
+        state_transition: None,
+        web_marker: None,
+        pre: Vec::new(),
+        post: Vec::new(),
         body: std::mem::take(&mut ec.body),
     };
     let d = check_func_body(
@@ -2172,10 +2172,10 @@ pub(crate) fn synthesize_delegation_method(
         declared_effects: None,
         effect_via: None,
         state_requires: None,
-            state_transition: None,
-            web_marker: None,
-            pre: Vec::new(),
-            post: Vec::new(),
+        state_transition: None,
+        web_marker: None,
+        pre: Vec::new(),
+        post: Vec::new(),
         body: vec![body_stmt],
     }
 }
@@ -2225,10 +2225,10 @@ pub(crate) fn synthesize_default_method(
         declared_effects: None,
         effect_via: None,
         state_requires: None,
-            state_transition: None,
-            web_marker: None,
-            pre: Vec::new(),
-            post: Vec::new(),
+        state_transition: None,
+        web_marker: None,
+        pre: Vec::new(),
+        post: Vec::new(),
         body: body.to_vec(),
     }
 }

@@ -49,4 +49,4 @@ cargo test --test lsp
 ```
 
 In the editor, open a `.jet` file containing `let x = 1;` — expect an
-**E0009** diagnostic pointing at `#=` / `:=` binding sigils (use `x #= 1` or `x := 1`).
+**E0009** diagnostic pointing at `::` / `:=` binding sigils (use `x :: 1` or `x := 1`).

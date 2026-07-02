@@ -1,0 +1,22 @@
+// D-TYPEDTEXT1=D: a string literal in a position expecting `Sql`/`Html`
+// elaborates to a checked value — the same expected-type law as `.{ }`
+// construction. Each `{hole}` becomes a bound parameter (Sql) or an escaped
+// insertion (Html); a runtime `String` can never fill the position directly
+// (E0149) — `.raw("…")` is the sole audited escape.
+fn run_query(q: Sql) {
+    print("template: {q.template()}")
+    print("param count: {q.params().len()}")
+}
+
+fn render(h: Html) {
+    print("html: {h.text()}")
+}
+
+fn main() {
+    id :: 42
+    run_query("select * from incidents where id = {id}")
+    name :: "<script>alert(1)</script>"
+    render("<p>{name}</p>")
+    trusted :: Html.raw("<b>audited</b>")
+    render(trusted)
+}

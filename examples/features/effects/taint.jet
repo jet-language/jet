@@ -15,7 +15,7 @@ use core.process as process
 
 fn main() {
     // Untrusted input, marked at its source. Taint spreads through the binding.
-    name #= #Tainted "world danger; rm -rf /"
+    name :: #Tainted "world danger; rm -rf /"
     // Clean it. The sanitizer's result is trusted, so it may reach the sink.
     safe := shell_arg(name)
     // A subprocess command is an `Exec` sink. The argument is sanitized, so this

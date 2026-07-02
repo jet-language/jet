@@ -19,7 +19,7 @@ fn pure_fn_injected_clock_ok() {
     return clock.now()
 }
 fn main() {
-    c #= time.clock(500)
+    c :: time.clock(500)
     print("{at(c)}")
 }
 use core.time as time;
@@ -57,7 +57,7 @@ fn pure_fn_constructs_caps_ok() {
 use core.time as time;
 use core.random as random;
 @Pure fn seeded() -> Int {
-    c #= time.clock(10)
+    c :: time.clock(10)
     r := random.rng(1)
     return c.now() + r.int(0, 0)
 }
@@ -188,7 +188,7 @@ fn main() { print("{risky()}") }
 fn assume_deterministic_contextual_keyword() {
     let src = r#"
 fn main() {
-    assume_deterministic #= 5
+    assume_deterministic :: 5
     print("{assume_deterministic}")
 }
 "#;
@@ -261,7 +261,7 @@ fn rng_bool_needs_mut_receiver() {
     let src = r#"
 use core.random as random;
 fn main() {
-    r #= random.rng(3)
+    r :: random.rng(3)
     b := r.bool()
     print("{b}")
 }
@@ -330,7 +330,7 @@ fn clock_advance_needs_mut_receiver() {
     let src = r#"
 use core.time as time;
 fn main() {
-    c #= time.clock(0)
+    c :: time.clock(0)
     n := c.advance(100)
     print("{n}")
 }

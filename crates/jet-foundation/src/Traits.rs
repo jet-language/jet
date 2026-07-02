@@ -406,8 +406,12 @@ impl TraitRegistry {
                     .map(|(name, _, ty)| (name.clone(), ty.clone()))
                     .collect();
                 if let Some((key, value)) = self.index_key_value.get(type_name) {
-                    merged.entry("Key".to_string()).or_insert_with(|| key.clone());
-                    merged.entry("Value".to_string()).or_insert_with(|| value.clone());
+                    merged
+                        .entry("Key".to_string())
+                        .or_insert_with(|| key.clone());
+                    merged
+                        .entry("Value".to_string())
+                        .or_insert_with(|| value.clone());
                 }
                 merged
             } else {

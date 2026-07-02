@@ -334,8 +334,7 @@ impl<'a> Parser<'a> {
                     self.pub_file_default = true;
                     continue;
                 }
-                TokKind::Hash
-                    if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
+                TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
                 {
                     let span = self.peek().span;
                     self.diags.push(Diagnostic::error(
@@ -349,7 +348,10 @@ impl<'a> Parser<'a> {
                             "`#{}` flips this file to public-by-default (D-VISDEFAULT2)",
                             Syntax::MARKER_PUB_FILE
                         ),
-                        format!("write `#{}` at the top of the file", Syntax::MARKER_PUB_FILE),
+                        format!(
+                            "write `#{}` at the top of the file",
+                            Syntax::MARKER_PUB_FILE
+                        ),
                         Some(span),
                     ));
                     if pub_file {
@@ -369,99 +371,93 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                TokKind::Hash if self.at_web_target() => {
-                    match self.parse_web_target_marker() {
-                        Ok(TargetMarker::DefaultWeb) => {
-                            if matches!(self.peek().kind, TokKind::KwModule) {
-                                let span = self.peek().span;
-                                self.diags.push(Diagnostic::error(
+                TokKind::Hash if self.at_web_target() => match self.parse_web_target_marker() {
+                    Ok(TargetMarker::DefaultWeb) => {
+                        if matches!(self.peek().kind, TokKind::KwModule) {
+                            let span = self.peek().span;
+                            self.diags.push(Diagnostic::error(
                                     "E0003",
                                     "`#Target(Web)` isn't valid on a module".to_string(),
                                     "`Web` is a file-level default-backend marker, not a partition ceiling".to_string(),
                                     "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(Js)` on a module".to_string(),
                                     Some(span),
                                 ));
-                                self.sync_top();
-                                continue;
-                            }
-                            if default_target.is_some() {
-                                let span = self.peek().span;
-                                self.diags.push(Diagnostic::error(
-                                    "E0003",
-                                    "only one `#Target(Web)` marker is allowed per file".to_string(),
-                                    "a file may declare at most one default backend".to_string(),
-                                    "remove the duplicate `#Target(Web)` marker".to_string(),
-                                    Some(span),
-                                ));
-                                self.sync_top();
-                                continue;
-                            }
-                            default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
-                            continue;
-                        }
-                        Ok(TargetMarker::Bucket(target)) => {
-                            if matches!(self.peek().kind, TokKind::KwModule) {
-                                match self.code_module_with_pkg_and_target(false, false, Some(target))
-                                {
-                                    Ok(item) => items.push(item),
-                                    Err(d) => {
-                                        self.diags.push(d);
-                                        self.sync_top();
-                                    }
-                                }
-                                continue;
-                            }
-                            if web_target_ceiling.is_some() {
-                                let span = self.peek().span;
-                                self.diags.push(Diagnostic::error(
-                                    "E0003",
-                                    "only one `#Target(…)` ceiling is allowed per file".to_string(),
-                                    "a file may declare at most one web partition ceiling".to_string(),
-                                    "remove the duplicate `#Target(Wasm)` or `#Target(Js)` marker"
-                                        .to_string(),
-                                    Some(span),
-                                ));
-                                self.sync_top();
-                                continue;
-                            }
-                            web_target_ceiling = Some(target);
-                            continue;
-                        }
-                        Err(d) => {
-                            self.diags.push(d);
                             self.sync_top();
                             continue;
                         }
+                        if default_target.is_some() {
+                            let span = self.peek().span;
+                            self.diags.push(Diagnostic::error(
+                                "E0003",
+                                "only one `#Target(Web)` marker is allowed per file".to_string(),
+                                "a file may declare at most one default backend".to_string(),
+                                "remove the duplicate `#Target(Web)` marker".to_string(),
+                                Some(span),
+                            ));
+                            self.sync_top();
+                            continue;
+                        }
+                        default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
+                        continue;
                     }
-                }
+                    Ok(TargetMarker::Bucket(target)) => {
+                        if matches!(self.peek().kind, TokKind::KwModule) {
+                            match self.code_module_with_pkg_and_target(false, false, Some(target)) {
+                                Ok(item) => items.push(item),
+                                Err(d) => {
+                                    self.diags.push(d);
+                                    self.sync_top();
+                                }
+                            }
+                            continue;
+                        }
+                        if web_target_ceiling.is_some() {
+                            let span = self.peek().span;
+                            self.diags.push(Diagnostic::error(
+                                "E0003",
+                                "only one `#Target(…)` ceiling is allowed per file".to_string(),
+                                "a file may declare at most one web partition ceiling".to_string(),
+                                "remove the duplicate `#Target(Wasm)` or `#Target(Js)` marker"
+                                    .to_string(),
+                                Some(span),
+                            ));
+                            self.sync_top();
+                            continue;
+                        }
+                        web_target_ceiling = Some(target);
+                        continue;
+                    }
+                    Err(d) => {
+                        self.diags.push(d);
+                        self.sync_top();
+                        continue;
+                    }
+                },
                 // D-HTMLPAIR1 (open, c134): `#Html("path.html")` — explicit
                 // companion host page for `--target=web` builds.
-                TokKind::Hash if self.at_html_marker() => {
-                    match self.parse_html_marker() {
-                        Ok(path) => {
-                            if html_path.is_some() {
-                                let span = self.peek().span;
-                                self.diags.push(Diagnostic::error(
-                                    "E0003",
-                                    "only one `#Html(…)` marker is allowed per file".to_string(),
-                                    "a file may declare at most one companion host page"
-                                        .to_string(),
-                                    "remove the duplicate `#Html(…)` marker".to_string(),
-                                    Some(span),
-                                ));
-                                self.sync_top();
-                                continue;
-                            }
-                            html_path = Some(path);
-                            continue;
-                        }
-                        Err(d) => {
-                            self.diags.push(d);
+                TokKind::Hash if self.at_html_marker() => match self.parse_html_marker() {
+                    Ok(path) => {
+                        if html_path.is_some() {
+                            let span = self.peek().span;
+                            self.diags.push(Diagnostic::error(
+                                "E0003",
+                                "only one `#Html(…)` marker is allowed per file".to_string(),
+                                "a file may declare at most one companion host page".to_string(),
+                                "remove the duplicate `#Html(…)` marker".to_string(),
+                                Some(span),
+                            ));
                             self.sync_top();
                             continue;
                         }
+                        html_path = Some(path);
+                        continue;
                     }
-                }
+                    Err(d) => {
+                        self.diags.push(d);
+                        self.sync_top();
+                        continue;
+                    }
+                },
                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
                 // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
@@ -520,9 +516,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(self.foreign_sanitizer_diag(t.span));
                     self.func_with_modifiers(false, true).map(Item::Func)
                 }
-                TokKind::KwPriv | TokKind::KwPub
-                    if matches!(self.peek2().kind, TokKind::Colon) =>
-                {
+                TokKind::KwPriv | TokKind::KwPub if matches!(self.peek2().kind, TokKind::Colon) => {
                     let span = Span::new(self.peek().span.start, self.peek2().span.end);
                     self.bump();
                     self.bump();
@@ -585,8 +579,9 @@ impl<'a> Parser<'a> {
                                     None,
                                 )
                                 .map(Item::Func),
-                            TokKind::KwModule if self.is_code_module_at(1) => self
-                                .code_module_with_pkg(is_pub, is_package_pub),
+                            TokKind::KwModule if self.is_code_module_at(1) => {
+                                self.code_module_with_pkg(is_pub, is_package_pub)
+                            }
                             TokKind::KwUse => match self.import_decl() {
                                 Ok(mut imp) => {
                                     imp.is_pub = is_pub;
@@ -606,10 +601,9 @@ impl<'a> Parser<'a> {
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
                                 .protocol_decl_with_pkg(is_pub, is_package_pub)
                                 .map(Item::ProtocolDecl),
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => {
-                                self.type_alias_def(is_pub, is_package_pub)
-                                    .map(Item::TypeAlias)
-                            }
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
+                                .type_alias_def(is_pub, is_package_pub)
+                                .map(Item::TypeAlias),
                             _ => self
                                 .func_after_fn(
                                     is_pub,
@@ -725,9 +719,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(self.foreign_test_diag(t.span));
                     self.test_def_after_kw().map(Item::Test)
                 }
-                TokKind::KwModule if self.is_code_module_at(1) => {
-                    self.code_module(false)
-                }
+                TokKind::KwModule if self.is_code_module_at(1) => self.code_module(false),
                 TokKind::KwModule => self.module_decl().map(Item::Module),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -754,11 +746,13 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
                 TokKind::Hash if self.at_unit_family_def() => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.unit_family_def(is_pub, is_package_pub).map(Item::UnitFamily)
+                    self.unit_family_def(is_pub, is_package_pub)
+                        .map(Item::UnitFamily)
                 }
                 TokKind::Hash | TokKind::At if self.at_bundle_distinct_def() => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.distinct_def(is_pub, is_package_pub).map(Item::Distinct)
+                    self.distinct_def(is_pub, is_package_pub)
+                        .map(Item::Distinct)
                 }
                 // D-REPRC1: `#layout(c) struct Name { … }`
                 TokKind::Hash if self.at_layout_struct() => {
@@ -781,7 +775,8 @@ impl<'a> Parser<'a> {
                 // D-STATE-DECL: `state TypeName { A, B, C }`
                 TokKind::Ident(n) if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.state_decl_with_pkg(is_pub, is_package_pub).map(Item::StateDecl)
+                    self.state_decl_with_pkg(is_pub, is_package_pub)
+                        .map(Item::StateDecl)
                 }
                 // D-PROTO1/D-PROTO2: `protocol Name { client -> server: Msg(…) }`
                 TokKind::Ident(n) if n == Syntax::KW_PROTOCOL && self.at_protocol_block() => {
@@ -792,7 +787,8 @@ impl<'a> Parser<'a> {
                 // D-TYPEALIAS1: `alias Name<T> = …`
                 TokKind::Ident(n) if n == Syntax::KW_ALIAS => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.type_alias_def(is_pub, is_package_pub).map(Item::TypeAlias)
+                    self.type_alias_def(is_pub, is_package_pub)
+                        .map(Item::TypeAlias)
                 }
                 // D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored derive.
                 TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
@@ -841,7 +837,8 @@ impl<'a> Parser<'a> {
                 TokKind::KwComptime => self.comptime_def().map(Item::Const),
                 TokKind::Ident(_) if self.at_distinct_def() => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.distinct_def(is_pub, is_package_pub).map(Item::Distinct)
+                    self.distinct_def(is_pub, is_package_pub)
+                        .map(Item::Distinct)
                 }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_CLASS => {
                     let t = self.bump();
@@ -925,8 +922,10 @@ impl<'a> Parser<'a> {
                         format!("replace `{}` with `{}`", foreign, Syntax::KW_FN),
                         Some(t.span),
                     ));
-                    self.func_after_fn(false, false, false, false, false, None, None, false, None, false, None)
-                        .map(Item::Func)
+                    self.func_after_fn(
+                        false, false, false, false, false, None, None, false, None, false, None,
+                    )
+                    .map(Item::Func)
                 }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_IMPORT => {
                     let t = self.bump();
@@ -1492,7 +1491,19 @@ impl<'a> Parser<'a> {
         self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
         let (is_pub, is_package_pub) = self.parse_item_visibility();
         self.expect_kw(TokKind::KwFn, "after `#Reactive`")?;
-        self.func_after_fn(is_pub, is_package_pub, false, false, false, None, None, true, None, false, None)
+        self.func_after_fn(
+            is_pub,
+            is_package_pub,
+            false,
+            false,
+            false,
+            None,
+            None,
+            true,
+            None,
+            false,
+            None,
+        )
     }
 
     /// D-UNSAFE2: is the cursor at `#Unsafe fn …` or `#Unsafe("…") fn …`?
@@ -1545,7 +1556,19 @@ impl<'a> Parser<'a> {
         }
         let (is_pub, is_package_pub) = self.parse_item_visibility();
         self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
-        self.func_after_fn(is_pub, is_package_pub, true, false, false, None, None, false, None, false, None)
+        self.func_after_fn(
+            is_pub,
+            is_package_pub,
+            true,
+            false,
+            false,
+            None,
+            None,
+            false,
+            None,
+            false,
+            None,
+        )
     }
 
     /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
@@ -1588,11 +1611,8 @@ impl<'a> Parser<'a> {
         let kind = match &self.peek().kind {
             TokKind::KwExtern => {
                 let span = Span::new(start.start, self.bump().span.end);
-                self.diags.push(self.retired_c_module_marker_diag(
-                    "#extern",
-                    "#Extern",
-                    span,
-                ));
+                self.diags
+                    .push(self.retired_c_module_marker_diag("#extern", "#Extern", span));
                 CModuleKind::Extern
             }
             TokKind::Ident(n) if n == Syntax::ATTR_EXTERN_MODULE => {
@@ -1605,11 +1625,8 @@ impl<'a> Parser<'a> {
             }
             TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
                 let span = Span::new(start.start, self.bump().span.end);
-                self.diags.push(self.retired_c_module_marker_diag(
-                    "#bindgen",
-                    "#Bindgen",
-                    span,
-                ));
+                self.diags
+                    .push(self.retired_c_module_marker_diag("#bindgen", "#Bindgen", span));
                 CModuleKind::Bindgen
             }
             other => {
@@ -1636,20 +1653,14 @@ impl<'a> Parser<'a> {
         let kind = match &self.peek().kind {
             TokKind::KwExtern => {
                 let span = Span::new(start.start, self.bump().span.end);
-                self.diags.push(self.retired_c_module_marker_diag(
-                    "@extern",
-                    "#Extern",
-                    span,
-                ));
+                self.diags
+                    .push(self.retired_c_module_marker_diag("@extern", "#Extern", span));
                 CModuleKind::Extern
             }
             TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
                 let span = Span::new(start.start, self.bump().span.end);
-                self.diags.push(self.retired_c_module_marker_diag(
-                    "@bindgen",
-                    "#Bindgen",
-                    span,
-                ));
+                self.diags
+                    .push(self.retired_c_module_marker_diag("@bindgen", "#Bindgen", span));
                 CModuleKind::Bindgen
             }
             _ => unreachable!("at_retired_at_c_module guards marker spelling"),
@@ -1657,12 +1668,7 @@ impl<'a> Parser<'a> {
         self.c_module_after_kind(start, kind)
     }
 
-    fn retired_c_module_marker_diag(
-        &self,
-        old: &str,
-        new: &str,
-        span: Span,
-    ) -> Diagnostic {
+    fn retired_c_module_marker_diag(&self, old: &str, new: &str, span: Span) -> Diagnostic {
         Diagnostic::error(
             "E0060",
             format!("C FFI modules use `{}`, not `{}`", new, old),
@@ -1845,7 +1851,8 @@ impl<'a> Parser<'a> {
         let sigil = self.bump(); // `#` or `@`
         let (name, name_span) = self.expect_ident("after the marker sigil")?;
         if matches!(sigil.kind, TokKind::Hash) {
-            self.diags.push(Self::e0062_contract_on_hash(&name, name_span));
+            self.diags
+                .push(Self::e0062_contract_on_hash(&name, name_span));
         }
         Ok(Span::new(start.start, name_span.end))
     }
@@ -1959,7 +1966,10 @@ impl<'a> Parser<'a> {
 
     /// D-PREPOST1: parse `@Pre(cond, "msg")` / `@Post(cond, "msg")`; cursor on
     /// the sigil. `kw` is `CONTRACT_PRE` or `CONTRACT_POST`.
-    fn parse_contract_clause(&mut self, kw: &str) -> Result<crate::AST::ContractClause, Diagnostic> {
+    fn parse_contract_clause(
+        &mut self,
+        kw: &str,
+    ) -> Result<crate::AST::ContractClause, Diagnostic> {
         let start = self.peek().span;
         let sigil = self.bump(); // `#` or `@`
         let (_, name_span) = self.expect_ident("after the marker sigil")?;
@@ -1968,7 +1978,10 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::LParen, &format!("after `@{kw}`"))?;
         let cond = self.expr_no_struct_lit()?;
-        self.expect(TokKind::Comma, &format!("between the condition and message in `@{kw}(…)`"))?;
+        self.expect(
+            TokKind::Comma,
+            &format!("between the condition and message in `@{kw}(…)`"),
+        )?;
         let (message, message_span) = self.expect_marker_name(kw)?;
         let end = self.peek().span;
         self.expect(TokKind::RParen, &format!("to close `@{kw}(…)`"))?;
@@ -2005,7 +2018,10 @@ impl<'a> Parser<'a> {
             other => {
                 return Err(Diagnostic::error(
                     "E0003",
-                    format!("expected a path in quotes inside `#Html(…)`, found {}", describe(other)),
+                    format!(
+                        "expected a path in quotes inside `#Html(…)`, found {}",
+                        describe(other)
+                    ),
                     "the companion host page is a fixed file path".to_string(),
                     "write `#Html(\"index.html\")`".to_string(),
                     Some(self.peek().span),
@@ -2042,15 +2058,16 @@ impl<'a> Parser<'a> {
         self.bump(); // `#`
         self.bump(); // `Target`
         self.expect(TokKind::LParen, "after `#Target`")?;
-        let (name, name_span) = self.expect_ident(
-            "the partition name inside `#Target(…)` (`Wasm`, `Js`, or `Web`)",
-        )?;
+        let (name, name_span) =
+            self.expect_ident("the partition name inside `#Target(…)` (`Wasm`, `Js`, or `Web`)")?;
         self.expect(TokKind::RParen, "to close `#Target(…)`")?;
         if name == crate::Syntax::WEB_TARGET_DEFAULT_WEB {
             return Ok(TargetMarker::DefaultWeb);
         }
-        crate::Syntax::WebBucket::parse(&name).map(TargetMarker::Bucket).ok_or_else(|| {
-            Diagnostic::error(
+        crate::Syntax::WebBucket::parse(&name)
+            .map(TargetMarker::Bucket)
+            .ok_or_else(|| {
+                Diagnostic::error(
                 "E0003",
                 format!("`#Target({name})` is not a known web partition"),
                 "web targets are `Wasm` (compute), `Js` (DOM/view), or `Web` (default CLI backend)"
@@ -2063,7 +2080,7 @@ impl<'a> Parser<'a> {
                 ),
                 Some(name_span),
             )
-        })
+            })
     }
 
     /// D-WASM1=A: consume `#Wasm` / `#Js` / `#WasmExport` when present.
@@ -2167,21 +2184,21 @@ impl<'a> Parser<'a> {
                     None,
                 )
                 .map(Item::Func),
-            TokKind::KwModule if self.is_code_module_at(1) => self
-                .code_module_with_pkg(is_pub, is_package_pub),
+            TokKind::KwModule if self.is_code_module_at(1) => {
+                self.code_module_with_pkg(is_pub, is_package_pub)
+            }
             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => self
                 .state_decl_with_pkg(is_pub, is_package_pub)
                 .map(Item::StateDecl),
             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
                 .protocol_decl_with_pkg(is_pub, is_package_pub)
                 .map(Item::ProtocolDecl),
-            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => {
-                self.type_alias_def(is_pub, is_package_pub).map(Item::TypeAlias)
-            }
-            TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY) =>
-            {
-                self.unit_family_def(is_pub, is_package_pub).map(Item::UnitFamily)
+            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
+                .type_alias_def(is_pub, is_package_pub)
+                .map(Item::TypeAlias),
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY) => {
+                self.unit_family_def(is_pub, is_package_pub)
+                    .map(Item::UnitFamily)
             }
             _ => {
                 let d = Diagnostic::error(
@@ -2272,7 +2289,11 @@ impl<'a> Parser<'a> {
                     Syntax::MARKER_PUB_FILE,
                     Syntax::KW_PRIV
                 ),
-                format!("write `{} fn …` instead of `{} fn …`", Syntax::KW_PRIV, Syntax::FOREIGN_PRIVATE),
+                format!(
+                    "write `{} fn …` instead of `{} fn …`",
+                    Syntax::KW_PRIV,
+                    Syntax::FOREIGN_PRIVATE
+                ),
                 Some(span),
             ));
             if matches!(self.peek().kind, TokKind::KwPub) {
@@ -2281,7 +2302,11 @@ impl<'a> Parser<'a> {
                 let _ = self.try_parse_pub_package_suffix();
                 self.diags.push(Diagnostic::error(
                     "E0417",
-                    format!("`{}` and `{}` can't both apply to one item", Syntax::KW_PRIV, Syntax::KW_PUB),
+                    format!(
+                        "`{}` and `{}` can't both apply to one item",
+                        Syntax::KW_PRIV,
+                        Syntax::KW_PUB
+                    ),
                     "an item is either public or private — pick one qualifier".to_string(),
                     format!(
                         "drop `{}` (already public in a `#{}` file) or remove `{}`",
@@ -2295,7 +2320,11 @@ impl<'a> Parser<'a> {
             if !self.pub_file_default {
                 self.diags.push(Diagnostic::error(
                     "E0413",
-                    format!("`{}` only applies inside a `#{}` file", Syntax::KW_PRIV, Syntax::MARKER_PUB_FILE),
+                    format!(
+                        "`{}` only applies inside a `#{}` file",
+                        Syntax::KW_PRIV,
+                        Syntax::MARKER_PUB_FILE
+                    ),
                     format!(
                         "without `#{}`, items are private by default and export with `{}`",
                         Syntax::MARKER_PUB_FILE,
@@ -2321,7 +2350,11 @@ impl<'a> Parser<'a> {
                 let _ = self.try_parse_pub_package_suffix();
                 self.diags.push(Diagnostic::error(
                     "E0417",
-                    format!("`{}` and `{}` can't both apply to one item", Syntax::KW_PRIV, Syntax::KW_PUB),
+                    format!(
+                        "`{}` and `{}` can't both apply to one item",
+                        Syntax::KW_PRIV,
+                        Syntax::KW_PUB
+                    ),
                     "an item is either public or private — pick one qualifier".to_string(),
                     format!(
                         "drop `{}` (already public in a `#{}` file) or remove `{}`",
@@ -2335,7 +2368,11 @@ impl<'a> Parser<'a> {
             if !self.pub_file_default {
                 self.diags.push(Diagnostic::error(
                     "E0413",
-                    format!("`{}` only applies inside a `#{}` file", Syntax::KW_PRIV, Syntax::MARKER_PUB_FILE),
+                    format!(
+                        "`{}` only applies inside a `#{}` file",
+                        Syntax::KW_PRIV,
+                        Syntax::MARKER_PUB_FILE
+                    ),
                     format!(
                         "without `#{}`, items are private by default and export with `{}`",
                         Syntax::MARKER_PUB_FILE,
@@ -2367,7 +2404,11 @@ impl<'a> Parser<'a> {
                         Syntax::MARKER_PUB_FILE,
                         Syntax::KW_PRIV
                     ),
-                    format!("drop `{}` or mark exceptions with `{}`", Syntax::KW_PUB, Syntax::KW_PRIV),
+                    format!(
+                        "drop `{}` or mark exceptions with `{}`",
+                        Syntax::KW_PUB,
+                        Syntax::KW_PRIV
+                    ),
                     Some(self.toks[self.pos.saturating_sub(1)].span),
                 ));
             }
@@ -3050,12 +3091,7 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek().kind, TokKind::LBrace)
                     && (second == "Client" || second == "Server")
                 {
-                    (
-                        format!("{first}.{second}"),
-                        span,
-                        None,
-                        None,
-                    )
+                    (format!("{first}.{second}"), span, None, None)
                 } else {
                     (first, span, Some(second), Some(second_span))
                 }
@@ -3341,11 +3377,7 @@ impl<'a> Parser<'a> {
         if i < self.toks.len() && matches!(self.toks[i].kind, TokKind::KwPub) {
             i += 1;
         }
-        i < self.toks.len()
-            && matches!(
-                self.toks[i].kind,
-                TokKind::KwStruct | TokKind::KwEnum
-            )
+        i < self.toks.len() && matches!(self.toks[i].kind, TokKind::KwStruct | TokKind::KwEnum)
     }
 
     /// If `toks[i]` is `(`, returns the index just past its matching `)`;
@@ -3973,10 +4005,7 @@ impl<'a> Parser<'a> {
                 }
             }
             let fix = if label_hint.is_empty() {
-                format!(
-                    "write `#{}(owner)` before the field name",
-                    Syntax::ATTR_REF
-                )
+                format!("write `#{}(owner)` before the field name", Syntax::ATTR_REF)
             } else {
                 format!(
                     "write `#{}({label_hint})` instead of `ref[{label_hint}]`",
@@ -4030,7 +4059,8 @@ impl<'a> Parser<'a> {
             let name_tok = self.bump(); // `Persist`
             let span = Span::new(sigil.span.start, name_tok.span.end);
             if matches!(sigil.kind, TokKind::Hash) {
-                self.diags.push(Self::e0062_contract_on_hash(Syntax::CONTRACT_PERSIST, span));
+                self.diags
+                    .push(Self::e0062_contract_on_hash(Syntax::CONTRACT_PERSIST, span));
             }
             (true, Some(span))
         } else {
@@ -4122,13 +4152,10 @@ impl<'a> Parser<'a> {
 
     // --- distinct types --------------------------------------------------
 
-    /// D-DIST1 (ratified 2026-06-19): true when the cursor is at `Name #= distinct` (or retired sigils).
+    /// D-DIST1/D-BIND4: true when the cursor is at `Name :: distinct`.
     fn at_distinct_def(&self) -> bool {
         matches!(&self.peek().kind, TokKind::Ident(_))
-            && matches!(
-                &self.peek2().kind,
-                TokKind::HashEq | TokKind::AtEq | TokKind::ColonColon
-            )
+            && matches!(&self.peek2().kind, TokKind::ColonColon)
             && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
     }
 
@@ -4146,7 +4173,7 @@ impl<'a> Parser<'a> {
     /// 2026-07-01): true when a stack of one or more capability-bundle
     /// markers (`@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase`,
     /// any order, retired `#` spelling included so `distinct_def` can teach
-    /// E0062) precedes `Name #= distinct` at the cursor. The `@Numeric`-only
+    /// E0062) precedes `Name :: distinct` at the cursor. The `@Numeric`-only
     /// sibling of the old `at_numeric_distinct_def` predicate, generalized to
     /// the four fixed bundles.
     fn at_bundle_distinct_def(&self) -> bool {
@@ -4172,7 +4199,7 @@ impl<'a> Parser<'a> {
         matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_)))
             && matches!(
                 self.toks.get(i + 1).map(|t| &t.kind),
-                Some(TokKind::HashEq) | Some(TokKind::AtEq) | Some(TokKind::ColonColon)
+                Some(TokKind::ColonColon)
             )
             && matches!(
                 self.toks.get(i + 2).map(|t| &t.kind),
@@ -4181,7 +4208,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-DIST1/D-DIST3/D-CAPBUNDLE1/D-MARKERMOVE1: parse
-    /// `[@Numeric] [@Comparable] [@Printable] [@CodableAsBase] Name #= distinct BaseType`
+    /// `[@Numeric] [@Comparable] [@Printable] [@CodableAsBase] Name :: distinct BaseType`
     /// — a stack of zero or more capability-bundle markers, any order.
     pub(super) fn distinct_def(
         &mut self,
@@ -4204,7 +4231,8 @@ impl<'a> Parser<'a> {
             let sigil = self.bump(); // consume `#` or `@`
             let (attr, attr_span) = self.expect_ident("after the marker sigil")?;
             if matches!(sigil.kind, TokKind::Hash) {
-                self.diags.push(Self::e0062_contract_on_hash(&attr, attr_span));
+                self.diags
+                    .push(Self::e0062_contract_on_hash(&attr, attr_span));
             }
             if attr == Syntax::ATTR_NUMERIC {
                 is_numeric = true;
@@ -4243,36 +4271,10 @@ impl<'a> Parser<'a> {
             ));
         }
         let (name, name_span) = self.expect_ident("as the distinct type name")?;
-        // D-BIND3: accept `#=` or retired `#=` / `@=` (E0991 teaching error).
+        // D-BIND4: distinct definitions use `::`.
         match self.peek().kind {
-            TokKind::HashEq => {
+            TokKind::ColonColon => {
                 self.bump();
-            }
-            TokKind::ColonColon | TokKind::AtEq => {
-                let span = self.peek().span;
-                let retired = if matches!(self.peek().kind, TokKind::AtEq) {
-                    Syntax::SIGIL_BIND_IMMUT_RETIRED2
-                } else {
-                    Syntax::SIGIL_BIND_IMMUT_RETIRED
-                };
-                self.bump();
-                self.diags.push(Diagnostic::error(
-                    "E0991",
-                    format!(
-                        "`{retired}` is the old immutable-binding sigil — use `{}` instead",
-                        Syntax::SIGIL_BIND_IMMUT
-                    ),
-                    format!(
-                        "the immutable binding sigil is `{}` (D-BIND3)",
-                        Syntax::SIGIL_BIND_IMMUT
-                    ),
-                    format!(
-                        "write `{name} {} {kw} BaseType` instead of `{name} {retired} {kw} BaseType`",
-                        Syntax::SIGIL_BIND_IMMUT,
-                        kw = Syntax::KW_DISTINCT
-                    ),
-                    Some(span),
-                ));
             }
             _ => {
                 return Err(Diagnostic::error(
@@ -4343,7 +4345,10 @@ impl<'a> Parser<'a> {
                     "E0137",
                     format!("this range is empty — {} is after {}", lo, hi),
                     "a range's low bound must not be greater than its high bound".to_string(),
-                    format!("write `{}..{}` (swap the bounds), or fix the values", hi, lo),
+                    format!(
+                        "write `{}..{}` (swap the bounds), or fix the values",
+                        hi, lo
+                    ),
                     Some(Span::new(lo_span.start, hi_span.end)),
                 ));
             }
@@ -4383,7 +4388,11 @@ impl<'a> Parser<'a> {
             }
             _ => Err(Diagnostic::error(
                 "E0003",
-                format!("expected a whole number {}, found {}", where_, describe(&self.peek().kind)),
+                format!(
+                    "expected a whole number {}, found {}",
+                    where_,
+                    describe(&self.peek().kind)
+                ),
                 "a range constraint's bounds are literal whole numbers".to_string(),
                 "write a plain integer, e.g. `0..10`".to_string(),
                 Some(self.peek().span),
@@ -4671,7 +4680,8 @@ impl<'a> Parser<'a> {
         debug_assert_eq!(attr, Syntax::ATTR_MUST_USE);
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         if matches!(sigil.kind, TokKind::Hash) {
-            self.diags.push(Self::e0062_contract_on_hash(&attr, attr_name_span));
+            self.diags
+                .push(Self::e0062_contract_on_hash(&attr, attr_name_span));
         }
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
@@ -4725,7 +4735,11 @@ impl<'a> Parser<'a> {
                 "E0003",
                 format!(
                     "`{}{}` isn't a valid attribute on a struct declaration",
-                    if matches!(sigil.kind, TokKind::At) { "@" } else { "#" },
+                    if matches!(sigil.kind, TokKind::At) {
+                        "@"
+                    } else {
+                        "#"
+                    },
                     attr
                 ),
                 "only `@PublishedSchema` is supported here".to_string(),
@@ -4734,7 +4748,8 @@ impl<'a> Parser<'a> {
             ));
         }
         if matches!(sigil.kind, TokKind::Hash) {
-            self.diags.push(Self::e0062_contract_on_hash(&attr, attr_name_span));
+            self.diags
+                .push(Self::e0062_contract_on_hash(&attr, attr_name_span));
         }
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         // The lexer may insert a `Semi` after the marker identifier when `struct` is
@@ -5099,8 +5114,7 @@ impl<'a> Parser<'a> {
     ) -> Result<crate::AST::ProtocolDecl, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // consume `protocol`
-        let (name, name_span) =
-            self.expect_ident("the protocol name in `protocol Name { … }`")?;
+        let (name, name_span) = self.expect_ident("the protocol name in `protocol Name { … }`")?;
         self.expect(TokKind::LBrace, "to open the protocol declaration block")?;
         let mut messages = Vec::new();
         while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -5128,9 +5142,11 @@ impl<'a> Parser<'a> {
         let (from, _) = self.expect_ident("the sender in `client -> server: Msg(…)`")?;
         let direction = match from.as_str() {
             Syntax::PROTO_CLIENT => {
-                self.expect(TokKind::Arrow, "between the endpoints in a protocol message")?;
-                let (to, _) =
-                    self.expect_ident("the receiver in `client -> server: Msg(…)`")?;
+                self.expect(
+                    TokKind::Arrow,
+                    "between the endpoints in a protocol message",
+                )?;
+                let (to, _) = self.expect_ident("the receiver in `client -> server: Msg(…)`")?;
                 if to != Syntax::PROTO_SERVER {
                     return Err(Diagnostic::error(
                         "E0154",
@@ -5140,19 +5156,18 @@ impl<'a> Parser<'a> {
                         ),
                         "a client-to-server message is written `client -> server: Name(…)`"
                             .to_string(),
-                        format!(
-                            "write `client -> {}: …`",
-                            Syntax::PROTO_SERVER
-                        ),
+                        format!("write `client -> {}: …`", Syntax::PROTO_SERVER),
                         Some(self.peek().span),
                     ));
                 }
                 crate::AST::ProtocolDirection::ClientToServer
             }
             Syntax::PROTO_SERVER => {
-                self.expect(TokKind::Arrow, "between the endpoints in a protocol message")?;
-                let (to, _) =
-                    self.expect_ident("the receiver in `server -> client: Msg(…)`")?;
+                self.expect(
+                    TokKind::Arrow,
+                    "between the endpoints in a protocol message",
+                )?;
+                let (to, _) = self.expect_ident("the receiver in `server -> client: Msg(…)`")?;
                 if to != Syntax::PROTO_CLIENT {
                     return Err(Diagnostic::error(
                         "E0154",
@@ -5162,10 +5177,7 @@ impl<'a> Parser<'a> {
                         ),
                         "a server-to-client message is written `server -> client: Name(…)`"
                             .to_string(),
-                        format!(
-                            "write `server -> {}: …`",
-                            Syntax::PROTO_CLIENT
-                        ),
+                        format!("write `server -> {}: …`", Syntax::PROTO_CLIENT),
                         Some(self.peek().span),
                     ));
                 }
@@ -5174,7 +5186,11 @@ impl<'a> Parser<'a> {
             other => {
                 return Err(Diagnostic::error(
                     "E0154",
-                    format!("protocol messages start with `{}` or `{}`, not `{other}`", Syntax::PROTO_CLIENT, Syntax::PROTO_SERVER),
+                    format!(
+                        "protocol messages start with `{}` or `{}`, not `{other}`",
+                        Syntax::PROTO_CLIENT,
+                        Syntax::PROTO_SERVER
+                    ),
                     "each line names who sends and who receives before the message".to_string(),
                     format!(
                         "write `client -> {}: …` or `server -> {}: …`",
@@ -5185,9 +5201,11 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
-        self.expect(TokKind::Colon, "after the endpoint pair in a protocol message")?;
-        let (msg_name, name_span) =
-            self.expect_ident("the message name in a protocol line")?;
+        self.expect(
+            TokKind::Colon,
+            "after the endpoint pair in a protocol message",
+        )?;
+        let (msg_name, name_span) = self.expect_ident("the message name in a protocol line")?;
         self.expect(TokKind::LParen, "to open the message payload")?;
         let fields = self.protocol_message_fields()?;
         self.expect(TokKind::RParen, "to close the message payload")?;
@@ -5201,16 +5219,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn protocol_message_fields(
-        &mut self,
-    ) -> Result<Vec<(String, crate::AST::Type)>, Diagnostic> {
+    fn protocol_message_fields(&mut self) -> Result<Vec<(String, crate::AST::Type)>, Diagnostic> {
         let mut fields = Vec::new();
         if matches!(self.peek().kind, TokKind::RParen) {
             return Ok(fields);
         }
         loop {
             let (name, _) = self.expect_ident("a field name in a protocol message")?;
-            self.expect(TokKind::Colon, "after each field name in a protocol message")?;
+            self.expect(
+                TokKind::Colon,
+                "after each field name in a protocol message",
+            )?;
             let (ty, _) = self.type_()?;
             fields.push((name, ty));
             if matches!(self.peek().kind, TokKind::Comma) {

@@ -28,7 +28,7 @@ fn double(n: Int) -> Int {
     return (n * 2)
 }
 fn main() {
-    sum #= (7 + (3 * 4))
+    sum :: (7 + (3 * 4))
     print(\"sum {sum}\")
     print(double(sum))
 }
@@ -49,8 +49,8 @@ fn shout(s: String) -> String {
     return \"{s}!\"
 }
 fn main() {
-    n #= 7
-    parity #= if ((n % 2) == 0) { \"even\" } else { \"odd\" }
+    n :: 7
+    parity :: if ((n % 2) == 0) { \"even\" } else { \"odd\" }
     print(shout(parity))
 }
 ";
@@ -110,7 +110,7 @@ fn add(a: Int, b: Int) -> Int {
     return (a + b)
 }
 fn main() {
-    c #= Counter.{ n: 41 }
+    c :: Counter.{ n: 41 }
     print(add(c.bumped(), 0))
 }
 ";
@@ -128,8 +128,8 @@ fn overflow_still_traps_on_tir_path() {
     }
     let src = "\
 fn main() {
-a: U8 #= 200
-b: U8 #= 100
+a: U8 :: 200
+b: U8 :: 100
     print(a + b)
 }
 ";
@@ -249,10 +249,10 @@ fn origin() -> Point {
     return Point.{ x: 0, y: 0 }
 }
 fn main() {
-    p #= Point.{ x: 3, y: 4 }
+    p :: Point.{ x: 3, y: 4 }
     print(sum_pt(p))
     print(p.x)
-    o #= origin()
+    o :: origin()
     print(sum_pt(o))
 }
 ";
@@ -278,8 +278,8 @@ fn describe(p: Person) {
     print(\"{p.name} is {p.age}\")
 }
 fn main() {
-    label #= \"Ada\"
-    p #= Person.{ name: label, age: 36 }
+    label :: \"Ada\"
+    p :: Person.{ name: label, age: 36 }
     describe(p)
     print(p.age)
 }
@@ -309,7 +309,7 @@ fn deep(o: Outer) -> Int {
     return (o.inner.v + o.label)
 }
 fn main() {
-    o #= Outer.{ inner: Inner.{ v: 10 }, label: 5 }
+    o :: Outer.{ inner: Inner.{ v: 10 }, label: 5 }
     print(deep(o))
     print(o.inner.v)
 }
@@ -351,7 +351,7 @@ fn label(light: Light) -> String {
     }
 }
 fn main() {
-    start #= Light.Red
+    start :: Light.Red
     print(label(start))
     print(label(next(start)))
 }
@@ -555,7 +555,7 @@ fn name_of(p: Person) -> String {
     return p.name
 }
 fn main() {
-    p #= Person.{ name: \"Grace\", age: 40 }
+    p :: Person.{ name: \"Grace\", age: 40 }
     print(name_of(p))
 }
 ";
@@ -585,7 +585,7 @@ fn run(c: Calc) -> Int {
     return c.add(10, 20)
 }
 fn main() {
-    c #= Calc.{ base: 1 }
+    c :: Calc.{ base: 1 }
     print(run(c))
 }
 ";
@@ -611,11 +611,11 @@ struct Crate {
     }
 }
 fn run(b: Crate) -> String {
-    name #= \"x\"
+    name :: \"x\"
     return b.combine(name)
 }
 fn main() {
-    b #= Crate.{ label: \"t\" }
+    b :: Crate.{ label: \"t\" }
     print(run(b))
 }
 ";
@@ -648,7 +648,7 @@ fn describe(d: Dog) -> String {
     return d.label()
 }
 fn main() {
-    d #= Dog.{ sound: \"woof\" }
+    d :: Dog.{ sound: \"woof\" }
     print(describe(d))
 }
 ";
@@ -736,7 +736,7 @@ struct Counter {
     }
 }
 fn main() {
-    c #= Counter.make(5)
+    c :: Counter.make(5)
     print(c.value())
 }
 ";
@@ -795,7 +795,7 @@ enum Sign {
     }
 }
 fn main() {
-    s #= Sign.make_pos()
+    s :: Sign.make_pos()
     print(s.to_num())
 }
 ";
@@ -828,8 +828,8 @@ struct Vec2 {
     }
 }
 fn main() {
-    p #= Vec2.make(3, 4)
-    q #= p.shifted(10)
+    p :: Vec2.make(3, 4)
+    q :: p.shifted(10)
     print(q.sum())
 }
 ";
@@ -863,13 +863,13 @@ fn parse_age(raw: Int) -> Int ? ParseError {
     return ok((raw * 2))
 }
 fn load(raw: Int) -> Int ? ParseError {
-    n #= parse_age(raw)?
+    n :: parse_age(raw)?
     return ok((n + 1))
 }
 fn main() {
-    a #= load(21) ?? 0
+    a :: load(21) ?? 0
     print(a)
-    b #= load(0) ?? 99
+    b :: load(0) ?? 99
     print(b)
 }
 ";
@@ -951,10 +951,10 @@ fn handle_of(a: (Account?)) -> (String?) {
     return a?.profile?.handle
 }
 fn main() {
-    p #= Profile.{ handle: value(\"jay\") }
-    acct #= Account.{ profile: p }
+    p :: Profile.{ handle: value(\"jay\") }
+    acct :: Account.{ profile: p }
     print(handle_of(value(acct)) ?? \"none\")
-missing: (Account?) #= null
+missing: (Account?) :: null
     print(handle_of(missing) ?? \"none\")
 }
 ";
@@ -1161,9 +1161,9 @@ use core.math as math
 use core.path as path
 use core.crypto as crypto
 fn calc(a: Float) -> Float {
-    r #= math.sqrt(a)
-    f #= math.floor(r)
-    c #= math.ceil(r)
+    r :: math.sqrt(a)
+    f :: math.floor(r)
+    c :: math.ceil(r)
     return (f + c)
 }
 fn make_path(a: String, b: String) -> String {
@@ -1458,7 +1458,7 @@ fn describe(s: Shape) -> String {
     return \"{s.name()}: {s.area()}\"
 }
 fn main() {
-shapes: [Shape] #= [Circle.{radius: 2.0}, Square.{side: 3.0}]
+shapes: [Shape] :: [Circle.{radius: 2.0}, Square.{side: 3.0}]
     shapes.each((s) => {
         print(describe(s))
     })
@@ -1522,7 +1522,7 @@ fn double(x: Int) -> Int {
 fn main() {
     print(apply_twice(double, 3))
     print(apply_twice((n: Int) => (n + 1), 5))
-    g #= double
+    g :: double
     print(apply_twice(g, 4))
 }
 ";
@@ -1570,7 +1570,7 @@ fn scope_guard_closure_core_call() {
     let src = "\
 use core.scope as scope
 fn work() {
-    _g #= scope.guard(() => { print(\"cleanup\") })
+    _g :: scope.guard(() => { print(\"cleanup\") })
     print(\"working\")
 }
 fn main() {
@@ -1597,7 +1597,7 @@ fn compute() -> Int {
     return 21
 }
 fn launch() -> Int {
-    t #= tasks.spawn(() => compute())
+    t :: tasks.spawn(() => compute())
     return t.join()
 }
 fn main() {
@@ -1629,14 +1629,14 @@ use core.files as files
 use core.fs as fs
 fn write_file(path: String, text: String) -> Int {{
     w := files.create(path) ?? return 0
-    _r #= w.write_line(text)
-    _f #= w.flush()
+    _r :: w.write_line(text)
+    _f :: w.flush()
     return 1
 }}
 fn main() {{
-    done #= write_file(\"{path}\", \"hello handle\")
+    done :: write_file(\"{path}\", \"hello handle\")
     print(done)
-    contents #= fs.read(\"{path}\") ?? \"<none>\"
+    contents :: fs.read(\"{path}\") ?? \"<none>\"
     print(contents)
 }}
 ",
@@ -1944,7 +1944,7 @@ struct Voice {
 }
 impl Voice.Speaker {
     fn say(self, msg: String) -> String {
-        p #= self.prefix
+        p :: self.prefix
         return \"{p}: {msg}\"
     }
 }
@@ -1981,7 +1981,7 @@ fn maybe(n: Int) -> (Int?) {
 }
 fn risky(count: Int, ratio: Float) -> Int {
     base := count + 1
-    got #= maybe(count) ?? panic(\"no value at {count}\")
+    got :: maybe(count) ?? panic(\"no value at {count}\")
     return got + base
 }
 fn main() {
@@ -2017,7 +2017,7 @@ fn render(m: Msg) -> String {
     return \"?\"
 }
 fn main() {
-    m #= wrap(\"hi\")
+    m :: wrap(\"hi\")
     print(render(m))
 }
 ";
@@ -2051,8 +2051,8 @@ fn leaf_val(t: Tree) -> Int {
     return 0
 }
 fn main() {
-    a #= Tree.Leaf(7)
-    b #= wrap(a)
+    a :: Tree.Leaf(7)
+    b :: wrap(a)
     print(\"{leaf_val(b)}\")
 }
 ";
@@ -2089,8 +2089,8 @@ fn first(s: Shape) -> Int {
     return 0
 }
 fn main() {
-    pt #= Point.{ x: 3, y: 4 }
-    sh #= mk(pt)
+    pt :: Point.{ x: 3, y: 4 }
+    sh :: mk(pt)
     print(\"{first(sh)}\")
 }
 ";
@@ -2120,8 +2120,8 @@ fn mk(xs: [Int]) -> Holder {
     return Holder.Nums(xs)
 }
 fn main() {
-    b #= Bag.{ items: [1, 2, 3], label: \"x\" }
-    d #= mk([4, 5])
+    b :: Bag.{ items: [1, 2, 3], label: \"x\" }
+    d :: mk([4, 5])
     print(b.label)
 }
 ";
@@ -2159,7 +2159,7 @@ fn main() {
     print(\"{id(5)}\")
     print(\"{pick(1, 2, true)}\")
     print(\"{firstof([10, 20, 30])}\")
-    ys #= wrap(7)
+    ys :: wrap(7)
     print(\"{ys[0]}\")
 }
 ";
@@ -2186,7 +2186,7 @@ fn name_of(rec: Rec) -> &String {
     return rec.name
 }
 fn main() {
-    r #= Rec.{ name: \"alpha\", value: \"beta\" }
+    r :: Rec.{ name: \"alpha\", value: \"beta\" }
     print(\"{name_of(r)}\")
 }
 ";
@@ -2212,8 +2212,8 @@ fn build_req() -> HttpRequest {
     return HttpRequest.{method: \"GET\", path: \"/\", body: \"\", headers: [:]}
 }
 fn main() {
-    r #= build_resp(\"hi\")
-    q #= build_req()
+    r :: build_resp(\"hi\")
+    q :: build_req()
     print(\"built\")
 }
 ";
@@ -2259,17 +2259,17 @@ fn unsafe_fn_block_and_ptr_ops() {
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
 fn read_reg(addr: Int) -> Int {
-    p #= mem.Ptr<Int>.from_addr(addr)
+    p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
 fn main() {
-cell: Int #= 1337
-    addr #= mem.address_of(cell)
+cell: Int :: 1337
+    addr :: mem.address_of(cell)
     #Unsafe(\"addr is the address of `cell`, a live Int on this stack frame\") {
-        p #= mem.Ptr<Int>.from_addr(addr)
-        seen #= mem.volatile_read(p)
+        p :: mem.Ptr<Int>.from_addr(addr)
+        seen :: mem.volatile_read(p)
         print(seen)
-        again #= read_reg(addr)
+        again :: read_reg(addr)
         print(again)
     }
 }
@@ -2288,14 +2288,14 @@ fn unsafe_tier_emit_is_byte_exact() {
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be valid\")
 fn read_reg(addr: Int) -> Int {
-    p #= mem.Ptr<Int>.from_addr(addr)
+    p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
 fn main() {
-cell: Int #= 1337
-    addr #= mem.address_of(cell)
+cell: Int :: 1337
+    addr :: mem.address_of(cell)
     #Unsafe(\"safe: cell is live\") {
-        seen #= read_reg(addr)
+        seen :: read_reg(addr)
         print(\"{seen}\")
     }
 }
@@ -2424,7 +2424,7 @@ fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
     return copy
 }
 fn main() {
-p: Pair<Int> #= make_pair(1, 2)
+p: Pair<Int> :: make_pair(1, 2)
     print(p.first)
     st: Stack<Int> := empty_stack()
     st = push(st, 42)
@@ -2508,7 +2508,7 @@ fn main() {
 
 /// c109 Phase 19: arena allocators — the `mem.Arena.new()` / `mem.Bump.new()` /
 /// `mem.Pool.new(slots:)` / `mem.Fixed.new(size:)` producers, the `alloc`/`reset`/`free`
-/// handle methods, and the `arena_view` binding (`x #= arena.alloc(v)`, read via deref).
+/// handle methods, and the `arena_view` binding (`x :: arena.alloc(v)`, read via deref).
 #[test]
 fn arena_alloc_reset_free() {
     if !have_rustc() {
@@ -2517,17 +2517,17 @@ fn arena_alloc_reset_free() {
     let src = "\
 use core.mem
 fn main() {
-    arena #= mem.Arena.new()
-    x #= arena.alloc(42)
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
     print(x)
     arena.reset()
-    y #= arena.alloc(99)
+    y :: arena.alloc(99)
     print(y)
-    sized #= mem.Arena.new(capacity: 4096)
-    s #= sized.alloc(7)
+    sized :: mem.Arena.new(capacity: 4096)
+    s :: sized.alloc(7)
     print(s)
-    pool #= mem.Pool.new(slots: 8)
-    p #= pool.alloc(3)
+    pool :: mem.Pool.new(slots: 8)
+    p :: pool.alloc(3)
     print(p)
     arena.free()
 }
@@ -2548,10 +2548,10 @@ fn arena_region_block() {
 use core.mem
 fn main() {
     region scratch {
-        a #= mem.Arena.new()
-        b #= mem.Bump.new()
-        x #= a.alloc(1)
-        y #= b.alloc(2)
+        a :: mem.Arena.new()
+        b :: mem.Bump.new()
+        x :: a.alloc(1)
+        y :: b.alloc(2)
         print(x)
         print(y)
     }
@@ -2573,12 +2573,12 @@ fn smart_context_block() {
     let src = "\
 use core.mem
 fn main() {
-    arena #= mem.Arena.new()
+    arena :: mem.Arena.new()
     #Context(allocator: arena) {
-        x #= arena.alloc(10)
+        x :: arena.alloc(10)
         print(x)
     }
-    y #= arena.alloc(20)
+    y :: arena.alloc(20)
     print(y)
     arena.free()
 }
@@ -2605,14 +2605,14 @@ use core.math as math
 use core.random as random
 use core.io as io
 fn run() -> Int {
-    a #= math.abs((-5))
-    b #= math.min(3, 7)
-    c #= math.max(3, 7)
-    d #= math.clamp(15, 0, 10)
+    a :: math.abs((-5))
+    b :: math.min(3, 7)
+    c :: math.max(3, 7)
+    d :: math.clamp(15, 0, 10)
     io.eprint(\"trace: {a} {b} {c} {d}\")
     xs := [1, 2, 3]
     random.shuffle(~xs)
-    p #= random.pick(xs)
+    p :: random.pick(xs)
     return ((((a + b) + c) + d) + (p ?? 0))
 }
 fn main() {
@@ -2643,21 +2643,21 @@ fn http_request_response_accessors() {
     let src = "\
 use core.http as http
 fn handle(req: HttpRequest) -> HttpResponse {
-    m #= req.method()
-    p #= req.path()
-    h #= req.header(\"host\")
-    q #= req.param(\"id\")
-    body #= \"m={m} p={p}\"
+    m :: req.method()
+    p :: req.path()
+    h :: req.header(\"host\")
+    q :: req.param(\"id\")
+    body :: \"m={m} p={p}\"
     return HttpResponse.{status: \"200 OK\", body: body, headers: [:]}
 }
 fn describe(resp: HttpResponse) -> String {
-    s #= resp.status()
-    b #= resp.body()
+    s :: resp.status()
+    b :: resp.body()
     return \"{s}: {b}\"
 }
 fn main() {
-    req #= http.parse(\"GET /x HTTP/1.1\\nHost: localhost\")
-    resp #= handle(req)
+    req :: http.parse(\"GET /x HTTP/1.1\\nHost: localhost\")
+    resp :: handle(req)
     print(describe(resp))
 }
 ";
@@ -2684,8 +2684,8 @@ fn sum_range(first: Int, last: Int) -> Int {
     return total
 }
 fn main() {
-    a #= tasks.spawn(() => sum_range(1, 25))
-    b #= tasks.spawn(() => sum_range(26, 50))
+    a :: tasks.spawn(() => sum_range(1, 25))
+    b :: tasks.spawn(() => sum_range(26, 50))
     print((a.join() + b.join()))
 }
 ";
@@ -2724,13 +2724,13 @@ fn channel_send_receive() {
     let src = "\
 use core.tasks as tasks
 fn main() {
-ch: Channel<Int> #= tasks.channel()
-s1: Sender<Int> #= ch.sender()
-    t1 #= tasks.spawn(take(s1) () => {
+ch: Channel<Int> :: tasks.channel()
+s1: Sender<Int> :: ch.sender()
+    t1 :: tasks.spawn(take(s1) () => {
         s1.send(30)
     })
-    s2 #= ch.sender()
-    t2 #= tasks.spawn(take(s2) () => {
+    s2 :: ch.sender()
+    t2 :: tasks.spawn(take(s2) () => {
         s2.send(12)
     })
     t1.join()
@@ -2812,7 +2812,7 @@ fn first_even(xs: [Int]) -> Int {
     return out.len()
 }
 fn main() {
-    nothing: Int? #= null
+    nothing: Int? :: null
     print(describe(value(7)))
     print(describe(nothing))
     print(first_even([1, 2, 3]))
@@ -2929,21 +2929,21 @@ fn distinct_types() {
         return;
     }
     let src = "\
-UserId #= distinct Int;
-@Numeric Meters #= distinct Float;
+UserId :: distinct Int;
+@Numeric Meters :: distinct Float;
 
 fn greet(id: UserId) -> String {
     return \"user {(id.raw())}\"
 }
 fn main() {
-    uid #= UserId(42)
+    uid :: UserId(42)
     print(greet(uid))
-    a #= Meters(3.0)
-    b #= Meters(1.5)
-    c #= a + b
+    a :: Meters(3.0)
+    b :: Meters(1.5)
+    c :: a + b
     print(\"{(c.raw())} m\")
-    x #= UserId(7)
-    y #= UserId(7)
+    x :: UserId(7)
+    y :: UserId(7)
     print(\"{(x == y)}\")
 }
 ";
@@ -2952,9 +2952,36 @@ fn main() {
     assert_eq!(stdout, "user 42\n4.5 m\ntrue\n");
 }
 
+/// D-RANGETYPE1: range-constrained distinct constructors are fallible for
+/// runtime values (`Severity(raw)?`), and arithmetic widens to the base `Int`
+/// so codegen must not leave an `Int`-typed expression as raw newtype math.
+#[test]
+fn range_type_runtime_try_and_arithmetic_widens() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+@Numeric Severity :: distinct Int(0..10);
+
+fn checked(raw: Int) -> Severity ? String {
+    return ok(Severity(raw)?)
+}
+
+fn main() {
+    a :: checked(4) ?? Severity(0)
+    b :: Severity(6)
+    widened: Int :: a + b
+    print(\"{widened}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_range_type_checked", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "10\n");
+}
+
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
 /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).user_x`;
-/// destructure `(a, b) #= p.clone()` → the borrow-temp + per-field `.clone()` form;
+/// destructure `(a, b) :: p.clone()` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
 fn named_tuples() {
@@ -2966,12 +2993,12 @@ fn bounds() -> (max: Int, min: Int) {
     return (min: 0, max: 10)
 }
 fn main() {
-    p #= (x: 1, y: 2)
-    q #= (y: 3, x: 4)
-    same_shape #= (p == q)
-    (a, b) #= p.clone()
+    p :: (x: 1, y: 2)
+    q :: (y: 3, x: 4)
+    same_shape :: (p == q)
+    (a, b) :: p.clone()
     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
-    pair #= bounds()
+    pair :: bounds()
     print(\"{pair.min} {pair.max}\")
 }
 ";
@@ -2993,8 +3020,8 @@ fn json_value_construct_match_render() {
     let src = "\
 use core.encoding.json as json
 fn main() {
-    raw #= \"{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}\"
-    data #= json.parse(raw) ?? panic(\"bad json\")
+    raw :: \"{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}\"
+    data :: json.parse(raw) ?? panic(\"bad json\")
     if data == Object(entries) {
         print(entries.len())
     }
@@ -3021,11 +3048,11 @@ fn json_nested_variant_matching() {
     let src = "\
 use core.encoding.json as json
 fn main() {
-    raw #= \"{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}\"
-    data #= json.decode(raw) ?? panic(\"bad json\")
+    raw :: \"{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}\"
+    data :: json.decode(raw) ?? panic(\"bad json\")
     if data == Object(entries) {
-        port #= entries[\"port\"]
-        name #= entries[\"name\"]
+        port :: entries[\"port\"]
+        name :: entries[\"name\"]
         if port == Int(n) {
             print(n + 1)
         }
@@ -3051,10 +3078,10 @@ fn regex_match_group() {
     let src = "\
 use core.regex as re
 fn main() {
-    text #= \"order 42 shipped\"
-    m #= re.match(\"(\\\\d+) shipped\", text) ?? panic(\"bad pattern\")
+    text :: \"order 42 shipped\"
+    m :: re.match(\"(\\\\d+) shipped\", text) ?? panic(\"bad pattern\")
     if m == value(mat) {
-        whole #= mat.group(0) ?? \"none\"
+        whole :: mat.group(0) ?? \"none\"
         print(whole)
     }
 }
@@ -3127,7 +3154,7 @@ pub fn make_note(name: ^String, t: ^NoteType) -> Note {
     return Note.{name: name, note_type: t, parent: null}
 }
 pub fn kind_str(n: Note) -> String {
-    k #= n.note_type
+    k :: n.note_type
     if k == {
         User -> { return \"user\" }
         Feedback -> { return \"feedback\" }
@@ -3156,10 +3183,10 @@ fn describe(n: Note, q: Query) -> String {
     }
 }
 fn main() {
-    n #= note.make_note(\"x\", NoteType.User)
-    q #= classify(\"user\")
+    n :: note.make_note(\"x\", NoteType.User)
+    q :: classify(\"user\")
     print(describe(n, q))
-    q2 #= classify(\"design\")
+    q2 :: classify(\"design\")
     print(describe(n, q2))
 }
 ";
@@ -3196,7 +3223,7 @@ impl Rect {
     }
 }
 fn main() {
-    r #= Rect.new(4, 3)
+    r :: Rect.new(4, 3)
     print(r.area())
 }
 ";
@@ -3216,7 +3243,7 @@ fn ambient_input() {
     }
     let src = "\
 fn greet() -> String {
-    name #= input() ?? \"world\"
+    name :: input() ?? \"world\"
     return \"hello, {name}\"
 }
 fn main() {
@@ -3246,15 +3273,15 @@ fn handle_root(req: HttpRequest) -> HttpResponse {
     return HttpResponse.{status: \"200 OK\", body: \"welcome\", headers: [:]}
 }
 fn handle_user(req: HttpRequest) -> HttpResponse {
-    id #= req.param(\"id\") ?? \"unknown\"
+    id :: req.param(\"id\") ?? \"unknown\"
     return HttpResponse.{status: \"200 OK\", body: \"user={id}\", headers: [:]}
 }
 fn main() {
-    router #= http.router()
+    router :: http.router()
     router.get(\"/\", handle_root)
     router.get(\"/users/:id\", handle_user)
-    req #= http.parse(\"GET / HTTP/1.1\\nHost: localhost\")
-    resp #= http.dispatch(router, req)
+    req :: http.parse(\"GET / HTTP/1.1\\nHost: localhost\")
+    resp :: http.dispatch(router, req)
     print(resp.body())
 }
 ";
@@ -3328,9 +3355,9 @@ fn main() {
     score: Int := 41
     bump(~score)
     print(score)
-greeting: String #= \"hello\"
+greeting: String :: \"hello\"
     show(greeting)
-saved: String #= archive(^\"vault\")
+saved: String :: archive(^\"vault\")
     print(saved)
 }
 ";
@@ -3339,7 +3366,7 @@ saved: String #= archive(^\"vault\")
     assert_eq!(stdout, "42\nhello\nvault\n");
 }
 
-/// c109 Phase 26: a fan-out result-list DESTRUCTURE `[a, b, c] #= <init>` (S74, 41_fan_out).
+/// c109 Phase 26: a fan-out result-list DESTRUCTURE `[a, b, c] :: <init>` (S74, 41_fan_out).
 /// Binds each element via the runtime bounds-checked `jet_unpack_vec`.
 #[test]
 fn list_destructure() {
@@ -3351,8 +3378,8 @@ fn double(n: Int) -> Int {
     return (n * 2)
 }
 fn main() {
-    doubled #= double.[1, 2, 3]
-    [a, b, c] #= doubled
+    doubled :: double.[1, 2, 3]
+    [a, b, c] :: doubled
     print(a)
     print(b)
     print(c)
@@ -3364,7 +3391,7 @@ fn main() {
 }
 
 /// c109 Phase 27: a fn-typed VALUE stored in a local + a struct fn-FIELD method
-/// (24_callbacks). `double_fn #= double` binds a bare fn-name as a value; `apply_twice`
+/// (24_callbacks). `double_fn :: double` binds a bare fn-name as a value; `apply_twice`
 /// takes it (and a lambda) as a Fn arg; `Worker.{ step: … }` constructs a struct with a
 /// fn-typed field; `w.step(4)` calls THROUGH that field. All route through the TIR.
 #[test]
@@ -3383,10 +3410,10 @@ struct Worker {
     step: fn(Int) -> Int
 }
 fn main() {
-    double_fn #= double
+    double_fn :: double
     print(apply_twice(double_fn, 3))
     print(apply_twice((x: Int) => (x + 1), 5))
-    w #= Worker.{step: (n: Int) => (n * n)}
+    w :: Worker.{step: (n: Int) => (n * n)}
     print(w.step(4))
 }
 ";
@@ -3409,32 +3436,32 @@ fn sized_integers() {
     }
     let src = "\
 fn main() {
-red: U8 #= 255
-channel: I32 #= 100000
-depth: I8 #= -120
+red: U8 :: 255
+channel: I32 :: 100000
+depth: I8 :: -120
     print(red)
     print(channel)
     print(depth)
-total: I64 #= 9000000000
+total: I64 :: 9000000000
     print(total + 1)
-half: U8 #= 100
+half: U8 :: 100
     print(half + half)
-bytes: [U8] #= [104, 105, 33]
+bytes: [U8] :: [104, 105, 33]
     print(bytes)
-wide: I64 #= red.to_i64()
+wide: I64 :: red.to_i64()
     print(wide)
-clamped: U8 #= channel.to_u8() ?? 255
+clamped: U8 :: channel.to_u8() ?? 255
     print(clamped)
     print(U8.MAX)
     print(I32.MIN)
-flags: U8 #= 13
+flags: U8 :: 13
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
-hi: U8 #= 200
-lo: U8 #= 100
+hi: U8 :: 200
+lo: U8 :: 100
     print(wrapping(hi + lo))
     print(saturating(hi + lo))
-fallback: U8 #= 0
+fallback: U8 :: 0
     print(checked(hi + lo) ?? fallback)
 }
 ";
@@ -3519,7 +3546,7 @@ use core.io as io
 fn collect() -> [String] {
     out: [String] := []
     loop true {
-        line #= io.input(\"> \") ?? return out.clone()
+        line :: io.input(\"> \") ?? return out.clone()
         if line == \"\" {
             break
         }
@@ -3528,7 +3555,7 @@ fn collect() -> [String] {
     return out
 }
 fn main() {
-    got #= collect()
+    got :: collect()
     print(\"count={got.len()}\")
     loop g in got {
         print(g)
@@ -3610,11 +3637,11 @@ struct Score {
     derive Comparable
 }
 fn main() {
-shapes: [Shape] #= [Circle.{radius: 1.0}, Square.{side: 2.0}]
+shapes: [Shape] :: [Circle.{radius: 1.0}, Square.{side: 2.0}]
     shapes.each((s) => {
         print_area(s)
     })
-    nums #= [3, 1, 4, 1, 5]
+    nums :: [3, 1, 4, 1, 5]
     print(largest(nums))
     scores := [Score.{points: 10}, Score.{points: 20}]
     scores.sort_by((s: Score) => s.points)
@@ -3653,7 +3680,7 @@ impl Dog.Named {
     }
 }
 fn main() {
-    d #= Dog.{ name: \"Rex\" }
+    d :: Dog.{ name: \"Rex\" }
     print(d.label())
 }
 ";
@@ -3679,7 +3706,7 @@ struct Ledger {
     }
 }
 fn main() {
-    data: [Int] #= [1, 2, 3]
+    data: [Int] :: [1, 2, 3]
     ledger: Ledger := Ledger.{ rows: [] }
     ledger.put_back(data)
     print(ledger.rows[0])
@@ -3798,7 +3825,7 @@ struct Tree {
     child: Tree?
 }
 fn main() {
-    root #= Tree.{
+    root :: Tree.{
         value: 3,
         child: value(Tree.{
             value: 2,
@@ -3827,7 +3854,7 @@ fn unqualified_foreign_struct_literal() {
     let main_src = "\
 use \"notes\"
 fn main() {
-    n #= Note.{ text: \"hi\" }
+    n :: Note.{ text: \"hi\" }
     print(n.text)
 }
 ";
@@ -3867,7 +3894,7 @@ struct Bag {
     }
 }
 fn main() {
-    b #= Bag.{ items: [1, 2, 3] }
+    b :: Bag.{ items: [1, 2, 3] }
     print(b.get())
     print(b.len())
 }
@@ -3895,13 +3922,13 @@ fn check(xs: [Int]) {
     }
 }
 fn main() {
-    e #= [1, 2, 3].is_empty()
+    e :: [1, 2, 3].is_empty()
     print(e)
-    m #= [1: 2]
+    m :: [1: 2]
     print(m.is_empty())
-    s #= \"hi\"
+    s :: \"hi\"
     print(s.is_empty())
-empty: [Int] #= []
+empty: [Int] :: []
     check(empty)
     check([9])
 }
@@ -3929,7 +3956,7 @@ fn f(xs: [Int]) {
 }
 fn main() {
     f([10, 20])
-empty: [Int] #= []
+empty: [Int] :: []
     f(empty)
     print(99)
 }
@@ -3957,7 +3984,7 @@ struct Tree {
 }
 fn sum(t: Tree) -> Int {
     total := t.value
-kid: Tree? #= t.child
+kid: Tree? :: t.child
     if kid == {
         value(c) -> {
             total = total + sum(c)
@@ -3967,7 +3994,7 @@ kid: Tree? #= t.child
     return total
 }
 fn main() {
-    root #= Tree.{
+    root :: Tree.{
         value: 3,
         child: value(Tree.{
             value: 2,
@@ -4001,7 +4028,7 @@ fn make(n: String) -> Person {
     return Person.{ name: n }
 }
 fn main() {
-    p #= make(\"Ada\")
+    p :: make(\"Ada\")
     print(p.name)
 }
 ";
@@ -4010,7 +4037,7 @@ fn main() {
     assert_eq!(stdout, "Ada\n");
 }
 
-/// c109 (B3): a struct-destructuring binding `Type.{ x, y } #= p` routes through
+/// c109 (B3): a struct-destructuring binding `Type.{ x, y } :: p` routes through
 /// the TIR and prints the field sum (byte-for-byte the AST `BindPattern::Struct`).
 #[test]
 fn struct_destructure_binding() {
@@ -4020,8 +4047,8 @@ fn struct_destructure_binding() {
     let src = "\
 struct Point { x: Int, y: Int }
 fn main() {
-    p #= Point.{ x: 1, y: 2 }
-    Point.{ x, y } #= p
+    p :: Point.{ x: 1, y: 2 }
+    Point.{ x, y } :: p
     print(x + y)
 }
 ";
@@ -4073,7 +4100,7 @@ fn firstof(xs: [Int#3]) -> Int {
 }
 fn main() {
     print(firstof(double.[1, 2, 3]))
-    g #= Grid.{ row: double.[1, 2, 3] }
+    g :: Grid.{ row: double.[1, 2, 3] }
     print(g.row[1])
 }
 ";
@@ -4100,9 +4127,9 @@ fn f(h: Holder) -> Int {
     }
 }
 fn main() {
-    hold #= Holder.{ val: value(5) }
+    hold :: Holder.{ val: value(5) }
     print(f(hold))
-    empty #= Holder.{ val: null }
+    empty :: Holder.{ val: null }
     print(f(empty))
 }
 ";
@@ -4243,7 +4270,7 @@ fn main() {
     );
 }
 
-/// c109: an owning field read of a NON-SCALAR field (`s #= p.name`, `name:
+/// c109: an owning field read of a NON-SCALAR field (`s :: p.name`, `name:
 /// String`). Sema rewrites the read in owning position to `(p.name).clone()`;
 /// the TIR emits `((user_p).user_name).clone()`. The single-uppercase-letter
 /// struct name `P` is a concrete declared type (not a type var), so `main`
@@ -4260,9 +4287,9 @@ struct P {
 }
 
 fn main() {
-    p #= P.{ name: \"x\" }
-    s #= p.name
-    t #= p.name
+    p :: P.{ name: \"x\" }
+    s :: p.name
+    t :: p.name
     print(s)
     print(t)
 }
@@ -4368,8 +4395,8 @@ comptime P = Pair.{left: 7, right: \"seven\"}
 comptime L = Light.Green
 
 fn main() {
-    p #= Pair.{left: 7, right: \"seven\"}
-    l #= Light.Green
+    p :: Pair.{left: 7, right: \"seven\"}
+    l :: Light.Green
     print(\"{P.left}\")
     print(\"{p.left}\")
     print(\"{P.right}\")
@@ -4414,7 +4441,7 @@ enum Wrapper {
     None
 }
 fn main() {
-    w #= Wrapper.Some(42)
+    w :: Wrapper.Some(42)
     if w == Some(_) {
         print(\"has value\")
     }
@@ -4444,11 +4471,11 @@ fn string_lines_and_to_int() {
     }
     let src = "\
 fn main() {
-    n #= \"42\".to_int() ?? -1
+    n :: \"42\".to_int() ?? -1
     print((n + 1))
-    bad #= \"abc\".to_int() ?? -1
+    bad :: \"abc\".to_int() ?? -1
     print(bad)
-    lines #= \"a\\nb\\nc\".lines()
+    lines :: \"a\\nb\\nc\".lines()
     print(lines.len())
     loop line in lines {
         print(line)
@@ -4568,8 +4595,8 @@ struct Pt { a: Int, b: Int }
 @[Codable]
 struct PlainPt { a: Int, b: Int }
 fn main() {
-    cs: [Pt] #= [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]
-    ps: [PlainPt] #= [PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 }]
+    cs: [Pt] :: [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]
+    ps: [PlainPt] :: [PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 }]
     print(json.to_string(cs) == json.to_string(ps))
     print(json.to_string(cs))
 }
@@ -4588,14 +4615,14 @@ fn linalg_vectors_and_matrices() {
     }
     let src = "\
 fn main() {
-a: Vec3 #= Vec3(1.0, 2.0, 3.0)
-b: Vec3 #= Vec3(4.0, 5.0, 6.0)
+a: Vec3 :: Vec3(1.0, 2.0, 3.0)
+b: Vec3 :: Vec3(4.0, 5.0, 6.0)
     print(a.dot(b))
-c: Vec3 #= a + b
+c: Vec3 :: a + b
     print(c.to_array())
     print(a.cross(b).to_array())
-scale: Mat3 #= Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-out: Vec3 #= scale * a
+scale: Mat3 :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+out: Vec3 :: scale * a
     print(out.to_array())
 }
 ";
@@ -4616,16 +4643,16 @@ fn simd_lanes_ops_and_reductions() {
     }
     let src = "\
 fn main() {
-v: F32x4 #= F32x4(1.0, 2.0, 3.0, 4.0)
-w: F32x4 #= F32x4(10.0, 20.0, 30.0, 40.0)
-s: F32x4 #= v + w
+v: F32x4 :: F32x4(1.0, 2.0, 3.0, 4.0)
+w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
+s: F32x4 :: v + w
     print(s.to_array())
     print(v[2])
     print(v.sum())
     print(v.reduce(#Max))
     print(v.reduce(#Mul))
     print(F32x4.splat(5.0).to_array())
-d: F64x2 #= F64x2.from_array([1.5, 2.5])
+d: F64x2 :: F64x2.from_array([1.5, 2.5])
     print(d.sum())
 }
 ";
@@ -4647,7 +4674,7 @@ fn user_type_shadows_builtin_math_name() {
     let src = "\
 struct Vec3 { x: Int, y: Int }
 fn main() {
-    v: Vec3 #= Vec3.{ x: 3, y: 4 }
+    v: Vec3 :: Vec3.{ x: 3, y: 4 }
     print(v.x)
     print(v.y)
 }

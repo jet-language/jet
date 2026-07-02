@@ -35,7 +35,7 @@ fn fs_call_sets_file_io() {
     let c = caps(
         r#"
 use core.fs as fs
-fn main() { x #= fs.read("a") ?? ""; print(x); }
+fn main() { x :: fs.read("a") ?? ""; print(x); }
 "#,
     );
     assert!(
@@ -52,7 +52,7 @@ fn time_call_sets_concurrency() {
     let c = caps(
         r#"
 use core.time as time
-fn main() { t #= time.now(); print("{t}"); }
+fn main() { t :: time.now(); print("{t}"); }
 "#,
     );
     assert!(

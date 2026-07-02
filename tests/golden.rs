@@ -32,7 +32,11 @@ fn examples_compile_and_run() {
         if !topic_path.is_dir() {
             continue;
         }
-        let topic_name = topic_path.file_name().unwrap().to_string_lossy().into_owned();
+        let topic_name = topic_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         if topic_name == "expected" {
             continue;
         }
@@ -66,10 +70,16 @@ fn examples_compile_and_run() {
     for (path, stem, shown) in entries {
         let src = fs::read_to_string(&path).unwrap();
 
-        if (stem == "lowlevel/ffi" || stem == "io/archive" || stem == "io/db"
-            || stem == "crypto/crypto_envelope" || stem == "crypto/crypto_sign" || stem == "crypto/crypto_migration"
-            || stem == "io/compress_gzip" || stem == "io/compress_zstd")
-            && !have_cargo {
+        if (stem == "lowlevel/ffi"
+            || stem == "io/archive"
+            || stem == "io/db"
+            || stem == "crypto/crypto_envelope"
+            || stem == "crypto/crypto_sign"
+            || stem == "crypto/crypto_migration"
+            || stem == "io/compress_gzip"
+            || stem == "io/compress_zstd")
+            && !have_cargo
+        {
             eprintln!(
                 "note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)"
             );

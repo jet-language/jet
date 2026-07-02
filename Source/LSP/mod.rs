@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn teaching_edit_from_let() {
-        // D-BIND1: `let x = 1` migrates to `x #= 1`, which moves tokens — it is
+        // D-BIND1: `let x = 1` migrates to `x :: 1`, which moves tokens — it is
         // no longer a single-keyword swap, so no auto-edit is synthesized (the
         // `replace `X` with `Y`` shape). `jet fmt` performs the migration. The
         // teaching diagnostic still fires and points at the sigil form.
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn inlay_hints_for_int_literal() {
-        let src = "fn main() {\n    x #= 42\n    count := 0\n}\n";
+        let src = "fn main() {\n    x :: 42\n    count := 0\n}\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);

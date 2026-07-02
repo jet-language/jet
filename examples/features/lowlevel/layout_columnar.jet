@@ -46,7 +46,7 @@ fn main() {
     print(ps.len())          // 3
 
     // Index-read yields a whole gathered Particle.
-    third #= ps[2]
+    third :: ps[2]
     print(third.x)           // 4.0
 
     // Field-read goes straight to the field's column (the cache-friendly path).
@@ -61,8 +61,8 @@ fn main() {
         PlainParticle.{ x: 1.0, y: 2.0, mass: 3.0 },
         PlainParticle.{ x: 4.0, y: 5.0, mass: 6.0 },
     ]
-    columnar_json #= json.to_string(ps)
-    plain_json #= json.to_string(plain)
+    columnar_json :: json.to_string(ps)
+    plain_json :: json.to_string(plain)
     print(columnar_json)
     require(columnar_json == plain_json, "columnar layout must serialize identically to AoS")
     print("serialization transparent")

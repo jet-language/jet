@@ -137,10 +137,7 @@ impl SemIndex {
     }
 
     pub fn call_sites(&self, callee: &str) -> Vec<&CallEdge> {
-        self.calls
-            .iter()
-            .filter(|c| c.callee == callee)
-            .collect()
+        self.calls.iter().filter(|c| c.callee == callee).collect()
     }
 
     pub fn effects(&self) -> &[EffectFact] {

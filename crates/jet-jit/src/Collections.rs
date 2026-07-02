@@ -118,11 +118,7 @@ extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
             .get(list as usize)
             .expect("jit list join: bad handle")
             .clone();
-        let sep = rt
-            .strings
-            .get(sep_id as usize)
-            .cloned()
-            .unwrap_or_default();
+        let sep = rt.strings.get(sep_id as usize).cloned().unwrap_or_default();
         let joined = xs
             .iter()
             .map(|v| v.to_string())

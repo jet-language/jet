@@ -30,20 +30,20 @@ use core.ui as ui
 use core.devserver as devserver
 
 fn dev() {
-    server #= devserver.app()
+    server :: devserver.app()
     server.serve()
 }
 
 fn render(n: Int) {
-    backend #= ui.null_backend()
+    backend :: ui.null_backend()
     color := "#e8790c"
     if ((n % 2) == 0) {
         color = "#3366ff"
     }
-    node #= ui.node_color("Clicks: {n}", 160.0, 40.0, color)
-    constraint #= ui.constraint(0.0, 0.0, 300.0, 100.0)
-    size #= backend.measure(node, constraint)
-    frame #= ui.rect(20.0, 20.0, size.width, size.height)
+    node :: ui.node_color("Clicks: {n}", 160.0, 40.0, color)
+    constraint :: ui.constraint(0.0, 0.0, 300.0, 100.0)
+    size :: backend.measure(node, constraint)
+    frame :: ui.rect(20.0, 20.0, size.width, size.height)
     backend.layout(node, frame)
     backend.paint(node)
 }

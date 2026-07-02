@@ -182,9 +182,7 @@ impl<'a> Parser<'a> {
                 self.finish_generic_module(name, name_span, is_pub, is_package_pub, start)
             }
             // D-GENMOD2=A: `module Alias = Target<args>` — module alias
-            TokKind::Eq => {
-                self.finish_module_alias(name, name_span, is_pub, is_package_pub, start)
-            }
+            TokKind::Eq => self.finish_module_alias(name, name_span, is_pub, is_package_pub, start),
             TokKind::Semi => {
                 let end = self.bump().span.end; // consume `;`
                 Ok(Item::CodeModule(CodeModule {

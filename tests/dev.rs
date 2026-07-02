@@ -42,7 +42,11 @@ fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
         if !topic_path.is_dir() {
             continue;
         }
-        let topic_name = topic_path.file_name().unwrap().to_string_lossy().into_owned();
+        let topic_name = topic_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         if topic_name == "expected" {
             continue;
         }
@@ -288,7 +292,11 @@ fn task_program_runs_via_jit() {
         RunOutcome::Problems(ds) => panic!("tasks must run via default dev/JIT, got: {ds:?}"),
     };
     assert_eq!(got.trim(), "5050", "tasks expected sum");
-    assert_eq!(jit.trim(), got.trim(), "JIT output drifted from dev_iteration");
+    assert_eq!(
+        jit.trim(),
+        got.trim(),
+        "JIT output drifted from dev_iteration"
+    );
 }
 
 /// c139 M4: scheduler/channel spawn stress example is jit-covered and runs.
@@ -385,7 +393,10 @@ fn cranelift_backend_matches_hello() {
     );
     let run = Command::new(&bin).output().expect("run compiled hello");
     let compiled_stdout = String::from_utf8_lossy(&run.stdout).to_string();
-    assert_eq!(got, compiled_stdout, "cranelift output drifted from AOT binary");
+    assert_eq!(
+        got, compiled_stdout,
+        "cranelift output drifted from AOT binary"
+    );
 }
 
 fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
@@ -444,9 +455,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 
     let interpreted = match dev_iteration(file, false, true) {
         RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(ds)
-            if ds.iter().any(|d| BOUNDARY_CODES.contains(&d.code)) =>
-        {
+        RunOutcome::Problems(ds) if ds.iter().any(|d| BOUNDARY_CODES.contains(&d.code)) => {
             golden_stdout(stem)
         }
         RunOutcome::Problems(ds) => {
@@ -506,15 +515,15 @@ fn jit_coverage_detail_smoke() {
         let funcs = jet_jit::jit_program_func_names(&bundle);
         eprintln!("{stem}: {detail}");
         if stem == "basics/switch" {
-            eprintln!(
-                "  compile: {:?}",
-                jet_jit::try_compile_bundle(&bundle)
-            );
+            eprintln!("  compile: {:?}", jet_jit::try_compile_bundle(&bundle));
         }
         if stem == "131_taskgroup" {
             let (sites, lams) = jet_jit::jit_spawn_stats(&bundle);
             eprintln!("  spawn: {sites} sites / {lams} lambdas");
-            eprintln!("  uncovered: {:?}", jet_jit::jit_main_uncovered_detail(&bundle));
+            eprintln!(
+                "  uncovered: {:?}",
+                jet_jit::jit_main_uncovered_detail(&bundle)
+            );
         }
         eprintln!("  funcs: {}", funcs.join(", "));
         eprintln!("  main: {}", stmts.join(", "));
@@ -592,9 +601,7 @@ fn jit_covered_example_stems() -> Vec<String> {
         {
             continue;
         }
-        if jet_jit::jit_covers_bundle(&bundle)
-            && jet_jit::try_compile_bundle(&bundle).is_ok()
-        {
+        if jet_jit::jit_covers_bundle(&bundle) && jet_jit::try_compile_bundle(&bundle).is_ok() {
             stems.push(stem_of(&root, &path));
         }
     }

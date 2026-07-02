@@ -61,6 +61,7 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == Syntax::KW_COMPTIME => Some(TokKind::KwComptime),
         s if s == Syntax::KW_RETURN => Some(TokKind::KwReturn),
         s if s == Syntax::KW_LOOP => Some(TokKind::KwLoop),
+        s if s == Syntax::KW_YIELD => Some(TokKind::KwYield),
         s if s == Syntax::KW_UNSAFE => Some(TokKind::KwUnsafe),
         s if s == Syntax::KW_USE => Some(TokKind::KwUse),
         s if s == Syntax::KW_EXTERN => Some(TokKind::KwExtern),

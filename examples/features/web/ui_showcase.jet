@@ -179,12 +179,12 @@ fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) -> 
 }
 
 fn paint_stat_card(card: StatCard) {
-    backend #= ui.null_backend()
+    backend :: ui.null_backend()
     hex := to_hex(card.color)
-    node #= ui.node_color("{card.label}: {card.value}", 170.0, 74.0, hex)
-    constraint #= ui.constraint(0.0, 0.0, 400.0, 200.0)
-    size #= backend.measure(node, constraint)
-    frame #= ui.rect(card.x, card.y, size.width, size.height)
+    node :: ui.node_color("{card.label}: {card.value}", 170.0, 74.0, hex)
+    constraint :: ui.constraint(0.0, 0.0, 400.0, 200.0)
+    size :: backend.measure(node, constraint)
+    frame :: ui.rect(card.x, card.y, size.width, size.height)
     backend.layout(node, frame)
     backend.paint(node)
 }
@@ -221,18 +221,18 @@ fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
 // time, never by a stored/mutated animated value (D-MOTIONTIME1).
 
 fn initApp() -> Signal<Int> {
-    boosts #= reactive.signal(0)
+    boosts :: reactive.signal(0)
 
     paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), 0.0, 0.0))
     paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), 190.0, 0.0))
 
-    counter_backend #= ui.null_backend()
+    counter_backend :: ui.null_backend()
     ui.reactive_render(() => {
         hex := to_hex(boost_color())
-        node #= ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, hex)
-        constraint #= ui.constraint(0.0, 0.0, 400.0, 200.0)
-        size #= counter_backend.measure(node, constraint)
-        frame #= ui.rect(190.0, 90.0, size.width, size.height)
+        node :: ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, hex)
+        constraint :: ui.constraint(0.0, 0.0, 400.0, 200.0)
+        size :: counter_backend.measure(node, constraint)
+        frame :: ui.rect(190.0, 90.0, size.width, size.height)
         counter_backend.layout(node, frame)
         counter_backend.paint(node)
     })
@@ -241,17 +241,17 @@ fn initApp() -> Signal<Int> {
 }
 
 fn initFuel() -> Signal<Int> {
-    elapsed #= reactive.signal(0)
-    backend #= ui.null_backend()
+    elapsed :: reactive.signal(0)
+    backend :: ui.null_backend()
     hex := to_hex(fuel_color())
 
     ui.reactive_render(() => {
         value := tween(40.0, 95.0, elapsed.get(), 600)
         pct := value.to_int()
-        node #= ui.node_color("Fuel: {pct}%", 170.0, 74.0, hex)
-        constraint #= ui.constraint(0.0, 0.0, 400.0, 200.0)
-        size #= backend.measure(node, constraint)
-        frame #= ui.rect(0.0, 90.0, size.width, size.height)
+        node :: ui.node_color("Fuel: {pct}%", 170.0, 74.0, hex)
+        constraint :: ui.constraint(0.0, 0.0, 400.0, 200.0)
+        size :: backend.measure(node, constraint)
+        frame :: ui.rect(0.0, 90.0, size.width, size.height)
         backend.layout(node, frame)
         backend.paint(node)
     })
@@ -279,7 +279,7 @@ fn main() {
         print(line)
     }
 
-    boosts #= reactive.signal(0)
+    boosts :: reactive.signal(0)
     print("boosts={boosts.get()}")
     boosts.set(boosts.get() + 1)
     print("boosts={boosts.get()}")

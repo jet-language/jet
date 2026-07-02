@@ -16,7 +16,7 @@ use crate::AST::{
     ConstDef, Contribution, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func,
     GenericModuleDef, GenericModuleParam, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
     LambdaMeta, LambdaParam, Marker, ModuleAliasDef, ModuleArg, ModuleDecl, Namespace, OrFallback,
-    Param, Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, TagDef, TraitDef,
+    Param, Pattern, Program, Stmt, StrMatchPart, StrPart, StructDef, SwitchArm, TagDef, TraitDef,
     TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp, Variant, VariantField,
     VariantPayload,
 };
@@ -514,7 +514,7 @@ mod s61_tests {
     fn spaced_minus_is_subtraction() {
         // Also a single-line-block regression guard (S6-R Go-rule part 2: a
         // terminator may be omitted before the closing `}`).
-        let p = program("fn main() { d #= 5 - 3 }");
+        let p = program("fn main() { d :: 5 - 3 }");
         let func = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) => Some(f),
             _ => None,
@@ -535,9 +535,8 @@ mod s61_tests {
     /// D-TASKSCOPE1=A: `g.task { … }` parses as a scoped spawn call, not struct lit.
     #[test]
     fn taskgroup_task_block_parses_as_spawn() {
-        let p = program(
-            "fn main() {\n    taskgroup g {\n        h #= g.task { return 1 }\n    }\n}\n",
-        );
+        let p =
+            program("fn main() {\n    taskgroup g {\n        h :: g.task { return 1 }\n    }\n}\n");
         let main = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "main" => Some(f),
             _ => None,
@@ -579,10 +578,14 @@ fn main() {
 }"#;
         let p = program(src);
         assert!(p.pub_file);
-        let mut funcs: Vec<_> = p.items.iter().filter_map(|i| match i {
-            crate::AST::Item::Func(f) => Some(f),
-            _ => None,
-        }).collect();
+        let mut funcs: Vec<_> = p
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                crate::AST::Item::Func(f) => Some(f),
+                _ => None,
+            })
+            .collect();
         funcs.sort_by_key(|f| f.name.as_str());
         let greet = funcs.iter().find(|f| f.name == "greet").expect("greet");
         let secret = funcs.iter().find(|f| f.name == "secret").expect("secret");

@@ -718,7 +718,9 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
 /// every normal compile-flavored command applies before printing `out.lints`.
 const A11Y_LINT_CODES: [&str; 2] = ["E2930", "E2931"];
 
-pub(crate) fn visible_lints(lints: &[jet::Diagnostics::Diagnostic]) -> Vec<jet::Diagnostics::Diagnostic> {
+pub(crate) fn visible_lints(
+    lints: &[jet::Diagnostics::Diagnostic],
+) -> Vec<jet::Diagnostics::Diagnostic> {
     lints
         .iter()
         .filter(|d| !A11Y_LINT_CODES.contains(&d.code))

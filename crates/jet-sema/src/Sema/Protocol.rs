@@ -4,9 +4,9 @@
 //! it into `#SingleUse` `.Client`/`.Server` handle structs plus `state`/`#Transition`
 //! impl methods, then re-parses the fragments through the normal front end (R11).
 
-use crate::AST::{Item, ProtocolDecl, ProtocolDirection, ProtocolMessage};
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
+use crate::AST::{Item, ProtocolDecl, ProtocolDirection, ProtocolMessage};
 
 /// Expand every `protocol` declaration in `items`, replacing each with its generated
 /// handle types and methods. Parse/lex failures are recorded in `diags`.
@@ -73,8 +73,14 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
 
     out.push_str(&format!("state {client} {{ {state_list} }}\n"));
     out.push_str(&format!("state {server} {{ {state_list} }}\n\n"));
-    out.push_str(&format!("#{} struct {client} {{\n    _token: Int,\n}}\n\n", Syntax::ATTR_SINGLE_USE));
-    out.push_str(&format!("#{} struct {server} {{\n    _token: Int,\n}}\n\n", Syntax::ATTR_SINGLE_USE));
+    out.push_str(&format!(
+        "#{} struct {client} {{\n    _token: Int,\n}}\n\n",
+        Syntax::ATTR_SINGLE_USE
+    ));
+    out.push_str(&format!(
+        "#{} struct {server} {{\n    _token: Int,\n}}\n\n",
+        Syntax::ATTR_SINGLE_USE
+    ));
 
     out.push_str(&format!("impl {client} {{\n"));
     out.push_str(&format!(

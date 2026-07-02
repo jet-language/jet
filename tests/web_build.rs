@@ -20,7 +20,9 @@ fn build_web_fixture(stem: &str, src: &str, shown: &str) -> PathBuf {
             jet::render_diagnostics(shown, src, &diags)
         )
     });
-    let web = out.web.expect("web target compile must produce web artifacts");
+    let web = out
+        .web
+        .expect("web target compile must produce web artifacts");
     assert!(
         web.manifest_json.contains("\"status\": \"m2\""),
         "manifest should be M2: {}",
@@ -274,15 +276,12 @@ fn jet_cli_infers_web_target_from_file_marker() {
         eprintln!("note: skipping web-target-inference (file marker) test");
         return;
     }
-    let dir = std::env::temp_dir().join(format!(
-        "jet_web_target_marker_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_web_target_marker_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\nuse core.ui as ui\nfn main() {\n    b #= ui.null_backend()\n    n #= ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c #= ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s #= b.measure(n, c)\n    f #= ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
+        "#Target(Web)\nuse core.ui as ui\nfn main() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
     )
     .unwrap();
 
@@ -298,8 +297,14 @@ fn jet_cli_infers_web_target_from_file_marker() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(dir.join("build/app.js").is_file(), "no build/app.js — web backend wasn't inferred");
-    assert!(dir.join("build/app.wasm").is_file(), "no build/app.wasm — web backend wasn't inferred");
+    assert!(
+        dir.join("build/app.js").is_file(),
+        "no build/app.js — web backend wasn't inferred"
+    );
+    assert!(
+        dir.join("build/app.wasm").is_file(),
+        "no build/app.wasm — web backend wasn't inferred"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -313,10 +318,7 @@ fn jet_cli_infers_web_target_from_manifest() {
         eprintln!("note: skipping web-target-inference (manifest) test");
         return;
     }
-    let dir = std::env::temp_dir().join(format!(
-        "jet_web_target_manifest_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_web_target_manifest_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -326,7 +328,7 @@ fn jet_cli_infers_web_target_from_manifest() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use core.ui as ui\nfn main() {\n    b #= ui.null_backend()\n    n #= ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c #= ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s #= b.measure(n, c)\n    f #= ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
+        "use core.ui as ui\nfn main() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
     )
     .unwrap();
 
@@ -342,8 +344,14 @@ fn jet_cli_infers_web_target_from_manifest() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(dir.join("build/app.js").is_file(), "no build/app.js — web backend wasn't inferred from pkg.jet");
-    assert!(dir.join("build/app.wasm").is_file(), "no build/app.wasm — web backend wasn't inferred from pkg.jet");
+    assert!(
+        dir.join("build/app.js").is_file(),
+        "no build/app.js — web backend wasn't inferred from pkg.jet"
+    );
+    assert!(
+        dir.join("build/app.wasm").is_file(),
+        "no build/app.wasm — web backend wasn't inferred from pkg.jet"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -406,7 +414,11 @@ fn jet_cli_uses_explicit_html_marker() {
     )
     .unwrap();
     // A sibling `app.html` exists too — the explicit marker must win over it.
-    fs::write(dir.join("app.html"), "<html>sibling, should be ignored</html>").unwrap();
+    fs::write(
+        dir.join("app.html"),
+        "<html>sibling, should be ignored</html>",
+    )
+    .unwrap();
     fs::write(dir.join("custom.html"), "<html>custom marker page</html>").unwrap();
 
     let jet = jet_bin();
@@ -560,22 +572,33 @@ fn web_showcase_dashboard_roundtrip() {
     let stdout = run_showcase_harness(&dir);
     let lines: Vec<&str> = stdout.lines().collect();
 
-    assert_eq!(lines[0], "nodes=4", "expected 4 independently-mounted DOM boxes:\n{stdout}");
+    assert_eq!(
+        lines[0], "nodes=4",
+        "expected 4 independently-mounted DOM boxes:\n{stdout}"
+    );
 
     assert!(
-        lines.iter().any(|l| l.contains("\"Altitude: 12,400 ft\"") && l.contains("bg=#3366ff")),
+        lines
+            .iter()
+            .any(|l| l.contains("\"Altitude: 12,400 ft\"") && l.contains("bg=#3366ff")),
         "missing/wrong Altitude card:\n{stdout}"
     );
     assert!(
-        lines.iter().any(|l| l.contains("\"Airspeed: 410 kt\"") && l.contains("bg=#12b886")),
+        lines
+            .iter()
+            .any(|l| l.contains("\"Airspeed: 410 kt\"") && l.contains("bg=#12b886")),
         "missing/wrong Airspeed card:\n{stdout}"
     );
     assert!(
-        lines.iter().any(|l| l.contains("\"Boosts: 0\"") && l.contains("bg=#8855ee")),
+        lines
+            .iter()
+            .any(|l| l.contains("\"Boosts: 0\"") && l.contains("bg=#8855ee")),
         "missing/wrong initial Boosts card:\n{stdout}"
     );
     assert!(
-        lines.iter().any(|l| l.contains("\"Fuel: 40%\"") && l.contains("bg=#e8790c")),
+        lines
+            .iter()
+            .any(|l| l.contains("\"Fuel: 40%\"") && l.contains("bg=#e8790c")),
         "missing/wrong initial Fuel card:\n{stdout}"
     );
 
@@ -585,7 +608,10 @@ fn web_showcase_dashboard_roundtrip() {
     );
 
     for elapsed_ms in [0i64, 150, 300, 450, 600, 900] {
-        let want = format!("elapsed={elapsed_ms}: Fuel: {}%", expected_fuel_pct(elapsed_ms));
+        let want = format!(
+            "elapsed={elapsed_ms}: Fuel: {}%",
+            expected_fuel_pct(elapsed_ms)
+        );
         assert!(
             lines.contains(&want.as_str()),
             "tween mismatch at elapsed={elapsed_ms} — want line {want:?} in:\n{stdout}"

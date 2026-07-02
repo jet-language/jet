@@ -55,7 +55,11 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
         if path.extension().and_then(|x| x.to_str()) == Some(ext) {
             let stem = format!(
                 "{}/{}",
-                path.parent().unwrap().file_name().unwrap().to_string_lossy(),
+                path.parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
                 path.file_stem().unwrap().to_string_lossy()
             );
             if stem == "lowlevel/ffi" {

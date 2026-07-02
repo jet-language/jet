@@ -1,9 +1,8 @@
 //! M4: scheduler-backed task/channel host shims for the Cranelift JIT.
 
 use jet_codegen::scheduler::{
-    jet_scheduler_all, jet_scheduler_any, jet_scheduler_race,
-    jet_scheduler_select_int_channels, jet_scheduler_spawn_with_control, JetSchedulerChannel,
-    JetSchedulerJoin, JetTaskControl,
+    jet_scheduler_all, jet_scheduler_any, jet_scheduler_race, jet_scheduler_select_int_channels,
+    jet_scheduler_spawn_with_control, JetSchedulerChannel, JetSchedulerJoin, JetTaskControl,
 };
 use std::cell::RefCell;
 use std::sync::Arc;

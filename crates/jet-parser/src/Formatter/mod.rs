@@ -231,7 +231,8 @@ fn func_decl_start(f: &Func, src: &str) -> usize {
     // `pub`/`fn`. The retired `@Pure` spelling still parses (E0062) so it's
     // searched too, preferring whichever match sits closer to `pos`.
     if f.is_pure {
-        let at_pos = before[..pos].rfind(&format!("{}{}", Syntax::CONTRACT_PREFIX, Syntax::KW_PURE));
+        let at_pos =
+            before[..pos].rfind(&format!("{}{}", Syntax::CONTRACT_PREFIX, Syntax::KW_PURE));
         let hash_pos = before[..pos].rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_PURE));
         match (at_pos, hash_pos) {
             (Some(a), Some(h)) => a.max(h),
@@ -312,6 +313,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Val(b) => b.init.span().end,
         Stmt::Assign { value, .. } => value.span().end,
         Stmt::Return(e, s) => e.as_ref().map(|x| x.span().end).unwrap_or(s.end),
+        Stmt::Yield(e, _) => e.span().end,
         Stmt::If(i) => if_end(i),
         Stmt::While { body, .. } => body.last().map(stmt_end).unwrap_or(0),
         Stmt::For { body, .. } => body.last().map(stmt_end).unwrap_or(0),
@@ -655,6 +657,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
             LValue::Field { base, .. } => base.span().start,
         },
         Stmt::Return(_, s) => s.start,
+        Stmt::Yield(_, s) => s.start,
         Stmt::If(i) => i.span.start,
         Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::Switch { span, .. } => span.start,
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {

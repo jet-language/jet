@@ -650,8 +650,7 @@ impl<'a> Parser<'a> {
                         let mut name = other.to_string();
                         while matches!(self.peek().kind, TokKind::Dot) {
                             self.bump();
-                            let (part, _) =
-                                self.expect_ident("after `.` in a type path")?;
+                            let (part, _) = self.expect_ident("after `.` in a type path")?;
                             name = format!("{name}.{part}");
                         }
                         if matches!(self.peek().kind, TokKind::Lt) {

@@ -120,7 +120,9 @@ impl Parser {
             let Some(c) = self.peek() else {
                 return Err(self.err("truncated unicode escape"));
             };
-            let d = c.to_digit(16).ok_or_else(|| self.err("invalid unicode escape"))?;
+            let d = c
+                .to_digit(16)
+                .ok_or_else(|| self.err("invalid unicode escape"))?;
             v = v * 16 + d;
             self.pos += 1;
         }
@@ -274,7 +276,10 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
                 return "[]".to_string();
             }
             if !pretty {
-                let parts: Vec<String> = xs.iter().map(|x| render_json_pretty(x, false, depth)).collect();
+                let parts: Vec<String> = xs
+                    .iter()
+                    .map(|x| render_json_pretty(x, false, depth))
+                    .collect();
                 return format!("[{}]", parts.join(","));
             }
             let pad = "  ".repeat(depth + 1);
@@ -314,12 +319,7 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
                         CtKey::Str(s) => quote_json(s),
                         other => quote_json(&other.to_value().jet_show()),
                     };
-                    format!(
-                        "{}{}: {}",
-                        pad,
-                        key,
-                        render_json_pretty(v, true, depth + 1)
-                    )
+                    format!("{}{}: {}", pad, key, render_json_pretty(v, true, depth + 1))
                 })
                 .collect();
             format!("{{\n{}\n{}}}", parts.join(",\n"), end)

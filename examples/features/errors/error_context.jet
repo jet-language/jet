@@ -1,0 +1,29 @@
+// D-ERRCTX1=D: `.context("msg {var}")` adds a lazily-evaluated human boundary
+// message to an error as it crosses a layer — the message closure only runs
+// if the error actually propagates. Errors are plain text, so each
+// `.context()` crossed on the way out prepends to the same chain.
+fn read_raw() -> String ? {
+    return err("file not found")
+}
+
+fn parse_config(path: String) -> String ? {
+    raw :: read_raw()?
+    return ok(raw)
+}
+
+fn load_config(path: String) -> String ? {
+    cfg :: parse_config(path).context("loading config {path}")?
+    return ok(cfg)
+}
+
+fn main() {
+    if load_config("app.toml") == {
+        ok(v) -> {
+            print("ok: {v}")
+        }
+        err(e) -> {
+            print("failed: {e@Debug}")
+        }
+
+    }
+}

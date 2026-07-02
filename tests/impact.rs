@@ -5,15 +5,10 @@ use std::path::PathBuf;
 #[test]
 fn impact_report_upstream_main() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/effects/effects.jet");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
-        .args([
-            "impact",
-            path.to_str().unwrap(),
-            "report",
-            "--depth=3",
-        ])
+        .args(["impact", path.to_str().unwrap(), "report", "--depth=3"])
         .output()
         .expect("jet impact");
     assert!(
@@ -29,8 +24,8 @@ fn impact_report_upstream_main() {
 #[test]
 fn impact_json_output() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/effects/effects.jet");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
         .args([
             "impact",
@@ -50,8 +45,8 @@ fn impact_json_output() {
 #[test]
 fn impact_unknown_symbol_exits_error() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/effects/effects.jet");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
         .args(["impact", path.to_str().unwrap(), "not_a_real_symbol_xyz"])
         .output()

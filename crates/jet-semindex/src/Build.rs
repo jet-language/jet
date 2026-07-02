@@ -1,9 +1,9 @@
 //! Semantic index builder — walks a checked `ProgramBundle` AST.
 //! D-SEMINDEX1: shared by LSP and the public `jet-semindex` query API.
 
-use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::Syntax;
+use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
@@ -612,7 +612,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::Val(b) => {
             collect_binding(b, mp, ctx);
         }
-        AST::Stmt::Expr(e) => collect_expr(e, mp, ctx),
+        AST::Stmt::Expr(e) | AST::Stmt::Yield(e, _) => collect_expr(e, mp, ctx),
         AST::Stmt::Assign { target, value, .. } => {
             collect_lvalue(target, mp, ctx);
             collect_expr(value, mp, ctx);

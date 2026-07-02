@@ -130,14 +130,8 @@ impl ImpactReport {
             }
             out.push('\n');
         }
-        out.push_str(&format!(
-            "  references:        {}\n",
-            self.references.len()
-        ));
-        out.push_str(&format!(
-            "  direct call sites: {}\n",
-            self.call_sites.len()
-        ));
+        out.push_str(&format!("  references:        {}\n", self.references.len()));
+        out.push_str(&format!("  direct call sites: {}\n", self.call_sites.len()));
         out.push_str(&format!(
             "  upstream callers:  {} (depth <= {})\n",
             self.upstream_callers.len(),

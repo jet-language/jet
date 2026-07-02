@@ -777,9 +777,9 @@ fn apply_core_call(
             let text = as_string(one(0)?, span)?;
             match super::JsonInterp::parse_json(text) {
                 Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(super::JsonInterp::json_error_value(
-                    e,
-                )))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(
+                    super::JsonInterp::json_error_value(e),
+                ))),
             }
         }
         ("core.encoding.json", "decode") => {
@@ -787,18 +787,22 @@ fn apply_core_call(
             let text = as_string(one(0)?, span)?;
             match super::JsonInterp::parse_json(text) {
                 Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(super::JsonInterp::json_error_value(
-                    e,
-                )))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(
+                    super::JsonInterp::json_error_value(e),
+                ))),
             }
         }
         ("core.encoding.json", "to_string") => {
             let v = one(0)?;
-            Ok(CtValue::Str(super::JsonInterp::render_json_pretty(v, false, 0)))
+            Ok(CtValue::Str(super::JsonInterp::render_json_pretty(
+                v, false, 0,
+            )))
         }
         ("core.encoding.json", "to_string_pretty") => {
             let v = one(0)?;
-            Ok(CtValue::Str(super::JsonInterp::render_json_pretty(v, true, 0)))
+            Ok(CtValue::Str(super::JsonInterp::render_json_pretty(
+                v, true, 0,
+            )))
         }
         // --- core.time pure constructors ---
         ("core.time", "ms") => {
@@ -856,7 +860,9 @@ fn apply_core_call(
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.int expects Int bounds", span)),
             };
-            Ok(CtValue::Int(with_ambient_rng(|st| random_int(st, low, high))))
+            Ok(CtValue::Int(with_ambient_rng(|st| {
+                random_int(st, low, high)
+            })))
         }
         ("core.random", "float") => Ok(CtValue::Float(with_ambient_rng(|st| random_float(st)))),
         ("core.random", "rng") => {
@@ -904,9 +910,11 @@ fn apply_core_call(
 }
 
 fn regex_pattern(args: &[CtValue], span: Span) -> Result<regex::Regex, Diagnostic> {
-    let pat = as_string(args.first().ok_or_else(|| {
-        unsupported("regex call: missing pattern argument", span)
-    })?, span)?;
+    let pat = as_string(
+        args.first()
+            .ok_or_else(|| unsupported("regex call: missing pattern argument", span))?,
+        span,
+    )?;
     regex::Regex::new(pat).map_err(|e| {
         Diagnostic::error(
             "E0956",
@@ -920,17 +928,21 @@ fn regex_pattern(args: &[CtValue], span: Span) -> Result<regex::Regex, Diagnosti
 
 fn regex_is_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
-    let text = as_string(args.get(1).ok_or_else(|| {
-        unsupported("regex.is_match: missing text argument", span)
-    })?, span)?;
+    let text = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.is_match: missing text argument", span))?,
+        span,
+    )?;
     Ok(CtValue::ResOk(Box::new(CtValue::Bool(re.is_match(text)))))
 }
 
 fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
-    let text = as_string(args.get(1).ok_or_else(|| {
-        unsupported("regex.find: missing text argument", span)
-    })?, span)?;
+    let text = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.find: missing text argument", span))?,
+        span,
+    )?;
     Ok(CtValue::ResOk(Box::new(match re.find(text) {
         Some(m) => CtValue::Some(Box::new(CtValue::Str(m.as_str().to_string()))),
         None => CtValue::None(crate::AST::Type::String),
@@ -939,9 +951,11 @@ fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
 
 fn regex_find_all(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
-    let text = as_string(args.get(1).ok_or_else(|| {
-        unsupported("regex.find_all: missing text argument", span)
-    })?, span)?;
+    let text = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.find_all: missing text argument", span))?,
+        span,
+    )?;
     let items: Vec<CtValue> = re
         .find_iter(text)
         .map(|m| CtValue::Str(m.as_str().to_string()))
@@ -951,9 +965,11 @@ fn regex_find_all(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic>
 
 fn regex_split(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
-    let text = as_string(args.get(1).ok_or_else(|| {
-        unsupported("regex.split: missing text argument", span)
-    })?, span)?;
+    let text = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.split: missing text argument", span))?,
+        span,
+    )?;
     let items: Vec<CtValue> = re
         .split(text)
         .map(|s| CtValue::Str(s.to_string()))
@@ -963,12 +979,16 @@ fn regex_split(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
 
 fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
-    let text = as_string(args.get(1).ok_or_else(|| {
-        unsupported("regex.replace: missing text argument", span)
-    })?, span)?;
-    let rep = as_string(args.get(2).ok_or_else(|| {
-        unsupported("regex.replace: missing replacement argument", span)
-    })?, span)?;
+    let text = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
+        span,
+    )?;
+    let rep = as_string(
+        args.get(2)
+            .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
+        span,
+    )?;
     Ok(CtValue::ResOk(Box::new(CtValue::Str(
         re.replace_all(text, rep).into_owned(),
     ))))
@@ -976,9 +996,11 @@ fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> 
 
 fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
-    let text = as_string(args.get(1).ok_or_else(|| {
-        unsupported("regex.match: missing text argument", span)
-    })?, span)?;
+    let text = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.match: missing text argument", span))?,
+        span,
+    )?;
     Ok(CtValue::ResOk(Box::new(match re.captures(text) {
         Some(caps) => {
             let groups: Vec<CtValue> = (0..caps.len())
@@ -1118,13 +1140,15 @@ fn apply_impure_core_call(
             )))),
             Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(".", e)))),
         },
-        ("core.env", "home_dir") => Ok(match std::env::var("HOME")
-            .ok()
-            .or_else(|| std::env::var("USERPROFILE").ok())
-        {
-            Some(v) => CtValue::Some(Box::new(CtValue::Str(v))),
-            None => CtValue::None(crate::AST::Type::String),
-        }),
+        ("core.env", "home_dir") => Ok(
+            match std::env::var("HOME")
+                .ok()
+                .or_else(|| std::env::var("USERPROFILE").ok())
+            {
+                Some(v) => CtValue::Some(Box::new(CtValue::Str(v))),
+                None => CtValue::None(crate::AST::Type::String),
+            },
+        ),
         ("core.io", "args") => Ok(CtValue::List(
             std::env::args()
                 .skip(1)
@@ -1142,9 +1166,9 @@ fn apply_impure_core_call(
             }
             Ok(CtValue::Unit)
         }
-        ("core.io", "input") | ("core.io", "read_all_input") => Ok(CtValue::ResOk(Box::new(
-            CtValue::Str(String::new()),
-        ))),
+        ("core.io", "input") | ("core.io", "read_all_input") => {
+            Ok(CtValue::ResOk(Box::new(CtValue::Str(String::new()))))
+        }
         ("core.io", "stdin") => Ok(CtValue::Struct {
             type_name: "StdinHandle".to_string(),
             fields: vec![],
@@ -1158,10 +1182,7 @@ fn apply_impure_core_call(
         }
         ("core.process", "run") => {
             let cmd = match one(0)? {
-                CtValue::List(items) => items
-                    .iter()
-                    .map(|v| v.jet_show())
-                    .collect::<Vec<_>>(),
+                CtValue::List(items) => items.iter().map(|v| v.jet_show()).collect::<Vec<_>>(),
                 _ => {
                     return Err(unsupported(
                         "process.run expects a list of command words",
@@ -1178,10 +1199,7 @@ fn apply_impure_core_call(
                     )],
                 })));
             }
-            match std::process::Command::new(&cmd[0])
-                .args(&cmd[1..])
-                .output()
-            {
+            match std::process::Command::new(&cmd[0]).args(&cmd[1..]).output() {
                 Ok(out) => Ok(CtValue::ResOk(Box::new(CtValue::Struct {
                     type_name: "ProcessResult".to_string(),
                     fields: vec![

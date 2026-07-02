@@ -136,10 +136,7 @@ pub fn write(lock: &LockFile) -> String {
             out.push_str(&format!("layer = \"{}\"\n", layer.as_str()));
         }
         if let Some(inferred) = pkg.inferred_layer {
-            out.push_str(&format!(
-                "inferred-layer = \"{}\"\n",
-                inferred.as_str()
-            ));
+            out.push_str(&format!("inferred-layer = \"{}\"\n", inferred.as_str()));
         }
 
         // D-EFFBUDGET1: per-dependency effect provenance + audited grants.
@@ -148,8 +145,11 @@ pub fn write(lock: &LockFile) -> String {
             out.push_str(&format!("effects = [{}]\n", effects.join(", ")));
         }
         if !pkg.effect_grants.is_empty() {
-            let grants: Vec<String> =
-                pkg.effect_grants.iter().map(|e| format!("\"{}\"", e)).collect();
+            let grants: Vec<String> = pkg
+                .effect_grants
+                .iter()
+                .map(|e| format!("\"{}\"", e))
+                .collect();
             out.push_str(&format!("effect-grants = [{}]\n", grants.join(", ")));
         }
     }
@@ -328,14 +328,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "locked" => pkg.locked_raw = Some(val.to_string()),
                 "dependencies" => pkg.deps = parse_string_array(val),
                 "layer" => {
-                    pkg.layer = crate::Syntax::RuntimeLayer::parse_manifest(
-                        val.trim_matches('"'),
-                    );
+                    pkg.layer = crate::Syntax::RuntimeLayer::parse_manifest(val.trim_matches('"'));
                 }
                 "inferred-layer" => {
-                    pkg.inferred_layer = crate::Syntax::RuntimeLayer::parse_manifest(
-                        val.trim_matches('"'),
-                    );
+                    pkg.inferred_layer =
+                        crate::Syntax::RuntimeLayer::parse_manifest(val.trim_matches('"'));
                 }
                 "effects" => pkg.effects = parse_string_array(val),
                 "effect-grants" => pkg.effect_grants = parse_string_array(val),
@@ -519,7 +516,11 @@ pub fn load(project_root: &Path) -> Option<LockFile> {
 }
 
 /// D-RINGLAYER1=A M2: persist inferred runtime layer for the root package after build.
-pub fn record_inferred_layer(project_root: &Path, package_name: &str, layer: crate::Syntax::RuntimeLayer) {
+pub fn record_inferred_layer(
+    project_root: &Path,
+    package_name: &str,
+    layer: crate::Syntax::RuntimeLayer,
+) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     let Ok(raw) = std::fs::read_to_string(&lock_path) else {
         return;
@@ -527,11 +528,7 @@ pub fn record_inferred_layer(project_root: &Path, package_name: &str, layer: cra
     let Ok(mut lock) = parse(&raw) else {
         return;
     };
-    let Some(pkg) = lock
-        .packages
-        .iter_mut()
-        .find(|p| p.name == package_name)
-    else {
+    let Some(pkg) = lock.packages.iter_mut().find(|p| p.name == package_name) else {
         return;
     };
     pkg.inferred_layer = Some(layer);

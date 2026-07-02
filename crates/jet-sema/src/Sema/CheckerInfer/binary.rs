@@ -161,17 +161,10 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                if self.registry.distinct_range(distinct_name).is_some() {
+                    return self.registry.distinct_base(distinct_name).cloned();
+                }
                 // Same @Numeric distinct type — arithmetic is allowed, returns the same type.
-                //
-                // D-RANGETYPE1 gap: the ratified text also wants a range
-                // type's arithmetic to WIDEN to the base (`Severity + Severity
-                // -> Int`, since a sum can leave the declared bounds). Doing
-                // that in sema alone breaks codegen (the TIR `Binary` lowering
-                // reads the operand's Rust newtype and emits a raw `+` on it;
-                // widening the SEMA type to `Int` without also unwrapping each
-                // operand to `.raw()` in codegen produced an I2-class rustc
-                // rejection). Left as same-type arithmetic (like any other
-                // `@Numeric` distinct type) until the codegen unwrap is wired.
                 return Some(lt);
             }
             if (lt_is_distinct || rt_is_distinct) && is_eq {
@@ -425,7 +418,9 @@ impl<'a> Checker<'a> {
                     None
                 }
             }
-            BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => self.check_relational(op, &lt, &rt, span),
+            BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                self.check_relational(op, &lt, &rt, span)
+            }
             BinOp::And | BinOp::Or => unreachable!(),
         }
     }
@@ -433,7 +428,13 @@ impl<'a> Checker<'a> {
     /// D-CHAINCMP1: the `</<=/>/>=` type-check, shared by a plain `Binary`
     /// pair and each adjacent pair of a `CompareChain`. No new *type* rule —
     /// every pair type-checks exactly as a standalone relational comparison.
-    pub(crate) fn check_relational(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) -> Option<Type> {
+    pub(crate) fn check_relational(
+        &mut self,
+        op: BinOp,
+        lt: &Type,
+        rt: &Type,
+        span: Span,
+    ) -> Option<Type> {
         if lt == rt && matches!(lt, Type::Int | Type::Float) {
             Some(Type::Bool)
         } else if lt == rt
@@ -477,7 +478,11 @@ impl<'a> Checker<'a> {
                 _ => ok = false,
             }
         }
-        if ok { Some(Type::Bool) } else { None }
+        if ok {
+            Some(Type::Bool)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn op_mismatch(&mut self, op: BinOp, lt: &Type, rt: &Type, span: Span) {

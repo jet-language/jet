@@ -9,12 +9,12 @@
 //   docs/reference/syntax-surface.jet  (non-executable).
 // Decision IDs + rationale live in docs/spec/syntax-decisions.md.
 // --- variables & types ---------------------------------------------------
-// `name #= val` / `name := val` infer types; `name: Type #= val` / `name: Type := val` annotate.
+// `name :: val` / `name := val` infer types; `name: Type :: val` / `name: Type := val` annotate.
 fn show_values() {
-    name: String #= "Jet"
-    year #= 2026
-    version #= 0.1
-    ready: Bool #= true
+    name: String :: "Jet"
+    year :: 2026
+    version :: 0.1
+    ready: Bool :: true
     print("values: {name} {year} {version} {ready}")
     count := 0
     count = count + 3
@@ -88,7 +88,7 @@ fn parse_age(raw: String) -> Int ? ParseError {
 }
 
 fn double_age(raw: String) -> Int ? ParseError {
-    n #= parse_age(raw)?
+    n :: parse_age(raw)?
     return ok(n * 2)
 }
 
@@ -118,14 +118,14 @@ module math {
 fn main() {
     show_values()
     print(greet("world"))
-    same #= id(99)
+    same :: id(99)
     print("id: {same}")
-    p #= Point.{x: 3.0, y: 4.0}
+    p :: Point.{x: 3.0, y: 4.0}
     print("dist_sq: {p.dist_sq()}")
-    o #= Point.origin()
+    o :: Point.origin()
     print("origin: {o.x} {o.y}")
     print("next: {next(Light.Red) == Light.Yellow}")
-    kind #= day_kind("sun")
+    kind :: day_kind("sun")
     print("day: {kind}")
     // errors
     if double_age("42") == {
@@ -133,31 +133,31 @@ fn main() {
         err(e) -> print("err: {e}")
 
     }
-    fallback #= parse_age("") ?? 0
+    fallback :: parse_age("") ?? 0
     print("fallback: {fallback}")
     // collections + closures
     nums: [Int] := [3, 1, 2]
     nums.push(4)
     nums.sort()
-    squares #= nums.map((n: Int) => n * n)
-    big #= squares.filter((n: Int) => n > 5)
-    total #= nums.reduce(0, (acc: Int, n: Int) => acc + n)
+    squares :: nums.map((n: Int) => n * n)
+    big :: squares.filter((n: Int) => n > 5)
+    total :: nums.reduce(0, (acc: Int, n: Int) => acc + n)
     print("nums: {nums[0]} {nums[1]} total {total} big {big.len()}")
     // tuple
-    pair #= (x: 1, y: 2)
+    pair :: (x: 1, y: 2)
     print("tuple: {pair.x} {pair.y}")
     // trait dispatch
-    sq #= Square.{side: 5.0}
+    sq :: Square.{side: 5.0}
     print("area: {sq.area()}")
     // module
     print("module: {math.double(21)}")
     // fan-out (S75): f.[a, b, c] == [f(a), f(b), f(c)]
-    tripled #= triple.[1, 2, 3]
-    [t0, t1, t2] #= tripled
+    tripled :: triple.[1, 2, 3]
+    [t0, t1, t2] :: tripled
     print("fanout: {t0} {t1} {t2}")
     // strings
-    parts #= "a,b,c".split(",")
-    trimmed #= "  hi  ".trim()
+    parts :: "a,b,c".split(",")
+    trimmed :: "  hi  ".trim()
     print("split: {parts.len()} trimmed: {trimmed}")
     // control flow
     sum := 0

@@ -7,16 +7,16 @@ mod Build;
 mod Json;
 mod Types;
 
+pub use jet_sema::SemIndexEffectFacts;
 pub use Build::{
     build_index, build_symbol_db, HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
 };
-pub use jet_sema::SemIndexEffectFacts;
 pub use Types::{
     CallEdge, EffectFact, SemIndex, SourceSpan, SymbolDef, SymbolKind, SymbolRef, SCHEMA_VERSION,
 };
 
-use jet_foundation::AST::ProgramBundle;
 use jet_foundation::Diagnostics::Diagnostic;
+use jet_foundation::AST::ProgramBundle;
 use std::path::Path;
 
 /// Structured errors for project loading / I/O only (compiler diagnostics stay
@@ -44,12 +44,12 @@ pub fn from_checked(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemI
 /// Load, check, and build the semantic index for an entry file (loader → parser → sema).
 pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
-        &entry_str,
-        None,
-        false,
-    );
-    if !diags.iter().any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error) {
+    let (diags, bundle, facts) =
+        jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
+    if !diags
+        .iter()
+        .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
+    {
         if let Some(bundle) = bundle {
             return Ok(build_index(&bundle, &facts));
         }

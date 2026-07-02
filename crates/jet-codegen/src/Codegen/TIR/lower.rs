@@ -8,7 +8,7 @@ use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, BindPattern, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt,
     IndexKind, LValue, Lambda, LambdaBody, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart,
-    SwitchArm, TryConvert, Type, UnOp, VariantPayload,
+    StructPatField, SwitchArm, TryConvert, Type, UnOp, VariantPayload,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -16,9 +16,9 @@ use std::rc::Rc;
 
 fn struct_lit_field_root<'a>(e: &'a Expr) -> Option<&'a str> {
     match e {
-        Expr::MethodCall { receiver, method, .. } if method == "clone" => {
-            struct_lit_field_root(receiver)
-        }
+        Expr::MethodCall {
+            receiver, method, ..
+        } if method == "clone" => struct_lit_field_root(receiver),
         Expr::Ident(n, _) => Some(n),
         Expr::Field(inner, _, _) => struct_lit_field_root(inner),
         Expr::Index { base, .. } | Expr::Slice { base, .. } => struct_lit_field_root(base),
@@ -46,27 +46,17 @@ fn lower_struct_lit_field(
                     Expr::Ident(_, _) => env.rust_name_of(owner),
                     Expr::Field(inner, field, _) => {
                         let base = lower_expr(inner, cx, env);
-                        format!(
-                            "&({}).{}",
-                            emit_tir_expr(&base, cx),
-                            mangle(field)
-                        )
+                        format!("&({}).{}", emit_tir_expr(&base, cx), mangle(field))
                     }
-                    Expr::MethodCall { receiver, method, .. }
-                        if method == "clone" =>
-                    {
-                        match receiver.as_ref() {
-                            Expr::Field(inner, field, _) => {
-                                let base = lower_expr(inner, cx, env);
-                                format!(
-                                    "&({}).{}",
-                                    emit_tir_expr(&base, cx),
-                                    mangle(field)
-                                )
-                            }
-                            _ => env.rust_name_of(owner),
+                    Expr::MethodCall {
+                        receiver, method, ..
+                    } if method == "clone" => match receiver.as_ref() {
+                        Expr::Field(inner, field, _) => {
+                            let base = lower_expr(inner, cx, env);
+                            format!("&({}).{}", emit_tir_expr(&base, cx), mangle(field))
                         }
-                    }
+                        _ => env.rust_name_of(owner),
+                    },
                     _ => env.rust_name_of(owner),
                 };
                 return TExpr {
@@ -340,24 +330,24 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
-        for p in &f.params {
-            let rust_name = cx.mangle_name(&p.name);
-            let param_ty = if p.variadic {
-                Type::List(Box::new(p.ty.clone()))
-            } else {
-                p.ty.clone()
-            };
-            // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
-            // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
-            // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
-            // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
-            // its source convention (`Read` → `&user_Stack<T>`, deref'd place `(*user_s)`).
-            let mut slot_param = p.clone();
-            slot_param.ty = param_ty.clone();
-            let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
-            env.bind(&p.name, place, Some(param_ty.clone()));
-            params.push((rust_name, param_ty, p.convention));
-        }
+    for p in &f.params {
+        let rust_name = cx.mangle_name(&p.name);
+        let param_ty = if p.variadic {
+            Type::List(Box::new(p.ty.clone()))
+        } else {
+            p.ty.clone()
+        };
+        // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
+        // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
+        // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
+        // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
+        // its source convention (`Read` → `&user_Stack<T>`, deref'd place `(*user_s)`).
+        let mut slot_param = p.clone();
+        slot_param.ty = param_ty.clone();
+        let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
+        env.bind(&p.name, place, Some(param_ty.clone()));
+        params.push((rust_name, param_ty, p.convention));
+    }
     let body = lower_stmts(&f.body, cx, &mut env);
     TFunc {
         name: f.name.clone(),
@@ -748,7 +738,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     match s {
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Struct { .. })) => {
-            // c109: a struct-destructuring binding `Type { x, y } #= <init>`. Lower the
+            // c109: a struct-destructuring binding `Type { x, y } :: <init>`. Lower the
             // init ONCE; its total `.ty` is a `Type::Named`/`Apply` naming a struct
             // (sema guarantees it). The per-field type comes from `cx.struct_fields`,
             // reproducing `emit_stmt`'s `BindPattern::Struct` arm. Each field binds with
@@ -783,7 +773,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
-            // c109 Phase 23: a tuple-destructuring binding `(a, b) #= <init>`. Lower the
+            // c109 Phase 23: a tuple-destructuring binding `(a, b) :: <init>`. Lower the
             // init ONCE; its total `.ty` is a `Type::Tuple` (sema guarantees it). Pair the
             // pattern elements to the tuple's CANONICAL fields by position, reproducing
             // `emit_stmt`'s `BindPattern::Tuple` arm. Each element binds with its resolved
@@ -813,7 +803,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
         }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::List { .. })) => {
-            // c109 Phase 26: a list-destructuring binding `[a, b, c] #= <init>`. Lower
+            // c109 Phase 26: a list-destructuring binding `[a, b, c] :: <init>`. Lower
             // the init ONCE, then bind each element via `jet_unpack_vec(tmp, want, i,
             // file, line)`, reproducing `emit_stmt`'s `BindPattern::List` arm. The
             // element slot type reproduces `expr_jet_ty(init)`'s `Some(List(inner))`-only
@@ -876,7 +866,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     },
                 };
             }
-            // c109 Phase 19: an arena `view` binding (`x #= arena.alloc(v)`). The AST
+            // c109 Phase 19: an arena `view` binding (`x :: arena.alloc(v)`). The AST
             // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
             // NEVER `let mut` — a view is a non-reassignable `&mut T`) and binds a DEREF'd
             // slot (reads go through `(*x)`). Reproduce it exactly: a `Let` with `kw: "let"`,
@@ -1071,8 +1061,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     {
                         match crate::Sema::parse_swizzle_member(field, type_name) {
                             crate::Sema::SwizzleParse::Ok(lanes) => {
-                                let lanes_u8: Vec<u8> =
-                                    lanes.iter().map(|&i| i as u8).collect();
+                                let lanes_u8: Vec<u8> = lanes.iter().map(|&i| i as u8).collect();
                                 Some((type_name.clone(), lanes_u8))
                             }
                             _ => None,
@@ -1082,8 +1071,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 };
                 if let Some((type_name, lanes_u8)) = swizzle_write {
                     let clone_value = if let Expr::Ident(vname, _) = value {
-                        env.is_borrowed(vname)
-                            && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                        env.is_borrowed(vname) && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
                     } else {
                         false
                     };
@@ -1115,6 +1103,21 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Return(Some(e), _) if env.view_return => lower_view_return(e, cx, env),
         Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_expr(e, cx, env))),
         Stmt::Return(None, _) => TStmt::Return(None),
+        // D-STREAMYIELD1: `yield e` inside a generator's spawned thread — send on
+        // the channel the wrapping `Stream<T>` body opened (see `emit_generator_body`),
+        // blocking (rendezvous, bound 0) until the consumer pulls. A closed receiver
+        // (consumer stopped early) makes `send` fail; ignored — the thread just runs
+        // to completion doing nothing further useful, rather than panicking.
+        Stmt::Yield(e, _) => {
+            let v = lower_expr(e, cx, env);
+            TStmt::ExprStmt(TExpr {
+                ty: unit_type(),
+                kind: TExprKind::ConstInline(format!(
+                    "let _ = __jet_yield_tx.send({});",
+                    emit_tir_expr(&v, cx)
+                )),
+            })
+        }
         // D-IGNORERET2=A: `.drop("reason")` — lower only the receiver (for side effects).
         // The method call itself is erased; the "reason" string is audit-only.
         Stmt::Expr(Expr::MethodCall {
@@ -1230,8 +1233,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     Type::FixedList { elem, .. } => Some((**elem).clone()),
                     // Map iteration: key type for single-binding form.
                     Type::Map { key, .. } => Some((**key).clone()),
+                    // D-STREAMYIELD1: a generator's `Stream<T>`.
+                    Type::Apply { name, args } if name == "Stream" && args.len() == 1 => {
+                        Some(args[0].clone())
+                    }
                     _ => None,
                 };
+                let by_value =
+                    matches!(&lowered_coll.ty, Type::Apply { name, .. } if name == "Stream");
                 if method_kind.is_none() {
                     if let Type::Named(n) = &lowered_coll.ty {
                         if let Some(hook) = cx.iterable_hooks.get(n) {
@@ -1270,6 +1279,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     collection_str,
                     method_kind,
                     columnar,
+                    by_value,
                     body: lower_stmts(body, cx, &mut branch),
                 }
             }
@@ -1338,7 +1348,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // runtime object (unlike Region/TaskGroup, which erase) — bind `name`
         // to a fresh `jet_layout::Handle` BEFORE lowering the body, so the
         // desugared `NAME.h(box, anchor)` calls inside resolve to it, exactly
-        // like an ordinary `NAME #= jet_layout::Handle::new(…)` binding would.
+        // like an ordinary `NAME :: jet_layout::Handle::new(…)` binding would.
         Stmt::Layout { name, body, .. } => {
             let place = mangle(name);
             env.bind(
@@ -1737,10 +1747,14 @@ pub(crate) fn lower_switch(
         return lower_fallible_match(subject, arms, else_body, cx, env);
     }
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
-    // heads mixed in — → the general mixed `if/else if … else` chain. (An all-range +
-    // else switch already routed to shape B above; this catches the value+range mix.)
+    // heads / D-DESTRUCT1 struct-pattern heads mixed in — → the general mixed
+    // `if/else if … else` chain. (An all-range + else switch already routed to shape B
+    // above; this catches the value+range mix.)
     if arms.iter().all(|a| {
-        arm_is_plain_cond(cx, &a.cond, subject) || arm_head_range(cx, &a.cond, subject).is_some()
+        arm_is_plain_cond(cx, &a.cond, subject)
+            || arm_head_range(cx, &a.cond, subject).is_some()
+            || arm_struct_pattern(cx, &a.cond, subject).is_some()
+            || arm_str_match_pattern(cx, &a.cond, subject).is_some()
     }) {
         return lower_mixed_switch(subject, arms, else_body, cx, env);
     }
@@ -1749,13 +1763,7 @@ pub(crate) fn lower_switch(
 }
 
 /// D-IF3: `subject >= lo && subject <= hi` as a lowered bool expression.
-fn range_inclusive_cond(
-    subject: &Expr,
-    lo: i64,
-    hi: i64,
-    cx: &Cx,
-    env: &mut LowerEnv,
-) -> TExpr {
+fn range_inclusive_cond(subject: &Expr, lo: i64, hi: i64, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let lo_e = TExpr {
         ty: Type::Int,
         kind: TExprKind::IntLit(lo, None),
@@ -1811,17 +1819,31 @@ pub(crate) fn lower_mixed_switch(
     env: &mut LowerEnv,
 ) -> TStmt {
     let subject_expr = lower_expr(subject, cx, env);
+    let subject_ty = subject_expr.ty.clone();
     let subject_str = emit_tir_expr(&subject_expr, cx);
     let mut tarms = Vec::new();
     for arm in arms {
+        let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
+        let str_match_pat = arm_str_match_pattern(cx, &arm.cond, subject);
         let cond_expr = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
             range_inclusive_cond(subject, lo, hi, cx, env)
+        } else if let Some(pattern) = struct_pat.as_ref() {
+            struct_pattern_cond_expr(pattern, &subject_ty, cx, env)
+        } else if let Some(pattern) = str_match_pat.as_ref() {
+            str_match_pattern_cond_expr(pattern, cx)
         } else {
             lower_expr(&arm.cond, cx, env)
         };
         // The arm body uses the SHARED `&mut env` in `emit_mixed_switch` (leaks).
         let mut branch = clone_env(env);
-        let body = lower_stmts(&arm.body, cx, &mut branch);
+        let mut body = if let Some(pattern) = struct_pat.as_ref() {
+            lower_struct_pattern_bindings(pattern, &subject_ty, cx, &mut branch)
+        } else if let Some(pattern) = str_match_pat.as_ref() {
+            lower_str_match_pattern_bindings(pattern, cx, &mut branch)
+        } else {
+            Vec::new()
+        };
+        body.extend(lower_stmts(&arm.body, cx, &mut branch));
         tarms.push((cond_expr, body));
     }
     let else_lowered = else_body.as_ref().map(|body| {
@@ -1833,6 +1855,300 @@ pub(crate) fn lower_mixed_switch(
         arms: tarms,
         else_body: else_lowered,
     }
+}
+
+/// D-DESTRUCT1: value tests in `.{ field: value, ... }` become equality checks
+/// against the borrowed `_jet_switch_subject` that `MixedSwitch` emits.
+fn struct_pattern_cond_expr(
+    pattern: &Pattern,
+    subject_ty: &Type,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let mut tests = Vec::new();
+    if let Pattern::Struct { fields, .. } = pattern {
+        for field in fields {
+            let StructPatField::Value { field, value, .. } = field else {
+                continue;
+            };
+            let fty = struct_pattern_field_type(cx, subject_ty, field).unwrap_or(Type::Int);
+            let lhs = TExpr {
+                ty: fty.clone(),
+                kind: TExprKind::ConstInline(struct_pattern_subject_field_expr(
+                    cx, subject_ty, field,
+                )),
+            };
+            let rhs = lower_expr(value, cx, env);
+            tests.push(TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::Binary {
+                    op: BinOp::Eq,
+                    overflow: false,
+                    line: 0,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+            });
+        }
+    }
+    bool_and_chain(tests)
+}
+
+/// D-DESTRUCT1: bind field locals before an arm body runs. Each binding clones from
+/// the borrowed switch subject, matching the existing binding-position destructure.
+fn lower_struct_pattern_bindings(
+    pattern: &Pattern,
+    subject_ty: &Type,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Vec<TStmt> {
+    let mut out = Vec::new();
+    let Pattern::Struct { fields, .. } = pattern else {
+        return out;
+    };
+    for field in fields {
+        let StructPatField::Bind { field, local, .. } = field else {
+            continue;
+        };
+        let fty = struct_pattern_field_type(cx, subject_ty, field).unwrap_or(Type::Int);
+        let local_rust = mangle(local);
+        env.bind(local, local_rust.clone(), Some(fty.clone()));
+        out.push(TStmt::Let {
+            name: local.clone(),
+            kw: "let",
+            ty_clause: format!(": {}", cx.rust_type(&fty)),
+            init: TExpr {
+                ty: fty,
+                kind: TExprKind::ConstInline(format!(
+                    "{}.clone()",
+                    struct_pattern_subject_field_expr(cx, subject_ty, field)
+                )),
+            },
+        });
+    }
+    out
+}
+
+/// D-PARSESTR1: build the Rust closure body that scans the subject against a
+/// str-match pattern's literal anchors and holes, returning
+/// `Option<(T1, T2, ...)>` (`None` on any anchor miss or failed typed read).
+/// Holes are non-greedy and anchored: since E0147 already rejected adjacent
+/// holes at parse time, the next literal anchor (or end-of-string) always
+/// exists between/after every hole, so the scan never backtracks — each step
+/// is `starts_with`/`find` from the current cursor.
+fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
+    let Pattern::StrMatch { parts, .. } = pattern else {
+        return (
+            "(|| -> Option<()> { Some(()) })()".to_string(),
+            Vec::new(),
+        );
+    };
+    let mut holes: Vec<(String, Type)> = Vec::new();
+    let mut body = String::new();
+    body.push_str("let mut __jet_sm: &str = _jet_switch_subject.as_str();\n");
+    let mut i = 0;
+    while i < parts.len() {
+        match &parts[i] {
+            crate::AST::StrMatchPart::Lit(lit) => {
+                // A literal that immediately FOLLOWS a hole was already consumed as
+                // that hole's trailing anchor (the `find` step below) — skip it here
+                // to avoid double-consuming. Every other literal (leading, or between
+                // two other literals — never actually produced by the lexer, but
+                // handled uniformly) is a prefix check at the current cursor.
+                let already_consumed_by_prior_hole =
+                    i > 0 && matches!(parts[i - 1], crate::AST::StrMatchPart::Hole { .. });
+                if !already_consumed_by_prior_hole {
+                    body.push_str(&format!(
+                        "if !__jet_sm.starts_with({lit}) {{ return None; }} __jet_sm = &__jet_sm[{lit}.len()..];\n",
+                        lit = escape_rust_str(lit)
+                    ));
+                }
+                i += 1;
+            }
+            crate::AST::StrMatchPart::Hole { name, ty, .. } => {
+                let var = format!("__jet_sm_{}", mangle(name));
+                // Find the boundary: the next literal anchor's text (non-greedy —
+                // the FIRST occurrence from the cursor), or end-of-string if this
+                // hole is the last part.
+                match parts.get(i + 1) {
+                    Some(crate::AST::StrMatchPart::Lit(next_lit)) => {
+                        body.push_str(&format!(
+                            "let {var}: &str = match __jet_sm.find({next_lit}) {{ Some(__jet_i) => {{ let __jet_h = &__jet_sm[..__jet_i]; __jet_sm = &__jet_sm[__jet_i + {next_lit}.len()..]; __jet_h }}, None => return None }};\n",
+                            var = var,
+                            next_lit = escape_rust_str(next_lit)
+                        ));
+                    }
+                    _ => {
+                        // Last part, or a hole followed by another hole (rejected at
+                        // parse time by E0147) — take the rest of the string.
+                        body.push_str(&format!(
+                            "let {var}: &str = __jet_sm; __jet_sm = \"\";\n",
+                            var = var
+                        ));
+                    }
+                }
+                let bound_ty = ty.clone().unwrap_or(Type::String);
+                match &bound_ty {
+                    Type::String => {
+                        body.push_str(&format!(
+                            "let {var}: String = {var}.to_string();\n",
+                            var = var
+                        ));
+                    }
+                    Type::Int => {
+                        body.push_str(&format!(
+                            "let {var}: i64 = match {var}.trim().parse::<i64>() {{ Ok(__jet_v) => __jet_v, Err(_) => return None }};\n",
+                            var = var
+                        ));
+                    }
+                    Type::Float => {
+                        body.push_str(&format!(
+                            "let {var}: f64 = match {var}.trim().parse::<f64>() {{ Ok(__jet_v) => __jet_v, Err(_) => return None }};\n",
+                            var = var
+                        ));
+                    }
+                    Type::Bool => {
+                        body.push_str(&format!(
+                            "let {var}: bool = match {var}.trim().parse::<bool>() {{ Ok(__jet_v) => __jet_v, Err(_) => return None }};\n",
+                            var = var
+                        ));
+                    }
+                    // sema already rejected any other type (E0305) before codegen runs.
+                    _ => {}
+                }
+                holes.push((name.clone(), bound_ty));
+                i += 1;
+            }
+        }
+    }
+    // A pattern must consume the WHOLE subject, not just a prefix. A trailing
+    // hole (no literal after it) already takes the rest of the string by
+    // construction; a trailing literal only checked a prefix, so require
+    // nothing is left over.
+    let ends_in_lit = matches!(parts.last(), Some(crate::AST::StrMatchPart::Lit(_)));
+    if ends_in_lit {
+        body.push_str("if !__jet_sm.is_empty() { return None; }\n");
+    }
+    let tuple_vars: Vec<String> = holes
+        .iter()
+        .map(|(n, _)| format!("__jet_sm_{}", mangle(n)))
+        .collect();
+    body.push_str(&format!("Some(({}))\n", tuple_join(&tuple_vars)));
+    let tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
+    let closure = format!(
+        "(|| -> Option<({})> {{\n{}}})()",
+        tuple_join(&tuple_tys),
+        body
+    );
+    (closure, holes)
+}
+
+/// A single-element Rust tuple needs a trailing comma (`(x,)`); zero or 2+
+/// elements render as the ordinary comma-joined list.
+fn tuple_join(items: &[String]) -> String {
+    match items.len() {
+        0 => String::new(),
+        1 => format!("{},", items[0]),
+        _ => items.join(", "),
+    }
+}
+
+/// D-PARSESTR1: the bool test for a str-match arm head — whether the scan
+/// closure succeeds. Always refutable (E0148 requires an `else` whenever this
+/// pattern appears in an if-table with no fallback).
+fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
+    let (closure, _) = str_match_scan_closure(pattern, cx);
+    TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::ConstInline(format!("({}).is_some()", closure)),
+    }
+}
+
+/// D-PARSESTR1: bind each hole locally before the arm body runs. Re-invokes
+/// the same scan closure text as the cond (pure/cheap — `starts_with`/`find`/
+/// `.parse()` — matching how struct-pattern value tests and bind fields are
+/// independently re-derived rather than shared), binds the whole result tuple
+/// to one temp, then projects each hole out of it by field index.
+fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
+    let (closure, holes) = str_match_scan_closure(pattern, cx);
+    if holes.is_empty() {
+        return Vec::new();
+    }
+    let tuple_ty_str = tuple_join(&holes.iter().map(|(_, t)| cx.rust_type(t)).collect::<Vec<_>>());
+    // `TStmt::Let` always mangles its `name` at emission (Codegen/TIR/emit.rs),
+    // so the tuple temp's REFERENCED name must go through the same `mangle`.
+    let tuple_local = "__jet_sm_tuple";
+    let tuple_rust = mangle(tuple_local);
+    let mut out = vec![TStmt::Let {
+        name: tuple_local.to_string(),
+        kw: "let",
+        ty_clause: format!(": ({})", tuple_ty_str),
+        init: TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
+        },
+    }];
+    let single = holes.len() == 1;
+    for (i, (name, ty)) in holes.iter().enumerate() {
+        let local_rust = mangle(name);
+        env.bind(name, local_rust, Some(ty.clone()));
+        let project = if single {
+            // A one-element Rust tuple is `(x,)`; its sole field is still `.0`.
+            format!("{}.0", tuple_rust)
+        } else {
+            format!("{}.{}", tuple_rust, i)
+        };
+        out.push(TStmt::Let {
+            name: name.clone(),
+            kw: "let",
+            ty_clause: format!(": {}", cx.rust_type(ty)),
+            init: TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::ConstInline(project),
+            },
+        });
+    }
+    out
+}
+
+fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str) -> Option<Type> {
+    match subject_ty {
+        Type::Apply { name, .. } => cx
+            .struct_fields
+            .get(name)?
+            .iter()
+            .find(|(f, _)| f == field)
+            .map(|(_, t)| t.clone()),
+        _ => struct_field_type(cx, subject_ty, field),
+    }
+}
+
+fn struct_pattern_subject_field_expr(cx: &Cx, subject_ty: &Type, field: &str) -> String {
+    let field_rust =
+        core_struct_field_rust_name(cx, subject_ty, field).unwrap_or_else(|| mangle(field));
+    format!("((*_jet_switch_subject).{})", field_rust)
+}
+
+fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {
+    let Some(mut acc) = tests.pop() else {
+        return TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::BoolLit(true),
+        };
+    };
+    while let Some(next) = tests.pop() {
+        acc = TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::Binary {
+                op: BinOp::And,
+                overflow: false,
+                line: 0,
+                lhs: Box::new(next),
+                rhs: Box::new(acc),
+            },
+        };
+    }
+    acc
 }
 
 /// c109 Phase 8: lower a fallible/optional pattern match (`when … { it == ok(n) ->
@@ -2411,9 +2727,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|p| match p {
                     StrPart::Lit(s) => TStrPart::Lit(s.clone()),
-                    StrPart::Interp(e, fmt) => {
-                        TStrPart::Interp(lower_expr(e, cx, env), *fmt)
-                    }
+                    StrPart::Interp(e, fmt) => TStrPart::Interp(lower_expr(e, cx, env), *fmt),
                 })
                 .collect();
             TExpr {
@@ -2454,8 +2768,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::ComptimeSplice {
-            value: Some(value),
-            ..
+            value: Some(value), ..
         } => TExpr {
             ty: value.jet_type(),
             kind: TExprKind::ConstInline(value.serialize()),
@@ -2549,12 +2862,18 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // type; `+`/`-` stay plain `Binary` (`jet_layout::LinExpr`
             // implements `std::ops::{Add,Sub}`).
             {
-                let l_axis = matches!(&lhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
-                let r_axis = matches!(&rhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
+                let l_axis =
+                    matches!(&lhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
+                let r_axis =
+                    matches!(&rhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
                 if (l_axis || r_axis)
-                    && matches!(op, BinOp::Ge | BinOp::Le | BinOp::Eq | BinOp::Add | BinOp::Sub)
+                    && matches!(
+                        op,
+                        BinOp::Ge | BinOp::Le | BinOp::Eq | BinOp::Add | BinOp::Sub
+                    )
                 {
-                    if let Some(Ok(result_ty)) = crate::Sema::layout_binop_result(*op, &lhs.ty, &rhs.ty)
+                    if let Some(Ok(result_ty)) =
+                        crate::Sema::layout_binop_result(*op, &lhs.ty, &rhs.ty)
                     {
                         // A bare `Int`/`Float` operand (axis-neutral) isn't a
                         // `jet_layout::LinExpr` at the Rust level yet — wrap it
@@ -2574,7 +2893,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let lhs = wrap(lhs);
                         let rhs = wrap(rhs);
                         if matches!(op, BinOp::Add | BinOp::Sub) {
-                            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+                            let line =
+                                crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
                             return TExpr {
                                 ty: result_ty,
                                 kind: TExprKind::Binary {
@@ -2717,6 +3037,70 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args: targs,
                         },
                     },
+                };
+            }
+            // D-TYPEDTEXT1=D: the synthetic `Sql`/`Html` call sema rewrote a typed
+            // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
+            // alternate literal-segment, hole, literal-segment, ..., always closing
+            // on a literal (`literals.len() == holes.len() + 1`) — even index is a
+            // compile-time-known literal segment, odd index is a hole value. A hole
+            // never re-enters the template text: `Sql` keeps it as a separate bound
+            // param, `Html` HTML-escapes it before joining.
+            if (call.name == "Sql" || call.name == "Html") && !cx.sigs.contains_key(&call.name) {
+                let is_sql = call.name == "Sql";
+                let mut literals: Vec<String> = Vec::new();
+                let mut holes: Vec<String> = Vec::new();
+                for (i, a) in call.args.iter().enumerate() {
+                    if i % 2 == 0 {
+                        let lit = match &a.expr {
+                            Expr::Str(parts, _) => match parts.as_slice() {
+                                [crate::AST::StrPart::Lit(s)] => s.clone(),
+                                _ => String::new(),
+                            },
+                            _ => String::new(),
+                        };
+                        literals.push(lit);
+                    } else {
+                        let hole = lower_expr(&a.expr, cx, env);
+                        holes.push(format!("({}).jet_show()", emit_tir_expr(&hole, cx)));
+                    }
+                }
+                let ty = Type::Named(call.name.clone());
+                let code = if is_sql {
+                    // `literals` is compile-time known here (codegen-time Rust
+                    // `Vec<String>`, not generated code) — the `?`-joined template
+                    // is built now, not with a runtime `+`/`format!` in the output.
+                    let template = literals.join("?");
+                    format!(
+                        "({}.to_string(), vec![{}])",
+                        escape_rust_str(&template),
+                        holes.join(", ")
+                    )
+                } else {
+                    // Holes are runtime values — use `format!` (not `+`) so a
+                    // literal segment's `&str` never needs an owned-`String` LHS.
+                    let mut fmt_str = String::new();
+                    let mut fmt_args = Vec::new();
+                    for (i, lit) in literals.iter().enumerate() {
+                        fmt_str.push_str(&lit.replace('{', "{{").replace('}', "}}"));
+                        if let Some(h) = holes.get(i) {
+                            fmt_str.push_str("{}");
+                            fmt_args.push(format!("{}jet_html_escape(&({}))", cx.root_prefix, h));
+                        }
+                    }
+                    if fmt_args.is_empty() {
+                        format!("{}.to_string()", escape_rust_str(&fmt_str))
+                    } else {
+                        format!(
+                            "format!({}, {})",
+                            escape_rust_str(&fmt_str),
+                            fmt_args.join(", ")
+                        )
+                    }
+                };
+                return TExpr {
+                    ty,
+                    kind: TExprKind::ConstInline(code),
                 };
             }
             // `print` is ambient only when the user has not defined their own
@@ -2939,11 +3323,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .map(|a| lower_expr(&a.expr, cx, env))
                     .collect();
                 let func = if call.name == crate::Syntax::TYPE_BIGINT {
-                    if targs
-                        .first()
-                        .map(|a| a.ty == Type::String)
-                        .unwrap_or(false)
-                    {
+                    if targs.first().map(|a| a.ty == Type::String).unwrap_or(false) {
                         "from_str"
                     } else {
                         "from_int"
@@ -2979,6 +3359,20 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         args: targs,
                     },
                 };
+            }
+            if call.range_checked && !env.locals.contains_key(&call.name) {
+                if let Some(arg) = call.args.first() {
+                    return TExpr {
+                        ty: Type::Result {
+                            ok: Box::new(Type::Named(call.name.clone())),
+                            err: Box::new(Type::String),
+                        },
+                        kind: TExprKind::RangeCheckedCtor {
+                            name: call.name.clone(),
+                            arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                        },
+                    };
+                }
             }
             // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
             // decided here, totally — via the shared `lower_one_call_arg` (the single
@@ -3339,8 +3733,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
             // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
             // type so the field read is byte-exact for both core and user structs.
-            let field_rust = core_struct_field_rust_name(cx, &recv.ty, member)
-                .unwrap_or_else(|| mangle(member));
+            let field_rust =
+                core_struct_field_rust_name(cx, &recv.ty, member).unwrap_or_else(|| mangle(member));
             // A self-referential (recursive) edge has Rust type `Box<…>`; the read derefs
             // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
             // resolved struct name — mirrors the AST `boxed_field_read`).
@@ -3416,9 +3810,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // element to read, so its element type is unresolved (`Int` placeholder),
         // but the emitted `vec![]` is type-inferred by Rust from the binding context.
         Expr::ListLit(elems, _span) => {
-            let has_spread = elems
-                .iter()
-                .any(|e| matches!(e, Expr::Spread(..)));
+            let has_spread = elems.iter().any(|e| matches!(e, Expr::Spread(..)));
             if has_spread {
                 let mut parts = Vec::new();
                 for e in elems {
@@ -3929,7 +4321,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "Size" => matches!(member, "width" | "height"),
         "Rect" => matches!(member, "x" | "y" | "width" | "height"),
         "SizeConstraint" => {
-            matches!(member, "min_width" | "min_height" | "max_width" | "max_height")
+            matches!(
+                member,
+                "min_width" | "min_height" | "max_width" | "max_height"
+            )
         }
         "UiNode" => matches!(member, "label" | "width" | "height"),
         // E2-M10: HttpRequest / HttpResponse field access.
@@ -4019,6 +4414,68 @@ pub(crate) fn lower_method_call(
             },
             _ => unit_type(),
         }
+    }
+    // D-ERRCTX1=D: `<fallible>.context("…")` — lazily-evaluated (only formatted
+    // if the error actually propagates): wrap the message in a zero-arg closure
+    // and let `jet_context` call it only on the `Err` branch.
+    if method == "context" && recv_type.as_deref() == Some("__Fallible__") {
+        let recv = lower_expr(receiver, cx, env);
+        let msg = lower_expr(&args[0].expr, cx, env);
+        let code = format!(
+            "{}jet_context({}, || {})",
+            cx.root_prefix,
+            emit_tir_expr(&recv, cx),
+            emit_tir_expr(&msg, cx)
+        );
+        return TExpr {
+            ty: recv.ty.clone(),
+            kind: TExprKind::ConstInline(code),
+        };
+    }
+    // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — the audited escape.
+    // `Sql`/`Html` name the type here (sema already confirmed no local shadows
+    // it), so `recv_type` was never set for this call; check the receiver
+    // shape directly instead.
+    if method == "raw" {
+        if let Expr::Ident(n, _) = receiver {
+            if n == "Sql" || n == "Html" {
+                let arg = lower_expr(&args[0].expr, cx, env);
+                let code = if n == "Sql" {
+                    format!("(({}).clone(), Vec::new())", emit_tir_expr(&arg, cx))
+                } else {
+                    format!("({}).clone()", emit_tir_expr(&arg, cx))
+                };
+                return TExpr {
+                    ty: Type::Named(n.clone()),
+                    kind: TExprKind::ConstInline(code),
+                };
+            }
+        }
+    }
+    // D-TYPEDTEXT1=D: `.template()`/`.params()` split a checked `Sql` value;
+    // `.text()` reads the escaped `Html` string.
+    if recv_type.as_deref() == Some("Sql") && matches!(method, "template" | "params") {
+        let recv = lower_expr(receiver, cx, env);
+        let code = if method == "template" {
+            format!("({}).0.clone()", emit_tir_expr(&recv, cx))
+        } else {
+            format!("({}).1.clone()", emit_tir_expr(&recv, cx))
+        };
+        return TExpr {
+            ty: if method == "template" {
+                Type::String
+            } else {
+                Type::List(Box::new(Type::String))
+            },
+            kind: TExprKind::ConstInline(code),
+        };
+    }
+    if recv_type.as_deref() == Some("Html") && method == "text" {
+        let recv = lower_expr(receiver, cx, env);
+        return TExpr {
+            ty: Type::String,
+            kind: TExprKind::ConstInline(format!("({}).clone()", emit_tir_expr(&recv, cx))),
+        };
     }
     // D-TASKSCOPE1=A / D-NURSERY1=A: structured taskgroup methods.
     if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
@@ -4635,8 +5092,7 @@ pub(crate) fn lower_method_call(
     if matches!(
         recv_type.as_deref(),
         Some("Signal") | Some("Derived") | Some("Computed")
-    )
-        && is_reactive_method_name(method, args.len())
+    ) && is_reactive_method_name(method, args.len())
     {
         let recv_t = lower_expr(receiver, cx, env);
         let elem = match &recv_t.ty {
@@ -5843,7 +6299,10 @@ pub(crate) fn resolve_builtin_op(
                 Some(Type::Option(inner)) => *inner,
                 _ => Type::Int,
             };
-            let fields = vec![("a".to_string(), a_ty.clone()), ("b".to_string(), b_ty.clone())];
+            let fields = vec![
+                ("a".to_string(), a_ty.clone()),
+                ("b".to_string(), b_ty.clone()),
+            ];
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::OptionZip {
                 tuple_struct: ts,
@@ -6073,13 +6532,14 @@ pub(crate) fn lower_lambda_expecting(
 }
 
 /// c139 M4: lower a spawn lambda to compilable TIR for the Cranelift JIT.
-pub(crate) fn lower_spawn_lambda_for_jit(
-    lam: &Lambda,
-    cx: &Cx,
-    env: &LowerEnv,
-) -> TJitSpawnLambda {
+pub(crate) fn lower_spawn_lambda_for_jit(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TJitSpawnLambda {
     let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
-    let cloned: HashSet<&str> = lam.meta.cloned_captures.iter().map(|s| s.as_str()).collect();
+    let cloned: HashSet<&str> = lam
+        .meta
+        .cloned_captures
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
     let reads = match &lam.body {
         LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
         LambdaBody::Expr(e) => crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())]),
@@ -6142,12 +6602,7 @@ pub(crate) fn lower_spawn_lambda_for_jit(
         params: lam
             .params
             .iter()
-            .map(|p| {
-                (
-                    p.name.clone(),
-                    p.ty.clone().unwrap_or_else(|| Type::Int),
-                )
-            })
+            .map(|p| (p.name.clone(), p.ty.clone().unwrap_or_else(|| Type::Int)))
             .collect(),
         captures,
         body,

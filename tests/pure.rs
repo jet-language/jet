@@ -283,7 +283,7 @@ fn transitive_clean_program_no_error() {
     return n * n
 }
 fn main() {
-    x #= square(5)
+    x :: square(5)
 }
 "#;
     let (toks, _) = jet::Lexer::lex(src);
@@ -529,7 +529,9 @@ fn main() {
         })
         .expect("main");
     assert!(
-        main.body.iter().any(|s| matches!(s, jet::AST::Stmt::Reactive { .. })),
+        main.body
+            .iter()
+            .any(|s| matches!(s, jet::AST::Stmt::Reactive { .. })),
         "expected Stmt::Reactive in main body, got {:?}",
         main.body
     );

@@ -266,7 +266,10 @@ fn ga_feature_size_budgets() {
 
     for (file, max_bytes) in budgets {
         let src = features_dir.join(file);
-        let stem = std::path::Path::new(file).file_stem().unwrap().to_string_lossy();
+        let stem = std::path::Path::new(file)
+            .file_stem()
+            .unwrap()
+            .to_string_lossy();
         let bin = build_dir.join("build").join(stem.as_ref());
 
         let out = Command::new(&jet)

@@ -34,8 +34,8 @@ fn main() {
     // D-DET1 injectable Clock, seeded at 0 — no wall-clock read, reproducible
     // by construction. `elapsed` is a Signal fed by explicit clock reads.
     clock := time.clock(0)
-    elapsed #= reactive.signal(clock.now())
-    x #= reactive.derived(() => tween(0.0, 100.0, elapsed.get(), 400))
+    elapsed :: reactive.signal(clock.now())
+    x :: reactive.derived(() => tween(0.0, 100.0, elapsed.get(), 400))
 
     print("t={elapsed.get()} x={x.get()}")
 

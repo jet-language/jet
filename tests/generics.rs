@@ -39,7 +39,7 @@ struct Pair<T> {{
 }}
 
 fn main() {{
-    p #= twice({lit})
+    p :: twice({lit})
     print(p.first)
 }}
 "#
@@ -62,8 +62,8 @@ struct Pair<T> {
 }
 
 fn main() {
-    a #= twice(1)
-    b #= twice(2.5)
+    a :: twice(1)
+    b :: twice(2.5)
     print(a.first)
     print(b.first)
 }
@@ -87,7 +87,7 @@ fn wrap<Kind>(x: Kind) -> Wrap<Kind> {
 }
 
 fn main() {
-    b #= wrap(42)
+    b :: wrap(42)
     print(b.val)
 }
 "#;
@@ -108,8 +108,8 @@ fn identity<Elem>(x: Elem) -> Elem {
 }
 
 fn main() {
-    n #= identity(7)
-    s #= identity("hello")
+    n :: identity(7)
+    s :: identity("hello")
     print(n)
     print(s)
 }
@@ -137,7 +137,7 @@ struct Pair<Elem> {
 }
 
 fn main() {
-    p #= twice(1)
+    p :: twice(1)
     print(p.first)
 }
 "#;

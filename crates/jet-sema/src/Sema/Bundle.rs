@@ -57,9 +57,7 @@ fn substitute_type(ty: Type, param_name: &str, replacement: &Type) -> Type {
     match ty {
         Type::Named(ref n) if n == param_name => replacement.clone(),
         Type::Named(_) => ty,
-        Type::List(inner) => {
-            Type::List(Box::new(substitute_type(*inner, param_name, replacement)))
-        }
+        Type::List(inner) => Type::List(Box::new(substitute_type(*inner, param_name, replacement))),
         Type::Map { key, value } => Type::Map {
             key: Box::new(substitute_type(*key, param_name, replacement)),
             value: Box::new(substitute_type(*value, param_name, replacement)),
@@ -74,17 +72,30 @@ fn substitute_type(ty: Type, param_name: &str, replacement: &Type) -> Type {
             ok: Box::new(substitute_type(*ok, param_name, replacement)),
             err: Box::new(substitute_type(*err, param_name, replacement)),
         },
-        Type::Fn { params, ret, effect_bound } => Type::Fn {
-            params: params.into_iter().map(|t| substitute_type(t, param_name, replacement)).collect(),
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+        } => Type::Fn {
+            params: params
+                .into_iter()
+                .map(|t| substitute_type(t, param_name, replacement))
+                .collect(),
             ret: ret.map(|r| Box::new(substitute_type(*r, param_name, replacement))),
             effect_bound,
         },
         Type::Apply { name, args } => Type::Apply {
             name,
-            args: args.into_iter().map(|t| substitute_type(t, param_name, replacement)).collect(),
+            args: args
+                .into_iter()
+                .map(|t| substitute_type(t, param_name, replacement))
+                .collect(),
         },
         Type::Tuple(parts) => Type::Tuple(
-            parts.into_iter().map(|(n, t)| (n, Box::new(substitute_type(*t, param_name, replacement)))).collect()
+            parts
+                .into_iter()
+                .map(|(n, t)| (n, Box::new(substitute_type(*t, param_name, replacement))))
+                .collect(),
         ),
         Type::FixedList { elem, len } => Type::FixedList {
             elem: Box::new(substitute_type(*elem, param_name, replacement)),
@@ -149,16 +160,10 @@ fn expand_alias(
         None => {
             diags.push(Diagnostic::error(
                 "E0850",
-                format!(
-                    "generic module `{}` not found in this scope",
-                    alias.target
-                ),
+                format!("generic module `{}` not found in this scope", alias.target),
                 "check the module template name and make sure it is defined in the same file"
                     .to_string(),
-                format!(
-                    "example: `module {} = MyTemplate<String>`",
-                    alias.name
-                ),
+                format!("example: `module {} = MyTemplate<String>`", alias.name),
                 Some(alias.target_span),
             ));
             return None;
@@ -180,10 +185,15 @@ fn expand_alias(
                 "example: `module {} = {}<{}>` with {} arg(s)",
                 alias.name,
                 alias.target,
-                template.params.iter().map(|p| match p {
-                    GenericModuleParam::TypeParam { name, .. } => name.as_str(),
-                    GenericModuleParam::ValueParam { name, .. } => name.as_str(),
-                }).collect::<Vec<_>>().join(", "),
+                template
+                    .params
+                    .iter()
+                    .map(|p| match p {
+                        GenericModuleParam::TypeParam { name, .. } => name.as_str(),
+                        GenericModuleParam::ValueParam { name, .. } => name.as_str(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 template.params.len(),
             ),
             Some(alias.span),
@@ -213,8 +223,7 @@ fn expand_alias(
         .iter()
         .filter_map(|item| {
             if let Item::Func(f) = item {
-                let expanded =
-                    apply_type_args_to_func(f.clone(), &template.params, &alias.args);
+                let expanded = apply_type_args_to_func(f.clone(), &template.params, &alias.args);
                 Some(Item::Func(expanded))
             } else {
                 None // already reported above
@@ -235,7 +244,10 @@ fn expand_alias(
 /// D-GENMOD2=A: expand every `ModuleAlias` in each module's item list into a
 /// concrete `CodeModule` using the corresponding `GenericModule` template.
 /// Templates and aliases are removed from the item list after expansion.
-pub(crate) fn expand_generic_module_aliases(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn expand_generic_module_aliases(
+    bundle: &mut ProgramBundle,
+    diags: &mut Vec<Diagnostic>,
+) {
     for module in bundle.modules.iter_mut() {
         // Collect templates by name, recording non-Func item kinds for E0854.
         let templates: std::collections::HashMap<String, TemplateInfo> = module
@@ -307,7 +319,9 @@ pub(crate) fn expand_generic_module_aliases(bundle: &mut ProgramBundle, diags: &
         for (idx, cm) in expansions {
             module.items[idx] = Item::CodeModule(cm);
         }
-        module.items.retain(|i| !matches!(i, Item::GenericModule(_)));
+        module
+            .items
+            .retain(|i| !matches!(i, Item::GenericModule(_)));
     }
 }
 
@@ -342,7 +356,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) => rewrite_inline_calls_expr(e, siblings, modname),
+            Stmt::Expr(e) | Stmt::Yield(e, _) => rewrite_inline_calls_expr(e, siblings, modname),
             Stmt::Val(b) => rewrite_inline_calls_expr(&mut b.init, siblings, modname),
             Stmt::Assign { value, .. } => rewrite_inline_calls_expr(value, siblings, modname),
             Stmt::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
@@ -1772,10 +1786,7 @@ fn helper_import_chain(usage: &str, core_imports: &HashMap<String, String>) -> S
         return format!("ambient `input()` (helper `{usage}`)");
     }
     if let Some((module, _)) = usage.split_once("::") {
-        if let Some((alias, imported)) = core_imports
-            .iter()
-            .find(|(_, m)| m.as_str() == module)
-        {
+        if let Some((alias, imported)) = core_imports.iter().find(|(_, m)| m.as_str() == module) {
             return format!("`use {imported} as {alias}` → `{usage}`");
         }
         return format!("prelude helper `{usage}`");
@@ -1791,7 +1802,7 @@ pub(crate) fn collect_core_stmts(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) => collect_core_expr(e, imports, used, spans),
+            Stmt::Expr(e) | Stmt::Yield(e, _) => collect_core_expr(e, imports, used, spans),
             Stmt::Val(b) => collect_core_expr(&b.init, imports, used, spans),
             Stmt::Assign { target, value, .. } => {
                 collect_core_lvalue(target, imports, used, spans);
@@ -1813,7 +1824,9 @@ pub(crate) fn collect_core_stmts(
                             collect_core_expr(step, imports, used, spans);
                         }
                     }
-                    ForKind::In { collection } => collect_core_expr(collection, imports, used, spans),
+                    ForKind::In { collection } => {
+                        collect_core_expr(collection, imports, used, spans)
+                    }
                 }
                 collect_core_stmts(body, imports, used, spans);
             }
@@ -1941,22 +1954,12 @@ pub(crate) fn collect_core_expr(
     // type NAME, which is enough to require the prelude.
     match expr {
         Expr::Call(c) if is_math_type(&c.name) => {
-            note_core_usage(
-                used,
-                spans,
-                "core.math::__mathtypes__",
-                Some(c.name_span),
-            );
+            note_core_usage(used, spans, "core.math::__mathtypes__", Some(c.name_span));
         }
         Expr::Call(c)
             if c.name == crate::Syntax::TYPE_BIGINT || c.name == crate::Syntax::TYPE_DECIMAL =>
         {
-            note_core_usage(
-                used,
-                spans,
-                "core.numeric::__precise__",
-                Some(c.name_span),
-            );
+            note_core_usage(used, spans, "core.numeric::__precise__", Some(c.name_span));
         }
         Expr::MethodCall {
             receiver,
@@ -1965,21 +1968,11 @@ pub(crate) fn collect_core_expr(
         } => {
             if let Expr::Ident(n, _) = receiver.as_ref() {
                 if is_math_type(n) {
-                    note_core_usage(
-                        used,
-                        spans,
-                        "core.math::__mathtypes__",
-                        Some(*method_span),
-                    );
+                    note_core_usage(used, spans, "core.math::__mathtypes__", Some(*method_span));
                 }
                 // D-PATHFS1: `Path.from(...)` or any Path static call triggers path prelude.
                 if n == "Path" {
-                    note_core_usage(
-                        used,
-                        spans,
-                        "core.path::__pathapi__",
-                        Some(*method_span),
-                    );
+                    note_core_usage(used, spans, "core.path::__pathapi__", Some(*method_span));
                 }
             }
         }

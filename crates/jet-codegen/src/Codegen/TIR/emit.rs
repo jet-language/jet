@@ -59,10 +59,30 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     }
     if tir.is_reactive {
         emit_reactive_wrapped_body(&tir.body, cx, out, 1);
+    } else if matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == "Stream") {
+        emit_generator_wrapped_body(&tir.body, cx, out, 1);
     } else {
         emit_tir_stmts(&tir.body, cx, out, 1);
     }
     out.push_str("}\n\n");
+}
+
+/// D-STREAMYIELD1: a generator (`-> Stream<T>`) spawns its body on its own
+/// thread and hands the caller the channel receiver immediately — `yield`
+/// (lowered to `__jet_yield_tx.send(...)`) blocks on the rendezvous channel
+/// until the consumer's `loop x in stream { }` pulls the next value. No
+/// coroutine/async machinery: a real OS thread IS the suspended generator.
+fn emit_generator_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
+    let pad = "    ".repeat(indent);
+    let inner = indent + 1;
+    out.push_str(&format!(
+        "{}let (__jet_yield_tx, __jet_yield_rx) = std::sync::mpsc::sync_channel(0);\n",
+        pad
+    ));
+    out.push_str(&format!("{}std::thread::spawn(move || {{\n", pad));
+    emit_tir_stmts(body, cx, out, inner);
+    out.push_str(&format!("{}}});\n", pad));
+    out.push_str(&format!("{}__jet_yield_rx\n", pad));
 }
 
 fn emit_reactive_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
@@ -628,6 +648,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             collection_str,
             method_kind,
             columnar,
+            by_value,
             body,
         } => {
             let lbl = tir_label_prefix(label);
@@ -720,7 +741,11 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     None => {
                         // D-SOA1: a columnar list iterates `iter_aos()` (owned S, no
                         // `.cloned()`); a plain list iterates `iter().cloned()`.
-                        let iter_form = if *columnar {
+                        // D-STREAMYIELD1: a `Stream<T>` (`Receiver<T>`) iterates BY
+                        // VALUE directly — it already yields owned `T`, no `.iter()`.
+                        let iter_form = if *by_value {
+                            format!("({})", collection_str)
+                        } else if *columnar {
                             format!("({}).iter_aos()", collection_str)
                         } else {
                             format!("({}).iter().cloned()", collection_str)
@@ -1016,6 +1041,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
         }
+        TExprKind::RangeCheckedCtor { name, arg } => {
+            format!(
+                "{}::try_new({})",
+                cx.mangle_name(name),
+                emit_tir_expr(arg, cx)
+            )
+        }
         // D-SIMD2 / D-LINALG1: a math constructor / static method → the prelude free
         // function `{root}jet_math_<T>_<func>(args)`. Args are plain values (floats or
         // a `[T#N]` array) — no borrow/clone decisions.
@@ -1045,12 +1077,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 "jet_decimal"
             };
             let call = if func == "from_str" {
-                format!(
-                    "{}{}_{}(&({}))",
-                    cx.root_prefix, prefix, func, parts[0]
-                )
+                format!("{}{}_{}(&({}))", cx.root_prefix, prefix, func, parts[0])
             } else if func.starts_with("from_") {
-                format!("{}{}_{}({})", cx.root_prefix, prefix, func, parts.join(", "))
+                format!(
+                    "{}{}_{}({})",
+                    cx.root_prefix,
+                    prefix,
+                    func,
+                    parts.join(", ")
+                )
             } else if parts.len() == 1 {
                 format!("{}{}_{}(&({}))", cx.root_prefix, prefix, func, parts[0])
             } else {
@@ -1384,10 +1419,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         TExprKind::IncDec {
-            op,
-            place,
-            postfix,
-            ..
+            op, place, postfix, ..
         } => {
             let delta = match op {
                 crate::AST::IncDecOp::Inc => "+",
@@ -3156,13 +3188,21 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", regex_fn("jet_compress_gzip_compress"), arg(0))
         }
         ("core.compress.gzip", "decompress") => {
-            format!("{}(&({}))", regex_fn("jet_compress_gzip_decompress"), arg(0))
+            format!(
+                "{}(&({}))",
+                regex_fn("jet_compress_gzip_decompress"),
+                arg(0)
+            )
         }
         ("core.compress.zstd", "compress") => {
             format!("{}(&({}))", regex_fn("jet_compress_zstd_compress"), arg(0))
         }
         ("core.compress.zstd", "decompress") => {
-            format!("{}(&({}))", regex_fn("jet_compress_zstd_decompress"), arg(0))
+            format!(
+                "{}(&({}))",
+                regex_fn("jet_compress_zstd_decompress"),
+                arg(0)
+            )
         }
         // D-DBDRIVER1: jet.db — SQLite via the FFI bridge crate. `open`/`open_memory`
         // are the only module-level entry points; they wrap the bridge's raw u64
@@ -3207,18 +3247,8 @@ pub(crate) fn emit_tir_core_call(
         // D-RENDERTGT2=A (c133 M1): UI backend seam constructors.
         ("core.ui", "null_backend") => format!("{}jet_ui_null()", cx.root_prefix),
         ("core.ui", "tui_backend") => format!("{}jet_ui_tui()", cx.root_prefix),
-        ("core.ui", "point") => format!(
-            "{}jet_ui_point({}, {})",
-            cx.root_prefix,
-            arg(0),
-            arg(1)
-        ),
-        ("core.ui", "size") => format!(
-            "{}jet_ui_size({}, {})",
-            cx.root_prefix,
-            arg(0),
-            arg(1)
-        ),
+        ("core.ui", "point") => format!("{}jet_ui_point({}, {})", cx.root_prefix, arg(0), arg(1)),
+        ("core.ui", "size") => format!("{}jet_ui_size({}, {})", cx.root_prefix, arg(0), arg(1)),
         ("core.ui", "rect") => format!(
             "{}jet_ui_rect({}, {}, {}, {})",
             cx.root_prefix,
@@ -3242,11 +3272,7 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.ui", "key_event") => format!(
-            "{}jet_ui_key_event(&({}))",
-            cx.root_prefix,
-            arg(0)
-        ),
+        ("core.ui", "key_event") => format!("{}jet_ui_key_event(&({}))", cx.root_prefix, arg(0)),
         ("core.ui", "resize_event") => format!(
             "{}jet_ui_resize_event({}, {})",
             cx.root_prefix,
@@ -3410,11 +3436,17 @@ fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec<String>) {
     loop {
         match &cur.kind {
             TExprKind::SelectStart => break,
-            TExprKind::SelectRecv { builder: inner, channel } => {
+            TExprKind::SelectRecv {
+                builder: inner,
+                channel,
+            } => {
                 recvs.push(emit_tir_expr(channel, cx));
                 cur = inner;
             }
-            TExprKind::SelectAfter { builder: inner, millis } => {
+            TExprKind::SelectAfter {
+                builder: inner,
+                millis,
+            } => {
                 afters.push(emit_tir_expr(millis, cx));
                 cur = inner;
             }
@@ -3478,12 +3510,7 @@ fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lanes: &[u8]) 
 }
 
 /// D-SWIZZLE1: render a write swizzle as ordered lane stores.
-fn emit_math_swizzle_assign_stmt(
-    base: &str,
-    type_name: &str,
-    lanes: &[u8],
-    value: &str,
-) -> String {
+fn emit_math_swizzle_assign_stmt(base: &str, type_name: &str, lanes: &[u8], value: &str) -> String {
     if lanes.len() == 1 {
         let lane = lanes[0] as usize;
         let val = if type_name == "F32x4" {

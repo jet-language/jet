@@ -48,6 +48,7 @@ pub enum TokKind {
     KwComptime,
     KwReturn,
     KwLoop,
+    KwYield,
     KwUnsafe,
     KwUse,
     KwExtern,
@@ -79,12 +80,8 @@ pub enum TokKind {
     LBracket,
     RBracket,
     Colon,
-    /// D-BIND2: `@=` retired immutable binding sigil — E0991 points at `#=`.
-    AtEq,
-    /// D-BIND2: `::` retired immutable binding sigil — E0991 points at `#=`.
+    /// D-BIND4: `::` immutable binding sigil.
     ColonColon,
-    /// D-BIND3: `#=` immutable binding sigil.
-    HashEq,
     /// D-BIND1 (ratified 2026-06-18): `:=` mutable binding sigil (was `var`).
     ColonEq,
     Comma,
@@ -217,6 +214,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwComptime => format!("the keyword `{}`", Syntax::KW_COMPTIME),
         TokKind::KwReturn => format!("the keyword `{}`", Syntax::KW_RETURN),
         TokKind::KwLoop => format!("the keyword `{}`", Syntax::KW_LOOP),
+        TokKind::KwYield => format!("the keyword `{}`", Syntax::KW_YIELD),
         TokKind::KwUnsafe => format!("the keyword `{}`", Syntax::KW_UNSAFE),
         TokKind::KwUse => format!("the keyword `{}`", Syntax::KW_USE),
         TokKind::KwExtern => format!("the keyword `{}`", Syntax::KW_EXTERN),
@@ -234,9 +232,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::LBracket => "`[`".to_string(),
         TokKind::RBracket => "`]`".to_string(),
         TokKind::Colon => "`:`".to_string(),
-        TokKind::AtEq => format!("`{}`", Syntax::SIGIL_BIND_IMMUT_RETIRED2),
-        TokKind::ColonColon => format!("`{}`", Syntax::SIGIL_BIND_IMMUT_RETIRED),
-        TokKind::HashEq => format!("`{}`", Syntax::SIGIL_BIND_IMMUT),
+        TokKind::ColonColon => format!("`{}`", Syntax::SIGIL_BIND_IMMUT),
         TokKind::ColonEq => format!("`{}`", Syntax::SIGIL_BIND_MUT),
         TokKind::Comma => "`,`".to_string(),
         TokKind::Arrow => "`->`".to_string(),

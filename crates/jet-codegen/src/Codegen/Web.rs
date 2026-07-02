@@ -1,8 +1,8 @@
 //! D-WEBBACKEND1 / D-WEBKIND1 / D-DOMGEN1 (c123 M2): WASM + JS web backend emission.
 
-use crate::AST::{Expr, FfiLink, Item, ProgramBundle, Stmt, Type};
 use crate::Sema::CompileMode;
 use crate::Syntax;
+use crate::AST::{Expr, FfiLink, Item, ProgramBundle, Stmt, Type};
 use jet_foundation::WebPartition::{WebBucket, WebPartitionMarker};
 
 /// Generated web backend artifacts (WASM Rust, JS loader/app, DOM shim, manifest).
@@ -38,7 +38,11 @@ struct FuncWeb {
     body: Vec<Stmt>,
 }
 
-pub fn emit_web(bundle: &ProgramBundle, _mode: CompileMode, _link: Option<&FfiLink>) -> WebArtifacts {
+pub fn emit_web(
+    bundle: &ProgramBundle,
+    _mode: CompileMode,
+    _link: Option<&FfiLink>,
+) -> WebArtifacts {
     let funcs = collect_web_funcs(bundle);
     let manifest_json = emit_manifest(bundle, &funcs);
     let wasm_rust = emit_wasm_rust(bundle, &funcs);
@@ -150,10 +154,7 @@ fn collect_module_funcs(
 }
 
 fn json_quote(s: &str) -> String {
-    format!(
-        "\"{}\"",
-        s.replace('\\', "\\\\").replace('"', "\\\"")
-    )
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
@@ -231,7 +232,10 @@ fn wasm_export_symbol(name: &str) -> String {
     format!("jet_export_{name}")
 }
 
-fn find_struct_fields<'a>(bundle: &'a ProgramBundle, name: &str) -> Option<&'a [crate::AST::Field]> {
+fn find_struct_fields<'a>(
+    bundle: &'a ProgramBundle,
+    name: &str,
+) -> Option<&'a [crate::AST::Field]> {
     for module in &bundle.modules {
         if let Some(fields) = struct_fields_in_items(&module.items, name) {
             return Some(fields);
@@ -263,7 +267,10 @@ fn flatten_abi_params(bundle: &ProgramBundle, params: &[(String, Type)]) -> Vec<
     for (name, ty) in params {
         if let Type::Named(n) = ty {
             if let Some(fields) = find_struct_fields(bundle, n) {
-                if fields.iter().all(|f| matches!(f.ty, Type::Int | Type::IntN { .. })) {
+                if fields
+                    .iter()
+                    .all(|f| matches!(f.ty, Type::Int | Type::IntN { .. }))
+                {
                     for field in fields {
                         out.push((format!("{name}_{}", field.name), field.ty.clone()));
                     }
@@ -284,7 +291,10 @@ fn js_abi_call_args(
 ) -> Vec<String> {
     if let Type::Named(n) = ty {
         if let Some(fields) = find_struct_fields(bundle, n) {
-            if fields.iter().all(|f| matches!(f.ty, Type::Int | Type::IntN { .. })) {
+            if fields
+                .iter()
+                .all(|f| matches!(f.ty, Type::Int | Type::IntN { .. }))
+            {
                 let bind = format!("_{name}_flat");
                 let kind = format!("struct-{}", n.to_lowercase());
                 prelude.push_str(&format!(
@@ -441,7 +451,11 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
         out.push_str("}\n\n");
         for f in &exports {
             let args: Vec<String> = f.params.iter().map(|(n, _)| n.clone()).collect();
-            out.push_str(&format!("async function bridge_{}({}) {{\n", f.name, args.join(", ")));
+            out.push_str(&format!(
+                "async function bridge_{}({}) {{\n",
+                f.name,
+                args.join(", ")
+            ));
             out.push_str("  const wasm = await loadWasm();\n");
             let sym = wasm_export_symbol(&f.name);
             let mut prelude = String::new();
@@ -451,7 +465,10 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
                 .flat_map(|(n, ty)| js_abi_call_args(bundle, n, ty, &mut prelude))
                 .collect();
             out.push_str(&prelude);
-            out.push_str(&format!("  const raw = wasm.{sym}({});\n", call_args.join(", ")));
+            out.push_str(&format!(
+                "  const raw = wasm.{sym}({});\n",
+                call_args.join(", ")
+            ));
             out.push_str("  return jetDom.unmarshalAbi(raw, \"scalar\");\n");
             out.push_str("}\n\n");
         }
@@ -468,7 +485,10 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
     if let Some(main_fn) = funcs.iter().find(|f| f.name == "main") {
         if main_fn.bucket == WebBucket::Js {
             out.push_str("export async function jet_main() {\n");
-            out.push_str(&format!("  jetDom.enterRenderScope({});\n", json_quote("main")));
+            out.push_str(&format!(
+                "  jetDom.enterRenderScope({});\n",
+                json_quote("main")
+            ));
             out.push_str("  try {\n");
             emit_js_body(&main_fn.body, &mut out, funcs, 2);
             out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
@@ -507,8 +527,15 @@ fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) {
     // the same first key every call, so its one box is reused in place; an
     // entry point that internally paints several distinct nodes in one call
     // (197_ui_showcase.jet's `initApp`) gets one distinct key per node.
-    out.push_str(&format!("export function {}({}) {{\n", f.name, param_names(&f.params)));
-    out.push_str(&format!("  jetDom.enterRenderScope({});\n", json_quote(&f.name)));
+    out.push_str(&format!(
+        "export function {}({}) {{\n",
+        f.name,
+        param_names(&f.params)
+    ));
+    out.push_str(&format!(
+        "  jetDom.enterRenderScope({});\n",
+        json_quote(&f.name)
+    ));
     out.push_str("  try {\n");
     emit_js_body(&f.body, out, all, 2);
     if let Some(ret) = &f.return_type {
@@ -558,7 +585,9 @@ fn emit_js_body(body: &[Stmt], out: &mut String, funcs: &[FuncWeb], indent: usiz
                 out.push_str(&format!("{pad}return {};\n", js_emit_expr(expr, funcs)));
             }
             Stmt::Return(None, _) => out.push_str(&format!("{pad}return;\n")),
-            Stmt::For { var, kind, body, .. } => match kind {
+            Stmt::For {
+                var, kind, body, ..
+            } => match kind {
                 crate::AST::ForKind::Range { start, end, .. } => {
                     out.push_str(&format!(
                         "{pad}for (let {var} = {}; {var} < {}; {var}++) {{\n",
@@ -701,14 +730,8 @@ fn emit_js_method(
     let recv = js_emit_expr(receiver, funcs);
     let arg_exprs: Vec<String> = args.iter().map(|a| js_emit_expr(&a.expr, funcs)).collect();
     match (method, arg_exprs.len()) {
-        ("measure", 2) => format!(
-            "jetDom.measure({}, {})",
-            arg_exprs[0], arg_exprs[1]
-        ),
-        ("layout", 2) => format!(
-            "jetDom.layout({recv}, {}, {})",
-            arg_exprs[0], arg_exprs[1]
-        ),
+        ("measure", 2) => format!("jetDom.measure({}, {})", arg_exprs[0], arg_exprs[1]),
+        ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", arg_exprs[0], arg_exprs[1]),
         ("paint", 1) => format!("jetDom.paint({recv}, {})", arg_exprs[0]),
         ("commands", 0) => format!("jetDom.commands({recv})"),
         ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", arg_exprs[0]),
@@ -754,7 +777,9 @@ fn js_emit_expr(expr: &Expr, funcs: &[FuncWeb]) -> String {
         ),
         Expr::Unary(op, inner, _) => format!("({}{})", unop(op), js_emit_expr(inner, funcs)),
         Expr::Paren(inner, _) => js_emit_expr(inner, funcs),
-        Expr::Call(call) => js_emit_call_expr(call, funcs).unwrap_or_else(|| "undefined".to_string()),
+        Expr::Call(call) => {
+            js_emit_call_expr(call, funcs).unwrap_or_else(|| "undefined".to_string())
+        }
         Expr::MethodCall {
             receiver,
             method,
@@ -803,7 +828,10 @@ fn js_emit_lambda(lam: &crate::AST::Lambda, funcs: &[FuncWeb]) -> String {
 }
 
 fn js_string_lit(parts: &[crate::AST::StrPart]) -> String {
-    if parts.iter().any(|p| matches!(p, crate::AST::StrPart::Interp(_, _))) {
+    if parts
+        .iter()
+        .any(|p| matches!(p, crate::AST::StrPart::Interp(_, _)))
+    {
         let mut s = String::from("`");
         for part in parts {
             match part {
@@ -835,11 +863,7 @@ fn js_emit_call_expr(call: &crate::AST::Call, funcs: &[FuncWeb]) -> Option<Strin
             .iter()
             .map(|a| js_emit_expr(&a.expr, funcs))
             .collect();
-        return Some(format!(
-            "await bridge_{}({})",
-            call.name,
-            args.join(", ")
-        ));
+        return Some(format!("await bridge_{}({})", call.name, args.join(", ")));
     }
     if let Some(dom) = ui_dom_call(&call.name, &call.args, funcs) {
         return Some(dom);

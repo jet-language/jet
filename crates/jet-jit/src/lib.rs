@@ -13,7 +13,9 @@
 mod Collections;
 mod Concurrency;
 
-use jet_codegen::scheduler::{JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl};
+use jet_codegen::scheduler::{
+    JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl,
+};
 // I6: Cranelift crates live here, not in the compiler `jet` crate (`Source/`).
 // The root package depends on jet-jit; jet-jit depends on cranelift-*.
 // D-JITDEP1 approved this as a scoped runtime-side exception.
@@ -32,9 +34,9 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::Codegen::TIR::{
-    self, JitProgram, JitSpawnCapture, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
-    TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TOrFallback,
-    TStmt, TStrPart, TBuiltinOp,
+    self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
+    TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TOrFallback,
+    TStmt, TStrPart,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -307,9 +309,18 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
     builder.symbol("jet_jit_str_eq", jet_jit_str_eq as *const u8);
-    builder.symbol("jet_jit_struct_new_f64", jet_jit_struct_new_f64 as *const u8);
-    builder.symbol("jet_jit_struct_get_f64", jet_jit_struct_get_f64 as *const u8);
-    builder.symbol("jet_jit_struct_set_f64", jet_jit_struct_set_f64 as *const u8);
+    builder.symbol(
+        "jet_jit_struct_new_f64",
+        jet_jit_struct_new_f64 as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_get_f64",
+        jet_jit_struct_get_f64 as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_set_f64",
+        jet_jit_struct_set_f64 as *const u8,
+    );
     Collections::register_collections_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     let mut module = JITModule::new(builder);
@@ -523,10 +534,7 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         } => {
             if *is_option {
                 jit_covers_expr(value, callees)
-                    && matches!(
-                        fallback,
-                        TOrFallback::Value(_) | TOrFallback::Panic(_)
-                    )
+                    && matches!(fallback, TOrFallback::Value(_) | TOrFallback::Panic(_))
             } else {
                 !is_option
                     && jit_covers_expr(value, callees)
@@ -535,20 +543,27 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         }
         TExprKind::ListLit(elems) => {
             (jit_list_int_type(&expr.ty)
-                && elems.iter().all(|e| {
-                    matches!(&e.ty, Type::Int) && jit_covers_expr(e, callees)
-                }))
+                && elems
+                    .iter()
+                    .all(|e| matches!(&e.ty, Type::Int) && jit_covers_expr(e, callees)))
                 || (jit_list_task_int_type(&expr.ty)
                     && elems.iter().all(|e| jit_covers_expr(e, callees)))
         }
-        TExprKind::Index { base, index, is_map, .. } => {
+        TExprKind::Index {
+            base,
+            index,
+            is_map,
+            ..
+        } => {
             !is_map
                 && jit_list_int_type(&base.ty)
                 && matches!(&index.ty, Type::Int)
                 && jit_covers_expr(base, callees)
                 && jit_covers_expr(index, callees)
         }
-        TExprKind::Slice { base, start, end, .. } => {
+        TExprKind::Slice {
+            base, start, end, ..
+        } => {
             jit_list_int_type(&base.ty)
                 && matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
@@ -560,17 +575,13 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             jit_covers_builtin_op(op, recv, args, callees)
         }
         TExprKind::StructLit { fields, .. } => {
-            jit_struct_type(&expr.ty)
-                && fields.iter().all(|(_, v, _)| jit_covers_expr(v, callees))
+            jit_struct_type(&expr.ty) && fields.iter().all(|(_, v, _)| jit_covers_expr(v, callees))
         }
         TExprKind::Field { recv, .. } => jit_covers_expr(recv, callees),
         TExprKind::MethodCall { recv, args, .. } => {
-            jit_covers_expr(recv, callees)
-                && args.iter().all(|a| jit_covers_call_arg(a, callees))
+            jit_covers_expr(recv, callees) && args.iter().all(|a| jit_covers_call_arg(a, callees))
         }
-        TExprKind::StaticCall { args, .. } => {
-            args.iter().all(|a| jit_covers_call_arg(a, callees))
-        }
+        TExprKind::StaticCall { args, .. } => args.iter().all(|a| jit_covers_call_arg(a, callees)),
         TExprKind::EnumLit { payload, .. } => {
             jit_enum_type(&expr.ty) && jit_covers_enum_payload(payload, callees)
         }
@@ -683,9 +694,7 @@ fn jit_covers_builtin_op(
                 && matches!(&args[0].ty, Type::Int)
                 && jit_covers_expr(&args[0], callees)
         }
-        TBuiltinOp::Sort | TBuiltinOp::LenList => {
-            jit_list_int_type(&recv.ty) && args.is_empty()
-        }
+        TBuiltinOp::Sort | TBuiltinOp::LenList => jit_list_int_type(&recv.ty) && args.is_empty(),
         TBuiltinOp::GetList => {
             jit_list_int_type(&recv.ty)
                 && args.len() == 1
@@ -803,14 +812,20 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                 && !columnar
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
-        TStmt::EnumMatch { arms, else_body, .. } => {
-            arms.iter().all(|a| a.body.iter().all(|s| jit_covers_stmt(s, callees)))
+        TStmt::EnumMatch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .all(|a| a.body.iter().all(|s| jit_covers_stmt(s, callees)))
                 && else_body
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| jit_covers_stmt(s, callees)))
         }
-        TStmt::MixedSwitch { arms, else_body, .. } => {
-            arms.iter().all(|(_, b)| b.iter().all(|s| jit_covers_stmt(s, callees)))
+        TStmt::MixedSwitch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .all(|(_, b)| b.iter().all(|s| jit_covers_stmt(s, callees)))
                 && else_body
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| jit_covers_stmt(s, callees)))
@@ -825,10 +840,7 @@ fn jit_covers_func(tir: &TFunc, callees: &HashSet<String>) -> bool {
 }
 
 fn jit_covers_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<String> {
-    if !matches!(
-        tir.kind,
-        TFuncKind::TopLevel | TFuncKind::Method { .. }
-    ) {
+    if !matches!(tir.kind, TFuncKind::TopLevel | TFuncKind::Method { .. }) {
         return Some("not top-level".into());
     }
     if !tir.generics.is_empty() || tir.is_view || tir.is_unsafe || tir.is_reactive {
@@ -909,7 +921,9 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
             }
             TStmt::Region(body) => count_spawn_sites_stmts(body, n),
             TStmt::ForIn { body, .. } => count_spawn_sites_stmts(body, n),
-            TStmt::EnumMatch { arms, else_body, .. } => {
+            TStmt::EnumMatch {
+                arms, else_body, ..
+            } => {
                 for arm in arms {
                     count_spawn_sites_stmts(&arm.body, n);
                 }
@@ -917,7 +931,9 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
                     count_spawn_sites_stmts(b, n);
                 }
             }
-            TStmt::MixedSwitch { arms, else_body, .. } => {
+            TStmt::MixedSwitch {
+                arms, else_body, ..
+            } => {
                 for (_, b) in arms {
                     count_spawn_sites_stmts(b, n);
                 }
@@ -1109,7 +1125,11 @@ fn clif_ty(ty: &Type) -> Option<types::Type> {
     if jit_concurrency_type(ty) {
         return Some(types::I64);
     }
-    if jit_list_int_type(ty) || jit_list_task_int_type(ty) || jit_struct_type(ty) || jit_enum_type(ty) {
+    if jit_list_int_type(ty)
+        || jit_list_task_int_type(ty)
+        || jit_struct_type(ty)
+        || jit_enum_type(ty)
+    {
         return Some(types::I64);
     }
     if jit_optional_scalar_type(ty) {
@@ -1601,7 +1621,9 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(merge);
                 self.dead = false;
             }
-            TStmt::MixedSwitch { arms, else_body, .. } => {
+            TStmt::MixedSwitch {
+                arms, else_body, ..
+            } => {
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
@@ -2114,9 +2136,7 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::StructLit { fields, .. } => self.lower_struct_lit(fields),
             TExprKind::Field {
-                recv,
-                field_rust,
-                ..
+                recv, field_rust, ..
             } => {
                 let handle = self.lower_expr(recv)?;
                 let type_name = user_type_name(&recv.ty)
@@ -2466,9 +2486,7 @@ impl LowerCtx<'_, '_> {
 
     fn expr_field_type(&self, expr: &TExpr) -> Option<Type> {
         let TExprKind::Field {
-            recv,
-            field_rust,
-            ..
+            recv, field_rust, ..
         } = &expr.kind
         else {
             return None;
@@ -2734,33 +2752,30 @@ fn stmt_has_return(stmts: &[TStmt]) -> bool {
             then_body,
             else_body,
             ..
-        } => {
-            stmt_has_return(then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| stmt_has_return(b))
-        }
+        } => stmt_has_return(then_body) || else_body.as_ref().is_some_and(|b| stmt_has_return(b)),
         TStmt::Loop { body, .. }
         | TStmt::While { body, .. }
         | TStmt::Range { body, .. }
         | TStmt::ForIn { body, .. }
         | TStmt::Region(body) => stmt_has_return(body),
-        TStmt::CountedLoop { init, step, body, .. } => {
+        TStmt::CountedLoop {
+            init, step, body, ..
+        } => {
             stmt_has_return(std::slice::from_ref(init))
                 || stmt_has_return(std::slice::from_ref(step))
                 || stmt_has_return(body)
         }
-        TStmt::EnumMatch { arms, else_body, .. } => {
+        TStmt::EnumMatch {
+            arms, else_body, ..
+        } => {
             arms.iter().any(|a| stmt_has_return(&a.body))
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| stmt_has_return(b))
+                || else_body.as_ref().is_some_and(|b| stmt_has_return(b))
         }
-        TStmt::MixedSwitch { arms, else_body, .. } => {
+        TStmt::MixedSwitch {
+            arms, else_body, ..
+        } => {
             arms.iter().any(|(_, b)| stmt_has_return(b))
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| stmt_has_return(b))
+                || else_body.as_ref().is_some_and(|b| stmt_has_return(b))
         }
         _ => false,
     })
@@ -2792,10 +2807,7 @@ fn lower_function(
         let param_vals = b.block_params(entry).to_vec();
         let mut param_idx = 0usize;
         let method_struct = match &tir.kind {
-            TFuncKind::Method { .. } => tir
-                .name
-                .split_once("::")
-                .map(|(t, _)| t.to_string()),
+            TFuncKind::Method { .. } => tir.name.split_once("::").map(|(t, _)| t.to_string()),
             _ => None,
         };
         let mut lctx = LowerCtx {

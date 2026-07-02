@@ -139,7 +139,7 @@ fn io_input_reads_a_line_from_stdin() {
 use core.io as io
 
 fn main() {
-    name #= io.input("name? ") ?? panic("read failed")
+    name :: io.input("name? ") ?? panic("read failed")
     print("hello, {name}")
 }
 "#,
@@ -308,7 +308,7 @@ fn json_decode_lenient_surfaces_coercions() {
         r#"
 use core.encoding.json as json
 fn main() {
-    data #= json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
+    data :: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
             print(n + 1)
@@ -338,7 +338,7 @@ fn main() {
         r#"
 use core.encoding.json as json
 fn main() {
-    data #= json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
+    data :: json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
             print(n)
@@ -363,7 +363,7 @@ fn main() {
         r#"
 use core.encoding.json as json
 fn main() {
-    data #= json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
+    data :: json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
             print(n)
@@ -427,8 +427,8 @@ fn json_parser_is_rfc8259_complete() {
         r#"
 use core.encoding.json as json
 fn main() {
-    raw #= "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
-    data #= json.parse(raw) ?? panic("bad json")
+    raw :: "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
+    data :: json.parse(raw) ?? panic("bad json")
     print(json.to_string(data))
 }
 "#,
@@ -510,7 +510,7 @@ use core.tasks as tasks
 fn main() {
 ch: Channel<Int> : tasks.channel()
 sender: Sender<Int> : ch.sender()
-    producer #= tasks.spawn(take(sender) () => {
+    producer :: tasks.spawn(take(sender) () => {
         loop i in 1..1000 {
             sender.send(i)
         }
@@ -548,10 +548,10 @@ fn scheduler_spawn_1000_tasks() {
 use core.tasks as tasks
 
 fn main() {
-ch: Channel<Int> #= tasks.channel()
-sender: Sender<Int> #= ch.sender()
+ch: Channel<Int> :: tasks.channel()
+sender: Sender<Int> :: ch.sender()
     loop i in 1..1000 {
-        copy #= sender.clone()
+        copy :: sender.clone()
         tasks.spawn(take(copy) () => {
             copy.send(1)
         })
@@ -588,10 +588,10 @@ fn scheduler_spawn_10000_tasks() {
 use core.tasks as tasks
 
 fn main() {
-ch: Channel<Int> #= tasks.channel()
-sender: Sender<Int> #= ch.sender()
+ch: Channel<Int> :: tasks.channel()
+sender: Sender<Int> :: ch.sender()
     loop i in 1..10000 {
-        copy #= sender.clone()
+        copy :: sender.clone()
         tasks.spawn(take(copy) () => {
             copy.send(1)
         })
@@ -629,10 +629,10 @@ fn scheduler_spawn_100000_tasks_bench() {
 use core.tasks as tasks
 
 fn main() {
-ch: Channel<Int> #= tasks.channel()
-sender: Sender<Int> #= ch.sender()
+ch: Channel<Int> :: tasks.channel()
+sender: Sender<Int> :: ch.sender()
     loop i in 1..100000 {
-        copy #= sender.clone()
+        copy :: sender.clone()
         tasks.spawn(take(copy) () => {
             copy.send(1)
         })
@@ -680,9 +680,9 @@ fn slow_one() -> Int {
 
 fn main() {
     taskgroup g {
-        slow #= g.task { slow_one() }
-        fast #= g.task { fast_nine() }
-        winner #= g.race([slow, fast])
+        slow :: g.task { slow_one() }
+        fast :: g.task { fast_nine() }
+        winner :: g.race([slow, fast])
         print(winner)
     }
 }
@@ -854,13 +854,13 @@ struct Id<K> {
 }
 
 fn main() {
-    wi #= Wrap<Int>.{ value: 7 }
+    wi :: Wrap<Int>.{ value: 7 }
     print(json.to_string(wi))
-    back #= json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
+    back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
-    id #= Id<Wrap<Int>>.{ raw: 9, marker: null }
+    id :: Id<Wrap<Int>>.{ raw: 9, marker: null }
     print(json.to_string(id))
-    rid #= json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    rid :: json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
 }
 "#,
@@ -897,8 +897,8 @@ struct Server { host: String  port: Int }
 @[Codable]
 struct Config { title: String  server: Server  ports: [Int] }
 fn main() {
-    raw #= "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
-    cfg #= toml.decode<Config>(raw) ?? panic("bad toml")
+    raw :: "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
+    cfg :: toml.decode<Config>(raw) ?? panic("bad toml")
     print(cfg.title)
     print(cfg.server.host)
     print(cfg.server.port)
@@ -922,8 +922,8 @@ fn main() {
         r#"
 use core.encoding.toml as toml
 fn main() {
-    raw #= "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n"
-    d #= toml.parse(raw) ?? panic("bad")
+    raw :: "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n"
+    d :: toml.parse(raw) ?? panic("bad")
     print(toml.to_string(d))
 }
 "#,
@@ -960,8 +960,8 @@ struct Service { name: String  port: Int }
 @[Codable]
 struct Config { app: String  services: [Service] }
 fn main() {
-    raw #= "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
-    cfg #= yaml.decode<Config>(raw) ?? panic("bad yaml")
+    raw :: "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
+    cfg :: yaml.decode<Config>(raw) ?? panic("bad yaml")
     print(cfg.app)
     print(cfg.services.len())
     print(cfg.services[0].name)
@@ -981,8 +981,8 @@ fn main() {
         r#"
 use core.encoding.yaml as yaml
 fn main() {
-    raw #= "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
-    d #= yaml.parse(raw) ?? panic("bad yaml")
+    raw :: "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
+    d :: yaml.parse(raw) ?? panic("bad yaml")
     if d == Object(top) {
         if top["flowlist"] == Array(xs) {
             print(xs.len())
@@ -1022,18 +1022,18 @@ fn option_zip_and_lift2_combinators() {
         "option_combinators",
         r#"
 fn main() {
-    both_a: Float? #= value(2.0)
-    both_b: Float? #= value(5.0)
+    both_a: Float? :: value(2.0)
+    both_b: Float? :: value(5.0)
     print(both_a.zip(both_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_a, both_b))
 
-    a_only: Float? #= value(2.0)
-    b_missing: Float? #= null
+    a_only: Float? :: value(2.0)
+    b_missing: Float? :: null
     print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, a_only, b_missing))
 
-    both_missing_a: Float? #= null
-    both_missing_b: Float? #= null
+    both_missing_a: Float? :: null
+    both_missing_b: Float? :: null
     print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
 }
@@ -1043,8 +1043,7 @@ fn main() {
     );
     assert_eq!(code, 0, "option combinator fixture failed: {stderr}");
     assert_eq!(
-        stdout,
-        "10.0\n10.0\nnull\nnull\nnull\nnull\n",
+        stdout, "10.0\n10.0\nnull\nnull\nnull\nnull\n",
         "unexpected option combinator output: {stdout}"
     );
     let _ = fs::remove_dir_all(&dir);

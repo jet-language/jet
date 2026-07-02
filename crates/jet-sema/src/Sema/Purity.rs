@@ -137,7 +137,7 @@ pub(crate) fn check_pure_stmt(
         Stmt::Assign { value, .. } => check_pure_expr(value, pure_fn, funcs),
         Stmt::Return(Some(e), _) => check_pure_expr(e, pure_fn, funcs),
         Stmt::Return(None, _) => None,
-        Stmt::Expr(e) => check_pure_expr(e, pure_fn, funcs),
+        Stmt::Expr(e) | Stmt::Yield(e, _) => check_pure_expr(e, pure_fn, funcs),
         Stmt::If(if_stmt) => check_pure_if(if_stmt, pure_fn, funcs),
         Stmt::While { cond, body, .. } => {
             if let Some(d) = check_pure_expr(cond, pure_fn, funcs) {
@@ -544,7 +544,7 @@ fn check_pure_stmt_with_path(
         Stmt::Assign { value, .. } => rec!(value),
         Stmt::Return(Some(e), _) => rec!(e),
         Stmt::Return(None, _) => None,
-        Stmt::Expr(e) => rec!(e),
+        Stmt::Expr(e) | Stmt::Yield(e, _) => rec!(e),
         Stmt::If(if_stmt) => check_pure_if_with_path(if_stmt, pure_fn, funcs, path, visited),
         Stmt::While { cond, body, .. } => {
             if let Some(d) = rec!(cond) {
@@ -1055,7 +1055,7 @@ fn walk_stmt_for_calls(
             walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags)
         }
         Stmt::Return(None, _) => {}
-        Stmt::Expr(e) => {
+        Stmt::Expr(e) | Stmt::Yield(e, _) => {
             walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags)
         }
         Stmt::If(if_stmt) => {

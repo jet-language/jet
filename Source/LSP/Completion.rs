@@ -451,8 +451,8 @@ pub(crate) fn compute_completions(
         for (label, detail, insert) in [
             (
                 "bind immut (inferred)",
-                "name #= value",
-                "${1:name} #= ${2:value}",
+                "name :: value",
+                "${1:name} :: ${2:value}",
             ),
             (
                 "bind mut (inferred)",
@@ -461,8 +461,8 @@ pub(crate) fn compute_completions(
             ),
             (
                 "bind immut (explicit)",
-                "name: Type #= value",
-                "${1:name}: ${2:Type} #= ${3:value}",
+                "name: Type :: value",
+                "${1:name}: ${2:Type} :: ${3:value}",
             ),
             (
                 "bind mut (explicit)",

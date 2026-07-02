@@ -20,10 +20,7 @@ payload: {
 }
 "#;
     let pm = jet::Jetpack::PackageManifest::parse(raw).unwrap();
-    assert_eq!(
-        pm.package.layer,
-        Some(jet::Syntax::RuntimeLayer::Alloc)
-    );
+    assert_eq!(pm.package.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
     let mf = jet::Jetpack::PackageManifest::to_manifest(&pm, raw).unwrap();
     assert_eq!(mf.package.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
 }
@@ -161,7 +158,7 @@ fn ambient_input_infers_std_layer() {
     .unwrap();
     let main = r#"
 fn main() {
-    _ #= input("name? ")
+    _ :: input("name? ")
     print("ok")
 }
 "#;
@@ -190,7 +187,7 @@ fn ceiling_blocks_ambient_input_helper() {
     .unwrap();
     let main = r#"
 fn main() {
-    _ #= input("name? ")
+    _ :: input("name? ")
     print("ok")
 }
 "#;
@@ -240,7 +237,10 @@ fn lock_roundtrip_layer_metadata() {
     };
     let raw = jet::Lock::write(&lock);
     let parsed = jet::Lock::parse(&raw).unwrap();
-    assert_eq!(parsed.packages[0].layer, Some(jet::Syntax::RuntimeLayer::Alloc));
+    assert_eq!(
+        parsed.packages[0].layer,
+        Some(jet::Syntax::RuntimeLayer::Alloc)
+    );
     assert_eq!(
         parsed.packages[0].inferred_layer,
         Some(jet::Syntax::RuntimeLayer::Std)

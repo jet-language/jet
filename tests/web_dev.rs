@@ -31,9 +31,7 @@ fn jet_bin() -> PathBuf {
 /// expects, so the test doesn't need `curl` or any HTTP crate.
 fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     let req = format!(
         "GET {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
         path
@@ -85,10 +83,10 @@ fn wait_for_version_change(port: u16, baseline: &str, timeout: Duration) -> Stri
 const FIXTURE_SRC: &str = r#"use core.ui as ui
 
 fn main() {
-    backend #= ui.null_backend()
-    node #= ui.node("hello", 100.0, 20.0)
-    constraint #= ui.constraint(0.0, 0.0, 200.0, 100.0)
-    size #= backend.measure(node, constraint)
+    backend :: ui.null_backend()
+    node :: ui.node("hello", 100.0, 20.0)
+    constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+    size :: backend.measure(node, constraint)
     print(size.width)
     print(size.height)
 }
@@ -100,10 +98,10 @@ fn main() {
 const FIXTURE_SRC_EDITED: &str = r#"use core.ui as ui
 
 fn main() {
-    backend #= ui.null_backend()
-    node #= ui.node("hello there", 100.0, 20.0)
-    constraint #= ui.constraint(0.0, 0.0, 200.0, 100.0)
-    size #= backend.measure(node, constraint)
+    backend :: ui.null_backend()
+    node :: ui.node("hello there", 100.0, 20.0)
+    constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+    size :: backend.measure(node, constraint)
     print(size.width)
     print(size.height)
 }
@@ -233,7 +231,7 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
 const FN_FIXTURE_SRC: &str = r#"use core.devserver as devserver
 
 fn dev() {
-    server #= devserver.for_app("app.jet")
+    server :: devserver.for_app("app.jet")
     server.port(8181)
     server.serve()
 }
@@ -249,7 +247,7 @@ fn main() {
 const FN_FIXTURE_SRC_EDITED: &str = r#"use core.devserver as devserver
 
 fn dev() {
-    server #= devserver.for_app("app.jet")
+    server :: devserver.for_app("app.jet")
     server.port(8181)
     server.serve()
 }
@@ -268,7 +266,10 @@ fn wait_for_server_up(port: u16, timeout: Duration) {
             return;
         }
         if start.elapsed() > timeout {
-            panic!("jet dev's own core.devserver never came up on port {}", port);
+            panic!(
+                "jet dev's own core.devserver never came up on port {}",
+                port
+            );
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -277,7 +278,9 @@ fn wait_for_server_up(port: u16, timeout: Duration) {
 #[test]
 fn jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save() {
     if !have_tool("rustc") {
-        eprintln!("note: skipping jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save (need rustc)");
+        eprintln!(
+            "note: skipping jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save (need rustc)"
+        );
         return;
     }
     // The fixture's `dev()` shells out to `jet build --target=web` — it needs
@@ -378,7 +381,7 @@ fn jet_dev_app_zero_arg_watches_launched_file() {
         r#"use core.devserver as devserver
 
 fn dev() {
-    server #= devserver.app()
+    server :: devserver.app()
     server.port(8182)
     server.serve()
 }

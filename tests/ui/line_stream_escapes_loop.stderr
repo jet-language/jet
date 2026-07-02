@@ -1,7 +1,7 @@
 Error [E2502]: a line stream can only be used directly in a loop
   --> tests/ui/line_stream_escapes_loop.jet:5:20
     |
-  5 |     rows #= reader.lines();
+  5 |     rows :: reader.lines();
     |                    ^^^^^
  Why: `.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use
  Fix: iterate it directly: `loop rows in handle.lines() { … }`

@@ -413,6 +413,9 @@ impl<'a> Interp<'a> {
             // D-TXN1–D-TXN4: a transaction block is a runtime/codegen construct; the
             // comptime interpreter has no transactions, so `#Transact` is declined.
             Stmt::Transact { span, .. } => Err(unsupported("a `#Transact` block", *span)),
+            // D-STREAMYIELD1: a generator suspends on a real thread/channel at
+            // runtime; the comptime interpreter has no such thing.
+            Stmt::Yield(_, span) => Err(unsupported("a `yield`", *span)),
             // D-CTX1: the smart-context block is a runtime/codegen construct; the
             // comptime interpreter declines it (no thread-local context at compile time).
             Stmt::ContextBlock { span, .. } => Err(unsupported("a `#Context` block", *span)),

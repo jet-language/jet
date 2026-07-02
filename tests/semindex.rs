@@ -30,9 +30,7 @@ fn semindex_effects_and_calls() {
     assert!(idx.lookup("report").is_some());
     assert!(!idx.call_edges().is_empty());
     let report_effects = idx.effect_of("report").expect("report has effects");
-    assert!(
-        !report_effects.inferred.is_empty() || !report_effects.direct.is_empty()
-    );
+    assert!(!report_effects.inferred.is_empty() || !report_effects.direct.is_empty());
 }
 
 #[test]

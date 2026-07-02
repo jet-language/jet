@@ -50,7 +50,7 @@ mod jet_layout {
 
     /// `LinExpr` is what `HVar`/`VVar`/`LengthVar` erase to — and it needs to
     /// be `Copy`: a `layout {}` line routinely reuses a captured variable
-    /// (`xv #= form.h("x","width"); form.suggest(xv, 100.0); form.value(xv)`),
+    /// (`xv :: form.h("x","width"); form.suggest(xv, 100.0); form.value(xv)`),
     /// and Jet's general non-Copy-reuse clone-insertion doesn't (yet) know
     /// about this closed type family, so a `Vec`/`Rc`-backed representation
     /// would hit a real "use of moved value" in the generated Rust the first
@@ -259,7 +259,13 @@ mod jet_layout {
         row
     }
 
-    fn build_row(lhs: &LinExpr, rhs: &LinExpr, op: RelOp, strength: Strength, label: String) -> RowSpec {
+    fn build_row(
+        lhs: &LinExpr,
+        rhs: &LinExpr,
+        op: RelOp,
+        strength: Strength,
+        label: String,
+    ) -> RowSpec {
         // `lhs OP rhs` → `(lhs - rhs) OP 0` → `terms · x OP (-constant)`.
         let combined = lhs.combine(rhs, -1.0);
         normalize_row(RowSpec {
@@ -333,7 +339,8 @@ mod jet_layout {
                         let ratio = self.rows[i][n] / a;
                         let better = ratio < best_ratio - EPS;
                         let tied = (ratio - best_ratio).abs() <= EPS;
-                        if better || (tied && leave.map_or(true, |l| self.basis[i] < self.basis[l])) {
+                        if better || (tied && leave.map_or(true, |l| self.basis[i] < self.basis[l]))
+                        {
                             best_ratio = ratio;
                             leave = Some(i);
                         }
@@ -393,7 +400,10 @@ mod jet_layout {
                 rhs: val,
                 op: RelOp::Eq,
                 strength: Strength::Medium,
-                label: format!("suggest({})", inner.var_names.get(idx).cloned().unwrap_or_default()),
+                label: format!(
+                    "suggest({})",
+                    inner.var_names.get(idx).cloned().unwrap_or_default()
+                ),
             }));
         }
         if specs.is_empty() {
@@ -416,7 +426,10 @@ mod jet_layout {
                         let surplus = next_col;
                         let artificial = next_col + 1;
                         next_col += 2;
-                        Extra::SurplusArtificial { surplus, artificial }
+                        Extra::SurplusArtificial {
+                            surplus,
+                            artificial,
+                        }
                     }
                     RelOp::Eq => {
                         let col = next_col;
@@ -447,7 +460,10 @@ mod jet_layout {
                     rows[i][col] = 1.0;
                     basis[i] = col;
                 }
-                Extra::SurplusArtificial { surplus, artificial } => {
+                Extra::SurplusArtificial {
+                    surplus,
+                    artificial,
+                } => {
                     rows[i][surplus] = -1.0;
                     rows[i][artificial] = 1.0;
                     basis[i] = artificial;
@@ -580,7 +596,11 @@ mod jet_layout {
             let idx;
             {
                 let mut inner = self.0.borrow_mut();
-                let existing = inner.boxes.get(box_name).and_then(|m| m.get(anchor)).copied();
+                let existing = inner
+                    .boxes
+                    .get(box_name)
+                    .and_then(|m| m.get(anchor))
+                    .copied();
                 idx = match existing {
                     Some(i) => i,
                     None => {

@@ -191,13 +191,8 @@ impl TypeRegistry {
     pub(crate) fn is_must_use(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
-            Some(TypeDef::Struct {
-                must_use: true,
-                ..
-            }) | Some(TypeDef::Enum {
-                must_use: true,
-                ..
-            })
+            Some(TypeDef::Struct { must_use: true, .. })
+                | Some(TypeDef::Enum { must_use: true, .. })
         )
     }
 
@@ -493,7 +488,7 @@ pub(crate) struct LocalInfo {
 }
 
 /// D-ALLOC2 (ratified 2026-06-21): bookkeeping for an arena-`view` binding —
-/// what `x #= arena.alloc(v)` produced. The view points into `arena`'s storage
+/// what `x :: arena.alloc(v)` produced. The view points into `arena`'s storage
 /// and is valid only inside the region (the lexical scope of the `arena`
 /// binding, or an explicit `region`); the checker forbids it escaping (E0631)
 /// or being used after `arena` is `reset`/`free`d (E0632).
@@ -679,7 +674,7 @@ pub(crate) struct Checker<'a> {
     /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
     freed_allocators: HashMap<String, String>,
     /// D-ALLOC2 (ratified 2026-06-21): arena-`view` bindings in scope — a binding
-    /// `x #= arena.alloc(v)` holds a scope-bound view into `arena`. Maps the view
+    /// `x :: arena.alloc(v)` holds a scope-bound view into `arena`. Maps the view
     /// name → which arena it points into (for E0631 escape / E0632 use-after-reset).
     arena_views: HashMap<String, ArenaViewInfo>,
     /// D-UNINIT1 (ratified 2026-06-21): `#Uninit` bindings not yet definitely
@@ -770,12 +765,12 @@ mod Diagnostics;
 mod Effects;
 mod FFI;
 pub mod HotSwap;
+mod Protocol;
 mod Purity;
 mod Registration;
 pub mod Schema;
 mod SchemaMigration;
 mod State;
-mod Protocol;
 mod Taint;
 mod WebPartition;
 

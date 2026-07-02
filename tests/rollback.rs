@@ -51,7 +51,7 @@ fn bump(c: ~Counter) -> Int ? Fail {
 }
 fn main() {
     c := Counter.{ value: 10, ops: 0 }
-    _ #= bump(~c) ?? 0
+    _ :: bump(~c) ?? 0
     print(c.value)
     print(c.ops)
 }
@@ -97,7 +97,7 @@ fn bump(c: ~Counter) -> Int ? Fail {
 }
 fn main() {
     c := Counter.{ value: 10, ops: 0 }
-    _ #= bump(~c) ?? 0
+    _ :: bump(~c) ?? 0
     print(c.value)
     print(c.ops)
 }
@@ -136,7 +136,7 @@ fn bump(c: ~Counter) -> Int ? Fail {
 }
 fn main() {
     c := Counter.{ value: 0 }
-    _ #= bump(~c) ?? 0
+    _ :: bump(~c) ?? 0
     print(c.value)
 }
 "#;

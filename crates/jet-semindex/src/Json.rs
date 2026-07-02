@@ -3,7 +3,7 @@
 use jet_foundation::Diagnostics::Span;
 
 use crate::Build::{SymDef, SymKind, SymRef};
-use crate::Types::{CallEdge, EffectFact, SemIndex, SymbolDef, SymbolKind, SymbolRef, SourceSpan};
+use crate::Types::{CallEdge, EffectFact, SemIndex, SourceSpan, SymbolDef, SymbolKind, SymbolRef};
 
 fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -214,7 +214,9 @@ pub(crate) fn lsp_sym_kind_json(kind: &SymKind) -> String {
                 ty_json
             )
         }
-        SymKind::Param { ty } => format!("{{\"kind\":\"param\",\"type\":{}}}", json_str(&ty.name())),
+        SymKind::Param { ty } => {
+            format!("{{\"kind\":\"param\",\"type\":{}}}", json_str(&ty.name()))
+        }
     }
 }
 
@@ -242,17 +244,11 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
 fn convert_kind(kind: &SymKind) -> SymbolKind {
     match kind {
         SymKind::Function { params, ret } => SymbolKind::Function {
-            params: params
-                .iter()
-                .map(|(n, t)| (n.clone(), t.name()))
-                .collect(),
+            params: params.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
             ret: ret.as_ref().map(|t| t.name()),
         },
         SymKind::Struct { fields } => SymbolKind::Struct {
-            fields: fields
-                .iter()
-                .map(|(n, t)| (n.clone(), t.name()))
-                .collect(),
+            fields: fields.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
         },
         SymKind::Enum { variants } => SymbolKind::Enum {
             variants: variants.clone(),
@@ -278,7 +274,11 @@ fn convert_kind(kind: &SymKind) -> SymbolKind {
 pub(crate) fn convert_effects(facts: &jet_sema::SemIndexEffectFacts) -> Vec<EffectFact> {
     let mut out = Vec::new();
     for (function, summary) in &facts.summaries {
-        let direct: Vec<String> = summary.direct.iter().map(|e| e.name().to_string()).collect();
+        let direct: Vec<String> = summary
+            .direct
+            .iter()
+            .map(|e| e.name().to_string())
+            .collect();
         let callees: Vec<String> = summary.edges.iter().cloned().collect();
         let inferred: Vec<String> = facts
             .solved

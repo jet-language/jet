@@ -10,13 +10,17 @@ use jet::ExitCodes;
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
 
 /// D-BUILDPROFILE1: load `pkg.jet` build profiles from the project root of `source_file`.
-fn load_pkg_profiles(source_file: &str) -> Option<Vec<jet::Jetpack::PackageManifest::BuildProfileDef>> {
+fn load_pkg_profiles(
+    source_file: &str,
+) -> Option<Vec<jet::Jetpack::PackageManifest::BuildProfileDef>> {
     let src_path = std::path::Path::new(source_file);
     let search_from = src_path.parent().unwrap_or(std::path::Path::new("."));
     let root = jet::Loader::find_manifest_root(search_from)?;
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).ok()?;
-    jet::Jetpack::PackageManifest::parse(&raw).ok().map(|mf| mf.build_profiles)
+    jet::Jetpack::PackageManifest::parse(&raw)
+        .ok()
+        .map(|mf| mf.build_profiles)
 }
 
 /// D-BUILDPROFILE1: resolve `--profile=<name>` (or `--release` → `"release"`)
@@ -142,49 +146,49 @@ pub(crate) fn run_compile_cmd(
     };
     let (rust_code, ffi_link, clinks, capabilities, web_out, web_partition_report) =
         match compile_result {
-        Ok(out) => {
-            // D-A11YGATE1=B (c134 Phase 6): a11y lints (E2930/E2931) are opt-in
-            // via `jet lint --a11y`; ordinary build/run never surfaces them.
-            let lints = crate::CmdDevTools::visible_lints(&out.lints);
-            if !lints.is_empty() {
-                if mode.json {
-                    eprint!("{}", jet::render_all_json(file, &src, &lints));
-                } else {
-                    eprint!(
-                        "{}",
-                        jet::render_all_colored(file, &src, &lints, mode.color_stderr())
-                    );
-                    let n = lints.len();
-                    eprintln!(
-                        "\n{} warning{} emitted (compilation continues)",
-                        n,
-                        if n == 1 { "" } else { "s" }
-                    );
+            Ok(out) => {
+                // D-A11YGATE1=B (c134 Phase 6): a11y lints (E2930/E2931) are opt-in
+                // via `jet lint --a11y`; ordinary build/run never surfaces them.
+                let lints = crate::CmdDevTools::visible_lints(&out.lints);
+                if !lints.is_empty() {
+                    if mode.json {
+                        eprint!("{}", jet::render_all_json(file, &src, &lints));
+                    } else {
+                        eprint!(
+                            "{}",
+                            jet::render_all_colored(file, &src, &lints, mode.color_stderr())
+                        );
+                        let n = lints.len();
+                        eprintln!(
+                            "\n{} warning{} emitted (compilation continues)",
+                            n,
+                            if n == 1 { "" } else { "s" }
+                        );
+                    }
                 }
+                // S59 (E2-M14): resolve native C link flags at build time; E3201
+                // (unresolved C lib) surfaces here, not during front-end checking.
+                let clinks = match jet::resolve_c_links(file) {
+                    Ok(args) => args,
+                    Err(diags) => {
+                        report_problems(mode, file, &src, &diags);
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                };
+                (
+                    out.rust,
+                    out.ffi,
+                    clinks,
+                    out.capabilities,
+                    out.web,
+                    out.web_partition_report,
+                )
             }
-            // S59 (E2-M14): resolve native C link flags at build time; E3201
-            // (unresolved C lib) surfaces here, not during front-end checking.
-            let clinks = match jet::resolve_c_links(file) {
-                Ok(args) => args,
-                Err(diags) => {
-                    report_problems(mode, file, &src, &diags);
-                    exit(ExitCodes::USER_ERROR);
-                }
-            };
-            (
-                out.rust,
-                out.ffi,
-                clinks,
-                out.capabilities,
-                out.web,
-                out.web_partition_report,
-            )
-        }
-        Err(diags) => {
-            report_problems(mode, file, &src, &diags);
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
+            Err(diags) => {
+                report_problems(mode, file, &src, &diags);
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
 
     if emit_rust {
         print!("{}", rust_code);
@@ -899,8 +903,13 @@ pub(crate) fn write_web_artifacts(
         }
     };
 
-    fs::create_dir_all(out_dir)
-        .map_err(|e| format!("error: couldn't create the {} folder: {}", out_dir.display(), e))?;
+    fs::create_dir_all(out_dir).map_err(|e| {
+        format!(
+            "error: couldn't create the {} folder: {}",
+            out_dir.display(),
+            e
+        )
+    })?;
 
     let manifest_path = out_dir.join("web.manifest.json");
     let dom_path = out_dir.join("jet_dom_runtime.js");

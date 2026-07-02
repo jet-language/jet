@@ -2,20 +2,20 @@
 use core.compress.gzip as gz
 
 fn main() {
-original: [U8] #= [72, 101, 108, 108, 111]   // ASCII "Hello"
-    compressed #= gz.compress(original)
+original: [U8] :: [72, 101, 108, 108, 111]   // ASCII "Hello"
+    compressed :: gz.compress(original)
 
     // A gzip stream is always longer than 5 bytes (header alone is 10).
     print((compressed.len() > 5))
 
     // Round-trip: decompress must recover the original bytes exactly.
-    restored #= gz.decompress(compressed) ?? panic("bad gzip")
+    restored :: gz.decompress(compressed) ?? panic("bad gzip")
     print((restored.len() == original.len()))
     print((restored == original))
 
     // Decompress failure path: corrupt input returns err.
-    bad: [U8] #= [1, 2, 3, 4, 5]
-    result #= gz.decompress(bad)
+    bad: [U8] :: [1, 2, 3, 4, 5]
+    result :: gz.decompress(bad)
     if result == {
         ok(_) -> { print(false) }
         err(_) -> { print(true) }

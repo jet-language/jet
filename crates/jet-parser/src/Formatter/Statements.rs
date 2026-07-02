@@ -50,6 +50,10 @@ impl<'a> Fmt<'a> {
                     self.fmt_expr(e, Prec::OrFallback);
                 }
             }
+            Stmt::Yield(e, _) => {
+                self.write("yield ");
+                self.fmt_expr(e, Prec::OrFallback);
+            }
             Stmt::If(i) => self.fmt_if(i),
             Stmt::While {
                 cond, body, label, ..
@@ -557,8 +561,8 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
-        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND3: ordinary
-        // bindings are sigil-led (`name #= …` / `name := …`), no leading keyword.
+        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND4: ordinary
+        // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.
         if b.is_comptime {
             self.write(Syntax::KW_COMPTIME);
             self.write(" ");
@@ -577,8 +581,8 @@ impl<'a> Fmt<'a> {
                 Syntax::SIGIL_BIND_IMMUT
             });
         } else if let Some(ty) = &b.ty {
-            // D-BIND3: explicit-type form.
-            // Immutable: `name: Type #= expr`. Mutable: `name: Type #== expr`.
+            // D-BIND4: explicit-type form.
+            // Immutable: `name: Type :: expr`. Mutable: `name: Type := expr`.
             self.write(&b.name);
             self.write(": ");
             self.fmt_type(ty);
