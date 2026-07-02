@@ -6491,7 +6491,7 @@
       "epoch": "e3",
       "phase": "planning",
       "priority": "P1",
-      "plan": null,
+      "plan": "tools/Tower/docs/plans/epoch-3/marker-family.md",
       "blockedBy": [],
       "log": [
         {
@@ -6514,6 +6514,11 @@
         {
           "at": "2026-06-30",
           "text": "Carded from Tower Ideas binder. Full decision ballot attached with examples, cross-language comparison, and adversarial pass."
+        },
+        {
+          "at": "2026-07-01",
+          "by": "agent",
+          "text": "Implementation plan written: tools/Tower/docs/plans/epoch-3/marker-family.md. Key finding: the @ plane is not parsed at all yet (CONTRACT_* constants unused; parser rejects @ in item position) — this card BUILDS the contract plane, not a rename. Two gates raised as ballots: D-MARKERMOVE2 (blocking: #Pure type-position callback bound vs the declarations-only @ law) and D-MARKERMOVE3 (non-blocking: plane for remaining derive markers, ships with stay-# default). Teaching errors E0062/E0063 proposed. #Numeric/@Numeric merge (I8) assigned to this migration."
         }
       ],
       "created": "2026-06-30T23:13:57.166Z",
@@ -16224,6 +16229,72 @@
       "status": "ratified",
       "outcome": "B",
       "ratifiedAt": "2026-07-01"
+    },
+    {
+      "id": "D-MARKERMOVE2",
+      "cardId": "c7markerfamily",
+      "title": "#Pure moved to @Pure — but #Pure also lives in TYPE position (callback bounds). What happens there?",
+      "gist": "The @ plane law says @ only precedes declarations. `#Pure fn(Int) -> Int` is a live callback-type bound inside types, where @ never goes. The move list says Pure moves; the law says @ can’t go where #Pure lives.",
+      "explainer": "D-MARKER-FAMILY1=B ratified: @ states a checkable promise and may only precede a declaration. D-MARKERMOVE1=B moved Pure to the @ plane. Neither addressed Parser/Types.rs:361: a function TYPE may be written `#Pure fn(T) -> U` to require a pure callback. Planning found the gap; parser work on the plane migration is gated on this answer.",
+      "story": "Dot writes a numerics library and wants map() to accept only pure callbacks. She declares her own functions with @Pure now. When she writes the parameter type for map(), does the bound spell #Pure (old plane), @Pure (breaking the declarations-only law), or something else?",
+      "inWild": "fn map(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] { ... }   // today\n\n@Pure\nfn double(x: Int) -> Int { x * 2 }   // after the move\n\nmap(nums, double)   // the bound and the declaration should visibly match",
+      "detail": "Raised as gate G1 in tools/Tower/docs/plans/epoch-3/marker-family.md. Blocking: parser work on the @ plane cannot start until the type-position surface is fixed.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Position split: @Pure on declarations, #Pure stays on callback-type bounds (recommended)",
+          "detail": "The law stays exact: @ precedes declarations only. The type-position bound keeps its # spelling as wire-in machinery. Cost: one concept, two spellings, chosen by position — a taught rule, softened because you READ them in different places.",
+          "code": "@Pure\nfn double(x: Int) -> Int { x * 2 }\n\nfn map(items: [Int], f: #Pure fn(Int) -> Int) -> [Int] { ... }"
+        },
+        {
+          "key": "B",
+          "name": "One spelling: @Pure allowed in the single type-position bound slot",
+          "detail": "The law gains one carve-out: a contract marker may prefix a function TYPE to state a bound. One spelling everywhere Pure appears; the \"declarations only\" law becomes \"declarations, plus contract bounds on function types\".",
+          "code": "@Pure\nfn double(x: Int) -> Int { x * 2 }\n\nfn map(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Retire the type-position bound; purity is required at the parameter declaration",
+          "detail": "No marker inside types at all. The parameter is itself a declaration, so the contract plane can annotate it. Grammar stays smallest; the bound moves left of the name instead of inside the type.",
+          "code": "@Pure\nfn double(x: Int) -> Int { x * 2 }\n\nfn map(items: [Int], @Pure f: fn(Int) -> Int) -> [Int] { ... }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "status": "open"
+    },
+    {
+      "id": "D-MARKERMOVE3",
+      "cardId": "c7markerfamily",
+      "title": "Which plane owns the remaining derive markers: #[Debug], #[Summarize], #[Comparable], user derives like #[Wire]?",
+      "gist": "D-MARKERMOVE1=B moved only Codable/Encode/Decode among derive markers. The rest were not named. Default reading: they stay # (generation machinery, not promises) — confirm or move them.",
+      "explainer": "The ratified two-plane law: @ states a checkable promise about the declaration; # is compiler machinery/directives. Codable moved because \"this type round-trips\" is a promise. #[Debug]/#[Summarize]/#[Comparable] and user derives (derive T.Wire bodies) generate code — the MARKERMOVE1 ballot itself frames user derives as directive machinery. Unaddressed, so the plane migration ships with a documented default that needs ratifying.",
+      "story": "Walter just learned @Codable is a promise-plane contract. He types @Debug on his struct by analogy and gets a teaching error pointing back to #[Debug]. Is that the language he was promised, or should Debug have moved with Codable?",
+      "inWild": "@Codable            // moved: a promise the type round-trips\n#[Debug]            // stayed: machinery that generates a formatter?\n#[Wire]             // user derive: machinery by definition (derive T.Wire { ... })\nstruct Payment { amount: Usd }",
+      "detail": "Raised as gate G3 in tools/Tower/docs/plans/epoch-3/marker-family.md. Non-blocking: the migration ships with the default (stay #) either way; this ballot ratifies or reverses it.",
+      "options": [
+        {
+          "key": "A",
+          "name": "They stay # — derives are generation machinery (recommended)",
+          "detail": "Only the three ratified movers (Codable/Encode/Decode) live on @. Everything that exists to GENERATE code, including all user derives, is # machinery. One teachable line: \"@ promises, # generates.\"",
+          "code": "@Codable\n#[Debug, Comparable]\nstruct Payment { amount: Usd }\n\nderive T.Wire { ... }   // user derives: # plane, always"
+        },
+        {
+          "key": "B",
+          "name": "All built-in derive markers move to @; user derives stay #",
+          "detail": "Built-ins read as capability promises (@Debug = \"this type is printable for debugging\"). User derives stay machinery. Cost: the built-in/user line becomes the plane line — two kinds of derive spelling forever.",
+          "code": "@Codable @Debug @Comparable\nstruct Payment { amount: Usd }\n\nderive T.Wire { ... }   // user derives stay #"
+        },
+        {
+          "key": "C",
+          "name": "Case-by-case: promise-like derives move, mechanical ones stay",
+          "detail": "Judgment call per marker (Comparable moves, Debug stays?). Maximal nuance, permanent ambiguity for every future derive.",
+          "code": "@Codable @Comparable\n#[Debug]\nstruct Payment { amount: Usd }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "status": "open"
     }
   ],
   "binder": [
