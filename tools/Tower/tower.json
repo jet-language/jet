@@ -2,7 +2,7 @@
   "meta": {
     "version": 3,
     "currentEpoch": "e3",
-    "nextNum": 183,
+    "nextNum": 184,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -12,7 +12,8 @@
         "epoch:e6",
         "epoch:e4",
         "epoch:e5",
-        "epoch:e7"
+        "epoch:e7",
+        "board-sidequests"
       ]
     }
   },
@@ -3452,6 +3453,11 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-07-02",
+          "by": "agent",
+          "text": "Found and reproduced a real cache-poisoning race in the current build cache (Source/BuildCache.rs + Source/CmdCompile.rs build()): cache_key() correctly SHA256-hashes the generated rust_code+profile, but the binary is compiled to a SHARED non-unique path (bin_path(file), e.g. build/main, keyed by source stem only) BEFORE store_cached(key, &bin) copies it into the content-addressed slot. Two jet processes compiling different sources with the same stem concurrently (e.g. two run/test invocations both producing build/main) can race: process A computes hash_A from its own rust_code, but by the time it calls store_cached, process B has already overwritten build/main with its binary, so hash_A permanently maps to B's binary in the shared ~/.cache/jet/build/ cache. Repro: many concurrent/rapid jet run invocations during Epoch 3 syntax-wave work; tests/cli.rs simple_exec_runs_without_a_manifest started failing (build/main.rs correct, cached binary under the correct hash printed wrong output). Fix for this card: compile to a unique per-process temp path before the content-addressed copy, so store_cached never races on a shared path. Cleared ~/.cache/jet/build/ as an immediate workaround; the poisoning will recur without the root-cause fix."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -6982,7 +6988,7 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "tools/Tower/docs/plans/epoch-3/syntax-wave.md",
       "blockedBy": [],
@@ -7078,6 +7084,11 @@
           "at": "2026-07-02",
           "by": "agent",
           "text": "D-PARSESTR1 (interpolation-as-pattern) and D-TYPEDTEXT1 (Sql/Html typed text, expected-type elaboration + E0149 injection guard + .raw() escape) fully implemented end-to-end: parser/sema/codegen, diagnostics.md entries, tests/ui fixtures, examples+expected, fmt stability tests, syntax-decisions.md rows. D-TYPEDTEXT2 note: sql\"…\"/html\"…\" untyped-binding prefixes NOT implemented (lexer prefix-scan gap, named not hidden) — the no-prefix expected-type path is the common case and fully covers it. db.query NOT migrated to single-Sql-arg form (stays on its existing (sql:String, params:[DbValue]) shape) — out of scope for this ballot."
+        },
+        {
+          "at": "2026-07-02",
+          "by": "agent",
+          "text": "All 16 syntax-wave ballots verified/implemented end-to-end: D-CHAINCMP1, D-TRAILBLOCK1, D-LAMBDAINFER1, D-DESTRUCT1, D-UNITLIT1, D-RANGETYPE1, D-CAPBUNDLE1, D-PREPOST1, D-PERSIST1, D-EFFBUDGET1 were already shipped (quick-verified green this session). Newly implemented this session: D-PARSESTR1 (interpolation-as-pattern, parser+sema+codegen finished, diagnostics/tests/example/fmt added), D-TYPEDTEXT1 (Sql/Html typed text, expected-type elaboration + E0149 injection guard + .raw() escape + .template()/.params()/.text() accessors; note: sql\"...\"/html\"...\" untyped-binding prefixes NOT built, lexer-prefix-scan gap named in docs; db.query NOT migrated off its existing (sql,params) 2-arg form, out of scope), D-ERRCTX1 (.context() lazy boundary message on Result<T,Error>; pre-existing E3002 ?-trace confirmed already wired), D-STREAMYIELD1 (yield/Stream<T> generators — implemented as a real OS thread + rendezvous std::sync::mpsc::sync_channel(0), no coroutine machinery needed since Receiver<T> already implements IntoIterator; full E0805/E0806/E0807 diagnostics). D-UFCS1=B needed no code (docs only, already present). All 16 rows now in syntax-decisions.md. Global exit sweep: full `cargo test` run green (63 binaries, 0 failures) after clearing a pre-existing build-cache poisoning bug found along the way (logged to card #85, unrelated to this card's changes). Card done."
         }
       ],
       "created": "2026-07-01T00:00:00.000Z",
@@ -7284,11 +7295,15 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
       "plan": "tools/Tower/docs/proposals/gameplay-dna.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-02",
+          "text": "4 ballots minted from gameplay-dna.md: D-TAG1, D-PATCH1, D-FIELDPOL1, D-EFFTREE1 (no ID collisions; D-EFFTREE1 is an explicit reopen of ratified D-EFF4/5). Each carries gist/story/inWild/comparisons/options-with-worked-code/rec. Card holds in deciding until owner decides."
+        },
         {
           "at": "2026-07-02",
           "by": "agent",
@@ -7335,6 +7350,22 @@
         }
       ],
       "created": "2026-07-02T16:45:00.523Z",
+      "updated": "2026-07-02"
+    },
+    {
+      "id": "c0h4hnu",
+      "num": 183,
+      "title": "jet expand --facts <lens> (transparency mechanism named by 3 ratified ballots)",
+      "body": "D-METHODMACRO1 (--facts inline), D-REF-SHORTHAND1 (--facts refs), and D-DYNARRAY1 (owner tracking, implicitly) all name jet expand --facts as their transparency surface; it does not exist anywhere in crates/jet-driver or Source/. jai-adoptions.md cross-card notes flag it as its own card rather than three half-built copies. Scope: which lenses ship first (inline, refs), output format, and whether expand without --facts means something. CLI surface details may need a ballot.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "log": [],
+      "created": "2026-07-02T19:42:33.221Z",
       "updated": "2026-07-02"
     }
   ],
@@ -18086,6 +18117,246 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02"
+    },
+    {
+      "id": "D-TAG1",
+      "cardId": "cauegas",
+      "title": "Nested variant groups in `enum`: can a variant hold sub-variants so a group name matches its whole subtree?",
+      "gist": "Can enum variants nest into groups, so testing `.Fire` also matches `.Fire.Burn` and `.Fire.Scald`?",
+      "explainer": "Cross-system code constantly needs a name-tree: damage kinds, permission scopes, diagnostic categories, feature flags. UE ships this as stringly GameplayTags (Damage.Fire.Burn) matched by ancestry, which composes beautifully but renames break silently and there is no counting (two stuns applied, one removed, still stunned). Jet already has closed enums, leading-dot values (D-ENUMDOT1), and the ==-pattern law (S31). This decision adds one axis to `enum`: a variant may group sub-variants, and a group name matches its subtree in == and match arms. No new keyword — the `tag` spelling was killed for colliding with the ratified D-QUAL2 tag qualifier and minting a second closed-name mechanism beside enum (I8). Also on the table: a core `Bag<T>` counted multiset (sibling of Set) so `add`/`remove` counts correctly, and whether `Bag.has(.Fire)` accepts a subtree pattern as sugar for the `any` closure.",
+      "story": "Hank is building the damage system for a roguelike. He has two physical damage kinds, two fire kinds, and cold, and armor should soak any physical hit. Today he lists every physical leaf by hand in the armor check; the day he adds a pierce variant he forgets to update it and armor silently stops working against it. He also tracks active damage-over-time in a Set, so a second fire tick and one cure leaves the target un-burning when it should still burn.",
+      "inWild": "enum Damage {\n    Physical { Blunt, Pierce }\n    Fire { Burn, Scald }\n    Cold\n}\n\nd :: Damage.Fire.Burn\nd == .Fire                     // true — ancestor test via the ratified pattern law (S31)\n\nif d == {\n    .Physical -> armor()       // one arm covers the whole subtree; exhaustive without listing leaves\n    .Fire     -> douse()\n    .Cold     -> warm()\n}\n\nactive: Bag<Damage> := Bag.new()   // counted multiset, sibling of Set\nactive.add(.Fire.Burn)\nactive.add(.Fire.Burn)\nactive.remove(.Fire.Burn)\nactive.has(.Fire.Burn)             // true — one burn left; the stuck-stun bug is gone\nburning :: active.any((t: Damage) => t == .Fire)   // ancestor query, plain closure",
+      "detail": "Recommendation — Option A: Recommend A: it is the one path that makes the tree a compile-time fact (exhaustiveness, rename-safe, LSP-completable) using machinery beginners already know, with counting handled by a plain core container; the `has` sugar (D) can follow as a library call once A ships. · This ballot was minted from tools/Tower/docs/proposals/gameplay-dna.md (card cauegas). Interplay: never propose syntax contradicting a ratified decision; whichever option wins needs formatter emission + a fmt STABILITY test and any new diagnostic gets a code + tests/ui snapshot (I4).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Nested variant groups, leaf-only payloads (recommended)",
+          "detail": "A variant may enclose sub-variants in `{ }`; a group name matches its whole subtree in == and match arms; exhaustiveness is checked at the group level; payloads live on leaves only. Ships alongside a core `Bag<T>` counted multiset so add/remove counts correctly. `Bag.has` stays an explicit `any` closure for subtree queries. Renames become refactors, the LSP completes every `.` level, and a value is always a leaf.",
+          "code": "enum Damage {\n    Physical { Blunt, Pierce }\n    Fire { Burn, Scald }\n    Cold\n}\n\nif d == {\n    .Physical -> armor()   // covers Blunt and Pierce; adding Slash later still routes here\n    .Fire     -> douse()\n    .Cold     -> warm()\n}\nactive: Bag<Damage> := Bag.new()\nactive.add(.Fire.Burn); active.add(.Fire.Burn); active.remove(.Fire.Burn)\nactive.has(.Fire.Burn)   // true"
+        },
+        {
+          "key": "B",
+          "name": "Enum-of-enums (Rust-style nesting, no new syntax)",
+          "detail": "No grammar change: model the tree as separate enums carried as payloads. Ancestor tests become `d is .Physical(_)`; you carry a second type name per group and there is no subtree-level exhaustiveness or dot-path value. Cheapest surface, but the group name is not a value and the compiler cannot see the tree.",
+          "code": "enum Physical { Blunt, Pierce }\nenum Fire { Burn, Scald }\nenum Damage { Physical(Physical), Fire(Fire), Cold }\n\nif d == {\n    .Physical(_) -> armor()   // must remember the payload wildcard\n    .Fire(_)     -> douse()\n    .Cold        -> warm()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Flat enum + naming convention (status quo, reject)",
+          "detail": "Do nothing. Keep `PhysicalBlunt`, `FireBurn` and match ancestry by hand with an else arm. Honest baseline: no new mechanism, but every subtree check is hand-maintained and silently rots when a leaf is added, and there is no counted container so multiset bugs stay.",
+          "code": "enum Damage { PhysicalBlunt, PhysicalPierce, FireBurn, Cold }\n\nfn is_physical(d: Damage) -> Bool {\n    if d == {\n        .PhysicalBlunt   -> true\n        .PhysicalPierce  -> true\n        else -> false          // add PhysicalSlash later: silently wrong\n    }\n}"
+        },
+        {
+          "key": "D",
+          "name": "Grouping plus subtree-pattern sugar on `Bag.has` (A, extended)",
+          "detail": "Everything in A, and additionally `Bag.has(.Fire)` accepts a subtree pattern as sugar for the `any` closure, so counted-multiset ancestor queries read as one call. More reach, one more thing to learn on the container; the sugar must be exactly equivalent to the closure to avoid a second meaning (I8).",
+          "code": "active.add(.Fire.Burn)\nactive.has(.Fire)        // sugar for active.any((t) => t == .Fire)  -> true\nactive.has(.Fire.Scald) // false"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Best current",
+          "note": "Swift nests enums inside enums; ancestor matching is by hand (`if case .physical = d`), no subtree exhaustiveness.",
+          "code": "enum Damage {\n  enum Physical { case blunt, pierce }\n  case physical(Physical)\n  case fire, cold\n}"
+        },
+        {
+          "lang": "Unreal (C++)",
+          "note": "GameplayTags are stringly dot-paths matched by ancestry (`.HasTag(\"Damage.Fire\")` catches `Damage.Fire.Burn`). Renames break silently; no compile check.",
+          "code": "if (Tags.HasTag(FGameplayTag::RequestGameplayTag(\"Damage.Fire\")))\n    Douse();"
+        },
+        {
+          "lang": "Rust",
+          "note": "No grouping axis; nest enum-in-enum and match with a wildcard arm. No subtree name, no counting container in std.",
+          "code": "enum Damage { Physical(Physical), Fire(Fire), Cold }\nmatch d { Damage::Physical(_) => armor(), _ => {} }"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "Discriminated unions with a shared prefix or a nested `kind` field; ancestry is a manual string `startsWith` or a switch group.",
+          "code": "type Damage =\n  | { kind: 'physical'; sub: 'blunt' | 'pierce' }\n  | { kind: 'fire'; sub: 'burn' | 'scald' }\n  | { kind: 'cold' };"
+        }
+      ],
+      "rec": "A",
+      "status": "open"
+    },
+    {
+      "id": "D-PATCH1",
+      "cardId": "cauegas",
+      "title": "`@[Patchable]` derive: generate a typed `T.Patch` change-value you can hold, diff, merge and serialize?",
+      "gist": "Should a derive generate a typed `T.Patch` — an all-optional twin of a struct — that you can hold, apply later, diff, merge and log?",
+      "explainer": "Jet's ratified `.{ }` copy-update (D-COPYUPDATE1) applies a change now. But a change you hold for later — an undo stack, an audit log, an API PATCH body, optimistic-UI predict-then-reconcile — is hand-rolled per type today: an optional-field struct plus a merge function, written again for every record. UE's insight (GameplayEffect) is that a change should be a data value: previewable, loggable, revertible, sendable. This decision picks a derive on the `@` contract plane (like `@Codable`) that generates a nested `T.Patch` struct whose fields are all optional, plus `apply`/`diff`/`merge`, Codable by construction. No new expression syntax — you build a Patch with ordinary `.{ }`. Killed already: relative magnitudes (`level: +1`), which are literal semantics found nowhere else; `invert(base)`, a footgun valid only against its exact base; duration/stacking policy, which is library speculation.",
+      "story": "Doris maintains the employee directory for a mid-size firm. It has an undo button and an audit log. For every kind of record she writes an optional-field struct and a merge function by hand, once per type, forever; and the audit log stores freeform JSON that slowly drifts out of sync with the real field names. She wants one canonical 'here is the change' value she can apply, reverse, and log without writing the plumbing again.",
+      "inWild": "@[Patchable]\nstruct Employee {\n    level: Int\n    title: String\n    team: String\n}\n\npromote :: Employee.Patch.{ level: 4, title: \"Senior\" }   // ordinary .{ } — set fields = the change\nemp2    :: emp.apply(promote)\nundo    :: Employee.diff(emp2, emp)      // the patch that gets you back\nboth    :: promote.merge(relocate)       // right side wins on overlap\naudit.log(promote)                       // Patch is Codable by construction",
+      "detail": "Recommendation — Option A: Recommend A: one canonical, typed, serializable change value (I8) that reuses `.{ }`, pattern-matching and Codable, and kills the hand-rolled-patch bug class outright; the full apply/diff/merge surface is what the driving use cases (undo, audit, optimistic UI, DB partials) actually require. · This ballot was minted from tools/Tower/docs/proposals/gameplay-dna.md (card cauegas). Interplay: never propose syntax contradicting a ratified decision; whichever option wins needs formatter emission + a fmt STABILITY test and any new diagnostic gets a code + tests/ui snapshot (I4).",
+      "options": [
+        {
+          "key": "A",
+          "name": "`@[Patchable]` derive → `T.Patch` struct + apply/diff/merge, Codable (recommended)",
+          "detail": "A derive on the `@` plane generates a nested all-optional `T.Patch` struct plus `apply(base)`, `Type.diff(new, old)`, and `merge(other)`; the Patch is Codable by construction. You construct and read it with skills you already have (`.{ }`, field access, patterns). `apply` is defined in terms of `.{ }` semantics, so there is one meaning of \"edited copy\" (I8 seam: `.{ }` is change-applied-now, Patch is change-as-a-value).",
+          "code": "@[Patchable]\nstruct Employee { level: Int; title: String; team: String }\n\np :: Employee.Patch.{ title: \"Staff\" }\nemp2 :: emp.apply(p)\nback :: Employee.diff(emp2, emp)\nmerged :: p.merge(relocate)\naudit.log(p)                    // encodes as {\"title\":\"Staff\"}"
+        },
+        {
+          "key": "B",
+          "name": "Generic library `Patch<T>` type (no per-struct codegen)",
+          "detail": "A single std generic instead of a derive: one type for all structs, no generated code. But field access becomes dynamic/stringly — you lose field-name completion, compile-checked field names, and exhaustiveness. The value is opaque to the type system, which is exactly what a typed patch was meant to fix.",
+          "code": "p: Patch<Employee> := Patch.new()\np.set(\"title\", \"Staff\")         // field name is a string; typo compiles\nemp2 :: p.apply(emp)"
+        },
+        {
+          "key": "C",
+          "name": "Manual optional-field structs (status quo, reject)",
+          "detail": "Do nothing. Keep hand-writing an optional-field struct and an apply/merge function per record type. No new mechanism, but the plumbing, the diff code, and the audit-log drift all stay, re-implemented everywhere.",
+          "code": "struct EmployeePatch { level: Int?; title: String? }\nfn apply(e: Employee, p: EmployeePatch) -> Employee {\n    e.{ level: p.level ?? e.level, title: p.title ?? e.title }\n}"
+        },
+        {
+          "key": "D",
+          "name": "`@[Patchable]` derive, apply-only (defer diff/merge)",
+          "detail": "Generate `T.Patch` and `apply` only; leave `diff` and `merge` to a later library decision. Smallest surface that still gives one canonical change value and Codable serialization. The cost: undo (diff) and combining changes (merge) — two of the four driving use cases — have no answer yet.",
+          "code": "@[Patchable]\nstruct Employee { level: Int; title: String }\np :: Employee.Patch.{ level: 4 }\nemp2 :: emp.apply(p)            // diff/merge: not yet"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Best current",
+          "note": "TypeScript `Partial<T>` gives the all-optional twin type for free, and JSON Merge Patch (RFC 7386) standardizes apply. But there is no diff, no field-wise merge helper, and null-vs-absent is ambiguous.",
+          "code": "type EmployeePatch = Partial<Employee>;\nconst next = { ...emp, ...promote };   // apply; no diff, no typed merge"
+        },
+        {
+          "lang": "Rust",
+          "note": "No built-in. A derive crate or a hand-written struct of `Option<T>` fields plus an apply fn; diff/merge are bespoke each time.",
+          "code": "struct EmployeePatch { level: Option<i32>, title: Option<String> }\nfn apply(e: Employee, p: EmployeePatch) -> Employee { /* per-field ?? */ }"
+        },
+        {
+          "lang": "Swift",
+          "note": "No built-in partial type. Teams hand-roll an optional-field struct or use key-path writes; no standard diff or merge.",
+          "code": "struct EmployeePatch { var level: Int?; var title: String? }"
+        },
+        {
+          "lang": "Unreal (C++)",
+          "note": "A GameplayEffect is data: a modifier list applied to attributes, previewable and reversible — but game-specific, not a general record patch.",
+          "code": "FGameplayEffectSpec Spec = MakeOutgoingSpec(PromoteEffect);\nASC->ApplyGameplayEffectSpecToSelf(Spec);"
+        }
+      ],
+      "rec": "A",
+      "status": "open"
+    },
+    {
+      "id": "D-FIELDPOL1",
+      "cardId": "cauegas",
+      "title": "Computed struct fields: can a field be a formula over its siblings — `attack: Int => strength*2+gear_mod`?",
+      "gist": "Can a struct field be defined by a formula over its sibling fields, recomputed on every read instead of stored?",
+      "explainer": "UE's attribute sets bake clamping and derivation into the field so no caller can produce a -3 health. Jet already has the clamping half: `type Health :: Int(0..1000)` (D-RANGETYPE1) and `#Invariant` (D-REFINE1). The missing half is a field defined by its siblings. Today that is a zero-arg method — which works, but is invisible to `@Codable` output and, the moment someone stores the value for speed or serialization, goes stale. This decision adds a computed field: `name: T => expr` where the expression reads sibling fields. It recomputes under `.{ }` and patches, appears in Codable encode, is unsettable (assigning it is an error with a fix-it), and takes no parens. The spelling uses `=>` (already 'computes to', from lambdas); `=` is left free for the eventual field-default decision, which every mainstream language spells with `=`. Cycles are a compile error; derived-from-derived is allowed, dependency-ordered.",
+      "story": "Earl is writing the character sheet for a tabletop companion app. Attack power is strength times two plus gear bonus. He stores attack as a plain Int field and computes it in the constructor. A week later a teammate edits strength through a copy-update on the saved character; attack keeps its old value, the sheet shows the wrong number, and the bug hides because everything type-checks.",
+      "inWild": "struct Stats {\n    strength: Int(1..99)\n    gear_mod: Int(-20..20)\n    attack: Int => strength * 2 + gear_mod\n}\n\ns  :: Stats.{ strength: 10, gear_mod: 3 }\ns.attack                     // 23 — never stored, never stale\ns2 :: s.{ strength: 12 }     // 27 in the copy\ns.attack = 99                // error: `attack` is computed; edit `strength`/`gear_mod` instead",
+      "detail": "Recommendation — Option A: Recommend A: the standard cross-language spelling for derived state, it kills the stale-denormalized-field bug class at the source, composes with patches (base/current for free), and keeps one authoring story per job by staying the non-reactive twin of `Computed<T>`. · This ballot was minted from tools/Tower/docs/proposals/gameplay-dna.md (card cauegas). Interplay: never propose syntax contradicting a ratified decision; whichever option wins needs formatter emission + a fmt STABILITY test and any new diagnostic gets a code + tests/ui snapshot (I4).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Computed field `name: T => expr` (recommended)",
+          "detail": "A field whose value is an expression over sibling fields, evaluated on read. Recomputes under `.{ }` and patches, appears in `@Codable` encode, is unsettable (assignment is a teaching error with a fix-it), takes no parens. `=>` already means 'computes to'; `=` stays reserved for the future field-default slot. Cycles are a compile error; derived-from-derived is allowed, dependency-ordered.",
+          "code": "struct Stats {\n    strength: Int(1..99)\n    gear_mod: Int(-20..20)\n    attack: Int => strength * 2 + gear_mod\n}\ns :: Stats.{ strength: 10, gear_mod: 3 }\ns.attack                 // 23\ns.{ strength: 12 }.attack // 27 — correct in the copy, no bookkeeping"
+        },
+        {
+          "key": "B",
+          "name": "Keep zero-arg methods (status quo, honest reject)",
+          "detail": "Do nothing. Derived values stay methods. Semantically the same result, but the value is absent from `@Codable` output, does not recompute inside a copy-update automatically (the method is fine but a stored cache is not), and reads as `s.attack()` with parens. No new spelling — and the stale-cache bug class stays whenever anyone denormalizes for speed or serialization.",
+          "code": "struct Stats { strength: Int; gear_mod: Int }\nimpl Stats { fn attack(self) -> Int { self.strength * 2 + self.gear_mod } }\ns.attack()               // works, but invisible to @Codable"
+        },
+        {
+          "key": "C",
+          "name": "Computed field, excluded from Codable output",
+          "detail": "Same `name: T => expr` spelling and recompute-in-copy behavior, but treated as transient: never encoded, always recomputed on decode. Simpler contract (no encode ambiguity), but loses the base/current-in-the-wire-format win — a client that only has the JSON cannot read the derived value without the schema.",
+          "code": "struct Stats {\n    strength: Int\n    attack: Int => strength * 2   // present at runtime, absent from encode\n}\n// encode(s) -> {\"strength\":10}"
+        },
+        {
+          "key": "D",
+          "name": "`#[Computed]` marker on a method (no new field grammar)",
+          "detail": "Reuse method syntax with a marker that opts the method into Codable output and parens-free access, instead of a new field form. Avoids adding grammar to the struct body, but still reads as a method declaration and introduces a marker to learn; the `=>` field form is the more direct spelling of \"this field is derived\".",
+          "code": "struct Stats { strength: Int; gear_mod: Int }\nimpl Stats {\n    #[Computed] fn attack(self) -> Int { self.strength * 2 + self.gear_mod }\n}\ns.attack                 // no parens, appears in @Codable"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Best current",
+          "note": "Swift computed properties are the standard spelling: a stored-free property with a getter body, no parens at the call site.",
+          "code": "struct Stats {\n  var strength: Int\n  var gearMod: Int\n  var attack: Int { strength * 2 + gearMod }\n}"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "A `val` with a custom getter — same idea, computed on read, no backing field.",
+          "code": "val attack: Int get() = strength * 2 + gearMod"
+        },
+        {
+          "lang": "C#",
+          "note": "Expression-bodied property; recomputes on every access.",
+          "code": "public int Attack => Strength * 2 + GearMod;"
+        },
+        {
+          "lang": "Rust",
+          "note": "No computed fields; you write a method and call `s.attack()`. It is invisible to serde `derive(Serialize)` unless you add attributes by hand.",
+          "code": "impl Stats { fn attack(&self) -> i32 { self.strength * 2 + self.gear_mod } }"
+        }
+      ],
+      "rec": "A",
+      "status": "open"
+    },
+    {
+      "id": "D-EFFTREE1",
+      "cardId": "cauegas",
+      "title": "Reopen D-EFF4/5: make the effect vocabulary a tree with ancestor subsumption (`#(Fs.Read)` under `#(Fs)`)?",
+      "gist": "Reopen the flat effect list: let effects nest so `#(Fs)` accepts any `Fs.*`, and `#(Fs.Read)` rejects an `Fs.Write` callee?",
+      "explainer": "D-EFF4/5 deliberately ratified a flat, closed set of ten effects — Net, Fs, Io, Db, Time, Rand, Env, Exec, Log, Gpu — with NO subsumption (calling a `Net` effect under `#(Io)` is E0740). It was chosen for teachability: ten names, no taxonomy arguments. This is the one gameplay-dna transplant that reopens a decided question, and it carries that burden explicitly. The proposal: re-base the ten names as tree roots so `Fs.Read`, `Fs.Write`, `Net.Http.Get` are leaves, and ancestor matching IS subsumption — the exact same rule as the tag trees in D-TAG1, learned once. `#(Fs)` in a signature would accept any `Fs.*` callee; a `#(Fs.Read)` caller would reject an `Fs.Write` callee; `#Grant` (D-SCAP1) gains subtree precision. Existing flat names stay valid as roots, so there is no migration break. It also settles the acknowledged D-EFF2 subsumption documentation gap structurally. Sequence this last, behind D-TAG1/PATCH1/FIELDPOL1.",
+      "story": "Walter is hardening a backend service. He has a config loader that should only ever read the filesystem, and he wants the compiler to prove it can never delete a file. Today `#(Fs)` is one indivisible capability: read and write are the same grant, so the loader is trusted with deletes and a stray `remove()` slipped past review would type-check clean. Read/write precision on Fs, Db and Net is the refinement his team asks for most.",
+      "inWild": "fn load(path: String) -> Config #(Fs.Read)      // finer than #(Fs)\nfn fetch(url: String) -> Body   #(Net.Http.Get)\n\n#Grant(Fs.Read) { caps -> load(\"app.conf\") }   // grants gain subtree precision\n\n// a #(Fs.Read) caller rejects an Fs.Write callee:\nfn read_only(p: String) #(Fs.Read) { remove(p) }  // error: remove needs Fs.Write, not covered by Fs.Read",
+      "detail": "Recommendation — Option A: Recommend A on the merits: it delivers the most-requested read/write capability precision, unifies subtree matching with D-TAG1 into one rule learned once, and settles the D-EFF2 gap structurally with zero migration break — but it reopens ratified D-EFF4/5, so sequence it last behind the other three. · This ballot was minted from tools/Tower/docs/proposals/gameplay-dna.md (card cauegas). Interplay: never propose syntax contradicting a ratified decision; whichever option wins needs formatter emission + a fmt STABILITY test and any new diagnostic gets a code + tests/ui snapshot (I4).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Effect tree with ancestor subsumption (recommended)",
+          "detail": "The ten ratified names become roots; `Fs.Read`, `Fs.Write`, `Net.Http.Get` are leaves. `#(Fs)` accepts any `Fs.*` callee; `#(Fs.Read)` rejects an `Fs.Write` callee; `#Grant` gains subtree precision. Flat names remain valid as roots, so no existing code breaks. Reverses E0740. Ancestor matching is the same rule as D-TAG1, so a user learns subtree matching once and applies it to enums, tags and effects alike.",
+          "code": "fn load(p: String) -> Config #(Fs.Read)\nfn archive(p: String)         #(Fs.Write)\n\nfn boot() #(Fs) {          // #(Fs) subsumes both children\n    let c = load(\"app.conf\")\n    archive(\"out.tar\")\n}\n#Grant(Fs.Read) { caps -> load(\"app.conf\") }"
+        },
+        {
+          "key": "B",
+          "name": "Keep flat, no subsumption (status quo, defer)",
+          "detail": "Do nothing. Ten names, no taxonomy, E0740 stays; the model stays maximally teachable but there is no read/write precision, and the acknowledged D-EFF2 subsumption gap stays a documentation note rather than a structural answer. Walter cannot prove his loader is read-only.",
+          "code": "fn load(p: String) -> Config #(Fs)   // read and write are one grant\nfn read_only(p: String) #(Fs) { remove(p) }  // type-checks — no way to forbid write"
+        },
+        {
+          "key": "C",
+          "name": "Fixed two-level split on a few effects only",
+          "detail": "Add a curated, closed second level to just the effects that need it — `Fs.Read`/`Fs.Write`, `Net.In`/`Net.Out`, `Db.Read`/`Db.Write` — with no general nesting. Less taxonomy debate than open trees, but the second level is picked arbitrarily by the language and the rule is a special case rather than the general ancestor law shared with D-TAG1.",
+          "code": "fn load(p: String) -> Config #(Fs.Read)   // only the blessed splits exist\nfn fetch(u: String) -> Body   #(Net.Out)\n// no Net.Http.Get — deeper paths are not expressible"
+        },
+        {
+          "key": "D",
+          "name": "Precision via prohibition, not a tree",
+          "detail": "Express read-only by combining the flat name with a D-PROP1 prohibition instead of nesting: `#(Fs) #(!Fs.Write)`. Keeps the ten flat names and adds no hierarchy, but the spelling is compound, `Fs.Write` still has to be a nameable sub-capability (so you half-need the tree anyway), and it does not compose with `#Grant` subtree precision.",
+          "code": "fn read_only(p: String) #(Fs) #(!Fs.Write) { load(p) }  // remove(p) here -> prohibition error"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Best current",
+          "note": "Deno's permission model splits filesystem into --allow-read and --allow-write, and read/write accept path prefixes — hierarchical capability, granted outside the type system.",
+          "code": "deno run --allow-read=./conf --allow-net=api.example.com app.ts"
+        },
+        {
+          "lang": "Unreal (C++)",
+          "note": "GameplayTag subsumption again: a system requiring `Ability.Fire` is satisfied by `Ability.Fire.Fireball`. Same ancestor rule proposed here for effects.",
+          "code": "RequiredTags.AddTag(\"Ability.Fire\");  // Fireball (a child) qualifies"
+        },
+        {
+          "lang": "Koka / effect systems",
+          "note": "Effects are rows of labels with no hierarchy; you get precise per-effect tracking but express read-vs-write as two unrelated labels, not parent/child.",
+          "code": "fun load(p: string) : <fs-read> config"
+        },
+        {
+          "lang": "Rust",
+          "note": "No effect system; capability is by module privacy and the type of the handle you hold (e.g. `&File` vs write methods). No signature-level effect at all.",
+          "code": "fn load(f: &File) -> Config { /* read via &File */ }"
+        }
+      ],
+      "rec": "A",
+      "status": "open"
     }
   ],
   "binder": [
