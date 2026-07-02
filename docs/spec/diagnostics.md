@@ -396,6 +396,8 @@ before continuing.
 | E1310 | parse/sema | variadic parameter not last, or variadic param has a default (D-VARIADIC1) |
 | E1311 | sema  | spread operand is not a list (D-VARIADIC1) |
 | E1312 | sema  | call spread at a callee without a variadic rest parameter (D-VARIADIC1) |
+| E1313 | sema  | trait-bounded variadic call-site argument doesn't implement the bound trait (D-ANY-JAI1) |
+| E1314 | sema  | trait-bounded variadic parameter used outside a `loop x in name { … }` loop (D-ANY-JAI1) |
 | E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
 | E0967 | jetpack | §6 merge conflict: a named source or scalar setting got irreconcilable values |
 | E0968 | jetpack | a module `sources:` entry isn't a `provider@target` ref (U6/U8) |
@@ -580,6 +582,8 @@ parse error.
 | E1310 | A `...` rest parameter is not last, or a variadic parameter has a default value. | A variadic parameter collects every trailing argument, so nothing may follow it; a default would contradict that job. | Move `name: ...T` to the end of the parameter list and remove any `= …` default. |
 | E1311 | A spread operand is not a list. | List spread `[...xs]` and call spread `f(...xs)` expand a list's elements — the operand must be `[T]`. | Spread a list value, or build the list without spread. |
 | E1312 | A call uses spread at a function with no variadic rest parameter. | `f(...xs)` only applies when the callee's final parameter is variadic (`name: ...T`). | Pass arguments individually, or call a function whose last parameter is variadic. |
+| E1313 | `` `{arg}` doesn't implement `{Trait}` `` — a trait-bounded variadic call-site argument fails one of the bound trait(s) (D-ANY-JAI1). | `{param}: ...{Trait}` (or `...[A, B]`) checks every argument against the bound trait(s) — that's how a function like this accepts a mix of types safely, with each argument monomorphized to its own concrete type (zero boxing). | Implement `{Trait}` for the argument's type, or drop the value from this call. |
+| E1314 | `` `{name}` can only be used in a `loop … in {name}` loop here `` — a trait-bounded variadic parameter referenced outside its one supported shape (D-ANY-JAI1). | A trait-bounded variadic's elements can have different concrete types, so there's no single Rust type to give the whole parameter (`.len()`, indexing, passing it on, a second loop, …) outside a loop that visits each argument once. | Iterate it with `loop x in {name} { … }` — that's the only supported use in v1. |
 
 ## Module evaluation diagnostics (jetpack)
 

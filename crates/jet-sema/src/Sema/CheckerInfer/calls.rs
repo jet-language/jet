@@ -2800,7 +2800,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let Some(sig) = self.funcs.get(&call.name).cloned() else {
+        let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
             let mut fix = format!(
                 "define it first ({} {}() {{ ... }}), or call one that exists",
                 Syntax::KW_FN,
@@ -2952,39 +2952,97 @@ impl<'a> Checker<'a> {
         }
 
         let variadic = sig.param_variadic.last().copied().unwrap_or(false);
-        if variadic {
-            self.normalize_variadic_call(call, &sig);
-        } else if call.args.iter().any(|a| a.spread) {
-            self.diags.push(Diagnostic::error(
-                "E1312",
-                format!("`{}` doesn't accept a spread argument", call.name),
-                "call spread `f(...xs)` only works when the callee has a final `...` rest parameter"
-                    .to_string(),
-                "pass arguments individually, or call a function whose last parameter is variadic"
-                    .to_string(),
-                Some(call.name_span),
-            ));
-            for arg in call.args.iter_mut() {
-                if arg.spread {
-                    self.infer(&mut arg.expr);
+        // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
+        // (`...Trait` / `...[A, B]`) can't be packed into one `[T]` list —
+        // its elements can have different concrete types, so there's no single
+        // element type a real list literal could carry. Bound-check the tail
+        // arguments (E1313) against a temporarily *removed* slice so the
+        // ordinary per-index checking below (moves, borrows, type-compat) never
+        // sees them and never re-`infer`s them; `sig` is shrunk (a local, owned
+        // clone) the same way, so the two arg counts still line up. The tail is
+        // spliced back onto `call.args` right before this function returns, so
+        // codegen reads the arity straight off `call.args.len()` same as any
+        // other call.
+        let bound_variadic = variadic
+            .then(|| sig.variadic_bounds.clone())
+            .flatten()
+            .or_else(|| {
+                if !variadic {
+                    return None;
+                }
+                match sig.params.last() {
+                    Some((_, Type::List(elem))) => match elem.as_ref() {
+                        Type::Named(n) if self.trait_reg.is_trait_name(n) => Some(vec![n.clone()]),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            });
+        let mut bound_variadic_tail: Option<Vec<crate::AST::CallArg>> = None;
+        if let Some(bounds) = bound_variadic {
+            let fixed = sig.params.len().saturating_sub(1);
+            if call.args.len() < fixed {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!(
+                        "`{}` expects at least {} argument{}, got {}",
+                        call.name,
+                        fixed,
+                        if fixed == 1 { "" } else { "s" },
+                        call.args.len()
+                    ),
+                    "every fixed parameter must receive a value before the variadic tail"
+                        .to_string(),
+                    format!("check the definition of `{}`", call.name),
+                    Some(call.name_span),
+                ));
+            }
+            let mut tail = if call.args.len() > fixed {
+                call.args.split_off(fixed)
+            } else {
+                Vec::new()
+            };
+            self.check_variadic_bound_tail(call, &sig, &mut tail, &bounds);
+            sig.params.pop();
+            sig.param_info.pop();
+            sig.defaults.pop();
+            sig.param_variadic.pop();
+            bound_variadic_tail = Some(tail);
+        } else {
+            if variadic {
+                self.normalize_variadic_call(call, &sig);
+            } else if call.args.iter().any(|a| a.spread) {
+                self.diags.push(Diagnostic::error(
+                    "E1312",
+                    format!("`{}` doesn't accept a spread argument", call.name),
+                    "call spread `f(...xs)` only works when the callee has a final `...` rest parameter"
+                        .to_string(),
+                    "pass arguments individually, or call a function whose last parameter is variadic"
+                        .to_string(),
+                    Some(call.name_span),
+                ));
+                for arg in call.args.iter_mut() {
+                    if arg.spread {
+                        self.infer(&mut arg.expr);
+                    }
                 }
             }
-        }
 
-        if call.args.len() != sig.params.len() {
-            self.diags.push(Diagnostic::error(
-                "E0104",
-                format!(
-                    "`{}` expects {} argument{}, got {}",
-                    call.name,
-                    sig.params.len(),
-                    if sig.params.len() == 1 { "" } else { "s" },
-                    call.args.len()
-                ),
-                "every argument must match a parameter".to_string(),
-                format!("check the definition of `{}`", call.name),
-                Some(call.name_span),
-            ));
+            if call.args.len() != sig.params.len() {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!(
+                        "`{}` expects {} argument{}, got {}",
+                        call.name,
+                        sig.params.len(),
+                        if sig.params.len() == 1 { "" } else { "s" },
+                        call.args.len()
+                    ),
+                    "every argument must match a parameter".to_string(),
+                    format!("check the definition of `{}`", call.name),
+                    Some(call.name_span),
+                ));
+            }
         }
 
         let fn_type_params = self
@@ -3362,6 +3420,12 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // D-ANY-JAI1: put the (already fully checked) trait-bounded variadic
+        // tail back so codegen sees the real call shape.
+        if let Some(tail) = bound_variadic_tail {
+            call.args.extend(tail);
+        }
+
         Some(sig.return_type.as_ref().map(|t| {
             let t = if generic_subst.is_empty() {
                 t.clone()
@@ -3370,6 +3434,65 @@ impl<'a> Checker<'a> {
             };
             self.resolve_type(t)
         }))
+    }
+
+    /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): check each trait-bounded variadic
+    /// call-site argument against `bounds` (E1313) and infer its type. `tail`
+    /// is the already-split-off trailing slice of `call.args`; the caller
+    /// re-attaches it once the rest of `check_call`'s per-index checking (which
+    /// only understands one shared element type) has run past it.
+    fn check_variadic_bound_tail(
+        &mut self,
+        call: &Call,
+        sig: &crate::AST::FuncSig,
+        tail: &mut [crate::AST::CallArg],
+        bounds: &[String],
+    ) {
+        let param_name = sig
+            .param_info
+            .last()
+            .map(|(n, _)| n.clone())
+            .unwrap_or_default();
+        for arg in tail.iter_mut() {
+            if arg.spread {
+                self.diags.push(Diagnostic::error(
+                    "E1312",
+                    format!("`{}` doesn't accept a spread argument", call.name),
+                    "a trait-bounded variadic (`...Trait` / `...[A, B]`) takes each argument as \
+                     its own type — spread would need one shared list type"
+                        .to_string(),
+                    "pass arguments individually".to_string(),
+                    Some(call.name_span),
+                ));
+                self.infer(&mut arg.expr);
+                continue;
+            }
+            let Some(ty) = self.infer(&mut arg.expr) else {
+                continue;
+            };
+            // D-LIN1: a rest parameter collects by value (S61 defaults/D-VARIADIC1
+            // give it no other convention today), matching the ordinary
+            // homogeneous variadic's move semantics. Mark moved *after*
+            // inferring (inference itself checks "already moved") — same order
+            // the ordinary per-index arg loop below uses.
+            if !ty.is_scalar() {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    self.mark_moved(name.clone(), *span);
+                }
+            }
+            let arg_name = ty.name();
+            for b in bounds {
+                if !self.trait_reg.implements_trait(&arg_name, b) {
+                    self.diags.push(e1313(
+                        &arg_name,
+                        b,
+                        &param_name,
+                        &call.name,
+                        arg.expr.span(),
+                    ));
+                }
+            }
+        }
     }
 
     /// D-VARIADIC1: pack trailing call arguments (and spreads) into the final list
@@ -3490,4 +3613,21 @@ impl<'a> Checker<'a> {
             spread: false,
         });
     }
+}
+
+/// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): E1313 — a trait-bounded variadic
+/// call-site argument doesn't implement one of the bound trait(s).
+fn e1313(arg_ty_name: &str, trait_name: &str, param_name: &str, fn_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1313",
+        format!("`{arg_ty_name}` doesn't implement `{trait_name}`"),
+        format!(
+            "`{param_name}: ...{trait_name}` checks every argument against `{trait_name}` — \
+             that's how `{fn_name}` accepts a mix of types safely"
+        ),
+        format!(
+            "implement `{trait_name}` for `{arg_ty_name}`'s type, or drop the value from this call"
+        ),
+        Some(span),
+    )
 }

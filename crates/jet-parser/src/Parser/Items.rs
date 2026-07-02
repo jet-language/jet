@@ -2782,7 +2782,10 @@ impl<'a> Parser<'a> {
         } else {
             self.expect_ident("for a parameter name")?
         };
-        let (ty, ty_span, variadic) = if matches!(self.peek().kind, TokKind::Colon) {
+        let (ty, ty_span, variadic, variadic_bound_list) = if matches!(
+            self.peek().kind,
+            TokKind::Colon
+        ) {
             self.bump();
             // D-CAP7: the capability sigil rides the type side — `name: ~T`/`^T`/`&T`.
             // (Receivers carry it on `self` instead: `~self`, parsed above.)
@@ -2805,15 +2808,28 @@ impl<'a> Parser<'a> {
             // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
             if matches!(self.peek().kind, TokKind::DotDotDot) {
                 self.bump();
-                let (t, ts) = self.type_()?;
-                (t, ts, true)
+                // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
+                // trait-bound list. `[` never starts a legal *concrete* variadic
+                // element type here (list `[T]` and map `[K, V]` types don't make
+                // sense as a rest-parameter's own element type spelled this way),
+                // so this position always means a bound list. Bare `...Trait` /
+                // `...T` both go through `type_()` unchanged — sema tells a
+                // trait name from a concrete type the same way `resolve_type_name`
+                // already does elsewhere.
+                if matches!(self.peek().kind, TokKind::LBracket) {
+                    let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
+                    (Type::Named(String::new()), bracket_span, true, Some(bounds))
+                } else {
+                    let (t, ts) = self.type_()?;
+                    (t, ts, true, None)
+                }
             } else {
                 let (t, ts) = self.type_()?;
-                (t, ts, false)
+                (t, ts, false, None)
             }
         } else if name == Syntax::KW_SELF {
             // S27: receiver type is the owning struct/enum; sema fills it in.
-            (Type::Named(String::new()), name_span, false)
+            (Type::Named(String::new()), name_span, false, None)
         } else {
             return Err(Diagnostic::error(
                 "E0003",
@@ -2848,6 +2864,7 @@ impl<'a> Parser<'a> {
             ty_span,
             default,
             variadic,
+            variadic_bound_list,
         })
     }
 

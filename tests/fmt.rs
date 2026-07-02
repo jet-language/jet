@@ -1385,3 +1385,59 @@ fn main() {
 ";
     assert_fmt_stable(src, "persist marker");
 }
+
+#[test]
+fn fmt_preserves_variadic_trait_bound_bare() {
+    // D-ANY-JAI1 (c7jaiany): `parts: ...Renderable` — the bare single-trait
+    // bound sugar — must survive byte-for-byte.
+    let src = "\
+fn log_all(parts: ...Renderable) {
+    loop p in parts {
+        print(\"{p}\")
+    }
+}
+
+fn main() {
+    log_all(1, \"two\", true)
+}
+";
+    assert_fmt_stable(src, "bare variadic trait bound");
+}
+
+#[test]
+fn fmt_preserves_variadic_trait_bound_list() {
+    // D-VARARGBOUND1 (c7jaiany, owner-amended): multi-trait bounds are a list
+    // everywhere, never `+` — `parts: ...[Renderable]` (and `...[A, B]` for a
+    // real multi-trait bound) must survive byte-for-byte.
+    let src = "\
+fn log_all(prefix: String, parts: ...[Renderable]) {
+    print(prefix)
+    loop p in parts {
+        print(\"{p}\")
+    }
+}
+
+fn main() {
+    log_all(\"first:\", 1, \"two\")
+    log_all(\"second:\", 3.5, false, \"x\")
+}
+";
+    assert_fmt_stable(src, "list-form variadic trait bound");
+}
+
+#[test]
+fn fmt_preserves_generic_type_param_bound_list() {
+    // D-VARARGBOUND1: the same list-bound spelling applies to an ordinary
+    // S45 generic type parameter, not just variadics — `<T: [A, B]>`, never
+    // `<T: A + B>`. Single-trait bounds stay bare.
+    let src = "\
+trait Loud {
+    fn shout(self) -> String
+}
+
+fn describe<T: [Renderable, Loud]>(item: T) -> String {
+    return item.shout()
+}
+";
+    assert_fmt_stable(src, "generic multi-trait bound list");
+}

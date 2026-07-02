@@ -4,7 +4,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
     self, e0902, e0903, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type,
     unify_types, BUILTIN_TRAITS, COMPARABLE, DEBUG, DECODE, DISPLAY, ENCODE, EQUATABLE, PRINTABLE,
-    SERIALIZE,
+    RENDERABLE, SERIALIZE,
 };
 use crate::Syntax;
 use crate::AST::FuncSig;
@@ -502,6 +502,12 @@ impl TraitRegistry {
     }
 
     pub fn implements_trait(&self, type_name: &str, trait_name: &str) -> bool {
+        // A primitive auto-satisfies the *built-in* trait family (Printable,
+        // Comparable, Renderable, …) — that's always true for every scalar. It
+        // must NOT auto-satisfy an arbitrary user-declared trait (D-ANY-JAI1
+        // fix, c7jaiany): a primitive can't carry a user `impl Int.Loud { }`
+        // (there's nothing to register it under), so falling through to the
+        // ordinary `trait_impls` lookup below correctly says no.
         if matches!(
             type_name,
             Syntax::TYPE_INT
@@ -509,7 +515,8 @@ impl TraitRegistry {
                 | Syntax::TYPE_BOOL
                 | Syntax::TYPE_STRING
                 | Syntax::TYPE_CHAR
-        ) {
+        ) && Generics::is_builtin_trait(trait_name)
+        {
             return true;
         }
         if self
@@ -529,6 +536,15 @@ impl TraitRegistry {
                 .derives
                 .get(type_name)
                 .is_some_and(|d| d.contains(trait_name)),
+            // D-ANY-JAI1: `Renderable` = anything codegen already gives a
+            // `JetDisplay` impl — the S55 auto-printable derive, or an explicit
+            // `impl Type.Display`.
+            RENDERABLE => {
+                self.auto_printable.contains(type_name)
+                    || self
+                        .trait_impls
+                        .contains(&(type_name.to_string(), DISPLAY.to_string()))
+            }
             _ => false,
         }
     }
@@ -665,6 +681,7 @@ impl TraitRegistry {
                 convention: AccessConvention::Read,
                 default: None,
                 variadic: false,
+                variadic_bound_list: None,
             }],
             return_type: Some(Type::Named("Snapshot".to_string())),
             is_view_return: false,
@@ -686,6 +703,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Write,
                     default: None,
                     variadic: false,
+                    variadic_bound_list: None,
                 },
                 crate::AST::Param {
                     name: "snap".to_string(),
@@ -695,6 +713,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Move,
                     default: None,
                     variadic: false,
+                    variadic_bound_list: None,
                 },
             ],
             return_type: None,
@@ -751,6 +770,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Write,
                     default: None,
                     variadic: false,
+                    variadic_bound_list: None,
                 }],
                 return_type: Some(Type::Option(Box::new(Type::Named("Item".to_string())))),
                 is_view_return: false,
@@ -784,6 +804,7 @@ impl TraitRegistry {
                     convention: AccessConvention::Move,
                     default: None,
                     variadic: false,
+                    variadic_bound_list: None,
                 }],
                 return_type: Some(Type::Named("Iter".to_string())),
                 is_view_return: false,
@@ -818,6 +839,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Read,
                         default: None,
                         variadic: false,
+                        variadic_bound_list: None,
                     },
                     crate::AST::Param {
                         name: "k".to_string(),
@@ -827,6 +849,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Move,
                         default: None,
                         variadic: false,
+                        variadic_bound_list: None,
                     },
                 ],
                 return_type: Some(Type::Option(Box::new(Type::Named("Value".to_string())))),
@@ -862,6 +885,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Write,
                         default: None,
                         variadic: false,
+                        variadic_bound_list: None,
                     },
                     crate::AST::Param {
                         name: "k".to_string(),
@@ -871,6 +895,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Move,
                         default: None,
                         variadic: false,
+                        variadic_bound_list: None,
                     },
                     crate::AST::Param {
                         name: "v".to_string(),
@@ -880,6 +905,7 @@ impl TraitRegistry {
                         convention: AccessConvention::Move,
                         default: None,
                         variadic: false,
+                        variadic_bound_list: None,
                     },
                 ],
                 return_type: None,
@@ -926,6 +952,7 @@ impl TraitRegistry {
                 convention: self_conv,
                 default: None,
                 variadic: false,
+                variadic_bound_list: None,
             }],
             return_type: ret,
             is_view_return: false,

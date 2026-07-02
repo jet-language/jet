@@ -155,6 +155,7 @@ mod tests {
             ty_span: zero(),
             default: None,
             variadic: false,
+            variadic_bound_list: None,
         }
     }
 

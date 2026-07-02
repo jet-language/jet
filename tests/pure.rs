@@ -176,6 +176,7 @@ fn main() {
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+                    variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
                     is_must_use: f.is_must_use,
                 },
             );
@@ -251,6 +252,7 @@ fn main() {
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+                    variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
                     is_must_use: f.is_must_use,
                 },
             );
@@ -318,6 +320,7 @@ fn main() {
                         .map(|p| p.default.as_ref().map(|d| *d.clone()))
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+                    variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
                     is_must_use: f.is_must_use,
                 },
             );

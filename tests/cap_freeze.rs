@@ -69,6 +69,7 @@ fn snapshot_freezes_resolved_sigils_round_trip() {
         ty_span: z,
         default: None,
         variadic: false,
+        variadic_bound_list: None,
     };
     let func = |name: &str, is_pub: bool, params: Vec<Param>| {
         Item::Func(Func {
@@ -148,6 +149,7 @@ fn fingerprint_folds_in_capability_digest() {
                 ty_span: z,
                 default: None,
                 variadic: false,
+                variadic_bound_list: None,
             }],
             return_type: None,
             is_view_return: false,

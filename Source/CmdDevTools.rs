@@ -662,6 +662,10 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .map(|p| p.default.as_ref().map(|d| *d.clone()))
                             .collect(),
                         param_variadic: f.params.iter().map(|p| p.variadic).collect(),
+                        variadic_bounds: f
+                            .params
+                            .last()
+                            .and_then(|p| p.variadic_bound_list.clone()),
                     },
                 );
                 ast_funcs.insert(f.name.clone(), f);

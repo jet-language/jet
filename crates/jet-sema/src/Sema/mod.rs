@@ -336,6 +336,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
         param_variadic,
+        variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: f.return_type.clone(),
         is_view_return: f.is_view_return,
         is_extern: false,
@@ -363,6 +364,7 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
         defaults: ef.params.iter().map(|_| None).collect(),
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
+        variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: ef.return_type.clone(),
         is_view_return: ef.is_view_return,
         is_extern: true,

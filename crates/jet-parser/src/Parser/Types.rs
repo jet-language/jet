@@ -134,18 +134,38 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    fn parse_trait_bounds(&mut self) -> Result<Vec<String>, Diagnostic> {
+    /// S45 multi-trait bounds, D-VARARGBOUND1-amended: a consistent list form
+    /// everywhere — `<T: [A, B]>`, never `<T: A + B>`. Single-trait bounds stay
+    /// bare (`<T: A>`).
+    pub(super) fn parse_trait_bounds(&mut self) -> Result<Vec<String>, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LBracket) {
+            let (bounds, _) = self.parse_bracket_trait_bound_list()?;
+            Ok(bounds)
+        } else {
+            let (name, _) = self.expect_ident("for a trait bound")?;
+            Ok(vec![name])
+        }
+    }
+
+    /// D-VARARGBOUND1: `[TraitA, TraitB, …]` — the bracketed multi-trait-bound
+    /// list, the cursor at `[`. Shared by `<T: [A, B]>` (via `parse_trait_bounds`)
+    /// and the variadic bound position `...[A, B]` (D-ANY-JAI1, `Items.rs::param`).
+    pub(super) fn parse_bracket_trait_bound_list(&mut self) -> Result<(Vec<String>, Span), Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::LBracket, "to open a trait-bound list")?;
         let mut bounds = Vec::new();
         loop {
             let (name, _) = self.expect_ident("for a trait bound")?;
             bounds.push(name);
-            if matches!(self.peek().kind, TokKind::Plus) {
+            if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
                 continue;
             }
             break;
         }
-        Ok(bounds)
+        let end = self.peek().span;
+        self.expect(TokKind::RBracket, "to close the trait-bound list")?;
+        Ok((bounds, Span::new(start.start, end.end)))
     }
 
     pub(super) fn parse_type_path(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {

@@ -519,7 +519,21 @@ impl<'a> Fmt<'a> {
             if let Some(s) = sigil {
                 self.write(s);
             }
-            self.fmt_type(&p.ty);
+            // D-VARIADIC1: `name: ...T` — the rest-parameter marker.
+            // D-ANY-JAI1/D-VARARGBOUND1: `...Trait` (bare — falls through to the
+            // ordinary `fmt_type` below, same as a concrete `...T`) or
+            // `...[TraitA, TraitB]` (the explicit bound-list form).
+            if p.variadic {
+                self.write("...");
+            }
+            match &p.variadic_bound_list {
+                Some(bounds) => {
+                    self.write("[");
+                    self.write(&bounds.join(", "));
+                    self.write("]");
+                }
+                None => self.fmt_type(&p.ty),
+            }
         }
         // S61: a trailing parameter may carry a `= default` value.
         if let Some(default) = &p.default {

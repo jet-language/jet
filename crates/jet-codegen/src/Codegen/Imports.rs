@@ -467,6 +467,12 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             if f.name == "main" && !include_main {
                 continue;
             }
+            // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
+            // (`...Trait` / `...[A, B]`) has no single Rust signature — it's
+            // emitted per call-site arity below instead (`VariadicBound.rs`).
+            if cx.variadic_bound_fns.contains_key(&f.name) {
+                continue;
+            }
             emit_func(cx, f, out);
         }
     }
@@ -476,6 +482,9 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             if let Some(body) = &cm.body {
                 for inner in body {
                     if let Item::Func(f) = inner {
+                        if cx.variadic_bound_fns.contains_key(&f.name) {
+                            continue;
+                        }
                         let mut mangled_f = f.clone();
                         mangled_f.name = format!("{}__{}", cm.name, f.name);
                         emit_func(cx, &mangled_f, out);
@@ -484,4 +493,8 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             }
         }
     }
+    // D-ANY-JAI1: emit exactly the per-arity specializations call sites above
+    // actually needed (`Cx::needed_variadic_arities`, populated while lowering
+    // those call sites — see `TIR/lower.rs::lower_variadic_bound_call`).
+    crate::Codegen::VariadicBound::emit_variadic_bound_specializations(cx, items, out);
 }

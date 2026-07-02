@@ -5,8 +5,8 @@ use crate::Numeric::{allows_float_money, is_money_like_name};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, ConstAttr, DistinctDef, EnumDef, Expr, Func, Item, Param, Program,
-    RustConstKind, StructDef, Type,
+    AccessConvention, ConstAttr, DistinctDef, ElseBranch, EnumDef, Expr, Func, IfStmt, Item,
+    Param, Program, RustConstKind, Stmt, StructDef, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -15,8 +15,12 @@ impl<'a> Checker<'a> {
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
         for p in &f.params {
-            let skip_type_check =
-                p.name == Syntax::KW_SELF && matches!(&p.ty, Type::Named(n) if n.is_empty());
+            // D-ANY-JAI1: the `...[TraitA, TraitB]` bound-list form parses `ty`
+            // as an unused `Type::Named("")` placeholder (the real bound list is
+            // `variadic_bound_list`) — nothing to declared-type-check there.
+            let skip_type_check = (p.name == Syntax::KW_SELF
+                || p.variadic_bound_list.is_some())
+                && matches!(&p.ty, Type::Named(n) if n.is_empty());
             if !skip_type_check {
                 let pty = self.resolve_type(p.ty.clone());
                 self.check_declared_type(&pty, p.ty_span);
@@ -44,7 +48,29 @@ impl<'a> Checker<'a> {
                 self.diags.push(already_defined(&p.name, p.name_span));
             } else {
                 let pty = self.resolve_type(if p.variadic {
-                    Type::List(Box::new(p.ty.clone()))
+                    // D-ANY-JAI1: a trait-bounded variadic (`...Trait` /
+                    // `...[A, B]`) binds its loop element as a `Type::TraitObject`
+                    // of the bound trait, reusing the existing boxed-dispatch
+                    // method/interpolation checking unchanged for the body-check
+                    // pass only (codegen never sees this type — its own
+                    // per-call-site synthesis in `Codegen/VariadicBound.rs` binds
+                    // the loop var to a bare generic type param instead, so
+                    // there's no boxing in the generated Rust).
+                    // KNOWN v1 GAP: `Type::TraitObject` holds one trait name, so a
+                    // multi-bound list (`...[A, B]`) only wires up `bounds[0]` here
+                    // — a method call on the loop var resolves against the FIRST
+                    // bound trait only. Interpolation (`{p}`, gated by
+                    // `Diagnostics::is_displayable`) and call-site bound checking
+                    // (E1313, `CheckerInfer/calls.rs::check_variadic_bound_tail`,
+                    // which DOES check every bound) are unaffected — this only
+                    // narrows what the loop *body* can call on `p` when there's
+                    // more than one bound trait and the method lives on a
+                    // non-first one. Fixing it needs `Type::TraitObject` to carry
+                    // a trait list, a broader change than this card's scope.
+                    match p.variadic_trait_bounds(|n| self.trait_reg.is_trait_name(n)) {
+                        Some(bounds) => Type::List(Box::new(Type::TraitObject(bounds[0].clone()))),
+                        None => Type::List(Box::new(p.ty.clone())),
+                    }
                 } else {
                     p.ty.clone()
                 });
@@ -146,6 +172,12 @@ impl<'a> Checker<'a> {
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
         self.check_block(&mut f.body, false);
         self.in_unsafe = prev_unsafe;
+        // D-ANY-JAI1: a trait-bounded variadic has no zero-cost representation
+        // for arbitrary use (heterogeneous elements, no boxing allowed) — codegen
+        // only covers one shape, a direct `loop x in parts { … }` loop, unrolled
+        // per call site's arity. Reject anything else here (E1314) so codegen
+        // never has to guess.
+        self.check_variadic_bound_body_shape(f);
         self.lint_unjoined_tasks_in_current_scope();
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
@@ -171,6 +203,291 @@ impl<'a> Checker<'a> {
                 Some(f.name_span),
             ));
         }
+    }
+
+    /// D-ANY-JAI1 (c7jaiany): validate that a trait-bounded variadic parameter
+    /// is used *only* as the collection of a single top-level `loop x in parts {
+    /// … }` loop — the one shape `crates/jet-codegen/src/Codegen/VariadicBound.rs`
+    /// unrolls per call-site arity. `parts` has no zero-cost Rust representation
+    /// outside that loop (heterogeneous elements, boxing is disallowed), so any
+    /// other reference — a bare read, `.len()`, indexing, a second loop, passing
+    /// it to another call, use inside a nested block (`#Unsafe { }`, `if`, …) —
+    /// is E1314. v1 scope, matching the plan's "conservative v1" call for this
+    /// card: exactly the shape the ballot's own `log_all` example needs.
+    fn check_variadic_bound_body_shape(&mut self, f: &Func) {
+        let Some(last) = f.params.last() else {
+            return;
+        };
+        if last
+            .variadic_trait_bounds(|n| self.trait_reg.is_trait_name(n))
+            .is_none()
+        {
+            return;
+        }
+        let name = last.name.clone();
+        let mut for_hits = 0usize;
+        let mut other: Vec<Span> = Vec::new();
+        for s in &f.body {
+            scan_stmt_for_variadic_uses(s, &name, true, &mut for_hits, &mut other);
+        }
+        if for_hits > 1 {
+            other.push(last.name_span);
+        }
+        for span in other {
+            self.diags.push(e1314(&name, span));
+        }
+    }
+}
+
+/// D-ANY-JAI1: E1314 — a trait-bounded variadic parameter used outside the
+/// one supported shape (a direct `loop x in name { … }` loop).
+fn e1314(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1314",
+        format!("`{name}` can only be used in a `loop … in {name}` loop here"),
+        format!(
+            "`{name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can \
+             have different concrete types, so there's no single Rust type to give `{name}` \
+             outside a loop that visits each argument once"
+        ),
+        format!("iterate it with `loop x in {name} {{ … }}` — that's the only supported use"),
+        Some(span),
+    )
+}
+
+/// Walk one statement looking for uses of `name` (a trait-bounded variadic
+/// parameter). `top_level` is true only for statements directly in the
+/// function body (not nested in `if`/`while`/`loop`/`switch`/…) — the blessed
+/// `loop x in name { … }` shape is only recognized there; `for_hits` counts how
+/// many times it's seen; every other reference to `name` lands in `other`.
+fn scan_stmt_for_variadic_uses(
+    s: &Stmt,
+    name: &str,
+    top_level: bool,
+    for_hits: &mut usize,
+    other: &mut Vec<Span>,
+) {
+    match s {
+        Stmt::For {
+            var2: None,
+            kind: crate::AST::ForKind::In { collection },
+            body,
+            label: None,
+            ..
+        } if top_level && matches!(collection, Expr::Ident(n, _) if n == name) => {
+            *for_hits += 1;
+            for st in body {
+                scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+            }
+        }
+        Stmt::Expr(e) | Stmt::Return(Some(e), _) => expr_uses(e, name, other),
+        Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => {}
+        Stmt::Val(b) => expr_uses(&b.init, name, other),
+        Stmt::Assign { target, value, .. } => {
+            match target {
+                crate::AST::LValue::Index { base, index, .. } => {
+                    expr_uses(base, name, other);
+                    expr_uses(index, name, other);
+                }
+                crate::AST::LValue::Field { base, .. } => expr_uses(base, name, other),
+                crate::AST::LValue::Local { name: n, name_span } => {
+                    if n == name {
+                        other.push(*name_span);
+                    }
+                }
+            }
+            expr_uses(value, name, other);
+        }
+        Stmt::If(ifs) => scan_if(ifs, name, for_hits, other),
+        Stmt::While { cond, body, .. } => {
+            expr_uses(cond, name, other);
+            for st in body {
+                scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+            }
+        }
+        Stmt::For {
+            kind, body, span, ..
+        } => {
+            match kind {
+                crate::AST::ForKind::Range { start, end, step } => {
+                    expr_uses(start, name, other);
+                    expr_uses(end, name, other);
+                    if let Some(s) = step {
+                        expr_uses(s, name, other);
+                    }
+                }
+                crate::AST::ForKind::In { collection } => {
+                    if matches!(collection, Expr::Ident(n, _) if n == name) {
+                        other.push(*span);
+                    } else {
+                        expr_uses(collection, name, other);
+                    }
+                }
+            }
+            for st in body {
+                scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+            }
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
+            expr_uses(subject, name, other);
+            for arm in arms {
+                expr_uses(&arm.cond, name, other);
+                for st in &arm.body {
+                    scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+                }
+            }
+            if let Some(body) = else_body {
+                for st in body {
+                    scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+                }
+            }
+        }
+        Stmt::Loop { body, .. } => {
+            for st in body {
+                scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+            }
+        }
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            expr_uses(&init.init, name, other);
+            expr_uses(cond, name, other);
+            scan_stmt_for_variadic_uses(step, name, false, for_hits, other);
+            for st in body {
+                scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+            }
+        }
+        // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
+        // `region`, `taskgroup`, `#Transact`, `comptime { }`, …) is out of scope
+        // for v1 — a trait-bounded variadic used inside one of these isn't
+        // caught here; codegen's own "internal compiler error" guard
+        // (`VariadicBound.rs`) is the backstop.
+        _ => {}
+    }
+}
+
+fn scan_if(ifs: &IfStmt, name: &str, for_hits: &mut usize, other: &mut Vec<Span>) {
+    expr_uses(&ifs.cond, name, other);
+    for st in &ifs.then_body {
+        scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+    }
+    match &ifs.else_branch {
+        Some(ElseBranch::ElseIf(inner)) => scan_if(inner, name, for_hits, other),
+        Some(ElseBranch::Else(body)) => {
+            for st in body {
+                scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
+            }
+        }
+        None => {}
+    }
+}
+
+/// Best-effort (not exhaustive — mirrors `Purity.rs`'s existing call-collector
+/// coverage) scan of an expression for a bare `Ident(name)`.
+fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
+    match e {
+        Expr::Ident(n, span) => {
+            if n == name {
+                other.push(*span);
+            }
+        }
+        Expr::Call(c) => {
+            for a in &c.args {
+                expr_uses(&a.expr, name, other);
+            }
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            expr_uses(receiver, name, other);
+            for a in args {
+                expr_uses(&a.expr, name, other);
+            }
+        }
+        Expr::CallValue { callee, args, .. } => {
+            expr_uses(callee, name, other);
+            for a in args {
+                expr_uses(&a.expr, name, other);
+            }
+        }
+        Expr::FanOut { callee, items, .. } => {
+            expr_uses(callee, name, other);
+            for item in items {
+                expr_uses(item, name, other);
+            }
+        }
+        Expr::Binary(_, l, r, _) => {
+            expr_uses(l, name, other);
+            expr_uses(r, name, other);
+        }
+        Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
+        | Expr::Field(inner, _, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Tainted(inner, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _) => expr_uses(inner, name, other),
+        Expr::OptField { base, .. } => expr_uses(base, name, other),
+        Expr::Index { base, index, .. } => {
+            expr_uses(base, name, other);
+            expr_uses(index, name, other);
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            expr_uses(base, name, other);
+            expr_uses(start, name, other);
+            expr_uses(end, name, other);
+        }
+        Expr::ListLit(items, _) => {
+            for i in items {
+                expr_uses(i, name, other);
+            }
+        }
+        Expr::MapLit(pairs, _) => {
+            for (k, v) in pairs {
+                expr_uses(k, name, other);
+                expr_uses(v, name, other);
+            }
+        }
+        Expr::StructLit { fields, .. } => {
+            for (_, _, v) in fields {
+                expr_uses(v, name, other);
+            }
+        }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, v) in fields {
+                expr_uses(v, name, other);
+            }
+        }
+        Expr::EnumLit { args, .. } => {
+            for a in args {
+                let e = match a {
+                    crate::AST::EnumLitArg::Positional(e) => e,
+                    crate::AST::EnumLitArg::Named { expr, .. } => expr,
+                };
+                expr_uses(e, name, other);
+            }
+        }
+        Expr::Str(parts, _) => {
+            for p in parts {
+                if let crate::AST::StrPart::Interp(inner, _) = p {
+                    expr_uses(inner, name, other);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1843,6 +2160,7 @@ pub(crate) fn check_error_conv_body(
             convention: AccessConvention::Move,
             default: None,
             variadic: false,
+            variadic_bound_list: None,
         }],
         return_type: Some(Type::Named(ec.to_ty.clone())),
         is_view_return: false,
@@ -2143,6 +2461,7 @@ pub(crate) fn synthesize_delegation_method(
         ty_span: zero,
         default: None,
         variadic: false,
+        variadic_bound_list: None,
     };
 
     let mut params = vec![self_param];
@@ -2197,6 +2516,7 @@ pub(crate) fn synthesize_default_method(
         ty_span: zero,
         default: None,
         variadic: false,
+        variadic_bound_list: None,
     };
     let mut params = vec![self_param];
     params.extend(

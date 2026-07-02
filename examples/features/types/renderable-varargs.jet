@@ -1,0 +1,28 @@
+// D-ANY-JAI1/D-VARARGBOUND1: `parts: ...Renderable` — a trait-bounded
+// heterogeneous variadic. Each call-site argument is checked against
+// `Renderable` and monomorphized to its own concrete type — zero boxing, no
+// dynamic dispatch. `Renderable` is satisfied by anything already
+// interpolatable (`{value}`): every primitive, and any struct/enum that's
+// auto-printable or has an explicit `Display` impl.
+fn log_all(parts: ...Renderable) {
+    loop p in parts {
+        print("{p}")
+    }
+}
+
+struct Point {
+    x: Int
+    y: Int
+
+    impl Display {
+        fn display(self) -> String {
+            return "({self.x}, {self.y})"
+        }
+    }
+}
+
+fn main() {
+    p :: Point.{ x: 3, y: 4 }
+    log_all(1, "two", true, p)
+    log_all(3.5, false)
+}

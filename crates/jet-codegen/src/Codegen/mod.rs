@@ -25,6 +25,7 @@ mod Statement;
 pub mod TIR;
 mod Tuples;
 mod Utils;
+mod VariadicBound;
 mod Web;
 
 pub(crate) use CModule::*;

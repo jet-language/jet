@@ -1,0 +1,7 @@
+Error [E1314]: `parts` can only be used in a `loop … in parts` loop here
+  --> tests/ui/variadic_bound_body_shape.jet:4:11
+    |
+  4 |     print(parts.len())
+    |           ^^^^^
+ Why: `parts` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can have different concrete types, so there's no single Rust type to give `parts` outside a loop that visits each argument once
+ Fix: iterate it with `loop x in parts { … }` — that's the only supported use

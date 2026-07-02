@@ -459,7 +459,13 @@ pub(crate) fn is_displayable(ty: &Type, trait_reg: &crate::Traits::TraitRegistry
                 || args.iter().all(|a| is_displayable(a, trait_reg))
         }
         Type::Tuple(fields) => fields.iter().all(|(_, t)| is_displayable(t, trait_reg)),
-        Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
+        // D-ANY-JAI1 (c7jaiany): the one blessed trait-object shape that IS
+        // displayable — `Renderable` means "has `JetDisplay`" by construction
+        // (see `TraitRegistry::implements_trait`), so a `Renderable` trait-object
+        // value (the loop element of a trait-bounded variadic) is interpolatable.
+        // Every other bare trait-object stays non-displayable.
+        Type::TraitObject(t) => t == Generics::RENDERABLE,
+        Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_displayable(elem, trait_reg),
         Type::Tagged { inner, .. } => is_displayable(inner, trait_reg),
     }

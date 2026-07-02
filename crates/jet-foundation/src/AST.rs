@@ -1292,6 +1292,38 @@ pub struct Param {
     pub default: Option<Box<Expr>>,
     /// D-VARIADIC1: `name: ...T` — last parameter only; `ty` is the element type.
     pub variadic: bool,
+    /// D-ANY-JAI1/D-VARARGBOUND1: `name: ...[TraitA, TraitB]` — an explicit
+    /// trait-bound list on a variadic parameter (heterogeneous elements, one
+    /// generic type slot per call-site argument, checked+monomorphized, zero
+    /// boxing). `None` for a bare `name: ...T` — that covers both the
+    /// D-VARIADIC1 homogeneous-concrete-type form and the `...Trait`
+    /// single-bound sugar; sema tells the two apart the same way
+    /// `resolve_type_name` already does (is `T` a registered trait name?).
+    /// When `Some`, `ty`/`ty_span` are an unused placeholder (`Type::Named("")`
+    /// spanning the bracket list).
+    pub variadic_bound_list: Option<Vec<String>>,
+}
+
+impl Param {
+    /// D-ANY-JAI1/D-VARARGBOUND1: the resolved trait-bound list for a variadic
+    /// parameter, or `None` when it's the plain D-VARIADIC1 homogeneous-concrete
+    /// form. `is_trait_name` lets each crate plug in its own trait-name lookup
+    /// (`TraitRegistry::is_trait_name` in sema, `Cx::trait_names` in codegen) —
+    /// the classification rule itself lives once, here.
+    pub fn variadic_trait_bounds(&self, is_trait_name: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+        if !self.variadic {
+            return None;
+        }
+        if let Some(list) = &self.variadic_bound_list {
+            return if list.is_empty() { None } else { Some(list.clone()) };
+        }
+        if let Type::Named(n) = &self.ty {
+            if !n.is_empty() && is_trait_name(n) {
+                return Some(vec![n.clone()]);
+            }
+        }
+        None
+    }
 }
 
 /// D-REPRC1 / D-SOA1 (ratified): the variant of `#layout(…)` on a struct.
@@ -2709,6 +2741,12 @@ pub struct FuncSig {
     pub defaults: Vec<Option<Expr>>,
     /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
     pub param_variadic: Vec<bool>,
+    /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): the trailing variadic parameter's
+    /// resolved trait-bound list (`Param::variadic_trait_bounds`), or `None` for
+    /// a non-variadic function or a plain D-VARIADIC1 homogeneous-concrete-type
+    /// variadic. Call-site checking (E1313) and codegen's per-arity
+    /// monomorphization both key off this.
+    pub variadic_bounds: Option<Vec<String>>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

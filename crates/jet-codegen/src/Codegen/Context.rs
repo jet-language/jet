@@ -115,6 +115,22 @@ pub(crate) struct Cx {
     /// (`emit_bundle_dbg`); false (the default) is byte-identical to today's output,
     /// so normal builds, `jet test`, and the JIT tier never see a marker.
     pub(crate) debug_linemap: bool,
+    /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): trait-bounded variadic function
+    /// name -> (fixed param count, resolved trait-bound list). Populated once
+    /// from each `Item::Func`'s trailing param; call-site lowering
+    /// (`TIR/lower.rs`) reads this to route to the per-arity monomorphized
+    /// function `Codegen/VariadicBound.rs` synthesizes instead of the normal
+    /// single Rust function a plain generic gets.
+    pub(crate) variadic_bound_fns: HashMap<String, (usize, Vec<String>)>,
+    /// Arities actually called, discovered while lowering ordinary function
+    /// bodies — the one traversal already guaranteed to visit every call site,
+    /// so this can never miss one the way a separate scan could. Drained after
+    /// the main function-emission pass to emit exactly the specializations
+    /// that are needed (`Codegen/VariadicBound.rs`). `BTreeMap`/`BTreeSet` (not
+    /// `Hash*`) so the emission order is deterministic — golden output must be
+    /// byte-stable across runs.
+    pub(crate) needed_variadic_arities:
+        std::cell::RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<usize>>>,
 }
 
 pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
@@ -811,6 +827,8 @@ pub(crate) fn build_cx_items(
         struct_type_params: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
+        variadic_bound_fns: HashMap::new(),
+        needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
     };
 
     for item in items {
@@ -856,6 +874,18 @@ pub(crate) fn build_cx_items(
                         effect_bound: None,
                     },
                 );
+                // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
+                // (`...Trait` / `...[A, B]`) has no single Rust signature — record
+                // it so call-site lowering routes to the per-arity function
+                // `Codegen/VariadicBound.rs` synthesizes instead of a normal call.
+                if let Some(last) = f.params.last() {
+                    if let Some(bounds) =
+                        last.variadic_trait_bounds(|n| crate::Generics::is_builtin_trait(n))
+                    {
+                        cx.variadic_bound_fns
+                            .insert(f.name.clone(), (f.params.len() - 1, bounds));
+                    }
+                }
             }
             Item::Struct(s) => {
                 cx.type_names.insert(s.name.clone());

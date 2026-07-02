@@ -3374,6 +3374,17 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
             }
+            // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a call to a trait-bounded
+            // variadic function — sema left the trailing args unpacked
+            // (`CheckerInfer/calls.rs::check_variadic_bound_tail`), so the arity
+            // is just "how many args past the fixed prefix". Route to the
+            // per-arity function `VariadicBound.rs` synthesizes; record the
+            // arity so the post-pass in `Codegen/mod.rs` knows to emit it.
+            if let Some((fixed, _bounds)) = cx.variadic_bound_fns.get(&call.name).cloned() {
+                return crate::Codegen::VariadicBound::lower_variadic_bound_call(
+                    call, fixed, cx, env,
+                );
+            }
             // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
             // decided here, totally — via the shared `lower_one_call_arg` (the single
             // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed

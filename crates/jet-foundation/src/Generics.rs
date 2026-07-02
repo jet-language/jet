@@ -16,8 +16,19 @@ pub const SERIALIZE: &str = "Serialize";
 /// both; `@[Encode]`/`@[Decode]` derive one. They lower to `user_Encode`/`user_Decode`.
 pub const ENCODE: &str = "Encode";
 pub const DECODE: &str = "Decode";
+/// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): `Renderable` — the trait-bounded
+/// heterogeneous variadic's blessed bound (`parts: ...Renderable`). Alias for
+/// `JetDisplay` (`crates/jet-codegen/src/Prelude/Core.rs`), the Rust trait Jet's
+/// own `{value}` string interpolation already generates/consumes: any type
+/// that's already interpolatable already satisfies `Renderable`, with zero new
+/// user-facing trait to implement. Chose alias-not-rename: `JetDisplay` is an
+/// internal codegen name (never spelled by a user), so renaming it bought
+/// nothing and would have touched every `Prelude/Core.rs` blanket impl.
+pub const RENDERABLE: &str = "Renderable";
 
-pub const BUILTIN_TRAITS: &[&str] = &[PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE];
+pub const BUILTIN_TRAITS: &[&str] = &[
+    PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE,
+];
 
 pub fn is_builtin_trait(name: &str) -> bool {
     BUILTIN_TRAITS.contains(&name)
@@ -34,6 +45,7 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         SERIALIZE => Some("user_Serialize"),
         ENCODE => Some("user_Encode"),
         DECODE => Some("user_Decode"),
+        RENDERABLE => Some("JetDisplay"),
         _ => None,
     }
 }
@@ -678,14 +690,15 @@ pub fn format_type_params(params: &[TypeParam]) -> String {
     if params.is_empty() {
         return String::new();
     }
+    // D-VARARGBOUND1 (c7jaiany, owner-amended): multi-trait bounds are a
+    // consistent list form everywhere, never `+` — `<T: [A, B]>`. A single
+    // bound stays bare (`<T: A>`).
     let inner: Vec<String> = params
         .iter()
-        .map(|p| {
-            if p.bounds.is_empty() {
-                p.name.clone()
-            } else {
-                format!("{}: {}", p.name, p.bounds.join(" + "))
-            }
+        .map(|p| match p.bounds.as_slice() {
+            [] => p.name.clone(),
+            [one] => format!("{}: {}", p.name, one),
+            many => format!("{}: [{}]", p.name, many.join(", ")),
         })
         .collect();
     format!("<{}>", inner.join(", "))
