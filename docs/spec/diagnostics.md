@@ -443,6 +443,7 @@ before continuing.
 | E2303 | sema  | `ref`/`view` crosses a task/channel boundary (E2-M5; emitted as E1102) |
 | E2304 | sema  | an indexed or sliced piece can't be handed back as a `view` (E2-M5) |
 | L2301 | sema  | this return borrows; here is its source (advisory, E2-M5) |
+| E2305 | sema  | a `View<T>` (`.view(...)`) escapes the scope of the list it borrows from (D-DYNARRAY1) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -642,7 +643,10 @@ tier-1 reference codes (E0206 bare-local `view` return, E0207 unlabeled
 `ref` fields); they do not replace them. E2303 is the reference-specific
 name for the task/channel rule — that situation is **reported once, as
 E1102** (a `view`/`ref` value is unsendable); E2303 exists so `jet explain
-E2303` points there and the soundness matrix has a named cell.
+E2303` points there and the soundness matrix has a named cell. E2305
+(D-DYNARRAY1) is the same *owner-outlives* reasoning applied to a
+`list.view(a..b)` window instead of a `-> view` return or a `ref` field —
+see `View<T>` in spec.md's "M2 — ownership" section.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -651,6 +655,7 @@ E2303` points there and the soundness matrix has a named cell.
 | E2303 | A `view` or a `ref`-holding struct crosses a `tasks.spawn` or `Sender.send` boundary. | A shared view (`&`) points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, remove the shared-view field before crossing, or rebuild the value as an owned copy. |
 | E2304 | A `-> view` function returns an indexed or sliced piece of a value (e.g. `text[0..2]` or `items[i]`). | Indexing or slicing builds a fresh, owned piece — there's no longer-lived value for a view to point at, so the piece would vanish the moment the function returns. A `view` into a whole *field* of a parameter is fine (the caller still owns the field); only the freshly-cut piece is the problem. | Return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it. |
 | L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
+| E2305 | A `View<T>` (`list.view(a..b)`) escapes the scope of the list it borrows from — returned from a function that owns the list, rebound to another local, or stored in a struct field. | `.view(a..b)` is a zero-copy window into the list's own backing storage, not a copy; if the list is made and freed inside this function (or scope), a window into it would outlive what owns it — there'd be nothing left to look at. | Return/store an owned copy instead (`list[a..b]` for a copying slice, or `.map(...)` the window into an owned list), or accept the list as a parameter so the caller keeps owning it. |
 
 ## Library authoring diagnostics (E2-M6)
 

@@ -614,6 +614,15 @@ impl Cx {
                     self.rust_type(&args[1])
                 )
             }
+            // D-DYNARRAY1: View<T> -> a genuine borrowed Rust slice `&[T]`. Zero-
+            // copy (a slice is a plain (ptr, len) pair, no allocation) and
+            // ordinary safe Rust — the lifetime is elided, valid as long as the
+            // borrow stays local, exactly the shape sema's E2305 owner-outlives
+            // check proves before this type is ever emitted (I2/I3: sema
+            // decides, codegen just emits the reference).
+            Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                format!("&[{}]", self.rust_type(&args[0]))
+            }
             // D-TTLVAL1=A: Expiring<T> / Rotting<T>.
             Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => {
                 format!("JetExpiring<{}>", self.rust_type(&args[0]))

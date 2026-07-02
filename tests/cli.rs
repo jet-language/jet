@@ -54,6 +54,22 @@ fn scrub(s: &str, file: &Path) -> String {
     s.replace(&file.display().to_string(), "BAD.jet")
 }
 
+/// A private cwd for a `jet run`/`build`/`bench`/`test` subprocess.
+///
+/// `jet` writes compiled output to `build/<stem>.rs` + `build/<stem>` *relative
+/// to its own cwd* (Source/CmdCompile.rs `bin_path`/`stem`/`build`), keyed only
+/// by the source file's stem — not its full path. Two concurrent `jet`
+/// processes compiling different files that happen to share a stem (e.g. two
+/// `main.jet` fixtures) race on that shared `build/` path if both inherit the
+/// test harness's cwd (the repo root). Giving each such test its own cwd
+/// removes the shared namespace entirely, regardless of stem.
+fn isolated_cwd(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("jet_cli_cwd_{tag}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 // ── Exit-code table ────────────────────────────────────────────────
 
 #[test]
@@ -641,7 +657,14 @@ fn simple_exec_runs_without_a_manifest() {
     // executable with zero ceremony (R9 / D-ILE1).
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/main.jet");
-    let out = Command::new(jet()).arg("run").arg(&path).output().unwrap();
+    // Isolated cwd: this fixture's stem is `main`, a common stem other tests
+    // and examples also use — see `isolated_cwd`.
+    let out = Command::new(jet())
+        .arg("run")
+        .arg(&path)
+        .current_dir(isolated_cwd("simple_exec"))
+        .output()
+        .unwrap();
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -840,8 +863,12 @@ build: { staging: Build.{ optimize: basic } }
     .unwrap();
     let main = dir.join("main.jet");
     fs::write(&main, "fn main() { print(\"ok\") }\n").unwrap();
+    // Isolated cwd: this fixture's stem is `main` — see `isolated_cwd`. Also
+    // the semantically correct place for `build/` to land, since it's this
+    // fixture's own project directory.
     let out = Command::new(jet())
         .args(["build", main.to_str().unwrap(), "--profile=staging"])
+        .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();

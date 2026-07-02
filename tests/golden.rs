@@ -11,6 +11,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+use common::FfiBridgeLock;
+
 #[test]
 fn examples_compile_and_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -70,22 +73,30 @@ fn examples_compile_and_run() {
     for (path, stem, shown) in entries {
         let src = fs::read_to_string(&path).unwrap();
 
-        if (stem == "lowlevel/ffi"
+        let uses_ffi_bridge = stem == "lowlevel/ffi"
             || stem == "io/archive"
             || stem == "io/db"
             || stem == "crypto/crypto_envelope"
             || stem == "crypto/crypto_sign"
             || stem == "crypto/crypto_migration"
             || stem == "io/compress_gzip"
-            || stem == "io/compress_zstd")
-            && !have_cargo
-        {
+            || stem == "io/compress_zstd";
+
+        if uses_ffi_bridge && !have_cargo {
             eprintln!(
                 "note: skipping examples/features/{stem}.jet golden (need cargo for FFI bridge)"
             );
             checked += 1;
             continue;
         }
+
+        // These stems build Jet's hidden global FFI/cargo bridge cache
+        // (`~/.cache/jet/ffi/<key>/`), which has no synchronization of its
+        // own. tests/cffi.rs compiles some of the same fixtures (e.g.
+        // `lowlevel/ffi`'s base64@0.22/b64encode signature) — hold the shared
+        // lock so the two test binaries never race the same cache key.
+        // See FfiBridgeLock for the full root cause.
+        let _ffi_lock = uses_ffi_bridge.then(FfiBridgeLock::acquire);
 
         let compiled = match jet::compile_with_path(&src, &shown) {
             Ok(c) => c,

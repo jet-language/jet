@@ -1441,3 +1441,20 @@ fn describe<T: [Renderable, Loud]>(item: T) -> String {
 ";
     assert_fmt_stable(src, "generic multi-trait bound list");
 }
+
+#[test]
+fn fmt_preserves_view_call_range_args() {
+    // D-DYNARRAY1: `.view(a..b)` parses its two args from `start..end`, not a
+    // comma list — the formatter's generic call-arg printer would otherwise
+    // silently rewrite `.view(0..9)` into the unparseable `.view(0, 9)`
+    // (own-CLAUDE-memory rule: new syntax needs a formatter round-trip test,
+    // not just a parser).
+    let src = "\
+fn main() {
+    incidents: [Int] := [1, 2, 3]
+    window :: incidents.view(0..2)
+    print(window.len())
+}
+";
+    assert_fmt_stable(src, "view call range args");
+}

@@ -418,13 +418,13 @@ impl<'a> Fmt<'a> {
                         f.write(".");
                         f.write(method);
                         f.fmt_method_type_args(type_args);
-                        f.fmt_call_args_or_trailing_block(args);
+                        f.fmt_view_or_call_args(method, args);
                     });
                 } else {
                     self.write(".");
                     self.write(method);
                     self.fmt_method_type_args(type_args);
-                    self.fmt_call_args_or_trailing_block(args);
+                    self.fmt_view_or_call_args(method, args);
                 }
             }
             Expr::StructLit {
@@ -793,6 +793,22 @@ impl<'a> Fmt<'a> {
     /// trailing-block lambda; otherwise the ordinary `(args)`. Shared by
     /// `Expr::Call`, `Expr::MethodCall`, and `Expr::CallValue` so all three
     /// call shapes round-trip the sugar identically.
+    /// D-DYNARRAY1: `.view(a..b)` parses its two args from `start .. end`, not
+    /// a comma list — round-trip that shape here, or `jet fmt` would silently
+    /// rewrite `.view(0..9)` into the unparseable `.view(0, 9)` (own-memory
+    /// rule: new syntax needs a formatter round-trip, not just a parser).
+    fn fmt_view_or_call_args(&mut self, method: &str, args: &[CallArg]) {
+        if method == Syntax::METHOD_VIEW && args.len() == 2 {
+            self.write("(");
+            self.fmt_expr(&args[0].expr, Prec::OrFallback);
+            self.write("..");
+            self.fmt_expr(&args[1].expr, Prec::OrFallback);
+            self.write(")");
+            return;
+        }
+        self.fmt_call_args_or_trailing_block(args);
+    }
+
     fn fmt_call_args_or_trailing_block(&mut self, args: &[CallArg]) {
         if let Some((last, init)) = args.split_last() {
             if last.flags.is_trailing_block {

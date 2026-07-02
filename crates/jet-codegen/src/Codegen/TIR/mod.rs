@@ -1495,6 +1495,14 @@ pub enum TClosureOp {
     /// `map` on `T?` — `(recv).clone().map(f)` (Rust's native `Option::map`, no
     /// prelude helper needed).
     OptionMap,
+    // D-DYNARRAY1: `View<T>` read-only closure methods. `recv` is already a
+    // `&[T]` borrow (see `Context::rust_type`'s `View` arm) — NOT `.clone()`d
+    // into an owned `Vec` first, unlike every list closure op above; that
+    // clone would silently defeat the zero-copy point of `.view(...)`.
+    /// `view.fold(init, f)` — `jet_view_fold((recv), init, f)`.
+    ViewFold,
+    /// `view.map(f)` — `jet_view_map((recv), f)` (map-to-owned: returns `[R]`).
+    ViewMap,
 }
 
 /// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
@@ -1712,6 +1720,14 @@ pub enum TBuiltinOp {
     // D-FAILCOMP1: failure-aware list adapters.
     /// `try_collect()` on `[Result<T,E>]` → `jet_list_try_collect((recv).clone())`.
     TryCollect,
+    // D-DYNARRAY1: `View<T>` — a zero-copy window (`&[T]`) over a list's
+    // backing storage. The read-only accessor methods (`len`/`is_empty`/
+    // `get`/`first`/`last`/`contains`/`index_of`) reuse `LenList`/`IsEmpty`/
+    // `GetList`/`First`/`Last`/`Contains`/`IndexOf` above unchanged — every
+    // one of those emits a plain Rust slice/`.get`/`.first`/… call that a
+    // `&[T]` receiver satisfies exactly as a `Vec<T>` does.
+    /// `list.view(a..b)` → `jet_view_new(&(recv), a0, a1, file, line)`.
+    ViewNew { line: usize },
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of

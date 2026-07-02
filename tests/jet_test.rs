@@ -306,9 +306,17 @@ fn jet_bench_target_integration() {
         return;
     }
     let example = root.join("examples/features/tooling/bench_target/main.jet");
+    // Isolated cwd: this fixture's stem is `main`. `jet` writes `build/<stem>.*`
+    // relative to its own cwd (Source/CmdCompile.rs `bin_path`/`stem`/`build`),
+    // keyed only by stem — a concurrent test compiling a different `main.jet`
+    // from the shared repo-root cwd would race this one on `build/main.rs`.
+    let cwd = std::env::temp_dir().join(format!("jet_bench_target_cwd_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&cwd);
+    fs::create_dir_all(&cwd).unwrap();
     let out = Command::new(&jet)
         .arg("bench")
         .arg(&example)
+        .current_dir(&cwd)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);

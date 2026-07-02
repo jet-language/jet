@@ -1514,6 +1514,13 @@ pub const KW_DISTINCT: &str = "distinct";
 /// `value.raw()` yields the base value. Named-cast family (S42).
 pub const METHOD_DISTINCT_RAW: &str = "raw";
 
+/// D-DYNARRAY1 (ratified 2026-07-01): zero-copy window constructor —
+/// `list.view(a..b)` — the sole legal spelling of the `View<T>` constructor
+/// (parsed specially: the `..` between the two ends is required, a
+/// comma-separated arg list is rejected so there is exactly one way to write
+/// it, I8). See `docs/spec/stdlib-api-laws.md` and `View<T>` in CoreLib.
+pub const METHOD_VIEW: &str = "view";
+
 /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified): `@Numeric` marker
 /// enables same-type arithmetic on a distinct type. Written `@Numeric` on
 /// the same line before the distinct-type name (contract-plane prefix,

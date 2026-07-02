@@ -1262,6 +1262,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::DequePeekFront => format!("({}).front().cloned()", recv),
                 TBuiltinOp::DequePeekBack => format!("({}).back().cloned()", recv),
                 TBuiltinOp::TryCollect => format!("jet_list_try_collect(({}).clone())", recv),
+                // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor.
+                // `&(recv)` (not `.clone()`): the window borrows the list's OWN
+                // backing storage, it never makes a second copy of it.
+                TBuiltinOp::ViewNew { line } => format!(
+                    "jet_view_new(&({}), {}, {}, {:?}, {})",
+                    recv,
+                    a(0),
+                    a(1),
+                    cx.file,
+                    line
+                ),
                 // D-ITER1: non-closure lazy adapters.
                 TBuiltinOp::Take => format!("jet_list_take(({}).clone(), {})", recv, a(0)),
                 TBuiltinOp::Skip => format!("jet_list_skip(({}).clone(), {})", recv, a(0)),
@@ -1936,6 +1947,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::Fold => {
                     format!("jet_list_fold(({}).clone(), {}, {})", recv, a(0), a(1))
                 }
+                // D-DYNARRAY1: `recv` is already a `&[T]` borrow — fold/map it
+                // directly, no `.clone()`-to-owned-Vec (that would defeat the
+                // zero-copy point of `.view(...)`).
+                TClosureOp::ViewFold => {
+                    format!("jet_view_fold(({}), {}, {})", recv, a(0), a(1))
+                }
+                TClosureOp::ViewMap => format!("jet_view_map(({}), {})", recv, a(0)),
                 TClosureOp::Position => {
                     format!("jet_list_position(({}).clone(), {})", recv, a(0))
                 }

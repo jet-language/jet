@@ -14,6 +14,15 @@ pub const RESERVED_TYPES: &[&str] = &[
     "Deque",
     Syntax::TYPE_BIGINT,
     Syntax::TYPE_DECIMAL,
+    // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
+    // `Deque`) — `View` is already a widely-used user type name across the
+    // jetpack UI component kit (examples/features/ui/*.jet, crates/jet-driver/
+    // src/Jetpack/components/*.jet). `list.view(a..b)` always types as
+    // `Type::Apply{"View", [T]}`; a user's own `enum View`/`struct View` types
+    // as `Type::Named("View")` — a different `Type` variant, so the two never
+    // collide in the type system or in codegen (a user `View` mangles to
+    // `user_View`; `.view()`'s result has no named Rust type at all — see
+    // `Context::rust_type`'s `View` arm, which maps straight to `&[T]`).
 ];
 
 pub fn is_reserved_type(name: &str) -> bool {
@@ -106,6 +115,10 @@ pub fn builtin_method_return(
         }
         Type::Apply { name, args } if name == "Deque" => {
             deque_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
+        Type::Apply { name, args } if name == "View" => {
+            view_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         // D-HOLE1: `.map` on `T?` (no general "hole"/absent-propagating value type —
         // Option composition gets library combinators instead). `.zip` is handled
@@ -343,6 +356,38 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("par_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
         ("par_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("par_fold", 2) => Some(Some(Type::Int)), // sema refines acc
+        // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor. Parsed
+        // specially (the `..` between the two Int ends), so it always arrives
+        // here as a 2-arg call; ownership tracking (E2305) happens at the
+        // binding site (`CheckerCore::check_binding`), not here (I3: this
+        // table is return-TYPE only).
+        ("view", 2) => Some(Some(Type::Apply {
+            name: "View".to_string(),
+            args: vec![inner.clone()],
+        })),
+        _ => None,
+    }
+}
+
+/// D-DYNARRAY1: `View<T>` — the read-only method surface a `.view(a..b)`
+/// window supports (indexing is handled separately, in `infer_index`; a
+/// `View` never mutates its owner — out of the ratified scope). Mirrors
+/// `list_method_return`'s equivalent entries exactly (I8: one behavior for
+/// the same method name, whether the receiver owns its storage or borrows
+/// it) — `index_of` intentionally matches the list table's existing
+/// `Option<T>` shape rather than `Option<Int>`, for the same reason.
+fn view_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("get" | "first" | "last" | "index_of", 0 | 1) => {
+            Some(Some(Type::Option(Box::new(elem.clone()))))
+        }
+        ("contains", 1) => Some(Some(Type::Bool)),
+        // D-ITER1-style closure surface, read-only subset only (D-DYNARRAY1 §2
+        // scope: indexing, iteration, `.fold`, `.map`-to-owned).
+        ("fold", 2) => Some(Some(Type::Int)), // placeholder; sema refines from init arg
+        ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // placeholder; sema refines; owned [R]
         _ => None,
     }
 }
@@ -658,6 +703,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
             "zip" => Some(vec![Type::List(Box::new((**inner).clone()))]),
             "dedup" | "enumerate" => Some(vec![]),
+            // D-DYNARRAY1: `.view(a..b)` — both range ends are Int (parsed
+            // specially; always arrives as exactly 2 args).
+            "view" => Some(vec![Type::Int, Type::Int]),
             _ => Some(vec![]),
         },
         Type::Map { key, value } => match method {
@@ -721,6 +769,27 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "push_front" | "push_back" => Some(vec![elem]),
+                _ => Some(vec![]),
+            }
+        }
+        // D-DYNARRAY1: `View<T>` arg types — read-only subset, mirrors `Type::List`.
+        Type::Apply { name, args } if name == "View" => {
+            let elem = args.first().cloned().unwrap_or(Type::Int);
+            match method {
+                "get" | "contains" => Some(vec![elem]),
+                "fold" => Some(vec![
+                    Type::Int, // init — sema refines
+                    Type::Fn {
+                        params: vec![Type::Int, elem],
+                        ret: Some(Box::new(Type::Int)),
+                        effect_bound: None,
+                    },
+                ]),
+                "map" => Some(vec![Type::Fn {
+                    params: vec![elem],
+                    ret: None, // sema refines R from the closure's actual return
+                    effect_bound: None,
+                }]),
                 _ => Some(vec![]),
             }
         }

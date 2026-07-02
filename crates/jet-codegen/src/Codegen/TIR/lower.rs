@@ -1237,6 +1237,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     Type::Apply { name, args } if name == "Stream" && args.len() == 1 => {
                         Some(args[0].clone())
                     }
+                    // D-DYNARRAY1: `loop x in window` — a `View<T>`'s element type.
+                    Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                        Some(args[0].clone())
+                    }
                     _ => None,
                 };
                 let by_value =
@@ -3973,6 +3977,10 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 Type::List(elem) => (**elem).clone(),
                 Type::Map { value, .. } => (**value).clone(),
                 Type::FixedList { elem, .. } => (**elem).clone(),
+                // D-DYNARRAY1: `window[i]` on a `View<T>`.
+                Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                    args[0].clone()
+                }
                 _ => Type::Int,
             };
             // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
@@ -6175,6 +6183,25 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             if method == "split" {
                 return Some(Type::List(Box::new(Type::String)));
             }
+            // D-DYNARRAY1: `xs.view(a..b).fold(...)` chained with no intermediate
+            // binding — resolve the constructed `View<T>`'s element type from the
+            // list receiver so the chained call still dispatches correctly.
+            if method == crate::Syntax::METHOD_VIEW {
+                if let Some(list_ty) = tir_recv_jet_ty(receiver, env) {
+                    let elem = match list_ty {
+                        Type::List(e) => Some(*e),
+                        Type::FixedList { elem, .. } => Some(*elem),
+                        _ => None,
+                    };
+                    if let Some(elem) = elem {
+                        return Some(Type::Apply {
+                            name: "View".to_string(),
+                            args: vec![elem],
+                        });
+                    }
+                }
+                return None;
+            }
             tir_recv_jet_ty(receiver, env)
         }
         _ => None,
@@ -6273,6 +6300,15 @@ pub(crate) fn resolve_builtin_op(
             // The string-slice form embeds the *receiver-span* line for its bounds panic.
             let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
             TBuiltinOp::Slice { line }
+        }
+        // D-DYNARRAY1: `list.view(a..b)` — the string-slice line-number
+        // convention (`("slice", 2)` above) doesn't apply here: the receiver
+        // is always a plain value (never a chained view — `resolve_builtin_op`
+        // only fires when `recv_type.is_none()`), so the receiver-span line
+        // matches `emit_builtin_method`'s own panic-site convention.
+        ("view", 2) => {
+            let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
+            TBuiltinOp::ViewNew { line }
         }
         ("keys", 0) => TBuiltinOp::Keys,
         ("values", 0) => TBuiltinOp::Values,
@@ -6390,6 +6426,10 @@ pub(crate) fn resolve_closure_op(
             // never the mutable-list form.
             if matches!(rty, Some(Type::Option(_))) {
                 TClosureOp::OptionMap
+            } else if matches!(&rty, Some(Type::Apply { name, .. }) if name == "View") {
+                // D-DYNARRAY1: map-to-owned — never the `.clone()`-into-Vec form
+                // the other list ops use (`recv` is already a borrow, not owned).
+                TClosureOp::ViewMap
             } else if fn_mut {
                 TClosureOp::MapMut
             } else {
@@ -6421,7 +6461,15 @@ pub(crate) fn resolve_closure_op(
         "par_filter" => TClosureOp::ParFilter,
         "par_fold" => TClosureOp::ParFold,
         "scan" => TClosureOp::Scan,
-        "fold" => TClosureOp::Fold,
+        "fold" => {
+            // D-DYNARRAY1: a View's `recv` is already `&[T]` — fold it directly,
+            // no `.clone()`-to-owned-Vec step.
+            if matches!(&rty, Some(Type::Apply { name, .. }) if name == "View") {
+                TClosureOp::ViewFold
+            } else {
+                TClosureOp::Fold
+            }
+        }
         "position" => TClosureOp::Position,
         "min_by" => TClosureOp::MinBy,
         "max_by" => TClosureOp::MaxBy,

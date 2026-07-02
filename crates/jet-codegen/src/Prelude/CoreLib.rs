@@ -2880,6 +2880,18 @@ mod jet_std {
     }
 }
 
+// ── View<T> (D-DYNARRAY1) ────────────────────────────────────────────────────
+// `list.view(a..b)` is a zero-copy window: unlike every bridge type below,
+// `View<T>` has no owning Rust struct here — it lowers straight to a plain
+// borrowed slice `&[T]` (`Context::rust_type`'s `View` arm, crates/jet-codegen/
+// src/Codegen/Context.rs), and its constructor/method helpers
+// (`jet_view_new`/`jet_view_fold`/`jet_view_map`) live in Core.rs next to
+// `jet_slice_vec`/`jet_list_fold` — the same bare (non-`jet_std::`-namespaced)
+// family every other list method belongs to, since `.view(...)` dispatches
+// through the ordinary list-method machinery, not the handle-type dispatch
+// the structs below use. Ownership (the window cannot outlive its list) is
+// proved by sema's E2305, not by a Rust lifetime parameter on a wrapper type.
+
 // ── Streaming file handles (E2-M7, D-IO2) ────────────────────────────────────
 // FileReader / FileWriter are RAII: Drop closes (and flushes) them
 // on every exit path — including `?` early returns and panics.

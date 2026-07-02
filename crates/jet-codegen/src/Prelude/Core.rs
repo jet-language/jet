@@ -729,6 +729,31 @@ fn jet_slice_vec<T: Clone>(xs: &[T], a: i64, b: i64, file: &str, line: u32) -> V
     }
     xs[a as usize..=b as usize].to_vec()
 }
+// D-DYNARRAY1: `View<T>` — `list.view(a..b)` is the zero-copy sibling of
+// `list[a..b]` (`jet_slice_vec` above): same inclusive bounds, same panic
+// wording, but a borrowed Rust slice instead of a fresh `Vec` — no element
+// data is copied. The returned `&[T]`'s lifetime is elided from `xs`'s; sema
+// (E2305) proves the window never outlives the list before this ever runs.
+fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'a [T] {
+    let len = xs.len() as i64;
+    if a < 0 || b < 0 || a > b || b >= len {
+        jet_panic(file, line, &format!("can't view {} items from {} to {} (inclusive)", len, a, b));
+    }
+    &xs[a as usize..=b as usize]
+}
+// D-DYNARRAY1: View<T> read-only closure surface. `xs` is already a borrow
+// (never `.clone()`d to an owned `Vec` first, unlike the `jet_list_*` family
+// above) — folding/mapping a view touches no allocation beyond the result.
+fn jet_view_fold<T: Clone, U, F>(xs: &[T], init: U, f: F) -> U where F: Fn(U, T) -> U {
+    let mut acc = init;
+    for x in xs {
+        acc = f(acc, x.clone());
+    }
+    acc
+}
+fn jet_view_map<T: Clone, U, F>(xs: &[T], f: F) -> Vec<U> where F: Fn(T) -> U {
+    xs.iter().cloned().map(f).collect()
+}
 fn jet_index_map<K: Ord + Clone, V: Clone>(m: &std::collections::BTreeMap<K, V>, k: &K, file: &str, line: u32) -> V {
     match m.get(k) {
         Some(v) => v.clone(),

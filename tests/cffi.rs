@@ -13,6 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+use common::FfiBridgeLock;
+
 /// Build a tiny C static library `libjetc.a` in `dir`, returning its directory
 /// and link name. Skips (returns None) when no C compiler is available.
 fn build_c_lib(dir: &Path) -> Option<(PathBuf, String)> {
@@ -699,6 +702,9 @@ fn ffi_example_compiles_and_runs() {
     let src = fs::read_to_string(&path).unwrap();
     let shown = "examples/features/lowlevel/ffi.jet";
 
+    // This example's FFI bridge (base64@0.22 / b64encode) shares a cache key
+    // with tests/golden.rs's compile of the same fixture — see FfiBridgeLock.
+    let _ffi_lock = FfiBridgeLock::acquire();
     let out = jet::compile_with_path(&src, shown).unwrap_or_else(|diags| {
         panic!(
             "22_ffi.jet failed the front end:\n{}",
@@ -761,6 +767,9 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     fs::write(&path, src).unwrap();
 
     let shown = path.to_string_lossy();
+    // Same base64@0.22/b64encode signature as `ffi_example_compiles_and_runs`
+    // and tests/golden.rs's `lowlevel/ffi` example — same FFI cache key.
+    let _ffi_lock = FfiBridgeLock::acquire();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
         panic!(
             "inline FFI pin should work even when pkg.jet exists:\n{}",

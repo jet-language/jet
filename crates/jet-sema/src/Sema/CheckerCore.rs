@@ -26,6 +26,8 @@ impl<'a> Checker<'a> {
         // lives in `self.scopes`, so it pops alongside.
         let depth = self.scopes.len();
         self.arena_views.retain(|_, v| v.scope_len < depth);
+        // D-DYNARRAY1: `View<T>` bindings leave scope the same way arena views do.
+        self.list_views.retain(|_, v| v.scope_len < depth);
         self.scopes.pop();
         self.lambda_mut_borrow_stack.pop();
         self.ct_scopes.pop();
@@ -1207,6 +1209,21 @@ impl<'a> Checker<'a> {
                                 self.report_view_escape(n, "be returned", *nspan);
                             }
                         }
+                        // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
+                        // list is local to this function would outlive it. Two
+                        // shapes: an already-bound view name (`return window`),
+                        // and a fresh `.view(...)` call made right in the
+                        // `return` (`return incidents.view(0..2)`) — the latter
+                        // needs `view_call_source` directly, the same way a
+                        // `return` builds a `#Ref` struct literal on the spot
+                        // (`check_stored_ref_fields`, called just above).
+                        if let Expr::Ident(n, nspan) = &*e {
+                            if self.is_list_view(n) {
+                                self.report_list_view_escape(n, "be returned", *nspan);
+                            }
+                        } else if let Some(owner) = self.view_call_source(e) {
+                            self.report_view_owns_return(&owner, e.span());
+                        }
                         // Returning a borrowed parameter would move out of a
                         // borrow in the generated Rust (I2) — require a copy.
                         // Exception: if the param type is a type variable, codegen
@@ -1581,6 +1598,11 @@ impl<'a> Checker<'a> {
                             Some(Type::Apply { name, args })
                                 if name == crate::Syntax::TYPE_STREAM && args.len() == 1 =>
                             {
+                                self.declare_loop_var(var.clone(), *var_span, &args[0]);
+                            }
+                            // D-DYNARRAY1: `loop x in window` — a `View<T>` iterates its
+                            // elements read-only, same shape as `loop x in a_list`.
+                            Some(Type::Apply { name, args }) if name == "View" && args.len() == 1 => {
                                 self.declare_loop_var(var.clone(), *var_span, &args[0]);
                             }
                             Some(other) => {
@@ -3102,6 +3124,17 @@ impl<'a> Checker<'a> {
         } else if let Expr::Ident(src, src_span) = &b.init {
             if self.is_arena_view(src) {
                 self.report_view_escape(src, "be stored in another binding", *src_span);
+            }
+        }
+        // D-DYNARRAY1: `x :: list.view(a..b)` makes `x` a scope-bound window
+        // into `list`. E2305 fires the same way E0631 does for arena views —
+        // rebinding a live view to a second name is itself an escape (views
+        // are non-reassignable non-escaping locals, I8), not re-tracked.
+        if let Some(owner) = self.view_call_source(&b.init) {
+            self.record_list_view(&b.name, owner);
+        } else if let Expr::Ident(src, src_span) = &b.init {
+            if self.is_list_view(src) {
+                self.report_list_view_escape(src, "be stored in another binding", *src_span);
             }
         }
         let task_has_view_capture = self.view_capture_tasks.contains(&b.name);

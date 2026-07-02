@@ -506,6 +506,21 @@ pub(crate) struct ArenaViewInfo {
     dead: Option<(String, Span)>,
 }
 
+/// D-DYNARRAY1 (ratified 2026-07-01): bookkeeping for a `View<T>` binding —
+/// what `x :: list.view(a..b)` produced. The view points into `list`'s backing
+/// storage and is valid only inside the lexical scope that owns `list`; the
+/// checker forbids it escaping (returned, stored in another binding, stored in
+/// a struct field) via E2305. Crossing a task/channel boundary is covered
+/// separately by the general sendability check (`SendProblemKind::ViewBorrow`),
+/// not this map.
+#[derive(Debug, Clone)]
+pub(crate) struct ListViewInfo {
+    /// The list this view points into.
+    owner: String,
+    /// `scopes.len()` at the view's declaration — cleared when that scope pops.
+    scope_len: usize,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum SendProblemKind {
     RefField,
@@ -679,6 +694,12 @@ pub(crate) struct Checker<'a> {
     /// `x :: arena.alloc(v)` holds a scope-bound view into `arena`. Maps the view
     /// name → which arena it points into (for E0631 escape / E0632 use-after-reset).
     arena_views: HashMap<String, ArenaViewInfo>,
+    /// D-DYNARRAY1 (ratified 2026-07-01): `View<T>` bindings in scope — a binding
+    /// `x :: list.view(a..b)` holds a scope-bound window into `list`'s backing
+    /// storage. Maps the view name → which list it points into (for E2305
+    /// escape). Mirrors `arena_views`'s shape; kept separate so the arena
+    /// mechanism (E0631/E0632, its own wording and drop-tracking) stays untouched.
+    list_views: HashMap<String, ListViewInfo>,
     /// D-UNINIT1 (ratified 2026-06-21): `#Uninit` bindings not yet definitely
     /// written — maps name → the `#Uninit` decl span. A read while still in this
     /// map is E0420 (write-before-read proof); a write clears it. Branch-merged

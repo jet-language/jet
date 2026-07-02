@@ -365,6 +365,115 @@ impl<'a> Checker<'a> {
         self.arena_views.contains_key(name)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // D-DYNARRAY1 (ratified 2026-07-01): `View<T>` zero-copy windows
+    // (`list.view(a..b)`).
+    //
+    // A view's Rust value is a genuine borrowed slice (`&[T]`, elided
+    // lifetime — see `Context::rust_type`'s `View` arm) so it is exactly as
+    // sound as an arena view; the tracking below is the same shape as
+    // `arena_views` (E0631/E0632, above) reusing its *reasoning*: the owner
+    // list is made and freed inside this function, so a view into it can't
+    // outlive that scope. Kept as a separate map (not a refactor of
+    // `arena_views`) so the well-tested arena mechanism's wording/drop-
+    // tracking stays untouched — I8's "one owner-tracking shape," not one
+    // shared struct.
+    //
+    // E2305 fires when a view escapes: returned, rebound to another local, or
+    // stored in a struct field. Crossing a task/channel boundary is instead
+    // caught by the general sendability check (`SendProblemKind::ViewBorrow`
+    // on `Type::Apply { name: "View", .. }`, reported as E1102) — no tracking
+    // needed there, the value's TYPE alone is enough.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// If `init` is `list.view(a..b)` on a plain local name, return the list's
+    /// name — but only when that list is a genuine local (dies at this
+    /// function's return/scope exit). A parameter or const outlives the call,
+    /// so a view into it is sound without tracking (mirrors `E2301`'s
+    /// param/const exemption in `view_return_local_owner`).
+    pub(crate) fn view_call_source(&self, init: &Expr) -> Option<String> {
+        let Expr::MethodCall {
+            receiver, method, ..
+        } = init
+        else {
+            return None;
+        };
+        if method != Syntax::METHOD_VIEW {
+            return None;
+        }
+        let Expr::Ident(name, _) = receiver.as_ref() else {
+            return None;
+        };
+        if self.consts.contains_key(name) {
+            return None;
+        }
+        if let Some(info) = self.lookup(name) {
+            if info.param_conv.is_some() {
+                return None;
+            }
+        }
+        Some(name.clone())
+    }
+
+    /// Record `name` as a view into `owner`, declared at the current scope depth.
+    pub(crate) fn record_list_view(&mut self, name: &str, owner: String) {
+        let scope_len = self.scopes.len();
+        self.list_views
+            .insert(name.to_string(), ListViewInfo { owner, scope_len });
+    }
+
+    /// True if `name` is currently a live `View<T>` binding.
+    pub(crate) fn is_list_view(&self, name: &str) -> bool {
+        self.list_views.contains_key(name)
+    }
+
+    /// E2305: a `View<T>` named `name` is escaping the scope of the list it
+    /// borrows from. `what` describes the escape site for the message.
+    pub(crate) fn report_list_view_escape(&mut self, name: &str, what: &str, span: Span) {
+        let owner = self
+            .list_views
+            .get(name)
+            .map(|v| v.owner.clone())
+            .unwrap_or_else(|| "its owner".to_string());
+        self.diags.push(Diagnostic::error(
+            "E2305",
+            format!(
+                "`{}` cannot be shared — it does not live long enough to {}",
+                name, what
+            ),
+            format!(
+                "`{}` is a view into `{}` (`.view(...)`); sharing it outside `{}`'s scope would let it outlive the list and point into freed memory",
+                name, owner, owner
+            ),
+            format!(
+                "keep `{}` inside `{}`'s scope, or copy what you need with `.map(...)` or indexing before it leaves",
+                name, owner
+            ),
+            Some(span),
+        ));
+    }
+
+    /// E2305: `return list.view(a..b)` made fresh right in the `return` — `owner`
+    /// (`list`) is made in this function and freed when it returns. Mirrors
+    /// E2301's exact wording (`this view points into X, which this function
+    /// owns`) for the "fresh call in return" shape; `report_list_view_escape`
+    /// above covers the "already-bound name" shape.
+    pub(crate) fn report_view_owns_return(&mut self, owner: &str, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E2305",
+            format!(
+                "this view points into `{}`, which this function owns",
+                owner
+            ),
+            format!(
+                "`{}` is made here and freed when the function returns, so a view into it (`.view(...)`) would outlive what owns it — there'd be nothing left to look at",
+                owner
+            ),
+            "return an owned copy (drop `.view(...)` for a copying slice `[a..b]`, or `.map(...)` it into an owned list), or accept the source as a parameter so the caller keeps owning it".to_string(),
+            Some(span),
+        ));
+    }
+
     /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `#SingleUse` struct/enum,
     /// checking the local registry first and then any imported module that exposes
     /// the type publicly. A `#SingleUse` value must be consumed exactly once and
@@ -683,6 +792,14 @@ impl<'a> Checker<'a> {
                 args.iter()
                     .find_map(|arg| self.sendability_problem_inner(arg, true, seen))
             }
+            // D-DYNARRAY1 (E2303, reported as E1102): a `View<T>` is a borrow into
+            // its owner's backing storage — it can never cross a task/channel
+            // boundary, the same rule a `-> view`/`ref` value already gets.
+            Type::Apply { name, .. } if name == "View" => Some(SendabilityProblem {
+                root: None,
+                path: Vec::new(),
+                kind: SendProblemKind::ViewBorrow,
+            }),
             Type::Apply { name, args } => self.named_sendability_problem(name, args, seen),
             Type::TraitObject(names) => Some(SendabilityProblem {
                 root: None,

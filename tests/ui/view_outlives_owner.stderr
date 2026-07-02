@@ -1,0 +1,7 @@
+Error [E2305]: this view points into `incidents`, which this function owns
+  --> tests/ui/view_outlives_owner.jet:3:22
+    |
+  3 |     return incidents.view(0..2)
+    |                      ^^^^
+ Why: `incidents` is made here and freed when the function returns, so a view into it (`.view(...)`) would outlive what owns it — there'd be nothing left to look at
+ Fix: return an owned copy (drop `.view(...)` for a copying slice `[a..b]`, or `.map(...)` it into an owned list), or accept the source as a parameter so the caller keeps owning it

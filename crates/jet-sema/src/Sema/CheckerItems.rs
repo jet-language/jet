@@ -624,6 +624,11 @@ impl<'a> Checker<'a> {
                 if self.is_arena_view(vname) {
                     self.report_view_escape(vname, "be stored in a struct field", *vspan);
                 }
+                // D-DYNARRAY1: E2305 — storing a `View<T>` in a struct field
+                // would let the struct outlive the list it borrows from.
+                if self.is_list_view(vname) {
+                    self.report_list_view_escape(vname, "be stored in a struct field", *vspan);
+                }
             }
             if let Some((_, _, fty, _, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);

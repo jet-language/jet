@@ -3507,6 +3507,14 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("peek_front", 0) | ("peek_back", 0)
         // D-FAILCOMP1: failure-aware list adapter.
         | ("try_collect", 0)
+        // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor. The
+        // View<T> read-accessor methods (`get`/`first`/`last`/`index_of`/
+        // `len`/`is_empty`/`contains`) need no separate entry — they share
+        // the exact same (name, argcount) pairs as the list arms above, and
+        // `resolve_builtin_op`/`method_call_in_subset` don't branch on
+        // receiver type for those (a `&[T]` receiver satisfies them exactly
+        // as a `Vec<T>` does — see `Context::rust_type`'s `View` arm).
+        | ("view", 2)
     )
     // NOTE: `is_empty` (now Bool-typed in `Collections::*_method_return` after the
     // c109 fix; lowered to `TBuiltinOp::IsEmpty`) is covered above. `join()` (no

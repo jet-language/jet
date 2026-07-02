@@ -168,6 +168,19 @@ Borrow-checker mechanics live in the transpiler; tier-1 users never write
 | `fn f() -> &T`         | borrow return (elided lifetime)   | `-> &T`          |
 | `ref field: T` (tier 2)| stored reference in a struct      | `field: &'a T`   |
 
+**`View<T>` (D-DYNARRAY1):** the collection-side sibling of a stored `ref`
+field, above. `list.view(a..b)` is a zero-copy window into `list`'s own
+backing storage — unlike `list[a..b]`, which stays the safe, default,
+**copying** slice (unchanged by `View<T>`'s addition). A `View<T>` compiles
+to a plain borrowed Rust slice `&[T]` (an elided-lifetime reference, no
+wrapper struct); the compiler tracks the list it borrows from the same way
+it tracks a `ref` field's owner, and rejects the window escaping that list's
+scope (returned, rebound to another local, or stored in a struct field) with
+**E2305**. Read-only surface in v1: indexing, iteration, `.fold`, and
+`.map` (map-to-owned — returns a fresh `[R]`, never another view); no
+mutation through a view. See `crates/jet-codegen/src/Prelude/CoreLib.rs`
+(the `View<T>` banner) and docs/spec/diagnostics.md's Tier-2 reference table.
+
 The capability is a prefix sigil on the **type** (D-CAP7) — see "Access
 capability sigils" below for the full set. Call-site rules: the call-site sigil
 must match the parameter; omitting `^` on a clonable type inserts `.clone()`

@@ -114,6 +114,15 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok((Syntax::KW_MOVE.to_string(), span));
         }
+        // D-DYNARRAY1: `view` is `KwView` in the lexer (reserved for the E2-M5
+        // `-> view T` teaching-error recovery, Items.rs:2770) but is also the
+        // `.view(a..b)` window-constructor method name — same carve-out shape
+        // as `take`/`KwMove` above.
+        if matches!(self.peek().kind, TokKind::KwView) {
+            let span = self.peek().span;
+            self.bump();
+            return Ok((Syntax::KW_VIEW.to_string(), span));
+        }
         self.expect_ident("after `.`")
     }
 
@@ -790,7 +799,37 @@ impl<'a> Parser<'a> {
                     } else if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
-                        if !matches!(self.peek().kind, TokKind::RParen) {
+                        if member == Syntax::METHOD_VIEW {
+                            // D-DYNARRAY1: `.view(a..b)` is the ONLY legal shape —
+                            // a comma arg list is not a second spelling (I8). Parse
+                            // `expr .. expr` directly; the two ends become the
+                            // constructor's two Int arguments, exactly like a
+                            // bracket slice's `start`/`end`.
+                            let start = self.expr()?;
+                            self.expect(
+                                TokKind::DotDot,
+                                "a `..` between the view's start and end",
+                            )?;
+                            let end = self.expr()?;
+                            let start_span = start.span();
+                            let end_span = end.span();
+                            args.push(CallArg {
+                                convention: AccessConvention::Read,
+                                expr: start,
+                                span: start_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            });
+                            args.push(CallArg {
+                                convention: AccessConvention::Read,
+                                expr: end,
+                                span: end_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            });
+                        } else if !matches!(self.peek().kind, TokKind::RParen) {
                             loop {
                                 args.push(self.call_arg()?);
                                 if matches!(self.peek().kind, TokKind::RParen) {
@@ -1647,7 +1686,37 @@ impl<'a> Parser<'a> {
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
-                        if !matches!(self.peek().kind, TokKind::RParen) {
+                        if member == Syntax::METHOD_VIEW {
+                            // D-DYNARRAY1: `.view(a..b)` — mirrors the identical
+                            // carve-out in `expr_postfix` above; this is the
+                            // separate fast-path `expr_primary` takes when the
+                            // receiver is a bare leading identifier (`incidents.
+                            // view(0..2)`), not a chained postfix expression.
+                            let start = self.expr()?;
+                            self.expect(
+                                TokKind::DotDot,
+                                "a `..` between the view's start and end",
+                            )?;
+                            let end = self.expr()?;
+                            let start_span = start.span();
+                            let end_span = end.span();
+                            args.push(CallArg {
+                                convention: AccessConvention::Read,
+                                expr: start,
+                                span: start_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            });
+                            args.push(CallArg {
+                                convention: AccessConvention::Read,
+                                expr: end,
+                                span: end_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            });
+                        } else if !matches!(self.peek().kind, TokKind::RParen) {
                             loop {
                                 args.push(self.call_arg()?);
                                 if matches!(self.peek().kind, TokKind::RParen) {

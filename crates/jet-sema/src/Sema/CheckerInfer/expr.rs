@@ -1353,6 +1353,25 @@ impl<'a> Checker<'a> {
                 }
                 Some((**elem).clone())
             }
+            // D-DYNARRAY1: `window[i]` on a `View<T>` — read-only, same bounds
+            // discipline as list indexing (runtime panic on out-of-range).
+            Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                *kind = IndexKind::List;
+                if idx_ty != Type::Int {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!(
+                            "list indexes must be {}, not {}",
+                            Type::Int.show(),
+                            idx_ty.show()
+                        ),
+                        "count positions with a whole number starting at 0".to_string(),
+                        "use an Int index, like `items[0]`".to_string(),
+                        Some(index.span()),
+                    ));
+                }
+                Some(args[0].clone())
+            }
             Type::Map { key, value } => {
                 *kind = IndexKind::Map;
                 if idx_ty != **key {

@@ -7004,11 +7004,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "tools/Tower/docs/plans/epoch-3/jai-adoptions.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-02",
+          "by": "agent",
+          "text": "Implemented + orchestrator-verified (full suite green, 63 binaries). View<T> zero-copy: .view(a..b) on [T] -> Rust &[T] elided-lifetime slice, no allocation (verified in generated Rust); read-only surface (len/is_empty/get/first/last/contains/index_of/fold/map); E2305 escape check (return/rebind/field-store) + task-boundary unsendable via existing E1102; copying slice [a..b] unchanged (regression green); example collections/dynamic-array-view.jet; fmt round-trip test; spec.md cross-ref; core-library docs. Deviations logged: View not in RESERVED_TYPES (8 existing user View types; Apply-vs-Named disambiguates); helpers in Core.rs bare namespace not CoreLib struct (slice-op shape). Follow-ups noted: jet dev interpreter subset entry for .view absent (falls back E2201); extra E2305 sub-shape fixtures optional. ALSO this slice: test-suite race class fixed (build/<stem> cwd collisions -> isolated cwds; FfiBridgeLock in tests) + product fix FFI.rs build_bridge skip-if-built + per-key cross-process BuildLock (real concurrent-jet-processes bug)."
+        },
         {
           "at": "2026-07-02",
           "by": "agent",

@@ -69,11 +69,15 @@ fn main() {
         "view return should emit &T: {}",
         out.rust
     );
-    assert!(
-        !out.rust.contains("-> &'"),
-        "view return should use elided lifetime, not explicit: {}",
-        out.rust
-    );
+    // User-facing signatures must elide lifetimes; prelude helpers (e.g.
+    // jet_view_new) legitimately carry explicit ones, so scope the check to
+    // generated user_ functions.
+    for line in out.rust.lines().filter(|l| l.contains("fn user_")) {
+        assert!(
+            !line.contains("&'"),
+            "view return should use elided lifetime, not explicit: {line}"
+        );
+    }
 }
 
 #[test]

@@ -284,6 +284,23 @@ pub fn build_bridge(
     );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
+    let target_dir = cache_root.join("target");
+    let target = target_dir.join("release");
+    let rlib = target.join(format!("lib{}.rlib", crate_name));
+    let deps_dir = target.join("deps");
+
+    // Fast path (cache hit): the key is content-derived from the exact
+    // extern-rust signature / dep set, so an rlib already sitting at this
+    // path is a valid build for this call — reuse it without touching
+    // `cargo` or rewriting the cached sources. No lock needed: we don't
+    // write anything.
+    if rlib.is_file() {
+        return Ok(FfiLink {
+            crate_name,
+            rlib_path: rlib,
+            deps_dir,
+        });
+    }
 
     if !command_exists("cargo") {
         return Err(vec![Diagnostic::error(
@@ -298,6 +315,24 @@ pub fn build_bridge(
 
     fs::create_dir_all(&cache_root)
         .map_err(|e| tool_error(&format!("couldn't create the FFI cache folder: {}", e)))?;
+
+    // Slow path (cache miss): another `jet` process may be building this same
+    // key right now. Cargo's `CARGO_TARGET_DIR` lock protects `target/`, not
+    // the `Cargo.toml`/`src/lib.rs` sources this function is about to
+    // (re)write, so guard the write+build with our own cross-process lock,
+    // scoped to this cache key — two processes on *different* keys never
+    // block each other.
+    let _lock = BuildLock::acquire(&cache_root)?;
+
+    // Re-check under the lock: whoever held it may have just finished
+    // building this exact key while we were waiting.
+    if rlib.is_file() {
+        return Ok(FfiLink {
+            crate_name,
+            rlib_path: rlib,
+            deps_dir,
+        });
+    }
 
     let src_dir = cache_root.join("src");
     fs::create_dir_all(&src_dir)
@@ -321,7 +356,6 @@ pub fn build_bridge(
     )
     .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
-    let target_dir = cache_root.join("target");
     let out = Command::new("cargo")
         .arg("build")
         .arg("--release")
@@ -379,8 +413,6 @@ pub fn build_bridge(
         .with_detail(format!("  cargo said:\n{}", stable_cargo_detail(&stderr)))]);
     }
 
-    let target = target_dir.join("release");
-    let rlib = target.join(format!("lib{}.rlib", crate_name));
     if !rlib.is_file() {
         return Err(tool_error(&format!(
             "FFI build finished but `{}` is missing",
@@ -390,8 +422,62 @@ pub fn build_bridge(
     Ok(FfiLink {
         crate_name,
         rlib_path: rlib,
-        deps_dir: target.join("deps"),
+        deps_dir,
     })
+}
+
+/// Cross-process lock guarding the slow path (rewrite + `cargo build`) of the
+/// FFI bridge cache for one cache key. Same atomic `create_dir` + stale-steal
+/// shape as `tests/common/mod.rs` `FfiBridgeLock`, kept as a *separate* lock
+/// (different failure domain: this one guards real concurrent `jet`
+/// processes; the test lock also serializes different test *binaries* in the
+/// same suite run) — scoped per cache key rather than global, and
+/// error-returning instead of panicking, since this runs in the compiler
+/// itself and must never crash a build (I2: no path here may surface as an
+/// internal panic in place of a diagnostic).
+struct BuildLock {
+    dir: PathBuf,
+}
+
+impl BuildLock {
+    /// Blocks until the lock is held. Steals a stale lock (mtime older than 2
+    /// minutes — far longer than any single FFI bridge `cargo build` takes)
+    /// so a killed/timed-out `jet` process can't wedge every later build on
+    /// this key.
+    fn acquire(cache_root: &std::path::Path) -> Result<BuildLock, Vec<Diagnostic>> {
+        let dir = cache_root.join(".build-lock");
+        loop {
+            match fs::create_dir(&dir) {
+                Ok(()) => return Ok(BuildLock { dir }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if let Ok(meta) = fs::metadata(&dir) {
+                        if let Ok(age) = meta.modified().and_then(|m| {
+                            m.elapsed()
+                                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                        }) {
+                            if age > std::time::Duration::from_secs(120) {
+                                let _ = fs::remove_dir(&dir);
+                                continue;
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(e) => {
+                    return Err(tool_error(&format!(
+                        "couldn't lock the FFI cache folder: {}",
+                        e
+                    )));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for BuildLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir(&self.dir);
+    }
 }
 
 fn collect_crate_deps(entries: &[ExternEntry]) -> BTreeMap<String, String> {
