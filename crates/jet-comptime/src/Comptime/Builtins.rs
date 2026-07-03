@@ -77,7 +77,7 @@ pub(super) fn eval_binop(
     }
 }
 
-fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
+pub(super) fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
     use CtValue::*;
     match (a, b) {
         (Int(a), Int(b)) => Ok(a.cmp(&b)),
@@ -192,6 +192,27 @@ pub(super) fn apply_mutating(
 }
 
 /// Non-mutating methods on values.
+/// D-ANY-JAI1: the type name `reflect.of(x).type_name()` reports — Jet's
+/// beginner-facing names for the built-ins, the struct/enum's own name for
+/// everything else.
+fn ctvalue_type_name(v: &CtValue) -> String {
+    match v {
+        CtValue::Int(_) => "Int".to_string(),
+        CtValue::Float(_) => "Float".to_string(),
+        CtValue::Bool(_) => "Bool".to_string(),
+        CtValue::Char(_) => "Char".to_string(),
+        CtValue::Str(_) => "String".to_string(),
+        CtValue::Bytes(_) => "[U8]".to_string(),
+        CtValue::List(_) => "List".to_string(),
+        CtValue::Map(_) => "Map".to_string(),
+        CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name.clone(),
+        CtValue::Some(_) | CtValue::None(_) => "Option".to_string(),
+        CtValue::ResOk(_) | CtValue::ResErr(_) => "Result".to_string(),
+        CtValue::Unit => "()".to_string(),
+        CtValue::Closure(_) => "Fn".to_string(),
+    }
+}
+
 pub(super) fn apply_method(
     recv: &CtValue,
     method: &str,
@@ -201,8 +222,116 @@ pub(super) fn apply_method(
     match (recv, method) {
         // Universal
         (v, "to_string") => Ok(CtValue::Str(v.jet_show())),
+        // c139: `.raw()` unwraps a distinct/`#UnitFamily` type (D-DIST1/D-QUAL3).
+        // Distinct types have zero runtime representation difference from
+        // their base — the interpreter never wraps one, so unwrapping is
+        // identity (`eval_distinct_ctor` in methods.rs constructs the same
+        // unwrapped value).
+        (v, "raw") => Ok(v.clone()),
+        // c139: `.clone()` — every `CtValue` is already an owned, independently
+        // mutable tree (no shared/interior-mutable state in this value model),
+        // so a deep clone is just `Clone::clone`.
+        (v, "clone") => Ok(v.clone()),
+        // D-ANY-JAI1: `reflect.of(x)` accessors that don't need interpreter
+        // access (`.display` does — see `eval_method`). `__Reflect`/
+        // `__ReflectField` are `core.reflect`'s internal tags (never a real
+        // Jet type — see the comment on `("core.reflect", "of")`).
+        (CtValue::Struct { type_name, fields }, "type_name") if type_name == "__Reflect" => {
+            let inner = fields.iter().find(|(n, _)| n == "value").map(|(_, v)| v);
+            Ok(CtValue::Str(
+                inner.map(ctvalue_type_name).unwrap_or_default(),
+            ))
+        }
+        (CtValue::Struct { type_name, fields }, "fields") if type_name == "__Reflect" => {
+            let inner = fields.iter().find(|(n, _)| n == "value").map(|(_, v)| v);
+            Ok(CtValue::List(match inner {
+                Some(CtValue::Struct { fields: sf, .. }) => sf
+                    .iter()
+                    .map(|(n, v)| CtValue::Struct {
+                        type_name: "__ReflectField".to_string(),
+                        fields: vec![
+                            ("name".to_string(), CtValue::Str(n.clone())),
+                            ("value".to_string(), v.clone()),
+                        ],
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            }))
+        }
+        (CtValue::Struct { type_name, fields }, "name") if type_name == "__ReflectField" => Ok(
+            fields.iter().find(|(n, _)| n == "name").map(|(_, v)| v.clone()).unwrap_or(CtValue::Unit),
+        ),
+        (CtValue::Struct { type_name, fields }, "value") if type_name == "__ReflectField" => Ok(
+            fields.iter().find(|(n, _)| n == "value").map(|(_, v)| v.clone()).unwrap_or(CtValue::Unit),
+        ),
+        // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
+        // `(v, "zip")` rather than guarding to `CtValue::Some`/`None` because
+        // both arms of the pairing need the same fallback.
+        (CtValue::Some(a), "zip") => Ok(match args.into_iter().next() {
+            Some(CtValue::Some(b)) => CtValue::Some(Box::new(CtValue::Struct {
+                type_name: "Pair".to_string(),
+                fields: vec![("a".to_string(), (**a).clone()), ("b".to_string(), *b)],
+            })),
+            _ => CtValue::None(Type::Int),
+        }),
+        (CtValue::None(t), "zip") => Ok(CtValue::None(t.clone())),
+        // D-SERDE-ACCESS=B: dynamic `Json`/`Data` accessors — `Option`-returning
+        // reads over the tagged tree `JsonInterp::json_variant` builds
+        // (`.parse()`'s result, or a value built by hand with `Json.Object(…)`).
+        // `.field`/`.at` don't match a non-Object/Array receiver or a missing
+        // key/index; `.int`/`.text`/`.bool`/`.float` don't match a value tagged
+        // with a different variant — all four report absence via `None` rather
+        // than an error, matching the `?? panic(…)` call-site convention.
+        // Guarded to an actual `Json`-tagged value (`v @ CtValue::Enum { .. }`)
+        // rather than matching any receiver — `.int`/`.float` in particular
+        // would otherwise shadow the `core.random` RNG struct's own same-named
+        // methods further down (match arms are tried in order).
+        (v @ CtValue::Enum { .. }, "field") => {
+            let key = match args.into_iter().next() {
+                Some(CtValue::Str(s)) => s,
+                _ => return Err(unsupported("`.field` requires a string argument", span)),
+            };
+            Ok(match super::JsonInterp::json_payload(v, "Object") {
+                Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key)) {
+                    Some(found) => CtValue::Some(Box::new(found.clone())),
+                    None => CtValue::None(Type::Named("Json".to_string())),
+                },
+                _ => CtValue::None(Type::Named("Json".to_string())),
+            })
+        }
+        (v @ CtValue::Enum { .. }, "at") => {
+            let i = as_int(args.first().unwrap_or(&CtValue::Int(-1)), span)?;
+            Ok(match super::JsonInterp::json_payload(v, "Array") {
+                Some(CtValue::List(xs)) if i >= 0 && (i as usize) < xs.len() => {
+                    CtValue::Some(Box::new(xs[i as usize].clone()))
+                }
+                _ => CtValue::None(Type::Named("Json".to_string())),
+            })
+        }
+        (v @ CtValue::Enum { .. }, "int") => Ok(match super::JsonInterp::json_payload(v, "Int") {
+            Some(n) => CtValue::Some(Box::new(n.clone())),
+            None => CtValue::None(Type::Int),
+        }),
+        (v @ CtValue::Enum { .. }, "text") => Ok(match super::JsonInterp::json_payload(v, "Text") {
+            Some(s) => CtValue::Some(Box::new(s.clone())),
+            None => CtValue::None(Type::String),
+        }),
+        (v @ CtValue::Enum { .. }, "bool") => Ok(match super::JsonInterp::json_payload(v, "Bool") {
+            Some(b) => CtValue::Some(Box::new(b.clone())),
+            None => CtValue::None(Type::Bool),
+        }),
+        (v @ CtValue::Enum { .. }, "float") => {
+            Ok(match super::JsonInterp::json_payload(v, "Float") {
+                Some(f) => CtValue::Some(Box::new(f.clone())),
+                None => CtValue::None(Type::Float),
+            })
+        }
         // Int / Float conversions
         (CtValue::Int(n), "to_float") => Ok(CtValue::Float(*n as f64)),
+        // D-SG9/D-NUMOPS1: sized-float width conversions collapse to identity —
+        // every width (F32/F64/Float) is one `CtValue::Float` in this
+        // interpreter (width bounds are a sema-time concern, S21).
+        (CtValue::Float(f), "to_float") => Ok(CtValue::Float(*f)),
         (CtValue::Int(n), "abs") => n
             .checked_abs()
             .map(CtValue::Int)

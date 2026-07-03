@@ -49,10 +49,10 @@ impl Parser {
     fn parse_value(&mut self) -> Result<CtValue, JsonError> {
         self.ws();
         match self.peek() {
-            Some('n') => self.word("null", CtValue::Unit),
-            Some('t') => self.word("true", CtValue::Bool(true)),
-            Some('f') => self.word("false", CtValue::Bool(false)),
-            Some('"') => Ok(CtValue::Str(self.string()?)),
+            Some('n') => self.word("null", json_variant("Null", None)),
+            Some('t') => self.word("true", json_variant("Bool", Some(CtValue::Bool(true)))),
+            Some('f') => self.word("false", json_variant("Bool", Some(CtValue::Bool(false)))),
+            Some('"') => Ok(json_variant("Text", Some(CtValue::Str(self.string()?)))),
             Some('[') => self.array(),
             Some('{') => self.object(),
             Some('-') | Some('0'..='9') => self.number(),
@@ -168,11 +168,11 @@ impl Parser {
         let s: String = self.chars[start..self.pos].iter().collect();
         if s.contains('.') || s.contains('e') || s.contains('E') {
             s.parse::<f64>()
-                .map(CtValue::Float)
+                .map(|f| json_variant("Float", Some(CtValue::Float(f))))
                 .map_err(|_| self.err("bad number"))
         } else {
             s.parse::<i64>()
-                .map(CtValue::Int)
+                .map(|n| json_variant("Int", Some(CtValue::Int(n))))
                 .map_err(|_| self.err("bad number"))
         }
     }
@@ -183,7 +183,7 @@ impl Parser {
         self.ws();
         if self.peek() == Some(']') {
             self.pos += 1;
-            return Ok(CtValue::List(items));
+            return Ok(json_variant("Array", Some(CtValue::List(items))));
         }
         loop {
             items.push(self.parse_value()?);
@@ -200,7 +200,7 @@ impl Parser {
                 _ => return Err(self.err("expected `,` or `]` in array")),
             }
         }
-        Ok(CtValue::List(items))
+        Ok(json_variant("Array", Some(CtValue::List(items))))
     }
 
     fn object(&mut self) -> Result<CtValue, JsonError> {
@@ -209,7 +209,7 @@ impl Parser {
         self.ws();
         if self.peek() == Some('}') {
             self.pos += 1;
-            return Ok(CtValue::Map(map));
+            return Ok(json_variant("Object", Some(CtValue::Map(map))));
         }
         loop {
             self.ws();
@@ -237,7 +237,37 @@ impl Parser {
                 _ => return Err(self.err("expected `,` or `}` in object")),
             }
         }
-        Ok(CtValue::Map(map))
+        Ok(json_variant("Object", Some(CtValue::Map(map))))
+    }
+}
+
+/// D-SERDE-ACCESS=B / D-DYNAMIC-TYPE1=A: build one node of the `Json`/`Data`
+/// dynamic-value tree — a `CtValue::Enum` so it round-trips through the exact
+/// same pattern-matching (`data == .Object(entries)`, S31) and explicit
+/// construction (`Json.Text("jet")`) machinery a user enum already gets, with
+/// no interpreter-specific special case needed on either of those paths.
+pub(super) fn json_variant(variant: &str, payload: Option<CtValue>) -> CtValue {
+    CtValue::Enum {
+        type_name: "Json".to_string(),
+        variant: variant.to_string(),
+        args: match payload {
+            Some(v) => vec![(None, v)],
+            None => Vec::new(),
+        },
+    }
+}
+
+/// The payload of a `Json`-tagged `CtValue` with the given variant name, or
+/// `None` if `v` isn't that shape (used by the `.field`/`.at`/`.int`/`.text`/
+/// `.bool`/`.float` accessor methods in `Builtins.rs`).
+pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
+    match v {
+        CtValue::Enum {
+            type_name,
+            variant: vname,
+            args,
+        } if type_name == "Json" && vname == variant => args.first().map(|(_, v)| v),
+        _ => None,
     }
 }
 
@@ -254,6 +284,50 @@ pub(super) fn parse_json(text: &str) -> Result<CtValue, JsonError> {
     Ok(v)
 }
 
+/// D-JSON3: lenient-decode coercion — walk a parsed `Json`-tagged tree and
+/// promote a `Text` leaf that reads as a number or a boolean to that type.
+/// Applied only by `core.encoding.json.decode` (untyped); `.parse()` stays
+/// literal.
+pub(super) fn coerce_json(v: CtValue) -> CtValue {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = v
+    else {
+        return v;
+    };
+    if type_name != "Json" {
+        return CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        };
+    }
+    match (variant.as_str(), args.into_iter().next()) {
+        ("Text", Some((_, CtValue::Str(s)))) => {
+            if let Ok(n) = s.parse::<i64>() {
+                json_variant("Int", Some(CtValue::Int(n)))
+            } else if s == "true" || s == "false" {
+                json_variant("Bool", Some(CtValue::Bool(s == "true")))
+            } else {
+                json_variant("Text", Some(CtValue::Str(s)))
+            }
+        }
+        ("Array", Some((_, CtValue::List(xs)))) => json_variant(
+            "Array",
+            Some(CtValue::List(xs.into_iter().map(coerce_json).collect())),
+        ),
+        ("Object", Some((_, CtValue::Map(m)))) => json_variant(
+            "Object",
+            Some(CtValue::Map(
+                m.into_iter().map(|(k, v)| (k, coerce_json(v))).collect(),
+            )),
+        ),
+        (variant, payload) => json_variant(variant, payload.map(|(_, v)| v)),
+    }
+}
+
 pub(super) fn json_error_value(e: JsonError) -> CtValue {
     CtValue::Struct {
         type_name: "JsonError".to_string(),
@@ -266,6 +340,20 @@ pub(super) fn json_error_value(e: JsonError) -> CtValue {
 
 pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> String {
     match v {
+        // D-SERDE-ACCESS=B: a `Json`-tagged dynamic value (from `.parse()`, or
+        // built by hand with `Json.Text(…)`/`Json.Object(…)`) — unwrap the tag
+        // and render its payload the same way the untagged shapes below do.
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "Json" => match variant.as_str() {
+            "Null" => "null".to_string(),
+            _ => match args.first() {
+                Some((_, payload)) => render_json_pretty(payload, pretty, depth),
+                None => "null".to_string(),
+            },
+        },
         CtValue::Unit => "null".to_string(),
         CtValue::Bool(b) => b.to_string(),
         CtValue::Int(n) => n.to_string(),

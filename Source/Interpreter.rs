@@ -156,6 +156,22 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                             span: Some(f.name_span),
                         });
                     }
+                    // D-CLIFLAG1: `fn run(args: T)` — the typed entry-signature
+                    // CLI surface. The real build parses `io.args()` into `T`
+                    // before calling `run`; the interpreter has no argv to
+                    // parse from and no synthesis for the defaults, so it has
+                    // nothing to bind `args` to. Declining honestly here beats
+                    // running with `args` unbound (which previously surfaced as
+                    // a confusing, unrelated E0956 deep in the body, or — worse
+                    // — silently printed the wrong value, c139 JIT/interpreter
+                    // parity finding).
+                    if f.name == "run" && !f.params.is_empty() {
+                        return Some(Boundary {
+                            feature: "uses a typed CLI entry signature (`fn run(args: T)`)"
+                                .to_string(),
+                            span: Some(f.name_span),
+                        });
+                    }
                     if let Some(b) = scan_stmts_for_unsafe(&f.body) {
                         return Some(b);
                     }
@@ -534,6 +550,184 @@ fn collect_funcs(bundle: &ProgramBundle) -> HashMap<String, &Func> {
     funcs
 }
 
+/// c139 JIT/interpreter-parity: extend `collect_funcs` with everything else
+/// `jet dev` needs to run whole programs at parity with the real build —
+/// D-MOD2 code-module namespaced functions (both the real `alias__fn`
+/// mangling and, when unclaimed, the bare name — covers a private sibling
+/// call inside the module and a `use mod.item` selective import in one move,
+/// with `use mod.item as alias` handled explicitly below), user-written
+/// instance/associated methods, D-FIELDPOL1 computed fields, and
+/// D-RANGETYPE1/D-DIST1 distinct-type constructors. Consts/`comptime`
+/// bindings are pre-evaluated into `globals` from sema's own `ConstDef::ct`
+/// (I2: the exact value baked into the real build, not a re-derivation).
+fn collect_funcs_and_info<'a>(
+    bundle: &'a ProgramBundle,
+) -> (HashMap<String, &'a Func>, crate::Comptime::ProgramInfo<'a>) {
+    let mut funcs: HashMap<String, &Func> = HashMap::new();
+    let mut info = crate::Comptime::ProgramInfo::empty();
+    for module in &bundle.modules {
+        walk_items_for_interp(&module.items, &mut funcs, &mut info);
+    }
+    // D-SELIMPORT1=A: `use mod.item as alias` for a *local* code module (not
+    // `core`/`jet`) — the bare-name fallback above already covers an
+    // unaliased `use mod.item`.
+    for module in &bundle.modules {
+        for imp in &module.imports {
+            let crate::AST::ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &imp.kind
+            else {
+                continue;
+            };
+            if module_alias == "core" || module_alias == "jet" {
+                continue;
+            }
+            for (orig, alias_opt) in items {
+                let Some(local) = alias_opt else { continue };
+                let qualified = format!("{}__{}", module_alias, orig);
+                if let Some(f) = funcs.get(qualified.as_str()).copied() {
+                    funcs.entry(local.clone()).or_insert(f);
+                }
+            }
+        }
+    }
+    // Core module aliases (`use core.math as math`, `use core.{sqrt}`),
+    // merged across every module the same way `funcs` already is — dev mode
+    // has no per-module scoping (see the doc comment on `collect_funcs`).
+    for module in &bundle.modules {
+        for imp in &module.imports {
+            if let Some(core_module) = imp.core_module_path() {
+                info.core_imports
+                    .entry(imp.import_alias())
+                    .or_insert(core_module);
+                continue;
+            }
+            if let crate::AST::ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &imp.kind
+            {
+                if module_alias == "core" || module_alias == "jet" {
+                    for (orig, alias_opt) in items {
+                        let local = alias_opt.clone().unwrap_or_else(|| orig.clone());
+                        let full = format!("core.{}", orig);
+                        if crate::Syntax::is_known_core_module(&full) {
+                            info.core_imports.entry(local).or_insert(full);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Top-level `const`/`comptime` bindings: sema already evaluated every
+    // `comptime NAME = …` into `ConstDef::ct` while checking the program (the
+    // caller of `run_checked` guarantees the front end already ran) — reuse
+    // that value rather than re-evaluating, so a `jet dev` run of the const
+    // matches the real build bit-for-bit (I2).
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let Item::Const(c) = item {
+                if let Some(v) = &c.ct {
+                    info.globals.entry(c.name.clone()).or_insert_with(|| v.clone());
+                }
+            }
+        }
+    }
+    (funcs, info)
+}
+
+/// One item-list pass for [`collect_funcs_and_info`]: top-level functions,
+/// `impl`/in-struct instance methods, computed fields, distinct-type
+/// constructors, and one level of D-MOD2 inline/generic-instantiated code
+/// modules (their own `Item::Func`s only — module-in-module nesting isn't a
+/// shape any current example produces, so it isn't walked recursively).
+fn walk_items_for_interp<'a>(
+    items: &'a [Item],
+    funcs: &mut HashMap<String, &'a Func>,
+    info: &mut crate::Comptime::ProgramInfo<'a>,
+) {
+    for item in items {
+        match item {
+            Item::Func(f) => {
+                funcs.entry(f.name.clone()).or_insert(f);
+            }
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    info.methods
+                        .entry((i.type_name.clone(), m.name.clone()))
+                        .or_insert(m);
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    info.methods
+                        .entry((s.name.clone(), m.name.clone()))
+                        .or_insert(m);
+                }
+                for blk in &s.trait_impls {
+                    for m in &blk.methods {
+                        info.methods
+                            .entry((s.name.clone(), m.name.clone()))
+                            .or_insert(m);
+                    }
+                }
+                for field in &s.fields {
+                    if let Some(expr) = &field.computed {
+                        info.computed_fields
+                            .entry((s.name.clone(), field.name.clone()))
+                            .or_insert(expr.as_ref());
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    info.methods
+                        .entry((e.name.clone(), m.name.clone()))
+                        .or_insert(m);
+                }
+                for blk in &e.trait_impls {
+                    for m in &blk.methods {
+                        info.methods
+                            .entry((e.name.clone(), m.name.clone()))
+                            .or_insert(m);
+                    }
+                }
+            }
+            Item::Distinct(d) => {
+                info.distinct_ranges
+                    .entry(d.name.clone())
+                    .or_insert(d.range.map(|(lo, hi, _)| (lo, hi)));
+            }
+            Item::UnitFamily(uf) => {
+                for d in uf.distinct_defs() {
+                    info.distinct_ranges
+                        .entry(d.name.clone())
+                        .or_insert(d.range.map(|(lo, hi, _)| (lo, hi)));
+                }
+            }
+            Item::CodeModule(cm) => {
+                if let Some(body) = &cm.body {
+                    for it in body {
+                        if let Item::Func(f) = it {
+                            funcs
+                                .entry(format!("{}__{}", cm.name, f.name))
+                                .or_insert(f);
+                            // Bare-name fallback: a private sibling call inside
+                            // the module, or an unaliased `use mod.item`
+                            // selective import — see `collect_funcs_and_info`.
+                            funcs.entry(f.name.clone()).or_insert(f);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Run a *checked* bundle in the interpreter (E2-M4). The caller has already
 /// run the front end and confirmed there are no errors. `try_anyway` (D-DEV1)
 /// skips the E2201 boundary scan and attempts execution with no guarantees.
@@ -543,7 +737,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             return RunOutcome::Problems(vec![boundary_diag(&b)]);
         }
     }
-    let funcs = collect_funcs(bundle);
+    let (funcs, program) = collect_funcs_and_info(bundle);
     let main = match funcs.get("run") {
         Some(f) => *f,
         None => {
@@ -560,7 +754,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     };
     let base_dir = &bundle.project_root;
     let mut sink = crate::Comptime::DevSink::new();
-    match crate::Comptime::run_main(main, &funcs, base_dir, &mut sink) {
+    match crate::Comptime::run_main(main, &funcs, base_dir, &mut sink, &program) {
         Ok(()) => RunOutcome::Ran {
             stdout: sink.stdout,
             stderr: sink.stderr,

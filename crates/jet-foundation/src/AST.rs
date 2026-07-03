@@ -2903,6 +2903,32 @@ pub enum CtValue {
     ResOk(Box<CtValue>),
     ResErr(Box<CtValue>),
     Unit,
+    /// c139 JIT/interpreter-parity: a lambda value (`(x) => x > 3`) captured
+    /// at the point it's created, so the interpreter can invoke it later —
+    /// passed to a higher-order method (`.filter`/`.map`/`.each`/`.sort_by`/
+    /// `Option.lift2`), stored, or returned. See `ClosureData` below.
+    Closure(std::sync::Arc<ClosureData>),
+}
+
+/// c139: a closure's captured state — the AST `Lambda` node plus every
+/// binding in scope where it was created (a tree-walker over-captures rather
+/// than tracking free variables, which is simpler and behaviorally
+/// equivalent here). `PartialEq` is reference identity (the `Arc`'s shared
+/// allocation address) rather than structural — closures aren't
+/// meaningfully comparable, and nothing in the language surface needs them
+/// to be; deriving `PartialEq` on the whole AST just to satisfy `CtValue`'s
+/// derive would be a much larger, unrelated change. `Arc` (not `Rc`) so
+/// `CtValue` stays `Send + Sync`, matching every other variant.
+#[derive(Clone, Debug)]
+pub struct ClosureData {
+    pub lambda: Lambda,
+    pub captured: std::collections::HashMap<String, CtValue>,
+}
+
+impl PartialEq for ClosureData {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
 }
 
 /// Orderable map key (S38: maps are `BTreeMap`, so keys must be `Ord`).
@@ -2986,6 +3012,16 @@ impl CtValue {
                 Type::Named(type_name.clone())
             }
             CtValue::Unit => Type::Named(String::new()),
+            // c139: no return-type info is threaded to a closure value at
+            // runtime (the interpreter is untyped past sema); the exact
+            // signature is never read back from `jet_type()` for a closure
+            // in practice (unlike `None(Type)`, which needs it to pick an
+            // empty list/option's element type).
+            CtValue::Closure(_) => Type::Fn {
+                params: Vec::new(),
+                ret: None,
+                effect_bound: None,
+            },
         }
     }
 
@@ -3045,6 +3081,9 @@ impl CtValue {
                 }
             }
             CtValue::Unit => String::new(),
+            // c139: never reached in practice — a closure is a callable, not
+            // a printable value, so no example interpolates one directly.
+            CtValue::Closure(_) => "<closure>".to_string(),
         }
     }
 
@@ -3106,6 +3145,7 @@ impl CtValue {
                 }
             }
             CtValue::Unit => "()".to_string(),
+            CtValue::Closure(_) => "<closure>".to_string(),
         }
     }
 
@@ -3228,6 +3268,7 @@ impl CtValue {
                 out.push(')');
             }
             CtValue::Unit => out.push_str("()"),
+            CtValue::Closure(_) => out.push_str("<closure>"),
         }
     }
 
@@ -3307,6 +3348,10 @@ impl CtValue {
             CtValue::ResOk(v) => format!("{{\"ok\":{}}}", v.to_json()),
             CtValue::ResErr(e) => format!("{{\"err\":{}}}", e.to_json()),
             CtValue::Unit => "null".to_string(),
+            // c139: a closure has no JSON representation — unreachable in
+            // practice (a value routed through the encoder never contains
+            // one; codable derives never target a `fn`-typed field).
+            CtValue::Closure(_) => "null".to_string(),
         }
     }
 
@@ -3376,6 +3421,14 @@ impl CtValue {
                 }
             }
             CtValue::Unit => "()".to_string(),
+            // c139: a closure can't be baked into a Rust literal — but it
+            // also can't reach here: a `comptime` binding's value must be an
+            // encodable type (sema rejects a function-typed `comptime` const
+            // before evaluation), and this method exists only to serialize a
+            // `comptime` binding's final value for codegen.
+            CtValue::Closure(_) => {
+                unreachable!("a closure value can't be a comptime binding's serialized result")
+            }
         }
     }
 }

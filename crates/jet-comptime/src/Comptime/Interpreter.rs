@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
     BinOp, BindPattern, EnumLitArg, Expr, Func, IncDecOp, OrFallback as FallbackKind, PatSlot,
-    Pattern, Stmt, StrPart, Type, UnOp,
+    Pattern, Stmt, StrFormat, StrPart, Type, UnOp,
 };
 
 use super::Builtins::{as_bool, as_int, eval_binop};
@@ -133,6 +133,32 @@ pub(super) struct Interp<'a> {
     /// D-METADERIVE1=A: source fragments emitted by `emit(…)` calls inside
     /// a user-authored `derive` body. Drained by `evaluate_derive_body`.
     pub(super) emitted_fragments: Vec<String>,
+    /// c139 JIT/interpreter-parity: top-level `const`/`comptime` bindings,
+    /// pre-evaluated (in declaration order, each seeing the ones before it)
+    /// so any function body — not just the initializer that names them
+    /// directly — can read them. Checked as a fallback under a local-scope
+    /// miss (locals always shadow). Empty for contexts with no such bindings.
+    pub(super) globals: &'a HashMap<String, CtValue>,
+    /// c139: `(TypeName, method) -> Func` for user-written instance/associated
+    /// methods — `impl Type { fn … }` / `impl Type.Trait { … }`, in-struct
+    /// `fn`/`impl Trait { … }` blocks, and D-MOD2 code-module namespaced calls
+    /// (registered as `(module_alias, fn_name)`). `eval_method` consults this
+    /// before falling back to the built-in `apply_method` dispatch.
+    pub(super) methods: &'a HashMap<(String, String), &'a Func>,
+    /// c139: `(TypeName, field) -> expr` for D-FIELDPOL1 computed fields
+    /// (`name: T => expr`). Sema has already rewritten sibling names to
+    /// `self.<field>` inside `expr`, so evaluating it just needs `self` bound
+    /// to the struct value.
+    pub(super) computed_fields: &'a HashMap<(String, String), &'a Expr>,
+    /// c139: `TypeName -> Some((lo, hi))` for a `distinct Base(lo..hi)` range
+    /// constraint (D-RANGETYPE1), `TypeName -> None` for every other distinct
+    /// type / `#UnitFamily` member (D-DIST1/D-QUAL3). `Name(expr)` is the only
+    /// call-syntax construct capitalized-name calls are used for in Jet (struct
+    /// literals use `.{ }`, enum variants use `.Variant`), so an unresolved
+    /// call to a name in this map is a distinct-type constructor: identity
+    /// for an unranged type, a proven-in-range literal folds to a direct
+    /// value, anything else is the fallible `Result`-wrapped form.
+    pub(super) distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
 }
 
 impl<'a> Interp<'a> {
@@ -207,7 +233,9 @@ impl<'a> Interp<'a> {
                         .ok_or_else(|| {
                             comptime_panic(&format!("this value has no field `{}`", f.name), f.span)
                         })?;
-                    scope.insert(f.name.clone(), v);
+                    // D-DESTRUCT1: `field: local` binds under the rename, not
+                    // the struct's own field name.
+                    scope.insert(f.local_name().to_string(), v);
                 }
             }
             BindPattern::List { elems, span } => {
@@ -385,17 +413,15 @@ impl<'a> Interp<'a> {
             // `apply_core_call` knows we're inside a gate. The E3411 (gate but no
             // flag) check is in `apply_impure_core_call`; the body always runs so
             // the interpreter can reach the impure call and produce a good span.
-            Stmt::Impure { body, span, .. } => {
-                if !self.allow_impure {
-                    // E3411: gate present but --allow-impure not passed.
-                    return Err(Diagnostic::error(
-                        "E3411",
-                        "comptime Tier-2 effect inside `#Impure` gate, but `--allow-impure` was not passed".to_string(),
-                        "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required too".to_string(),
-                        "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
-                        Some(*span),
-                    ));
-                }
+            Stmt::Impure { body, .. } => {
+                // c139 JIT/interpreter-parity fix: entering the gate is always
+                // fine — it just marks Tier-2 comptime effects as *reachable*.
+                // The actual `--allow-impure` requirement is enforced per call
+                // in `eval_method` (E3411 there names the specific call, e.g.
+                // `core.fs.read()`), which also correctly leaves a gate whose
+                // body never attempts a Tier-2 effect (e.g. only `print`s, or
+                // a nested `#Impure` demo block) needing no flag at all —
+                // matching the doc comment on D-CTEFFECT1's own example.
                 self.impure_depth += 1;
                 let result = self.exec_block(body, scope);
                 self.impure_depth -= 1;
@@ -442,11 +468,15 @@ impl<'a> Interp<'a> {
             Stmt::BreakLabel(_, span) | Stmt::ContinueLabel(_, span) => {
                 Err(unsupported("a labeled `break`/`continue`", *span))
             }
-            // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` already
-            // ran at sema time; it is build-time-only and erases (no runtime code).
-            // In `jet dev` / debugger mode the block is a no-op — consistent with
-            // codegen erasure (I3).
-            Stmt::ComptimeBlock { .. } => Ok(Flow::Normal),
+            // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }`
+            // already ran (and was purity/fuel-checked) at sema time; it is
+            // build-time-only and erases from the compiled program (I3). The
+            // dev interpreter re-runs it — same pure body, same guaranteed
+            // termination — directly in the *current* scope (not a child
+            // scope) so a binding inside the block "leaks into the
+            // surrounding comptime scope" exactly as the doc comment above
+            // the example describes, and a later `$name` splice resolves it.
+            Stmt::ComptimeBlock { body, .. } => self.exec_block(body, scope),
             // D-WHEN1 (ratified 2026-06-19): sema already selected the arm
             // (selected_then = Some(…)); execute only that arm. If sema didn't
             // run (None), skip both — matching codegen's dumb-emit behaviour.
@@ -717,7 +747,21 @@ impl<'a> Interp<'a> {
                 for part in parts {
                     match part {
                         StrPart::Lit(t) => s.push_str(t),
-                        StrPart::Interp(e, _) => s.push_str(&self.eval(e, scope)?.jet_show()),
+                        StrPart::Interp(e, fmt) => {
+                            let v = self.eval(e, scope)?;
+                            match fmt {
+                                // D-DISPLAY-SHAPE: bare `{value}` — a user
+                                // `impl Type.Display` (if any) wins over the
+                                // built-in rendering (D-DISPLAYDBG1/2).
+                                StrFormat::Display => {
+                                    s.push_str(&self.show_value(&v, e.span())?);
+                                }
+                                // `{value@Debug}` always uses the built-in
+                                // (auto-derived-Debug-shaped) rendering, never
+                                // a user `Display` impl.
+                                StrFormat::Debug => s.push_str(&v.jet_show()),
+                            }
+                        }
                     }
                 }
                 Ok(CtValue::Str(s))
@@ -741,6 +785,7 @@ impl<'a> Interp<'a> {
             }
             Expr::Ident(name, span) => scope
                 .get(name)
+                .or_else(|| self.globals.get(name))
                 .cloned()
                 .ok_or_else(|| unsupported(&format!("the name `{}`", name), *span)),
             Expr::Unary(op, inner, span) => {
@@ -812,12 +857,25 @@ impl<'a> Interp<'a> {
                     }
                 }
                 let v = self.eval(inner, scope)?;
-                match v {
-                    CtValue::Struct { fields, .. } => fields
-                        .into_iter()
-                        .find(|(name, _)| name == member)
-                        .map(|(_, value)| value)
-                        .ok_or_else(|| unsupported(&format!("the field `.{}`", member), *span)),
+                match &v {
+                    CtValue::Struct { type_name, fields } => {
+                        if let Some((_, value)) = fields.iter().find(|(name, _)| name == member) {
+                            return Ok(value.clone());
+                        }
+                        // D-FIELDPOL1: not a stored field — try a computed
+                        // field (`name: T => expr`, sibling names already
+                        // rewritten to `self.<field>` by sema).
+                        if let Some(expr) = self
+                            .computed_fields
+                            .get(&(type_name.clone(), member.clone()))
+                            .copied()
+                        {
+                            let mut self_scope = HashMap::new();
+                            self_scope.insert("self".to_string(), v.clone());
+                            return self.eval(expr, &mut self_scope);
+                        }
+                        Err(unsupported(&format!("the field `.{}`", member), *span))
+                    }
                     _ => Err(unsupported("field access on this value", *span)),
                 }
             }
@@ -1016,6 +1074,33 @@ impl<'a> Interp<'a> {
                 let matched = self.match_pattern(&v, pattern, scope)?;
                 Ok(CtValue::Bool(matched))
             }
+            // D-CHAINCMP1: `a <= b < c` — each shared middle operand is
+            // evaluated exactly once, then every adjacent pair is compared
+            // and the results AND-ed (short-circuiting on the first false,
+            // matching what the pairs would do written out by hand).
+            Expr::CompareChain { operands, ops, .. } => {
+                let mut vals = Vec::with_capacity(operands.len());
+                for o in operands {
+                    vals.push(self.eval(o, scope)?);
+                }
+                for (i, op) in ops.iter().enumerate() {
+                    let r = eval_binop(*op, vals[i].clone(), vals[i + 1].clone(), e.span())?;
+                    if !as_bool(&r, e.span())? {
+                        return Ok(CtValue::Bool(false));
+                    }
+                }
+                Ok(CtValue::Bool(true))
+            }
+            // c139: a lambda literal — capture the *current* scope by value
+            // (a tree-walker over-captures rather than tracking free
+            // variables) so the closure still sees its bindings after this
+            // `eval` call returns, e.g. once it's handed to `.filter(…)`.
+            Expr::Lambda(l) => Ok(CtValue::Closure(std::sync::Arc::new(
+                crate::AST::ClosureData {
+                    lambda: l.clone(),
+                    captured: scope.clone(),
+                },
+            ))),
             other => Err(unsupported_expr(other)),
         }
     }
@@ -1176,9 +1261,67 @@ impl<'a> Interp<'a> {
                     pattern.span(),
                 )),
             },
-            Pattern::StrMatch { span, .. } => {
-                Err(unsupported("a string-match pattern in `jet dev`", *span))
-            }
+            // D-PARSESTR1: an interpolation literal in pattern position —
+            // fixed text anchors the match, each `{hole}` binds the substring
+            // between its anchors (non-greedy: up to the next literal, or to
+            // the end of the subject for a trailing hole), typed holes
+            // additionally requiring that substring to parse as `ty` (a
+            // failed parse is a non-match, not an error — E0148 needs an
+            // `else` for exactly this). The whole subject must be consumed.
+            Pattern::StrMatch { parts, span } => match v {
+                CtValue::Str(s) => {
+                    let mut pos = 0usize;
+                    for (i, part) in parts.iter().enumerate() {
+                        match part {
+                            crate::AST::StrMatchPart::Lit(lit) => {
+                                if !s[pos..].starts_with(lit.as_str()) {
+                                    return Ok(false);
+                                }
+                                pos += lit.len();
+                            }
+                            crate::AST::StrMatchPart::Hole { name, ty, span } => {
+                                let end = match parts.get(i + 1) {
+                                    Some(crate::AST::StrMatchPart::Lit(next_lit)) => {
+                                        match s[pos..].find(next_lit.as_str()) {
+                                            Some(off) => pos + off,
+                                            None => return Ok(false),
+                                        }
+                                    }
+                                    _ => s.len(),
+                                };
+                                let captured = &s[pos..end];
+                                pos = end;
+                                let val = match ty {
+                                    None => CtValue::Str(captured.to_string()),
+                                    Some(Type::Int) => match captured.parse::<i64>() {
+                                        Ok(n) => CtValue::Int(n),
+                                        Err(_) => return Ok(false),
+                                    },
+                                    Some(Type::Float) => match captured.parse::<f64>() {
+                                        Ok(f) => CtValue::Float(f),
+                                        Err(_) => return Ok(false),
+                                    },
+                                    Some(_) => {
+                                        return Err(unsupported(
+                                            "this hole type in a string pattern",
+                                            *span,
+                                        ))
+                                    }
+                                };
+                                scope.insert(name.clone(), val);
+                            }
+                        }
+                    }
+                    Ok(pos == s.len())
+                }
+                other => Err(unsupported(
+                    &format!(
+                        "matching a string pattern against a value that isn't a string (got {})",
+                        other.jet_show()
+                    ),
+                    *span,
+                )),
+            },
         }
     }
 }

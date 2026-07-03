@@ -5,9 +5,9 @@
 use std::collections::HashMap;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CallArg, Expr, StrPart};
+use crate::AST::{CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
 
-use super::Builtins::{apply_method, apply_mutating, apply_static_type_method, as_bool};
+use super::Builtins::{apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp};
 use super::Diagnostics::{comptime_panic, unsupported};
 use super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::Interpreter::{Flow, Interp};
@@ -92,6 +92,18 @@ fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
     result
 }
 
+/// c139: the integer value of `e` when it is (possibly parenthesized/negated)
+/// an `Int` literal — used to mirror sema's compile-time-proof shortcut for a
+/// ranged distinct-type constructor (`eval_distinct_ctor`).
+fn literal_int(e: &Expr) -> Option<i64> {
+    match e {
+        Expr::Int(n, _, _) => Some(*n),
+        Expr::Unary(UnOp::Neg, inner, _) => literal_int(inner).and_then(i64::checked_neg),
+        Expr::Paren(inner, _) => literal_int(inner),
+        _ => None,
+    }
+}
+
 impl<'a> Interp<'a> {
     /// `f.[a, b, c]` → `[f(a), f(b), f(c)]` (fan-out, ratified in
     /// docs/spec/spec.md (S75 fan-out). Comptime only supports
@@ -148,7 +160,13 @@ impl<'a> Interp<'a> {
         if name == "print" || name == "eprint" {
             if self.sink.is_some() {
                 let text = match args.first() {
-                    Some(a) => self.eval(&a.expr, scope)?.jet_show(),
+                    // D-DISPLAYDBG1/2: same Display-impl-aware rendering as
+                    // `{value}` string interpolation (`show_value`) — `print`
+                    // is bare-Display too, never the `@Debug` form.
+                    Some(a) => {
+                        let v = self.eval(&a.expr, scope)?;
+                        self.show_value(&v, a.expr.span())?
+                    }
                     None => String::new(),
                 };
                 let sink = self.sink.as_mut().expect("dev-mode sink");
@@ -195,11 +213,45 @@ impl<'a> Interp<'a> {
             return Err(unsupported("`emit` argument must be a string", span));
         }
         // A user function: bind params, run the body in a fresh frame.
-        let func = self
-            .funcs
-            .get(name)
-            .copied()
-            .ok_or_else(|| unsupported(&format!("calling `{}`", name), span))?;
+        let func = match self.funcs.get(name).copied() {
+            Some(f) => f,
+            None => {
+                // c139 JIT/interpreter-parity: `Name(expr)` where `Name` isn't a
+                // known function is the distinct-type / `#UnitFamily` constructor
+                // call — the only capitalized-name *call* form Jet has (struct
+                // literals use `.{ }`, enum variants use `.Variant`).
+                if let Some(range) = self.distinct_ranges.get(name).copied() {
+                    return self.eval_distinct_ctor(name, range, args, span, scope);
+                }
+                return Err(unsupported(&format!("calling `{}`", name), span));
+            }
+        };
+        // D-VARIADIC1/D-ANY-JAI1: `name: ...T` / `name: ...[A, B]` — the last
+        // parameter only. Every call-site argument from that position on
+        // (any count, including zero) collects into one `List` bound to it;
+        // fixed params before it still bind 1:1.
+        if let Some(last) = func.params.last() {
+            if last.variadic {
+                let fixed = &func.params[..func.params.len() - 1];
+                if args.len() < fixed.len() {
+                    return Err(unsupported(
+                        &format!("`{}` (wrong number of arguments)", name),
+                        span,
+                    ));
+                }
+                let mut frame = HashMap::new();
+                for (p, a) in fixed.iter().zip(args) {
+                    let v = self.eval(&a.expr, scope)?;
+                    frame.insert(p.name.clone(), v);
+                }
+                let mut rest = Vec::with_capacity(args.len() - fixed.len());
+                for a in &args[fixed.len()..] {
+                    rest.push(self.eval(&a.expr, scope)?);
+                }
+                frame.insert(last.name.clone(), CtValue::List(rest));
+                return self.call_func(name, func, frame);
+            }
+        }
         if func.params.len() != args.len() {
             return Err(unsupported(
                 &format!("`{}` (wrong number of arguments)", name),
@@ -211,6 +263,20 @@ impl<'a> Interp<'a> {
             let v = self.eval(&a.expr, scope)?;
             frame.insert(p.name.clone(), v);
         }
+        self.call_func(name, func, frame)
+    }
+
+    /// c139: run a resolved `Func`'s body in `frame` (already bound: params,
+    /// and `self` for an instance/associated method), threading the same
+    /// debugger bookkeeping and `?`/`?? return` sentinel handling `eval_call`
+    /// always has. Shared by plain calls, instance-method dispatch, and
+    /// code-module namespaced calls.
+    fn call_func(
+        &mut self,
+        name: &str,
+        func: &Func,
+        mut frame: HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
         // D-DBG3: enter a user-function frame — bump the debugger's call depth
         // and current-function name so `next`/`finish` and the `in fn()` banner
         // track correctly, then restore both on the way out (every path).
@@ -241,6 +307,108 @@ impl<'a> Interp<'a> {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`
+    /// would in the compiled program. When `v`'s type has a user-written
+    /// `impl Type.Display { fn display(self) -> String }`, run that exact Jet
+    /// function body (byte-identical to what the real build does); otherwise
+    /// fall back to the built-in `jet_show()` rendering (every primitive, and
+    /// any struct/enum with no such impl — sema only accepts those in
+    /// interpolation when they're "auto-printable", which `jet_show()`
+    /// already matches).
+    pub(super) fn show_value(&mut self, v: &CtValue, _span: Span) -> Result<String, Diagnostic> {
+        let type_name = match v {
+            CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+                Some(type_name.clone())
+            }
+            _ => None,
+        };
+        if let Some(tn) = type_name {
+            if let Some(f) = self
+                .methods
+                .get(&(tn.clone(), "display".to_string()))
+                .copied()
+            {
+                if f.params.len() == 1 {
+                    let mut frame = HashMap::new();
+                    frame.insert(f.params[0].name.clone(), v.clone());
+                    if let CtValue::Str(s) = self.call_func(&format!("{}.display", tn), f, frame)? {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+        Ok(v.jet_show())
+    }
+
+    /// c139: invoke a closure value (`(x) => x > 3`) with already-evaluated
+    /// arguments — the counterpart of `call_func` for a lambda instead of a
+    /// named `fn`. The frame starts from the closure's captured scope (so it
+    /// still sees the bindings visible where it was created) with the params
+    /// bound over that.
+    fn call_closure(
+        &mut self,
+        f: &CtValue,
+        args: Vec<CtValue>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let CtValue::Closure(data) = f else {
+            return Err(unsupported("calling this value (it isn't a function)", span));
+        };
+        if data.lambda.params.len() != args.len() {
+            return Err(unsupported("this closure (wrong number of arguments)", span));
+        }
+        let mut frame = data.captured.clone();
+        for (p, a) in data.lambda.params.iter().zip(args) {
+            frame.insert(p.name.clone(), a);
+        }
+        match &data.lambda.body {
+            LambdaBody::Expr(e) => self.eval(e, &mut frame),
+            LambdaBody::Block(stmts) => match self.exec_block(stmts, &mut frame)? {
+                Flow::Return(v) => Ok(v),
+                _ => Ok(CtValue::Unit),
+            },
+        }
+    }
+
+    /// c139: `Name(expr)` — the distinct-type / `#UnitFamily` constructor.
+    /// `range` is the type's `distinct Base(lo..hi)` bound, if any
+    /// (D-RANGETYPE1). Distinct types have zero runtime representation
+    /// difference from their base (D-DIST1), so an unranged constructor is
+    /// identity. A ranged one mirrors sema's own compile-time proof: a
+    /// literal argument already known in-range folds to a direct value
+    /// (matching what codegen bakes in); anything else is the fallible
+    /// `Result`-wrapped form the `?`/`??` surface at the call site expects.
+    fn eval_distinct_ctor(
+        &mut self,
+        name: &str,
+        range: Option<(i64, i64)>,
+        args: &[CallArg],
+        span: Span,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let arg = args.first().ok_or_else(|| {
+            unsupported(&format!("`{}` (wrong number of arguments)", name), span)
+        })?;
+        let Some((lo, hi)) = range else {
+            return self.eval(&arg.expr, scope);
+        };
+        if let Some(n) = literal_int(&arg.expr) {
+            if n >= lo && n <= hi {
+                return Ok(CtValue::Int(n));
+            }
+        }
+        let v = self.eval(&arg.expr, scope)?;
+        let n = as_int(&v, arg.expr.span())?;
+        Ok(if n >= lo && n <= hi {
+            CtValue::ResOk(Box::new(CtValue::Int(n)))
+        } else {
+            CtValue::ResErr(Box::new(CtValue::Str(format!(
+                "{} out of range {}..{}",
+                n, lo, hi
+            ))))
+        })
     }
 
     fn eval_require(
@@ -413,6 +581,41 @@ impl<'a> Interp<'a> {
         Ok(CtValue::Str(content))
     }
 
+    /// c139: write `new_value` back to the place `target` reads from — the
+    /// mutating-method counterpart of evaluating `target` for a read. Handles
+    /// a bare local (`xs.push(v)`) and a field-access chain of any depth
+    /// (`copy.items.push(v)`), recursing on the base of a `Field` so the
+    /// write propagates all the way back to the owning local.
+    fn write_back(
+        &mut self,
+        target: &Expr,
+        new_value: CtValue,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        match target {
+            Expr::Ident(name, _) => {
+                scope.insert(name.clone(), new_value);
+                Ok(())
+            }
+            Expr::Field(inner, member, span) => {
+                let mut base = self.eval(inner, scope)?;
+                match &mut base {
+                    CtValue::Struct { fields, .. } => {
+                        match fields.iter_mut().find(|(n, _)| n == member) {
+                            Some(slot) => slot.1 = new_value,
+                            None => {
+                                return Err(unsupported(&format!("the field `.{}`", member), *span))
+                            }
+                        }
+                    }
+                    _ => return Err(unsupported("this indexed assignment", *span)),
+                }
+                self.write_back(inner, base, scope)
+            }
+            _ => Err(unsupported("this indexed assignment", target.span())),
+        }
+    }
+
     pub(super) fn eval_method(
         &mut self,
         receiver: &Expr,
@@ -520,26 +723,212 @@ impl<'a> Interp<'a> {
             }
         }
 
+        // c139 JIT/interpreter-parity: a static/associated call (`Type.assoc_fn(…)`,
+        // no `self` param — `impl`/in-struct methods registered in
+        // `self.methods`) or a D-MOD2 code-module namespaced call
+        // (`alias.fn(…)` — registered `alias__fn` in `self.funcs`), reached via
+        // an unbound name. A real instance receiver is always a scoped value,
+        // so it never lands here. Checked after the enum-variant-literal case
+        // above (capitalized `Type.Variant(…)` wins first).
+        if let Expr::Ident(name, _) = receiver {
+            if !scope.contains_key(name.as_str()) {
+                if let Some(f) = self.methods.get(&(name.clone(), method.to_string())).copied() {
+                    if f.params.len() == args.len() {
+                        let mut frame = HashMap::new();
+                        for (p, a) in f.params.iter().zip(args) {
+                            let v = self.eval(&a.expr, scope)?;
+                            frame.insert(p.name.clone(), v);
+                        }
+                        return self.call_func(&format!("{}.{}", name, method), f, frame);
+                    }
+                }
+                let mangled = format!("{}__{}", name, method);
+                if let Some(f) = self.funcs.get(mangled.as_str()).copied() {
+                    if f.params.len() == args.len() {
+                        let mut frame = HashMap::new();
+                        for (p, a) in f.params.iter().zip(args) {
+                            let v = self.eval(&a.expr, scope)?;
+                            frame.insert(p.name.clone(), v);
+                        }
+                        return self.call_func(&mangled, f, frame);
+                    }
+                }
+            }
+        }
+
+        // D-HOLE1: `Option.lift2(f, a, b)` — a static call on the builtin
+        // `Option` pseudo-type (never a real scoped value), so it's checked
+        // here alongside the unbound-name case above rather than folded into
+        // it (`Option` isn't in `self.methods`/`self.funcs`, and `f` is a
+        // closure this dispatch must itself invoke).
+        if let Expr::Ident(name, _) = receiver {
+            if name == "Option" && method == "lift2" && !scope.contains_key("Option") {
+                if args.len() != 3 {
+                    return Err(unsupported("`Option.lift2` (wrong number of arguments)", span));
+                }
+                let f = self.eval(&args[0].expr, scope)?;
+                let a = self.eval(&args[1].expr, scope)?;
+                let b = self.eval(&args[2].expr, scope)?;
+                return Ok(match (a, b) {
+                    (CtValue::Some(av), CtValue::Some(bv)) => {
+                        CtValue::Some(Box::new(self.call_closure(&f, vec![*av, *bv], span)?))
+                    }
+                    _ => CtValue::None(Type::Int),
+                });
+            }
+        }
+
+        // c139: higher-order methods — need `&mut self` to invoke a closure
+        // argument, so (like the mutating methods just below) they can't be
+        // plain `apply_method` entries. Guarded to the receiver shapes they
+        // actually apply to; anything else falls through to the generic
+        // dispatch at the end of this function.
+        const HOF_METHODS: &[&str] = &["filter", "map", "each", "sort_by", "find", "reduce"];
+        if HOF_METHODS.contains(&method) {
+            let recv = self.eval(receiver, scope)?;
+            match (&recv, method) {
+                (CtValue::List(xs), "filter") => {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    let mut out = Vec::new();
+                    for x in xs {
+                        if as_bool(&self.call_closure(&f, vec![x.clone()], span)?, span)? {
+                            out.push(x.clone());
+                        }
+                    }
+                    return Ok(CtValue::List(out));
+                }
+                (CtValue::List(xs), "map") => {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    let mut out = Vec::with_capacity(xs.len());
+                    for x in xs {
+                        out.push(self.call_closure(&f, vec![x.clone()], span)?);
+                    }
+                    return Ok(CtValue::List(out));
+                }
+                (CtValue::List(xs), "each") => {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    for x in xs {
+                        self.call_closure(&f, vec![x.clone()], span)?;
+                    }
+                    return Ok(CtValue::Unit);
+                }
+                (CtValue::List(xs), "find") => {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    for x in xs {
+                        if as_bool(&self.call_closure(&f, vec![x.clone()], span)?, span)? {
+                            return Ok(CtValue::Some(Box::new(x.clone())));
+                        }
+                    }
+                    return Ok(CtValue::None(Type::Int));
+                }
+                (CtValue::List(xs), "reduce") => {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    let mut acc = self.eval(&args[1].expr, scope)?;
+                    for x in xs {
+                        acc = self.call_closure(&f, vec![acc, x.clone()], span)?;
+                    }
+                    return Ok(acc);
+                }
+                // `.sort_by` writes back like the MUTATING list methods below
+                // (D-BIND4 `:=` receiver) — key every element once, sort the
+                // keyed pairs, then write the reordered list back through the
+                // same lvalue path `push`/`pop`/… use.
+                (CtValue::List(xs), "sort_by") if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) =>
+                {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    let mut keyed = Vec::with_capacity(xs.len());
+                    for x in xs {
+                        let k = self.call_closure(&f, vec![x.clone()], span)?;
+                        keyed.push((k, x.clone()));
+                    }
+                    let mut sort_err = None;
+                    keyed.sort_by(|a, b| match cmp(a.0.clone(), b.0.clone(), span) {
+                        Ok(o) => o,
+                        Err(e) => {
+                            sort_err.get_or_insert(e);
+                            std::cmp::Ordering::Equal
+                        }
+                    });
+                    if let Some(e) = sort_err {
+                        return Err(e);
+                    }
+                    let sorted = CtValue::List(keyed.into_iter().map(|(_, v)| v).collect());
+                    self.write_back(receiver, sorted, scope)?;
+                    return Ok(CtValue::Unit);
+                }
+                (CtValue::Some(inner), "map") => {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    let v = self.call_closure(&f, vec![(**inner).clone()], span)?;
+                    return Ok(CtValue::Some(Box::new(v)));
+                }
+                (CtValue::None(t), "map") => return Ok(CtValue::None(t.clone())),
+                _ => {}
+            }
+        }
+
+        // D-ANY-JAI1: `reflect.of(x).display()` — same Display-impl-aware
+        // rendering `{x}`/`print(x)` use (`show_value`), so it needs `&mut
+        // self` and can't be a plain `apply_method` entry like `.type_name`/
+        // `.fields` just above it. Guarded specifically to the `__Reflect`
+        // wrapper — a *user* type's own `.display()` call (the method a
+        // `impl Type.Display` block defines) still falls through to the
+        // ordinary instance-method dispatch below, unaffected.
+        if method == "display" {
+            let peek = self.eval(receiver, scope)?;
+            if let CtValue::Struct { type_name, fields } = &peek {
+                if type_name == "__Reflect" {
+                    let inner = fields
+                        .iter()
+                        .find(|(n, _)| n == "value")
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or(CtValue::Unit);
+                    let s = self.show_value(&inner, span)?;
+                    return Ok(CtValue::Str(s));
+                }
+            }
+        }
+
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
             "push", "pop", "insert", "remove", "clear", "reverse", "sort",
         ];
-        if MUTATING.contains(&method) {
-            if let Expr::Ident(bname, _) = receiver {
-                let mut container = scope
-                    .get(bname)
-                    .cloned()
-                    .ok_or_else(|| unsupported(&format!("the name `{}`", bname), span))?;
-                let mut argv = Vec::new();
-                for a in args {
-                    argv.push(self.eval(&a.expr, scope)?);
-                }
-                let ret = apply_mutating(&mut container, method, argv, span)?;
-                scope.insert(bname.clone(), container);
-                return Ok(ret);
+        if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+            let mut argv = Vec::new();
+            for a in args {
+                argv.push(self.eval(&a.expr, scope)?);
             }
+            let mut container = self.eval(receiver, scope)?;
+            let ret = apply_mutating(&mut container, method, argv, span)?;
+            self.write_back(receiver, container, scope)?;
+            return Ok(ret);
         }
         let recv = self.eval(receiver, scope)?;
+        // c139: an instance method the user wrote — `impl Type { fn … }` /
+        // in-struct `fn`/`impl Trait { … }`. `recv`'s own `type_name` (not the
+        // receiver expression's static type) picks the impl, so a value bound
+        // through a trait-typed parameter still dispatches to its concrete
+        // type's method (matches trait dynamic dispatch, no vtable needed).
+        // Checked before the generic builtin dispatch so a user method always
+        // wins over a same-named builtin.
+        let type_name = match &recv {
+            CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+                Some(type_name.clone())
+            }
+            _ => None,
+        };
+        if let Some(tn) = type_name {
+            if let Some(f) = self.methods.get(&(tn.clone(), method.to_string())).copied() {
+                if !f.params.is_empty() && f.params.len() == args.len() + 1 {
+                    let mut frame = HashMap::new();
+                    frame.insert(f.params[0].name.clone(), recv.clone());
+                    for (p, a) in f.params[1..].iter().zip(args) {
+                        let v = self.eval(&a.expr, scope)?;
+                        frame.insert(p.name.clone(), v);
+                    }
+                    return self.call_func(&format!("{}.{}", tn, method), f, frame);
+                }
+            }
+        }
         let mut argv = Vec::new();
         for a in args {
             argv.push(self.eval(&a.expr, scope)?);
@@ -577,6 +966,98 @@ fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
             span,
         )),
     }
+}
+
+/// D-UUIDENC1=A: a `[U8]` argument — either the literal `Bytes` shape
+/// (`embed_bytes`'s output) or a `List` of `Int` elements (an ordinary `[U8]`
+/// list literal), matching whichever the caller happens to be holding.
+fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    match v {
+        CtValue::Bytes(bs) => Ok(bs.clone()),
+        CtValue::List(xs) => xs
+            .iter()
+            .map(|x| match x {
+                CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
+                _ => Err(unsupported("a `[U8]` list with an out-of-range element", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("non-`[U8]` argument to comptime encoding call", span)),
+    }
+}
+
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+fn hex_encode(bytes: Vec<u8>) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX_DIGITS[(b >> 4) as usize] as char);
+        out.push(HEX_DIGITS[(b & 0xf) as usize] as char);
+    }
+    out
+}
+
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = Vec::with_capacity(chars.len() / 2);
+    for pair in chars.chunks(2) {
+        let hi = pair[0].to_digit(16)?;
+        let lo = pair[1].to_digit(16)?;
+        out.push(((hi << 4) | lo) as u8);
+    }
+    Some(out)
+}
+
+const BASE64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(bytes: Vec<u8>) -> String {
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied();
+        let b2 = chunk.get(2).copied();
+        out.push(BASE64_ALPHABET[(b0 >> 2) as usize] as char);
+        out.push(
+            BASE64_ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize] as char,
+        );
+        out.push(match b1 {
+            Some(b1) => {
+                BASE64_ALPHABET[(((b1 & 0x0f) << 2) | (b2.unwrap_or(0) >> 6)) as usize] as char
+            }
+            None => '=',
+        });
+        out.push(match b2 {
+            Some(b2) => BASE64_ALPHABET[(b2 & 0x3f) as usize] as char,
+            None => '=',
+        });
+    }
+    out
+}
+
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    fn digit(c: u8) -> Option<u8> {
+        BASE64_ALPHABET.iter().position(|&d| d == c).map(|i| i as u8)
+    }
+    let s = s.trim_end_matches('=');
+    let bytes = s.as_bytes();
+    if bytes.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for chunk in bytes.chunks(4) {
+        let d: Vec<u8> = chunk.iter().map(|&c| digit(c)).collect::<Option<_>>()?;
+        out.push((d[0] << 2) | (d.get(1).copied().unwrap_or(0) >> 4));
+        if d.len() > 2 {
+            out.push((d[1] << 4) | (d[2] >> 2));
+        }
+        if d.len() > 3 {
+            out.push((d[2] << 6) | d[3]);
+        }
+    }
+    Some(out)
 }
 
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
@@ -808,10 +1289,16 @@ fn apply_core_call(
             }
         }
         ("core.encoding.json", "decode") => {
-            // Lenient decode: same as parse for the dynamic interpreter value.
+            // D-JSON3: lenient decode — same tree as `.parse()`, but a `Text`
+            // leaf that looks like a number or a boolean coerces to that type
+            // (a wire value from a source that only has strings, e.g. a form
+            // post or a CSV cell, still lands as the type the rest of the tree
+            // expects). The coercion log line D-JSON3 also specifies is
+            // stderr-only and not part of any golden comparison, so it's not
+            // reproduced here.
             let text = as_string(one(0)?, span)?;
             match super::JsonInterp::parse_json(text) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Ok(v) => Ok(CtValue::ResOk(Box::new(super::JsonInterp::coerce_json(v)))),
                 Err(e) => Ok(CtValue::ResErr(Box::new(
                     super::JsonInterp::json_error_value(e),
                 ))),
@@ -900,6 +1387,65 @@ fn apply_core_call(
                 fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
             })
         }
+        // --- D-ANY-JAI1: core.reflect (the runtime reflection floor, pure).
+        // `"__Reflect"`/`"__ReflectField"` are internal-only tags (like
+        // `"TypeInfo"`/`"Match"`/`"IoError"` elsewhere in this file) — never a
+        // real Jet type name a user can write, so no `Syntax.rs` entry (I7 is
+        // about user-typeable names). `.type_name`/`.fields` are plain reads
+        // (`Builtins::apply_method`); `.display` needs `&mut self` (it may
+        // run a user `Display` impl), so it's dispatched in `eval_method`.
+        ("core.reflect", "of") => Ok(CtValue::Struct {
+            type_name: "__Reflect".to_string(),
+            fields: vec![("value".to_string(), one(0)?.clone())],
+        }),
+        // --- D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 (pure) ---
+        ("core.encoding.hex", "encode") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(hex_encode(bytes)))
+        }
+        ("core.encoding.hex", "decode") => {
+            let s = as_string(one(0)?, span)?;
+            Ok(match hex_decode(s) {
+                Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                None => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "`{}` isn't valid hex",
+                    s
+                )))),
+            })
+        }
+        ("core.encoding.base64", "encode") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(base64_encode(bytes)))
+        }
+        ("core.encoding.base64", "decode") => {
+            let s = as_string(one(0)?, span)?;
+            Ok(match base64_decode(s) {
+                Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                None => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "`{}` isn't valid base64",
+                    s
+                )))),
+            })
+        }
+        // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
+        ("core.text.unicode", "scalar_count") => {
+            Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
+        }
+        ("core.text.unicode", "byte_count") => {
+            Ok(CtValue::Int(as_string(one(0)?, span)?.len() as i64))
+        }
+        ("core.text.unicode", "is_ascii") => {
+            Ok(CtValue::Bool(as_string(one(0)?, span)?.is_ascii()))
+        }
+        ("core.text.unicode", "lower") => {
+            Ok(CtValue::Str(as_string(one(0)?, span)?.to_lowercase()))
+        }
+        ("core.text.unicode", "upper") => {
+            Ok(CtValue::Str(as_string(one(0)?, span)?.to_uppercase()))
+        }
+        ("core.text.unicode", "scalars") => Ok(CtValue::List(
+            as_string(one(0)?, span)?.chars().map(CtValue::Char).collect(),
+        )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when
         // no #Impure gate intercepts first in eval_method) ---
         ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {

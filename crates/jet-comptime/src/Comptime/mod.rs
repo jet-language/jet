@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::Func;
+use crate::AST::{Expr, Func};
 
 pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
@@ -41,6 +41,31 @@ use Purity::check_purity;
 static EMPTY_IMPORTS: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
 fn empty_imports() -> &'static HashMap<String, String> {
     EMPTY_IMPORTS.get_or_init(HashMap::new)
+}
+
+// c139: empty registries for evaluation contexts that don't thread the
+// whole-program info a `jet dev` run collects (comptime bindings, `derive`
+// bodies, the REPL) — user-method dispatch, computed fields, and
+// distinct-type constructors reached from those contexts still surface their
+// existing E0956 rather than silently no-op-ing.
+static EMPTY_GLOBALS: std::sync::OnceLock<HashMap<String, CtValue>> = std::sync::OnceLock::new();
+fn empty_globals() -> &'static HashMap<String, CtValue> {
+    EMPTY_GLOBALS.get_or_init(HashMap::new)
+}
+static EMPTY_METHODS: std::sync::OnceLock<HashMap<(String, String), &'static Func>> =
+    std::sync::OnceLock::new();
+fn empty_methods() -> &'static HashMap<(String, String), &'static Func> {
+    EMPTY_METHODS.get_or_init(HashMap::new)
+}
+static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
+    std::sync::OnceLock::new();
+fn empty_computed() -> &'static HashMap<(String, String), &'static Expr> {
+    EMPTY_COMPUTED.get_or_init(HashMap::new)
+}
+static EMPTY_DISTINCT: std::sync::OnceLock<HashMap<String, Option<(i64, i64)>>> =
+    std::sync::OnceLock::new();
+fn empty_distinct() -> &'static HashMap<String, Option<(i64, i64)>> {
+    EMPTY_DISTINCT.get_or_init(HashMap::new)
 }
 
 // --- public entry ---------------------------------------------------------
@@ -121,6 +146,10 @@ pub fn evaluate_with_imports_opts(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals,
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
@@ -156,6 +185,10 @@ pub fn evaluate_with_imports_opts_collecting(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals,
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = globals.clone();
     let val = interp.eval(init, &mut scope)?;
@@ -172,18 +205,45 @@ pub fn evaluate_with_imports_opts_collecting(
 /// (FFI/tasks/`@unsafe`); this function simply runs and may itself return
 /// E0956 (`unsupported`) when it reaches a construct the evaluator can't run,
 /// or E2202 when the fuel budget is exhausted.
+/// c139: everything the dev interpreter needs beyond the flat `funcs` map to
+/// run whole programs at parity with the real build — pre-evaluated
+/// top-level `const`/`comptime` bindings, user-method dispatch (`impl`/
+/// in-struct methods and D-MOD2 code-module namespaced calls), D-FIELDPOL1
+/// computed fields, and D-RANGETYPE1/D-DIST1 distinct-type constructors.
+/// Built once per `jet dev` run by `Source/Interpreter.rs::collect_program_info`.
+pub struct ProgramInfo<'a> {
+    pub globals: HashMap<String, CtValue>,
+    pub methods: HashMap<(String, String), &'a Func>,
+    pub computed_fields: HashMap<(String, String), &'a Expr>,
+    pub distinct_ranges: HashMap<String, Option<(i64, i64)>>,
+    pub core_imports: HashMap<String, String>,
+}
+
+impl<'a> ProgramInfo<'a> {
+    pub fn empty() -> Self {
+        ProgramInfo {
+            globals: HashMap::new(),
+            methods: HashMap::new(),
+            computed_fields: HashMap::new(),
+            distinct_ranges: HashMap::new(),
+            core_imports: HashMap::new(),
+        }
+    }
+}
+
 pub fn run_main(
     main: &Func,
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
     sink: &mut DevSink,
+    program: &ProgramInfo,
 ) -> Result<(), Diagnostic> {
     let mut interp = Interp {
         funcs,
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
-        core_imports: empty_imports(),
+        core_imports: &program.core_imports,
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
@@ -192,6 +252,10 @@ pub fn run_main(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals: &program.globals,
+        methods: &program.methods,
+        computed_fields: &program.computed_fields,
+        distinct_ranges: &program.distinct_ranges,
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -226,6 +290,10 @@ pub fn run_main_debug(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals: empty_globals(),
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -256,6 +324,10 @@ pub fn run_main_value(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals: empty_globals(),
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope)? {
@@ -289,6 +361,10 @@ pub fn run_main_with_fuel(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals: empty_globals(),
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -320,6 +396,10 @@ pub fn run_repl_main_with_fuel(
         repl_mode: true,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals: empty_globals(),
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -368,6 +448,10 @@ pub fn run_repl_step(
         repl_mode: true,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals: empty_globals(),
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     // Split: run all statements except the last; then handle the last specially
     // if it is a bare expression (for display) and not suppressed.
@@ -437,6 +521,10 @@ pub fn run_block_with_imports(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals,
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = globals.clone();
     interp.exec_block(stmts, &mut scope)?;
@@ -560,6 +648,10 @@ pub fn evaluate_derive_body(
         repl_mode: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
+        globals: empty_globals(),
+        methods: empty_methods(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
     };
     let mut scope = HashMap::new();
     scope.insert(type_param.to_string(), type_info);

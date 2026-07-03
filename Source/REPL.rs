@@ -263,6 +263,9 @@ impl Session {
             }
             CtValue::Enum { .. } => return,
             CtValue::Unit => return,
+            // c139: no sema pre-check stub for a closure value either — same
+            // reasoning as `Struct`/`Enum` above.
+            CtValue::Closure(_) => return,
         };
         self.binding_srcs.push(format!("{}{}", name, type_and_val));
     }
@@ -1060,6 +1063,7 @@ fn type_name(v: &CtValue) -> &'static str {
         CtValue::Some(_) | CtValue::None(_) => "Option",
         CtValue::ResOk(_) | CtValue::ResErr(_) => "Result",
         CtValue::Unit => "()",
+        CtValue::Closure(_) => "Fn",
     }
 }
 
