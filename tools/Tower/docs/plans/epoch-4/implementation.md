@@ -329,20 +329,10 @@ Tests:
 
 ## Phase D — jetos realization
 
-Do not start until prerequisites land: M12 layer 3 / pure eval foundations,
-Phase A dispatch, canonical role modules, and enough hangar realization.
-
-Milestones:
-
-| MS | Goal | Exit |
-|---|---|---|
-| OS0 | option registry + merge engine | three modules merge to canonical JSON; scalar conflict and cycle snapshots; shuffle-order deterministic |
-| OS1 | import tree + host selection + check/init | example repo with two hosts and five modules gives identical JSON across discovery orders |
-| OS2 | build generator + activation | VM switch -> rollback; power-cut sim boots prior generation |
-| OS3 | lift | external module lift succeeds; private-option read rejected |
-| OS4 | std option tree v0 | real machine boots from `system.laptop` |
-| OS-ISO | installable graphical image | `jet image installer` / spelling per CLI emits x86_64 Plasma Calamares ISO; QEMU boots to installer |
-| OS-VM | scripted VM harness | build ISO -> boot -> switch -> rollback round-trip |
+**GATED — owner greenlight required before any Phase D work.** Full plan
+(OS0–OS4, OS-ISO, OS-VM: stages, exit criteria, tests, dependency edges, ballot
+rows) lives in [`jetos-implementation.md`](jetos-implementation.md). Do not start
+until Phase A–C prereqs land *and* the owner greenlights.
 
 ---
 
@@ -396,15 +386,23 @@ Diagnostic: `E12xx` `unlocked-channel-in-ci`.
 Tests: channel resolves only on update; lock stays exact; CI-unlocked errors;
 `jet outdated` mutates nothing.
 
-### U22. Hangar disk contract (`D-JPK-GC1=B`)
+### U22. Hangar disk contract (`D-JPK-GC1=B`, owner-amended 2026-07-03)
 
-Auto-GC ages out unreferenced objects (14d default, opportunistic, no daemon);
-manual `jet gc`; honest `jet hangar du`. Lockfile/generation-reachable objects
-are never collected. Zero-`/tmp` guarantee is golden-tested. Build scratch is
-hangar-scoped and crash-cleaned. (Envelope/reachability land in A4.)
+Auto-GC ages out unreferenced objects (**30d** default, opportunistic, no
+daemon); manual verb is **`jet clean`** (not `jet gc`), which both
+garbage-collects and optimizes the hangar (hardlink/dedup, `nix store
+optimise` equivalent) in one pass; honest `jet hangar du`.
+Lockfile/generation-reachable objects are never collected. Zero-`/tmp`
+guarantee is golden-tested. Build scratch is hangar-scoped and crash-cleaned.
+(Envelope/reachability land in A4.)
 
-Tests: unreferenced object aged out; reachable object kept; `/tmp` stays empty
-across a build+crash; `jet hangar du` matches on-disk bytes.
+Tests: unreferenced object aged out at 30d; reachable object kept; optimize
+dedups identical objects and reports bytes saved; `/tmp` stays empty across a
+build+crash; `jet hangar du` matches on-disk bytes.
+
+Cleanup: E2604 fix text in docs/spec/diagnostics.md says `jet gc --force` —
+rewrite to the `jet clean` spelling and re-bless its snapshot as part of this
+item. Also `jet gc` stub mentions in docs/spec/roadmap.md (E2-M8/M12.2).
 
 ### U23. No-Nix machines (`D-JPK-NONIX1=A`)
 

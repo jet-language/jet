@@ -1293,8 +1293,10 @@ refs, lock, shells — Nix is one provider behind the `core`-first resolver
 trait (tvix shim scoped I6 waiver for the no-installed-nix goal). Ad-hoc
 adapters are `Pkg.adapt(name:, source:, recipe:)` with curated recipes
 (`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`). Hangar GC by age
-(default 14 days), `jet gc`, `jet hangar du`; no daemon, no root (transient
-sudo only for jetos activation). No-Nix machines degrade gracefully (E12xx
+(default 30 days), `jet clean` (one verb: garbage-collect + optimize the
+hangar via hardlink/dedup, `nix store optimise` equivalent; owner amendment
+2026-07-03 — there is no `jet gc`), `jet hangar du`; no daemon, no root
+(transient sudo only for jetos activation). No-Nix machines degrade gracefully (E12xx
 names fixes). Binary cache = output-hash-addressed HTTP(S) protocol with
 signed objects; miss never errors. Linux+macOS+Windows tier-1 native.
 Offline is a tested guarantee: realize-class verbs never touch the network
