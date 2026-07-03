@@ -182,6 +182,10 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
         "DataTree" => Some("DataTree"),
         "DecodeError" => Some("DecodeError"),
+        // D-MIGRATE3=A: decode-time migration transparency's plain status struct
+        // (the generic `DecodeResult<T>` has its own `rust_type` arm below, since
+        // this table only covers non-generic names).
+        "MigrationStatus" => Some("MigrationStatus"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DbValue" => Some("DbValue"),
         "DbError" => Some("DbError"),
@@ -607,6 +611,21 @@ impl Cx {
             {
                 format!(
                     "{}jet_std::JetDerived<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            // D-MIGRATE3=A: `DecodeResult<T>` — `decode_traced<T>`'s return-shape
+            // wrapper (`T` is already `[T]`/`Vec<T>` for CSV by the time sema
+            // builds this `Type::Apply`, so this arm needs no per-codec case).
+            // User-type-wins (D-SHIFT1 precedent): a user struct named
+            // `DecodeResult` shadows the core one — falls through to the plain
+            // user-generic arm below instead.
+            Type::Apply { name, args }
+                if name == "DecodeResult" && !args.is_empty() && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DecodeResult<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )

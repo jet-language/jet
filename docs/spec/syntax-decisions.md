@@ -1160,6 +1160,15 @@ Verbs: `add f: T = val`; `remove f`; `change f: Old -> New via { (old) =>
 expr }` (converter: inline `via` → `impl Old -> New` in scope → E0910); no
 `reorder`. CLI: `jet schema squash --before <ver>`, `jet schema status`.
 
+**Decode-time migration transparency** *(D-MIGRATE3=A)*: `decode_traced<T>(raw)
+-> DecodeResult<T> ?` beside `decode<T>` on every codec sharing the decode
+machinery (json/csv/toml/yaml); `DecodeResult<T> = { value: T, migration:
+MigrationStatus }`, `MigrationStatus = { migrated: Bool, from: String, steps:
+[String] }`. `decode` unchanged (I8, zero cost for callers not asking).
+`.migrated` is always `false` today (no snapshot-of-old-data runtime
+conversion exists yet to set it true) — reachable cases are a plain type and a
+`@PublishedSchema` type decoding fresh data.
+
 **Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-GC1,
 D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,
 D-JPK-OFFLINE1, U5, D-MONOREF1)*: `jetpack` is its own binary

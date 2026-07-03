@@ -450,6 +450,27 @@ impl Circle {
   edits only `.jet/cache/schema/`, never user source. There is **no `jet schema
   check` verb** — `jet build`'s E0910 is already the CI gate.
 
+  **Decode-time migration transparency (D-MIGRATE3=A):** `decode_traced<T>(raw)
+  -> DecodeResult<T> ?` sits beside `decode<T>` on every codec that shares this
+  decode machinery (json/csv/toml/yaml, D-ENC1). `DecodeResult<T>` is `{ value:
+  T, migration: MigrationStatus }`; `MigrationStatus` carries `.migrated: Bool`,
+  `.from` (source schema version), and `.steps` (applied migration names).
+  `decode` itself is unchanged — same call, same cost, for anyone not asking
+  (I8). `.migrated` is `false` and `.from`/`.steps` are empty both for a plain
+  type and for a `@PublishedSchema` type decoding data already shaped like the
+  current struct — that is the only reachable case today, since the runtime
+  conversion above (reading an *old* stored shape through a migration) is not
+  yet built (Build-tier versioning library, follow-on #11); `decode_traced` is
+  fully wired now so no call site changes the day that engine ships.
+
+  ```jet
+  r    :: json.decode_traced<UserRecord>(raw)?
+  user :: r.value
+  if r.migration.migrated {
+      log.info("record {user.id} arrived as schema v{r.migration.from}")
+  }
+  ```
+
 - **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
   sharing. Field order is preserved as written. Growable fields (`[T]`, `Map`,

@@ -723,6 +723,29 @@ sales :: csv.decode<Sale>(raw) ?? panic("bad csv")   // [Sale]
 print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}]
 ```
 
+**Traced decode — was this migrated?** (D-MIGRATE3=A): `decode_traced<T>(text)`
+sits beside `decode<T>` on every codec (json/csv/toml/yaml share the decode
+machinery) and returns `DecodeResult<T> ? DecodeError` — `{ value: T, migration:
+MigrationStatus }`. `MigrationStatus` carries `.migrated: Bool`, `.from` (the
+source schema version), and `.steps` (applied migration names). `decode` itself
+is untouched — same call, same cost, for anyone not asking (I8).
+
+```jet
+r    :: json.decode_traced<UserRecord>(raw)?
+user :: r.value
+if r.migration.migrated {
+    log.info("record {user.id} arrived as schema v{r.migration.from}")
+}
+```
+
+`.migrated` is `false` and `.from`/`.steps` are empty both for a plain type and
+for a `@PublishedSchema` type decoding data already shaped like the current
+struct — today, that is the only case there is: `@PublishedSchema` + `migration
+{ }` (below) checks *intent* at compile time against a committed snapshot; it
+does not yet convert an old stored shape at decode time, so no decode can
+report a real migration until that runtime engine ships. `decode_traced` is
+fully wired now so no call site has to change the day it does.
+
 **Field attributes** (D-SERDE5):
 
 | Attribute | Effect |
@@ -1232,6 +1255,7 @@ the package system fully stabilizes.
 | `examples/features/serde/serde_derive.jet` | `@[Codable]` encode + typed `decode<T>` with `#[Rename]` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
+| `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus` on a plain type and a `@PublishedSchema` type |
 | `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.

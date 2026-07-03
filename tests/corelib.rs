@@ -1004,6 +1004,116 @@ fn main() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+// ── D-MIGRATE3=A: decode-time migration transparency ─────────────────────────
+// `decode_traced<T>` sits beside `decode<T>` on every codec that shares the
+// decode machinery. `MigrationStatus.migrated` is false and `.from`/`.steps`
+// are empty both for a plain type (no `@PublishedSchema`) and for a
+// `@PublishedSchema` type decoding data already shaped like the current
+// struct (the "fresh" case) — that is the only case there is to report today:
+// `@PublishedSchema` + `migration { }` (D-MIGRATE1/D-MIGRATE2A-F) is a
+// sema-only intent check (E0910) against a committed snapshot; there is no
+// runtime engine yet that reads an *old* stored shape and reports it having
+// migrated (see docs/spec/spec.md's migrations section). This test covers the
+// three reachable cases: a plain type, a `@PublishedSchema` type decoding
+// fresh data, and a second codec (toml) end to end — not a `migrated: true`
+// case, since nothing can produce one until that engine exists.
+#[test]
+fn decode_traced_json_plain_and_published_fresh() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping decode_traced_json_plain_and_published_fresh (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_decode_traced_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "decode_traced_json",
+        r#"
+use core.encoding.json as json
+
+@[Codable]
+struct Point { x: Int  y: Int }
+
+@[PublishedSchema, Codable]
+struct UserRecord { id: Int  display_name: String }
+
+migration UserRecord {
+    rename name -> display_name
+}
+
+fn main() {
+    // Plain (non-@PublishedSchema) type: decode_traced still works.
+    p :: json.decode_traced<Point>("{{\"x\":1,\"y\":2}}") ?? panic("bad point")
+    print(p.value.x)
+    print(p.migration.migrated)
+    print(p.migration.from)
+    print(p.migration.steps.len())
+
+    // @PublishedSchema type, fresh data (matches the current shape exactly):
+    // still reports migrated: false — nothing runtime-converted it.
+    r :: json.decode_traced<UserRecord>("{{\"id\":1,\"display_name\":\"Ada\"}}") ?? panic("bad user")
+    print(r.value.display_name)
+    print(r.migration.migrated)
+
+    // decode<T> (untraced) is untouched: same call, no DecodeResult wrapper.
+    plain :: json.decode<Point>("{{\"x\":3,\"y\":4}}") ?? panic("bad plain")
+    print(plain.x)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "decode_traced json program failed: {stderr}");
+    assert_eq!(stdout, "1\nfalse\n\n0\nAda\nfalse\n3\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// A second codec exercising the same DecodeResult/MigrationStatus plumbing —
+// proves the traced method isn't a json-only special case (D-ENC1 shares the
+// decode machinery across json/csv/toml/yaml).
+#[test]
+fn decode_traced_toml_and_csv() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping decode_traced_toml_and_csv (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_decode_traced_toml_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "decode_traced_toml",
+        r#"
+use core.encoding.toml as toml
+use core.encoding.csv as csv
+
+@[Codable]
+struct Config { port: Int }
+
+fn main() {
+    r :: toml.decode_traced<Config>("port = 8080\n") ?? panic("bad toml")
+    print(r.value.port)
+    print(r.migration.migrated)
+
+    cr :: csv.decode_traced<Config>("port\n8080\n9090\n") ?? panic("bad csv")
+    print(cr.value.len())
+    print(cr.value[0].port)
+    print(cr.migration.migrated)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "decode_traced toml/csv program failed: {stderr}");
+    assert_eq!(stdout, "8080\nfalse\n2\n8080\nfalse\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn option_zip_and_lift2_combinators() {
     // D-HOLE1: `.zip`/`Option.lift2` — both present -> a present result; either

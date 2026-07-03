@@ -519,6 +519,35 @@ impl<'a> Checker<'a> {
                 };
                 return Some(result_ty(inner, decode_error_ty()));
             }
+            // D-MIGRATE3=A: `decode_traced<T>` — the one extra opt-in method beside
+            // `decode` on every codec that shares the decode machinery. Same target
+            // typing as `decode`, wrapped in `DecodeResult<T>` (`DecodeResult<[T]>`
+            // for CSV) so the caller can ask `.migration.migrated` without `decode`
+            // itself changing shape or cost (I8).
+            (
+                "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
+                | "core.encoding.yaml",
+                "decode_traced",
+            ) if !type_args.is_empty() => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                let t = type_args[0].clone();
+                self.check_decodable(&t, span);
+                let inner = if module == "core.encoding.csv" {
+                    Type::List(Box::new(t))
+                } else {
+                    t
+                };
+                let decode_result = Type::Apply {
+                    name: "DecodeResult".to_string(),
+                    args: vec![inner],
+                };
+                return Some(result_ty(decode_result, decode_error_ty()));
+            }
             ("core.mem", "volatile_read") => {
                 if !self.in_unsafe {
                     self.diags.push(e3101(Syntax::MEM_VOLATILE_READ, span));
@@ -2172,6 +2201,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
         // fallible, `?`-composed cursors over `[U8]`/`String`.
         | "Reader" | "Cursor"
+        // D-MIGRATE3=A: decode-time migration transparency. `DecodeResult<T>`
+        // (generic, see `is_core_generic` in CheckerCore.rs) and its plain
+        // `MigrationStatus` field both need the bare-name gate here too.
+        | "DecodeResult" | "MigrationStatus"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -2196,6 +2229,16 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "DecodeError" {
         return match field {
             "path" | "reason" => Some(Type::String),
+            _ => None,
+        };
+    }
+    // D-MIGRATE3=A: `MigrationStatus` — `.migrated` false + `.from`/`.steps`
+    // empty for fresh data and for non-`#PublishedSchema` types.
+    if type_name == "MigrationStatus" {
+        return match field {
+            "migrated" => Some(Type::Bool),
+            "from" => Some(Type::String),
+            "steps" => Some(Type::List(Box::new(Type::String))),
             _ => None,
         };
     }
@@ -2228,6 +2271,22 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         }),
         _ => None,
     }
+}
+
+/// D-MIGRATE3=A: field access on the reserved generic `DecodeResult<T>` —
+/// `.value: T` and `.migration: MigrationStatus`. Mirrors [`core_struct_field`]
+/// for the one reserved core type that carries a generic type argument
+/// (`Type::Apply`, not `Type::Named`); see the `Type::Apply` arm in
+/// `CheckerInfer/expr.rs`'s member-access resolver.
+pub(crate) fn core_generic_struct_field(type_name: &str, field: &str, args: &[Type]) -> Option<Type> {
+    if type_name == "DecodeResult" {
+        return match field {
+            "value" => args.first().cloned(),
+            "migration" => Some(Type::Named("MigrationStatus".to_string())),
+            _ => None,
+        };
+    }
+    None
 }
 
 pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
@@ -3379,10 +3438,12 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.io", "eprint")
             // D-ENC1 / D-SERDE6: typed encode/decode return types depend on the value
             // type / call-site `<T>`, so codegen reads them from resolved_ret (I3).
+            // D-MIGRATE3=A: `decode_traced` is the same call-site-typed shape, one
+            // layer deeper (`DecodeResult<T>`).
             | (
                 "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
                 | "core.encoding.yaml",
-                "to_string" | "to_string_pretty" | "decode",
+                "to_string" | "to_string_pretty" | "decode" | "decode_traced",
             )
             // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
             // element type is inferred from the initial value / closure return — not in
@@ -4172,12 +4233,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // verbs — formats are submodules); each format submodule carries the verbs.
         "core.encoding" => &[],
         // D-JSONVERB1: `to_string`/`to_string_pretty` (compact/pretty); `parse` → dynamic
-        // JSON value; `decode` → lenient typed decode (D-JSON3).
-        "core.encoding.json" => &["parse", "decode", "to_string", "to_string_pretty"],
+        // JSON value; `decode` → lenient typed decode (D-JSON3). D-MIGRATE3=A:
+        // `decode_traced<T>` rides alongside `decode` on every format.
+        "core.encoding.json" => &["parse", "decode", "decode_traced", "to_string", "to_string_pretty"],
         // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
-        "core.encoding.csv" => &["parse", "decode", "to_string"],
-        "core.encoding.toml" => &["parse", "decode", "to_string"],
-        "core.encoding.yaml" => &["parse", "decode", "to_string"],
+        "core.encoding.csv" => &["parse", "decode", "decode_traced", "to_string"],
+        "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],
+        "core.encoding.yaml" => &["parse", "decode", "decode_traced", "to_string"],
         // D-UUIDENC1=A: hex/base64 codecs and UUID generator.
         "core.encoding.hex" => &["encode", "decode"],
         "core.encoding.base64" => &["encode", "decode"],

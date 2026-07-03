@@ -4470,13 +4470,24 @@ pub(crate) fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
 /// Returns `Some(plain_name)` for a known core-struct field (so it is emitted
 /// unprefixed, B2), `None` otherwise (the caller falls back to `mangle(member)`).
 pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str) -> Option<String> {
+    // D-MIGRATE3=A: `DecodeResult<T>` is the one reserved core struct with a
+    // generic type argument (`Type::Apply`, not `Type::Named`) — handle it
+    // before the `Type::Named`-only path below. User-type-wins (D-SHIFT1
+    // precedent): a user struct named `DecodeResult` shadows the core one.
+    if let Type::Apply { name, .. } = recv_ty {
+        if name == "DecodeResult" && !cx.type_names.contains(name) && matches!(member, "value" | "migration") {
+            return Some(member.to_string());
+        }
+        return None;
+    }
     let Type::Named(type_name) = recv_ty else {
         return None;
     };
-    // User structs named Point/Rect/Size keep `user_<field>` lowering (c133 M1).
+    // User structs named Point/Rect/Size/MigrationStatus keep `user_<field>`
+    // lowering (c133 M1 precedent; D-MIGRATE3=A extends it to `MigrationStatus`).
     let ui_name_collision = matches!(
         type_name.as_str(),
-        "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode"
+        "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "MigrationStatus"
     );
     if ui_name_collision && cx.type_names.contains(type_name) {
         return None;
@@ -4504,6 +4515,8 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "HttpRequest" | "HttpResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
         }
+        // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
+        "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
         _ => false,
     };
     if known {
@@ -4526,9 +4539,40 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             .find(|(f, _)| f == field)
             .map(|(_, t)| (**t).clone());
     }
+    // D-MIGRATE3=A: `DecodeResult<T>` — a reserved core generic, not a user
+    // struct, so it normally has no `cx.struct_fields` entry. Mirrors
+    // `core_generic_struct_field` (sema/CheckerCoreLib.rs) so a chained access
+    // (`r.migration.migrated`) resolves the intermediate `.migration` type
+    // instead of falling back to `Type::Int` and mis-mangling the next field.
+    // User-type-wins (D-SHIFT1 precedent): if the user declared their own
+    // `struct DecodeResult<T>`, `cx.struct_fields` has a real entry — try that
+    // first so a same-named user field always wins.
+    if let Type::Apply { name, args } = recv_ty {
+        if let Some(fields) = cx.struct_fields.get(name) {
+            return fields.iter().find(|(f, _)| f == field).map(|(_, t)| t.clone());
+        }
+        if name == "DecodeResult" {
+            return match field {
+                "value" => args.first().cloned(),
+                "migration" => Some(Type::Named("MigrationStatus".to_string())),
+                _ => None,
+            };
+        }
+        return None;
+    }
     let Type::Named(name) = recv_ty else {
         return None;
     };
+    // D-MIGRATE3=A: `MigrationStatus` is likewise a reserved core struct —
+    // same user-type-wins order.
+    if name == "MigrationStatus" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "migrated" => Some(Type::Bool),
+            "from" => Some(Type::String),
+            "steps" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        };
+    }
     cx.struct_fields
         .get(name)?
         .iter()

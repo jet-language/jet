@@ -1723,6 +1723,12 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+            } else if let Some(fty) = core_generic_struct_field(name, member, args) {
+                // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
+                // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
+                // precedent: `Reader`/`Cursor`) means this fallback only runs when
+                // no user struct claimed the name above.
+                return Some(fty);
             }
         }
         if let Type::Tuple(fields) = t {

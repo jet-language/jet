@@ -2804,6 +2804,22 @@ pub(crate) fn enc_target_rust(ret_ty: &Type, cx: &Cx) -> String {
         cx.rust_type(ret_ty)
     }
 }
+/// D-MIGRATE3=A: the Rust type a typed `decode_traced<T>` constructs — same
+/// target as [`enc_target_rust`], one layer deeper through the resolved
+/// `Result<DecodeResult<T | [T]>, DecodeError>` return type.
+pub(crate) fn enc_target_rust_traced(ret_ty: &Type, cx: &Cx) -> String {
+    if let Type::Result { ok, .. } = ret_ty {
+        if let Type::Apply { args, .. } = &**ok {
+            if let Some(inner) = args.first() {
+                return match inner {
+                    Type::List(elem) => cx.rust_type(elem),
+                    other => cx.rust_type(other),
+                };
+            }
+        }
+    }
+    cx.rust_type(ret_ty)
+}
 pub(crate) fn enc_arg_is_json(args: &[TExpr]) -> bool {
     matches!(args.first().map(|a| &a.ty), Some(Type::Named(n)) if enc_is_json_name(n))
 }
@@ -3047,6 +3063,16 @@ pub(crate) fn emit_tir_core_call(
                 )
             }
         }
+        // D-MIGRATE3=A: `decode_traced<T>` — the traced sibling of `decode<T>`,
+        // one wrapper deeper (`DecodeResult<T>`), same target-type plumbing.
+        ("core.encoding.json", "decode_traced") => {
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_json_decode_traced"),
+                enc_target_rust_traced(ret_ty, cx),
+                arg(0)
+            )
+        }
         ("core.encoding.json", "to_string") => {
             if enc_arg_is_json(args) {
                 format!("{}(&({}))", helper("jet_std_json_render"), arg(0))
@@ -3072,6 +3098,14 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
+        ("core.encoding.csv", "decode_traced") => {
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_csv_decode_traced"),
+                enc_target_rust_traced(ret_ty, cx),
+                arg(0)
+            )
+        }
         ("core.encoding.csv", "to_string") => {
             if enc_arg_is_string_rows(args) {
                 format!("{}(&({}))", helper("jet_ring_csv_render"), arg(0))
@@ -3090,6 +3124,14 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
+        ("core.encoding.toml", "decode_traced") => {
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_toml_decode_traced"),
+                enc_target_rust_traced(ret_ty, cx),
+                arg(0)
+            )
+        }
         ("core.encoding.toml", "to_string") => {
             if enc_arg_is_json(args) {
                 format!("{}(&({}))", helper("jet_std_toml_render"), arg(0))
@@ -3105,6 +3147,14 @@ pub(crate) fn emit_tir_core_call(
                 "{}::<{}>(&({}))",
                 helper("jet_enc_yaml_decode"),
                 enc_target_rust(ret_ty, cx),
+                arg(0)
+            )
+        }
+        ("core.encoding.yaml", "decode_traced") => {
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_yaml_decode_traced"),
+                enc_target_rust_traced(ret_ty, cx),
                 arg(0)
             )
         }

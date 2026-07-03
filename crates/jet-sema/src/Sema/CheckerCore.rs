@@ -247,6 +247,8 @@ impl<'a> Checker<'a> {
                         | "Signal" | "Derived"
                         // D-STREAMYIELD1: generator return type.
                         | "Stream"
+                        // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
+                        | "DecodeResult"
                 );
                 if !is_core_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(

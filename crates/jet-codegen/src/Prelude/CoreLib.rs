@@ -728,6 +728,37 @@ mod jet_std {
         fn jet_show(&self) -> String { render_datatree_json(self, false, 0) }
     }
 
+    // D-MIGRATE3=A: decode-time migration transparency. `decode_traced<T>` sits
+    // beside `decode<T>` on every codec that shares this decode machinery;
+    // `decode` itself is byte-for-byte unchanged (I8, zero cost for callers not
+    // asking). `.migrated` is false and `.from`/`.steps` are empty both for
+    // fresh data and for any non-`@PublishedSchema` type; today that is the
+    // only case there is to report — `@PublishedSchema` + `migration { }` is a
+    // sema-only intent check (E0910) with no runtime data conversion yet (see
+    // `docs/spec/spec.md`'s migrations section / SchemaMigration.rs), so a real
+    // record read through an old shape still needs the shape to satisfy the
+    // current struct exactly. `MigrationStatus` reports what actually happened
+    // at decode time, honestly, and starts reporting migrations the moment
+    // that runtime engine lands, with no call-site change.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct MigrationStatus {
+        pub migrated: bool,
+        pub from: String,
+        pub steps: Vec<String>,
+    }
+
+    impl MigrationStatus {
+        pub fn fresh() -> MigrationStatus {
+            MigrationStatus { migrated: false, from: String::new(), steps: Vec::new() }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DecodeResult<T> {
+        pub value: T,
+        pub migration: MigrationStatus,
+    }
+
     // D-SERDE-ACCESS=B: dynamic accessor methods on DataTree.
     impl DataTree {
         pub fn field(&self, name: &str) -> Result<DataTree, String> {
@@ -3808,6 +3839,13 @@ fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::Deco
     T::jet_decode(&jet_std::datatree_from_json(&j))
 }
 
+// D-MIGRATE3=A: `decode_traced<T>` — same decode, wrapped in `DecodeResult` so the
+// caller can ask whether/how it migrated, without `decode` itself paying for it.
+fn jet_enc_json_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
+    let value = jet_enc_json_decode::<T>(text)?;
+    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
+}
+
 // CSV typed decode: header row maps columns to fields by name; each data row
 // becomes a DataTree::Object of Text cells, then decodes to `T`. A short row or a
 // per-row decode failure is a typed `DecodeError` naming the 1-based row.
@@ -3829,6 +3867,12 @@ fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, jet_std::
         out.push(T::jet_decode(&tree).map_err(|e| jet_std::DecodeError::under(&format!("row {}", i + 1), e))?);
     }
     Ok(out)
+}
+
+// D-MIGRATE3=A: traced sibling of `jet_enc_csv_decode` — see json's for the shape.
+fn jet_enc_csv_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<Vec<T>>, jet_std::DecodeError> {
+    let value = jet_enc_csv_decode::<T>(text)?;
+    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
 }
 
 // CSV typed encode: `[T]` → header row (field names from the first row's Object)
@@ -3875,6 +3919,12 @@ fn jet_enc_toml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::Deco
     T::jet_decode(&tree)
 }
 
+// D-MIGRATE3=A: traced sibling of `jet_enc_toml_decode` — see json's for the shape.
+fn jet_enc_toml_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
+    let value = jet_enc_toml_decode::<T>(text)?;
+    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
+}
+
 // YAML typed decode: parse flat scalars into a DataTree::Object of Text, then decode.
 // D-ENC-DYN1=A+ / D-ENC-YAML1 (c152): YAML is a full serde adapter over the one
 // rich `DataTree` — block + flow maps/sequences, typed core scalars, block scalars,
@@ -3889,6 +3939,12 @@ fn jet_enc_yaml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::Deco
     let tree = jet_std::yaml::parse_to_tree(text)
         .map_err(|e| jet_std::DecodeError::new(format!("invalid YAML (line {}): {}", e.line, e.message)))?;
     T::jet_decode(&tree)
+}
+
+// D-MIGRATE3=A: traced sibling of `jet_enc_yaml_decode` — see json's for the shape.
+fn jet_enc_yaml_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
+    let value = jet_enc_yaml_decode::<T>(text)?;
+    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
 }
 fn jet_enc_toml_to_string<T: user_Encode>(v: &T) -> String {
     jet_std::toml::render(&v.jet_encode())

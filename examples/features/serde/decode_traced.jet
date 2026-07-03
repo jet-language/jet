@@ -1,0 +1,57 @@
+// D-MIGRATE3=A — decode-time migration transparency. `decode_traced<T>` sits
+// beside `decode<T>` on every codec (json/csv/toml/yaml share this decode
+// machinery, D-ENC1): it returns a `DecodeResult<T>` — `{ value, migration }`
+// — so a caller can ask whether the record it just decoded arrived as an old
+// schema version, without `decode` itself changing shape or cost (I8: one
+// canonical way to ask; everyone who doesn't ask keeps calling plain `decode`
+// for free).
+//
+// `@PublishedSchema` + `migration { }` (D-MIGRATE1/D-MIGRATE2A-F) already
+// refuse a breaking field-layout change at compile time unless a migration
+// declares the intent (E0910) — that's a static check against a committed
+// snapshot. Reading an *old* stored record through that migration at runtime
+// is a separate, not-yet-built engine (see docs/spec/spec.md's migrations
+// section); until it lands, `.migrated` reports the honest truth for every
+// record decoded today: it never migrated, because nothing runtime-converts
+// old data yet. `decode_traced` is fully wired now so no call site has to
+// change the day that engine ships.
+use core.encoding.json as json
+
+// A plain type — decode_traced still works, `.migration.migrated` is false.
+@Codable
+struct Point {
+    x: Int
+    y: Int
+}
+
+// A published record. The migration block documents the v1 -> v2 rename so a
+// future snapshot diff (once this package publishes a snapshot) won't refuse
+// the rename with E0910. Decoding data already shaped like *today's* struct
+// is the fresh-data case either way.
+@[PublishedSchema, Codable]
+struct UserRecord {
+    id: Int
+    display_name: String
+    verified: Bool
+}
+
+migration UserRecord {
+    rename name -> display_name
+    add verified: Bool = false
+}
+
+fn main() {
+    p_raw :: "{{\"x\": 3, \"y\": 4}}"
+    p :: json.decode_traced<Point>(p_raw) ?? panic("bad point")
+    print("point: ({p.value.x}, {p.value.y})")
+    print("point migrated: {p.migration.migrated}")
+    u_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
+    r :: json.decode_traced<UserRecord>(u_raw) ?? panic("bad user record")
+    user :: r.value
+    if r.migration.migrated {
+        print("record {user.id} arrived as schema v{r.migration.from}")
+    } else {
+        print("record {user.id} arrived fresh, no migration applied")
+    }
+    print("steps applied: {r.migration.steps.len()}")
+}
