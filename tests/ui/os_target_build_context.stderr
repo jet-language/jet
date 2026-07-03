@@ -1,0 +1,7 @@
+Error [E-OSTARGET-BUILD-CONTEXT]: a `comptime if … == { … }` switch dispatches on `build.os`
+  --> tests/ui/os_target_build_context.jet:2:23
+    |
+  2 |     comptime if build.arch == {
+    |                       ^^^^
+ Why: `build.os` is the one compiler-known comptime value this switch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)
+ Fix: write `comptime if build.os == { .Linux -> … .Macos -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time

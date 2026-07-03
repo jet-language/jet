@@ -1,0 +1,7 @@
+Error [E-OSTARGET-DISPATCH-ARM]: `.Bsd` is not an OS arm — a `build.os` switch matches `.Linux`, `.Macos`, or `.Windows`
+  --> tests/ui/os_target_dispatch_bad_arm.jet:12:9
+    |
+ 12 |         .Bsd -> {
+    |         ^^^^^^^^^
+ Why: each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(Os.*)` uses — and each OS appears at most once
+ Fix: write `.Linux -> …`, `.Macos -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback)

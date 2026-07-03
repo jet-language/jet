@@ -52,6 +52,10 @@ pub fn compile_bundle_path_opts_dbg(
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    // D-OSTARGET2=B: the `comptime if build.os == { … }` desugar (run in sema)
+    // must fold to the same OS bucket codegen filters `impl`s by, so seed the
+    // bundle from the same resolved `active_os` as `emit_bundle`.
+    bundle.active_os = active_os;
     if web_target {
         bundle.web_partition_enforced = true;
     }
@@ -165,6 +169,7 @@ pub fn compile_src(
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
+        active_os: crate::Syntax::OsTarget::host(),
     };
     // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
@@ -288,6 +293,7 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
+        active_os: crate::Syntax::OsTarget::host(),
     };
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,

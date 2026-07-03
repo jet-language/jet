@@ -1072,6 +1072,36 @@ the surviving OS-gated impl through a comptime switch on `build.os` — a
 compiler-known comptime value matched with `.Linux`/`.Macos`/`.Windows`
 arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(Os.*)` gating (option A) rejected.
+*Shipped spelling (2026-07-03):* the ballot wrote the switch loosely as `match
+build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
+`if subject == { }` if-table) with the existing `comptime if` lead (D-WHEN1) —
+**no `match` keyword was added** (I8). Statement-position dispatch:
+
+```jet
+fn main() {
+    comptime if build.os == {
+        .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
+        .Macos   -> { b :: MacosBackend.{ name: "appkit" } print(b.label()) }
+        .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
+    }
+}
+```
+
+`build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
+bucket, host OS when omitted; a web/wasm target falls back to the host per
+`OsTarget::active`). Sema desugars the switch into a `comptime if` chain
+(D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
+the arm matching `active_os` and discarding the rest before any OS-gating
+check, type-check, or codegen sees a body — so constructing an OS-gated type
+inside the taken arm is legal and dead arms never trip
+`E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arm
+set must cover `.Linux`, `.Macos`, and `.Windows`, or carry an `else` — missing
+an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
+compiles or fails identically on every platform). A non-`build.os` subject is
+`E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
+`build.os` is meaningful *only* as this switch's subject — `build` is not a
+reserved word, so anywhere else it is an ordinary identifier (undefined at
+runtime → E0107), never a magic runtime value.
 **D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)**: Phase 8 native
 backend toolchain deps enter via nixpkgs devShell (`gtk4` + `pkg-config`,
 Linux first) per the standing native-deps stopgap; jetpack core provider

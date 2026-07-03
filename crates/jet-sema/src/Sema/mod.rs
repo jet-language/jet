@@ -830,7 +830,7 @@ pub(crate) use State::{check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
 pub(crate) use WebPartition::check_web_partition;
 // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
-pub(crate) use OsTarget::check_os_target;
+pub(crate) use OsTarget::{check_os_target, desugar_os_switches};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{

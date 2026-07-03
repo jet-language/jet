@@ -4,19 +4,18 @@
 // native backend needs its own devShell/flake change first, tracked
 // separately as Phase 8).
 //
-// Two dummy structs implement the same `Backend` trait, one gated
-// `#Target(Os.Linux)`, the other `#Target(Os.Macos)`. `jet build
-// --target=<triple>` only emits/links the `impl` matching that triple's OS
-// (host OS when `--target` is omitted) — `tests/cross.rs` proves this by
-// inspecting the generated Rust for both triples. `os_target_unmatched_call`
-// (tests/ui/) proves the flip side: code that ISN'T gated to match can't use
-// a gated type at all — a Jet-level compile error, not a missing-method
-// rustc ICE — so this file's `main` deliberately never touches either
-// backend directly. (There is no ratified way for ungated entry-point code
-// to dispatch to "whichever backend matches this build" yet — that needs
-// either fn-level `#Target(Os.*)` gating or another selection primitive,
-// neither in the ratified D-OSTARGET1 text. Flagged as follow-up, not built
-// here.)
+// Three dummy structs implement the same `Backend` trait, each `impl` gated to
+// one OS with `#Target(Os.*)`. `jet build --target=<triple>` only emits/links
+// the `impl` matching that triple's OS (host OS when `--target` is omitted) —
+// `tests/cross.rs` proves this by inspecting the generated Rust per triple.
+//
+// D-OSTARGET2=B (ratified 2026-07-03): ungated `main` reaches the surviving
+// OS-gated `impl` through a `comptime if build.os == { … }` switch. `build.os`
+// is a compiler-known comptime value; the switch folds to the arm matching the
+// build's target OS *before* any OS-gating check runs, discarding the others —
+// so constructing an OS-gated type inside the taken arm is legal, and the dead
+// arms never trip `E-OSTARGET-UNMATCHED-CALL`. This is the one dispatch
+// primitive: no fn-level `#Target` gating (option A was rejected).
 trait Backend {
     fn label(self) -> String
 }
@@ -26,6 +25,10 @@ struct LinuxBackend {
 }
 
 struct MacosBackend {
+    name: String
+}
+
+struct WindowsBackend {
     name: String
 }
 
@@ -43,6 +46,26 @@ impl MacosBackend.Backend {
     }
 }
 
+#Target(Os.Windows)
+impl WindowsBackend.Backend {
+    fn label(self) -> String {
+        return "windows: {self.name}"
+    }
+}
+
 fn main() {
-    print("os target gating: LinuxBackend/MacosBackend compiled side by side")
+    comptime if build.os == {
+        .Linux -> {
+            b :: LinuxBackend.{ name: "gtk" }
+            print(b.label())
+        }
+        .Macos -> {
+            b :: MacosBackend.{ name: "appkit" }
+            print(b.label())
+        }
+        .Windows -> {
+            b :: WindowsBackend.{ name: "win32" }
+            print(b.label())
+        }
+    }
 }

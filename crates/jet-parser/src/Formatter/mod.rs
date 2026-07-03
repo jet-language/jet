@@ -400,6 +400,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
             .or_else(|| then_body.last())
             .map(stmt_end)
             .unwrap_or(span.end),
+        Stmt::ComptimeSwitch { span, .. } => span.end,
         Stmt::ContextBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         // D-TERM1 (ratified 2026-06-22): `live { … }` — use span end.
         Stmt::Live { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
@@ -736,6 +737,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Grant { span, .. } => span.start,
         Stmt::ComptimeBlock { span, .. } => span.start,
         Stmt::ComptimeIf { span, .. } => span.start,
+        Stmt::ComptimeSwitch { span, .. } => span.start,
         Stmt::ContextBlock { span, .. } => span.start,
         // D-TERM1 (ratified 2026-06-22): `live { … }` — use span start.
         Stmt::Live { span, .. } => span.start,

@@ -676,6 +676,14 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             arms,
             else_body,
             ..
+        }
+        // D-OSTARGET2=B: `comptime if build.os == { … }` — index arm bodies
+        // the same as a runtime dispatch (sema desugars it away later).
+        | AST::Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
         } => {
             collect_expr(subject, mp, ctx);
             for arm in arms {

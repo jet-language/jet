@@ -2638,6 +2638,7 @@ impl<'a> Parser<'a> {
                         Stmt::Grant { span, .. } => span.end,
                         Stmt::ComptimeBlock { span, .. } => span.end,
                         Stmt::ComptimeIf { span, .. } => span.end,
+                        Stmt::ComptimeSwitch { span, .. } => span.end,
                         Stmt::ContextBlock { span, .. } => span.end,
                         // D-TERM1 (ratified 2026-06-22): live block span end.
                         Stmt::Live { span, .. } => span.end,

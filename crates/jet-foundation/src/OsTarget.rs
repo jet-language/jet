@@ -120,6 +120,97 @@ pub fn os_target_unmatched_call(
     )
 }
 
+/// E-OSTARGET-BUILD-CONTEXT (D-OSTARGET2=B): a `comptime if … == { }` OS
+/// dispatch whose subject is not `build.os`. The comptime switch that reaches
+/// OS-gated `impl`s dispatches only on the compiler-known `build.os` value.
+pub fn os_target_build_context(
+    span: Option<crate::Diagnostics::Span>,
+) -> crate::Diagnostics::Diagnostic {
+    crate::Diagnostics::Diagnostic::error(
+        "E-OSTARGET-BUILD-CONTEXT",
+        format!(
+            "a `{} {} … == {{ … }}` switch dispatches on `{}.{}`",
+            Syntax::KW_COMPTIME,
+            Syntax::KW_IF,
+            Syntax::BUILD_INFO,
+            Syntax::BUILD_INFO_OS,
+        ),
+        format!(
+            "`{}.{}` is the one compiler-known comptime value this switch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)",
+            Syntax::BUILD_INFO,
+            Syntax::BUILD_INFO_OS,
+        ),
+        format!(
+            "write `{} {} {}.{} == {{ .{} -> … .{} -> … .{} -> … }}`, or use a plain runtime `{}` for a value that isn't known at compile time",
+            Syntax::KW_COMPTIME,
+            Syntax::KW_IF,
+            Syntax::BUILD_INFO,
+            Syntax::BUILD_INFO_OS,
+            Syntax::TARGET_OS_LINUX,
+            Syntax::TARGET_OS_MACOS,
+            Syntax::TARGET_OS_WINDOWS,
+            Syntax::KW_IF,
+        ),
+        span,
+    )
+}
+
+/// E-OSTARGET-DISPATCH-ARM (D-OSTARGET2=B): an arm head of a `comptime if
+/// build.os == { }` switch is not a bare OS variant (`.Linux`/`.Macos`/
+/// `.Windows`), or repeats one.
+pub fn os_target_dispatch_arm(
+    found: &str,
+    span: Option<crate::Diagnostics::Span>,
+) -> crate::Diagnostics::Diagnostic {
+    crate::Diagnostics::Diagnostic::error(
+        "E-OSTARGET-DISPATCH-ARM",
+        format!(
+            "`{found}` is not an OS arm — a `{}.{}` switch matches `.{}`, `.{}`, or `.{}`",
+            Syntax::BUILD_INFO,
+            Syntax::BUILD_INFO_OS,
+            Syntax::TARGET_OS_LINUX,
+            Syntax::TARGET_OS_MACOS,
+            Syntax::TARGET_OS_WINDOWS,
+        ),
+        format!(
+            "each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#{}(Os.*)` uses — and each OS appears at most once",
+            Syntax::ATTR_TARGET,
+        ),
+        format!(
+            "write `.{} -> …`, `.{} -> …`, or `.{} -> …` (add an `else -> …` for a shared fallback)",
+            Syntax::TARGET_OS_LINUX,
+            Syntax::TARGET_OS_MACOS,
+            Syntax::TARGET_OS_WINDOWS,
+        ),
+        span,
+    )
+}
+
+/// E-OSTARGET-DISPATCH-EXHAUSTIVE (D-OSTARGET2=B): a `comptime if build.os ==
+/// { }` switch's arms leave some target OS uncovered and there is no `else`.
+/// Build-independent: enforced regardless of the current `--target` so the same
+/// source compiles (or fails) identically on every platform.
+pub fn os_target_dispatch_exhaustive(
+    missing: &[&str],
+    span: Option<crate::Diagnostics::Span>,
+) -> crate::Diagnostics::Diagnostic {
+    let list = missing.join(", ");
+    crate::Diagnostics::Diagnostic::error(
+        "E-OSTARGET-DISPATCH-EXHAUSTIVE",
+        format!(
+            "this `{}.{}` switch doesn't cover every target OS — missing: {list}",
+            Syntax::BUILD_INFO,
+            Syntax::BUILD_INFO_OS,
+        ),
+        "a build can target any native OS, so the switch must handle each one — otherwise a build for a missing OS would have no arm to run"
+            .to_string(),
+        format!(
+            "add an arm for each missing OS ({list}), or an `else -> …` catch-all",
+        ),
+        span,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

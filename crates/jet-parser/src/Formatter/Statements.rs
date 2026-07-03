@@ -113,25 +113,7 @@ impl<'a> Fmt<'a> {
             } => {
                 self.write(Syntax::KW_IF);
                 self.write(" ");
-                self.fmt_expr(subject, Prec::OrFallback);
-                self.write(" == {");
-                self.newline();
-                self.with_indent(|f| {
-                    for arm in arms {
-                        f.fmt_switch_arm(subject, arm);
-                        f.newline();
-                    }
-                    if let Some(else_b) = else_body {
-                        f.write(Syntax::KW_ELSE);
-                        f.write(" ");
-                        f.write(Syntax::OP_ARM_ARROW);
-                        f.write(" {");
-                        f.newline();
-                        f.with_indent(|f| f.fmt_block_stmts(else_b));
-                        f.end_block();
-                    }
-                });
-                self.end_block();
+                self.fmt_dispatch(subject, arms, else_body.as_deref());
             }
             Stmt::Break(_) => self.write("break"),
             Stmt::Continue(_) => self.write("continue"),
@@ -298,6 +280,18 @@ impl<'a> Fmt<'a> {
                     self.with_indent(|f| f.fmt_block_stmts(eb));
                     self.end_block();
                 }
+            }
+            // D-OSTARGET2=B (ratified 2026-07-03): `comptime if build.os == { … }`
+            // — the OS-dispatch switch. Formats exactly like a `Stmt::Switch`
+            // (D-IF3 arm grammar) with a `comptime` lead.
+            Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
+                self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));
+                self.fmt_dispatch(subject, arms, else_body.as_deref());
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
             Stmt::ContextBlock { fields, body, .. } => {
@@ -474,6 +468,32 @@ impl<'a> Fmt<'a> {
     /// (`subject == value`) prints just the value; a full condition prints as
     /// written. A single-statement body could be braceless, but fmt always uses
     /// a block for a stable, idempotent shape.
+    /// D-IF3 / D-OSTARGET2=B: render a dispatch body `== { arm -> … [else -> …] }`
+    /// (the caller has already written the `if` / `comptime if` lead and subject
+    /// keyword). Shared verbatim by `Stmt::Switch` and `Stmt::ComptimeSwitch` so
+    /// both render byte-for-byte identically.
+    fn fmt_dispatch(&mut self, subject: &Expr, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
+        self.fmt_expr(subject, Prec::OrFallback);
+        self.write(" == {");
+        self.newline();
+        self.with_indent(|f| {
+            for arm in arms {
+                f.fmt_switch_arm(subject, arm);
+                f.newline();
+            }
+            if let Some(else_b) = else_body {
+                f.write(Syntax::KW_ELSE);
+                f.write(" ");
+                f.write(Syntax::OP_ARM_ARROW);
+                f.write(" {");
+                f.newline();
+                f.with_indent(|f| f.fmt_block_stmts(else_b));
+                f.end_block();
+            }
+        });
+        self.end_block();
+    }
+
     fn fmt_switch_arm(&mut self, subject: &Expr, arm: &SwitchArm) {
         self.fmt_switch_cond(subject, &arm.cond, Prec::OrFallback);
         self.write(" ");

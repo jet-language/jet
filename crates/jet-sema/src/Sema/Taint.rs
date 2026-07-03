@@ -413,6 +413,12 @@ impl<'a> TaintCtx<'a> {
                 arms,
                 else_body,
                 ..
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
             } => {
                 self.check_expr(subject);
                 for a in arms {

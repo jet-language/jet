@@ -183,6 +183,19 @@ fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
         "Linux triple should strip the Os.Macos impl:\n{}",
         out.rust
     );
+    // D-OSTARGET2=B: `comptime if build.os == { … }` in `main` must fold to the
+    // Linux arm for a Linux triple — the arm constructs `LinuxBackend.{ name:
+    // "gtk" }`, so "gtk" appears and the discarded arms' payloads do not.
+    assert!(
+        out.rust.contains("\"gtk\""),
+        "Linux triple should keep only the .Linux dispatch arm (\"gtk\"):\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("\"appkit\"") && !out.rust.contains("\"win32\""),
+        "Linux triple should discard the .Macos/.Windows dispatch arms:\n{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -205,6 +218,18 @@ fn os_target_gating_emits_only_macos_impl_for_macos_triple() {
     assert!(
         !out.rust.contains("impl user_Backend for user_LinuxBackend"),
         "macOS triple should strip the Os.Linux impl:\n{}",
+        out.rust
+    );
+    // D-OSTARGET2=B: the same `main` switch folds to the .Macos arm for a macOS
+    // triple — constructing `MacosBackend.{ name: "appkit" }`.
+    assert!(
+        out.rust.contains("\"appkit\""),
+        "macOS triple should keep only the .Macos dispatch arm (\"appkit\"):\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("\"gtk\"") && !out.rust.contains("\"win32\""),
+        "macOS triple should discard the .Linux/.Windows dispatch arms:\n{}",
         out.rust
     );
 }

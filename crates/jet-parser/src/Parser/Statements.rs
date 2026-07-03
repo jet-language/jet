@@ -2864,6 +2864,44 @@ impl<'a> Parser<'a> {
     fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.bump().span; // `comptime`
         self.bump(); // `if`
+
+        // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
+        // `comptime if build.os == { .Linux -> … .Macos -> … }`. Detected the
+        // same way `if_or_dispatch` does — parse the subject below comparison
+        // precedence so a trailing `== {` marker survives; reuse `if_arms` for
+        // the arm grammar, then repackage the resulting `Stmt::Switch` as a
+        // `Stmt::ComptimeSwitch` (sema folds it to the active-OS arm).
+        let probe = self.pos;
+        let probe_diags = self.diags.len();
+        if let Ok(subject) = self.expr_no_struct_lit_no_cmp() {
+            if matches!(self.peek().kind, TokKind::EqEq)
+                && matches!(self.peek2().kind, TokKind::LBrace)
+            {
+                self.bump(); // `==`
+                self.expect(TokKind::LBrace, "to open the `comptime if` dispatch body")?;
+                let switch = self.if_arms(subject, start)?;
+                let Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } = switch
+                else {
+                    unreachable!("if_arms always returns Stmt::Switch");
+                };
+                let end = self.toks[self.pos - 1].span.end;
+                return Ok(Stmt::ComptimeSwitch {
+                    subject,
+                    arms,
+                    else_body,
+                    span: Span::new(start.start, end),
+                });
+            }
+        }
+        // Not the dispatch form — rewind and parse the boolean `comptime if`.
+        self.pos = probe;
+        self.diags.truncate(probe_diags);
+
         let cond_start = self.peek().span;
         let cond = self.expr_no_struct_lit()?;
         let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);

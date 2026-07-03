@@ -43,6 +43,7 @@ fn err_codes(src: &str) -> Vec<String> {
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
+        active_os: Syntax::OsTarget::host(),
     };
     check_bundle(&mut bundle, CompileMode::Eval)
         .into_iter()

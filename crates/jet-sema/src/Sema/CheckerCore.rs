@@ -1642,6 +1642,12 @@ impl<'a> Checker<'a> {
                 arms,
                 else_body,
                 span,
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                span,
             } => self.check_switch(subject, arms, else_body, *span),
             Stmt::Break(span) => {
                 if self.loop_depth == 0 {

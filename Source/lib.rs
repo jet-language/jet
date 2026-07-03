@@ -199,6 +199,9 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         web_partition_enforced: true,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
+        // D-OSTARGET2=B: this inline single-module path has no `--target`; the
+        // host OS is the active bucket.
+        active_os: Syntax::OsTarget::host(),
     };
     bundle.cffi = match CFFI::assemble(&mut bundle) {
         Ok(c) => c,

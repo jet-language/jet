@@ -176,6 +176,12 @@ impl<'a> InlineAlwaysScan<'a> {
                 arms,
                 else_body,
                 ..
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
             } => {
                 self.scan_expr(subject);
                 for arm in arms {

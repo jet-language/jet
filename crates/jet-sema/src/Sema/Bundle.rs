@@ -450,6 +450,12 @@ pub(crate) fn rewrite_inline_calls_stmts(
                 arms,
                 else_body,
                 ..
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
             } => {
                 rewrite_inline_calls_expr(subject, siblings, modname);
                 for a in arms.iter_mut() {
@@ -699,6 +705,11 @@ pub(crate) fn check_bundle_opts(
     allow_impure: bool,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = Vec::new();
+    // D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
+    // … }` switch to the arm matching this build's active OS *before* any other
+    // pass sees a body — so OS-gating checks, the type-checker, and codegen only
+    // meet the taken arm. Rewrites into a `comptime if` chain (reuses D-WHEN1).
+    diags.extend(super::desugar_os_switches(bundle));
     // D-GENMOD2=A: expand module aliases into concrete CodeModules before any
     // sibling-call mangling or registration sees the items.
     expand_generic_module_aliases(bundle, &mut diags);
@@ -1968,6 +1979,12 @@ pub(crate) fn collect_core_stmts(
                 collect_core_stmts(body, imports, used, spans);
             }
             Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            }
+            | Stmt::ComptimeSwitch {
                 subject,
                 arms,
                 else_body,

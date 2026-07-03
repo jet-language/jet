@@ -255,6 +255,12 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
             arms,
             else_body,
             ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
         } => {
             collect_tuple_shapes_from_expr(subject, out);
             for a in arms {

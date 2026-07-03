@@ -554,6 +554,14 @@ pub struct ProgramBundle {
     /// loaded module's path back to the dependency that owns it. Empty for a
     /// single-file program with no `pkg.jet`.
     pub dep_roots: std::collections::HashMap<String, std::path::PathBuf>,
+    /// D-OSTARGET2 (=B, ratified 2026-07-03): the active native OS bucket for
+    /// this build — resolved from `--target=<triple>` (host OS when absent or a
+    /// web/wasm pseudo-target). Seeded by the driver right after load; defaults
+    /// to the host OS for every other bundle constructor (LSP, tests). Sema's
+    /// `comptime if build.os == { … }` desugar reads it to fold the switch to
+    /// the arm matching this OS, and it must equal codegen's `active_os` so the
+    /// selected arm's gated `impl` is the one codegen keeps.
+    pub active_os: crate::OsTarget::OsTarget,
 }
 
 #[derive(Debug)]
@@ -2074,6 +2082,23 @@ pub enum Stmt {
         /// None before sema runs.
         selected_then: Option<bool>,
     },
+    /// D-OSTARGET2 (=B, ratified 2026-07-03): `comptime if build.os == { .Linux
+    /// -> … .Macos -> … .Windows -> … [else -> …] }` — the compile-time switch
+    /// that lets ungated code reach an OS-gated `impl`. `build.os` is a
+    /// compiler-known comptime value; the switch folds to the arm matching the
+    /// build's active OS (`ProgramBundle.active_os`), discarding the others
+    /// *before* any OS-gating check or full type-check sees them. Sema desugars
+    /// this node into a chain of `ComptimeIf` (each arm's condition is the
+    /// compile-time constant `build.os == .Os`) as the very first step of
+    /// `check_bundle`, so no later sema/codegen pass ever sees this variant —
+    /// only the parser, formatter, and semindex do. Arm heads are bare OS
+    /// variants (reuses the `Stmt::Switch` arm IR / `SwitchArm`).
+    ComptimeSwitch {
+        subject: Expr,
+        arms: Vec<SwitchArm>,
+        else_body: Option<Vec<Stmt>>,
+        span: Span,
+    },
     /// D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` — a
     /// build-time execution block. Runs at compile time via the tree-walking
     /// comptime interpreter; erases entirely (no runtime Rust emitted, I3).
@@ -2193,6 +2218,7 @@ impl Stmt {
             | Stmt::Caps { span, .. }
             | Stmt::Grant { span, .. }
             | Stmt::ComptimeIf { span, .. }
+            | Stmt::ComptimeSwitch { span, .. }
             | Stmt::ComptimeBlock { span, .. }
             | Stmt::ContextBlock { span, .. }
             | Stmt::Live { span, .. }

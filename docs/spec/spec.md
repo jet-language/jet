@@ -395,6 +395,18 @@ impl Circle {
   line before a declaration. Block markers use PascalCase and parenthesized
   arguments when arguments exist. `@Pure fn` is a prefix marker; `comptime`
   stays a prefix keyword.
+- **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `#Target(Os.Linux
+  |Macos|Windows)` gates one `impl` block to a native OS; `jet build
+  --target=<triple>` emits only the matching build's impls (host OS by default).
+  Ungated code reaches the surviving impl through the compile-time switch
+  **`comptime if build.os == { .Linux -> … .Macos -> … .Windows -> … [else -> …]
+  }`** — `build.os` is a compiler-known comptime value, the switch folds to the
+  arm matching the build's target OS and discards the rest before any gating
+  check runs. Arms must cover every OS or carry an `else`
+  (**E-OSTARGET-DISPATCH-EXHAUSTIVE**); the subject must be `build.os`
+  (**E-OSTARGET-BUILD-CONTEXT**); arm heads are bare OS variants
+  (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
+  full rules.
 - **Build-time embedding (D-CTIO1):** inside a `comptime` binding,
   **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
   and **`embed_bytes("path") -> [U8]`** bakes its raw bytes (binary-safe, no

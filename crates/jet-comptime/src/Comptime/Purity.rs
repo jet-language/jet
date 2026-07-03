@@ -247,6 +247,23 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         // D-DET1: `assume_deterministic { … }` suspends the determinism check for
         // its body — the comptime purity walk does not descend into it (footgun).
         Stmt::AssumeDet { .. } => {}
+        // D-OSTARGET2=B: sema desugars `comptime if build.os == { … }` into a
+        // `comptime if` chain before this pass runs, so this arm is unreachable
+        // in practice; walk both the subject and arms conservatively anyway.
+        Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
+            f(subject);
+            for arm in arms {
+                arm.body.iter().for_each(|s| walk_stmt_exprs(s, f));
+            }
+            if let Some(eb) = else_body {
+                eb.iter().for_each(|s| walk_stmt_exprs(s, f));
+            }
+        }
     }
 }
 

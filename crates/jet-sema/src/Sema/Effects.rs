@@ -718,6 +718,12 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
             arms,
             else_body,
             ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
         } => expr_handle_escape(subject, handle)
             .or_else(|| {
                 arms.iter()

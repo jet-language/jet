@@ -44,6 +44,12 @@ pub(crate) fn walk_stmts_for_const_refs(
                 arms,
                 else_body,
                 ..
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
             } => {
                 walk_expr_for_const_refs(subject, const_names, taken);
                 for a in arms {
@@ -432,6 +438,12 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
             arms,
             else_body,
             ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
         } => {
             expr_refs_name(subject, name)
                 || arms.iter().any(|a| {
@@ -585,6 +597,9 @@ pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Optio
             .iter()
             .find_map(|stmt| stmt_view_return_span(checker, stmt)),
         Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
             arms, else_body, ..
         } => arms
             .iter()
@@ -836,6 +851,12 @@ pub(crate) fn stmt_collect_captures(
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
         Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
             subject,
             arms,
             else_body,

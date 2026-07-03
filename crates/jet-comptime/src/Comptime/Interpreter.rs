@@ -461,6 +461,10 @@ impl<'a> Interp<'a> {
                 }
                 None => Ok(Flow::Normal),
             },
+            // D-OSTARGET2=B: `comptime if build.os == { … }` is desugared into a
+            // `comptime if` chain in sema before the interpreter ever runs, so
+            // this is unreachable; erase like a comptime block for safety.
+            Stmt::ComptimeSwitch { .. } => Ok(Flow::Normal),
         }
     }
 

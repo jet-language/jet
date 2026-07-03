@@ -310,6 +310,9 @@ pub fn load_entry_with_overlay(
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots,
+        // D-OSTARGET2=B: default to the host OS; the driver overrides this from
+        // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
+        active_os: Syntax::OsTarget::host(),
     };
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.

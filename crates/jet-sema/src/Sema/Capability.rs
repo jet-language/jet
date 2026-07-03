@@ -214,6 +214,12 @@ fn scan_stmt(
             arms,
             else_body,
             ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
         } => {
             scan_expr(subject, caps, method_map, param_types);
             for a in arms {

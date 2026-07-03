@@ -84,6 +84,46 @@ fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
 }
 
 #[test]
+fn fmt_comptime_os_switch_round_trips() {
+    // D-OSTARGET2=B (ratified 2026-07-03): `comptime if build.os == { … }` — the
+    // OS-dispatch switch. New token shape: the `comptime if <subject> == { }`
+    // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
+    // idempotent (the formatter-round-trip-required rule catches dropped tokens).
+    let src = r#"fn main() {
+    comptime if build.os == {
+        .Linux -> {
+            b :: LinuxBackend.{ name: "gtk" }
+            print(b.label())
+        }
+        .Macos -> print("mac")
+        else -> print("other")
+    }
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept a comptime OS switch");
+    assert!(
+        out.contains("comptime if build.os == {"),
+        "expected the `comptime if build.os == {{` switch head, got:\n{out}"
+    );
+    // Arms and their bodies survive (the formatter canonicalizes braceless arm
+    // bodies to block form, like any `if … == { }` dispatch).
+    assert!(
+        out.contains(".Linux -> {") && out.contains(".Macos -> {"),
+        "expected OS arms preserved, got:\n{out}"
+    );
+    assert!(
+        out.contains("print(\"mac\")") && out.contains("print(b.label())"),
+        "expected arm bodies preserved, got:\n{out}"
+    );
+    assert!(
+        out.contains("else -> {") && out.contains("print(\"other\")"),
+        "expected the else arm preserved, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("comptime OS switch output should re-fmt");
+    assert_eq!(out, twice, "comptime OS switch formatting must be idempotent");
+}
+
+#[test]
 fn fmt_if_expression_preserves_condition_parens() {
     // S68 (D-SG2): `if` as a value round-trips.
     // D-FMTPARENS1=A: author-written grouping parens are always preserved.

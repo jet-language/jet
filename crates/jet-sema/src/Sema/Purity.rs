@@ -212,6 +212,12 @@ pub(crate) fn check_pure_stmt(
             arms,
             else_body,
             ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
         } => {
             if let Some(d) = check_pure_expr(subject, pure_fn, funcs) {
                 return Some(d);
@@ -624,6 +630,12 @@ fn check_pure_stmt_with_path(
             None
         }
         Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
             subject,
             arms,
             else_body,
@@ -1167,6 +1179,12 @@ fn walk_stmt_for_calls(
             }
         }
         Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
             subject,
             arms,
             else_body,

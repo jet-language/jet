@@ -2167,6 +2167,7 @@ mod tests {
             web_partition_enforced: false,
             web_partition_report: None,
             dep_roots: std::collections::HashMap::new(),
+            active_os: crate::Syntax::OsTarget::host(),
         };
         // No C imports in unit tests; CFfi::default() is the correct empty state.
         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);

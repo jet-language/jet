@@ -123,6 +123,7 @@ fn dom_fn() {
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: Default::default(),
+        active_os: jet::Syntax::OsTarget::host(),
     };
     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert_eq!(

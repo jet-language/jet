@@ -266,6 +266,16 @@ pub const TARGET_OS_MACOS: &str = "Macos";
 /// D-OSTARGET1=A: `#Target(Os.Windows)`.
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
+/// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
+/// `build` and its `.os` field — the subject of a `comptime if build.os == { }`
+/// switch that folds to the arm matching the build's active OS. `build` is not
+/// a reserved keyword: it is recognized only in that syntactic position (an
+/// ordinary local named `build` is still fine); a `build.os` anywhere else has
+/// no compiler meaning.
+pub const BUILD_INFO: &str = "build";
+/// D-OSTARGET2=B: the `.os` field of the comptime `build` value.
+pub const BUILD_INFO_OS: &str = "os";
+
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
 pub const FOREIGN_UNSAFE: &str = "unsafe";
@@ -1519,7 +1529,10 @@ pub use crate::WebPartition::{
     is_abi_safe_type, web_abi_type, web_cross_partition, web_target_browser, WebBucket,
     WebPartitionMarker,
 };
-pub use crate::OsTarget::{os_target_mixed_axis, os_target_unmatched_call, OsTarget};
+pub use crate::OsTarget::{
+    os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
+    os_target_mixed_axis, os_target_unmatched_call, OsTarget,
+};
 
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
 /// inside the `.jet/` managed folder (SOURCE_ROOT_DIR). Replaces `jet.lock`
