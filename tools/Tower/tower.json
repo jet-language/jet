@@ -526,167 +526,7 @@
       ],
       "created": "2026-06-22T00:00:00Z",
       "updated": "2026-07-02",
-      "workOrder": 9999,
-      "decisions": [
-        {
-          "id": "D-FLAGSHIP1",
-          "status": "open",
-          "gist": "Which app is Jet's flagship CLI slice — the command-line program we ship, benchmark, and point people at.",
-          "story": "Hank, a sysadmin who lives in a terminal, hears Jet is 'great for CLI tools.' He wants proof: one real tool he can build from source, run on his own files, and time against what he already uses. Whatever we ship here is that proof — it gets compared, benchmarked, and quoted.",
-          "inWild": "// examples/apps/<cli>/main.jet — every candidate leans on this same surface\nfn main() {\n    args :: cli.parse(spec)?\n    for path in fs.walk(args.root) {\n        for line in File.open(path)?.lines() {\n            if pattern.matches(line) { print(\"{path}: {line}\") }\n        }\n    }\n}\n\n#Test fn matches_word_boundary() {\n    assert(pattern_for(\"fn \\\\w+\").matches(\"fn main() {\"))\n}",
-          "comparisons": "Rust's domain proof is ripgrep — one tool did more for Rust's CLI reputation than any doc. Go's is the gh/docker generation of CLIs. Zig points at its own build system. The pattern: one polished, benchmarkable tool per language.",
-          "options": [
-            {
-              "key": "A",
-              "name": "jetgrep — recursive regex search (recommended)",
-              "detail": "Grow the E2 GA jetgrep into a ripgrep-class searcher: globs, ignore rules, --count/--files/--context, colored TTY output, parallel directory scan. Invites the single highest-signal CLI benchmark that exists (vs grep/ripgrep) and exercises regex, fs walk, streaming stdin, args, color, exit codes.",
-              "code": "$ jetgrep \"fn \\\\w+_test\" src/ --count\nsrc/lexer.jet: 14\nsrc/parser.jet: 22\n\n$ time jetgrep TODO ~/big-repo   # the benchmark people will actually run\nreal 0m0.41s\n\n$ jetgrep \"(unclosed\" src/\nerror: invalid pattern: unclosed group\n  fix: escape the parenthesis: \\\\("
-            },
-            {
-              "key": "B",
-              "name": "jetstat — typed CSV/JSON data cruncher",
-              "detail": "Reads CSV with a header row into typed rows, filters, aggregates, emits JSON. Showcases serde derives, iterator adapters, and typed-pipeline safety — the 'awk but typed' pitch. Weaker on raw-speed comparison; stronger on type-safety story.",
-              "code": "$ jetstat sales.csv --filter \"amount > 100\" --group region --out json\n{\"west\": {\"count\": 1204, \"total\": 981223.50}, \"east\": ...}\n\n$ jetstat sales.csv --filter \"amont > 100\"\nerror: no column `amont` in sales.csv\n  fix: did you mean `amount`?"
-            },
-            {
-              "key": "C",
-              "name": "jetship — static site generator",
-              "detail": "Markdown tree in, HTML site out: templates, front-matter, live rebuild via jet dev. Credible (Hugo/Zola class), touches text/fs/templating, and its output can host Jet's own docs. Benchmarks less crisply than search; templating surface is a bigger bite.",
-              "code": "$ jetship build site/\n  42 pages -> public/ in 180ms\n$ jetship dev site/\n  serving http://localhost:8080  (rebuild on save)"
-            },
-            {
-              "key": "D",
-              "name": "jetwatch — parallel task runner / file watcher",
-              "detail": "make-meets-watchexec: declares tasks in a typed manifest, runs them in parallel on file change. Shows tasks/channels and process control in a tool devs run all day. Overlaps `jet dev` conceptually — risks a second way to mean 'watch and rerun' (I8 adjacency).",
-              "code": "$ jetwatch test lint\n[test] 132 passed  [lint] clean   (parallel, 2.1s)\n[watch] src/parser.jet changed -> rerunning test"
-            },
-            {
-              "key": "E",
-              "name": "jetdu — parallel disk-usage analyzer",
-              "detail": "ncdu-class: walks a tree in parallel, ranks by size, TUI summary table. Simple mental model, good parallel-fs and TUI-table showcase. Narrower feature spread than A-C (no regex/serde/templates).",
-              "code": "$ jetdu ~/Projects\n  3.2G  jet/target\n  1.1G  jet/.jet/store\n  212M  photos/raw\nscanned 148,201 files in 0.6s"
-            }
-          ],
-          "rec": "A — the grep head-to-head is the strongest single proof a language is fast and pleasant for CLI work, and the heritage jetgrep already GA'd once, so the slice measures polish, not feasibility."
-        },
-        {
-          "id": "D-FLAGSHIP2",
-          "status": "open",
-          "gist": "Which service is Jet's flagship server slice — the HTTP program that proves the backend story.",
-          "story": "Doris runs a small team's internal tools on one VM. She'll adopt Jet for services the day she can read one real service — routes, database, logging, shutdown — deploy it as a single binary, and curl it. This slice is that service.",
-          "inWild": "// examples/apps/<server>/main.jet — the surface every candidate stresses\nfn main() {\n    db :: Db.open(\"data.sqlite\")?\n    server :: http.server(\":8080\")\n    server.route(\"POST\", \"/paste\", handle_create)\n    server.route(\"GET\", \"/health\", fn(_) { Json.ok(Health.{ ok: true }) })\n    Log.info(\"listening\", port: 8080)\n    server.serve()?\n}",
-          "comparisons": "Go's proof was 'a static binary serving HTTP' (Docker, Caddy). Rust points at axum examples; TS at Express/Next starters. The convincing form is always a small, complete, deployable service — not a framework tour.",
-          "options": [
-            {
-              "key": "A",
-              "name": "jetpaste — pastebin with TTL expiry (recommended)",
-              "detail": "POST a paste, get a short id; GET raw or HTML; expiry via TTL sweep; /stats and /health. CRUD + persistence + time + concurrent clients is the minimum honest service, and every behavior goldens through curl. Exercises routes, SQLite, serde JSON, structured logs, per-request deadlines, graceful shutdown.",
-              "code": "$ jetpaste &\n$ curl -d \"hello world\" localhost:8080/paste\n{\"id\": \"k3xq\", \"expires\": \"2026-07-03T12:00:00Z\"}\n$ curl localhost:8080/p/k3xq\nhello world\n$ curl localhost:8080/p/gone4\n{\"error\": \"not found or expired\"}   # 404"
-            },
-            {
-              "key": "B",
-              "name": "jetlink — URL shortener with click stats",
-              "detail": "Shorten, redirect, count clicks, top-N stats endpoint. Same persistence/serde spread as A plus redirects; slightly thinner domain logic (fewer honest error paths than paste bodies + expiry).",
-              "code": "$ curl -d '{\"url\": \"https://jet.dev/docs\"}' localhost:8080/shorten\n{\"short\": \"http://localhost:8080/r/a7Kq\"}\n$ curl -i localhost:8080/r/a7Kq\nHTTP/1.1 302 Found\nLocation: https://jet.dev/docs"
-            },
-            {
-              "key": "C",
-              "name": "jetfeed — feed aggregator with background fetchers",
-              "detail": "Background tasks poll RSS/JSON feeds via the HTTP client; the server serves a merged digest. Uniquely shows client+server+taskgroup in one program. Depends on outside networks for real runs, so its golden path needs local fixture feeds.",
-              "code": "$ jetfeed --feeds feeds.toml &\n[fetch] lobste.rs ok (12 items)  [fetch] hn ok (30 items)\n$ curl localhost:8080/digest | head -3\n{\"items\": [{\"title\": \"Jet 1.0 released\", ...}"
-            },
-            {
-              "key": "D",
-              "name": "jetboard — kanban/task JSON API (pairs with the web slice)",
-              "detail": "Boards/cards CRUD API. If the web slice is jettasks (D-FLAGSHIP3=A), this becomes its persistence backend — the two slices then demo a full-stack Jet story. Cost: the two pillars' fates couple; a change in one ripples into the other's goldens.",
-              "code": "$ curl -d '{\"title\": \"ship slice\"}' localhost:8080/cards\n{\"id\": 1, \"title\": \"ship slice\", \"done\": false}\n$ curl -X PATCH -d '{\"done\": true}' localhost:8080/cards/1\n{\"id\": 1, \"done\": true}"
-            },
-            {
-              "key": "E",
-              "name": "jetrelay — webhook receiver and fan-out",
-              "detail": "Receives webhooks, verifies signatures (core.crypto), fans out to configured targets with retry. Ops-flavored and shows crypto + retry + concurrency; but its interesting behavior (retries, downstream failures) is the hardest to demo convincingly in a golden test.",
-              "code": "$ curl -d @push.json -H \"X-Sig: sha256=...\" localhost:8080/hook/github\n{\"accepted\": true, \"fanout\": 3}\n[relay] target ci.local ok  target chat.local ok  target log.local ok"
-            }
-          ],
-          "rec": "A — CRUD + persistence + expiry covers the widest honest surface (db, serde, time, routes, logs, shutdown) while every proof stays curl-observable and golden-testable."
-        },
-        {
-          "id": "D-FLAGSHIP3",
-          "status": "open",
-          "gist": "Which browser app is Jet's flagship web slice — the WASM/reactive-UI program people compare against React/Svelte.",
-          "story": "Betty writes React at work. She'll take Jet-on-the-web seriously the moment she can read one app she already knows by heart and see the Jet version is shorter, typed end-to-end, and has no npm folder. What app we pick decides whether that comparison is even possible.",
-          "inWild": "// examples/apps/<web>/main.jet — reactive surface every candidate uses\nfn task_row(t: Task) -> View {\n    row.{ children: [\n        checkbox.{ checked: t.done, on_toggle: fn() { toggle(t.id) } },\n        text.{ value: t.title, style: done_style(t.done) },\n    ] }\n}\n\n#Reactive fn remaining(tasks: List[Task]) -> Int {\n    tasks.filter(fn(t) { !t.done }).len()\n}",
-          "comparisons": "TodoMVC is the lingua franca of web frameworks — React, Vue, Svelte, Elm all prove themselves with it; readers diff implementations line-by-line. Swift shows Landmarks; Flutter shows counters and galleries. Only TodoMVC buys a cross-ecosystem comparison for free.",
-          "options": [
-            {
-              "key": "A",
-              "name": "jettasks — TodoMVC (recommended)",
-              "detail": "The TodoMVC spec, exactly: add/toggle/edit/delete, filters, clear-completed, count footer, keyboard interaction, persisted to browser storage. Instantly comparable to every framework a web dev knows; exercises signals, view tree, typed styles, components, a11y lint, and browser storage.",
-              "code": "$ jet dev app/main.jet --target=web\n  serving http://localhost:8080  (live reload)\n# browser: type \"write the plan\", Enter, click checkbox\n# footer flips: \"0 items left\" — no npm, no bundler, one .jet file tree"
-            },
-            {
-              "key": "B",
-              "name": "jetnotes — markdown editor with live preview",
-              "detail": "Split pane: textarea in, rendered markdown out, WASM-side parsing (grows the existing web_compute example). Shows compute-in-WASM strength; weaker on component/list/interaction breadth (one big text state, few components), so it stresses less of the UI stack.",
-              "code": "# browser: left pane\n## Flight notes\n- [x] fuel check\n# right pane re-renders on keystroke; parse runs in Jet/WASM, not JS"
-            },
-            {
-              "key": "C",
-              "name": "jetradar — live filterable flight-board dashboard",
-              "detail": "An aviation-themed departures board: a data table with reactive filters, sorting, and detail panel over a fixture dataset. On-brand and table/list-heavy; but no editing/creation flows, so forms, focus, and keyboard interaction go unproven.",
-              "code": "# browser: type \"SFO\" in the filter box\nJT214  SFO -> HND   boarding\nJT552  SFO -> JFK   delayed\n# 2 of 340 rows shown; sort by status reorders reactively"
-            },
-            {
-              "key": "D",
-              "name": "jetdeck — slide presenter from a text file",
-              "detail": "Text file in, keyboard-navigated slide deck in the browser; could present Jet itself. Charming and demo-friendly; but mostly static rendering with one keyboard axis — the thinnest reactive-state workout of the menu.",
-              "code": "$ jet run deck/main.jet --target=web talk.md\n# browser: arrow keys advance; slide 3 shows live-highlighted Jet code"
-            }
-          ],
-          "rec": "A — the whole value of the web slice is comparison, and TodoMVC is the only app the rest of the web world has already implemented for us to be compared against."
-        },
-        {
-          "id": "D-FLAGSHIP4",
-          "status": "open",
-          "gist": "Which game is Jet's flagship game slice — the windowed core.raylib program that proves Jet is real for interactive graphics.",
-          "story": "Earl teaches a high-school programming club. Nothing recruits like a game: window opens, sprite moves, sound plays, kids lean in. The flagship game is the demo he shows first — and the one game programmers judge Jet's loop-and-latency story by.",
-          "inWild": "// examples/apps/<game>/main.jet — the loop every candidate runs (core.raylib, D-RAYLIB1=A)\nfn main() {\n    w :: Window.open(\"jetfighter\", 800, 600)?\n    game := Game.new(seed: 7)\n    while !w.should_close() {\n        game.step(input.poll(), dt: clock.tick())\n        w.draw(fn(d) { game.render(d) })\n    }\n}\n\n#Test fn collision_hits_on_overlap() {\n    assert(hit(Rect.{ x: 0, y: 0, w: 8, h: 8 }, Rect.{ x: 4, y: 4, w: 8, h: 8 }))\n}",
-          "comparisons": "raylib's own example gallery is the genre's proving ground; Lua has Love2D demos, Zig and Odin both lead with raylib/Sokol games. An asteroids/breakout-class game is the recognized 'language can do games' unit.",
-          "options": [
-            {
-              "key": "A",
-              "name": "jetfighter — asteroids-style 2D shooter (recommended)",
-              "detail": "Top-down ship, thrust + rotate, shoot asteroids that split, waves, sound, score, game over. On-brand name, covers the full bridge (sprites, rotation, audio, input, collision, spawning), and a seeded --replay mode makes it golden-testable headless.",
-              "code": "$ jet run game/main.jet\n# window opens: ship rotates with arrows, fires with space,\n# asteroid splits with a crack sound, score ticks to 250\n$ jet run game/main.jet -- --replay demo.moves --headless\nframes: 900  score: 1250  checksum: 8f31aa02   # committed golden"
-            },
-            {
-              "key": "B",
-              "name": "barnstormer — side-scrolling plane through obstacles",
-              "detail": "Flappy-class: a biplane threads pylons, one-button input, parallax scroll, high score. Aviation-perfect and instantly playable; smaller mechanical spread than A (no rotation math, one input axis, fewer entity kinds).",
-              "code": "$ jet run game/main.jet\n# plane dips on space, clips a pylon, prop-sputter sound, \"score 23\"\n$ jet run game/main.jet -- --replay run.moves --headless\nframes: 640  score: 23  checksum: 51c09be7"
-            },
-            {
-              "key": "C",
-              "name": "contrail — snake, native and windowed",
-              "detail": "Snake where the body is a jet's contrail. Great name, dead-simple rules, fixed-array grid state shows off [T#N]. The most modest visual/audio workout of the menu — grid steps, no rotation, minimal sound.",
-              "code": "$ jet run game/main.jet\n# contrail grows across the sky grid; eating a star chimes; wall = game over\n$ jet run game/main.jet -- --replay path.moves --headless\nframes: 412  length: 19  checksum: c2d4e011"
-            },
-            {
-              "key": "D",
-              "name": "jetbreak — breakout/arkanoid",
-              "detail": "Paddle, ball, brick grid, power-ups. Classic and physics-flavored (bounce angles, brick states); reads as the most generic of the menu — nothing about it says Jet.",
-              "code": "$ jet run game/main.jet\n# ball chips a two-hit brick, paddle catches a widen power-up, level clears\n$ jet run game/main.jet -- --replay rally.moves --headless\nframes: 1330  bricks: 0  checksum: 77ab120c"
-            },
-            {
-              "key": "E",
-              "name": "mach1 — top-down time-trial racer",
-              "detail": "A jet races checkpoint gates against the clock, drift steering, ghost replay of your best run. The ghost is a natural showcase for the deterministic replay machinery itself; steering feel is the make-or-break and is the hardest thing to get right in a demo.",
-              "code": "$ jet run game/main.jet\n# lap 1: 42.3s — a translucent ghost flies your previous line\n$ jet run game/main.jet -- --replay best.lap --headless\nframes: 2540  lap: 41.8s  checksum: 09fe3d44"
-            }
-          ],
-          "rec": "A — widest bridge coverage (rotation, audio, collision, entity spawning) in a game that is on-brand, recognizable, and cleanly replay-testable."
-        }
-      ]
+      "workOrder": 9999
     },
     {
       "id": "c140",
@@ -5930,114 +5770,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-03",
-      "decisions": [
-        {
-          "id": "D-STYLEUNIT1",
-          "cardId": "c2qj06uq",
-          "status": "open",
-          "title": "Style length spelling: unit literals vs Length wrappers vs bare numbers",
-          "gist": "How a user writes a length like 320 pixels in a UI style.",
-          "story": "Betty is laying out the settings page of her recipe app: a card 320 wide, 180 tall, 12 of padding. She wants to type those three numbers once, have the compiler catch a unit typo, and not wonder later whether 320 meant pixels or something else.",
-          "inWild": "// Phase 3 shipped this shape — every length is three tokens of ceremony:\ngutter :: Length.{value: 12.0, unit: .Px}\n\nCARD :: Style.{\n    color:  Color.{r: 30, g: 60, b: 200},\n    width:  Length.{value: 320.0, unit: .Px},\n    height: Length.{value: 180.0, unit: .Px},\n}\n\nfn settings_card() -> View {\n    .Box.{children: [\n        .Text.{text: \"Servings\", style: CARD},\n    ]}\n}",
-          "comparisons": "CSS:            width: 320px;              — unit-suffix literal, the shape every web tutorial teaches\nJetpack Compose: Modifier.width(320.dp)     — typed Dp via extension property; 320 alone is a type error\nSwiftUI:        .frame(width: 320)         — unitless CGFloat points, unit is implicit convention\nFlutter:        SizedBox(width: 320)       — unitless logical pixels, same implicit convention\nReact inline:   {{ width: 320 }}           — bare number silently means px; {{ width: '320px' }} string also accepted\nTypst:          width: 320pt               — unit-suffix literal, checked at compile time",
-          "options": [
-            {
-              "key": "A",
-              "name": "Unit-family literal: width: 320px (recommended)",
-              "detail": "core.ui.style declares a #UnitFamily(length) { px } (D-QUAL3), so the ratified unit-literal syntax (D-UNITLIT1) applies: 320px is a compile-checked Px value. One canonical unit mechanism in the whole language (I8) — style lengths use the same machinery as 500ms and 12.50usd. Unit typos are compile errors (E0134); if a second unit ever ships, cross-unit math is a compile error too (E0127). Reads like the CSS every beginner has already seen.",
-              "code": "// User types:\nCARD :: Style.{\n    width:   320px,\n    height:  180px,\n    padding: 12px,\n}\n\ngutter :: 12px\nwide   :: gutter * 2.0       // arithmetic stays in Px\n\n// Typo — caught at compile time:\nw :: 320p\n// error[E0134]: unknown unit suffix `p`\n//   what: no unit family in scope defines `p`\n//   fix:  did you mean `px`?\n\n// Dot-construction spelling also valid (D-UNITLIT1):\nh :: px.{180}"
-            },
-            {
-              "key": "B",
-              "name": "Enum with per-unit variants: width: .Px.{value: 320.0}",
-              "detail": "Length is an enum whose variants carry the value: Length { Px(value: Float) }. Fully typed and pattern-matchable, and the field type stays a single Length even if more units are added. But it duplicates what unit families already do with a second, style-only mechanism (I8), and every length costs a variant-construction spelling.",
-              "code": "enum Length {\n    Px(value: Float)\n}\n\nCARD :: Style.{\n    width:  .Px.{value: 320.0},\n    height: .Px.{value: 180.0},\n}\n\n// Backends match on the unit:\nfn to_device(len: Length, scale: Float) -> Float {\n    if len == {\n        .Px(value) -> { return value * scale }\n    }\n}"
-            },
-            {
-              "key": "C",
-              "name": "Flat pair record: width: Length.{value: 320.0, unit: .Px}",
-              "detail": "Length is a two-field struct (value + LengthUnit enum) — the shape Phase 3's example shipped. Plain user-space types, nothing new to learn beyond structs. But it's the most ceremony per length, the unit and value can be read independently without matching (a backend can use .value and forget .unit), and it's a second unit mechanism next to unit families (I8).",
-              "code": "enum LengthUnit { Px }\n\nstruct Length {\n    value: Float\n    unit: LengthUnit\n}\n\nCARD :: Style.{\n    width:  Length.{value: 320.0, unit: .Px},\n    height: Length.{value: 180.0, unit: .Px},\n}\n\n// Nothing stops a backend ignoring the unit:\nfn to_device(len: Length) -> Float {\n    return len.value   // compiles even if unit handling was forgotten\n}"
-            },
-            {
-              "key": "D",
-              "name": "Bare Float logical pixels: width: 320.0",
-              "detail": "No Length type at all — style dimensions are Float, pixels by convention, like SwiftUI/Flutter. Least typing and no unit concept for beginners to learn. But the unit lives in documentation instead of the type: 320.0 could be anything, a duration mixed into a width compiles fine, and adding real units later changes every Style field's type.",
-              "code": "CARD :: Style.{\n    width:   320.0,\n    height:  180.0,\n    padding: 12.0,\n}\n\n// Nothing catches this — both are just Float:\ndelay_ms :: 250.0\noops :: Style.{width: delay_ms, height: 180.0}   // compiles, renders a 250-wide box"
-            },
-            {
-              "key": "E",
-              "name": "CSS string: width: \"320px\"",
-              "detail": "Lengths are strings parsed at render time, exactly like inline CSS. Familiar to web developers and trivially copy-pasteable from CSS. But every typo becomes a runtime failure in the user's running app, the compiler can't help with math on lengths, and stringly-typed values are the opposite of the typed-styles goal this phase exists for.",
-              "code": "CARD :: Style.{\n    width:  \"320px\",\n    height: \"180px\",\n}\n\n// Typo compiles fine, fails when the view first paints:\nbad :: Style.{width: \"32Opx\", height: \"180px\"}\n// runtime: panic: can't parse length \"32Opx\"\n\n// No arithmetic:\n// \"320px\" * 2.0   // E: can't multiply String by Float"
-            }
-          ],
-          "rec": "A — reuses the one ratified unit mechanism (D-QUAL3 + D-UNITLIT1), so `320px` is compile-checked with zero ceremony and no second style-only unit system (I8)."
-        },
-        {
-          "id": "D-UIDEVSHELL1",
-          "cardId": "c2qj06uq",
-          "status": "open",
-          "title": "Phase 8 native UI backends: how do GTK/AppKit/Win32 toolchain deps enter the dev environment?",
-          "gist": "Building a real native UI backend needs OS toolkit headers/libs the dev shell does not have; decide how they get there.",
-          "story": "Hank wants the reactive UI showcase to open a real Linux window instead of the web renderer. The compiler side (OS gating, renderer seam) is ready, but the flake devShell has no GTK headers or pkg-config, so nothing can link. Nothing an agent does can proceed until the dependency route is chosen.",
-          "inWild": "#Target(Os.Linux)\nimpl GtkBackend: JetBackend {\n    fn mount(root: Node) { /* #Extern gtk4 calls */ }\n}\n// jet build  ->  error: linking with cc failed: cannot find -lgtk-4",
-          "comparisons": "Rust gtk4-rs: system gtk4 via pkg-config, user installs it (apt/brew/nix). Tauri: webview system dep, documented per-OS. Flutter: bundles its own engine (huge, but zero system deps).",
-          "options": [
-            {
-              "key": "A",
-              "name": "nixpkgs devShell deps now (recommended)",
-              "detail": "Add gtk4 + pkg-config (Linux) to the flake devShell per the existing owner guidance for native deps (nixpkgs stopgap, jetpack core provider owns it long-term). macOS/Windows backends wait for contributors on those hosts. Non-Nix users get a clear \"install gtk4\" message.",
-              "code": "# flake.nix devShell\nbuildInputs = [ gtk4 pkg-config ];\n\n# then Phase 8 builds:\nnix develop -c jet run ui_showcase.jet   # real window"
-            },
-            {
-              "key": "B",
-              "name": "Defer Phase 8 to Epoch 4",
-              "detail": "Ship Epoch 3 UI as web-renderer only; native backends land with the jetpack core provider that owns native deps properly.",
-              "code": "// e3: web target stays the only real renderer\njet build --target=web ui_showcase.jet"
-            },
-            {
-              "key": "C",
-              "name": "Headless native backend first",
-              "detail": "Build the native backend against a stub/offscreen renderer (no toolkit linkage) so the seam is exercised end-to-end; real toolkits follow later behind A or B.",
-              "code": "#Target(Os.Linux)\nimpl HeadlessBackend: JetBackend { /* draws to a buffer, asserts in tests */ }"
-            }
-          ],
-          "rec": "A — matches the ratified native-deps guidance (nixpkgs stopgap while jetpack matures); unblocks Phase 8 for the primary dev host without new invariant pressure."
-        },
-        {
-          "id": "D-OSTARGET2",
-          "cardId": "c2qj06uq",
-          "status": "open",
-          "title": "How does ungated code get \"the impl for this OS\"?",
-          "gist": "#Target(Os.*) now gates impls, but plain main has no ratified way to construct/dispatch to whichever gated impl survived the build.",
-          "story": "Doris writes a desktop app. She gates LinuxBackend and MacosBackend impls per D-OSTARGET1. Now her ungated main needs a backend value. Constructing LinuxBackend directly in main is (correctly) E-OSTARGET-UNMATCHED-CALL — main is not Linux-only. There is no blessed way to say \"give me the one that matched this build.\"",
-          "inWild": "#Target(Os.Linux)\nimpl LinuxBackend: JetBackend { ... }\n#Target(Os.Macos)\nimpl MacosBackend: JetBackend { ... }\n\nfn main() {\n    b :: ???            // needs: the surviving backend for this build\n    app.mount(b)\n}",
-          "comparisons": "Rust: #[cfg(target_os)] on a fn returning Box<dyn Backend> — each cfg variant defines the same fn, exactly one compiles. Go: build tags per file, one file defines newBackend() per OS. Zig: comptime switch on builtin.os.",
-          "options": [
-            {
-              "key": "A",
-              "name": "fn-level #Target(Os.*) + one-survivor rule (recommended)",
-              "detail": "Extend gating to fns: several fns share one name/signature, each gated to a different OS, exactly one survives per build; ungated code calls it like any fn. Missing an OS the build targets = compile error listing covered OSes. Mirrors Rust cfg/Go build tags; no new expression syntax.",
-              "code": "#Target(Os.Linux)\nfn backend() -> JetBackend { return LinuxBackend.{} }\n#Target(Os.Macos)\nfn backend() -> JetBackend { return MacosBackend.{} }\n\nfn main() {\n    app.mount(backend())    // ungated, resolves to the survivor\n}"
-            },
-            {
-              "key": "B",
-              "name": "Comptime OS switch expression",
-              "detail": "A compiler-known comptime value (e.g. build.os) usable in a match whose non-matching arms are discarded before OS-gating checks run. More general (any per-OS choice), but new comptime surface + a second way to express what A does (I8 pressure).",
-              "code": "b :: match build.os {\n    .Linux -> LinuxBackend.{}\n    .Macos -> MacosBackend.{}\n}"
-            },
-            {
-              "key": "C",
-              "name": "Status quo — gated modules own the choice",
-              "detail": "Ungated code never touches gated types; each app ships a per-OS gated module exporting a common fn. Works today only if fn-level gating exists somewhere, which it does not — effectively forces apps to gate their whole main, hollowing the check.",
-              "code": "// every call chain from main must itself be OS-gated — main per OS."
-            }
-          ],
-          "rec": "A — smallest ratified-shape extension (same marker, fns instead of impls), proven pattern in Rust/Go, keeps one dispatch idiom (I8)."
-        }
-      ]
+      "updated": "2026-07-03"
     },
     {
       "id": "c2rj09ov",
@@ -7627,11 +7360,15 @@
       "kind": "idea",
       "track": "sidequest",
       "epoch": "e3",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
       "plan": "tools/Tower/docs/proposals/gameplay-dna.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-02",
           "text": "4 ballots minted from gameplay-dna.md: D-TAG1, D-PATCH1, D-FIELDPOL1, D-EFFTREE1 (no ID collisions; D-EFFTREE1 is an explicit reopen of ratified D-EFF4/5). Each carries gist/story/inWild/comparisons/options-with-worked-code/rec. Card holds in deciding until owner decides."
@@ -7656,7 +7393,7 @@
         }
       ],
       "created": "2026-07-02T16:45:00.487Z",
-      "updated": "2026-07-02"
+      "updated": "2026-07-03"
     },
     {
       "id": "cablueprint",
@@ -7704,56 +7441,7 @@
         }
       ],
       "created": "2026-07-02T19:42:33.221Z",
-      "updated": "2026-07-02",
-      "decisions": [
-        {
-          "id": "D-EXPANDCLI1",
-          "status": "open",
-          "gist": "How you ask the compiler to show the facts it proved (inline decisions, resolved ref owners) — the command's exact shape and what it does with no lens named.",
-          "story": "Doris maintains a telemetry indexer. A teammate's PR adds `@InlineAlways` to a hot dot-product and a new `&Incident` field whose owner the compiler inferred. Before approving, Doris wants to SEE what the compiler decided — which calls actually inlined, which arena owns that field — without reading generated Rust. Three ratified decisions promised her `jet expand --facts`; this ballot fixes the command's final shape.",
-          "inWild": "// src/index.jet — the PR under review\n@InlineAlways\nfn Vec3.dot(self, rhs: Vec3) -> Float {\n    return self.x*rhs.x + self.y*rhs.y + self.z*rhs.z\n}\n\nstruct Owner {\n    name: String\n    primary: &Incident            // owner inferred (sole candidate)\n}\n\nstruct Index {\n    @Ref(pool) hot: &Incident     // two arenas in scope: labeled\n    @Ref(arena) cold: &Incident\n}\n// Doris wants: every inline decision, every field's resolved owner.",
-          "comparisons": "Rust: `cargo expand` (nightly, macro output only) and `rustc --emit=mir` — dumps of transformed code, not curated facts; inlining is invisible. C: `gcc -E` preprocessed soup. Jai: metaprogram message loop can print build facts, but there's no standard lens command. Swift: `-emit-sil` expert dump. Nobody ships a beginner-readable 'what did the compiler decide' surface; Jet's is per-fact lines with file:line, plus `--json` for tools.",
-          "options": [
-            {
-              "key": "A",
-              "name": "jet expand --facts <lens>; bare expand shows everything (recommended)",
-              "detail": "Exactly the surface the three ratified decisions name. `--facts <lens>` narrows to one lens; bare `jet expand <file>` runs every lens, grouped — the magic default is 'show me all of it'. `--json` (existing global flag) emits the stable semindex-schema document. Unknown lens lists the valid ones.",
-              "code": "$ jet expand src/index.jet\ninline — call-site decisions (2 facts)\n  src/render.jet:41:15  Vec3.dot  inlined (@InlineAlways)\n  src/hot.jet:88:9      Vec3.dot  inlined (@InlineAlways)\n\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  src/index.jet:12:5  Index.hot      owner: pool       (labeled @Ref(pool))\n  src/index.jet:13:5  Index.cold     owner: arena      (labeled @Ref(arena))\n\n$ jet expand --facts refs src/index.jet\nrefs — resolved owners (3 facts)\n  ...\n\n$ jet expand --facts spam src/index.jet\nerror: no lens named `spam`\n Fix: pick one — inline (call-site inline decisions), refs (resolved ref/view owners)"
-            },
-            {
-              "key": "B",
-              "name": "jet expand --facts <lens>; bare expand is a lens directory, name reserved",
-              "detail": "Same ratified `--facts <lens>` spelling, but bare `jet expand <file>` prints the lens menu and exits nonzero instead of dumping everything. Keeps the bare name free for Epoch-4 derive/macro expansion audit (D-METHODMACRO1 routed DSL power there), so `jet expand` can later mean 'show generated code' without a meaning change breaking scripts.",
-              "code": "$ jet expand src/index.jet\nerror: `jet expand` needs a lens\n What: available lenses —\n   inline  call-site inline decisions\n   refs    resolved ref/view owners\n Fix: jet expand --facts refs src/index.jet\n\n$ jet expand --facts inline src/index.jet\ninline — call-site decisions (2 facts)\n  src/render.jet:41:15  Vec3.dot  inlined (@InlineAlways)\n  src/hot.jet:88:9      Vec3.dot  inlined (@InlineAlways)"
-            },
-            {
-              "key": "C",
-              "name": "positional lens: jet expand <lens> <file>",
-              "detail": "Drop the flag; the lens is the first word, like `jet schema status`. Reads faster and matches subcommand-verb muscle memory. REQUIRES AMENDING the transparency wording of D-METHODMACRO1, D-REF-SHORTHAND1, and D-DYNARRAY1, which all ratified the literal spelling `jet expand --facts <lens>`.",
-              "code": "$ jet expand refs src/index.jet\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ...\n\n$ jet expand src/index.jet        // lens word missing\nerror: `jet expand` needs a lens: inline | refs\n Fix: jet expand refs src/index.jet"
-            },
-            {
-              "key": "D",
-              "name": "dedicated subcommand: jet facts <lens> <file>",
-              "detail": "The command is about facts, so name it that; `expand` stays unclaimed until Epoch-4 code expansion actually exists. Clean noun, discoverable in `jet help`. REQUIRES AMENDING the three ratified decisions' `jet expand --facts` wording.",
-              "code": "$ jet facts refs src/index.jet\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ...\n\n$ jet facts src/index.jet          // no lens: run them all\ninline — call-site decisions (2 facts)\n  ...\nrefs — resolved owners (3 facts)\n  ..."
-            },
-            {
-              "key": "E",
-              "name": "fold into semindex: jet semindex <file> --facts <lens>",
-              "detail": "The facts already live in the semantic index (D-SEMINDEX1); expose the lens there instead of minting a command. One tool for 'ask the index'. Costs beginners the discoverable verb — `semindex` is tooling vocabulary, not a word Doris would guess. REQUIRES AMENDING the three ratified decisions' wording.",
-              "code": "$ jet semindex src/index.jet --facts refs\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ...\n\n$ jet semindex src/index.jet       // unchanged: index summary\nsemantic index (schema v2)\n  definitions: 14\n  ..."
-            },
-            {
-              "key": "F",
-              "name": "check-mode flag: jet check <file> --facts <lens>",
-              "detail": "Facts fall out of checking, so hang them on `jet check` — one compile, diagnostics plus facts in a single run, nothing new in `jet help`'s top level. Muddles check's contract (exit status = did it compile) with a reporting surface, and buries the transparency story the ballots sold as its own command. REQUIRES AMENDING the three ratified decisions' wording.",
-              "code": "$ jet check src/index.jet --facts refs\nok: src/index.jet checks clean\n\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ..."
-            }
-          ],
-          "rec": "A — the only shape that honors all three ratified decisions verbatim (no amendment churn), and bare `jet expand` showing every lens is the right magic default: the beginner who doesn't know lens names still gets the answer, the expert narrows with --facts."
-        }
-      ]
+      "updated": "2026-07-02"
     },
     {
       "id": "c105migrate4",
@@ -7767,39 +7455,6 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "decisions": [
-        {
-          "id": "D-MIGRATE4",
-          "cardId": "c105migrate4",
-          "status": "open",
-          "title": "Should decode apply migration{} blocks to old stored data at runtime?",
-          "gist": "Old stored data currently fails to decode; should the compiler generate the code that upgrades it in place during decode?",
-          "story": "Betty (from D-MIGRATE3) ships schema v3 of UserRecord. Her nightly import reads three-year-old v1 JSON. Today that decode simply errors — the migration blocks she wrote only prove a migration EXISTS at compile time. She expected the old records to load and upgrade; decode_traced exists to tell her it happened, but nothing can happen yet.",
-          "inWild": "#PublishedSchema\nstruct UserRecord {\n    id: Int\n    display_name: String   // was `name` in v1\n    verified: Bool         // added v2, default false\n}\n\nmigration UserRecord v1 -> v2 { add verified: Bool = false }\nmigration UserRecord v2 -> v3 { change name: String -> display_name via { (old) => old } }\n\nfn import(raw: String) -> UserRecord ? {\n    // raw is v1 JSON: {\"id\":7,\"name\":\"Ada\"}\n    return json.decode<UserRecord>(raw)?   // today: DecodeError. expected: migrated value\n}",
-          "comparisons": "Rust serde: no built-in versioning; versioning crates bolt it on manually. Protobuf/Capn Proto: wire-level defaults + field ids make old data readable by construction. Swift Codable: manual init(from:) branching on version keys. Jet already ratified the authoring surface (migration verbs, D-MIGRATE2A-F); this decides only whether/how the runtime applies them.",
-          "options": [
-            {
-              "key": "A",
-              "name": "Generate the migration chain into decode (recommended)",
-              "detail": "Codegen lowers each migration{} block to a step function; decode of a @PublishedSchema type first tries the current shape, on mismatch walks stored version tags/shape detection oldest to current, applying steps. decode_traced records from+steps; plain decode applies silently. Zero cost for types without migrations (nothing generated).",
-              "code": "user :: json.decode<UserRecord>(raw)?          // v1 JSON now loads\nr :: json.decode_traced<UserRecord>(raw)?\n// r.migration.migrated == true, .from == \"v1\", .steps == [\"v1->v2\",\"v2->v3\"]"
-            },
-            {
-              "key": "B",
-              "name": "Explicit opt-in call: decode_migrating only",
-              "detail": "Plain decode keeps failing on old shapes; a third method decode_migrating<T> applies the chain. Callers must choose migration explicitly; surface grows to three decode verbs (I8 pressure).",
-              "code": "user :: json.decode_migrating<UserRecord>(raw)?   // applies chain\nold  :: json.decode<UserRecord>(raw)               // still errors on v1"
-            },
-            {
-              "key": "C",
-              "name": "Defer past Epoch 3 (status quo)",
-              "detail": "Keep compile-time-only checks; decode_traced stays always-false until a later epoch. Stored-data users must hand-write upgraders.",
-              "code": "// no change; v1 JSON keeps failing:\nuser :: json.decode<UserRecord>(raw) ?? panic(\"DecodeError\")"
-            }
-          ],
-          "rec": "A — the authoring surface (migration verbs) and the transparency surface (decode_traced) are both ratified and shipped; A is the semantics both were designed around, keeps one decode verb (I8), and costs nothing for unversioned types."
-        }
-      ],
       "log": [
         {
           "at": "2026-07-03",
@@ -18618,7 +18273,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03"
     },
     {
       "id": "D-PATCH1",
@@ -18678,7 +18335,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03"
     },
     {
       "id": "D-FIELDPOL1",
@@ -18738,7 +18397,9 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03"
     },
     {
       "id": "D-EFFTREE1",
@@ -18798,7 +18459,466 @@
         }
       ],
       "rec": "A",
-      "status": "open"
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03"
+    },
+    {
+      "id": "D-FLAGSHIP1",
+      "cardId": "c123",
+      "title": "",
+      "gist": "Which app is Jet's flagship CLI slice — the command-line program we ship, benchmark, and point people at.",
+      "explainer": "",
+      "story": "Hank, a sysadmin who lives in a terminal, hears Jet is 'great for CLI tools.' He wants proof: one real tool he can build from source, run on his own files, and time against what he already uses. Whatever we ship here is that proof — it gets compared, benchmarked, and quoted.",
+      "inWild": "// examples/apps/<cli>/main.jet — every candidate leans on this same surface\nfn main() {\n    args :: cli.parse(spec)?\n    for path in fs.walk(args.root) {\n        for line in File.open(path)?.lines() {\n            if pattern.matches(line) { print(\"{path}: {line}\") }\n        }\n    }\n}\n\n#Test fn matches_word_boundary() {\n    assert(pattern_for(\"fn \\\\w+\").matches(\"fn main() {\"))\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jetgrep — recursive regex search (recommended)",
+          "detail": "Grow the E2 GA jetgrep into a ripgrep-class searcher: globs, ignore rules, --count/--files/--context, colored TTY output, parallel directory scan. Invites the single highest-signal CLI benchmark that exists (vs grep/ripgrep) and exercises regex, fs walk, streaming stdin, args, color, exit codes.",
+          "code": "$ jetgrep \"fn \\\\w+_test\" src/ --count\nsrc/lexer.jet: 14\nsrc/parser.jet: 22\n\n$ time jetgrep TODO ~/big-repo   # the benchmark people will actually run\nreal 0m0.41s\n\n$ jetgrep \"(unclosed\" src/\nerror: invalid pattern: unclosed group\n  fix: escape the parenthesis: \\\\("
+        },
+        {
+          "key": "B",
+          "name": "jetstat — typed CSV/JSON data cruncher",
+          "detail": "Reads CSV with a header row into typed rows, filters, aggregates, emits JSON. Showcases serde derives, iterator adapters, and typed-pipeline safety — the 'awk but typed' pitch. Weaker on raw-speed comparison; stronger on type-safety story.",
+          "code": "$ jetstat sales.csv --filter \"amount > 100\" --group region --out json\n{\"west\": {\"count\": 1204, \"total\": 981223.50}, \"east\": ...}\n\n$ jetstat sales.csv --filter \"amont > 100\"\nerror: no column `amont` in sales.csv\n  fix: did you mean `amount`?"
+        },
+        {
+          "key": "C",
+          "name": "jetship — static site generator",
+          "detail": "Markdown tree in, HTML site out: templates, front-matter, live rebuild via jet dev. Credible (Hugo/Zola class), touches text/fs/templating, and its output can host Jet's own docs. Benchmarks less crisply than search; templating surface is a bigger bite.",
+          "code": "$ jetship build site/\n  42 pages -> public/ in 180ms\n$ jetship dev site/\n  serving http://localhost:8080  (rebuild on save)"
+        },
+        {
+          "key": "D",
+          "name": "jetwatch — parallel task runner / file watcher",
+          "detail": "make-meets-watchexec: declares tasks in a typed manifest, runs them in parallel on file change. Shows tasks/channels and process control in a tool devs run all day. Overlaps `jet dev` conceptually — risks a second way to mean 'watch and rerun' (I8 adjacency).",
+          "code": "$ jetwatch test lint\n[test] 132 passed  [lint] clean   (parallel, 2.1s)\n[watch] src/parser.jet changed -> rerunning test"
+        },
+        {
+          "key": "E",
+          "name": "jetdu — parallel disk-usage analyzer",
+          "detail": "ncdu-class: walks a tree in parallel, ranks by size, TUI summary table. Simple mental model, good parallel-fs and TUI-table showcase. Narrower feature spread than A-C (no regex/serde/templates).",
+          "code": "$ jetdu ~/Projects\n  3.2G  jet/target\n  1.1G  jet/.jet/store\n  212M  photos/raw\nscanned 148,201 files in 0.6s"
+        }
+      ],
+      "comparisons": "Rust's domain proof is ripgrep — one tool did more for Rust's CLI reputation than any doc. Go's is the gh/docker generation of CLIs. Zig points at its own build system. The pattern: one polished, benchmarkable tool per language.",
+      "rec": "A — the grep head-to-head is the strongest single proof a language is fast and pleasant for CLI work, and the heritage jetgrep already GA'd once, so the slice measures polish, not feasibility.",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — the grep head-to-head is the strongest single proof a language is fast and pleasant for CLI work, and the heritage jetgrep already GA'd once, so the slice measures polish, not feasibility.",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-FLAGSHIP2",
+      "cardId": "c123",
+      "title": "",
+      "gist": "Which service is Jet's flagship server slice — the HTTP program that proves the backend story.",
+      "explainer": "",
+      "story": "Doris runs a small team's internal tools on one VM. She'll adopt Jet for services the day she can read one real service — routes, database, logging, shutdown — deploy it as a single binary, and curl it. This slice is that service.",
+      "inWild": "// examples/apps/<server>/main.jet — the surface every candidate stresses\nfn main() {\n    db :: Db.open(\"data.sqlite\")?\n    server :: http.server(\":8080\")\n    server.route(\"POST\", \"/paste\", handle_create)\n    server.route(\"GET\", \"/health\", fn(_) { Json.ok(Health.{ ok: true }) })\n    Log.info(\"listening\", port: 8080)\n    server.serve()?\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jetpaste — pastebin with TTL expiry (recommended)",
+          "detail": "POST a paste, get a short id; GET raw or HTML; expiry via TTL sweep; /stats and /health. CRUD + persistence + time + concurrent clients is the minimum honest service, and every behavior goldens through curl. Exercises routes, SQLite, serde JSON, structured logs, per-request deadlines, graceful shutdown.",
+          "code": "$ jetpaste &\n$ curl -d \"hello world\" localhost:8080/paste\n{\"id\": \"k3xq\", \"expires\": \"2026-07-03T12:00:00Z\"}\n$ curl localhost:8080/p/k3xq\nhello world\n$ curl localhost:8080/p/gone4\n{\"error\": \"not found or expired\"}   # 404"
+        },
+        {
+          "key": "B",
+          "name": "jetlink — URL shortener with click stats",
+          "detail": "Shorten, redirect, count clicks, top-N stats endpoint. Same persistence/serde spread as A plus redirects; slightly thinner domain logic (fewer honest error paths than paste bodies + expiry).",
+          "code": "$ curl -d '{\"url\": \"https://jet.dev/docs\"}' localhost:8080/shorten\n{\"short\": \"http://localhost:8080/r/a7Kq\"}\n$ curl -i localhost:8080/r/a7Kq\nHTTP/1.1 302 Found\nLocation: https://jet.dev/docs"
+        },
+        {
+          "key": "C",
+          "name": "jetfeed — feed aggregator with background fetchers",
+          "detail": "Background tasks poll RSS/JSON feeds via the HTTP client; the server serves a merged digest. Uniquely shows client+server+taskgroup in one program. Depends on outside networks for real runs, so its golden path needs local fixture feeds.",
+          "code": "$ jetfeed --feeds feeds.toml &\n[fetch] lobste.rs ok (12 items)  [fetch] hn ok (30 items)\n$ curl localhost:8080/digest | head -3\n{\"items\": [{\"title\": \"Jet 1.0 released\", ...}"
+        },
+        {
+          "key": "D",
+          "name": "jetboard — kanban/task JSON API (pairs with the web slice)",
+          "detail": "Boards/cards CRUD API. If the web slice is jettasks (D-FLAGSHIP3=A), this becomes its persistence backend — the two slices then demo a full-stack Jet story. Cost: the two pillars' fates couple; a change in one ripples into the other's goldens.",
+          "code": "$ curl -d '{\"title\": \"ship slice\"}' localhost:8080/cards\n{\"id\": 1, \"title\": \"ship slice\", \"done\": false}\n$ curl -X PATCH -d '{\"done\": true}' localhost:8080/cards/1\n{\"id\": 1, \"done\": true}"
+        },
+        {
+          "key": "E",
+          "name": "jetrelay — webhook receiver and fan-out",
+          "detail": "Receives webhooks, verifies signatures (core.crypto), fans out to configured targets with retry. Ops-flavored and shows crypto + retry + concurrency; but its interesting behavior (retries, downstream failures) is the hardest to demo convincingly in a golden test.",
+          "code": "$ curl -d @push.json -H \"X-Sig: sha256=...\" localhost:8080/hook/github\n{\"accepted\": true, \"fanout\": 3}\n[relay] target ci.local ok  target chat.local ok  target log.local ok"
+        }
+      ],
+      "comparisons": "Go's proof was 'a static binary serving HTTP' (Docker, Caddy). Rust points at axum examples; TS at Express/Next starters. The convincing form is always a small, complete, deployable service — not a framework tour.",
+      "rec": "A — CRUD + persistence + expiry covers the widest honest surface (db, serde, time, routes, logs, shutdown) while every proof stays curl-observable and golden-testable.",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — CRUD + persistence + expiry covers the widest honest surface (db, serde, time, routes, logs, shutdown) while every proof stays curl-observable and golden-testable.",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-FLAGSHIP3",
+      "cardId": "c123",
+      "title": "",
+      "gist": "Which browser app is Jet's flagship web slice — the WASM/reactive-UI program people compare against React/Svelte.",
+      "explainer": "",
+      "story": "Betty writes React at work. She'll take Jet-on-the-web seriously the moment she can read one app she already knows by heart and see the Jet version is shorter, typed end-to-end, and has no npm folder. What app we pick decides whether that comparison is even possible.",
+      "inWild": "// examples/apps/<web>/main.jet — reactive surface every candidate uses\nfn task_row(t: Task) -> View {\n    row.{ children: [\n        checkbox.{ checked: t.done, on_toggle: fn() { toggle(t.id) } },\n        text.{ value: t.title, style: done_style(t.done) },\n    ] }\n}\n\n#Reactive fn remaining(tasks: List[Task]) -> Int {\n    tasks.filter(fn(t) { !t.done }).len()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jettasks — TodoMVC (recommended)",
+          "detail": "The TodoMVC spec, exactly: add/toggle/edit/delete, filters, clear-completed, count footer, keyboard interaction, persisted to browser storage. Instantly comparable to every framework a web dev knows; exercises signals, view tree, typed styles, components, a11y lint, and browser storage.",
+          "code": "$ jet dev app/main.jet --target=web\n  serving http://localhost:8080  (live reload)\n# browser: type \"write the plan\", Enter, click checkbox\n# footer flips: \"0 items left\" — no npm, no bundler, one .jet file tree"
+        },
+        {
+          "key": "B",
+          "name": "jetnotes — markdown editor with live preview",
+          "detail": "Split pane: textarea in, rendered markdown out, WASM-side parsing (grows the existing web_compute example). Shows compute-in-WASM strength; weaker on component/list/interaction breadth (one big text state, few components), so it stresses less of the UI stack.",
+          "code": "# browser: left pane\n## Flight notes\n- [x] fuel check\n# right pane re-renders on keystroke; parse runs in Jet/WASM, not JS"
+        },
+        {
+          "key": "C",
+          "name": "jetradar — live filterable flight-board dashboard",
+          "detail": "An aviation-themed departures board: a data table with reactive filters, sorting, and detail panel over a fixture dataset. On-brand and table/list-heavy; but no editing/creation flows, so forms, focus, and keyboard interaction go unproven.",
+          "code": "# browser: type \"SFO\" in the filter box\nJT214  SFO -> HND   boarding\nJT552  SFO -> JFK   delayed\n# 2 of 340 rows shown; sort by status reorders reactively"
+        },
+        {
+          "key": "D",
+          "name": "jetdeck — slide presenter from a text file",
+          "detail": "Text file in, keyboard-navigated slide deck in the browser; could present Jet itself. Charming and demo-friendly; but mostly static rendering with one keyboard axis — the thinnest reactive-state workout of the menu.",
+          "code": "$ jet run deck/main.jet --target=web talk.md\n# browser: arrow keys advance; slide 3 shows live-highlighted Jet code"
+        }
+      ],
+      "comparisons": "TodoMVC is the lingua franca of web frameworks — React, Vue, Svelte, Elm all prove themselves with it; readers diff implementations line-by-line. Swift shows Landmarks; Flutter shows counters and galleries. Only TodoMVC buys a cross-ecosystem comparison for free.",
+      "rec": "A — the whole value of the web slice is comparison, and TodoMVC is the only app the rest of the web world has already implemented for us to be compared against.",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — the whole value of the web slice is comparison, and TodoMVC is the only app the rest of the web world has already implemented for us to be compared against.",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-FLAGSHIP4",
+      "cardId": "c123",
+      "title": "",
+      "gist": "Which game is Jet's flagship game slice — the windowed core.raylib program that proves Jet is real for interactive graphics.",
+      "explainer": "",
+      "story": "Earl teaches a high-school programming club. Nothing recruits like a game: window opens, sprite moves, sound plays, kids lean in. The flagship game is the demo he shows first — and the one game programmers judge Jet's loop-and-latency story by.",
+      "inWild": "// examples/apps/<game>/main.jet — the loop every candidate runs (core.raylib, D-RAYLIB1=A)\nfn main() {\n    w :: Window.open(\"jetfighter\", 800, 600)?\n    game := Game.new(seed: 7)\n    while !w.should_close() {\n        game.step(input.poll(), dt: clock.tick())\n        w.draw(fn(d) { game.render(d) })\n    }\n}\n\n#Test fn collision_hits_on_overlap() {\n    assert(hit(Rect.{ x: 0, y: 0, w: 8, h: 8 }, Rect.{ x: 4, y: 4, w: 8, h: 8 }))\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jetfighter — asteroids-style 2D shooter (recommended)",
+          "detail": "Top-down ship, thrust + rotate, shoot asteroids that split, waves, sound, score, game over. On-brand name, covers the full bridge (sprites, rotation, audio, input, collision, spawning), and a seeded --replay mode makes it golden-testable headless.",
+          "code": "$ jet run game/main.jet\n# window opens: ship rotates with arrows, fires with space,\n# asteroid splits with a crack sound, score ticks to 250\n$ jet run game/main.jet -- --replay demo.moves --headless\nframes: 900  score: 1250  checksum: 8f31aa02   # committed golden"
+        },
+        {
+          "key": "B",
+          "name": "barnstormer — side-scrolling plane through obstacles",
+          "detail": "Flappy-class: a biplane threads pylons, one-button input, parallax scroll, high score. Aviation-perfect and instantly playable; smaller mechanical spread than A (no rotation math, one input axis, fewer entity kinds).",
+          "code": "$ jet run game/main.jet\n# plane dips on space, clips a pylon, prop-sputter sound, \"score 23\"\n$ jet run game/main.jet -- --replay run.moves --headless\nframes: 640  score: 23  checksum: 51c09be7"
+        },
+        {
+          "key": "C",
+          "name": "contrail — snake, native and windowed",
+          "detail": "Snake where the body is a jet's contrail. Great name, dead-simple rules, fixed-array grid state shows off [T#N]. The most modest visual/audio workout of the menu — grid steps, no rotation, minimal sound.",
+          "code": "$ jet run game/main.jet\n# contrail grows across the sky grid; eating a star chimes; wall = game over\n$ jet run game/main.jet -- --replay path.moves --headless\nframes: 412  length: 19  checksum: c2d4e011"
+        },
+        {
+          "key": "D",
+          "name": "jetbreak — breakout/arkanoid",
+          "detail": "Paddle, ball, brick grid, power-ups. Classic and physics-flavored (bounce angles, brick states); reads as the most generic of the menu — nothing about it says Jet.",
+          "code": "$ jet run game/main.jet\n# ball chips a two-hit brick, paddle catches a widen power-up, level clears\n$ jet run game/main.jet -- --replay rally.moves --headless\nframes: 1330  bricks: 0  checksum: 77ab120c"
+        },
+        {
+          "key": "E",
+          "name": "mach1 — top-down time-trial racer",
+          "detail": "A jet races checkpoint gates against the clock, drift steering, ghost replay of your best run. The ghost is a natural showcase for the deterministic replay machinery itself; steering feel is the make-or-break and is the hardest thing to get right in a demo.",
+          "code": "$ jet run game/main.jet\n# lap 1: 42.3s — a translucent ghost flies your previous line\n$ jet run game/main.jet -- --replay best.lap --headless\nframes: 2540  lap: 41.8s  checksum: 09fe3d44"
+        }
+      ],
+      "comparisons": "raylib's own example gallery is the genre's proving ground; Lua has Love2D demos, Zig and Odin both lead with raylib/Sokol games. An asteroids/breakout-class game is the recognized 'language can do games' unit.",
+      "rec": "A — widest bridge coverage (rotation, audio, collision, entity spawning) in a game that is on-brand, recognizable, and cleanly replay-testable.",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — widest bridge coverage (rotation, audio, collision, entity spawning) in a game that is on-brand, recognizable, and cleanly replay-testable.",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-STYLEUNIT1",
+      "cardId": "c2qj06uq",
+      "title": "Style length spelling: unit literals vs Length wrappers vs bare numbers",
+      "gist": "How a user writes a length like 320 pixels in a UI style.",
+      "explainer": "",
+      "story": "Betty is laying out the settings page of her recipe app: a card 320 wide, 180 tall, 12 of padding. She wants to type those three numbers once, have the compiler catch a unit typo, and not wonder later whether 320 meant pixels or something else.",
+      "inWild": "// Phase 3 shipped this shape — every length is three tokens of ceremony:\ngutter :: Length.{value: 12.0, unit: .Px}\n\nCARD :: Style.{\n    color:  Color.{r: 30, g: 60, b: 200},\n    width:  Length.{value: 320.0, unit: .Px},\n    height: Length.{value: 180.0, unit: .Px},\n}\n\nfn settings_card() -> View {\n    .Box.{children: [\n        .Text.{text: \"Servings\", style: CARD},\n    ]}\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unit-family literal: width: 320px (recommended)",
+          "detail": "core.ui.style declares a #UnitFamily(length) { px } (D-QUAL3), so the ratified unit-literal syntax (D-UNITLIT1) applies: 320px is a compile-checked Px value. One canonical unit mechanism in the whole language (I8) — style lengths use the same machinery as 500ms and 12.50usd. Unit typos are compile errors (E0134); if a second unit ever ships, cross-unit math is a compile error too (E0127). Reads like the CSS every beginner has already seen.",
+          "code": "// User types:\nCARD :: Style.{\n    width:   320px,\n    height:  180px,\n    padding: 12px,\n}\n\ngutter :: 12px\nwide   :: gutter * 2.0       // arithmetic stays in Px\n\n// Typo — caught at compile time:\nw :: 320p\n// error[E0134]: unknown unit suffix `p`\n//   what: no unit family in scope defines `p`\n//   fix:  did you mean `px`?\n\n// Dot-construction spelling also valid (D-UNITLIT1):\nh :: px.{180}"
+        },
+        {
+          "key": "B",
+          "name": "Enum with per-unit variants: width: .Px.{value: 320.0}",
+          "detail": "Length is an enum whose variants carry the value: Length { Px(value: Float) }. Fully typed and pattern-matchable, and the field type stays a single Length even if more units are added. But it duplicates what unit families already do with a second, style-only mechanism (I8), and every length costs a variant-construction spelling.",
+          "code": "enum Length {\n    Px(value: Float)\n}\n\nCARD :: Style.{\n    width:  .Px.{value: 320.0},\n    height: .Px.{value: 180.0},\n}\n\n// Backends match on the unit:\nfn to_device(len: Length, scale: Float) -> Float {\n    if len == {\n        .Px(value) -> { return value * scale }\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Flat pair record: width: Length.{value: 320.0, unit: .Px}",
+          "detail": "Length is a two-field struct (value + LengthUnit enum) — the shape Phase 3's example shipped. Plain user-space types, nothing new to learn beyond structs. But it's the most ceremony per length, the unit and value can be read independently without matching (a backend can use .value and forget .unit), and it's a second unit mechanism next to unit families (I8).",
+          "code": "enum LengthUnit { Px }\n\nstruct Length {\n    value: Float\n    unit: LengthUnit\n}\n\nCARD :: Style.{\n    width:  Length.{value: 320.0, unit: .Px},\n    height: Length.{value: 180.0, unit: .Px},\n}\n\n// Nothing stops a backend ignoring the unit:\nfn to_device(len: Length) -> Float {\n    return len.value   // compiles even if unit handling was forgotten\n}"
+        },
+        {
+          "key": "D",
+          "name": "Bare Float logical pixels: width: 320.0",
+          "detail": "No Length type at all — style dimensions are Float, pixels by convention, like SwiftUI/Flutter. Least typing and no unit concept for beginners to learn. But the unit lives in documentation instead of the type: 320.0 could be anything, a duration mixed into a width compiles fine, and adding real units later changes every Style field's type.",
+          "code": "CARD :: Style.{\n    width:   320.0,\n    height:  180.0,\n    padding: 12.0,\n}\n\n// Nothing catches this — both are just Float:\ndelay_ms :: 250.0\noops :: Style.{width: delay_ms, height: 180.0}   // compiles, renders a 250-wide box"
+        },
+        {
+          "key": "E",
+          "name": "CSS string: width: \"320px\"",
+          "detail": "Lengths are strings parsed at render time, exactly like inline CSS. Familiar to web developers and trivially copy-pasteable from CSS. But every typo becomes a runtime failure in the user's running app, the compiler can't help with math on lengths, and stringly-typed values are the opposite of the typed-styles goal this phase exists for.",
+          "code": "CARD :: Style.{\n    width:  \"320px\",\n    height: \"180px\",\n}\n\n// Typo compiles fine, fails when the view first paints:\nbad :: Style.{width: \"32Opx\", height: \"180px\"}\n// runtime: panic: can't parse length \"32Opx\"\n\n// No arithmetic:\n// \"320px\" * 2.0   // E: can't multiply String by Float"
+        }
+      ],
+      "comparisons": "CSS:            width: 320px;              — unit-suffix literal, the shape every web tutorial teaches\nJetpack Compose: Modifier.width(320.dp)     — typed Dp via extension property; 320 alone is a type error\nSwiftUI:        .frame(width: 320)         — unitless CGFloat points, unit is implicit convention\nFlutter:        SizedBox(width: 320)       — unitless logical pixels, same implicit convention\nReact inline:   {{ width: 320 }}           — bare number silently means px; {{ width: '320px' }} string also accepted\nTypst:          width: 320pt               — unit-suffix literal, checked at compile time",
+      "rec": "A — reuses the one ratified unit mechanism (D-QUAL3 + D-UNITLIT1), so `320px` is compile-checked with zero ceremony and no second style-only unit system (I8).",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — reuses the one ratified unit mechanism (D-QUAL3 + D-UNITLIT1), so `320px` is compile-checked with zero ceremony and no second style-only unit system (I8).",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-UIDEVSHELL1",
+      "cardId": "c2qj06uq",
+      "title": "Phase 8 native UI backends: how do GTK/AppKit/Win32 toolchain deps enter the dev environment?",
+      "gist": "Building a real native UI backend needs OS toolkit headers/libs the dev shell does not have; decide how they get there.",
+      "explainer": "",
+      "story": "Hank wants the reactive UI showcase to open a real Linux window instead of the web renderer. The compiler side (OS gating, renderer seam) is ready, but the flake devShell has no GTK headers or pkg-config, so nothing can link. Nothing an agent does can proceed until the dependency route is chosen.",
+      "inWild": "#Target(Os.Linux)\nimpl GtkBackend: JetBackend {\n    fn mount(root: Node) { /* #Extern gtk4 calls */ }\n}\n// jet build  ->  error: linking with cc failed: cannot find -lgtk-4",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "nixpkgs devShell deps now (recommended)",
+          "detail": "Add gtk4 + pkg-config (Linux) to the flake devShell per the existing owner guidance for native deps (nixpkgs stopgap, jetpack core provider owns it long-term). macOS/Windows backends wait for contributors on those hosts. Non-Nix users get a clear \"install gtk4\" message.",
+          "code": "# flake.nix devShell\nbuildInputs = [ gtk4 pkg-config ];\n\n# then Phase 8 builds:\nnix develop -c jet run ui_showcase.jet   # real window"
+        },
+        {
+          "key": "B",
+          "name": "Defer Phase 8 to Epoch 4",
+          "detail": "Ship Epoch 3 UI as web-renderer only; native backends land with the jetpack core provider that owns native deps properly.",
+          "code": "// e3: web target stays the only real renderer\njet build --target=web ui_showcase.jet"
+        },
+        {
+          "key": "C",
+          "name": "Headless native backend first",
+          "detail": "Build the native backend against a stub/offscreen renderer (no toolkit linkage) so the seam is exercised end-to-end; real toolkits follow later behind A or B.",
+          "code": "#Target(Os.Linux)\nimpl HeadlessBackend: JetBackend { /* draws to a buffer, asserts in tests */ }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (gtk4-rs)",
+          "note": "system gtk4 via pkg-config; user installs it (apt/brew/nix).",
+          "code": "# shell.nix\nbuildInputs = [ gtk4 pkg-config ];"
+        },
+        {
+          "lang": "Flutter",
+          "note": "bundles its own engine — zero system deps, huge binary.",
+          "code": "flutter build linux   # no gtk headers needed"
+        }
+      ],
+      "rec": "A — matches the ratified native-deps guidance (nixpkgs stopgap while jetpack matures); unblocks Phase 8 for the primary dev host without new invariant pressure.",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — matches the ratified native-deps guidance (nixpkgs stopgap while jetpack matures); unblocks Phase 8 for the primary dev host without new invariant pressure.",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-OSTARGET2",
+      "cardId": "c2qj06uq",
+      "title": "How does ungated code get \"the impl for this OS\"?",
+      "gist": "#Target(Os.*) now gates impls, but plain main has no ratified way to construct/dispatch to whichever gated impl survived the build.",
+      "explainer": "",
+      "story": "Doris writes a desktop app. She gates LinuxBackend and MacosBackend impls per D-OSTARGET1. Now her ungated main needs a backend value. Constructing LinuxBackend directly in main is (correctly) E-OSTARGET-UNMATCHED-CALL — main is not Linux-only. There is no blessed way to say \"give me the one that matched this build.\"",
+      "inWild": "#Target(Os.Linux)\nimpl LinuxBackend: JetBackend { ... }\n#Target(Os.Macos)\nimpl MacosBackend: JetBackend { ... }\n\nfn main() {\n    b :: ???            // needs: the surviving backend for this build\n    app.mount(b)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "fn-level #Target(Os.*) + one-survivor rule (recommended)",
+          "detail": "Extend gating to fns: several fns share one name/signature, each gated to a different OS, exactly one survives per build; ungated code calls it like any fn. Missing an OS the build targets = compile error listing covered OSes. Mirrors Rust cfg/Go build tags; no new expression syntax.",
+          "code": "#Target(Os.Linux)\nfn backend() -> JetBackend { return LinuxBackend.{} }\n#Target(Os.Macos)\nfn backend() -> JetBackend { return MacosBackend.{} }\n\nfn main() {\n    app.mount(backend())    // ungated, resolves to the survivor\n}"
+        },
+        {
+          "key": "B",
+          "name": "Comptime OS switch expression",
+          "detail": "A compiler-known comptime value (e.g. build.os) usable in a match whose non-matching arms are discarded before OS-gating checks run. More general (any per-OS choice), but new comptime surface + a second way to express what A does (I8 pressure).",
+          "code": "b :: match build.os {\n    .Linux -> LinuxBackend.{}\n    .Macos -> MacosBackend.{}\n}"
+        },
+        {
+          "key": "C",
+          "name": "Status quo — gated modules own the choice",
+          "detail": "Ungated code never touches gated types; each app ships a per-OS gated module exporting a common fn. Works today only if fn-level gating exists somewhere, which it does not — effectively forces apps to gate their whole main, hollowing the check.",
+          "code": "// every call chain from main must itself be OS-gated — main per OS."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "#[cfg(target_os)] fns — one survives per build.",
+          "code": "#[cfg(target_os = \"linux\")]\nfn backend() -> Box<dyn Backend> { Box::new(Gtk) }\n#[cfg(target_os = \"macos\")]\nfn backend() -> Box<dyn Backend> { Box::new(AppKit) }"
+        },
+        {
+          "lang": "Go",
+          "note": "build tags: one file per OS defines the same fn.",
+          "code": "//go:build linux\nfunc newBackend() Backend { return gtk{} }"
+        },
+        {
+          "lang": "Zig",
+          "note": "comptime switch on builtin.os.",
+          "code": "const b = switch (builtin.os.tag) { .linux => Gtk{}, .macos => AppKit{}, else => unreachable };"
+        }
+      ],
+      "rec": "A — smallest ratified-shape extension (same marker, fns instead of impls), proven pattern in Rust/Go, keeps one dispatch idiom (I8).",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — smallest ratified-shape extension (same marker, fns instead of impls), proven pattern in Rust/Go, keeps one dispatch idiom (I8).",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-EXPANDCLI1",
+      "cardId": "c0h4hnu",
+      "title": "",
+      "gist": "How you ask the compiler to show the facts it proved (inline decisions, resolved ref owners) — the command's exact shape and what it does with no lens named.",
+      "explainer": "",
+      "story": "Doris maintains a telemetry indexer. A teammate's PR adds `@InlineAlways` to a hot dot-product and a new `&Incident` field whose owner the compiler inferred. Before approving, Doris wants to SEE what the compiler decided — which calls actually inlined, which arena owns that field — without reading generated Rust. Three ratified decisions promised her `jet expand --facts`; this ballot fixes the command's final shape.",
+      "inWild": "// src/index.jet — the PR under review\n@InlineAlways\nfn Vec3.dot(self, rhs: Vec3) -> Float {\n    return self.x*rhs.x + self.y*rhs.y + self.z*rhs.z\n}\n\nstruct Owner {\n    name: String\n    primary: &Incident            // owner inferred (sole candidate)\n}\n\nstruct Index {\n    @Ref(pool) hot: &Incident     // two arenas in scope: labeled\n    @Ref(arena) cold: &Incident\n}\n// Doris wants: every inline decision, every field's resolved owner.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet expand --facts <lens>; bare expand shows everything (recommended)",
+          "detail": "Exactly the surface the three ratified decisions name. `--facts <lens>` narrows to one lens; bare `jet expand <file>` runs every lens, grouped — the magic default is 'show me all of it'. `--json` (existing global flag) emits the stable semindex-schema document. Unknown lens lists the valid ones.",
+          "code": "$ jet expand src/index.jet\ninline — call-site decisions (2 facts)\n  src/render.jet:41:15  Vec3.dot  inlined (@InlineAlways)\n  src/hot.jet:88:9      Vec3.dot  inlined (@InlineAlways)\n\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  src/index.jet:12:5  Index.hot      owner: pool       (labeled @Ref(pool))\n  src/index.jet:13:5  Index.cold     owner: arena      (labeled @Ref(arena))\n\n$ jet expand --facts refs src/index.jet\nrefs — resolved owners (3 facts)\n  ...\n\n$ jet expand --facts spam src/index.jet\nerror: no lens named `spam`\n Fix: pick one — inline (call-site inline decisions), refs (resolved ref/view owners)"
+        },
+        {
+          "key": "B",
+          "name": "jet expand --facts <lens>; bare expand is a lens directory, name reserved",
+          "detail": "Same ratified `--facts <lens>` spelling, but bare `jet expand <file>` prints the lens menu and exits nonzero instead of dumping everything. Keeps the bare name free for Epoch-4 derive/macro expansion audit (D-METHODMACRO1 routed DSL power there), so `jet expand` can later mean 'show generated code' without a meaning change breaking scripts.",
+          "code": "$ jet expand src/index.jet\nerror: `jet expand` needs a lens\n What: available lenses —\n   inline  call-site inline decisions\n   refs    resolved ref/view owners\n Fix: jet expand --facts refs src/index.jet\n\n$ jet expand --facts inline src/index.jet\ninline — call-site decisions (2 facts)\n  src/render.jet:41:15  Vec3.dot  inlined (@InlineAlways)\n  src/hot.jet:88:9      Vec3.dot  inlined (@InlineAlways)"
+        },
+        {
+          "key": "C",
+          "name": "positional lens: jet expand <lens> <file>",
+          "detail": "Drop the flag; the lens is the first word, like `jet schema status`. Reads faster and matches subcommand-verb muscle memory. REQUIRES AMENDING the transparency wording of D-METHODMACRO1, D-REF-SHORTHAND1, and D-DYNARRAY1, which all ratified the literal spelling `jet expand --facts <lens>`.",
+          "code": "$ jet expand refs src/index.jet\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ...\n\n$ jet expand src/index.jet        // lens word missing\nerror: `jet expand` needs a lens: inline | refs\n Fix: jet expand refs src/index.jet"
+        },
+        {
+          "key": "D",
+          "name": "dedicated subcommand: jet facts <lens> <file>",
+          "detail": "The command is about facts, so name it that; `expand` stays unclaimed until Epoch-4 code expansion actually exists. Clean noun, discoverable in `jet help`. REQUIRES AMENDING the three ratified decisions' `jet expand --facts` wording.",
+          "code": "$ jet facts refs src/index.jet\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ...\n\n$ jet facts src/index.jet          // no lens: run them all\ninline — call-site decisions (2 facts)\n  ...\nrefs — resolved owners (3 facts)\n  ..."
+        },
+        {
+          "key": "E",
+          "name": "fold into semindex: jet semindex <file> --facts <lens>",
+          "detail": "The facts already live in the semantic index (D-SEMINDEX1); expose the lens there instead of minting a command. One tool for 'ask the index'. Costs beginners the discoverable verb — `semindex` is tooling vocabulary, not a word Doris would guess. REQUIRES AMENDING the three ratified decisions' wording.",
+          "code": "$ jet semindex src/index.jet --facts refs\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ...\n\n$ jet semindex src/index.jet       // unchanged: index summary\nsemantic index (schema v2)\n  definitions: 14\n  ..."
+        },
+        {
+          "key": "F",
+          "name": "check-mode flag: jet check <file> --facts <lens>",
+          "detail": "Facts fall out of checking, so hang them on `jet check` — one compile, diagnostics plus facts in a single run, nothing new in `jet help`'s top level. Muddles check's contract (exit status = did it compile) with a reporting surface, and buries the transparency story the ballots sold as its own command. REQUIRES AMENDING the three ratified decisions' wording.",
+          "code": "$ jet check src/index.jet --facts refs\nok: src/index.jet checks clean\n\nrefs — resolved owners (3 facts)\n  src/index.jet:8:5   Owner.primary  owner: incidents  (inferred — sole candidate)\n  ..."
+        }
+      ],
+      "comparisons": "Rust: `cargo expand` (nightly, macro output only) and `rustc --emit=mir` — dumps of transformed code, not curated facts; inlining is invisible. C: `gcc -E` preprocessed soup. Jai: metaprogram message loop can print build facts, but there's no standard lens command. Swift: `-emit-sil` expert dump. Nobody ships a beginner-readable 'what did the compiler decide' surface; Jet's is per-fact lines with file:line, plus `--json` for tools.",
+      "rec": "A — the only shape that honors all three ratified decisions verbatim (no amendment churn), and bare `jet expand` showing every lens is the right magic default: the beginner who doesn't know lens names still gets the answer, the expert narrows with --facts.",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — the only shape that honors all three ratified decisions verbatim (no amendment churn), and bare `jet expand` showing every lens is the right magic default: the beginner who doesn't know lens names still gets the answer, the expert narrows with --facts.",
+      "outcome": null,
+      "ratifiedAt": null
+    },
+    {
+      "id": "D-MIGRATE4",
+      "cardId": "c105migrate4",
+      "title": "Should decode apply migration{} blocks to old stored data at runtime?",
+      "gist": "Old stored data currently fails to decode; should the compiler generate the code that upgrades it in place during decode?",
+      "explainer": "",
+      "story": "Betty (from D-MIGRATE3) ships schema v3 of UserRecord. Her nightly import reads three-year-old v1 JSON. Today that decode simply errors — the migration blocks she wrote only prove a migration EXISTS at compile time. She expected the old records to load and upgrade; decode_traced exists to tell her it happened, but nothing can happen yet.",
+      "inWild": "#PublishedSchema\nstruct UserRecord {\n    id: Int\n    display_name: String   // was `name` in v1\n    verified: Bool         // added v2, default false\n}\n\nmigration UserRecord v1 -> v2 { add verified: Bool = false }\nmigration UserRecord v2 -> v3 { change name: String -> display_name via { (old) => old } }\n\nfn import(raw: String) -> UserRecord ? {\n    // raw is v1 JSON: {\"id\":7,\"name\":\"Ada\"}\n    return json.decode<UserRecord>(raw)?   // today: DecodeError. expected: migrated value\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Generate the migration chain into decode (recommended)",
+          "detail": "Codegen lowers each migration{} block to a step function; decode of a @PublishedSchema type first tries the current shape, on mismatch walks stored version tags/shape detection oldest to current, applying steps. decode_traced records from+steps; plain decode applies silently. Zero cost for types without migrations (nothing generated).",
+          "code": "user :: json.decode<UserRecord>(raw)?          // v1 JSON now loads\nr :: json.decode_traced<UserRecord>(raw)?\n// r.migration.migrated == true, .from == \"v1\", .steps == [\"v1->v2\",\"v2->v3\"]"
+        },
+        {
+          "key": "B",
+          "name": "Explicit opt-in call: decode_migrating only",
+          "detail": "Plain decode keeps failing on old shapes; a third method decode_migrating<T> applies the chain. Callers must choose migration explicitly; surface grows to three decode verbs (I8 pressure).",
+          "code": "user :: json.decode_migrating<UserRecord>(raw)?   // applies chain\nold  :: json.decode<UserRecord>(raw)               // still errors on v1"
+        },
+        {
+          "key": "C",
+          "name": "Defer past Epoch 3 (status quo)",
+          "detail": "Keep compile-time-only checks; decode_traced stays always-false until a later epoch. Stored-data users must hand-write upgraders.",
+          "code": "// no change; v1 JSON keeps failing:\nuser :: json.decode<UserRecord>(raw) ?? panic(\"DecodeError\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "serde has no built-in versioning; versioning crates bolt it on manually.",
+          "code": "#[derive(Deserialize)]\nstruct UserRecord { /* one shape only; old JSON = error */ }"
+        },
+        {
+          "lang": "Protobuf",
+          "note": "wire-level field ids + defaults make old data readable by construction.",
+          "code": "message UserRecord { int64 id = 1; string display_name = 2; bool verified = 3; }"
+        },
+        {
+          "lang": "Swift",
+          "note": "Codable: manual init(from:) branching on version keys.",
+          "code": "init(from d: Decoder) throws { /* if v1 { … } else { … } */ }"
+        }
+      ],
+      "rec": "A — the authoring surface (migration verbs) and the transparency surface (decode_traced) are both ratified and shipped; A is the semantics both were designed around, keeps one decode verb (I8), and costs nothing for unversioned types.",
+      "status": "open",
+      "group": "",
+      "bestCurrent": "",
+      "recommendation": "A — the authoring surface (migration verbs) and the transparency surface (decode_traced) are both ratified and shipped; A is the semantics both were designed around, keeps one decode verb (I8), and costs nothing for unversioned types.",
+      "outcome": null,
+      "ratifiedAt": null
     }
   ],
   "binder": [
