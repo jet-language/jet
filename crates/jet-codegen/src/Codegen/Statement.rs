@@ -59,7 +59,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         if is_json || is_key {
             v.to_string()
         } else {
-            mangle(v)
+            mangle_variant(v)
         }
     };
     match pattern {
@@ -68,6 +68,25 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         } => {
             // Check if any slot is a Range (needs a guard — handled in emit_pattern_match_switch).
             if bindings.is_empty() {
+                // D-TAG1: a group name matches its whole subtree — expand to an
+                // or-pattern over its leaves, payloads wildcarded.
+                if !is_json && !is_key {
+                    let leaves = group_leaves(cx, etype, variant);
+                    if !leaves.is_empty() {
+                        return leaves
+                            .iter()
+                            .map(|(n, p)| {
+                                let head = format!("{}::{}", prefix, vname(n));
+                                match p {
+                                    VariantPayload::Unit => head,
+                                    VariantPayload::Single(..) => format!("{head}(_)"),
+                                    VariantPayload::Named(_) => format!("{head} {{ .. }}"),
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" | ");
+                    }
+                }
                 format!("{}::{}", prefix, vname(variant))
             } else {
                 // Build per-slot Rust binding: Bind(n) → mangle(n), Wildcard → `_`, Range → temp name.
@@ -196,6 +215,23 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
             let prefix = enum_type_prefix(cx, variant);
             let rv = variant_rust_name(variant);
             if bindings.is_empty() {
+                // D-TAG1: a group name matches its whole subtree.
+                let owner = cx.variant_owner.get(variant).map(String::as_str);
+                let leaves = group_leaves(cx, owner, variant);
+                if !leaves.is_empty() {
+                    return leaves
+                        .iter()
+                        .map(|(n, p)| {
+                            let head = format!("{}::{}", prefix, variant_rust_name(n));
+                            match p {
+                                VariantPayload::Unit => head,
+                                VariantPayload::Single(..) => format!("{head}(_)"),
+                                VariantPayload::Named(_) => format!("{head} {{ .. }}"),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                }
                 format!("{}::{}", prefix, rv)
             } else {
                 let slot_pats: Vec<String> = bindings
@@ -269,4 +305,25 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
         arg_calls.join(", "),
         cx.rust_type(ft)
     )
+}
+
+/// D-TAG1: the ordered leaves under a group path of `enum_type`, with payloads.
+/// Empty when `variant` isn't a group (or the enum is unknown) — callers fall
+/// back to the plain single-variant pattern.
+pub(crate) fn group_leaves<'c>(
+    cx: &'c Cx,
+    enum_type: Option<&str>,
+    variant: &str,
+) -> Vec<(&'c String, &'c VariantPayload)> {
+    let Some(et) = enum_type else {
+        return Vec::new();
+    };
+    let Some(vars) = cx.enum_variants.get(et) else {
+        return Vec::new();
+    };
+    let prefix = format!("{variant}.");
+    vars.iter()
+        .filter(|(n, _)| n.starts_with(&prefix))
+        .map(|(n, p)| (n, p))
+        .collect()
 }

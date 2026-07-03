@@ -1,15 +1,25 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    /// U3 (unified-ecosystem §4): `module name { contributions… }`. Many
-    /// modules may share a file; a leading-`_` name disables one. The body is a
-    /// list of typed namespace contributions (`env.dev: Env { … }`).
+    /// U3 (unified-ecosystem §4): `module name { … }`. Many modules may share
+    /// a file; a leading-`_` name disables one.
+    ///
+    /// D-JPK-MODBODY1=A (ratified 2026-07-02): the canonical role-module form
+    /// puts the namespace in the declaration name — `module env.dev { fields }`,
+    /// `module system.laptop { … }` — with the role's fields bare in the body.
+    /// The old contribution form (`module dev { env.dev: Env.{ … } }`) still
+    /// parses for recovery but teaches E1229; it is not a legal stable spelling.
     pub(super) fn module_decl(&mut self) -> Result<ModuleDecl, Diagnostic> {
         let start = self.bump().span; // `module`
                                       // S84: module names may be kebab-case (a module is the package the
                                       // payload manifest discovers by name).
         let (name, name_span) = self.expect_dashed_name("for the module name")?;
         let disabled = name.starts_with('_');
+        // D-JPK-MODBODY1=A: a dot after the name means a role declaration —
+        // the name is a reserved namespace, the segment after the dot the role.
+        if matches!(self.peek().kind, TokKind::Dot) {
+            return self.role_module_decl(start, &name, name_span, disabled);
+        }
         self.expect(TokKind::LBrace, "to open the module body")?;
         let mut sources = Vec::new();
         let mut imports = Vec::new();
@@ -57,6 +67,145 @@ impl<'a> Parser<'a> {
             imports,
             members,
             contributions,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    /// D-JPK-MODBODY1=A: the canonical role-module declaration —
+    /// `module env.dev { fields }` / `module system.laptop { … }` /
+    /// `module image.installer-iso { … }`. The namespace lives in the
+    /// declaration name; the body carries the role's fields bare (plus the U8
+    /// reserved `sources:`/`imports:` siblings). Desugars to the same
+    /// `Contribution` IR the merge engine already evaluates, so one module
+    /// declares exactly one role.
+    fn role_module_decl(
+        &mut self,
+        start: Span,
+        ns_name: &str,
+        ns_span: Span,
+        disabled: bool,
+    ) -> Result<ModuleDecl, Diagnostic> {
+        // A leading `_` disables the module (U3) — strip it for the namespace
+        // word: `module _env.dev { … }`.
+        let ns_word = ns_name.trim_start_matches('_');
+        let namespace = match ns_word {
+            _ if ns_word == Syntax::NS_ENV => Namespace::Env,
+            _ if ns_word == Syntax::NS_SYSTEM => Namespace::System,
+            _ if ns_word == Syntax::NS_IMAGE => Namespace::Image,
+            _ => {
+                return Err(Diagnostic::error(
+                    "E0960",
+                    format!("`{}` is not a module namespace", ns_word),
+                    format!(
+                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), or `{}` (a disk image)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE
+                    ),
+                    format!(
+                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE
+                    ),
+                    Some(ns_span),
+                ));
+            }
+        };
+        self.bump(); // `.`
+        // S84: role names may be kebab-case (`system.my-host`).
+        let (path, path_span) = self.expect_dashed_name("for the role name")?;
+        self.expect(TokKind::LBrace, "to open the module body")?;
+
+        let mut sources = Vec::new();
+        let mut imports = Vec::new();
+        // Env bodies collect bare `field: expr` pairs into an inferred record
+        // (U18); system/image bodies reuse their dedicated field parsers.
+        let mut env_fields: Vec<(String, Span, Expr)> = Vec::new();
+        let mut system_fields: Vec<crate::AST::SystemField> = Vec::new();
+        let mut image_fields: Vec<crate::AST::ImageField> = Vec::new();
+        let body_start = self.peek().span.start;
+
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            match &self.peek().kind {
+                TokKind::Ident(n)
+                    if n == Syntax::MODULE_FIELD_SOURCES
+                        && matches!(self.peek2().kind, TokKind::Colon) =>
+                {
+                    sources.extend(self.module_sources()?);
+                }
+                TokKind::Ident(n)
+                    if n == Syntax::MODULE_FIELD_IMPORTS
+                        && matches!(self.peek2().kind, TokKind::Colon) =>
+                {
+                    imports.push(self.module_import()?);
+                }
+                _ => match namespace {
+                    Namespace::Env => {
+                        let (field, field_span) = self.expect_ident("for a field name")?;
+                        self.expect(TokKind::Colon, "after a field name")?;
+                        let value = self.expr()?;
+                        env_fields.push((field, field_span, value));
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        }
+                    }
+                    Namespace::System => {
+                        system_fields.push(self.system_field()?);
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        }
+                    }
+                    Namespace::Image => {
+                        image_fields.push(self.image_field()?);
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        }
+                    }
+                },
+            }
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RBrace, "to close the module body")?;
+        let body_span = Span::new(body_start, end);
+
+        let value = match namespace {
+            Namespace::Env => crate::AST::ContribValue::Expr(Expr::StructLit {
+                type_name: String::new(),
+                type_args: Vec::new(),
+                import_ns: None,
+                as_trait: None,
+                fields: env_fields,
+                inferred: true,
+                span: body_span,
+            }),
+            Namespace::System => crate::AST::ContribValue::System(crate::AST::SystemLit {
+                explicit_type: None,
+                fields: system_fields,
+                span: body_span,
+            }),
+            Namespace::Image => crate::AST::ContribValue::Image(crate::AST::ImageLit {
+                explicit_type: None,
+                fields: image_fields,
+                span: body_span,
+            }),
+        };
+        let contribution = Contribution {
+            namespace,
+            path: path.clone(),
+            path_span,
+            value,
+            span: Span::new(ns_span.start, end),
+        };
+        Ok(ModuleDecl {
+            // The declaration name is the full dotted role — `env.dev`.
+            name: format!("{ns_name}.{path}"),
+            name_span: Span::new(ns_span.start, path_span.end),
+            disabled,
+            sources,
+            imports,
+            members: Vec::new(),
+            contributions: vec![contribution],
             span: Span::new(start.start, end),
         })
     }

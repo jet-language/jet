@@ -604,6 +604,31 @@ fn assert_fmt_keeps(src: &str, needles: &[&str], label: &str) {
 }
 
 #[test]
+fn fmt_nested_enum_groups_stability() {
+    let src = "\
+enum Damage {
+    Physical { Blunt, Pierce }
+    Fire { Burn, Scald }
+    Cold
+}
+
+fn run() {
+    d: Damage := Damage.Fire.Burn
+    if d == {
+        .Physical -> { print(\"physical\") }
+        .Fire -> { print(\"fire\") }
+        .Cold -> { print(\"cold\") }
+    }
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["Physical {", "Blunt", "Pierce", ".Fire ->", "Fire {"],
+        "nested enum variant groups (D-TAG1)",
+    );
+}
+
+#[test]
 fn fmt_keeps_codable_and_field_rename_and_turbofish() {
     // The exact c-fmt regression: `@Codable` (contract plane) / `#[Rename("…")]`
     // (directive/serde plane, D-MARKERMOVE1=B), and a method-call turbofish

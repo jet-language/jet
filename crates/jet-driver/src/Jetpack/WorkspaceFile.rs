@@ -7,7 +7,7 @@
 //!   - Any comptime expression that evaluates to a `[String]`
 //!
 //! The result is a `WorkspacePlan` listing the member packages with their
-//! names (read from each member's `pack.jet`) and relative paths.
+//! names (read from each member's `pkg.jet`) and relative paths.
 //!
 //! This replaces the `[packages]` table in `jetpack.toml` (D-WORKSPACE1=B
 //! clean break: when `workspace.jet` is present, it is the sole index).
@@ -38,7 +38,7 @@ pub struct WorkspacePlan {
 /// One workspace member package.
 #[derive(Debug, Clone)]
 pub struct WorkspaceMember {
-    /// Package name read from the member's `pack.jet` (or derived from path).
+    /// Package name read from the member's `pkg.jet` (or derived from path).
     pub name: String,
     /// Path to the package directory, relative to the workspace root.
     pub path: String,
@@ -48,13 +48,83 @@ pub struct WorkspaceMember {
 // Load / evaluate
 // ──────────────────────────────────────────────
 
-/// Load and evaluate `workspace.jet` from `dir`. Returns `None` when the file
-/// is absent (not an error — a plain project has no workspace). Returns
-/// `Err(diagnostic)` when the file exists but is malformed.
+/// Load and evaluate the workspace index from `dir`. Returns `None` when no
+/// file declares one (not an error — a plain project has no workspace).
+/// Returns `Err(diagnostic)` when a declaring file exists but is malformed.
+///
+/// D-JPK-FILENAME2=B (A2): `workspace.jet` is a convention, not a reserved
+/// name — `module workspace { … }` is discovered by declaration and may live
+/// in `pkg.jet` or any top-level `.jet` file. `workspace.jet` is checked
+/// first (the canonical home, cheap fast path); otherwise every top-level
+/// `.jet` file (including `pkg.jet` — the one reserved filename) is scanned
+/// for the declaration. Two files both declaring `module workspace` is E1239.
 pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
     let path = dir.join(Syntax::WORKSPACE_FILE);
-    let src = std::fs::read_to_string(&path).ok()?;
-    Some(evaluate(&src, dir))
+    if let Ok(src) = std::fs::read_to_string(&path) {
+        return Some(evaluate(&src, dir));
+    }
+    // Discovery-by-declaration over the other top-level `.jet` files.
+    let mut declaring: Vec<(PathBuf, String)> = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(dir).ok()?.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let p = entry.path();
+        if p.extension().and_then(|x| x.to_str()) != Some(Syntax::FILE_EXT) {
+            continue;
+        }
+        let Ok(src) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        if declares_workspace_module(&src) {
+            declaring.push((p, src));
+        }
+    }
+    match declaring.len() {
+        0 => None,
+        1 => {
+            let (_, src) = declaring.remove(0);
+            Some(evaluate(&src, dir))
+        }
+        _ => Some(Err(e1239_ambiguous_workspace(
+            &declaring.iter().map(|(p, _)| p.as_path()).collect::<Vec<_>>(),
+        ))),
+    }
+}
+
+/// Cheap text-level probe: does `src` declare a top-level, enabled
+/// `module workspace { … }`? Full parse/eval happens only on the one match.
+fn declares_workspace_module(src: &str) -> bool {
+    let (toks, _lex_diags) = crate::Lexer::lex(src);
+    let Ok(program) = crate::Parser::parse(&toks) else {
+        return false;
+    };
+    program.items.iter().any(|item| {
+        matches!(item, Item::Module(m) if m.name == Syntax::NS_WORKSPACE && !m.disabled)
+    })
+}
+
+/// E1239: two or more files declare `module workspace` — the index must be
+/// unambiguous.
+fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
+    let list = paths
+        .iter()
+        .map(|p| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.display().to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("`, `");
+    Diagnostic::error(
+        "E1239",
+        format!("`module workspace` is declared in more than one file: `{list}`"),
+        "the workspace index is discovered by declaration, so exactly one file may declare \
+         `module workspace { … }`"
+            .to_string(),
+        "keep one declaration (conventionally in `workspace.jet`) and delete the others"
+            .to_string(),
+        None,
+    )
 }
 
 /// Evaluate a `workspace.jet` source string to a `WorkspacePlan`.
@@ -239,8 +309,8 @@ fn find_package_dirs(
 // Member resolution
 // ──────────────────────────────────────────────
 
-/// Resolve a member package: read its `pack.jet` (or `pkg.jet`) to get the
-/// package name. Falls back to the directory basename when no manifest exists.
+/// Resolve a member package: read its `pkg.jet` to get the package name.
+/// Falls back to the directory basename when no manifest exists.
 fn resolve_member(rel_path: &str, base_dir: &Path) -> WorkspaceMember {
     let abs = base_dir.join(rel_path);
     let name = read_package_name(&abs)
@@ -256,8 +326,8 @@ fn resolve_member(rel_path: &str, base_dir: &Path) -> WorkspaceMember {
     }
 }
 
-/// Try to read the package name from a `pack.jet` or `pkg.jet` in `dir`.
-/// Uses the simple text-level package name parser — no full evaluation needed.
+/// Try to read the package name from a `pkg.jet` in `dir`. Uses the simple
+/// text-level package name parser — no full evaluation needed.
 fn read_package_name(dir: &Path) -> Option<String> {
     let manifest_path = if dir.join(Syntax::PAYLOAD_FILE).is_file() {
         dir.join(Syntax::PAYLOAD_FILE)
@@ -392,9 +462,9 @@ mod tests {
     }
 
     #[test]
-    fn find_discovers_pack_jet_directories() {
+    fn find_discovers_pkg_jet_directories() {
         let tmp = tempdir("workspace-find");
-        // packages/hello/pack.jet
+        // packages/hello/pkg.jet
         let hello = tmp.join("packages/hello");
         std::fs::create_dir_all(&hello).unwrap();
         std::fs::write(hello.join(Syntax::PAYLOAD_FILE), "name: \"hello\"\n").unwrap();
@@ -402,7 +472,7 @@ mod tests {
         let ranker = tmp.join("packages/ranker");
         std::fs::create_dir_all(&ranker).unwrap();
         std::fs::write(ranker.join(Syntax::PAYLOAD_FILE), "name: \"ranker\"\n").unwrap();
-        // packages/lib (no pack.jet — should be ignored)
+        // packages/lib (no pkg.jet — should be ignored)
         let lib = tmp.join("packages/lib");
         std::fs::create_dir_all(lib).unwrap();
 
@@ -455,5 +525,71 @@ mod tests {
         let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
         assert!(names.contains(&"hello"));
         assert!(names.contains(&"ranker"));
+    }
+
+    // D-JPK-FILENAME2=B (A2): `module workspace` is discovered by declaration
+    // in any top-level `.jet` file — only `pkg.jet` is a reserved filename.
+
+    #[test]
+    fn workspace_module_discovered_in_arbitrary_filename() {
+        let dir = tempdir("ws-arbitrary");
+        std::fs::write(
+            dir.join("repo-index.jet"),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
+        let plan = load(&dir)
+            .expect("declaration should be discovered")
+            .expect("should evaluate clean");
+        assert!(plan.members.is_empty());
+    }
+
+    #[test]
+    fn workspace_module_discovered_in_pkg_jet() {
+        let dir = tempdir("ws-in-pkg");
+        std::fs::write(
+            dir.join(Syntax::PAYLOAD_FILE),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
+        let plan = load(&dir)
+            .expect("pkg.jet declaration should be discovered")
+            .expect("should evaluate clean");
+        assert!(plan.members.is_empty());
+    }
+
+    #[test]
+    fn workspace_jet_wins_over_discovered_files() {
+        let dir = tempdir("ws-canonical-wins");
+        let packages = dir.join("packages/hello");
+        std::fs::create_dir_all(&packages).unwrap();
+        std::fs::write(packages.join(Syntax::PAYLOAD_FILE), "name: \"hello\"\n").unwrap();
+        std::fs::write(
+            dir.join(Syntax::WORKSPACE_FILE),
+            "module workspace { members: find(\"./packages\") }\n",
+        )
+        .unwrap();
+        // A second declaration elsewhere is shadowed by the canonical file,
+        // never scanned — no E1239.
+        std::fs::write(dir.join("other.jet"), "module workspace { members: [] }\n").unwrap();
+        let plan = load(&dir).unwrap().unwrap();
+        assert_eq!(plan.members.len(), 1);
+    }
+
+    #[test]
+    fn two_discovered_workspace_declarations_are_e1239() {
+        let dir = tempdir("ws-ambiguous");
+        std::fs::write(dir.join("a.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(dir.join("b.jet"), "module workspace { members: [] }\n").unwrap();
+        let d = load(&dir).expect("should be Some").expect_err("ambiguous");
+        assert_eq!(d.code, "E1239");
+        assert!(d.what.contains("a.jet") && d.what.contains("b.jet"));
+    }
+
+    #[test]
+    fn no_workspace_anywhere_is_none() {
+        let dir = tempdir("ws-none");
+        std::fs::write(dir.join("env.jet"), "module env.dev { }\n").unwrap();
+        assert!(load(&dir).is_none());
     }
 }

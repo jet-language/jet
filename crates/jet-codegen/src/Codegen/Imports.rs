@@ -26,6 +26,9 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
                 {
                     cx.comparable.insert(s.name.clone());
                 }
+                if !cx.hashable.contains(&s.name) && type_is_hashable_struct(s, &cx.hashable) {
+                    cx.hashable.insert(s.name.clone());
+                }
             }
             Item::Enum(e) => {
                 if !cx.cloneable.contains(&e.name) && type_is_cloneable_enum(e, &cx.type_names) {
@@ -33,6 +36,9 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
                 }
                 if !cx.comparable.contains(&e.name) && type_is_comparable_enum(e, &cx.type_names) {
                     cx.comparable.insert(e.name.clone());
+                }
+                if !cx.hashable.contains(&e.name) && type_is_hashable_enum(e, &cx.hashable) {
+                    cx.hashable.insert(e.name.clone());
                 }
             }
             _ => {}

@@ -233,9 +233,13 @@ before continuing.
 | E0327 | sema  | a redundant `..` on a destructure that already names every field (D-DESTRUCT1) |
 | E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
 | E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
+| E0331 | parse | a payload on a variant group name (D-TAG1) |
+| E0332 | sema  | a group name used as a value (D-TAG1) |
 | E0333 | parse | a chained comparison changes direction (`a < b > c`) (D-CHAINCMP1) |
 | E0334 | sema  | a trailing `{ }` block argument's slot isn't a zero-parameter function (D-TRAILBLOCK1) |
 | E0335 | parse | a second trailing block, or a trailing block on a non-call (D-TRAILBLOCK1) |
+| E0336 | sema  | `@[Patchable]` on a generic struct (D-PATCH1) |
+| E0337 | sema  | `@[Patchable]` struct has a stored-reference or function-typed field (D-PATCH1) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
@@ -486,6 +490,11 @@ before continuing.
 | E1220 | jet   | a transitive dependency uses an effect outside the `pkg.jet` `effects:` budget (D-EFFBUDGET1) |
 | E1221 | jet   | a malformed `effects:`/`grants:` block in `pkg.jet` (D-EFFBUDGET1) |
 | E1225 | jet   | `jetpack.toml` uses the retired `[packages]` monorepo index (D-WORKSPACE1) |
+| E1226 | jet   | a retired manifest filename (`pack.jet`/`payload.jet`/`jet.toml`) found where `pkg.jet` belongs (D-JPK-FILENAME2) |
+| E1227 | jet   | `jet` and the `jetpack`/`jetos` engine binary disagree on protocol version (D-JPK-DISPATCH1) |
+| E1228 | jet   | an engine verb needs an engine binary (`jetpack`/`jetos`) that isn't installed (D-JPK-DISPATCH1) |
+| E1229 | jet   | a role-module contribution uses the retired `module name { ns.path: Type.{ } }` form (D-JPK-MODBODY1) |
+| E1239 | jet   | `module workspace` declared in more than one file (discovery-by-declaration, D-JPK-FILENAME2) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
@@ -1212,6 +1221,11 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1214 | `jetpack.toml` line {n} is not a valid assignment or table header. | Every line in `jetpack.toml` must be `key = "value"` (inside a table), a `[table]` header, or a blank/comment line. Anything else can't be interpreted. | Fix the line so it is either `[table]`, `key = "value"`, or a blank or `#`-comment line. |
 | E1215 | `jetpack.toml` {kind} `{name}` is not recognized. | `jetpack.toml` only accepts the tables `[repo]` and `[sources]`, and the keys listed for each. An unknown name is usually a typo. | Did you mean `{suggestion}`? Check the allowed names for this table. |
 | E1225 | `jetpack.toml` `[packages]` is retired. | Monorepo member indexes now live in `workspace.jet` so package sets use Jet's module grammar instead of a second manifest shape. | Move the member list to `workspace.jet`: `module workspace { members: find("./packages") }`. |
+| E1226 | `{name}` is not the package manifest name — Jet reads `pkg.jet`. | The manifest filename is frozen to one spelling (D-JPK-FILES/D-JPK-FILENAME2) so tooling, docs, and every worked example never have to guess which file to read. `pack.jet`, `payload.jet`, and `jet.toml` are retired names from earlier manifest reshapes. | Rename `{name}` to `pkg.jet`. |
+| E1227 | `jet` {jet_version} and `{engine}` {engine_version} disagree. | `jet` and its engine binaries (`jetpack`, `jetos`) ship as one toolchain and must match exactly — a version-skewed engine may not understand what `jet` sends it. `jet` checks this with an `--engine-protocol` handshake before running any engine verb. | Use matching `jet`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release. |
+| E1228 | `{verb}` needs the `{engine}` engine, which isn't installed. | `{verb}` is an engine verb — `jet` execs `{engine}` for it (D-JPK-DISPATCH1) rather than linking package-manager/OS logic into the compiler binary. | Install the matching Jet toolchain; the `{engine}` binary ships alongside `jet`. |
+| E1229 | Role namespace `{ns}` belongs in the module declaration name. | `module {name} { {ns}.{role}: {Type}.{ … } }` splits the role across two places; the canonical form puts it once, in the declaration name, so discovery-by-declaration (`module env.dev`) reads the role straight off the name (D-JPK-MODBODY1). | Write `module {ns}.{role} { … }` and move the contribution's fields up to the module body. |
+| E1239 | `module workspace` is declared in more than one file: `{list}`. | The workspace index is discovered by declaration (D-JPK-FILENAME2), so exactly one file may declare `module workspace { … }`. | Keep one declaration (conventionally in `workspace.jet`) and delete the others. |
 
 ## Machine-readable diagnostics (`--json`)
 

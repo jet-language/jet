@@ -193,7 +193,7 @@ fn run() {
 fn mut_self_method_requires_var_receiver() {
     expect_error(
         r#"
-struct Bag {
+struct Crate {
     n: Int
 
     fn poke(~self) {
@@ -203,7 +203,7 @@ struct Bag {
 }
 
 fn run() {
-    b :: Bag.{ n: 1 }
+    b :: Crate.{ n: 1 }
     b.poke()
 }
 "#,
@@ -287,7 +287,7 @@ fn run() {
 #[test]
 fn statement_can_start_with_self() {
     let src = r#"
-struct Bag {
+struct Crate {
     items: List<Int>
 
     fn add(~self, n: Int) {
@@ -296,7 +296,7 @@ struct Bag {
 }
 
 fn run() {
-    b := Bag.{ items: [0] }
+    b := Crate.{ items: [0] }
     b.add(5)
     print(b.items.len())
 }
@@ -308,7 +308,7 @@ fn run() {
 fn builtin_mutator_on_read_self_is_error() {
     expect_error(
         r#"
-struct Bag {
+struct Crate {
     items: List<Int>
 
     fn add(self, n: Int) {

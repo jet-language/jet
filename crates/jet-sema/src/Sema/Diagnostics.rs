@@ -352,9 +352,27 @@ pub(crate) fn missing_pattern_coverage(
     match subject_ty {
         Type::Named(name) => {
             let order = registry.enum_variant_order(name)?;
+            // D-TAG1: exhaustiveness is checked at the group level — a leaf is
+            // covered when the leaf itself OR any ancestor group is covered.
+            let leaf_covered = |leaf: &str| {
+                if covered.contains(leaf) {
+                    return true;
+                }
+                let mut prefix = String::new();
+                for (i, seg) in leaf.split('.').enumerate() {
+                    if i > 0 {
+                        if covered.contains(&prefix) {
+                            return true;
+                        }
+                        prefix.push('.');
+                    }
+                    prefix.push_str(seg);
+                }
+                false
+            };
             let missing: Vec<_> = order
                 .iter()
-                .filter(|v| !covered.contains(*v))
+                .filter(|v| !leaf_covered(v))
                 .cloned()
                 .collect();
             if missing.is_empty() {

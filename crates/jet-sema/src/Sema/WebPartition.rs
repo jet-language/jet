@@ -107,6 +107,7 @@ fn clone_enum(e: &crate::AST::EnumDef) -> EnumDef {
         must_use_span: e.must_use_span,
         serde_markers: e.serde_markers.clone(),
         type_markers: e.type_markers.clone(),
+        groups: e.groups.clone(),
     }
 }
 

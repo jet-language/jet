@@ -760,6 +760,8 @@ pub(crate) fn check_bundle_opts(
         // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
         // against each marker's declared vocabulary (E0614/E0615/E0616/E0617/E0618).
         diags.extend(super::ScopeMembers::check(&module.items));
+        // D-PATCH1: synthetic `T.Patch` before struct registration.
+        inject_patchable_types(&mut module.items, &mut diags);
         let st = &mut states[idx];
         for item in &module.items {
             match item {
@@ -1061,6 +1063,7 @@ pub(crate) fn check_bundle_opts(
         // so the synthesised Func nodes appear in the type registry.
         synthesize_impls(&mut module.items);
         register_type_methods(&module.items, &mut st.registry, &mut diags);
+        register_patchable_methods(&module.items, &mut st.registry);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
         // D-TXN-ROLLBACK layer 2: ensure Rollback is known before user impl blocks.
         st.trait_reg.register_synthetic_rollback();

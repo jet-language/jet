@@ -1,9 +1,14 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, ConstAttr, ConstDef, EnumDef, ExternFn, ExternRustBlock, Field, Func,
-    ImplDef, ImportDecl, ImportKind, Item, Marker, Param, StructDef, StructLayout, TraitImplBlock,
-    TypeParam, Variant, VariantPayload,
+    AccessConvention, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn, ExternRustBlock, Field,
+    Func, ImplDef, ImportDecl, ImportKind, Item, Marker, Param, StructDef, StructLayout,
+    TraitImplBlock, TypeParam, Variant, VariantPayload,
 };
+
+enum EnumFmtEntry<'b> {
+    Leaf(&'b Variant),
+    Group(&'b EnumGroup),
+}
 
 impl<'a> Fmt<'a> {
     pub(super) fn fmt_item(&mut self, item: &Item) {
@@ -672,11 +677,15 @@ impl<'a> Fmt<'a> {
         self.newline();
         let body_derives = Self::body_derive_lines(&e.derives, &e.type_markers);
         self.with_indent(|f| {
-            for (i, v) in e.variants.iter().enumerate() {
-                if i > 0 {
-                    f.newline();
+            if e.groups.is_empty() {
+                for (i, v) in e.variants.iter().enumerate() {
+                    if i > 0 {
+                        f.newline();
+                    }
+                    f.fmt_variant(v);
                 }
-                f.fmt_variant(v);
+            } else {
+                f.fmt_enum_grouped(e);
             }
             for (i, trait_name) in body_derives.iter().enumerate() {
                 if i > 0 || !e.variants.is_empty() {
@@ -707,6 +716,52 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_variant(&mut self, v: &Variant) {
+        self.fmt_variant_name_and_payload(v, &v.name);
+    }
+
+    /// D-TAG1: emit grouped enum bodies from flat leaves + `groups` metadata.
+    fn fmt_enum_grouped(&mut self, e: &EnumDef) {
+        let entries = Self::enum_entries_at_prefix(e, "");
+        for (i, entry) in entries.iter().enumerate() {
+            if i > 0 {
+                self.newline();
+            }
+            match entry {
+                EnumFmtEntry::Leaf(v) => self.fmt_variant(v),
+                EnumFmtEntry::Group(g) => self.fmt_enum_group(e, g),
+            }
+        }
+    }
+
+    fn fmt_enum_group(&mut self, e: &EnumDef, g: &EnumGroup) {
+        let short = g
+            .path
+            .rsplit('.')
+            .next()
+            .unwrap_or(g.path.as_str());
+        self.write(short);
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| {
+            let prefix = format!("{}.", g.path);
+            let entries = Self::enum_entries_at_prefix(e, &prefix);
+            for (i, entry) in entries.iter().enumerate() {
+                if i > 0 {
+                    f.newline();
+                }
+                match entry {
+                    EnumFmtEntry::Leaf(v) => {
+                        let leaf = v.name.strip_prefix(&prefix).unwrap_or(&v.name);
+                        f.fmt_variant_name_and_payload(v, leaf);
+                    }
+                    EnumFmtEntry::Group(sub) => f.fmt_enum_group(e, sub),
+                }
+            }
+        });
+        self.end_block();
+    }
+
+    fn fmt_variant_name_and_payload(&mut self, v: &Variant, name: &str) {
         // D-SERDE5: per-variant `#[Rename("x")]` markers sit inline before the name.
         if !v.serde_markers.is_empty() {
             self.write("#[");
@@ -718,7 +773,7 @@ impl<'a> Fmt<'a> {
             }
             self.write("] ");
         }
-        self.write(&v.name);
+        self.write(name);
         match &v.payload {
             VariantPayload::Unit => {}
             VariantPayload::Single(ty, _) => {
@@ -739,6 +794,36 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
         }
+    }
+
+    fn enum_entries_at_prefix<'b>(e: &'b EnumDef, prefix: &str) -> Vec<EnumFmtEntry<'b>> {
+        let mut items: Vec<(usize, EnumFmtEntry<'b>)> = Vec::new();
+        for g in &e.groups {
+            if !Self::is_direct_child_path(&g.path, prefix) {
+                continue;
+            }
+            let idx = e
+                .variants
+                .iter()
+                .position(|v| v.name.starts_with(&format!("{}.", g.path)))
+                .unwrap_or(usize::MAX);
+            items.push((idx, EnumFmtEntry::Group(g)));
+        }
+        for (i, v) in e.variants.iter().enumerate() {
+            if Self::is_direct_child_path(&v.name, prefix) {
+                items.push((i, EnumFmtEntry::Leaf(v)));
+            }
+        }
+        items.sort_by_key(|(idx, _)| *idx);
+        items.into_iter().map(|(_, entry)| entry).collect()
+    }
+
+    fn is_direct_child_path(path: &str, prefix: &str) -> bool {
+        if !path.starts_with(prefix) {
+            return false;
+        }
+        let rest = path.strip_prefix(prefix).unwrap_or(path);
+        !rest.contains('.')
     }
 
     fn fmt_impl(&mut self, i: &ImplDef) {

@@ -1,0 +1,30 @@
+enum Damage {
+    Physical { Blunt, Pierce }
+    Fire { Burn, Scald }
+    Cold
+}
+
+fn run() {
+    d: Damage := Damage.Fire.Burn
+    if d == {
+        .Physical -> {
+            print("physical")
+        }
+        .Fire -> {
+            print("fire")
+        }
+        .Cold -> {
+            print("cold")
+        }
+    }
+    if d == .Fire {
+        print("ancestor: fire")
+    }
+
+    active: Bag<Damage> := Bag.new()
+    active.add(Damage.Fire.Burn)
+    active.add(Damage.Fire.Burn)
+    active.remove(Damage.Fire.Burn)
+    print("burn count: {active.count(Damage.Fire.Burn)}")
+    print("has burn: {active.has(Damage.Fire.Burn)}")
+}

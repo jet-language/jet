@@ -50,10 +50,10 @@ pub(crate) fn run_schema(args: &[String]) {
 /// Locate the project root (dir containing `pkg.jet`) or exit with a clear error.
 fn project_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet schema` inside a project");
-        exit(ExitCodes::USER_ERROR);
-    })
+    crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet schema` inside a project",
+    )
 }
 
 /// `jet schema status` — list every snapshotted `@PublishedSchema` type.

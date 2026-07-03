@@ -365,10 +365,10 @@ parameter *is*, not the name; mirrors how other type annotations work.
 
 Is the package-type manifest syntax `package api = stable` / `package api = explicit`,
 or a different form (e.g., an `#[api(stable)]` attribute, or an `api:` field in
-pack.jet)?
+pkg.jet)?
 
 ```jet
-// Proposed form in pack.jet or at package declaration:
+// Proposed form in pkg.jet or at package declaration:
 package api = stable
 
 // Alternative: attribute
@@ -376,7 +376,7 @@ package api = stable
 package MyLib
 ```
 
-Recommendation: manifest field in pack.jet (`api: stable`), consistent with how
+Recommendation: manifest field in pkg.jet (`api: stable`), consistent with how
 `PackageKind` is already declared.
 
 ---

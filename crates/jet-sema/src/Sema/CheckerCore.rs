@@ -241,7 +241,7 @@ impl<'a> Checker<'a> {
                     name.as_str(),
                     "Task" | "Channel" | "Sender" | "Ptr"
                         // D-COLLBREADTH1=A: Set<T> and Deque<T>.
-                        | "Set" | "Deque"
+                        | "Set" | "Bag" | "Deque"
                         | "BigInt" | "Decimal"
                         // D-REACT1=B: reactive handle types.
                         | "Signal" | "Derived"
@@ -2538,7 +2538,14 @@ impl<'a> Checker<'a> {
                         Vec::new()
                     };
                     for variant in covered_names {
-                        if covered.contains(&variant) {
+                        // D-TAG1: an earlier group arm already covers every leaf in
+                        // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
+                        // unreachable (ancestor-or-equal test on the dotted path).
+                        let already = covered.contains(&variant)
+                            || covered
+                                .iter()
+                                .any(|c| variant.starts_with(&format!("{c}.")));
+                        if already {
                             self.diags.push(Diagnostic::lint(
                                 "L0301",
                                 format!(

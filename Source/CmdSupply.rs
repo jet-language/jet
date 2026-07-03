@@ -46,10 +46,10 @@ fn git_dirty_files(root: &std::path::Path) -> Option<Vec<String>> {
 /// this command validates and reports — what you'd get before pushing to git.
 pub(crate) fn run_publish(force: bool, mode: OutputMode) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet publish` inside a project");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet publish` inside a project",
+    );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
@@ -284,10 +284,10 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
 /// against the project root).
 pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet vendor` inside a project");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet vendor` inside a project",
+    );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
@@ -365,10 +365,10 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
 /// `jet audit [--advisory-db <path>]` — check the lockfile against an advisory DB.
 pub(crate) fn run_audit(db_path: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet audit` inside a project");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet audit` inside a project",
+    );
 
     let lock = match jet::Lock::load(&root) {
         Some(l) => l,
@@ -445,10 +445,10 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
 /// `jet sbom [--cyclonedx]` — emit a software bill of materials from the lockfile.
 pub(crate) fn run_sbom(cyclonedx: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet sbom` inside a project");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet sbom` inside a project",
+    );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
@@ -508,10 +508,10 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     }
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet yank` inside a project");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet yank` inside a project",
+    );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {

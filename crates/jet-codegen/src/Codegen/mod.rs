@@ -459,6 +459,15 @@ pub(crate) fn mangle(name: &str) -> String {
     format!("user_{}", name)
 }
 
+/// D-TAG1: Rust identifier for an enum variant. A grouped leaf's Jet name is a
+/// dotted path (`Fire.Burn`); Rust variant names can't dot, so segments join
+/// with `__` (`user_Fire__Burn`). Flat variants mangle exactly as before.
+/// Sema rejects two paths that would flatten identically (E0105), so this is
+/// injective over a checked program.
+pub(crate) fn mangle_variant(name: &str) -> String {
+    format!("user_{}", name.replace('.', "__"))
+}
+
 /// Rust identifier for a Jet user type (`Payment.Client` → `user_Payment__Client`).
 pub(crate) fn user_type_rust(name: &str) -> String {
     format!("user_{}", name.replace('.', "__"))

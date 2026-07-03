@@ -608,6 +608,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E0852", // D-GENMOD2=A: type argument bound check — staged (MVP skips bound checking)
         "E0853", // D-GENMOD2=A: value argument type mismatch — staged (MVP skips value params)
         "E0855", // D-GENMOD2=A: circular alias — staged (MVP has no cycle detection)
+        "E1229", // D-JPK-MODBODY1: retired role-module body form — parse recovery only, not stable
     ];
 
     let expected: BTreeSet<String> = EXPECTED_SPEC_AHEAD_OF_IMPL

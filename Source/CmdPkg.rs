@@ -11,11 +11,10 @@ use crate::flag_value;
 
 pub(crate) fn run_add(raw_args: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet add` inside a project");
-        eprintln!(" fix: run `jet new <name>` to create a project first");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet add` inside a project\n fix: run `jet new <name>` to create a project first",
+    );
 
     // Parse: jet add <dep-name> --path <dir> | --git <url> [--tag <t>|--branch <b>|--rev <r>]
     let non_flag: Vec<&String> = raw_args.iter().filter(|a| !a.starts_with("--")).collect();
@@ -84,10 +83,7 @@ pub(crate) fn run_add(raw_args: &[String]) {
 
 pub(crate) fn run_remove(dep_name: &str) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(&cwd, "error: no `pkg.jet` found");
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
@@ -107,19 +103,16 @@ pub(crate) fn run_remove(dep_name: &str) {
 
 pub(crate) fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found — run `jet fetch` inside a project");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(
+        &cwd,
+        "error: no `pkg.jet` found — run `jet fetch` inside a project",
+    );
     do_fetch(&root, locked);
 }
 
 pub(crate) fn run_update(dep: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pkg.jet` found");
-        exit(ExitCodes::USER_ERROR);
-    });
+    let root = crate::require_manifest_root(&cwd, "error: no `pkg.jet` found");
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {

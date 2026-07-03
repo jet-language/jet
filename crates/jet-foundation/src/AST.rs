@@ -1575,10 +1575,29 @@ pub struct EnumDef {
     /// user wrote before the `enum`, verbatim and in source order. See
     /// `StructDef::type_markers`. Empty when none.
     pub type_markers: Vec<Marker>,
+    /// D-TAG1 (ratified 2026-07-03): variant groups, in declaration order. A
+    /// variant may enclose sub-variants in `{ }`; the parser FLATTENS leaves
+    /// into `variants` (dotted paths, e.g. `Fire.Burn`) and records each group
+    /// path here so sema knows the subtree structure and the formatter can
+    /// reconstruct the nesting. Empty for a flat enum.
+    pub groups: Vec<EnumGroup>,
+}
+
+/// D-TAG1: one variant group (`Physical { Blunt, Pierce }`). `path` is the full
+/// dotted path from the enum root (`Physical`, or `Net.Http` when nested);
+/// `name_span` covers the group's own name segment.
+#[derive(Debug, Clone)]
+pub struct EnumGroup {
+    pub path: String,
+    pub name_span: Span,
 }
 
 #[derive(Debug)]
 pub struct Variant {
+    /// The variant's full dotted path from the enum root. A flat variant is a
+    /// bare name (`Cold`); a leaf inside D-TAG1 groups is dotted (`Fire.Burn`).
+    /// A value is always a leaf — group paths never appear here (they live in
+    /// `EnumDef::groups`).
     pub name: String,
     pub name_span: Span,
     pub payload: VariantPayload,

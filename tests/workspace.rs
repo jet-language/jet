@@ -217,3 +217,26 @@ fn find_discovers_packages_with_pkg_jet() {
 
     std::fs::remove_dir_all(&tmp).ok();
 }
+
+// ──────────────────────────────────────────────
+// E1239 — duplicate `module workspace` declarations (D-JPK-FILENAME2)
+// ──────────────────────────────────────────────
+
+#[test]
+fn e1239_two_discovered_workspace_declarations() {
+    use jet::Jetpack::WorkspaceFile;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("ws-e1239-{nanos}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.jet"), "module workspace { members: [] }\n").unwrap();
+    std::fs::write(dir.join("b.jet"), "module workspace { members: [] }\n").unwrap();
+    let d = WorkspaceFile::load(&dir)
+        .expect("workspace files present")
+        .expect_err("duplicate workspace declarations");
+    assert_eq!(d.code, "E1239");
+    assert!(d.what.contains("a.jet") && d.what.contains("b.jet"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

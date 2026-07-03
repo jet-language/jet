@@ -96,7 +96,7 @@ accepted.
 
 ### Stage 5 — migration from `jetpack.toml` monorepo index
 - The `[packages]`/monorepo role of `jetpack.toml` moves entirely to `workspace.jet`. Since `[packages]` is currently parsed-but-unconsumed (`CLI.rs:113-139` ignores it), removing the index role is low-risk.
-- Add a teaching diagnostic E1225: a project carries a `jetpack.toml` `[packages]` table — point to `workspace.jet` and show the equivalent `members:`. Keep `[repo]`/`[sources]` handling per their own decisions (sources are also moving per the env.jet consolidation — coordinate with the pack.jet/env.jet sequencing memo; do not double-home `sources:`).
+- Add a teaching diagnostic E1225: a project carries a `jetpack.toml` `[packages]` table — point to `workspace.jet` and show the equivalent `members:`. Keep `[repo]`/`[sources]` handling per their own decisions (sources are also moving per the env.jet consolidation — coordinate with the pkg.jet/env.jet sequencing memo; do not double-home `sources:`).
 - Update `examples/jetpack-mono/` to the new surface.
 
 ### Stage 6 — diagnostics, example, golden, tests, docs
@@ -111,7 +111,7 @@ accepted.
 2. **Soft path — ship the restricted common case early.** `members: find("./packages")` needs only the existing U4 `find()` directive + Stages 2-4, no comptime block. If the gate slips, Stages 1-5 can land for the `find()`-only common case and accept arbitrary-comptime members once the block lands. (Do not advertise this as the final surface; it is the same syntax with a narrower evaluator.)
 3. **Keyword/filename is resolved.** D-WORKSPACE2=A chose `module workspace`
    and `workspace.jet`.
-4. **Coordinate with the env.jet/sources consolidation** (pack.jet→env.jet memo): D-WORKSPACE1 ends the `sources:` double-home; do not implement a second sources home in `workspace.jet`. Sequence after the sources move settles.
+4. **Coordinate with the env.jet/sources consolidation** (pkg.jet→env.jet memo): D-WORKSPACE1 ends the `sources:` double-home; do not implement a second sources home in `workspace.jet`. Sequence after the sources move settles.
 5. Stages 1→2→3→4 are strictly ordered (index feeds addressing feeds sparse fetch feeds lock). Stage 5 migration and Stage 6 docs/tests close out.
 
 ## Remaining Owner-Q

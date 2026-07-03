@@ -667,8 +667,21 @@ impl<'a> Parser<'a> {
             TokKind::Dot if matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase())) =>
             {
                 let dot_start = self.bump().span.start; // consume `.`
-                let (variant, variant_span) =
+                let (mut variant, mut variant_span) =
                     self.expect_ident("after `.` in a leading-dot enum variant")?;
+                // D-TAG1: a dotted leaf path (`.Fire.Burn`) — further uppercase
+                // segments extend the variant path. `.{` never matches (its second
+                // token is `{`, not an ident), so named-payload construction below
+                // still sees its `.` intact.
+                while matches!(self.peek().kind, TokKind::Dot)
+                    && matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase()))
+                {
+                    self.bump(); // consume `.`
+                    let (seg, seg_span) =
+                        self.expect_ident("after `.` in a leading-dot enum variant")?;
+                    variant = format!("{variant}.{seg}");
+                    variant_span = seg_span;
+                }
                 // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val, … }` — named-payload
                 // construction reuses the struct dot-brace spelling (one leading-dot
                 // rule for every inferred construction, structs and enums alike).
@@ -2160,8 +2173,18 @@ impl<'a> Parser<'a> {
                 ) =>
             {
                 let dot_span = self.bump().span; // consume `.`
-                let (variant, variant_span) =
+                let (mut variant, mut variant_span) =
                     self.expect_ident("after `.` in a variant pattern")?;
+                // D-TAG1: a dotted path in pattern position — `.Fire.Burn` names a
+                // leaf, `.Fire` alone names a group (matches its whole subtree).
+                while matches!(self.peek().kind, TokKind::Dot)
+                    && matches!(&self.peek2().kind, TokKind::Ident(n) if n.chars().next().map_or(false, |c| c.is_uppercase()))
+                {
+                    self.bump(); // consume `.`
+                    let (seg, seg_span) = self.expect_ident("after `.` in a variant pattern")?;
+                    variant = format!("{variant}.{seg}");
+                    variant_span = seg_span;
+                }
                 let span_start = dot_span.start;
                 let (bindings, end) = if matches!(self.peek().kind, TokKind::LParen) {
                     self.bump(); // consume `(`

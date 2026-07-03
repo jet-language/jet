@@ -1599,7 +1599,41 @@ pub(crate) fn lower_forin_collection(
 ///  - `value(b)`/`ok(b)`/`err(b)` → `IfLet` with the Rust pattern from
 ///    `emit_if_let_pattern`, the binding's type resolved off the subject's lowered
 ///    `Option`/`Result` (mirroring `add_pattern_bindings`);
+///  - binding-free user enum variant/group tests (`d == .Fire`) → `Matches`;
 ///  - anything else → `Plain`.
+fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &Cx) -> bool {
+    match pattern {
+        Pattern::Variant { variant, bindings, .. } => {
+            bindings.is_empty()
+                && !is_json_variant(variant)
+                && !is_key_variant(variant)
+                && cx.variant_owner.contains_key(variant)
+        }
+        _ => false,
+    }
+}
+
+fn lower_binding_free_variant_pattern_test(
+    subject: &Expr,
+    pattern: &Pattern,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let subj = lower_expr(subject, cx, env);
+    let enum_type = match pattern {
+        Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).map(String::as_str),
+        _ => None,
+    };
+    let pat_str = emit_match_pattern(cx, pattern, enum_type);
+    TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::PatternMatches {
+            subj: Box::new(subj),
+            pat_str,
+        },
+    }
+}
+
 pub(crate) fn lower_if_cond(
     cond: &Expr,
     cx: &Cx,
@@ -1741,6 +1775,17 @@ pub(crate) fn lower_if_cond(
                 Some((name, place, ty)),
                 Vec::new(),
             );
+        }
+    }
+    if let Expr::PatternTest { subject, pattern, .. } = cond {
+        if is_binding_free_user_variant_pattern_test(pattern, cx) {
+            let subj = lower_expr(subject, cx, env);
+            let enum_type = match pattern {
+                Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).map(String::as_str),
+                _ => None,
+            };
+            let pat_str = emit_match_pattern(cx, pattern, enum_type);
+            return (TIfCond::Matches { pat_str, subj }, None, Vec::new());
         }
     }
     (TIfCond::Plain(lower_expr(cond, cx, env)), None, Vec::new())
@@ -2596,7 +2641,7 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
         Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
         None => format!("user_{}", type_name),
     };
-    format!("{}::{}", type_prefix, mangle(variant))
+    format!("{}::{}", type_prefix, mangle_variant(variant))
 }
 
 /// c109 Phase 16: the single-payload type of `(type_name, edge)`, mirroring the AST
@@ -3734,6 +3779,51 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .join(", ")
                 )
             };
+            // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
+            // wrap provided scalars in `Some(…)`.
+            if type_name.ends_with(".Patch")
+                && cx.patchable
+                    .iter()
+                    .any(|b| format!("{b}.Patch") == *type_name)
+            {
+                let provided: std::collections::HashMap<_, _> = fields
+                    .iter()
+                    .map(|(n, _, fe)| (n.as_str(), fe))
+                    .collect();
+                let all = cx
+                    .struct_fields
+                    .get(type_name)
+                    .cloned()
+                    .unwrap_or_default();
+                let tfields = all
+                    .iter()
+                    .map(|(fname, fty)| {
+                        let m = mangle(fname);
+                        let te = if let Some(fe) = provided.get(fname.as_str()) {
+                            let inner = lower_struct_lit_field(type_name, fname, fe, cx, env);
+                            TExpr {
+                                ty: fty.clone(),
+                                kind: TExprKind::Present(Box::new(inner)),
+                            }
+                        } else {
+                            TExpr {
+                                ty: fty.clone(),
+                                kind: TExprKind::Absent,
+                            }
+                        };
+                        (m, te, false)
+                    })
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type,
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             // c109: a self-referential field (`child: Tree?` on `Tree`) has Rust type
             // `Box<…>` (`cx.boxed_edges`); resolve the `boxed` flag here (a total fact)
             // so emit can wrap the value in `Box::new(…)`, exactly as `emit_struct_lit`.
@@ -4426,6 +4516,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Paren(inner, _) => lower_expr(inner, cx, env),
+        Expr::PatternTest { subject, pattern, .. }
+            if is_binding_free_user_variant_pattern_test(pattern, cx) =>
+        {
+            lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
+        }
         _ => unreachable!("expression not in TIR subset"),
     }
 }
@@ -5914,6 +6009,26 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        // D-TAG1: `Bag.new()` → empty HashMap with elem type from sema.
+        if type_name == "Bag" && method == "new" && args.is_empty() {
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
+                _ => Type::Int,
+            };
+            let elem_rust = cx.rust_type(&elem_ty);
+            let bag_ty = Type::Apply {
+                name: "Bag".to_string(),
+                args: vec![elem_ty],
+            };
+            return TExpr {
+                ty: bag_ty,
+                kind: TExprKind::StaticCall {
+                    type_prefix: format!("std::collections::HashMap::<{}, usize>", elem_rust),
+                    method_rust: "new".to_string(),
+                    args: vec![],
+                },
+            };
+        }
         // D-HOLE1: `Option.lift2(f, a, b)` → apply `f` to both payloads only when
         // both are present. `a`/`b` lower plainly as values; `R` comes from sema's
         // `resolved_ret` (the arg-dependent return type, same mechanism the
@@ -6481,12 +6596,15 @@ pub(crate) fn resolve_builtin_op(
     let is_string = matches!(rty, Some(Type::String));
     let is_map = matches!(rty, Some(Type::Map { .. }));
     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
+    let is_bag = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Bag");
     // D-HOLE1: `.zip` on `T?` (vs. `[T].zip`).
     let is_option = matches!(rty, Some(Type::Option(_)));
     Some(match (method, args.len()) {
         ("len", 0) => {
             if is_string {
                 TBuiltinOp::LenString
+            } else if is_bag {
+                TBuiltinOp::BagLen
             } else {
                 TBuiltinOp::LenList
             }
@@ -6504,6 +6622,8 @@ pub(crate) fn resolve_builtin_op(
         ("remove", 1) => {
             if is_set {
                 TBuiltinOp::SetRemove
+            } else if is_bag {
+                TBuiltinOp::BagRemove
             } else if is_map {
                 TBuiltinOp::RemoveMap
             } else {
@@ -6623,9 +6743,12 @@ pub(crate) fn resolve_builtin_op(
         // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.
         ("try_collect", 0) => TBuiltinOp::TryCollect,
         // D-COLLBREADTH1=A: Set<T> instance methods.
-        ("add", 1) => TBuiltinOp::SetInsert,
+        ("add", 1) if is_set => TBuiltinOp::SetInsert,
+        ("add", 1) if is_bag => TBuiltinOp::BagAdd,
         ("to_list", 0) => TBuiltinOp::SetToList,
         ("union", 1) => TBuiltinOp::SetUnion,
+        ("has", 1) if is_bag => TBuiltinOp::BagHas,
+        ("count", 1) if is_bag => TBuiltinOp::BagCount,
         // D-COLLBREADTH1=A: Deque<T> instance methods.
         ("push_front", 1) => TBuiltinOp::DequePushFront,
         ("push_back", 1) => TBuiltinOp::DequePushBack,

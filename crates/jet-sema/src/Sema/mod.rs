@@ -57,6 +57,9 @@ pub(crate) enum TypeDef {
         name_span: Span,
         variants: HashMap<String, (Span, VariantPayload)>,
         variant_order: Vec<String>,
+        /// D-TAG1: variant groups — group path → (span, ordered leaf paths in
+        /// its subtree). A group name matches its whole subtree in patterns.
+        groups: HashMap<String, (Span, Vec<String>)>,
         methods: HashMap<String, MethodSig>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `enum`.
         single_use: bool,
@@ -133,6 +136,14 @@ impl TypeRegistry {
     fn enum_variant_order(&self, name: &str) -> Option<&[String]> {
         match self.types.get(name) {
             Some(TypeDef::Enum { variant_order, .. }) => Some(variant_order.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// D-TAG1: the enum's variant groups (group path → span + leaf paths).
+    fn enum_groups(&self, name: &str) -> Option<&HashMap<String, (Span, Vec<String>)>> {
+        match self.types.get(name) {
+            Some(TypeDef::Enum { groups, .. }) => Some(groups),
             _ => None,
         }
     }
@@ -797,6 +808,7 @@ mod CheckerInfer;
 mod CheckerInline;
 mod CheckerItems;
 mod CheckerOwnership;
+mod CheckerPatchable;
 mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod Diagnostics;
@@ -818,6 +830,7 @@ mod WebPartition;
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;
 pub(crate) use CheckerCli::*;
+pub(crate) use CheckerPatchable::*;
 pub use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
 pub(crate) use Effects::*;

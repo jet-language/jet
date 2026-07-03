@@ -1480,6 +1480,15 @@ pub(crate) fn if_cond_in_subset(
                     }
                 }
             }
+            // D-TAG1: a binding-free variant/group test (`if d == .Fire { … }`)
+            // is a plain Bool condition — the expression subset lowers it to
+            // `matches!` (`TExprKind::PatternMatches`), no if-let, no bindings.
+            if !is_json_variant(variant)
+                && bindings.is_empty()
+                && cx.variant_owner.contains_key(variant)
+            {
+                return Some(Vec::new());
+            }
             return None;
         }
         return match pattern {
@@ -1982,6 +1991,25 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         }
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
             expr_in_subset(inner, cx, locals)
+        }
+        // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
+        // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
+        // Bool `matches!` (`TExprKind::PatternMatches`). Only user enums whose
+        // owner resolves via `cx.variant_owner` — payload-binding tests stay the
+        // if-let condition shape, JSON/Key keep their existing routes.
+        Expr::PatternTest {
+            subject,
+            pattern:
+                Pattern::Variant {
+                    variant, bindings, ..
+                },
+            ..
+        } if bindings.is_empty()
+            && !is_json_variant(variant)
+            && !is_key_variant(variant)
+            && cx.variant_owner.contains_key(variant) =>
+        {
+            expr_in_subset(subject, cx, locals)
         }
         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
         // D-CHAINCMP1: `0 <= sev < 10` — in-subset iff every operand is.
@@ -2874,7 +2902,7 @@ pub(crate) fn method_call_in_subset(
         if let Expr::Ident(type_name, _) = receiver {
             if !locals.contains(type_name.as_str()) {
                 match (type_name.as_str(), method, args.len()) {
-                    ("Set", "from", 1) | ("Deque", "new", 0) => {
+                    ("Set", "from", 1) | ("Bag", "new", 0) | ("Deque", "new", 0) => {
                         return args
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
@@ -3447,7 +3475,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
         | "status" | "group"
         // D-COLLBREADTH1=A: Set<T> and Deque<T> methods.
-        | "add" | "union" | "to_list"
+        | "add" | "union" | "to_list" | "has" | "count"
         | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back"
         // `from` is the static constructor for Set — admitted here so the static-call
         // shape below can claim it before `is_intercepted_method_name` blocks it.
@@ -3552,6 +3580,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("enumerate", 0) | ("zip", 1)
         // D-COLLBREADTH1=A: Set<T> instance methods.
         | ("add", 1) | ("union", 1) | ("to_list", 0)
+        // D-TAG1: Bag<T> instance methods (add/remove share list/set arms above).
+        | ("has", 1) | ("count", 1)
         // D-COLLBREADTH1=A: Deque<T> instance methods.
         | ("push_front", 1) | ("push_back", 1)
         | ("pop_front", 0) | ("pop_back", 0)

@@ -97,6 +97,10 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     if cx.comparable.contains(&s.name) {
         derives.push("PartialEq");
     }
+    if cx.hashable.contains(&s.name) {
+        derives.push("Eq");
+        derives.push("Hash");
+    }
     if cx.partial_ord.contains(&s.name) {
         derives.push("PartialOrd");
     }
@@ -245,6 +249,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     }
     emit_struct_serde(cx, s, out);
     emit_struct_cli(cx, s, out);
+    emit_struct_patchable(cx, s, out);
     if s.layout == Some(crate::AST::StructLayout::Columnar) {
         emit_columnar_storage(cx, s, out);
     }
@@ -468,6 +473,51 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     ));
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// D-PATCH1 (card #181): `@[Patchable]` — nested `T.Patch` + apply/diff/merge.
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
+    if !s.derives.iter().any(|(t, _)| t == crate::Syntax::CONTRACT_PATCHABLE) {
+        return;
+    }
+    let base_rust = user_type_rust(&s.name);
+    let patch_name = format!("{}.Patch", s.name);
+    let patch_rust = user_type_rust(&patch_name);
+
+    let mut apply_fields = Vec::new();
+    let mut diff_fields = Vec::new();
+    let mut merge_fields = Vec::new();
+    for f in &s.fields {
+        let m = mangle(&f.name);
+        apply_fields.push(format!(
+            "{m}: __p.{m}.clone().unwrap_or_else(|| self.{m}.clone())"
+        ));
+        diff_fields.push(format!(
+            "{m}: if __new.{m} != __old.{m} {{ Some(__new.{m}) }} else {{ None }}"
+        ));
+        merge_fields.push(format!("{m}: __other.{m}.or_else(|| self.{m}.clone())"));
+    }
+
+    out.push_str(&format!("impl {base_rust} {{\n"));
+    out.push_str(&format!(
+        "    pub fn user_apply(&self, __p: {patch_rust}) -> {base_rust} {{\n        {base_rust} {{ {} }}\n    }}\n",
+        apply_fields.join(", ")
+    ));
+    out.push_str(&format!(
+        "    pub fn user_diff(__new: {base_rust}, __old: {base_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
+        diff_fields.join(", ")
+    ));
+    out.push_str("}\n\n");
+
+    out.push_str(&format!("impl {patch_rust} {{\n"));
+    out.push_str(&format!(
+        "    pub fn user_merge(&self, __other: {patch_rust}) -> {patch_rust} {{\n        {patch_rust} {{ {} }}\n    }}\n",
+        merge_fields.join(", ")
+    ));
+    out.push_str("}\n\n");
+}
+
 /// S12/D-CLIFLAG1: Jet's only program entry is `fn run`. Rust still needs
 /// `fn main`, so synthesize a wrapper. Zero-arg `run` calls straight through;
 /// typed `run(args: T)` / `run(cmd: Enum)` generates down onto the same
@@ -559,7 +609,7 @@ fn emit_cli_subcommand_entry(
             // Sema's E1307 already rejects this shape; unreachable at codegen.
             continue;
         };
-        let tag = mangle(&v.name);
+        let tag = mangle_variant(&v.name);
         let ctor = format!("user_{}::{}(__payload)", e.name, tag);
         arms.push_str(&format!(
             "        {sub:?} => {{\n            let __spec = __jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match __jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ user_run({call_arg}); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
@@ -586,6 +636,10 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     if cx.comparable.contains(&e.name) {
         derives.push("PartialEq");
     }
+    if cx.hashable.contains(&e.name) {
+        derives.push("Eq");
+        derives.push("Hash");
+    }
     out.push_str(&format!(
         "#[derive({})]\npub enum user_{} {{\n",
         derives.join(", "),
@@ -594,14 +648,14 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     for v in &e.variants {
         match &v.payload {
             VariantPayload::Unit => {
-                out.push_str(&format!("    {},\n", mangle(&v.name)));
+                out.push_str(&format!("    {},\n", mangle_variant(&v.name)));
             }
             VariantPayload::Single(t, _) => {
                 let ty = cx.field_rust_type(&e.name, &v.name, t);
-                out.push_str(&format!("    {}({}),\n", mangle(&v.name), ty));
+                out.push_str(&format!("    {}({}),\n", mangle_variant(&v.name), ty));
             }
             VariantPayload::Named(fs) => {
-                out.push_str(&format!("    {} {{\n", mangle(&v.name)));
+                out.push_str(&format!("    {} {{\n", mangle_variant(&v.name)));
                 for f in fs {
                     let key = format!("{}.{}", v.name, f.name);
                     let ty = cx.field_rust_type(&e.name, &key, &f.ty);
@@ -1116,7 +1170,7 @@ fn emit_enum_serde(cx: &Cx, e: &EnumDef, out: &mut String) {
             e.name
         ));
         for v in &e.variants {
-            let vm = mangle(&v.name);
+            let vm = mangle_variant(&v.name);
             let wire = variant_wire_name(v);
             let body = encode_variant_body(cx, &v.payload, &wire, tag.as_deref(), untagged);
             match &v.payload {
@@ -1270,7 +1324,7 @@ fn emit_enum_decode(
                 out.push_str(&format!(
                     "                {wire:?} => return Ok(user_{}::{}),\n",
                     e.name,
-                    mangle(&v.name)
+                    mangle_variant(&v.name)
                 ));
             }
         }
@@ -1298,7 +1352,7 @@ fn emit_enum_decode(
 // For internal tagging, named fields read from the same object as the tag; for the
 // external/untagged shapes, `src` is the payload sub-tree.
 fn decode_variant_from(cx: &Cx, enum_name: &str, v: &Variant, src: &str) -> String {
-    let vm = mangle(&v.name);
+    let vm = mangle_variant(&v.name);
     match &v.payload {
         VariantPayload::Unit => format!("user_{}::{}", enum_name, vm),
         VariantPayload::Single(t, _) => {

@@ -703,6 +703,15 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // (the formatter always emits `.` before a Pattern::Variant name). No new keyword or sigil —
 // reuses OP_DOT (S21). Value-position dot (`.Red` where type is known) is D-ENUMDOT2 (open).
 
+// D-TAG1 (ratified 2026-07-03): enum variant groups. A variant may enclose sub-variants
+// in `{ }` (`enum Damage { Physical { Blunt, Pierce } Fire { Burn, Scald } Cold }`), to any
+// depth. A group name matches its whole subtree in `==` pattern tests and dispatch arms
+// (`d == .Fire` is true for `.Fire.Burn`); exhaustiveness is checked at the group level;
+// payloads live on leaves only (E0331); a value is always a leaf — a group name is not a
+// value (E0332). Ships with the core counted multiset `Bag<T>` (`Bag.new()`, `add`,
+// `remove`, `has`, `count`; subtree queries stay an explicit `any` closure). No new keyword
+// or sigil — reuses `{ }` blocks, OP_DOT paths, and D-ENUMDOT1 leading-dot patterns.
+
 // D-RANGE2 (c25, ratified): porting-hazard teaching errors for constructs Jet does NOT use.
 // E0318: `..=` (Rust inclusive range) — Jet's `..` is already inclusive; `0..=9` → teach `0..9`.
 // E0319: `step` in an arm head — `step` is a loop modifier (S22/S72), not an arm construct.
@@ -1282,6 +1291,19 @@ pub const JETPACK_VERBS: &[&str] = &[
     OS_SUBCOMMAND,
 ];
 
+/// D-JPK-DISPATCH1=B (A1, card c9jetpackgates): `jet` execs the engine
+/// binary (`jetpack`, later `jetos`) for every engine verb instead of linking
+/// it in-process — git/kubectl-style dispatch by executable name. Before
+/// exec-ing the real command, `jet` runs `<engine> --engine-protocol`, a
+/// hidden handshake flag every engine binary answers with its own
+/// `CARGO_PKG_VERSION` on stdout; a mismatch against `jet`'s own version is
+/// E1227 (`engine-version-skew`). This is process-dispatch plumbing between
+/// two binaries jet ships together, never a token a user writes in a `.jet`
+/// file, so I7 (every user-typeable keyword lives here with a decision ID)
+/// does not require it to gate a Tower ballot of its own — it is this
+/// gate's own implementation surface.
+pub const ENGINE_PROTOCOL_FLAG: &str = "--engine-protocol";
+
 /// D-JPK14: the default visible prompt label inside a Jetpack shell.
 pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
 
@@ -1448,6 +1470,15 @@ pub const REF_PROVIDER_AT: &str = "@";
 /// interim names retired, clean break, no alias). A payload is a collection
 /// of packages; its identity block is `payload: { … }`.
 pub const PAYLOAD_FILE: &str = "pkg.jet";
+
+/// D-JPK-FILENAME2=B (A2, card c9jetpackgates, ratified 2026-07-02): retired
+/// manifest filenames from earlier reshapes of this same file (U1 `jet.toml`
+/// -> U10 `pack.jet` -> D-JPK-FILES `pkg.jet`). Finding one of these instead
+/// of `PAYLOAD_FILE` is E1226, not a silent fallback — D-JPK-FILENAME2
+/// reconfirmed `pkg.jet` as final, so these never come back as aliases.
+/// `jetpack.toml` is a *different*, still-live file (D-JPK-FILES repo
+/// metadata: `[repo]`/`[sources]`) and does not belong on this list.
+pub const STALE_MANIFEST_NAMES: &[&str] = &["pack.jet", "payload.jet", "jet.toml"];
 
 /// U10 (ratified 2026-06-16): manifest identity block keyword — `payload: { name,
 /// version, … }` (was `package:`).
@@ -2062,6 +2093,9 @@ pub const CONTRACT_BUNDLE_CODABLE_AS_BASE: &str = "CodableAsBase"; // D-CAPBUNDL
 /// that card builds against a fixed name. Never shipped as `#`, so no
 /// teaching error.
 pub const CONTRACT_CLI: &str = "Cli"; // D-CLIFLAG1
+/// D-PATCH1 (card #181): struct-level derive — generates nested `T.Patch` with
+/// `apply`/`diff`/`merge`, Codable by construction (Encode+Decode on Patch).
+pub const CONTRACT_PATCHABLE: &str = "Patchable"; // D-PATCH1
 /// D-CLIFLAG1: field-level doc marker for CLI-derived help text — `@Doc`.
 /// Same status as `CONTRACT_CLI`: registered here, feature built elsewhere.
 pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
@@ -2105,6 +2139,8 @@ pub const CONTRACT_MARKERS: &[&str] = &[
     // D-CLIFLAG1 (G4) — registered, feature not yet implemented
     CONTRACT_CLI,
     CONTRACT_DOC,
+    // D-PATCH1 (card #181)
+    CONTRACT_PATCHABLE,
 ];
 
 /// D-MARKER-FAMILY1: every `#`-plane directive name that a moved-marker

@@ -122,3 +122,77 @@ pub(super) fn file_declares_module(text: &str, name: &str) -> bool {
     }
     false
 }
+
+// ──────────────────────────────────────────────
+// Tests — D-JPK-FILENAME2=B (A2) acceptance: `pkg.jet` is the only reserved
+// filename; every role module (`workspace`, dev/system role names) is
+// discovered by declaration, regardless of which `.jet` file it lives in.
+// ──────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tempdir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!(
+            "discovery-a2-{tag}-{nanos}-{:?}",
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn module_found_regardless_of_filename() {
+        let dir = tempdir("arbitrary-filename");
+        // Nothing here is named after the module it declares.
+        std::fs::write(dir.join("whatever.jet"), "module workspace { members: [] }\n").unwrap();
+        let found = discover_module_in(&dir, "workspace").unwrap();
+        assert_eq!(found, dir);
+    }
+
+    #[test]
+    fn several_role_modules_discovered_across_arbitrary_files() {
+        let dir = tempdir("several-roles");
+        std::fs::write(dir.join("a.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(dir.join("b.jet"), "module dev { }\n").unwrap();
+        std::fs::write(dir.join("c.jet"), "module laptop { }\n").unwrap();
+        assert!(discover_module_in(&dir, "workspace").is_ok());
+        assert!(discover_module_in(&dir, "dev").is_ok());
+        assert!(discover_module_in(&dir, "laptop").is_ok());
+    }
+
+    /// Only `pkg.jet` is reserved: discovery skips it even if it happens to
+    /// contain module-shaped text, so a module can never be "found" via the
+    /// manifest file itself — only via the tree it manages.
+    #[test]
+    fn pkg_jet_is_excluded_from_discovery() {
+        let dir = tempdir("pkg-jet-excluded");
+        std::fs::write(
+            dir.join(Syntax::PAYLOAD_FILE),
+            "module bogus { }\npayload: { name: \"x\", version: \"0.1.0\" }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            discover_module_in(&dir, "bogus"),
+            Err(DiscoveryError::NotFound {
+                name: "bogus".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn ambiguous_when_two_files_declare_the_same_module() {
+        let dir = tempdir("ambiguous");
+        std::fs::write(dir.join("one.jet"), "module dup { }\n").unwrap();
+        std::fs::write(dir.join("two.jet"), "module dup { }\n").unwrap();
+        assert!(matches!(
+            discover_module_in(&dir, "dup"),
+            Err(DiscoveryError::Ambiguous { .. })
+        ));
+    }
+}

@@ -501,6 +501,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // Legacy M2 struct map for ref-field checks and cloneable helper.
     let mut struct_fields_legacy: HashMap<String, Vec<(Option<String>, Type)>> = HashMap::new();
 
+    // D-PATCH1: synthetic `T.Patch` structs before the registration pass.
+    inject_patchable_types(&mut prog.items, &mut diags);
+
     // --- registration pass (M3) -----------------------------------------
     for item in &prog.items {
         match item {
@@ -751,6 +754,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     }
 
     register_type_methods(&prog.items, &mut registry, &mut diags);
+    register_patchable_methods(&prog.items, &mut registry);
     // S62 + D-LIB2: synthesise before register_impl_methods so synthesised
     // Func nodes are visible when method lookup is registered.
     synthesize_impls(&mut prog.items);
@@ -1839,6 +1843,10 @@ pub(crate) fn register_enum(
     let mut variants = HashMap::new();
     let mut variant_order = Vec::new();
     let mut seen = HashSet::new();
+    // D-TAG1: leaf names are full dotted paths; the flattened Rust variant name
+    // joins segments with `__`, so two distinct paths that mangle identically
+    // (`Fire.Burn` vs `Fire__Burn`) must be rejected here, not by rustc (I2).
+    let mut mangled = HashMap::new();
     for v in &e.variants {
         if !seen.insert(v.name.clone()) {
             diags.push(Diagnostic::error(
@@ -1850,8 +1858,43 @@ pub(crate) fn register_enum(
             ));
             continue;
         }
+        if let Some(other) = mangled.insert(v.name.replace('.', "__"), v.name.clone()) {
+            diags.push(Diagnostic::error(
+                "E0105",
+                format!(
+                    "variant `{}` collides with `{}` in `{}`",
+                    v.name, other, e.name
+                ),
+                "a grouped path and an underscored name flatten to the same variant".to_string(),
+                "rename one of the two variants".to_string(),
+                Some(v.name_span),
+            ));
+            continue;
+        }
         variant_order.push(v.name.clone());
         variants.insert(v.name.clone(), (v.name_span, v.payload.clone()));
+    }
+    // D-TAG1: record each group's subtree (ordered leaf paths). A group path
+    // that also names a leaf is a duplicate definition (one name, two meanings).
+    let mut groups: HashMap<String, (Span, Vec<String>)> = HashMap::new();
+    for g in &e.groups {
+        if variants.contains_key(&g.path) || groups.contains_key(&g.path) {
+            diags.push(Diagnostic::error(
+                "E0105",
+                format!("variant `{}` is defined twice in `{}`", g.path, e.name),
+                "a group name and a variant name share one namespace".to_string(),
+                "rename or remove the duplicate variant".to_string(),
+                Some(g.name_span),
+            ));
+            continue;
+        }
+        let prefix = format!("{}.", g.path);
+        let leaves: Vec<String> = variant_order
+            .iter()
+            .filter(|v| v.starts_with(&prefix))
+            .cloned()
+            .collect();
+        groups.insert(g.path.clone(), (g.name_span, leaves));
     }
     registry.types.insert(
         e.name.clone(),
@@ -1859,6 +1902,7 @@ pub(crate) fn register_enum(
             name_span: e.name_span,
             variants,
             variant_order,
+            groups,
             methods: HashMap::new(),
             single_use: e.is_single_use,
             must_use: e.is_must_use,

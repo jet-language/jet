@@ -2,7 +2,7 @@
   "meta": {
     "version": 3,
     "currentEpoch": "e3",
-    "nextNum": 186,
+    "nextNum": 188,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7557,6 +7557,11 @@
         {
           "at": "2026-07-03",
           "by": "agent",
+          "text": "D-PATCH1 vertical slice: `@[Patchable]` → synthetic `T.Patch` (optional fields, partial `.{ }` literals), `apply`/`diff`/`merge` codegen, example patchable.jet. E0336/E0337 for generic/ref/fn fields. Patch Encode/Decode deferred (prelude path). Card building — next: D-FIELDPOL1, D-EFFTREE1."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
           "text": "Owner unfroze; implementation started in parallel with jetpack. Order: D-TAG1 → D-PATCH1 → D-FIELDPOL1 → D-EFFTREE1 (EFFTREE last — reopens E0740). [handoff] D-TAG1 agent running; none spec-logged in syntax-decisions.md yet — each implementation adds its entry."
         },
         {
@@ -7724,6 +7729,27 @@
       ],
       "created": "2026-07-03",
       "updated": "2026-07-03"
+    },
+    {
+      "id": "cmemgreenfield",
+      "num": 187,
+      "title": "Greenfield memory model: One-Home value semantics (D-MEM1)",
+      "body": "Owner asked (2026-07-03) for a fundamental, greenfield reconsideration of memory management — a jump the size of C→borrow-checker, fully featured, easy for beginners AND experts; capability vocabulary explicitly not the answer. Proposal: tools/Tower/docs/proposals/memory-greenfield.md — One-Home model: value semantics everywhere (handoffs are logical copies, compiler lowers to move/borrow/CoW with Perceus-grade elision), visible mutation via ~ only, resources (@Resource) as the only consume-semantics types, Shared<T>/Pool<T> as the only aliasing (by name), annotations demoted from permission to enforceable performance contracts (^ zero-copy, @Unique, policy no_implicit_copy), expert tier (arenas, uninit, *T/#Unsafe) untouched. If D-MEM1=A: supersedes &T share sigil, D-REF-SHORTHAND1/2 stored refs, L0201; follow-on ballots for Shared/Pool/@Unique/policy spellings. ALL memory-model implementation gated on D-MEM1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": null,
+      "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Proposal written (memory-greenfield.md); D-MEM1 minted ballot-ready. No implementation until the owner rules."
+        }
+      ]
     }
   ],
   "decisions": [
@@ -19735,6 +19761,45 @@
       "recommendation": "A",
       "outcome": "A",
       "ratifiedAt": "2026-07-03"
+    },
+    {
+      "id": "D-MEM1",
+      "cardId": "cmemgreenfield",
+      "title": "Greenfield memory model — One-Home value semantics vs alternatives",
+      "gist": "Replace the user-facing ownership question entirely: values everywhere, compiler owns ownership (move/borrow/CoW elision), ~ is the only thing beginners learn, sharing is a named type (Shared/Pool), annotations become enforceable performance contracts. Supersedes the &T share sigil and stored-ref fields if adopted.",
+      "explainer": "The sigil capability model is Rust's question with friendlier spellings: users still pick view/edit/take/share at every boundary, mirror it at call sites, and hit use-after-move on plain data. Owner verdict: clunky and confusing. The greenfield move is to delete the question, not respell it. One-Home model: (1) every value lives in exactly one place — memory is a tree, aliasing impossible in safe code; (2) handoffs are logical copies — after party.add(player), player is still yours; the compiler lowers each handoff to a move (last use), borrow (read-only), memcpy (small POD), or CoW snapshot (heap-backed, one elidable refcount, physical copy only on write-while-shared); (3) mutation is visible — only heal(~player) can change your value, enforced by a local exclusivity check (complete because nothing stores references — the entire reason lifetimes exist is gone, not hidden); (4) resources (@Resource: files, sockets, locks) are the only consume-semantics types — use-after-move errors exist only there, where they read naturally (\"file was closed by close\"); (5) sharing is asked for by name — Shared<T> (one value, many doors) or Pool<T>+Id<T> (stable handles; the graphs/ECS paved road). Experts tighten instead of unlock: ^T = guaranteed zero-copy consume, @Unique = statically no counts, policy no_implicit_copy = any surviving implicit copy/refcount is a compile error (Rust-strictness as an opt-in scoped lint profile), jet build --copies shows every surviving cost. Arenas, uninit, *T/#Unsafe tier untouched. Beginner curriculum: two sentences. Cost honesty: an escaping live handoff of heap data costs one deterministic refcount bump unless elided — accepting option A includes reading priority #3 as \"no GC/pauses; elidable, policy-removable counts allowed where program semantics demand a logical copy\". Proven parts: Swift/Hylo (mutable value semantics + CoW at mass-market scale), Koka Perceus/Lobster (RC elision), Mojo (inferred ownership, imperative surface), Vale (generational handles → Pool ids). Full write-up with worked examples: tools/Tower/docs/proposals/memory-greenfield.md.",
+      "story": "A beginner writes add_member(~party, player) then keeps using player. Today: \"player was taken\" error, must learn take/copy/share. Under A: it just works, safely — the compiler moved, borrowed, or snapshotted. Meanwhile the game team turns on policy no_implicit_copy in the render crate and gets compile errors on any hidden cost — Rust strictness exactly where wanted, nowhere else.",
+      "inWild": "// today\n$ jet build game.jet\nerror[E0913]: player was taken by add_member\n\n// under D-MEM1=A\n$ jet build game.jet        # compiles; player still usable\n$ jet build --copies game.jet\nnote: player snapshot at game.jet:12 (party keeps a copy) — 1 refcount;\n      becomes a move if print(player.name) is hoisted above the call",
+      "detail": "Gates ALL memory-model work. If A: supersedes D-CAP7's &T share sigil, D-REF-SHORTHAND1/2 (stored &T fields + #Ref owner inference, E0207/E0427), L0201; E0912 freeze-at-API shrinks to ~/^; follow-on ballots mint spellings for Shared<T>, Pool<T>/Id<T>, @Resource, @Unique, policy no_implicit_copy, --copies voice, and the model name (menu in the proposal: Fly-by-Wire, One-Home, Autotrim, Slipstream, Feather, Glidepath). Survives regardless: ~ sigil + call-site mirror, copy verb, *T/#Unsafe, arenas/regions, uninit, S63 RAII, #SingleUse (becomes @Resource substrate). Sema machinery: access inference (kept from D-CAP8 infer tier) + last-use dataflow + uniqueness/RC elision + local exclusivity check; lowers to safe Rust + vetted CowBox runtime (I1/I2/I3 intact).",
+      "options": [
+        {
+          "key": "A",
+          "name": "One-Home model — value semantics, compiler-owned ownership, CoW+elision, Shared/Pool, contracts-not-permission (recommended)",
+          "detail": "Beginners: two rules, zero ownership errors on plain data, no aliasing ever. Experts: opt-in strictness reaching literal Rust guarantees (policy no_implicit_copy, @Unique, ^ zero-copy, arenas, *T). Cost: an escaping live handoff of heap data may keep one deterministic, elidable, policy-bannable refcount.",
+          "code": "fn add_member(party: ~Party, player: Player) { party.members.push(player) }\nadd_member(~party, player)\nprint(player.name)   // fine — player is yours, always"
+        },
+        {
+          "key": "B",
+          "name": "One-Home, eager copies only — no CoW, no refcounts ever",
+          "detail": "Same five rules; an escaping live handoff is a real deep copy every time (lint-visible; copy to silence). Purest reading of priority #3, fully predictable — but beginners pay accidental O(n) copies the machinery in A would have made free, and the expert tier already answers the purity concern.",
+          "code": "add_member(~party, player)   // deep-copies player here, every time\nprint(player.name)           // fine, but the copy was real"
+        },
+        {
+          "key": "C",
+          "name": "Generational references — pointers stay, safety via runtime generation checks (Vale-style)",
+          "detail": "References remain first-class and storable; every deref checks a generation, stale access is a clean runtime failure; opt-in regions elide checks in hot code. Familiar to pointer-language users — but aliasing spooky-action returns, the failure mode moves to runtime, and the default path pays per-deref checks.",
+          "code": "p := &player\nparty.add(p)\nplayer.hp = 0    // p observes the change — aliasing is back"
+        },
+        {
+          "key": "D",
+          "name": "Status quo — D-CAP7/8 sigil capabilities stand",
+          "detail": "Keep T/~T/^T/&T/*T with call-site mirroring, freeze-at-API, stored-ref fields (D-REF-SHORTHAND). The proposal archives as design history. This is the system the owner just called clunky and confusing.",
+          "code": "add_member(~party, ^player)\nprint(player.name)   // error: player was taken by add_member"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "group": "ownership"
     }
   ],
   "binder": [

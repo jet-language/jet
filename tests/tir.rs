@@ -2108,7 +2108,7 @@ fn collection_field_and_payload() {
         return;
     }
     let src = "\
-struct Bag {
+struct Crate {
     items: [Int]
     label: String
 }
@@ -2120,7 +2120,7 @@ fn mk(xs: [Int]) -> Holder {
     return Holder.Nums(xs)
 }
 fn run() {
-    b :: Bag.{ items: [1, 2, 3], label: \"x\" }
+    b :: Crate.{ items: [1, 2, 3], label: \"x\" }
     d :: mk([4, 5])
     print(b.label)
 }
@@ -3883,7 +3883,7 @@ fn user_method_shadowing_builtin_name() {
         return;
     }
     let src = "\
-struct Bag {
+struct Crate {
     items: [Int]
 
     fn get(self) -> Int {
@@ -3894,7 +3894,7 @@ struct Bag {
     }
 }
 fn run() {
-    b :: Bag.{ items: [1, 2, 3] }
+    b :: Crate.{ items: [1, 2, 3] }
     print(b.get())
     print(b.len())
 }

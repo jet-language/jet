@@ -56,7 +56,7 @@ pub(crate) fn variant_rust_name(variant: &str) -> String {
     if is_json_variant(variant) || is_key_variant(variant) {
         variant.to_string()
     } else {
-        mangle(variant)
+        mangle_variant(variant)
     }
 }
 

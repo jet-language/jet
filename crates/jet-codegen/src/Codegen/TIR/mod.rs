@@ -383,10 +383,12 @@ pub enum TForInMethod {
 ///    are in scope in the then-branch (the binding's resolved type is bound at lowering,
 ///    mirroring `add_pattern_bindings`).
 ///  - `IsNone` — an `x == null` test (`Pattern::Absent`): `if {subj}.is_none() {`.
+///  - `Matches` — a binding-free enum variant/group test (`d == .Fire`): `if matches!(&{subj}, {pat}) {`.
 pub enum TIfCond {
     Plain(TExpr),
     IfLet { pat_str: String, subj: TExpr },
     IsNone { subj: TExpr },
+    Matches { pat_str: String, subj: TExpr },
 }
 
 /// D-DOTSCOPE1: which `#Test` scope member a `TStmt::ScopeMember` is.
@@ -1240,6 +1242,14 @@ pub enum TExprKind {
     /// per-item call expressions (a `Call`/`Print`/`CallValue` form, resolved at
     /// lowering exactly as the AST path routes an `Ident` callee through `emit_call`
     /// and any other callee through `(f)(item)`). Emit just wraps them in `vec![…]`.
+    /// D-TAG1: a binding-free enum variant/group pattern test (`d == .Fire`,
+    /// `d == .Fire.Burn` in expression position). Lowers to `matches!(&subj, pat)`
+    /// where `pat` is the same Rust pattern string `emit_match_pattern` uses for
+    /// switch arms (group names expand to or-patterns over their leaves).
+    PatternMatches {
+        subj: Box<TExpr>,
+        pat_str: String,
+    },
     FanOut {
         calls: Vec<TExpr>,
     },
@@ -1739,6 +1749,12 @@ pub enum TBuiltinOp {
     SetToList,
     /// `set.union(other)` → `(recv).union(&(a0)).cloned().collect::<std::collections::HashSet<_>>()`.
     SetUnion,
+    // D-TAG1: Bag<T> counted multiset (HashMap-backed).
+    BagAdd,
+    BagRemove,
+    BagHas,
+    BagCount,
+    BagLen,
     // D-COLLBREADTH1=A: Deque<T> operations.
     /// `deque.push_front(v)` → `(recv).push_front(a0)`.
     DequePushFront,

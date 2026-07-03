@@ -47,8 +47,12 @@ pub(crate) struct Cx {
     /// `rust_type` maps the list type and the list ops route to its inherent API.
     pub(crate) columnar: HashSet<String>,
     pub(crate) comparable: HashSet<String>,
+    /// D-TAG1: types whose fields are all Eq+Hash-capable (comparable minus
+    /// float fields) — gates `derive(Eq, Hash)` for `Bag<T>` keys.
+    pub(crate) hashable: HashSet<String>,
     /// S55: explicit `derive Comparable;` → PartialOrd in Rust.
     pub(crate) partial_ord: HashSet<String>,
+    pub(crate) patchable: HashSet<String>,
     pub(crate) src: String,
     pub(crate) file: String,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
@@ -681,6 +685,13 @@ impl Cx {
             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {
                 format!("std::collections::HashSet<{}>", self.rust_type(&args[0]))
             }
+            // D-TAG1: Bag<T> → HashMap<T, usize>.
+            Type::Apply { name, args } if name == "Bag" && !args.is_empty() => {
+                format!(
+                    "std::collections::HashMap<{}, usize>",
+                    self.rust_type(&args[0])
+                )
+            }
             Type::Apply { name, args } if name == "Deque" && !args.is_empty() => {
                 format!("std::collections::VecDeque<{}>", self.rust_type(&args[0]))
             }
@@ -877,7 +888,9 @@ pub(crate) fn build_cx_items(
         migrations: HashMap::new(),
         columnar: HashSet::new(),
         comparable: HashSet::new(),
+        hashable: HashSet::new(),
         partial_ord: HashSet::new(),
+        patchable: HashSet::new(),
         src: src.to_string(),
         file: file.to_string(),
         test_mode: false,
@@ -1012,6 +1025,11 @@ pub(crate) fn build_cx_items(
                 for v in &e.variants {
                     cx.variant_owner.insert(v.name.clone(), e.name.clone());
                 }
+                // D-TAG1: group names resolve to their owning enum too, so a
+                // group pattern (`.Fire ->`) finds its Rust type prefix.
+                for g in &e.groups {
+                    cx.variant_owner.insert(g.path.clone(), e.name.clone());
+                }
             }
             Item::Const(c) => {
                 if c.is_comptime {
@@ -1139,6 +1157,35 @@ pub(crate) fn build_cx_items(
                     cx.method_rets
                         .insert((s.name.clone(), m.name.clone()), m.return_type.clone());
                 }
+                if s.derives.iter().any(|(t, _)| t == Syntax::CONTRACT_PATCHABLE) {
+                    cx.patchable.insert(s.name.clone());
+                    let patch = format!("{}.Patch", s.name);
+                    let base_ty = Type::Named(s.name.clone());
+                    let patch_ty = Type::Named(patch.clone());
+                    cx.method_sigs.insert(
+                        (s.name.clone(), "apply".to_string()),
+                        vec![(AccessConvention::Move, patch_ty.clone())],
+                    );
+                    cx.method_rets
+                        .insert((s.name.clone(), "apply".to_string()), Some(base_ty.clone()));
+                    cx.method_sigs.insert(
+                        (s.name.clone(), "diff".to_string()),
+                        vec![
+                            (AccessConvention::Move, base_ty.clone()),
+                            (AccessConvention::Move, base_ty),
+                        ],
+                    );
+                    cx.method_rets.insert(
+                        (s.name.clone(), "diff".to_string()),
+                        Some(patch_ty.clone()),
+                    );
+                    cx.method_sigs.insert(
+                        (patch.clone(), "merge".to_string()),
+                        vec![(AccessConvention::Move, patch_ty.clone())],
+                    );
+                    cx.method_rets
+                        .insert((patch, "merge".to_string()), Some(patch_ty));
+                }
             }
             Item::Enum(e) => {
                 cx.boxed_edges.extend(find_enum_box_edges(e, &cx));
@@ -1169,6 +1216,32 @@ pub(crate) fn build_cx_items(
                 }
             }
             _ => {}
+        }
+    }
+
+    // D-TAG1: `hashable` (unlike `comparable`) can't trust "field type is a
+    // known type name" — a `Named` field is only Eq+Hash-capable if THAT type
+    // is itself hashable (e.g. it has no Float fields). Fixed-point over the
+    // (monotonically growing) hashable set until nothing new is added.
+    let mut hashable_changed = true;
+    while hashable_changed {
+        hashable_changed = false;
+        for item in items {
+            match item {
+                Item::Struct(s) if !cx.hashable.contains(&s.name) => {
+                    if type_is_hashable_struct(s, &cx.hashable) {
+                        cx.hashable.insert(s.name.clone());
+                        hashable_changed = true;
+                    }
+                }
+                Item::Enum(e) if !cx.hashable.contains(&e.name) => {
+                    if type_is_hashable_enum(e, &cx.hashable) {
+                        cx.hashable.insert(e.name.clone());
+                        hashable_changed = true;
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1435,6 +1508,52 @@ pub(crate) fn field_type_comparable(
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_comparable(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_comparable(inner, types, param_names),
+    }
+}
+
+pub(crate) fn type_is_hashable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
+    let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
+    s.fields
+        .iter()
+        .all(|f| !f.is_stored_ref && field_type_hashable(&f.ty, types, &param_names))
+}
+
+pub(crate) fn type_is_hashable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
+    let param_names: HashSet<String> = e.type_params.iter().map(|p| p.name.clone()).collect();
+    e.variants.iter().all(|v| match &v.payload {
+        VariantPayload::Unit => true,
+        VariantPayload::Single(t, _) => field_type_hashable(t, types, &param_names),
+        VariantPayload::Named(fs) => fs
+            .iter()
+            .all(|f| field_type_hashable(&f.ty, types, &param_names)),
+    })
+}
+
+/// Same shape as `field_type_comparable`, minus `Float`/`Float32` — Rust's
+/// `f64`/`f32` don't implement `Eq`/`Hash` (NaN breaks both laws).
+pub(crate) fn field_type_hashable(
+    ty: &Type,
+    types: &HashSet<String>,
+    param_names: &HashSet<String>,
+) -> bool {
+    match ty {
+        Type::Float | Type::Float32 => false,
+        Type::Int | Type::Bool | Type::String | Type::Char => true,
+        Type::IntN { .. } => true,
+        Type::Option(inner) => field_type_hashable(inner, types, param_names),
+        Type::Result { ok, err } => {
+            field_type_hashable(ok, types, param_names) && field_type_hashable(err, types, param_names)
+        }
+        Type::List(inner) => field_type_hashable(inner, types, param_names),
+        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
+        Type::Named(n) => types.contains(n),
+        Type::Apply { args, .. } => args.iter().all(|a| field_type_hashable(a, types, param_names)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| field_type_hashable(t, types, param_names)),
+        Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => field_type_hashable(elem, types, param_names),
+        Type::Tagged { inner, .. } => field_type_hashable(inner, types, param_names),
     }
 }
 

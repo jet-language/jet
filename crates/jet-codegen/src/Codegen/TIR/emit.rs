@@ -425,6 +425,14 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                         emit_tir_expr(subj, cx)
                     ));
                 }
+                TIfCond::Matches { pat_str, subj } => {
+                    out.push_str(&format!(
+                        "{}if matches!(&({}), {}) {{\n",
+                        pad,
+                        emit_tir_expr(subj, cx),
+                        pat_str
+                    ));
+                }
             }
             emit_tir_stmts(then_body, cx, out, indent + 1);
             match else_body {
@@ -1104,6 +1112,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::CharLit(c) => format!("{:?}", c),
         TExprKind::StrLit(parts) => emit_tir_str(parts, cx),
         TExprKind::Local(place) => place.clone(),
+        // D-TAG1: binding-free enum variant/group pattern test.
+        TExprKind::PatternMatches { subj, pat_str } => {
+            format!("matches!(&({}), {})", emit_tir_expr(subj, cx), pat_str)
+        }
         // c109 Phase 24: a comptime const inlined verbatim (the pre-rendered value).
         TExprKind::ConstInline(val) => val.clone(),
         TExprKind::Print(arg) => {
@@ -1349,6 +1361,31 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "({}).union(&({})).cloned().collect::<std::collections::HashSet<_>>()",
                     recv,
                     a(0)
+                ),
+                // D-TAG1: Bag<T> counted multiset.
+                TBuiltinOp::BagAdd => format!(
+                    "{{ *({}).entry({}).or_insert(0) += 1; }}",
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::BagRemove => format!(
+                    "{{ if let Some(c) = ({recv}).get_mut(&{arg}) {{ *c -= 1; if *c == 0 {{ ({recv}).remove(&{arg}); }} }} }}",
+                    recv = recv,
+                    arg = a(0)
+                ),
+                TBuiltinOp::BagHas => format!(
+                    "({}).get(&{}).copied().unwrap_or(0) > 0",
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::BagCount => format!(
+                    "({}).get(&{}).copied().unwrap_or(0) as i64",
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::BagLen => format!(
+                    "({}).values().sum::<usize>() as i64",
+                    recv
                 ),
                 // D-COLLBREADTH1=A: Deque<T> operations.
                 TBuiltinOp::DequePushFront => format!("({}).push_front({})", recv, a(0)),

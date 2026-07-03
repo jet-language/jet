@@ -219,6 +219,17 @@ in scope for the rest of the same condition. No `is`, no Rust `match`.
 leading dot (`.Circle(r)`, `.Empty`); value position too when the expected
 type is known (`.Red`; E0330 fallback). `Color.Red` always valid.
 
+**D-TAG1 — Nested variant groups** *(ratified 2026-07-03, card #181)*: a
+variant may enclose sub-variants in `{ }` to any depth (`enum Damage {
+Physical { Blunt, Pierce } Fire { Burn, Scald } Cold }`). A group name
+matches its whole subtree in `==` pattern tests and dispatch arms (`d == .Fire`
+is true for `.Fire.Burn`); exhaustiveness is checked at the group level;
+payloads live on leaves only (E0331); a value is always a leaf — a group name
+is not a value (E0332). Ships with core `Bag<T>` counted multiset
+(`Bag.new()`, `add`, `remove`, `has`, `count`; subtree queries stay an explicit
+`any` closure). No new keyword — reuses `{ }`, dot paths, and D-ENUMDOT1
+leading-dot patterns.
+
 **S74 — Standalone destructuring** *(with D-DESTRUCT1)*: bindings may
 destructure structs, tuples, and lists:
 
@@ -621,6 +632,16 @@ prefix — `#Tainted String`.
 
 **D-MATURITY1**: `@Experimental` / `@Tested` / `@Hardened` are doc-only
 markers before `fn` — parsed, erased, zero semantic effect.
+
+**D-PATCH1 — Typed patches** *(ratified 2026-07-03, card #181)*: `@[Patchable]`
+on a struct `T` synthesizes `T.Patch` — every field wrapped `T?` (Option),
+absent field = no change. Generated methods: `t.apply(patch) -> T` (apply
+onto a base), `T.diff(new, old) -> T.Patch` (static; fields that changed,
+`None` where equal), `patch.merge(other) -> T.Patch` (`other` wins on
+conflicting `Some`s). No type parameters (E0336 — concrete field list only);
+no stored-reference or function-typed fields (E0337 — a patch holds owned
+optional values). `Patch` Encode/Decode is deferred to the prelude serde
+path, not yet generated.
 
 ### Capabilities & memory
 

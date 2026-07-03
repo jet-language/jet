@@ -735,6 +735,7 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
         } => {
             let cond_ok = match cond {
                 TIfCond::Plain(e) => matches!(&e.ty, Type::Bool) && jit_covers_expr(e, callees),
+                TIfCond::Matches { .. } => false,
                 TIfCond::IfLet { .. } | TIfCond::IsNone { .. } => false,
             };
             cond_ok

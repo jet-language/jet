@@ -25,6 +25,7 @@ mod CmdPkg;
 mod CmdSchema;
 mod CmdSemIndex;
 mod CmdSupply;
+mod EngineDispatch;
 
 use CmdCompile::{
     run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new, run_test,
@@ -869,14 +870,22 @@ fn main() {
             return;
         }
         "env" => {
-            // Scale-2 front door (U §8, D-DEV4): `jet env` delegates straight to
-            // `jetpack enter`, forwarding flags and any trailing `-- cmd`.
+            // Scale-2 front door (U §8, D-DEV4): `jet env` maps to `jetpack
+            // enter`, forwarding flags and any trailing `-- cmd`.
+            // D-JPK-DISPATCH1=B (A1): execs the `jetpack` engine binary by
+            // name — never linked in-process — so the compiler binary stays
+            // standalone-checkable (deleting `jetpack` still leaves `jet
+            // build`/`jet run` fully working).
             let mut fwd = raw.clone();
             if let Some(pos) = fwd.iter().position(|a| a == "env") {
                 fwd.remove(pos);
             }
             fwd.insert(0, "enter".to_string());
-            exit(jet::Jetpack::run(fwd));
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "env",
+                &fwd,
+            ));
         }
         "repl" => {
             // E2-M18: interactive REPL (D-REPL1=A, D-REPL3=A).
@@ -1092,6 +1101,13 @@ fn main() {
                                 return;
                             }
                         }
+                    }
+                    // D-JPK-FILENAME2=B (A2): a retired manifest filename in
+                    // place of `pkg.jet` gets the E1226 teaching diagnostic
+                    // instead of the generic "no pkg.jet found" message.
+                    if let Some(msg) = jet::Loader::stale_manifest_name_message(&cwd) {
+                        eprint!("{}", msg);
+                        exit(ExitCodes::USAGE);
                     }
                     eprintln!(
                         "error: no file given and no `pkg.jet` found in this directory or above"
@@ -1391,4 +1407,19 @@ pub(crate) fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> 
         }
     }
     None
+}
+
+/// Find the manifest root from `cwd`, or exit. D-JPK-FILENAME2=B (A2): when
+/// there's no `pkg.jet` but a retired filename (`pack.jet`/`payload.jet`/
+/// `jet.toml`) sits where it belongs, teaches E1226 instead of the generic
+/// "no pkg.jet found" — `fallback_hint` is that generic message's body for
+/// commands that genuinely have no manifest at all.
+pub(crate) fn require_manifest_root(cwd: &Path, fallback_hint: &str) -> PathBuf {
+    jet::Loader::find_manifest_root(cwd).unwrap_or_else(|| {
+        match jet::Loader::stale_manifest_name_message(cwd) {
+            Some(msg) => eprint!("{}", msg),
+            None => eprintln!("{}", fallback_hint),
+        }
+        exit(ExitCodes::USER_ERROR);
+    })
 }

@@ -1162,10 +1162,43 @@ impl<'a> Checker<'a> {
                     }
                     _ => Type::Int,
                 };
-                return Some(Type::Apply {
+                let ret = Type::Apply {
                     name: "Deque".to_string(),
                     args: vec![elem_ty],
-                });
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            // D-TAG1: `Bag.new()` → `Bag<T>`. T is inferred from the annotation.
+            if type_name == "Bag" && method == "new" && args.is_empty() {
+                let elem_ty = match &self.expected_type {
+                    Some(Type::Apply { name, args, .. }) if name == "Bag" && !args.is_empty() => {
+                        args[0].clone()
+                    }
+                    _ => Type::Int,
+                };
+                if !Collections::is_hashable_type(&elem_ty) {
+                    self.diags.push(Diagnostic::error(
+                        "E0506",
+                        format!(
+                            "`Bag<{}>` is not valid — `{}` is not hashable",
+                            elem_ty.name(),
+                            elem_ty.name()
+                        ),
+                        "Bag elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
+                        format!(
+                            "change the element type to a hashable type, or use a `[{}]` list instead",
+                            elem_ty.name()
+                        ),
+                        Some(span),
+                    ));
+                }
+                let ret = Type::Apply {
+                    name: "Bag".to_string(),
+                    args: vec![elem_ty],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
             }
             // D-PATHFS1: `Path.from(str)` — typed path constructor.
             if type_name == "Path" && method == "from" && !self.registry.contains("Path") {

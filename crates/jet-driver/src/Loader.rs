@@ -334,6 +334,46 @@ pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// D-JPK-FILENAME2=B (A2): walk upward the same way [`find_manifest_root`]
+/// does, but look for a *retired* manifest filename instead of `pkg.jet`.
+/// Stops (returns `None`) the moment a directory has `pkg.jet` — nothing
+/// stale to report once the real manifest is found. Used to upgrade a plain
+/// "no pkg.jet found" message into the E1226 teaching diagnostic when the
+/// user's project still carries an old filename.
+pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join(Syntax::PAYLOAD_FILE).is_file() {
+            return None;
+        }
+        for name in Syntax::STALE_MANIFEST_NAMES {
+            if dir.join(name).is_file() {
+                return Some((dir, name));
+            }
+        }
+        match dir.parent() {
+            Some(p) => dir = p.to_path_buf(),
+            None => return None,
+        }
+    }
+}
+
+/// Render the E1226 `old-manifest-filename` teaching diagnostic for `dir`
+/// carrying the retired manifest name `stale` — or `None` when `start`
+/// carries no retired name (the caller keeps its own "no pkg.jet found"
+/// message in that case).
+pub fn stale_manifest_name_message(start: &Path) -> Option<String> {
+    let (dir, stale) = find_stale_manifest_name(start)?;
+    Some(format!(
+        "Error [E1226]: `{stale}` is not the package manifest name — Jet reads `pkg.jet`\n \
+         Why: the manifest filename is frozen to one spelling (D-JPK-FILES/D-JPK-FILENAME2) so \
+         tooling, docs, and every worked example never have to guess which file to read\n \
+         Fix: rename `{}` to `{}`\n",
+        dir.join(stale).display(),
+        dir.join(Syntax::PAYLOAD_FILE).display(),
+    ))
+}
+
 /// Dry-resolve path dependencies to catch version conflicts (E1201).
 /// Does not fetch, store, or link anything — only loads manifests.
 fn dry_resolve_path_deps(mf: &Manifest::Manifest, project_root: &Path) -> Result<(), Diagnostic> {
@@ -1093,4 +1133,82 @@ fn relative_display(root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
+}
+
+#[cfg(test)]
+mod stale_manifest_name_tests {
+    use super::*;
+
+    fn tempdir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!(
+            "loader-stale-manifest-{tag}-{nanos}-{:?}",
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn finds_pack_jet() {
+        let dir = tempdir("pack");
+        fs::write(dir.join("pack.jet"), "").unwrap();
+        let (found_dir, name) = find_stale_manifest_name(&dir).expect("should find pack.jet");
+        assert_eq!(found_dir, dir);
+        assert_eq!(name, "pack.jet");
+    }
+
+    #[test]
+    fn finds_payload_jet() {
+        let dir = tempdir("payload");
+        fs::write(dir.join("payload.jet"), "").unwrap();
+        let (_, name) = find_stale_manifest_name(&dir).expect("should find payload.jet");
+        assert_eq!(name, "payload.jet");
+    }
+
+    #[test]
+    fn finds_jet_toml() {
+        let dir = tempdir("jettoml");
+        fs::write(dir.join("jet.toml"), "").unwrap();
+        let (_, name) = find_stale_manifest_name(&dir).expect("should find jet.toml");
+        assert_eq!(name, "jet.toml");
+    }
+
+    #[test]
+    fn jetpack_toml_is_not_stale() {
+        // jetpack.toml is a different, still-live file (repo metadata) —
+        // must never be mistaken for a retired manifest name.
+        let dir = tempdir("jetpacktoml");
+        fs::write(dir.join("jetpack.toml"), "").unwrap();
+        assert_eq!(find_stale_manifest_name(&dir), None);
+    }
+
+    #[test]
+    fn pkg_jet_present_means_nothing_stale() {
+        let dir = tempdir("both");
+        fs::write(dir.join("pkg.jet"), "").unwrap();
+        fs::write(dir.join("pack.jet"), "").unwrap();
+        // pkg.jet exists right here — the walk stops with nothing to report,
+        // even though a stale name also happens to sit alongside it.
+        assert_eq!(find_stale_manifest_name(&dir), None);
+    }
+
+    #[test]
+    fn no_manifest_at_all_is_none() {
+        let dir = tempdir("empty");
+        assert_eq!(find_stale_manifest_name(&dir), None);
+    }
+
+    #[test]
+    fn message_names_e1226_and_both_filenames() {
+        let dir = tempdir("message");
+        fs::write(dir.join("pack.jet"), "").unwrap();
+        let msg = stale_manifest_name_message(&dir).expect("message");
+        assert!(msg.contains("E1226"));
+        assert!(msg.contains("pack.jet"));
+        assert!(msg.contains("pkg.jet"));
+    }
 }

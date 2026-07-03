@@ -1001,3 +1001,78 @@ fn expand_compile_error_reports_ordinary_diagnostics() {
         stderr
     );
 }
+
+// ── D-JPK-FILENAME2=B (A2): retired manifest filenames → E1226 ──────
+
+#[test]
+fn stale_manifest_name_pack_jet_is_e1226() {
+    let dir = isolated_cwd("stale_pack_jet");
+    fs::write(dir.join("pack.jet"), "payload: { name: \"x\", version: \"0.1.0\" }\n").unwrap();
+    let out = Command::new(jet())
+        .arg("add")
+        .arg("dep")
+        .arg("--path")
+        .arg("../dep")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
+    assert!(stderr.contains("pack.jet"), "names the found file:\n{stderr}");
+    assert!(stderr.contains("pkg.jet"), "names the fix target:\n{stderr}");
+}
+
+#[test]
+fn stale_manifest_name_jet_toml_is_e1226() {
+    let dir = isolated_cwd("stale_jet_toml");
+    fs::write(dir.join("jet.toml"), "").unwrap();
+    let out = Command::new(jet())
+        .arg("build")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
+    assert!(stderr.contains("jet.toml"), "names the found file:\n{stderr}");
+}
+
+#[test]
+fn stale_manifest_name_payload_jet_is_e1226() {
+    let dir = isolated_cwd("stale_payload_jet");
+    fs::write(dir.join("payload.jet"), "").unwrap();
+    let out = Command::new(jet())
+        .arg("schema")
+        .arg("status")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
+    assert!(stderr.contains("payload.jet"), "names the found file:\n{stderr}");
+}
+
+/// `jetpack.toml` is a different, still-live file (D-JPK-FILES repo
+/// metadata) — it must NOT be mistaken for a retired manifest name.
+#[test]
+fn jetpack_toml_alone_is_not_e1226() {
+    let dir = isolated_cwd("jetpacktoml_not_stale");
+    fs::write(dir.join("jetpack.toml"), "[repo]\nname = \"x\"\n").unwrap();
+    let out = Command::new(jet())
+        .arg("build")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("E1226"),
+        "jetpack.toml is a different live file, not a retired manifest name:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("no file given and no `pkg.jet` found") || stderr.contains("E1225"),
+        "should fall back to the generic no-manifest message:\n{stderr}"
+    );
+}

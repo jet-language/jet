@@ -6,7 +6,7 @@ use super::*;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{AccessConvention, Call, CallArg, Expr, IndexKind, StrPart, Type, UnOp};
+use crate::AST::{AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, UnOp};
 use std::collections::HashSet;
 
 impl<'a> Checker<'a> {
@@ -640,7 +640,29 @@ impl<'a> Checker<'a> {
                 addr,
                 span,
             } => self.infer_ptr_from_addr(alias, *alias_span, elem, addr, *span),
-            Expr::Field(inner, member, span) => self.infer_field(inner, member, *span),
+            Expr::Field(_, _, span) => {
+                let span = *span;
+                // D-TAG1: fold a dotted variant path (`Damage.Fire.Burn`) into an
+                // enum literal so codegen sees one EnumLit node. Single-segment
+                // `Enum.Variant` keeps its existing Field route (unchanged Rust).
+                if let Some((type_name, variant)) = self.fold_enum_variant_path(e) {
+                    if variant.contains('.') {
+                        let ty = self.check_enum_lit(&type_name, &variant, &mut [], span);
+                        *e = Expr::EnumLit {
+                            type_name,
+                            variant,
+                            args: Vec::new(),
+                            span,
+                        };
+                        return Some(ty);
+                    }
+                }
+                let Expr::Field(inner, member, _) = e else {
+                    unreachable!("matched Field above")
+                };
+                let member = member.clone();
+                self.infer_field(inner, &member, span)
+            }
             Expr::OptField {
                 base,
                 member,
@@ -684,6 +706,39 @@ impl<'a> Checker<'a> {
                 recv_type,
                 resolved_ret,
             } => {
+                // D-TAG1: a payload leaf under a group — `Damage.Fire.Burn(5)`
+                // parses as a method call on the `Damage.Fire` field chain. Fold
+                // chain + method into one dotted variant path and rewrite to an
+                // enum literal (single-segment `Enum.Variant(args)` keeps its
+                // existing MethodCall route — receiver is a bare Ident there,
+                // which `fold_enum_variant_path` deliberately does not fold).
+                if recv_type.is_none()
+                    && type_args.is_empty()
+                    && args.iter().all(|a| a.label.is_none())
+                {
+                    if let Some((type_name, prefix)) = self.fold_enum_variant_path(receiver) {
+                        let variant = format!("{prefix}.{}", method);
+                        let span = Span::new(
+                            receiver.span().start,
+                            args.last()
+                                .map(|a| a.span.end)
+                                .unwrap_or(method_span.end)
+                                .max(method_span.end),
+                        );
+                        let mut enum_args: Vec<EnumLitArg> = args
+                            .drain(..)
+                            .map(|a| EnumLitArg::Positional(a.expr))
+                            .collect();
+                        let ty = self.check_enum_lit(&type_name, &variant, &mut enum_args, span);
+                        *e = Expr::EnumLit {
+                            type_name,
+                            variant,
+                            args: enum_args,
+                            span,
+                        };
+                        return Some(ty);
+                    }
+                }
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
                 self.clear_uninit_mut_args(args);
                 self.infer_method_call(

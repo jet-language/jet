@@ -439,6 +439,55 @@ impl<'a> Checker<'a> {
         None
     }
 
+    /// D-TAG1: fold a field chain rooted at an enum type name into
+    /// `(enum_name, dotted_path)` — `Damage.Fire.Burn` → `("Damage",
+    /// "Fire.Burn")`. Returns `None` for a bare `Ident` (no hop — the
+    /// single-segment `Enum.Variant` routes stay untouched), for chains not
+    /// rooted at a known enum, or when a local shadows the type name.
+    pub(crate) fn fold_enum_variant_path(&self, e: &Expr) -> Option<(String, String)> {
+        fn walk<'e>(e: &'e Expr) -> Option<(&'e str, Vec<&'e str>)> {
+            match e {
+                Expr::Ident(name, _) => Some((name, Vec::new())),
+                Expr::Field(inner, member, _) => {
+                    let (root, mut segs) = walk(inner)?;
+                    segs.push(member);
+                    Some((root, segs))
+                }
+                _ => None,
+            }
+        }
+        let (root, segs) = walk(e)?;
+        if segs.is_empty() {
+            return None;
+        }
+        if self.lookup(root).is_some() || !self.is_known_enum(root) {
+            return None;
+        }
+        Some((root.to_string(), segs.join(".")))
+    }
+
+    /// D-TAG1: the enum's variant groups (group path → span + ordered leaf paths),
+    /// resolved like `resolve_enum_variants_cloned` (local registry, then imports).
+    /// `None` when the type isn't an enum; an empty map for a flat enum.
+    pub(crate) fn resolve_enum_groups_cloned(
+        &self,
+        enum_name: &str,
+    ) -> Option<HashMap<String, (Span, Vec<String>)>> {
+        if let Some(g) = self.registry.enum_groups(enum_name) {
+            return Some(g.clone());
+        }
+        if let Some(mods) = self.modules {
+            for &idx in self.imports.values() {
+                if self.type_is_pub_in(idx, enum_name) {
+                    if let Some(g) = mods[idx].registry.enum_groups(enum_name) {
+                        return Some(g.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub(crate) fn same_package_scope(&self, owner_mod: usize) -> bool {
         if owner_mod == self.module_idx {
             return true;
@@ -569,6 +618,14 @@ impl<'a> Checker<'a> {
         };
         let subst = self.struct_subst(type_name, type_args);
         let field_names: Vec<String> = def_fields.iter().map(|(n, ..)| n.clone()).collect();
+        // D-PATCH1: `T.Patch` literals are partial — omitted fields mean "unchanged"
+        // (encoded as `null` / `None`); provided values use the inner field type.
+        let is_patch_lit = type_name
+            .strip_suffix(".Patch")
+            .is_some_and(|base| super::patch_type_name(base) == type_name)
+            && def_fields
+                .iter()
+                .all(|(_, _, ty, _, _)| matches!(ty, Type::Option(_)));
         let mut provided = HashMap::new();
         for (name, name_span, expr) in fields.iter_mut() {
             if provided.insert(name.clone(), ()).is_some() {
@@ -595,7 +652,11 @@ impl<'a> Checker<'a> {
                 && super::CheckerOwnership::ref_field_init_root(expr).is_some();
             if let Some((_, _, fty, _, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
-                self.expected_type = Some(inst);
+                self.expected_type = if is_patch_lit {
+                    inst.unwrap_option().cloned()
+                } else {
+                    Some(inst)
+                };
             }
             if matches!(expr, Expr::Lambda(_)) {
                 self.lambda_escapes = true;
@@ -632,7 +693,13 @@ impl<'a> Checker<'a> {
             if let Some((_, _, fty, _, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 if let Some(et) = et {
-                    self.check_type_assignable(&inst, &et, expr.span());
+                    if is_patch_lit {
+                        if let Some(inner) = inst.unwrap_option() {
+                            self.check_type_assignable(&inner, &et, expr.span());
+                        }
+                    } else {
+                        self.check_type_assignable(&inst, &et, expr.span());
+                    }
                 }
             } else {
                 self.diags.push(Diagnostic::error(
@@ -651,7 +718,7 @@ impl<'a> Checker<'a> {
             .filter(|(n, _, _, is_ref, _)| !*is_ref && !provided.contains_key(n))
             .map(|(n, ..)| n.clone())
             .collect();
-        if !missing.is_empty() {
+        if !missing.is_empty() && !is_patch_lit {
             self.diags.push(Diagnostic::error(
                 "E0303",
                 format!(
@@ -757,6 +824,34 @@ impl<'a> Checker<'a> {
             return ty;
         };
         let Some((_, payload)) = variants.get(variant) else {
+            // D-TAG1: a group name in value position — a value is always a leaf.
+            if let Some((_, leaves)) = self
+                .resolve_enum_groups_cloned(type_name)
+                .and_then(|g| g.get(variant).cloned())
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0332",
+                    format!("`{}` is a group, not a value", variant),
+                    "a group names its whole subtree in patterns; an actual value is always a leaf variant (D-TAG1)".to_string(),
+                    format!(
+                        "pick a leaf: {}",
+                        leaves
+                            .iter()
+                            .map(|l| format!("`{type_name}.{l}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    match a {
+                        EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => {
+                            self.infer(e);
+                        }
+                    }
+                }
+                return ty;
+            }
             let mut fix = "check the variant name".to_string();
             if let Some(s) = suggest_field(variant, &variants.keys().cloned().collect::<Vec<_>>()) {
                 fix = format!("did you mean `{}`?", s);
@@ -908,7 +1003,11 @@ impl<'a> Checker<'a> {
         };
         let variant_known = self
             .resolve_enum_variants_cloned(enum_name)
-            .is_some_and(|variants| variants.contains_key(variant));
+            .is_some_and(|variants| variants.contains_key(variant))
+            // D-TAG1: a group name is pattern-shaped too (matches its subtree).
+            || self
+                .resolve_enum_groups_cloned(enum_name)
+                .is_some_and(|groups| groups.contains_key(variant));
         if !variant_known {
             return None;
         }
@@ -960,9 +1059,15 @@ impl<'a> Checker<'a> {
                     return None;
                 };
                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
-                let (_, payload) = variants.get(variant.as_str())?;
-                if !matches!(payload, crate::AST::VariantPayload::Unit) {
-                    return None;
+                // D-TAG1: a bare group name is a unit-shaped subtree pattern.
+                let is_group = self
+                    .resolve_enum_groups_cloned(enum_name)
+                    .is_some_and(|g| g.contains_key(variant.as_str()));
+                if !is_group {
+                    let (_, payload) = variants.get(variant.as_str())?;
+                    if !matches!(payload, crate::AST::VariantPayload::Unit) {
+                        return None;
+                    }
                 }
                 // Only accept if the variant is NOT a live local (avoids shadowing).
                 if self.lookup(variant).is_some() {
@@ -1344,6 +1449,27 @@ impl<'a> Checker<'a> {
                     return HashMap::new();
                 };
                 let Some((_, payload)) = variants.get(variant) else {
+                    // D-TAG1: a group name matches its whole subtree — a unit-shaped
+                    // pattern with no bindings (groups carry no payload, E0331).
+                    if self
+                        .resolve_enum_groups_cloned(enum_name)
+                        .is_some_and(|g| g.contains_key(variant))
+                    {
+                        if !bindings.is_empty() {
+                            self.diags.push(Diagnostic::error(
+                                "E0306",
+                                format!(
+                                    "pattern `{}` expects 0 bindings, got {}",
+                                    variant,
+                                    bindings.len()
+                                ),
+                                "a group has no payload of its own — payloads live on leaf variants (D-TAG1)".to_string(),
+                                format!("write `.{}` with no `(...)`, or match a specific leaf to bind its payload", variant),
+                                Some(span),
+                            ));
+                        }
+                        return HashMap::new();
+                    }
                     self.diags.push(Diagnostic::error(
                         "E0305",
                         format!("pattern `{}` doesn't belong to `{}`", variant, enum_name),

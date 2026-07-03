@@ -11,6 +11,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_MAP,
     Syntax::TYPE_CHAR,
     "Set",
+    "Bag",
     "Deque",
     Syntax::TYPE_BIGINT,
     Syntax::TYPE_DECIMAL,
@@ -112,6 +113,10 @@ pub fn builtin_method_return(
         // D-COLLBREADTH1=A: Set<T> and Deque<T>.
         Type::Apply { name, args } if name == "Set" => {
             set_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        // D-TAG1: Bag<T> counted multiset.
+        Type::Apply { name, args } if name == "Bag" => {
+            bag_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         Type::Apply { name, args } if name == "Deque" => {
             deque_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
@@ -576,6 +581,19 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
     }
 }
 
+/// D-TAG1: `Bag<T>` methods (counted multiset backed by `HashMap<T, usize>`).
+fn bag_method_return(_elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("add" | "remove", 1) => Some(None),
+        ("has", 1) => Some(Some(Type::Bool)),
+        ("count", 1) => Some(Some(Type::Int)),
+        ("any", 1) => Some(Some(Type::Bool)),
+        _ => None,
+    }
+}
+
 /// D-COLLBREADTH1=A: `Deque<T>` methods (ring-buffer double-ended queue).
 fn deque_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
@@ -599,6 +617,10 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Map { .. } => matches!(method, "insert" | "remove" | "clear"),
         // D-COLLBREADTH1=A: Set mutating methods.
         Type::Apply { name, .. } if name == "Set" => {
+            matches!(method, "add" | "remove" | "clear")
+        }
+        // D-TAG1: Bag mutating methods.
+        Type::Apply { name, .. } if name == "Bag" => {
             matches!(method, "add" | "remove" | "clear")
         }
         // D-COLLBREADTH1=A: Deque mutating methods.
@@ -760,6 +782,19 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 "union" => Some(vec![Type::Apply {
                     name: "Set".to_string(),
                     args: vec![elem],
+                }]),
+                _ => Some(vec![]),
+            }
+        }
+        // D-TAG1: Bag<T> arg types.
+        Type::Apply { name, args } if name == "Bag" => {
+            let elem = args.first().cloned().unwrap_or(Type::Int);
+            match method {
+                "add" | "remove" | "has" | "count" => Some(vec![elem]),
+                "any" => Some(vec![Type::Fn {
+                    params: vec![elem],
+                    ret: Some(Box::new(Type::Bool)),
+                    effect_bound: None,
                 }]),
                 _ => Some(vec![]),
             }

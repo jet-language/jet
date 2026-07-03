@@ -3157,6 +3157,7 @@ impl<'a> Parser<'a> {
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LBrace, "to open the enum body")?;
         let mut variants = Vec::new();
+        let mut groups = Vec::new();
         let mut methods = Vec::new();
         let mut trait_impls = Vec::new();
         let mut derives = Vec::new();
@@ -3168,9 +3169,7 @@ impl<'a> Parser<'a> {
             // D-SERDE5/7: `#[Rename("x")]` on a variant — variant-level serde markers.
             if self.at_marker_list() {
                 let variant_markers = self.parse_marker_groups()?;
-                let mut v = self.variant()?;
-                v.serde_markers = variant_markers;
-                variants.push(v);
+                self.variant_entry("", &mut variants, &mut groups, variant_markers)?;
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
@@ -3183,7 +3182,7 @@ impl<'a> Parser<'a> {
             } else if matches!(self.peek().kind, TokKind::KwFn | TokKind::KwPub) {
                 methods.push(self.method_in_type()?);
             } else {
-                variants.push(self.variant()?);
+                self.variant_entry("", &mut variants, &mut groups, Vec::new())?;
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
@@ -3206,25 +3205,98 @@ impl<'a> Parser<'a> {
             must_use_span: None,
             serde_markers: Vec::new(),
             type_markers: Vec::new(),
+            groups,
         })
     }
 
-    fn variant(&mut self) -> Result<Variant, Diagnostic> {
+    /// D-TAG1 (ratified 2026-07-03): parse one enum-body entry — a leaf variant
+    /// or a variant group `Name { … }`. Leaves are recorded flat with their full
+    /// dotted path (`prefix.Name`); each group path is recorded in `groups` so
+    /// sema and the formatter see the tree. Groups nest to any depth. Payloads
+    /// live on leaves only (E0331).
+    fn variant_entry(
+        &mut self,
+        prefix: &str,
+        variants: &mut Vec<crate::AST::Variant>,
+        groups: &mut Vec<crate::AST::EnumGroup>,
+        serde_markers: Vec<crate::AST::Marker>,
+    ) -> Result<(), Diagnostic> {
         let (name, name_span) = self.expect_ident("for a variant name")?;
+        let path = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}.{name}")
+        };
         let payload = if matches!(self.peek().kind, TokKind::LParen) {
-            self.bump();
+            let payload_start = self.bump().span; // consume `(`
             let payload = self.variant_payload()?;
             self.expect(TokKind::RParen, "after a variant's payload")?;
-            payload
+            let payload_end = self.toks[self.pos.saturating_sub(1)].span.end;
+            if matches!(self.peek().kind, TokKind::LBrace) {
+                // D-TAG1: a payload on a group name — payloads live on leaves only.
+                self.diags.push(Diagnostic::error(
+                    "E0331",
+                    format!("group `{}` can't carry a payload", path),
+                    "a variant group only names its subtree — data lives on the leaf variants (D-TAG1)".to_string(),
+                    "move the payload onto the leaf variants inside the `{ }`, or remove the `(...)`".to_string(),
+                    Some(Span::new(payload_start.start, payload_end)),
+                ));
+                VariantPayload::Unit
+            } else {
+                payload
+            }
         } else {
             VariantPayload::Unit
         };
-        Ok(Variant {
-            name,
-            name_span,
-            payload,
-            serde_markers: Vec::new(),
-        })
+        if !matches!(self.peek().kind, TokKind::LBrace) {
+            variants.push(Variant {
+                name: path,
+                name_span,
+                payload,
+                serde_markers,
+            });
+            return Ok(());
+        }
+        // A variant group: `Name { entry (,|newline entry)* }`.
+        self.bump(); // consume `{`
+        if !serde_markers.is_empty() {
+            self.diags.push(Diagnostic::error(
+                "E0003",
+                format!("a `#[…]` marker can't sit on group `{}`", path),
+                "serde markers rename wire names, and only leaf variants reach the wire (D-TAG1)"
+                    .to_string(),
+                "move the marker onto a leaf variant inside the `{ }`".to_string(),
+                Some(name_span),
+            ));
+        }
+        let leaves_before = variants.len();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi | TokKind::Comma) {
+                self.bump();
+                continue;
+            }
+            let entry_markers = if self.at_marker_list() {
+                self.parse_marker_groups()?
+            } else {
+                Vec::new()
+            };
+            self.variant_entry(&path, variants, groups, entry_markers)?;
+            if matches!(self.peek().kind, TokKind::Semi | TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the variant group")?;
+        if variants.len() == leaves_before {
+            self.diags.push(Diagnostic::error(
+                "E0003",
+                format!("group `{}` has no variants", path),
+                "an empty group can never match anything — every group needs at least one leaf variant (D-TAG1)".to_string(),
+                "add a variant inside the `{ }`, or remove the group".to_string(),
+                Some(name_span),
+            ));
+        }
+        groups.push(crate::AST::EnumGroup { path, name_span });
+        Ok(())
     }
 
     fn variant_payload(&mut self) -> Result<VariantPayload, Diagnostic> {

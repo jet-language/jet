@@ -263,7 +263,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--swap", help: "with dev/serve: hot-swap type-stable edits, restart on type change (c77)" },
     FlagSpec { long: "--watch", help: "with dev/serve: --watch=off runs once and exits (c77)" },
     // E2-M18 REPL flags.
-    FlagSpec { long: "--project", help: "with repl: load pack.jet from this directory for import context (D-REPL10)" },
+    FlagSpec { long: "--project", help: "with repl: load pkg.jet from this directory for import context (D-REPL10)" },
     // E2-M16 flags.
     FlagSpec { long: "--pure", help: "with eval: require the program to be pure (S60 / D-PURE2)" },
     FlagSpec { long: "--freestanding", help: "with build/run: no OS; rejects std-only APIs (E2-M15)" },
