@@ -68,7 +68,22 @@ pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 
 pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     let _ = src;
-    compile_bundle_path(file, Sema::CompileMode::Run)
+    compile_bundle_path(file, Sema::CompileMode::Run, None)
+}
+
+/// Like `compile_with_path`, but threads a `--target=<triple>` (or `None`)
+/// through to codegen's native OS-target gating (D-OSTARGET1=A, ratified
+/// 2026-07-01, c134) — an `impl` gated to a different `#Target(Os.*)` than
+/// the resolved active OS is skipped entirely. `jet build`/`jet run`'s real
+/// `--target=` flag is the only caller; `compile_with_path` keeps its
+/// existing host-OS-default behavior unchanged for every other caller.
+pub fn compile_with_target(
+    src: &str,
+    file: &str,
+    cross_target: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    let _ = src;
+    compile_bundle_path(file, Sema::CompileMode::Run, cross_target)
 }
 
 /// Front-end check for a file on disk (and its imports). Library modules
@@ -89,20 +104,21 @@ pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
 fn compile_bundle_path(
     file: &str,
     mode: Sema::CompileMode,
+    cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, mode, false, false, false)
+    compile_bundle_path_opts(file, mode, false, false, false, cross_target)
 }
 
 /// Like `compile_with_path` but with `--freestanding` mode (E2-M15).
 /// Rejects OS-dependent std APIs (E3301) and emits `panic = "abort"` hint.
 pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, false, false)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, false, false, None)
 }
 
 /// Like `compile_with_path` but with `--allow-impure` (D-CTEFFECT1).
 /// Enables Tier-2 ambient comptime effects inside `#Impure` gates.
 pub fn compile_allow_impure(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true, false)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true, false, None)
 }
 
 fn compile_bundle_path_opts(
@@ -111,20 +127,36 @@ fn compile_bundle_path_opts(
     freestanding: bool,
     allow_impure: bool,
     web_target: bool,
+    cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_opts(file, mode, freestanding, allow_impure, web_target)
+    Driver::compile_bundle_path_opts(
+        file,
+        mode,
+        freestanding,
+        allow_impure,
+        web_target,
+        cross_target,
+    )
 }
 
 /// Like `compile_with_path` but for `jet build --target=web` (D-WEBBACKEND1 M2).
 pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, false, true)
+    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, false, true, None)
 }
 
 /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
 /// normal build with `debug_linemap = true`, so the generated Rust carries the
 /// `// jet:line N` table `Source/Debug/LineMap.rs` reads back.
 pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    Driver::compile_bundle_path_opts_dbg(file, Sema::CompileMode::Run, false, false, false, true)
+    Driver::compile_bundle_path_opts_dbg(
+        file,
+        Sema::CompileMode::Run,
+        false,
+        false,
+        false,
+        true,
+        None,
+    )
 }
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`

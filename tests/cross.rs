@@ -140,3 +140,91 @@ fn e3301_snapshot() {
         );
     }
 }
+
+// ── D-OSTARGET1=A: native OS platform gating (c134 Phase 9.3) ───────────────
+
+/// `#Target(Os.Linux)` / `#Target(Os.Macos)` impls, both present in source —
+/// only the `impl` matching `--target=<triple>`'s OS reaches the generated
+/// Rust (mirrors how `Codegen/Web.rs` filters function membership by
+/// `WebBucket`, E2-M15's cross-compile flag reused, no new flag). The
+/// compiler-synthesized `JetShow`/`JetDebug`/`JetDisplay` impls for both
+/// structs are NOT filtered (only the user's own OS-gated `impl` is) — this
+/// asserts on the specific `impl user_Backend for user_<Type>` line, not a
+/// bare substring count of the type name.
+fn os_target_gating_path() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/lowlevel/os_target_gating.jet")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn os_target_gating_src() -> String {
+    fs::read_to_string(os_target_gating_path()).unwrap()
+}
+
+#[test]
+fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
+    let src = os_target_gating_src();
+    let file = os_target_gating_path();
+    let out = jet::compile_with_target(&src, &file, Some("x86_64-unknown-linux-gnu"))
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected os_target_gating.jet:\n{}",
+                jet::render_diagnostics(&file, &src, &diags)
+            )
+        });
+    assert!(
+        out.rust.contains("impl user_Backend for user_LinuxBackend"),
+        "Linux triple should keep the Os.Linux impl:\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("impl user_Backend for user_MacosBackend"),
+        "Linux triple should strip the Os.Macos impl:\n{}",
+        out.rust
+    );
+}
+
+#[test]
+fn os_target_gating_emits_only_macos_impl_for_macos_triple() {
+    let src = os_target_gating_src();
+    let file = os_target_gating_path();
+    let out = jet::compile_with_target(&src, &file, Some("aarch64-apple-darwin")).unwrap_or_else(
+        |diags| {
+            panic!(
+                "front end rejected os_target_gating.jet:\n{}",
+                jet::render_diagnostics(&file, &src, &diags)
+            )
+        },
+    );
+    assert!(
+        out.rust.contains("impl user_Backend for user_MacosBackend"),
+        "macOS triple should keep the Os.Macos impl:\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("impl user_Backend for user_LinuxBackend"),
+        "macOS triple should strip the Os.Linux impl:\n{}",
+        out.rust
+    );
+}
+
+#[test]
+fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
+    let src = os_target_gating_src();
+    let file = os_target_gating_path();
+    let out = jet::compile_with_target(&src, &file, None).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected os_target_gating.jet:\n{}",
+            jet::render_diagnostics(&file, &src, &diags)
+        )
+    });
+    // This repo's dev shell / CI host is Linux (see env: `jet::OsTarget::host()`).
+    let host_is_linux = jet::Syntax::OsTarget::host() == jet::Syntax::OsTarget::Linux;
+    assert_eq!(
+        out.rust.contains("impl user_Backend for user_LinuxBackend"),
+        host_is_linux,
+        "no --target= should default to the host OS:\n{}",
+        out.rust
+    );
+}

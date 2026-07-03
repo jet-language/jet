@@ -1,11 +1,14 @@
 use super::*;
 
-/// D-WEBDEFAULT1 (open, c134): what a `#Target(…)` marker parsed to — a
-/// partition-ceiling `Bucket` (`Wasm`/`Js`, existing D-WASM1 meaning) or
-/// `DefaultWeb` (`Web` — this file's default CLI backend, a different axis).
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): what a `#Target(…)` marker parsed to — a
+/// partition-ceiling `Bucket` (`Wasm`/`Js`, existing D-WASM1 meaning),
+/// `DefaultWeb` (`Web` — this file's default CLI backend, a different axis),
+/// or `Os` (D-OSTARGET1=A: `Os.Linux`/`Os.Macos`/`Os.Windows` — the native
+/// platform-gating axis, item-scoped rather than file/module-scoped).
 pub(super) enum TargetMarker {
     Bucket(crate::Syntax::WebBucket),
     DefaultWeb,
+    Os(crate::Syntax::OsTarget),
 }
 
 impl<'a> Parser<'a> {
@@ -427,13 +430,25 @@ impl<'a> Parser<'a> {
                         web_target_ceiling = Some(target);
                         continue;
                     }
+                    // D-OSTARGET1=A: `#Target(Os.X)` attaches to the `impl` block
+                    // that immediately follows — item scope, not file scope.
+                    Ok(TargetMarker::Os(os)) => {
+                        match self.os_gated_impl(os) {
+                            Ok(item) => items.push(item),
+                            Err(d) => {
+                                self.diags.push(d);
+                                self.sync_top();
+                            }
+                        }
+                        continue;
+                    }
                     Err(d) => {
                         self.diags.push(d);
                         self.sync_top();
                         continue;
                     }
                 },
-                // D-HTMLPAIR1 (open, c134): `#Html("path.html")` — explicit
+                // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — explicit
                 // companion host page for `--target=web` builds.
                 TokKind::Hash if self.at_html_marker() => match self.parse_html_marker() {
                     Ok(path) => {
@@ -1015,6 +1030,7 @@ impl<'a> Parser<'a> {
                         methods: vec![f],
                         delegation_field: None,
                         assoc_type_impls: Vec::new(),
+                        os_target: None,
                     })
                 } else {
                     Item::Func(f)
@@ -2088,14 +2104,14 @@ impl<'a> Parser<'a> {
             && matches!(self.peek3().kind, TokKind::LParen)
     }
 
-    /// D-HTMLPAIR1 (open, c134): detect `#Html(`.
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): detect `#Html(`.
     pub(super) fn at_html_marker(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_HTML)
             && matches!(self.peek3().kind, TokKind::LParen)
     }
 
-    /// D-HTMLPAIR1 (open, c134): parse `#Html("path.html")` — the file's
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#Html("path.html")` — the file's
     /// explicit companion host page for `--target=web` builds.
     pub(super) fn parse_html_marker(&mut self) -> Result<String, Diagnostic> {
         self.bump(); // `#`
@@ -2139,15 +2155,42 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-WASM1=A / D-WEBDEFAULT1 (open, c134): `#Target(Wasm)` / `#Target(Js)`
+    /// D-WASM1=A / D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Wasm)` / `#Target(Js)`
     /// (a partition ceiling) or `#Target(Web)` (this file's default CLI
     /// backend — a different axis, same marker).
     pub(super) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
         self.bump(); // `#`
         self.bump(); // `Target`
         self.expect(TokKind::LParen, "after `#Target`")?;
-        let (name, name_span) =
-            self.expect_ident("the partition name inside `#Target(…)` (`Wasm`, `Js`, or `Web`)")?;
+        let (name, name_span) = self.expect_ident(
+            "the partition name inside `#Target(…)` (`Wasm`, `Js`, `Web`, or `Os.Linux`/`Os.Macos`/`Os.Windows`)",
+        )?;
+        // D-OSTARGET1=A: `#Target(Os.Linux|Os.Macos|Os.Windows)` — the second,
+        // mutually-exclusive axis (native platform gating on an `impl`).
+        if name == crate::Syntax::TARGET_OS_NAMESPACE {
+            self.expect(TokKind::Dot, "after `Os` inside `#Target(Os. … )`")?;
+            let (os_name, os_span) = self.expect_ident(
+                "the OS name inside `#Target(Os. … )` (`Linux`, `Macos`, or `Windows`)",
+            )?;
+            self.expect(TokKind::RParen, "to close `#Target(…)`")?;
+            return crate::Syntax::OsTarget::parse(&os_name)
+                .map(TargetMarker::Os)
+                .ok_or_else(|| {
+                    Diagnostic::error(
+                        "E0003",
+                        format!("`#Target(Os.{os_name})` is not a known native OS"),
+                        "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`"
+                            .to_string(),
+                        format!(
+                            "write `#Target(Os.{})`, `#Target(Os.{})`, or `#Target(Os.{})`",
+                            Syntax::TARGET_OS_LINUX,
+                            Syntax::TARGET_OS_MACOS,
+                            Syntax::TARGET_OS_WINDOWS,
+                        ),
+                        Some(os_span),
+                    )
+                });
+        }
         self.expect(TokKind::RParen, "to close `#Target(…)`")?;
         if name == crate::Syntax::WEB_TARGET_DEFAULT_WEB {
             return Ok(TargetMarker::DefaultWeb);
@@ -2158,10 +2201,10 @@ impl<'a> Parser<'a> {
                 Diagnostic::error(
                 "E0003",
                 format!("`#Target({name})` is not a known web partition"),
-                "web targets are `Wasm` (compute), `Js` (DOM/view), or `Web` (default CLI backend)"
+                "web targets are `Wasm` (compute), `Js` (DOM/view), `Web` (default CLI backend), or `Os.Linux`/`Os.Macos`/`Os.Windows` (native platform gating)"
                     .to_string(),
                 format!(
-                    "write `#Target({})`, `#Target({})`, or `#Target({})`",
+                    "write `#Target({})`, `#Target({})`, `#Target({})`, or `#Target(Os.{{Linux|Macos|Windows}})`",
                     Syntax::WEB_BUCKET_WASM,
                     Syntax::WEB_BUCKET_JS,
                     Syntax::WEB_TARGET_DEFAULT_WEB,
@@ -3298,6 +3341,7 @@ impl<'a> Parser<'a> {
                     methods: Vec::new(),
                     delegation_field: Some(field),
                     assoc_type_impls: Vec::new(),
+                    os_target: None,
                 }));
             }
         }
@@ -3335,7 +3379,47 @@ impl<'a> Parser<'a> {
             methods,
             delegation_field: None,
             assoc_type_impls,
+            os_target: None,
         }))
+    }
+
+    /// D-OSTARGET1=A: parse the `impl` block that must follow a `#Target(Os.X)`
+    /// marker and attach `os` to it. Reuses `impl_or_error_conv` (same grammar,
+    /// same `impl Type.Trait { … }` / delegation / error-conversion forms) and
+    /// stamps the OS gate onto the resulting `ImplDef` afterward — no need to
+    /// thread a new parameter through every `impl` parse path or its other
+    /// caller (`Modules.rs`'s inline-module item loop calls this same helper).
+    pub(super) fn os_gated_impl(&mut self, os: crate::Syntax::OsTarget) -> Result<Item, Diagnostic> {
+        // S6-R: a synthetic statement-terminator `;` may follow the marker
+        // line (same as the `TokKind::Semi` skip at the top of the top-level
+        // item loop) — swallow it before checking what actually follows.
+        while matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        if !matches!(self.peek().kind, TokKind::KwImpl) {
+            let span = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("`#Target(Os.{})` isn't valid here", os.name()),
+                "`Os.Linux`/`Os.Macos`/`Os.Windows` gates a whole `impl` block, not a module, function, or any other item".to_string(),
+                format!("write `#Target(Os.{}) impl Type.Trait {{ … }}`", os.name()),
+                Some(span),
+            ));
+        }
+        match self.impl_or_error_conv()? {
+            Item::Impl(mut i) => {
+                i.os_target = Some(os);
+                Ok(Item::Impl(i))
+            }
+            Item::ErrorConv(ec) => Err(Diagnostic::error(
+                "E0003",
+                format!("`#Target(Os.{})` isn't valid on an error-conversion `impl`", os.name()),
+                "`impl Source -> Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
+                format!("remove the `#Target(Os.{})` marker", os.name()),
+                Some(ec.from_span),
+            )),
+            other => Ok(other),
+        }
     }
 
     /// S28: `impl Trait { … }` inside a struct/enum body.

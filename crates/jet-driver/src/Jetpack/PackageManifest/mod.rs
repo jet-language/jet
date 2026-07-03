@@ -116,7 +116,7 @@ pub struct PackageMeta {
     pub jet_constraint: Option<String>,
     /// D-RINGLAYER1=A: optional runtime-layer ceiling (`core` / `alloc` / `std`).
     pub layer: Option<crate::Syntax::RuntimeLayer>,
-    /// D-WEBDEFAULT1 (open, c134): `target: "web"` — this package's default
+    /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `target: "web"` — this package's default
     /// CLI backend, the manifest-level counterpart to a loose file's
     /// `#Target(Web)` marker. `--target=<x>` on the command line still wins.
     pub target: Option<String>,

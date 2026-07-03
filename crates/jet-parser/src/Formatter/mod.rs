@@ -78,6 +78,42 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
         f.newline();
     }
+    // D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — the file's
+    // default CLI backend. D-WASM1: `#Target(Wasm)`/`#Target(Js)` — the file's
+    // web partition ceiling. Neither carries a span (single-instance file
+    // markers, same treatment as `#PubFile` above), so — like `#PubFile` —
+    // this fixed post-import position is canonical, not a preservation of
+    // wherever the author originally wrote it in the source.
+    if prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB) {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
+        f.write(&format!(
+            "#{}({})",
+            Syntax::ATTR_TARGET,
+            Syntax::WEB_TARGET_DEFAULT_WEB
+        ));
+        f.newline();
+    }
+    if let Some(bucket) = prog.web_target_ceiling {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
+        f.write(&format!("#{}({})", Syntax::ATTR_TARGET, bucket.name()));
+        f.newline();
+    }
+    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — the
+    // file's explicit companion host page.
+    if let Some(html_path) = &prog.html_path {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
+        f.write(&format!("#{}(\"{}\")", Syntax::ATTR_HTML, html_path));
+        f.newline();
+    }
     for item in &prog.items {
         if !first {
             f.blank_separator_before_item();

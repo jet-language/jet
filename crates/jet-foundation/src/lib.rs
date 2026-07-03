@@ -6,6 +6,7 @@ pub mod Diagnostics;
 pub mod Generics;
 pub mod JitBackend;
 pub mod Numeric;
+pub mod OsTarget;
 pub mod RingLayer;
 pub mod SHA256;
 pub mod Syntax;

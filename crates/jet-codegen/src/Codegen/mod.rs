@@ -645,6 +645,10 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
                 }
             }
             Item::Impl(i) => {
+                // D-OSTARGET1=A: skip an `impl` gated to a non-active native OS.
+                if i.os_target.is_some_and(|os| os != cx.active_os) {
+                    continue;
+                }
                 if i.trait_name.is_some() {
                     emit_external_trait_impl(&cx, i, &mut out);
                 } else {
@@ -759,6 +763,10 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
                 }
             }
             Item::Impl(i) => {
+                // D-OSTARGET1=A: skip an `impl` gated to a non-active native OS.
+                if i.os_target.is_some_and(|os| os != cx.active_os) {
+                    continue;
+                }
                 if i.trait_name.is_some() {
                     emit_external_trait_impl(&cx, i, &mut out);
                 } else {
@@ -978,7 +986,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 }
 
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
-    emit_bundle_dbg(bundle, link, false)
+    emit_bundle_dbg(bundle, link, false, Syntax::OsTarget::host())
 }
 
 /// D-DBG3 step 2 (dap-debugger): identical to `emit_bundle`, but with
@@ -986,10 +994,16 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
 /// (`TStmt::LineMarker`) the native debug backend's line table reads back. Used ONLY
 /// by the `jet debug` native build path; `emit_bundle` (linemap off) stays
 /// byte-identical to today's output for every other build (golden tests, JIT).
+///
+/// D-OSTARGET1=A (ratified 2026-07-01, c134): `active_os` is the resolved
+/// native OS bucket this build targets (from `--target=<triple>`, or the host
+/// OS when absent) — an `impl` gated to a different `#Target(Os.*)` is
+/// skipped entirely (`Codegen/Imports.rs::emit_program_items`).
 pub fn emit_bundle_dbg(
     bundle: &ProgramBundle,
     link: Option<&FfiLink>,
     debug_linemap: bool,
+    active_os: Syntax::OsTarget,
 ) -> String {
     let entry = &bundle.modules[bundle.entry];
     let mut out = String::new();
@@ -1046,6 +1060,7 @@ pub fn emit_bundle_dbg(
         cx.core_imports = core_import_map(bundle, i);
         cx.used_core = bundle.used_core.clone();
         cx.root_prefix = "super::".to_string();
+        cx.active_os = active_os;
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
         cx.unqualified_file = ufile;
@@ -1061,6 +1076,7 @@ pub fn emit_bundle_dbg(
         &extern_funcs,
     );
     cx.debug_linemap = debug_linemap;
+    cx.active_os = active_os;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
     register_foreign_enum_variants(&mut cx, bundle, bundle.entry);

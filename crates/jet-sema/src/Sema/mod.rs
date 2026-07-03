@@ -798,6 +798,7 @@ mod Diagnostics;
 mod Effects;
 mod FFI;
 pub mod HotSwap;
+mod OsTarget;
 mod Protocol;
 mod Purity;
 mod Registration;
@@ -822,6 +823,8 @@ pub(crate) use FFI::*;
 pub(crate) use State::{check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
 pub(crate) use WebPartition::check_web_partition;
+// D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
+pub(crate) use OsTarget::check_os_target;
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{

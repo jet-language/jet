@@ -1610,3 +1610,37 @@ fn main() {
 ";
     assert_fmt_stable(src, "inline contracts");
 }
+
+// ── D-WEBDEFAULT1 / D-HTMLPAIR1 / D-OSTARGET1 formatter round-trip (c134 Phase 9) ──
+//
+// Formatter round-trip is required for new syntax, not optional (house
+// lesson: a past miss here silently corrupted syntax for months). Before
+// this fix, `#Target(Web)` / `#Html(...)` / `#Target(Os.*)` markers were
+// silently DROPPED by `jet fmt` — no error, just gone.
+
+#[test]
+fn fmt_target_web_marker_stability() {
+    // D-WEBDEFAULT1=A: `#Target(Web)` is a singleton file marker with no
+    // captured span (same treatment as `#PubFile`) — it renders at a fixed
+    // canonical position right after imports, not wherever the author
+    // originally wrote it.
+    let src = "use core.io as io\n#Target(Web)\n\nfn main() {\n    io.print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#Target(Web) marker");
+}
+
+#[test]
+fn fmt_html_marker_stability() {
+    // D-HTMLPAIR1=A: `#Html(\"path.html\")` — same marker family as
+    // `#Target(Web)`, same fixed-position treatment.
+    let src = "use core.ui as ui\n#Target(Web)\n\n#Html(\"dashboard.html\")\n\nfn main() {\n    ui.print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#Html(...) marker");
+}
+
+#[test]
+fn fmt_os_target_marker_stability() {
+    // D-OSTARGET1=A: `#Target(Os.Linux)` precedes the `impl` block it gates,
+    // on its own line — item-scoped, not file-scoped, so (unlike the two
+    // markers above) it keeps the author's own position.
+    let src = "trait Backend {\n    fn label(self) -> String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(Os.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) -> String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn main() {\n    print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#Target(Os.Linux) marker");
+}

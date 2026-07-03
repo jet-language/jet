@@ -1065,7 +1065,10 @@ takes `Web`/`Browser`/`Wasm`/`Js` and `Os.Linux`/`Os.Macos`/`Os.Windows`
 (mixing web+OS on one item rejected). Default target: CLI `--target` >
 `pkg.jet` `target:` > file marker. `#Html("path.html")` names a companion
 page (explicit > sibling `<stem>.html` > generated; missing path = build
-error). *(formatter emission for `#Target`/`#Html` still owed)*
+error). `Os.*` gates a single `impl` block (item-scoped), not a file/module —
+`E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it; native
+backend impls behind it (Phase 8) still need a devShell/toolkit-dependency
+gate first.
 
 **D-OBS1 / D-OBS3 — Observability**: source maps + Jet-line panic reports;
 OTel-aligned std-only structured logs/metrics; exporters are FFI-wrapped

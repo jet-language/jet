@@ -423,7 +423,7 @@ pub struct Program {
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
     pub pub_file: bool,
-    /// D-WEBDEFAULT1 (open, c134): `#Target(Web)` — this file's default CLI
+    /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — this file's default CLI
     /// backend is the web target, so `jet run`/`jet dev`/`jet build` don't
     /// need `--target=web` on every invocation. `None` means the native
     /// default applies unless `pkg.jet` or an explicit `--target=` flag says
@@ -431,7 +431,7 @@ pub struct Program {
     /// ceiling *within* a web build) — `Web` here means "build for the web
     /// backend at all," a different axis, same marker family (I8).
     pub default_target: Option<String>,
-    /// D-HTMLPAIR1 (open, c134): `#Html("path.html")` — this program's
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this program's
     /// companion host page for `--target=web` builds, explicit instead of
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
@@ -570,7 +570,7 @@ pub struct LoadedModule {
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
     pub pub_file: bool,
-    /// D-HTMLPAIR1 (open, c134): `#Html("path.html")` — this file's explicit
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,
 }
@@ -1598,6 +1598,12 @@ pub struct ImplDef {
     pub delegation_field: Option<String>,
     /// D-LIB2: `type Name = ConcreteType;` in top-level impl blocks.
     pub assoc_type_impls: Vec<(String, Span, Type)>,
+    /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os.Linux|Os.Macos|Os.Windows)`
+    /// before this `impl` block — native OS gating (Phase 8 native backends).
+    /// `None` means this impl compiles for every OS. Only ratified at item
+    /// (impl) scope, not per-function — the ballot's worked example gates
+    /// whole backend impls, never individual methods.
+    pub os_target: Option<crate::OsTarget::OsTarget>,
 }
 
 #[derive(Debug, Clone)]

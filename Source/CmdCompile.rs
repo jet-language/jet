@@ -142,7 +142,10 @@ pub(crate) fn run_compile_cmd(
     } else if allow_impure {
         jet::compile_allow_impure(file)
     } else {
-        jet::compile_with_path(&src, file)
+        // D-OSTARGET1=A: thread the real `--target=<triple>` through so
+        // codegen only emits/links `#Target(Os.*)`-gated impls for the OS
+        // that triple builds for (host OS when the flag is absent).
+        jet::compile_with_target(&src, file, cross_target)
     };
     let (rust_code, ffi_link, clinks, capabilities, web_out, web_partition_report) =
         match compile_result {
@@ -917,7 +920,7 @@ pub(crate) fn write_web_artifacts(
     let wasm_rs_path = out_dir.join("app_wasm.rs");
     let wasm_path = out_dir.join("app.wasm");
     let html_path = out_dir.join("index.html");
-    // D-HTMLPAIR1 (open, c134): precedence for the served HTML source —
+    // D-HTMLPAIR1 (ratified 2026-07-01, c134): precedence for the served HTML source —
     // (1) an explicit `#Html("path.html")` marker, relative to the source
     //     file's own directory; a path that doesn't resolve is a hard error
     //     naming the missing file, never a silent fallback;

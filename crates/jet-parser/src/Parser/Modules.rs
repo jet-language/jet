@@ -158,6 +158,17 @@ impl<'a> Parser<'a> {
                         Some(span),
                     ));
                 }
+                // D-OSTARGET1=A: `Os.*` gates an `impl` block, never a module.
+                super::Items::TargetMarker::Os(os) => {
+                    let span = self.peek().span;
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("`#Target(Os.{})` isn't valid on a module", os.name()),
+                        "`Os.Linux`/`Os.Macos`/`Os.Windows` gates a single `impl` block, not a module".to_string(),
+                        format!("move `#Target(Os.{})` to the `impl` block itself", os.name()),
+                        Some(span),
+                    ));
+                }
             }
         } else {
             None
@@ -423,6 +434,32 @@ impl<'a> Parser<'a> {
             TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
             TokKind::KwTag => self.tag_def(false).map(Item::Tag),
+            // D-OSTARGET1=A: `#Target(Os.X) impl …` inside a module body.
+            TokKind::Hash if self.at_web_target() => match self.parse_web_target_marker()? {
+                super::Items::TargetMarker::Os(os) => self.os_gated_impl(os),
+                super::Items::TargetMarker::DefaultWeb => {
+                    let span = self.peek().span;
+                    Err(Diagnostic::error(
+                        "E0003",
+                        "`#Target(Web)` isn't valid on a module".to_string(),
+                        "`Web` is a file-level default-backend marker, not a partition ceiling"
+                            .to_string(),
+                        "move `#Target(Web)` to the top of the file, outside any module"
+                            .to_string(),
+                        Some(span),
+                    ))
+                }
+                super::Items::TargetMarker::Bucket(_) => {
+                    let span = self.peek().span;
+                    Err(Diagnostic::error(
+                        "E0003",
+                        "`#Target(Wasm)`/`#Target(Js)` isn't valid on an item inside a module body".to_string(),
+                        "the web bucket ceiling is file- or module-level (`#Target(Wasm) module name { … }`), not per-item".to_string(),
+                        "move the marker to the `module` declaration itself".to_string(),
+                        Some(span),
+                    ))
+                }
+            },
             TokKind::KwImpl => self.impl_or_error_conv(),
             TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),

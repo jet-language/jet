@@ -449,6 +449,12 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
                 }
             }
             Item::Impl(i) => {
+                // D-OSTARGET1=A: an `impl` gated to a different native OS than
+                // this build's active target is skipped entirely — mirrors how
+                // `Codegen/Web.rs` filters function membership by `WebBucket`.
+                if i.os_target.is_some_and(|os| os != cx.active_os) {
+                    continue;
+                }
                 if i.trait_name.is_some() {
                     emit_external_trait_impl(cx, i, out);
                 } else {

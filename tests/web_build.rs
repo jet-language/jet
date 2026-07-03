@@ -268,7 +268,7 @@ fn jet_cli_web_build_succeeds() {
     );
 }
 
-/// D-WEBDEFAULT1 (open, c134): a file-level `#Target(Web)` marker makes
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a file-level `#Target(Web)` marker makes
 /// `jet build <file>` (no `--target=` flag at all) infer the web backend.
 #[test]
 fn jet_cli_infers_web_target_from_file_marker() {
@@ -308,7 +308,7 @@ fn jet_cli_infers_web_target_from_file_marker() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-WEBDEFAULT1 (open, c134): a package's `pkg.jet` `target: "web"` makes
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): a package's `pkg.jet` `target: "web"` makes
 /// `jet build <file>` infer the web backend even with no file-level marker
 /// and no `--target=` flag — the managed-package counterpart to the loose-
 /// file marker above.
@@ -355,7 +355,7 @@ fn jet_cli_infers_web_target_from_manifest() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-WEBDEFAULT1 (open, c134): `jet run` never infers the web backend from
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `jet run` never infers the web backend from
 /// `#Target(Web)`, even with no `--target=` flag — "run" means "execute and
 /// show console output," which a web build can't satisfy (there's no runtime
 /// to run a `.wasm`+`.js` bundle as a console program). This is a real
@@ -397,7 +397,7 @@ fn jet_cli_run_never_infers_web_target_from_marker() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-HTMLPAIR1 (open, c134): an explicit `#Html("path.html")` marker wins
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): an explicit `#Html("path.html")` marker wins
 /// over the `<stem>.html` sibling-filename convention.
 #[test]
 fn jet_cli_uses_explicit_html_marker() {
@@ -441,7 +441,7 @@ fn jet_cli_uses_explicit_html_marker() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-HTMLPAIR1 (open, c134): a `#Html(...)` path that doesn't exist is a
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): a `#Html(...)` path that doesn't exist is a
 /// loud build error, never a silent fallback to the generic page.
 #[test]
 fn jet_cli_html_marker_missing_file_is_an_error() {

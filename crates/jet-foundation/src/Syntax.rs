@@ -240,16 +240,31 @@ pub const WEB_BUCKET_WASM: &str = "Wasm";
 /// D-WEBKIND1=A (c123): `jet build --target=web` Jet backend target (not a rustc triple).
 pub const BUILD_TARGET_WEB: &str = "web";
 
-/// D-WEBDEFAULT1 (open, c134): `#Target(Web)` argument spelling — a file-level
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` argument spelling — a file-level
 /// marker distinct from the `Wasm`/`Js` partition-ceiling values above (same
 /// `#Target(...)` marker, different axis: "build me for the web backend by
 /// default" rather than "cap this file's partition ceiling").
 pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
 
-/// D-HTMLPAIR1 (open, c134): `#Html("path.html")` — an explicit, file-level
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — an explicit, file-level
 /// declaration of this program's companion host page for `--target=web`
 /// builds, replacing the silent `<stem>.html` filename convention.
 pub const ATTR_HTML: &str = "Html";
+
+/// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os. … )` namespace — the
+/// second, mutually-exclusive axis of the `#Target(...)` marker family
+/// (`Wasm`/`Js`/`Web` above are the first, web-bucket axis). Attaches at
+/// `impl` block scope, not file/module scope.
+pub const TARGET_OS_NAMESPACE: &str = "Os";
+
+/// D-OSTARGET1=A: `#Target(Os.Linux)`.
+pub const TARGET_OS_LINUX: &str = "Linux";
+
+/// D-OSTARGET1=A: `#Target(Os.Macos)`.
+pub const TARGET_OS_MACOS: &str = "Macos";
+
+/// D-OSTARGET1=A: `#Target(Os.Windows)`.
+pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
@@ -1504,6 +1519,7 @@ pub use crate::WebPartition::{
     is_abi_safe_type, web_abi_type, web_cross_partition, web_target_browser, WebBucket,
     WebPartitionMarker,
 };
+pub use crate::OsTarget::{os_target_mixed_axis, os_target_unmatched_call, OsTarget};
 
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
 /// inside the `.jet/` managed folder (SOURCE_ROOT_DIR). Replaces `jet.lock`

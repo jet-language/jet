@@ -321,6 +321,8 @@ before continuing.
 | E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
+| E-OSTARGET-MIXED-AXIS | sema | a `#Target(Os.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
+| E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(Os.*)`-gated type (D-OSTARGET1) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
 | E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
@@ -974,6 +976,13 @@ reported as **E0119** (unknown name).
 | E-WEB-CROSS-PARTITION | `{caller}` is compiled to {caller_bucket} but calls `{callee}`, which lives in {callee_bucket}. | The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet (D-WASM1). | Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust `#Target` / `#Wasm` / `#Js` markers. Run `jet build --target web --explain-partition` to audit assignments. |
 | E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `@[Codable]` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `@[Codable]` to the struct/enum and keep every field ABI-safe. |
 | E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Wasm` / `#WasmExport` pin, move browser work into a `#Js` function, or drop the browser API calls. |
+
+## Native OS platform gating diagnostics (c134, D-OSTARGET1)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E-OSTARGET-MIXED-AXIS | `#Target(Os.{os})` can't combine with `#Target({web})` on `{item}`. | The OS axis (`Os.Linux`/`Os.Macos`/`Os.Windows`, native platform gating) and the web axis (`Wasm`/`Js`/`Web`, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket. | Pick one axis: remove the `#Target(Os.{os})` marker or the web-axis marker. |
+| E-OSTARGET-UNMATCHED-CALL | `{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(Os.{os})`, without itself being gated to match. | An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. | Only use `{gated_type}` from inside an `impl` already gated to `#Target(Os.{os})`, or move `{caller}`'s body into one. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
 

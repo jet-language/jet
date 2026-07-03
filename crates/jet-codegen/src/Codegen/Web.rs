@@ -20,7 +20,7 @@ pub struct WebArtifacts {
     /// (a button calling an exported function) ships its own companion HTML
     /// alongside the `.jet` source instead of relying on this default.
     pub index_html: String,
-    /// D-HTMLPAIR1 (open, c134): the entry file's `#Html("path.html")`
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): the entry file's `#Html("path.html")`
     /// marker, if any — relative to the `.jet` source's own directory.
     pub explicit_html_path: Option<String>,
 }

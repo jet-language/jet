@@ -7,14 +7,28 @@ use crate::Diagnostics::{Diagnostic, Severity};
 use std::path::Path;
 
 /// Main pipeline: load from file path → sema → ffi → codegen.
+///
+/// D-OSTARGET1=A (ratified 2026-07-01, c134): `cross_target` is the raw
+/// `--target=<triple>` string (or `None`) — reused as-is from the existing
+/// E2-M15 cross-compile flag, resolved to a native OS bucket in
+/// `compile_bundle_path_opts_dbg` (host OS when `None` or unrecognized).
 pub fn compile_bundle_path_opts(
     file: &str,
     mode: crate::Sema::CompileMode,
     freestanding: bool,
     allow_impure: bool,
     web_target: bool,
+    cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_dbg(file, mode, freestanding, allow_impure, web_target, false)
+    compile_bundle_path_opts_dbg(
+        file,
+        mode,
+        freestanding,
+        allow_impure,
+        web_target,
+        false,
+        cross_target,
+    )
 }
 
 /// Like `compile_bundle_path_opts`, but `debug_linemap = true` routes codegen
@@ -29,7 +43,12 @@ pub fn compile_bundle_path_opts_dbg(
     allow_impure: bool,
     web_target: bool,
     debug_linemap: bool,
+    cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
+    // `--target=<triple>` flag E2-M15 already threads through (host OS when
+    // absent or unrecognized, e.g. a wasm/web pseudo-target).
+    let active_os = crate::Syntax::OsTarget::active(cross_target);
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
@@ -67,7 +86,7 @@ pub fn compile_bundle_path_opts_dbg(
     if timing {
         timer.lap("ffi");
     }
-    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap);
+    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os);
     let web = if web_target {
         Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()))
     } else {
@@ -344,7 +363,13 @@ pub fn compile_bundle_path_with_entry(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), false);
+    // D-OSTARGET1=A: `jet dev`'s entry-swap path never cross-compiles — host OS.
+    let rust = crate::Codegen::emit_bundle_dbg(
+        &bundle,
+        ffi.as_ref(),
+        false,
+        crate::Syntax::OsTarget::host(),
+    );
     let capabilities = crate::Capabilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),

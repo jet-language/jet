@@ -1,0 +1,48 @@
+// D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating for
+// `#Extern` backends (Tower c134 Phase 9.3) — the mechanism, not a real
+// GTK/AppKit/Win32 backend (this sandbox has no toolkit dev headers; a real
+// native backend needs its own devShell/flake change first, tracked
+// separately as Phase 8).
+//
+// Two dummy structs implement the same `Backend` trait, one gated
+// `#Target(Os.Linux)`, the other `#Target(Os.Macos)`. `jet build
+// --target=<triple>` only emits/links the `impl` matching that triple's OS
+// (host OS when `--target` is omitted) — `tests/cross.rs` proves this by
+// inspecting the generated Rust for both triples. `os_target_unmatched_call`
+// (tests/ui/) proves the flip side: code that ISN'T gated to match can't use
+// a gated type at all — a Jet-level compile error, not a missing-method
+// rustc ICE — so this file's `main` deliberately never touches either
+// backend directly. (There is no ratified way for ungated entry-point code
+// to dispatch to "whichever backend matches this build" yet — that needs
+// either fn-level `#Target(Os.*)` gating or another selection primitive,
+// neither in the ratified D-OSTARGET1 text. Flagged as follow-up, not built
+// here.)
+trait Backend {
+    fn label(self) -> String
+}
+
+struct LinuxBackend {
+    name: String
+}
+
+struct MacosBackend {
+    name: String
+}
+
+#Target(Os.Linux)
+impl LinuxBackend.Backend {
+    fn label(self) -> String {
+        return "linux: {self.name}"
+    }
+}
+
+#Target(Os.Macos)
+impl MacosBackend.Backend {
+    fn label(self) -> String {
+        return "macos: {self.name}"
+    }
+}
+
+fn main() {
+    print("os target gating: LinuxBackend/MacosBackend compiled side by side")
+}

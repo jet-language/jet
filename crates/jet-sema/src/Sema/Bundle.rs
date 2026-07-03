@@ -1665,6 +1665,10 @@ pub(crate) fn check_bundle_opts(
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
     diags.extend(check_web_partition(bundle, &effect_summaries, &solved));
 
+    // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating —
+    // mixed-axis conflicts and unmatched cross-gate calls.
+    diags.extend(check_os_target(bundle));
+
     // D-TAINT1: taint tracking across every module. `#Sanitizer fn`s are
     // collected program-wide (a sanitizer in one module clears taint at a call in
     // another); each module's bodies are checked against its own Core aliases so

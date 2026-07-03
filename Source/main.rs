@@ -917,7 +917,7 @@ fn main() {
             // ordering bug was caught during manual verification — the first
             // cut checked #Target(Web) first, which made `fn dev()` totally
             // unreachable on any file that also declared #Target(Web), e.g.
-            // 196_ui_web_click.jet, which has both.)
+            // ui_web_click.jet, which has both.)
             if has_dev_entry_fn(file) {
                 run_dev_entry(file, mode);
                 return;
@@ -927,7 +927,7 @@ fn main() {
             // different execution model from the native interpret/hot-swap
             // loop above, so it's a separate function, not a new branch
             // inside `run_dev`'s interpreter machinery.
-            // D-WEBDEFAULT1 (open): no explicit --target= falls back to the
+            // D-WEBDEFAULT1 (ratified 2026-07-01, c134): no explicit --target= falls back to the
             // file's own `#Target(Web)` marker, if any.
             if effective_target("dev", file, cross_target.as_deref()).as_deref()
                 == Some(jet::Syntax::BUILD_TARGET_WEB)
@@ -1205,7 +1205,7 @@ fn main() {
 /// (ext-optional CLI). If `raw` exists as-is, use it. Otherwise, if `raw.jet`
 /// exists, use that. If neither exists, return `raw` unchanged so the normal
 /// file-not-found diagnostic fires with the original name the user typed.
-/// D-WEBDEFAULT1 (open, c134): resolve the effective `--target=` value for
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): resolve the effective `--target=` value for
 /// `file`. Precedence: an explicit CLI flag always wins; else `pkg.jet`'s
 /// `target: "web"` (a managed package's project-level default); else a
 /// lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
@@ -1265,7 +1265,7 @@ fn has_dev_entry_fn(file: &str) -> bool {
         .any(|i| matches!(i, jet::AST::Item::Func(f) if f.name == "dev"))
 }
 
-/// D-WEBDEFAULT1 (open, c134): `pkg.jet`'s `target: "web"`, if `file` sits
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `pkg.jet`'s `target: "web"`, if `file` sits
 /// inside a managed package (found via the same `find_manifest_root` walk
 /// `jet run`/`jet build` already use to resolve project-root mode).
 fn manifest_default_target(file: &str) -> Option<String> {
