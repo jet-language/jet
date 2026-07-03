@@ -5292,12 +5292,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
-      "priority": "P1",
+      "phase": "building",
+      "priority": "P0",
       "workOrder": 10,
       "plan": "jit-cranelift — M4 functional parity with AOT: (1) wire `dev_iteration` through CraneliftBackend by default (D-JIT2; done 2026-06-30); (2) expand CLIF lowering + host runtime for tasks/channels/spawn (scheduler), then structs/enums/collections/Core per `tir_covers`; (3) align `jit_covers` gate with `tir_covers` (try-compile, never silent interpreter fallback for AOT-covered programs); (4) three-way differential battery on full `examples/features/*.jet` set; (5) `jet dev` on `160_scheduler_spawn.jet` and task programs without E2201. Exit: byte-identical stdout vs AOT for every tir-covered example, or named tested gap only.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Owner directive 2026-07-03 (angry — subagents were burning `--test golden` in an earlier misstep, unrelated to this card but same session): full JIT/AOT parity, fix systemically. Reopening — the 2026-06-30 close used the plan's alternate exit clause ('named tested gap only'), 124 gaps tracked via `jit_coverage_audit --ignored`, not actual parity. Triage so far: (1) real design boundary, working as intended — effects requiring live OS resources (env/net/fs) and some concurrency shapes hit a clean E2201 'jet dev can't interpret this yet, use jet run' before any attempt, per the pre-execution boundary scan in Source/Interpreter.rs. (2) REAL BUG, distinct from (1): plain pure-functional runtime code with NO comptime/effects involved (examples/features/errors/errors.jet's `err(ParseError.BadDigit(raw))`, types/option.jet's `find_even(9) == value(n)`, memory/arena.jet's `mem.Arena.new()`) falls through the boundary scan uncaught, gets executed via `crate::Comptime::run_main` (Source/Interpreter.rs top-of-file doc: the dev interpreter literally IS the comptime tree-walker), and fails with a leaked **E0956** ('comptime evaluates a pure subset... compute this value at runtime') — wrong diagnostic voice for `jet dev` (the Fix advice is nonsensical: the user is already trying to run this at runtime) and probably NOT a fundamental capability gap, just missing eval coverage in the comptime tree-walker for ordinary struct/enum construction, static methods, pattern-test expressions. Plan: (a) fix the E0956-leak so every currently-uncovered construct at minimum shows a correct, consistent E2201 message (quick, high-value, no coverage change); (b) extend `crate::Comptime`'s pure-subset coverage for the tractable real gaps (struct/enum construction, static methods, Option/Result pattern tests, `err`/`ok` construction) since these are pure and should never have needed a boundary in the first place; (c) leave genuinely-effectful gaps (io/net/fs/concurrency edge cases, FFI, GPU, low-level) as the intentional, correctly-labeled E2201 boundary — those aren't 'errors', they're the interpreter honestly declining effects it can't grant in a dev loop, and `jit_coverage_audit` already tracks them by name (I2: never silent wrong answer). Full categorized gap list is in `jit_coverage_audit --ignored` output (130ish stems)."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -7557,6 +7562,16 @@
         {
           "at": "2026-07-03",
           "by": "agent",
+          "text": "D-FIELDPOL1 implemented: `name: T => expr` computed struct field, never stored, recomputed on every read. Parser (`=>` after field type), Field.computed: Option<Box<Expr>>. Sema (CheckerFieldPolicy.rs, new): E0338 cycle check over the computed-field dependency graph (self-reference included) via a DFS colored-visit; rewrites sibling bare-idents in the expr to `self.<field>`; synthesizes a `fn <field>(self) -> T { return <expr>; }` method appended to `s.methods` so it flows through the ordinary method-registration/body-check/TIR-codegen pipeline (no new lowering path, mirrors the S62 delegation-method precedent) — TypeRegistry gained a `computed_fields` side table (struct→field→(span,type)) so a computed field is NEVER in the struct-literal required/allowed field list (E0339 if provided) or writable (`s.field=v`/`s.field++`, also E0339), but a *read* still resolves its type. Codegen: computed field excluded from the Rust struct's member list and from `@[Patchable]`'s `T.Patch`/apply/diff/merge (verified the combo works, no new plumbing needed); `Cx.computed_fields` + a `LowerEnv.self_owner` field (self's own env type is `None` by design, so `self.field` needed a different owner-lookup than `x.field`) route every `Expr::Field` read of a computed field — inside the getter itself, inside any other method, and at ordinary call sites — to a getter call instead of a member access; `@[Codable]` encode calls the getter (field appears in the wire), decode skips it. Formatter round-trips `=> expr`; fmt STABILITY test added. Example examples/features/types/computed_field.jet + golden .out. docs/spec/diagnostics.md + syntax-decisions.md updated. Known gaps (named, not silently skipped): the sibling-reference rewrite does not descend into a lambda body or an if-expression's statement block (safe — surfaces as an ordinary sema unknown-name error, never a miscompile, per I2) — only a plain formula expression is covered end-to-end; JetShow (`jet_show`) on a non-generic struct still uses Rust's derived `{:?}` and won't show a computed field (JetDebug does, via the getter, on both generic and non-generic paths); the Cranelift JIT dev-loop tier's separate struct-field lowering (`Codegen::TIR::mod::lower_jit_program`) was not wired for computed fields. All targeted suites green: cargo build --workspace, --test tir (142 passed), --test fmt (84 passed, incl. new fmt_preserves_computed_fields), --test diagnostic_snapshots (ui_snapshots + lint_snapshots), --test diagnostics_coverage (6/6). Next: D-EFFTREE1."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "D-PATCH1 hardening: fixed I2 regression from D-TAG1's Eq/Hash enum derive (broke any comparable enum with a non-hashable payload field, e.g. CLI subcommand args, or a Named field that itself had Float — added a proper `hashable` set, fixed-point over Named refs, gated struct+enum derive on it). Fixed Bundle.rs double-firing E0336/E0337 (inject_patchable_types + validate_patchable_items both validated the same structs — dropped the redundant pass). Closed I4 gap: E0336/E0337 now have diagnostics.md rows + tests/ui snapshots (patchable_generic, patchable_stored_ref) + D-PATCH1 logged in syntax-decisions.md. golden/hardening/tir/diagnostic_snapshots/diagnostics_coverage all green. D-FIELDPOL1 implementation now running in a subagent — next after: D-EFFTREE1."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
           "text": "D-PATCH1 vertical slice: `@[Patchable]` → synthetic `T.Patch` (optional fields, partial `.{ }` literals), `apply`/`diff`/`merge` codegen, example patchable.jet. E0336/E0337 for generic/ref/fn fields. Patch Encode/Decode deferred (prelude path). Card building — next: D-FIELDPOL1, D-EFFTREE1."
         },
         {
@@ -7733,8 +7748,8 @@
     {
       "id": "cmemgreenfield",
       "num": 187,
-      "title": "Greenfield memory model: One-Home value semantics (D-MEM1)",
-      "body": "Owner asked (2026-07-03) for a fundamental, greenfield reconsideration of memory management — a jump the size of C→borrow-checker, fully featured, easy for beginners AND experts; capability vocabulary explicitly not the answer. Proposal: tools/Tower/docs/proposals/memory-greenfield.md — One-Home model: value semantics everywhere (handoffs are logical copies, compiler lowers to move/borrow/CoW with Perceus-grade elision), visible mutation via ~ only, resources (@Resource) as the only consume-semantics types, Shared<T>/Pool<T> as the only aliasing (by name), annotations demoted from permission to enforceable performance contracts (^ zero-copy, @Unique, policy no_implicit_copy), expert tier (arenas, uninit, *T/#Unsafe) untouched. If D-MEM1=A: supersedes &T share sigil, D-REF-SHORTHAND1/2 stored refs, L0201; follow-on ballots for Shared/Pool/@Unique/policy spellings. ALL memory-model implementation gated on D-MEM1.",
+      "title": "Memory model v3.1: progressive ceremony, adversarially hardened (D-MEM1)",
+      "body": "Owner iterating on memory-model direction (3 rounds 2026-07-03): v1 One-Home rejected (hidden magic, limiting); v2 completed-sigils rejected (from-clauses verbose, ~ too frequent/painful). v3 = progressive ceremony: quiet tier (zero sigils; free-fn args immutable by rule; receiver mutation inferred + badged; value semantics with move/borrow/CoW lowering), loud tier (rare ~ out-params, ^ gives, & holds, copy, Shared/Pool by name), claimed tier (policy no_implicit_copy/no_count/no_alloc/strict_alias per module = scoped Rust-grade discipline; arenas/uninit/*T/#Unsafe unchanged). 9 head-to-head Rust comparisons in proposal. Proposal: tools/Tower/docs/proposals/memory-greenfield.md. ALL memory-model implementation gated on D-MEM1.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
@@ -7748,6 +7763,26 @@
           "at": "2026-07-03",
           "by": "agent",
           "text": "Proposal written (memory-greenfield.md); D-MEM1 minted ballot-ready. No implementation until the owner rules."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Owner: felt inconsistent, wanted practice shown. Model recast as ONE law (give a value / lend a place, lend dies with the statement); receiver rule pinned (left-of-dot = visible lend); proposal gained walked full program + cost ledger, complete 4-class error gallery, place-return limitation, 9-case consistency matrix."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Owner rejected One-Home v1; directive: fix current system instead. Proposal + D-MEM1 fully reworked to the completed-sigils overhaul (options A/B/C)."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "v2 rejected (from-clauses verbose; ~ must be rare — painful to type; wants examples vs Rust). Reworked to v3 progressive-ceremony model; D-MEM1 options now A(v3)/B(v3+declared receivers)/C(v2)/D(status quo), rec A."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Owner: answer copy-economics + functions-must-DO objections; run adversarial pass (veteran memory engineer). Pass ran: F2/F3/F6 landed — & holds deleted (all checking now static, no runtime exclusivity tier), @NoImplicitCopy added, benchmark-vs-Rust ratification gate added; F1/F4/F7-F10 deflected with recorded arguments. Proposal rewritten v3.1; D-MEM1 options updated."
         }
       ]
     }
@@ -19765,36 +19800,36 @@
     {
       "id": "D-MEM1",
       "cardId": "cmemgreenfield",
-      "title": "Greenfield memory model — One-Home value semantics vs alternatives",
-      "gist": "Replace the user-facing ownership question entirely: values everywhere, compiler owns ownership (move/borrow/CoW elision), ~ is the only thing beginners learn, sharing is a named type (Shared/Pool), annotations become enforceable performance contracts. Supersedes the &T share sigil and stored-ref fields if adopted.",
-      "explainer": "The sigil capability model is Rust's question with friendlier spellings: users still pick view/edit/take/share at every boundary, mirror it at call sites, and hit use-after-move on plain data. Owner verdict: clunky and confusing. The greenfield move is to delete the question, not respell it. One-Home model: (1) every value lives in exactly one place — memory is a tree, aliasing impossible in safe code; (2) handoffs are logical copies — after party.add(player), player is still yours; the compiler lowers each handoff to a move (last use), borrow (read-only), memcpy (small POD), or CoW snapshot (heap-backed, one elidable refcount, physical copy only on write-while-shared); (3) mutation is visible — only heal(~player) can change your value, enforced by a local exclusivity check (complete because nothing stores references — the entire reason lifetimes exist is gone, not hidden); (4) resources (@Resource: files, sockets, locks) are the only consume-semantics types — use-after-move errors exist only there, where they read naturally (\"file was closed by close\"); (5) sharing is asked for by name — Shared<T> (one value, many doors) or Pool<T>+Id<T> (stable handles; the graphs/ECS paved road). Experts tighten instead of unlock: ^T = guaranteed zero-copy consume, @Unique = statically no counts, policy no_implicit_copy = any surviving implicit copy/refcount is a compile error (Rust-strictness as an opt-in scoped lint profile), jet build --copies shows every surviving cost. Arenas, uninit, *T/#Unsafe tier untouched. Beginner curriculum: two sentences. Cost honesty: an escaping live handoff of heap data costs one deterministic refcount bump unless elided — accepting option A includes reading priority #3 as \"no GC/pauses; elidable, policy-removable counts allowed where program semantics demand a logical copy\". Proven parts: Swift/Hylo (mutable value semantics + CoW at mass-market scale), Koka Perceus/Lobster (RC elision), Mojo (inferred ownership, imperative surface), Vale (generational handles → Pool ids). Full write-up with worked examples: tools/Tower/docs/proposals/memory-greenfield.md.",
-      "story": "A beginner writes add_member(~party, player) then keeps using player. Today: \"player was taken\" error, must learn take/copy/share. Under A: it just works, safely — the compiler moved, borrowed, or snapshotted. Meanwhile the game team turns on policy no_implicit_copy in the render crate and gets compile errors on any hidden cost — Rust strictness exactly where wanted, nowhere else.",
-      "inWild": "// today\n$ jet build game.jet\nerror[E0913]: player was taken by add_member\n\n// under D-MEM1=A\n$ jet build game.jet        # compiles; player still usable\n$ jet build --copies game.jet\nnote: player snapshot at game.jet:12 (party keeps a copy) — 1 refcount;\n      becomes a move if print(player.name) is hoisted above the call",
-      "detail": "Gates ALL memory-model work. If A: supersedes D-CAP7's &T share sigil, D-REF-SHORTHAND1/2 (stored &T fields + #Ref owner inference, E0207/E0427), L0201; E0912 freeze-at-API shrinks to ~/^; follow-on ballots mint spellings for Shared<T>, Pool<T>/Id<T>, @Resource, @Unique, policy no_implicit_copy, --copies voice, and the model name (menu in the proposal: Fly-by-Wire, One-Home, Autotrim, Slipstream, Feather, Glidepath). Survives regardless: ~ sigil + call-site mirror, copy verb, *T/#Unsafe, arenas/regions, uninit, S63 RAII, #SingleUse (becomes @Resource substrate). Sema machinery: access inference (kept from D-CAP8 infer tier) + last-use dataflow + uniqueness/RC elision + local exclusivity check; lowers to safe Rust + vetted CowBox runtime (I1/I2/I3 intact).",
+      "title": "Memory model v3.1 — progressive ceremony, adversarially hardened",
+      "gist": "Safety constant, ceremony scales with claimed control. Quiet tier: zero sigils (values yours, code acts on its subject, sharing by name). Loud tier: rare ~ (non-receiver mutation) and ^ (gives) only — & holds DELETED after adversarial review; no storable views exist, so ALL ownership checking is static (no runtime checks, no lifetimes, no borrow errors). Claimed tier: @NoImplicitCopy per type + policy no_implicit_copy/no_count/no_alloc per module. Benchmark-vs-Rust ratification gate before any build.",
+      "explainer": "v3 ran through an owner-directed adversarial pass (veteran systems/memory engineer persona). Three attacks landed and changed the design. (F3, fatal for &): v3's storable & hold was semantically unspecified — live view needs runtime exclusivity checks (implicit RefCell panics); snapshot semantics make & redundant with plain assignment (CoW already shares the buffer). Resolution: & DELETED from the safe tier; zero-copy immutable sharing is what assignment already does; visible-update sharing is Shared<T> by name; with no storable views every remaining check is static — the runtime-checked tier is gone. (F2): CoW latency cliffs/retention are real 3am bugs — armed with @NoImplicitCopy per-type marker (any silent copy/count of a marked type is a compile error program-wide), --explain-copies, jet dev copy tracing. (F6): ARC traffic on aggregate escaping handoffs — mitigations noted necessary-not-sufficient; added a RATIFICATION GATE: benchmark suite (game tick, JSON, HTTP echo, alloc churn) must land within an owner-set envelope of equivalent Rust under the DEFAULT tier before any build, else D-MEM1 reopens with data. Deflected with arguments now recorded in the proposal: memory blowup (logical copies share physically; footprint ~ Rust + one count word per allocation), functions-cant-DO (rule restated: code acts on its subject freely — methods, incl. external fn Type.method; non-subject mutation is one char, transfer(~a, ~b); Swift inout precedent), threads (atomicity by whole-program escape analysis), deterministic destruction (destructors only on @Resource move-only types — drop points as static as Rust), policy-dialect fear (semantics identical everywhere; policy only converts silent lowering into required explicitness), FFI (uniqueness forced under #Unsafe before pointer exposure). Receiver-mutation visibility (F5) stays an explicit ballot axis: A = inferred ✎/⌫ badges in doc/LSP + semver-diffed metadata + @Pure opt-in; B = declared ~self. Full write-up incl. the attack/disposition table: tools/Tower/docs/proposals/memory-greenfield.md.",
+      "story": "A veteran skeptic asks \"where are my runtime panics, my ARC traffic, my 100MB copy cliff at 3am?\" — and gets: no runtime ownership checks exist (all static), the cliff is a compile error on @NoImplicitCopy types, and if default-tier benchmarks miss the Rust envelope the decision reopens with data instead of shipping on vibes.",
+      "inWild": "// safe surface, complete:\nparty.members.push(kai); print(kai.name)   // works\nswap(~a, ~b)                                // rare marked mutation\nchannel.send(^packet)                       // visible give\nconfig := Shared.new(Config.{})             // sharing by name\n\n@NoImplicitCopy struct Image { pixels: [U8] }\nimg2 := img                                 // error: Image never implicitly\n                                            // copies; add `copy img` or restructure",
+      "detail": "Gates ALL memory-model work. If A: deletes D-CAP8 elevation/freeze + api:explicit, L0201, D-REF-SHORTHAND1/2 (#Ref/E0207/E0427), &T in BOTH ratified roles (share param + stored ref; glyph reserved unminted), routine mirroring (survives on ~ args and ^ gives only). Keeps ~/^/* glyph meanings at collapsed frequency, copy verb, D-MUTSELF1 (^self; ~self under option B), S63 RAII, #SingleUse->@Resource, arenas/uninit/*T/#Unsafe, S53 posture, D-CAP5 metadata + badges. New follow-on ballots: @NoImplicitCopy; policy spellings; Shared/Pool APIs; @Resource naming; badge + --explain-copies voice; rare-mutation marker spelling menu (~ / mut / inout / postfix !). Ratification gate: owner sets the perf envelope; suite must pass under default tier before build.",
       "options": [
         {
           "key": "A",
-          "name": "One-Home model — value semantics, compiler-owned ownership, CoW+elision, Shared/Pool, contracts-not-permission (recommended)",
-          "detail": "Beginners: two rules, zero ownership errors on plain data, no aliasing ever. Experts: opt-in strictness reaching literal Rust guarantees (policy no_implicit_copy, @Unique, ^ zero-copy, arenas, *T). Cost: an escaping live handoff of heap data may keep one deterministic, elidable, policy-bannable refcount.",
-          "code": "fn add_member(party: ~Party, player: Player) { party.members.push(player) }\nadd_member(~party, player)\nprint(player.name)   // fine — player is yours, always"
+          "name": "Progressive ceremony, hardened — no storable views, all-static checking, @NoImplicitCopy + policies, benchmark gate (recommended)",
+          "detail": "Safe surface: zero sigils except rare ~ and ^. No lifetimes, no borrow errors, no runtime ownership checks. Memory footprint ~ Rust + one count word per allocation; latency cliffs are compile errors on marked types; default-tier perf proven against Rust before build.",
+          "code": "party.members.push(kai); print(kai.name)   // works\ntransfer(~checking, ~savings, 50)           // functions DO things — marked target\n@NoImplicitCopy struct Image { … }          // cliff-proof by type contract"
         },
         {
           "key": "B",
-          "name": "One-Home, eager copies only — no CoW, no refcounts ever",
-          "detail": "Same five rules; an escaping live handoff is a real deep copy every time (lint-visible; copy to silence). Purest reading of priority #3, fully predictable — but beginners pay accidental O(n) copies the machinery in A would have made free, and the expert tier already answers the purity concern.",
-          "code": "add_member(~party, player)   // deep-copies player here, every time\nprint(player.name)           // fine, but the copy was real"
+          "name": "A + declared mutating receivers (fn heal(~self))",
+          "detail": "Const-correct signatures in source at the price of ~ on every mutating method — its highest-frequency site. Call sites unchanged; badge/metadata machinery identical. Pick if reviewer-visible receiver mutation outweighs sigil frequency.",
+          "code": "fn Player.heal(~self, amount: Int) { self.hp += amount }\nkai.heal(10)"
         },
         {
           "key": "C",
-          "name": "Generational references — pointers stay, safety via runtime generation checks (Vale-style)",
-          "detail": "References remain first-class and storable; every deref checks a generation, stale access is a clean runtime failure; opt-in regions elide checks in hot code. Familiar to pointer-language users — but aliasing spooky-action returns, the failure mode moves to runtime, and the default path pays per-deref checks.",
-          "code": "p := &player\nparty.add(p)\nplayer.hp = 0    // p observes the change — aliasing is back"
+          "name": "v2 completed sigils — explicit ~/^/& + from-clauses (on record)",
+          "detail": "Maximum source honesty, maximum ceremony. Reviewed and disliked 2026-07-03 (from-clause verbosity, ~ frequency).",
+          "code": "fn longest(a: &Str, b: &Str) -> &Str from a, b"
         },
         {
           "key": "D",
-          "name": "Status quo — D-CAP7/8 sigil capabilities stand",
-          "detail": "Keep T/~T/^T/&T/*T with call-site mirroring, freeze-at-API, stored-ref fields (D-REF-SHORTHAND). The proposal archives as design history. This is the system the owner just called clunky and confusing.",
-          "code": "add_member(~party, ^player)\nprint(player.name)   // error: player was taken by add_member"
+          "name": "Status quo — D-CAP7/8 + D-REF-SHORTHAND as ratified",
+          "detail": "The six diagnosed inconsistencies stand (elevating signatures, dual-meaning &, silent clones, owner inference, freeze-at-API, no decision procedure).",
+          "code": "fn heal(player: Player)   // might edit or take player; signature cannot say"
         }
       ],
       "rec": "A",

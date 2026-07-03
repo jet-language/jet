@@ -1646,6 +1646,28 @@ fn run() {
 }
 
 #[test]
+fn fmt_preserves_computed_fields() {
+    // D-FIELDPOL1 (card #181): `name: T => expr` — a computed field — must
+    // survive the round-trip byte-for-byte, including a formula that
+    // references another computed field (own-CLAUDE-memory rule: new syntax
+    // needs a formatter round-trip test, not just a parser).
+    let src = "\
+struct Stats {
+    strength: Int
+    gear_mod: Int
+    attack: Int => strength * 2 + gear_mod
+    threat: Int => attack + gear_mod
+}
+
+fn run() {
+    s: Stats := Stats.{strength: 10, gear_mod: 3}
+    print(\"attack: {s.attack}\")
+}
+";
+    assert_fmt_stable(src, "computed fields");
+}
+
+#[test]
 fn fmt_preserves_inline_contracts() {
     // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` precede `pub`/`fn` on a free
     // function and on a method — both must round-trip byte-for-byte (own-

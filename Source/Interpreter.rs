@@ -565,8 +565,32 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             stdout: sink.stdout,
             stderr: sink.stderr,
         },
-        Err(d) => RunOutcome::Problems(vec![d]),
+        Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
     }
+}
+
+/// c139 JIT-parity fix (2026-07-03): the dev interpreter IS the comptime
+/// tree-walker (see module doc), so a construct it can't run leaks the
+/// comptime evaluator's own E0956 ("unsupported")/E0951 ("impurity") codes —
+/// correct for a real `comptime { }` block, but wrong voice here: the "compute
+/// this at runtime" fix advice is nonsense when the user is already trying to
+/// run this at runtime via `jet dev`. Rewrap as the dev-loop's own E2201
+/// boundary diagnostic instead, preserving what construct tripped it.
+fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
+    let detail = match d.code {
+        "E0956" => d
+            .what
+            .strip_suffix(" can't run at compile time yet")
+            .unwrap_or(&d.what)
+            .replace(" at compile time", ""),
+        "E0951" => "code that touches the outside world (network, filesystem, or environment)"
+            .to_string(),
+        _ => return d,
+    };
+    boundary_diag(&Boundary {
+        feature: format!("uses {detail}, which isn't covered by the dev interpreter yet"),
+        span: d.span,
+    })
 }
 
 /// One iteration of the `jet dev` watch loop, factored out so it can be

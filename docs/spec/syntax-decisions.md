@@ -347,6 +347,18 @@ construction checks at compile time (E0135 out of bounds), runtime construction
 is fallible (`Severity(raw)?`, else E0136); an empty/reversed range is E0137;
 arithmetic widens to the base type.
 
+**D-FIELDPOL1 — Computed fields** *(ratified 2026-07-03, card #181)*: a struct
+field `name: T => expr` is never stored — every read recomputes `expr` against
+the struct's current field values (siblings, data or computed, are readable by
+bare name inside `expr`). Unsettable: absent from a `Type.{ … }` literal's
+required/allowed field list (E0339 if provided), and direct assignment
+(`s.field = v`, `s.field++`) is also E0339. A cycle among computed-field
+formulas, including self-reference, is E0338. Codegen: not a Rust struct
+member — a synthesized inherent getter method instead; every read routes to a
+call of it. `@[Patchable]` (D-PATCH1) excludes a computed field from `T.Patch`
+and from `apply`/`diff`/`merge`. `@[Codable]` encode calls the getter (the
+field appears in the wire output); decode never reads into it.
+
 **D-QUAL3 — Unit families**: `#UnitFamily(currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);
 cross-unit mixing reuses E0127. **D-UNITLIT1 — unit literals**: `500ms`,

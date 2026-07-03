@@ -1661,6 +1661,13 @@ pub struct Field {
     pub serde_markers: Vec<Marker>,
     /// D-DEBUG-REDACT: `@[Redact]` — omit/redact in auto-derived Debug output.
     pub redact: bool,
+    /// D-FIELDPOL1 (ratified 2026-07-03, card #181): `name: T => expr` — a
+    /// computed field. Never stored; every read recomputes `expr` against the
+    /// struct's current sibling fields. `expr` is parsed with bare sibling
+    /// field names still as plain `Ident`s — sema rewrites each one to
+    /// `self.<field>` once every field of the struct is known (see
+    /// `Sema::CheckerFieldPolicy`). `None` for an ordinary stored field.
+    pub computed: Option<Box<Expr>>,
 }
 
 /// D-PATW / D-PATR (ratified 2026-06-19): a single payload slot inside a variant pattern.

@@ -741,6 +741,7 @@ pub(crate) fn check_bundle_opts(
             registry: TypeRegistry {
                 types: HashMap::new(),
                 ref_field_labels: HashMap::new(),
+                computed_fields: HashMap::new(),
             },
             structs: HashMap::new(),
             consts: HashMap::new(),
@@ -760,6 +761,9 @@ pub(crate) fn check_bundle_opts(
         // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
         // against each marker's declared vocabulary (E0614/E0615/E0616/E0617/E0618).
         diags.extend(super::ScopeMembers::check(&module.items));
+        // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field`
+        // rewrite + synthesized getter methods, before anything else.
+        process_computed_fields(&mut module.items, &mut diags);
         // D-PATCH1: synthetic `T.Patch` before struct registration.
         inject_patchable_types(&mut module.items, &mut diags);
         let st = &mut states[idx];

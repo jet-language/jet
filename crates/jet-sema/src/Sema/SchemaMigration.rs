@@ -691,6 +691,7 @@ mod tests {
             ty_span: zero(),
             serde_markers: Vec::new(),
             redact: false,
+            computed: None,
         }
     }
 

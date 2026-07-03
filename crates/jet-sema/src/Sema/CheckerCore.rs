@@ -954,6 +954,14 @@ impl<'a> Checker<'a> {
                             }
                         }
                         let base_ty = self.infer(base);
+                        // D-FIELDPOL1: `s.computed_field = v` — a computed field is
+                        // never stored, so a plain assignment has nothing to write.
+                        if let Some(bt) = &base_ty {
+                            if self.field_is_computed(bt, field) {
+                                self.diags.push(computed_field_not_settable(field, *span));
+                                return;
+                            }
+                        }
                         // D-SWIZZLE1: overlapping write swizzles (`v.xx = …`) are rejected.
                         if let Some(Type::Named(type_name)) = &base_ty {
                             if is_swizzleable_math_type(type_name)
@@ -3703,6 +3711,13 @@ impl<'a> Checker<'a> {
                             return None;
                         }
                     }
+                }
+                // D-FIELDPOL1: `s.computed_field++` — a computed field is never
+                // stored, so `++`/`--` has nothing to edit in place.
+                if self.field_is_computed(&base_ty, field) {
+                    self.diags
+                        .push(computed_field_not_settable(field, *field_span));
+                    return None;
                 }
                 let field_ty = self.field_type(&base_ty, field, *field_span)?;
                 if !field_ty.is_integer() {

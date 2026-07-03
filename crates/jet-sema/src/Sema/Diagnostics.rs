@@ -771,6 +771,21 @@ pub(crate) fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
+/// D-FIELDPOL1: writing to a computed field (`s.field = v`, `s.field++`) — a
+/// computed field is never stored, so there's nothing to write.
+pub(crate) fn computed_field_not_settable(field: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0339",
+        format!("`{}` is a computed field — it can't be assigned", field),
+        format!(
+            "`{}` is declared `{} => …` — its value always comes from that formula, recomputed on every read",
+            field, field
+        ),
+        format!("change the fields `{}`'s formula reads, not `{}` itself", field, field),
+        Some(span),
+    )
+}
+
 pub(crate) fn private_item(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0605",

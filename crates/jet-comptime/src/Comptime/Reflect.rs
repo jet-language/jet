@@ -159,6 +159,7 @@ mod tests {
             ty_span: span(),
             serde_markers: Vec::new(),
             redact: false,
+            computed: None,
         }
     }
 

@@ -112,6 +112,13 @@ pub(crate) struct LowerEnv {
     /// reads this off `view_return` threaded through `emit_stmts`; the TIR carries it on
     /// the env so the `Return` lowering reproduces it byte-for-byte.
     view_return: bool,
+    /// D-FIELDPOL1: the owning struct name when lowering an inherent/trait
+    /// method (`None` for a free function). `self`'s own env type is
+    /// deliberately `None` (see `bind` above), so a `self.field` read can't
+    /// resolve its receiver struct through `recv.ty` the way `x.field` does —
+    /// this is the one place that struct name is available, used only to
+    /// check `cx.computed_fields` (whether `self.field` needs a getter call).
+    self_owner: Option<String>,
 }
 
 impl LowerEnv {
@@ -122,6 +129,7 @@ impl LowerEnv {
             fn_name,
             panic_locals: Rc::new(RefCell::new(HashMap::new())),
             view_return: false,
+            self_owner: None,
         }
     }
     /// Bind `name` to its resolved Rust place + type, updating BOTH `locals` (used for
@@ -517,6 +525,7 @@ pub(crate) fn param_place_generic(
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.self_owner = Some(type_name.to_string());
     env.view_return = f.is_view_return;
     let mut params = Vec::new();
     let mut self_conv: Option<AccessConvention> = None;
@@ -584,6 +593,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
 /// The `TraitMethod` kind drives a bare name, no `pub`, always-`&self` signature.
 pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.self_owner = Some(type_name.to_string());
     env.view_return = f.is_view_return;
     let mut params = Vec::new();
     let mut self_conv = AccessConvention::Read;
@@ -2712,6 +2722,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::clone(&env.panic_locals),
         view_return: env.view_return,
+        self_owner: env.self_owner.clone(),
     }
 }
 
@@ -2726,6 +2737,7 @@ pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::new(RefCell::new(env.panic_locals.borrow().clone())),
         view_return: env.view_return,
+        self_owner: env.self_owner.clone(),
     }
 }
 
@@ -3967,6 +3979,41 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             let recv = lower_expr(receiver, cx, env);
+            // D-FIELDPOL1: a computed field is not a Rust struct member — sema
+            // (`CheckerFieldPolicy`) already synthesized it as a getter method
+            // on `s.methods`; route the read to a call of that method instead
+            // of a member access. `boxed` never applies (a getter call, not a
+            // stored recursive edge). `self`'s own env type is deliberately
+            // `None` (`recv.ty` falls back to `Type::Int`, see `LowerEnv::bind`),
+            // so a bare `self.field` (every computed field's rewritten body
+            // reads its siblings this way) resolves the owner via
+            // `env.self_owner` instead of `recv.ty`.
+            let field_owner: Option<&str> = if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == Syntax::KW_SELF)
+            {
+                env.self_owner.as_deref()
+            } else if let Type::Named(type_name) = &recv.ty {
+                Some(type_name.as_str())
+            } else {
+                None
+            };
+            if let Some(type_name) = field_owner {
+                if cx
+                    .computed_fields
+                    .get(type_name)
+                    .is_some_and(|c| c.contains(member))
+                {
+                    let field_ty = struct_field_type(cx, &Type::Named(type_name.to_string()), member)
+                        .unwrap_or(Type::Int);
+                    return TExpr {
+                        ty: field_ty,
+                        kind: TExprKind::Field {
+                            recv: Box::new(recv),
+                            field_rust: format!("{}()", mangle(member)),
+                            boxed: false,
+                        },
+                    };
+                }
+            }
             if let Type::Named(type_name) = &recv.ty {
                 if crate::Sema::is_swizzleable_math_type(type_name)
                     && !cx.struct_fields.contains_key(type_name)

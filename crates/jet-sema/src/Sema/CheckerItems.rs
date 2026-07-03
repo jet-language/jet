@@ -392,6 +392,23 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-FIELDPOL1: `type_name`'s computed fields (name → span + declared
+    /// type) in `owner_mod`, or `None` when it has none / isn't a struct.
+    pub(crate) fn computed_field_types_of(
+        &self,
+        owner_mod: usize,
+        type_name: &str,
+    ) -> Option<&HashMap<String, (Span, Type)>> {
+        if owner_mod == self.module_idx {
+            self.registry.computed_field_types(type_name)
+        } else {
+            self.modules?
+                .get(owner_mod)?
+                .registry
+                .computed_field_types(type_name)
+        }
+    }
+
     /// Check if `enum_name` is a known enum in the current or any imported module.
     pub(crate) fn is_known_enum(&self, enum_name: &str) -> bool {
         if self.registry.enum_variants(enum_name).is_some() {
@@ -701,6 +718,26 @@ impl<'a> Checker<'a> {
                         self.check_type_assignable(&inst, &et, expr.span());
                     }
                 }
+            } else if self
+                .computed_field_types_of(owner_mod, type_name)
+                .is_some_and(|c| c.contains_key(name))
+            {
+                // D-FIELDPOL1: a computed field is never settable — it's
+                // recomputed on every read, so a struct literal can't give it
+                // a value.
+                self.diags.push(Diagnostic::error(
+                    "E0339",
+                    format!(
+                        "`{}` is a computed field on `{}` — it can't be set",
+                        name, type_name
+                    ),
+                    format!(
+                        "`{}` is declared `{} => …` — its value always comes from that formula, never from a struct literal",
+                        name, name
+                    ),
+                    format!("remove `{}` from this `.{{ … }}`", name),
+                    Some(*name_span),
+                ));
             } else {
                 self.diags.push(Diagnostic::error(
                     "E0303",

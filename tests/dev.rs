@@ -326,19 +326,32 @@ fn scheduler_spawn_runs_via_jit() {
 }
 
 /// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts
-/// execution. For a task program it then fails honestly at the unsupported
-/// construct (E0956) rather than refusing up front — no guarantees, but it
-/// tried.
+/// execution. For a task program it then fails honestly at whatever
+/// unsupported construct it actually hits during interpretation, rather than
+/// refusing up front at the pre-scan's (earlier, more conservative) report
+/// site — no guarantees, but it tried.
+///
+/// c139 JIT-parity fix (2026-07-03): the dev interpreter's own comptime-leak
+/// errors (E0956/E0951) are now rewrapped as E2201 for a consistent voice
+/// (`Source/Interpreter.rs::dev_boundary_from_comptime`), so the diagnostic
+/// CODE alone no longer distinguishes "blocked by the pre-scan" from "tried
+/// and failed later" — both surface as E2201. Compare the failure SITE
+/// instead: try-anyway must fail at a different span than the pre-scan's
+/// (earlier / more conservative) report, proving real execution proceeded
+/// past the boundary before hitting trouble.
 #[test]
 fn try_anyway_skips_the_boundary_scan() {
     let file = "examples/features/concurrency/tasks.jet";
+    let RunOutcome::Problems(blocked) = dev_iteration(file, false, true) else {
+        panic!("expected the E2201 pre-scan to block this program up front");
+    };
+    assert_eq!(blocked[0].code, "E2201", "pre-scan should report E2201");
     match dev_iteration(file, true, true) {
         RunOutcome::Problems(diags) => {
-            // It got past the E2201 pre-scan and hit a real unsupported
-            // construct during interpretation.
-            assert!(
-                diags.iter().all(|d| d.code != "E2201"),
-                "try-anyway must skip the E2201 pre-scan"
+            assert_ne!(
+                diags.first().and_then(|d| d.span),
+                blocked.first().and_then(|d| d.span),
+                "try-anyway must fail at a different site than the pre-scan, proving it skipped the scan and actually tried"
             );
         }
         // If a future evaluator can run it, that's fine too — the point is the

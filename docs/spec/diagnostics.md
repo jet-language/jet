@@ -240,6 +240,8 @@ before continuing.
 | E0335 | parse | a second trailing block, or a trailing block on a non-call (D-TRAILBLOCK1) |
 | E0336 | sema  | `@[Patchable]` on a generic struct (D-PATCH1) |
 | E0337 | sema  | `@[Patchable]` struct has a stored-reference or function-typed field (D-PATCH1) |
+| E0338 | sema  | a cycle among computed-field formulas, including self-reference (D-FIELDPOL1) |
+| E0339 | sema  | a computed field given in a struct literal or assigned to directly (D-FIELDPOL1) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |

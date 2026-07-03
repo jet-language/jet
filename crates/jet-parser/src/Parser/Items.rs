@@ -4356,6 +4356,16 @@ impl<'a> Parser<'a> {
         } else {
             (false, None)
         };
+        // D-FIELDPOL1: `name: T => expr` — a computed field. `expr` is a
+        // single expression (no block); sibling field names inside it are
+        // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
+        // to `self.<field>` once every field of the struct is known.
+        let computed = if matches!(self.peek().kind, TokKind::LambdaArrow) {
+            self.bump();
+            Some(Box::new(self.expr()?))
+        } else {
+            None
+        };
         Ok(Field {
             is_pub,
             is_package_pub,
@@ -4367,6 +4377,7 @@ impl<'a> Parser<'a> {
             ty_span,
             serde_markers: Vec::new(),
             redact: false,
+            computed,
         })
     }
 

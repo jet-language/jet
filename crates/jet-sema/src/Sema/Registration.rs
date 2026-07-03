@@ -495,12 +495,16 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     let mut registry = TypeRegistry {
         types: HashMap::new(),
         ref_field_labels: HashMap::new(),
+        computed_fields: HashMap::new(),
     };
     let mut consts: HashMap<String, Type> = HashMap::new();
     let mut trait_reg = TraitRegistry::default();
     // Legacy M2 struct map for ref-field checks and cloneable helper.
     let mut struct_fields_legacy: HashMap<String, Vec<(Option<String>, Type)>> = HashMap::new();
 
+    // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field` rewrite +
+    // synthesized getter methods, before anything else sees the struct.
+    process_computed_fields(&mut prog.items, &mut diags);
     // D-PATCH1: synthetic `T.Patch` structs before the registration pass.
     inject_patchable_types(&mut prog.items, &mut diags);
 
@@ -1720,6 +1724,11 @@ pub(crate) fn register_struct(
     }
     let mut field_names = HashSet::new();
     let mut fields = Vec::new();
+    // D-FIELDPOL1: struct name → computed field name → (span, type). A
+    // computed field is never a stored field — it's excluded from `fields`
+    // entirely (so it's never required/allowed in a struct literal, E0339)
+    // and resolved for reads through this side table instead.
+    let mut computed_fields: HashMap<String, (Span, Type)> = HashMap::new();
     for f in &s.fields {
         if !field_names.insert(f.name.clone()) {
             diags.push(Diagnostic::error(
@@ -1730,13 +1739,17 @@ pub(crate) fn register_struct(
                 Some(f.name_span),
             ));
         }
-        fields.push((
-            f.name.clone(),
-            f.name_span,
-            f.ty.clone(),
-            f.is_stored_ref,
-            f.is_pub,
-        ));
+        if f.computed.is_some() {
+            computed_fields.insert(f.name.clone(), (f.name_span, f.ty.clone()));
+        } else {
+            fields.push((
+                f.name.clone(),
+                f.name_span,
+                f.ty.clone(),
+                f.is_stored_ref,
+                f.is_pub,
+            ));
+        }
         if f.ty.is_float()
             && is_money_like_name(&f.name)
             && !allows_float_money(&f.serde_markers)
@@ -1765,6 +1778,9 @@ pub(crate) fn register_struct(
             columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
         },
     );
+    if !computed_fields.is_empty() {
+        registry.computed_fields.insert(s.name.clone(), computed_fields);
+    }
     // D-REF-SHORTHAND1/2: record only *explicit* `#Ref(label)` owners. An
     // unlabeled `&T` field leaves no entry — its owner is inferred at each
     // construction site (`check_stored_ref_fields`), so a missing entry here

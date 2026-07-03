@@ -327,6 +327,7 @@ mod tests {
                     ty_span: zero,
                     serde_markers: Vec::new(),
                     redact: false,
+                    computed: None,
                 },
                 Field {
                     is_pub: false,
@@ -339,6 +340,7 @@ mod tests {
                     ty_span: zero,
                     serde_markers: Vec::new(),
                     redact: false,
+                    computed: None,
                 },
             ],
             methods: vec![],

@@ -31,9 +31,13 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
             continue;
         }
         let patch_name = patch_type_name(&s.name);
+        // D-FIELDPOL1: a computed field can't hold an "unchanged" sentinel —
+        // it never appears in `T.Patch`, and `apply`/`diff`/`merge` skip it
+        // (codegen in `emit_struct_patchable` filters the same way).
         let fields: Vec<Field> = s
             .fields
             .iter()
+            .filter(|f| f.computed.is_none())
             .map(|f| Field {
                 name: f.name.clone(),
                 name_span: f.name_span,
@@ -45,6 +49,7 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
                 is_package_pub: f.is_package_pub,
                 serde_markers: Vec::new(),
                 redact: false,
+                computed: None,
             })
             .collect();
         to_add.push(Item::Struct(StructDef {

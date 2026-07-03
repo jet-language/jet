@@ -96,6 +96,12 @@ pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
     /// D-REFSTRUCT1: struct field → owner label for `#Ref(label)` fields.
     ref_field_labels: HashMap<String, HashMap<String, String>>,
+    /// D-FIELDPOL1: struct name → computed field name → (span, declared
+    /// type). A computed field never appears in `TypeDef::Struct::fields`
+    /// (it's not a stored field, and is never required/allowed in a struct
+    /// literal — E0339); this side table is the only place sema resolves its
+    /// type for a *read* (`field_type`).
+    computed_fields: HashMap<String, HashMap<String, (Span, Type)>>,
 }
 
 impl TypeRegistry {
@@ -115,6 +121,15 @@ impl TypeRegistry {
             Some(TypeDef::Struct { fields, .. }) => Some(fields.as_slice()),
             _ => None,
         }
+    }
+
+    /// D-FIELDPOL1: `name`'s computed fields (field name → span + declared
+    /// type), or `None` when `name` isn't a struct / has none.
+    pub(crate) fn computed_field_types(
+        &self,
+        name: &str,
+    ) -> Option<&HashMap<String, (Span, Type)>> {
+        self.computed_fields.get(name)
     }
 
     /// D-SOA1: true when `name` is a `#layout(columnar)` struct (its `[name]`
@@ -804,6 +819,7 @@ mod Captures;
 mod CheckerCli;
 mod CheckerCore;
 mod CheckerCoreLib;
+mod CheckerFieldPolicy;
 mod CheckerInfer;
 mod CheckerInline;
 mod CheckerItems;
@@ -830,6 +846,7 @@ mod WebPartition;
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;
 pub(crate) use CheckerCli::*;
+pub(crate) use CheckerFieldPolicy::*;
 pub(crate) use CheckerPatchable::*;
 pub use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;

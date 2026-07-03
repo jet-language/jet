@@ -1034,5 +1034,10 @@ impl<'a> Fmt<'a> {
             self.write(": ");
             self.fmt_type(&field.ty);
         }
+        // D-FIELDPOL1: `name: T => expr` — a computed field.
+        if let Some(expr) = &field.computed {
+            self.write(" => ");
+            self.fmt_expr(expr, Prec::OrFallback.add_rhs());
+        }
     }
 }

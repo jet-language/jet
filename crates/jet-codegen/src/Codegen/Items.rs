@@ -6,6 +6,20 @@ use crate::AST::{
 };
 use std::collections::HashMap;
 
+/// D-FIELDPOL1: the Rust expression that reads field `f` off `self` — a
+/// getter call `(self).user_field()` for a computed field (it's not a struct
+/// member), a plain member read `(self).user_field` otherwise. Used anywhere
+/// codegen renders a field's *value* (JetShow/JetDebug, `@[Codable]` encode)
+/// outside the struct's own member-list emission.
+fn field_self_read(f: &Field) -> String {
+    let m = mangle(&f.name);
+    if f.computed.is_some() {
+        format!("(self).{m}()")
+    } else {
+        format!("(self).{m}")
+    }
+}
+
 fn type_mentions_gc(ty: &Type) -> bool {
     match ty {
         Type::Apply { name, .. } if name == Syntax::GC_TYPE => true,
@@ -137,7 +151,11 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             type_params
         ));
     }
-    for f in &s.fields {
+    // D-FIELDPOL1: a computed field is never a Rust struct member. Sema
+    // (`CheckerFieldPolicy`) already synthesized it as an ordinary method on
+    // `s.methods`, so it's emitted below via the normal `emit_type_impl`
+    // method-emission path — nothing extra to do here but skip it as a field.
+    for f in s.fields.iter().filter(|f| f.computed.is_none()) {
         let field_ty = if f.is_stored_ref {
             let label = f
                 .stored_ref_label
@@ -174,7 +192,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             let show_fields: String = s
                 .fields
                 .iter()
-                .map(|f| format!("((self).{}).jet_show()", mangle(&f.name)))
+                .map(|f| format!("({}).jet_show()", field_self_read(f)))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("format!(\"{}({})\", {})", s.name, fmt_fields, show_fields)
@@ -265,7 +283,12 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
 fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     // Stored-ref fields cannot be columnar (a column is owned storage); sema's
     // whole-struct rule plus the value-field assumption holds for the v1 surface.
-    let fields: Vec<&Field> = s.fields.iter().filter(|f| !f.is_stored_ref).collect();
+    // D-FIELDPOL1: a computed field is never a stored column either.
+    let fields: Vec<&Field> = s
+        .fields
+        .iter()
+        .filter(|f| !f.is_stored_ref && f.computed.is_none())
+        .collect();
     let name = &s.name;
     let cn = format!("user_{name}_columns");
 
@@ -410,7 +433,9 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     );
     let mut decode_lines = String::new();
 
-    for f in &s.fields {
+    // D-FIELDPOL1: a computed field isn't a CLI-settable member (E0339 already
+    // rejects it in a struct literal for the same reason) — skip it here too.
+    for f in s.fields.iter().filter(|f| f.computed.is_none()) {
         let flag = f.name.replace('_', "-");
         let help = serde_marker(&f.serde_markers, crate::Syntax::CONTRACT_DOC)
             .and_then(marker_str_arg)
@@ -465,7 +490,12 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
         name = s.name
     ));
 
-    let inits: Vec<String> = s.fields.iter().map(|f| mangle(&f.name)).collect();
+    let inits: Vec<String> = s
+        .fields
+        .iter()
+        .filter(|f| f.computed.is_none())
+        .map(|f| mangle(&f.name))
+        .collect();
     out.push_str(&format!(
         "fn __jet_cli_decode_{name}(__spec: &JetArgsSpec, __parsed: &JetParsedArgs) -> Result<{cn}, String> {{\n{decode_lines}    Ok({cn} {{ {inits} }})\n}}\n\n",
         name = s.name,
@@ -488,7 +518,10 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
     let mut apply_fields = Vec::new();
     let mut diff_fields = Vec::new();
     let mut merge_fields = Vec::new();
-    for f in &s.fields {
+    // D-FIELDPOL1: a computed field is never a `T.Patch` member (see
+    // `Sema::CheckerPatchable`) — skip it here too, or `self.<field>`/
+    // `__new.<field>` would reference a Rust field that no longer exists.
+    for f in s.fields.iter().filter(|f| f.computed.is_none()) {
         let m = mangle(&f.name);
         apply_fields.push(format!(
             "{m}: __p.{m}.clone().unwrap_or_else(|| self.{m}.clone())"
@@ -801,22 +834,25 @@ fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
             if serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP) {
                 continue;
             }
-            let m = mangle(&f.name);
+            // D-FIELDPOL1: a computed field IS present in `@[Codable]` output —
+            // encode calls its getter instead of reading a (nonexistent) field.
+            let read = field_self_read(f);
             if serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN) {
                 out.push_str(&format!(
-                    "        if let jet_std::DataTree::Object(mut __es) = (self.{m}).jet_encode() {{ __o.append(&mut __es); }}\n"
+                    "        if let jet_std::DataTree::Object(mut __es) = ({read}).jet_encode() {{ __o.append(&mut __es); }}\n"
                 ));
                 continue;
             }
             let key = field_wire_key(style, f);
-            if matches!(f.ty, Type::Option(_)) {
+            if f.computed.is_none() && matches!(f.ty, Type::Option(_)) {
                 // D-SERDE5 owner-Q: an absent optional is omitted from the wire.
+                let m = mangle(&f.name);
                 out.push_str(&format!(
                     "        if let Some(__v) = &self.{m} {{ __o.push(({key:?}.to_string(), __v.jet_encode())); }}\n"
                 ));
             } else {
                 out.push_str(&format!(
-                    "        __o.push(({key:?}.to_string(), (self.{m}).jet_encode()));\n"
+                    "        __o.push(({key:?}.to_string(), ({read}).jet_encode()));\n"
                 ));
             }
         }
@@ -847,7 +883,10 @@ fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
                 keys.join(", ")
             ));
         }
-        for f in &s.fields {
+        // D-FIELDPOL1: a computed field has nothing to decode INTO (it's not
+        // a Rust struct member) — skip it entirely; `Ok(user_S { … })` below
+        // only lists the stored fields.
+        for f in s.fields.iter().filter(|f| f.computed.is_none()) {
             let m = mangle(&f.name);
             let rust = cx.rust_type(&f.ty);
             if serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP) {
@@ -878,7 +917,12 @@ fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
                 "        let {m}: {rust} = match jet_std::datatree_get(__t, {key:?}) {{ Some(__v) => <{rust} as user_Decode>::jet_decode(__v).map_err(|__e| jet_std::DecodeError::under({key:?}, __e))?, None => {absent} }};\n"
             ));
         }
-        let inits: Vec<String> = s.fields.iter().map(|f| mangle(&f.name)).collect();
+        let inits: Vec<String> = s
+            .fields
+            .iter()
+            .filter(|f| f.computed.is_none())
+            .map(|f| mangle(&f.name))
+            .collect();
         out.push_str(&format!(
             "        Ok(user_{} {{ {} }})\n    }}\n",
             s.name,
@@ -1462,9 +1506,9 @@ fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
                 format!("\"{}: [redacted]\".to_string()", f.name)
             } else {
                 format!(
-                    "format!(\"{}: {{}}\", ((self).{}).jet_debug())",
+                    "format!(\"{}: {{}}\", ({}).jet_debug())",
                     f.name,
-                    mangle(&f.name)
+                    field_self_read(f)
                 )
             }
         })

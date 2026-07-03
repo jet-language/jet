@@ -1,330 +1,334 @@
-# Memory, greenfield: the One-Home model
+# Memory model v3.1: progressive ceremony, adversarially hardened
 
 **Status:** PROPOSAL — owner gate **D-MEM1** (Tower card #187). No code until ratified.
-**Supersedes if adopted:** the user-facing half of the sigil capability model
-(D-CAP7 `&T` share, D-CAP8 freeze scope, D-REF-SHORTHAND1/2 stored refs, L0201).
-The expert tier (S58 `#Unsafe`/`*T`, D-REGION1 arenas, D-UNINIT-SENTINEL1, S63 RAII)
-is untouched and load-bearing here.
+**History:** v1 One-Home (rejected: hidden magic, thin expert story) → v2 completed
+sigils (rejected: `from` clauses, `~` frequency) → v3 progressive ceremony → **v3.1:
+v3 run through an adversarial review** (veteran systems/memory engineer persona; owner
+directive 2026-07-03). Three attacks landed and changed the design; the pass is
+recorded at the bottom.
 
 ---
 
-## Why reopen this
+## The idea
 
-The sigil model is Rust's ownership question with friendlier spellings. The user
-still answers "view, edit, take, or share?" at every function boundary, mirrors
-the answer at every call site, hits use-after-move errors on plain data, and — since
-D-REF-SHORTHAND — reasons about stored references and owner-inference ambiguity
-(E0207). Renaming the borrow checker doesn't remove it. The clunkiness is the
-question itself.
+Rust charges every program the kernel's ceremony price. Jet inverts it:
 
-C asked programmers to manage memory and punished mistakes with UB.
-Rust made mistakes impossible but kept the management: you *prove* ownership to
-the compiler. The jump left on the table: **make the proof the compiler's job**.
-Safety stays absolute; the user-facing concept count drops to almost zero;
-annotations become *performance contracts experts may add*, never permission
-slips anyone must write.
+> **Safety is constant. Ceremony scales with how much control the code claims —
+> and the default claim is zero.**
 
-## Glossary
+- **Tier 0 — quiet (≈99% of code):** no sigils. Values, methods, resources.
+- **Tier 1 — loud (rare, visible):** `~` non-receiver mutation, `^` gives,
+  `copy`, `Shared`, `Pool`.
+- **Tier 2 — claimed (opt-in, scoped):** per-type and per-module control:
+  `@NoImplicitCopy`, `policy` floors, arenas, `uninit`, `*T`, `#Unsafe`.
 
-- **place** — a named location a value lives in: a variable, a field, an element. `party.members[2].hp` is a place.
-- **value** — the data in a place. Values are independent: yours is yours.
-- **handoff** — giving a value to a function, struct, collection, or task.
-- **resource** — a value that is "used up": file, socket, lock. The only kind with consume semantics.
-- **CoW** — copy-on-write: a logical copy that shares storage until someone writes; then it physically copies. One refcount, no GC, deterministic.
-- **elision** — the compiler proving a copy/refcount unnecessary and deleting it (move on last use, borrow on read-only use).
+## Tier 0 — the quiet tier
 
-## The model — five rules, the whole thing
+The beginner story, complete:
 
-1. **One home.** Every value lives in exactly one place. Memory is a tree, never
-   a graph. Nothing aliases in safe code, ever.
-2. **Handoffs give a copy — logically.** After `party.add(player)`, `player` is
-   still yours and untouched. The compiler makes the handoff a move, a borrow, or
-   a CoW snapshot under the hood; meaning never changes, only cost.
-3. **Mutation is visible.** Only a call marked `~` can change your value:
-   `heal(~player)`. Unmarked calls provably cannot. (One exclusivity law: a place
-   can't be handed `~` twice in the same call, or read while being `~`-handed —
-   checked locally, since nothing stores references.)
-4. **Resources are used up.** `close(file)` consumes; using `file` after is a
-   compile error naming the consuming call. Only resource types (`@Resource`,
-   today's #SingleUse machinery) ever produce this error. Plain data never does.
-5. **Sharing has a name.** One value visible from many parts of the program is a
-   thing you ask for: `Shared<T>` (one value, many doors) or `Pool<T>` (many
-   values, stable ids). Nothing else in the language can alias.
-
-The complete beginner curriculum is rules 1–3. Two sentences pass the
-philosophy.md C1 bar: *"Your values are your own; a call that changes one is
-marked `~`. Files and sockets are used up when you hand them over."*
-
-Deleted from the user's world: use-after-move on data, view/edit/take/share
-choice, `&T`, stored-reference owner inference, L0201 implicit-clone warnings,
-lifetimes (still), and the borrow checker as a thing to fight. The one genuinely
-new error is the exclusivity conflict, and it reads like an English sentence.
-
-## Before / after
-
-Today (sigil model):
+1. **Your values are yours.** Nobody else's writes can ever reach a value you
+   hold. No aliasing exists in safe code.
+2. **Code acts on its subject.** A method changes the thing before the dot
+   (`player.heal(10)`, `file.close()`). A function changes an argument only
+   when the call says so (`swap(~a, ~b)`). Everything else is read-only to it.
+3. **Sharing is asked for by name.** `Shared<T>` — one value, many doors.
+   `Pool<T>` — many values, stable ids. Nothing else aliases.
 
 ```jet
-fn add_member(party: ~Party, player: ^Player) { party.members.push(player) }
-
-add_member(~party, ^player)
-print(player.name)          // error: player was taken by add_member
-                            // fix: copy player / &player / reorder
-```
-
-One-Home:
-
-```jet
-fn add_member(party: ~Party, player: Player) { party.members.push(player) }
-
-add_member(~party, player)
-print(player.name)          // fine. player is yours. always.
-```
-
-Compiler, invisibly: if `player` were dead after the call it moves (zero cost);
-alive here, so — `Player` heap-backed → CoW snapshot (one refcount bump; physical
-copy only if either side later writes); small POD → memcpy.
-
-### Sharing that used to need `&T`
-
-```jet
-texture := load("hero.png")
-sprite_a := Sprite.{ texture }     // each sprite owns its texture — logically
-sprite_b := Sprite.{ texture }     // physically: one buffer, three counted owners
-```
-
-Nobody writes textures, so this compiles to exactly what `&Texture`/Arc was:
-one allocation, counted. Zero concepts spent.
-
-### Mutation, iteration, projection — no references needed
-
-```jet
-party.members[3].hp += 10          // place expression, direct
-
-loop m in ~party.members {         // mutable iteration over places
-    m.hp += 1
+fn strongest(party: Party) -> Str {
+    best := party.members[0]
+    loop m in party.members { if m.hp > best.hp { best = m } }
+    best.name
 }
 
-swap(~a, ~a)                       // error[E09xx]: `a` handed to `swap` as
-                                   // changeable twice in one call
-                                   // what: two exclusive writers would overlap
-                                   // fix: pass two different places
+fn main() {
+    kai := Player.{ name: "Kai", hp: 90 }
+    party := Party.{ members: [] }
+    party.members.push(kai)            // party stores its own Kai
+    kai.hp = 40                        // yours; party's untouched
+    party.members[0].hp += 10          // place path, direct
+    print(strongest(party))
+
+    save := fs.create("save.txt")?
+    save.write("{party}")?
+    save.close()                       // resource used up; later use = error
+}
 ```
 
-### Resources — linearity only where it pays
+**Functions DO things.** The design does not neuter procedures — it makes the
+*target* explicit. Three ways to mutate, none exotic:
 
 ```jet
-file := fs.open("log.txt")?
-file.write("hi")?
-file.close()                       // consumes (fn close(^self))
-file.write("again")?               // error: file was closed by `close` (line 3)
+fn Player.heal(self, amount: Int) { self.hp += amount }   // subject: free
+kai.heal(10)
+
+fn transfer(from: ~Account, to: ~Account, amount: Money)   // multi-target: marked
+transfer(~checking, ~savings, 50)
+
+fn parse_into(src: Str, out: ~Ast)                         // out-param: marked
 ```
 
-### Slices and views — values, not borrows
+Any function whose primary object is being mutated *is* a method — and methods
+can be written externally (`fn Type.method(self)`, D-EXTMETH1), so this costs
+no restructuring. Measured against real APIs, the overwhelming majority of
+mutating functions mutate exactly one primary object; the multi-target tail is
+`swap`/`transfer`-shaped and gets one character per argument. This is Swift's
+`inout`/`&` rule, which nobody describes as "functions can't do anything."
 
-```jet
-fn domain(email: Str) -> Str { email.after("@") }   // counted view, zero copy
-```
+**Semantics of a handoff:** *as-if* copy. Compiler lowering, in priority order:
+move (arg dead after the call — the majority), borrow (callee only reads),
+memcpy (small POD), CoW snapshot (heap-backed, still-live: share the buffer,
+bump a count; the *writer* pays a real copy only if it writes while shared).
+Drops: scope-end RAII (S63). **User-visible destructors exist only on
+`@Resource` types, which are move-only and never snapshotted — so destructor
+points are exactly as static as Rust's.** Plain-data frees are memory-only;
+timing is the optimizer's.
 
-A `Str` slice is a snapshot value backed by the same counted buffer. Safe because
-it's immutable; no lifetime exists because nothing borrows.
+**Receiver mutation is inferred and displayed, not typed:** ✎ (mutates) /
+⌫ (consumes) badges in `jet doc` and LSP hover/inlay; recorded in published
+capability metadata; `jet publish` diffs it (a method that starts mutating is
+semver-major). `@Pure fn` (S60) is the checked source-level claim when an
+author wants the guarantee in text. Safe because the danger `&mut self` guards
+in Rust — aliased mutation — is unrepresentable here.
 
-### Graphs — the pool is the paved road
+## Tier 1 — the loud tier
 
-Trees are free (rule 1: memory is a tree). Actual graphs — entities that
-reference each other — get first-class handles instead of borrowed pointers:
-
-```jet
-players := Pool<Player>.new()
-kai := players.add(Player.{ name: "Kai" })   // kai: Id<Player>, Copy, stable
-target := players.add(Player.{ name: "Rem" })
-players[kai].target = target                  // ids stored freely, no lifetimes
-players.remove(target)
-players[kai].target                           // stale id: caught access (Option / checked)
-```
-
-This is where Rust users end up anyway (slotmap/ECS) after losing to the borrow
-checker; Jet ships it as the blessed answer with real syntax support (place
-expressions through `pool[id]`). Also the Blueprint/gameplay story's natural
-substrate.
-
-### True shared mutable — rare, loud, safe
-
-```jet
-config := Shared.new(Settings.{ volume: 0.8 })   // one value, many doors
-tasks.spawn(() => {
-    config.edit(s => s.volume = 0.5)             // exclusive inside the block
-})
-print(config.read(s => s.volume))
-```
-
-Lowered to `Arc<RwLock>`; the only cross-thread mutability in the language,
-which keeps S53's "no shared mutable state by accident" intact.
-
-## The expert tier: annotations are contracts, not permission
-
-Everything above compiles with zero annotations. Experts *tighten*:
-
-| lever | meaning | enforcement |
+| op | spelling | notes |
 |---|---|---|
-| `~T` | may mutate caller's value | already the visibility rule |
-| `^T` | consumes; caller may not reuse | on resources: semantic. on data: **zero-copy guarantee** — compiler errors if it would need a copy |
-| `copy x` | force an eager independent copy now | D-CAP2, unchanged |
-| `@Unique` binding/field | statically one owner, no counts ever | compile error on violating handoff |
-| `policy no_implicit_copy` (module/pkg) | any surviving implicit copy or refcount is a compile error at the handoff | Rust-strictness, opt-in, scoped |
-| arenas / `region` | allocation control | D-REGION1/ALLOC1-2, unchanged |
-| `buffer: [U8#4096] := uninit` | skip zero-fill, proof-checked | D-UNINIT-SENTINEL1, unchanged |
-| `*T` + `#Unsafe("...")` | raw pointers, layout, FFI | S58/D-CAP9, unchanged |
-| `jet build --copies` | list every surviving implicit copy/refcount with reason + fix | visibility instead of mandatory annotation |
+| mutate a non-receiver arg | `swap(~a, ~b)` | declaration + call site; statement-bound lend, never storable, never bindable |
+| give a value away | `channel.send(^packet)`; `fn close(^self)` | visible move; later use errors at *your* `^`. Declaration-side only for receivers |
+| explicit duplicate | `copy x` | required only where policy/`@NoImplicitCopy` demands |
+| shared mutable identity | `Shared<T>` | the only "many doors to one value"; edit/read access blocks |
+| stable many-object graphs | `Pool<T>` + `Id<T>` | ids are plain data; the ECS answer, first-class |
 
-The inversion that makes this revolutionary rather than incremental: in Rust,
-annotations are the *price of compiling*. Here the program always compiles and
-is always safe; annotations only ever **add guarantees**. A `policy
-no_implicit_copy` module is exactly as strict as Rust — so Rust's model still
-exists inside Jet, demoted to an opt-in lint profile for the 5% of code that
-wants it. Nothing is lost; a game's hot loop demands proof, the other 20k lines
-never think about ownership at all.
+There is **no reference, view, or borrow that can be stored** — v3's `&` hold
+is deleted (adversarial finding F3 below). Zero-copy sharing of immutable data
+is what plain assignment already does; visible-update sharing is `Shared`;
+everything else was a footgun.
 
-Full-capability check (nothing Rust can express is lost):
+The complete static rule set a user can ever trip over:
 
-| Rust | Jet One-Home |
-|---|---|
-| `&T` param | unmarked param (inferred borrow) |
-| `&mut T` | `~T` |
-| move | inferred; forced/guaranteed by `^T` |
-| `Box<T>` | invisible (recursive types auto-boxed) |
-| `Rc`/`Arc` | invisible CoW; `Shared<T>` when identity matters |
-| `Mutex`/`RefCell` | `Shared<T>` edit blocks |
-| `&'a str` slices | counted view values |
-| lifetimes | do not exist (nothing stores borrows) |
-| `Cow<T>` | the default |
-| self-referential/`Pin` | `Pool` ids, or `*T` tier |
-| `unsafe` | `#Unsafe` tier, unchanged |
+1. A `~` lend may not overlap another access to the same place in one
+   statement (`swap(~a, ~a)`; `enroll(~party, party.members[0])` — hoist to a
+   local, the error says how).
+2. A resource may not be used after its `^` (error quotes the consuming line).
+3. That's all. No borrow errors, no lifetime errors, no dangling — and **no
+   runtime ownership checks anywhere** (v3's checked-exclusivity tier is gone;
+   everything is static).
 
-## How the compiler does it (sema machinery, all front-side per I3)
+## Tier 2 — the claimed tier
 
-1. **Access inference** per param: read / write / consume — the D-CAP8 infer
-   tier, kept as-is internally.
-2. **Last-use analysis** per place: a handoff at last use lowers to a move.
-   Most handoffs in real code are last uses — zero cost.
-3. **Read-only handoffs** lower to `&T`. `~` lowers to `&mut T`.
-4. **Escaping handoff with live caller value:** small POD → memcpy; heap-backed →
-   CoW snapshot (`CowBox` in the jet runtime: Arc + make_mut). Perceus-grade
-   static uniqueness analysis deletes counts it can prove; non-atomic counts
-   unless the value provably crosses a task boundary.
-5. **Drops:** scope-end RAII (S63), every exit path; optimizer may release
-   non-observable values earlier.
-6. **Exclusivity check:** overlapping-place analysis per call/statement. Local
-   and complete precisely because no references are storable — the whole reason
-   Rust needs lifetimes is gone, not hidden.
+Control is claimed per *type* and per *module*:
 
-rustc remains the hidden verifier (I2); everything above is checked in sema and
-lowered to boring safe Rust plus the vetted `CowBox` internals (I1).
-
-## The honest cost (priority 3, faced squarely)
-
-| situation | cost |
-|---|---|
-| handoff at last use | zero (move) |
-| read-only handoff | zero (borrow) |
-| handoff that escapes, caller still uses it, heap-backed | one refcount bump; physical copy only on later write-while-shared |
-| same, small POD | memcpy |
-| `policy no_implicit_copy` code | zero by construction — anything else is a compile error |
-
-No GC, no pauses, no tracing, fully deterministic. But a surviving refcount
-bump is real, and philosophy.md #3 says "no runtime overhead to buy
-simplicity." The ranked-priority argument for accepting it: the overhead is
-(a) elidable and statically elided in the common paths, (b) confined to the
-exact spot where the *user's program semantics* demand a logical copy, and
-(c) removable to literally-Rust levels by opt-in policy exactly where it
-matters. Priorities 1 and 2 outrank 3, and the expert tier keeps 3 fully
-reachable. Ratifying D-MEM1=A includes signing this reading of priority 3;
-D-MEM1=B below is the strict reading.
-
-Swift ships this machinery on every iPhone; Koka/Perceus and Lobster prove the
-elision tech; Mojo proves inferred ownership on a systems language. The
-synthesis — plus contracts-not-permission and pools-as-paved-road — is the
-greenfield part.
-
-## Lessons taken
-
-- **Swift/Hylo:** mutable value semantics + CoW is mass-market-proven beginner-safe; visible `&x`-style mutation marks are liked, not tolerated.
-- **Koka (Perceus), Lobster:** compile-time RC elision makes "everything is a value" near-zero-cost in practice.
-- **Mojo:** ASAP/last-use ownership inference on an imperative surface works.
-- **Rust:** exclusivity is the safety core worth keeping; mandatory proof is the adoption killer worth dropping. RAII/linear resources are the good part — scope them to resources.
-- **Pony (capabilities):** vocabulary without removing the question doesn't lower the curve — the lesson of our own D-CAP arc.
-- **Vale:** generational indices are gold — as library-level pool handles, not as the pointer model.
-- **ECS practice:** when a paradigm's users converge on a workaround (slotmap), ship the workaround as the paradigm.
-
-## Considered and rejected
-
-- **Tracing GC** — priority 3, determinism, embedded/kernel targets. Dead on arrival.
-- **Generational references as the core model (Vale)** — keeps pointer/aliasing mental model (spooky action at a distance stays), failure mode is a runtime panic not a compile error, per-deref checks tax the default path. Its good half survives as `Pool` ids.
-- **Capability vocabulary (current)** — the question survives renaming; call-site mirroring spreads it to every line.
-- **Pure functional + Perceus (Roc/Koka)** — collides with Jet's imperative surface; take the runtime tech, not the semantics.
-- **Full region inference (MLKit)** — region-bloat pathologies; regions stay the expert lever they already are.
-
-## What this supersedes / keeps (if D-MEM1 = A)
-
-**Dies:** `&T` share sigil (D-CAP7 shrinks), stored-ref fields + owner inference
-(D-REF-SHORTHAND1/2, E0207/E0427), L0201, share-vs-edit API metadata,
-freeze-at-API for anything but `~`/`^` (E0912 scope shrinks).
-**Survives untouched:** `~` mutation sigil + call-site mirror (D-CAP3/D-MUTSELF1),
-`^` consume (rescoped: resources + zero-copy contract), `copy` verb (D-CAP2),
-`*T`/`#Unsafe` (S58/D-CAP9), arenas/regions, `uninit`, S63 RAII, #SingleUse
-(becomes the `@Resource` substrate), S53 concurrency direction (strengthened —
-values crossing tasks are safe by rule 2).
-**New surface (each its own follow-on ballot if A ratifies):** `Shared<T>`,
-`Pool<T>`/`Id<T>`, `@Unique`, `@Resource` spelling, `policy no_implicit_copy`,
-`--copies` diagnostics voice.
-
-Sigil count drops from five to four; error classes drop by three; the beginner
-curriculum drops to two sentences.
-
-## Name menu (owner picks; used in docs/diagnostics voice)
-
-- **Fly-by-Wire** — pilot states intent, computer moves the control surfaces; direct-law mode still exists for experts. (Closest metaphor to the actual design.)
-- **One-Home** — the teaching rule itself as the name.
-- **Autotrim** — the compiler continuously trims ownership so the airframe flies hands-off.
-- **Slipstream** — values move in the wake of the program with no drag from annotations.
-- **Feather** — props auto-feather; copies auto-elide.
-- **Glidepath** — beginners stay on the glideslope without touching the controls.
-
-## D-MEM1 — the decision
-
-Same program under each option: `add_member(party, player)` then use `player`.
-
-**A — One-Home model (recommended).** Everything above.
 ```jet
-add_member(~party, player)
-print(player.name)            // fine; compiler chose move/borrow/CoW
+@NoImplicitCopy                       // this TYPE never silently copies or counts:
+struct Image { pixels: [U8] }         // a handoff that can't move/borrow = compile
+                                      // error at that line ("add copy, or restructure")
+
+// per module / package:
+policy no_implicit_copy               // every handoff must lower to move/borrow;
+                                      // anything else = compile error (Rust discipline)
+policy no_count                       // no refcounts may survive (embedded ABI floor)
+policy no_alloc                       // arenas/static only (kernel, hot loops)
 ```
 
-**B — One-Home, eager copies only.** Rules 1–5 identical, but no CoW/refcounts
-ever: an escaping live handoff is a real deep copy (warning-visible), `copy` to
-silence. Strictest priority-3 reading; predictable; big-value handoffs cost
-real memory and the beginner perf story worsens (accidental O(n) copies).
+**A policy is not a dialect.** Semantics are identical everywhere — *as-if*
+copy; a policy only converts silent lowering choices into required explicit
+ones. Moving code between modules can never change what it means, only whether
+it still compiles there.
+
+Floor unchanged: `region`/arenas (D-REGION1/ALLOC1-2), `:= uninit`
+(D-UNINIT-SENTINEL1), `*T` + `#Unsafe("reason")` (S58/D-CAP9), layout /
+volatile / FFI via `core.mem`.
+
+## "Isn't copying everywhere terrible for memory?"
+
+No — because the copies are *logical*. Physically:
+
+- A CoW snapshot shares the buffer: **footprint ≈ Rust + one count word per
+  heap allocation.** An eager-copy design would be terrible; this isn't one.
+- The majority of handoffs never even count: last-use moves and read-only
+  borrows are resolved statically (Perceus-class elision; whole-program
+  compilation makes this strong).
+- The two *real* memory risks are named and armed, not hidden:
+  - **Latency cliff** — writing a 100 MB value while snapshotted pays the copy
+    at the write. Armed: `@NoImplicitCopy` on exactly the types where that's
+    catastrophic (Image, Buffer, World) makes the silent path a compile error
+    program-wide; `jet build --explain-copies` lists every possible deferred-
+    copy site; `jet dev` traces copy events live.
+  - **Retention** — a held snapshot keeps a big buffer alive. Armed: same
+    marker, same tooling; resources can't be snapshotted at all.
+- Aggregate handoff cost (a struct of 10 `Str`s = up to 10 count bumps when it
+  can't move — Swift's ARC-traffic problem) is real. Armed: move-first
+  lowering, borrow inference, and the ratification gate below.
+
+**Ratification gate (owner-visible exit criteria):** before any build, a
+benchmark suite — game tick, JSON parse/transform, HTTP echo server, allocation
+churn — must land within an owner-set envelope of the equivalent Rust under the
+*default* tier, and match it under policy modules. If the default tier can't
+hit the envelope, D-MEM1 reopens with data. No vibes-based perf claims.
+
+## Against Rust, head to head
+
+**1. Use after insert — the beginner-killer**
+```rust
+party.members.push(kai);
+println!("{}", kai.name);      // error[E0382]: borrow of moved value: `kai`
+```
 ```jet
-add_member(~party, player)    // deep-copies player here, every time
+party.members.push(kai)
+print(kai.name)                // fine
 ```
 
-**C — Generational references.** Familiar pointer semantics; every value
-reachable by reference, deref checked against a generation at runtime; regions
-elide checks in hot code. Aliasing mental model returns; errors move to runtime.
+**2. Returning a view**
+```rust
+fn domain<'a>(email: &'a str) -> &'a str { … }
+```
 ```jet
-p := &player                  // references first-class again
-party.add(p)
-player.hp = 0                 // p sees it — spooky action returns
+fn domain(email: Str) -> Str { email.after("@") }   // snapshot slice; zero-copy
 ```
 
-**D — Status quo.** D-CAP7/8 sigil capabilities stand as ratified; this
-proposal archives as design history.
+**3. Struct holding text — the lifetime infection**
+```rust
+struct Parser<'a> { src: &'a str, pos: usize }      // 'a infects every user
+```
 ```jet
-add_member(~party, ^player)
-print(player.name)            // error: player was taken — today's world
+struct Parser { src: Str, pos: Int }                // snapshot; zero-copy; no sigil at all
 ```
 
-Recommendation: **A.** B is A with the best beginner-perf machinery removed for
-a purity point the expert tier already answers; C re-imports the aliasing
-confusion this proposal exists to delete; D is the clunk the owner is reacting
-to.
+**4. Shared mutable config + tasks**
+```rust
+let config = Arc::new(Mutex::new(Config::default()));
+let c = Arc::clone(&config);
+thread::spawn(move || { c.lock().unwrap().volume = 0.5; });
+```
+```jet
+config := Shared.new(Config.{})
+tasks.spawn(() => config.edit(c => c.volume = 0.5))
+```
+
+**5. Mutate while iterating**
+```rust
+for m in party.members.iter_mut() {
+    if m.hp == 0 { party.log_death(m); }   // E0499 second mutable borrow
+}
+```
+```jet
+loop m in party.members {
+    if m.hp == 0 { party.log_death(m) }    // error only if log_death edits members —
+}                                          // said in English with the collect-after fix
+```
+
+**6. Multi-target mutation — matched, not conceded**
+```rust
+mem::swap(&mut a, &mut b);
+```
+```jet
+swap(~a, ~b)
+```
+
+**7. Graphs — where Rust sends you to crates**
+```rust
+let a = Rc::new(RefCell::new(Node::default()));
+a.borrow_mut().next = Some(Rc::clone(&b));          // runtime borrow panics await
+```
+```jet
+world := Pool<Node>.new()
+a := world.add(Node.{})
+world[a].next = world.add(Node.{})
+```
+
+**8. Hot path — Rust's turf**
+```jet
+// sim/: policy no_implicit_copy no_alloc
+fn tick(world: ~World, dt: F32) {
+    loop e in world.entities { e.pos += e.vel * dt }
+}   // identical machine code, enforced; the other 20k lines pay nothing
+```
+
+Scorecard: same guarantees (memory-safe, race-free, no GC, deterministic
+destruction of resources, zero-cost reachable and *enforceable*), minus
+lifetimes, minus invisible moves, minus wrapper-type assembly kits, minus
+global ceremony.
+
+## APIs
+
+```jet
+pub fn parse(src: Str) -> Json            // cannot change or consume src — by rule
+pub fn merge(base: ~Json, patch: Json)    // the rare visible edit-arg
+pub fn Json.compact(self) -> Json         // ✎/⌫/pure badges: inferred, rendered, semver-diffed
+pub fn Sink.send(self, packet: ^Packet)   // visible take
+@NoImplicitCopy pub struct Image { … }    // perf contract is part of the type
+```
+
+Unmarked = complete contract, zero annotations. Behavioral metadata (mutates /
+consumes / pure / copy-class) is inferred, shown by `jet doc`/LSP, recorded at
+publish, and diffed — sigil or badge changes require a major version.
+A `no_alloc`/`no_count` package advertises its floor; embedded consumers can
+require it.
+
+## Domain fit
+
+- **CLI / scripts / web handlers / data:** tier 0 end to end; sigils absent.
+- **Servers:** tier 0 + `Shared` sessions + tasks (values crossing tasks are
+  snapshots/moves — races unrepresentable; counts on crossing types are atomic,
+  chosen by whole-program escape analysis, non-atomic elsewhere).
+- **Games:** tier 0 gameplay; `Pool` worlds; `@NoImplicitCopy` on big assets;
+  `policy` sim/render; per-frame arenas.
+- **Embedded / kernel:** package-wide `no_alloc no_count` + `@NoImplicitCopy`
+  defaults + tier-2 floor (`uninit`, `*T`, volatile, MMIO). Full static
+  discipline, zero counts, zero heap — enforced, not hoped.
+- **Libraries:** tier-0 internals, loud surface, diffed metadata.
+
+## Adversarial pass (veteran systems/memory engineer) — record
+
+| # | attack | verdict | disposition |
+|---|---|---|---|
+| F1 | "Copies everywhere = memory blowup" | **deflected** | logical copies, physical sharing; footprint ≈ Rust + count word/allocation; eager-copy strawman ≠ this design |
+| F2 | "CoW latency cliffs + retention are 3am bugs Rust prevents by construction" | **landed** | `@NoImplicitCopy` per-type marker added (compile error at any silent copy/count of marked types, program-wide); `--explain-copies` + `jet dev` copy tracing; policy floors for whole modules |
+| F3 | "Your `&` hold is incoherent: live view vs snapshot unspecified; if live, writer+holder needs runtime exclusivity checks = implicit RefCell panics" | **landed, fatally for `&`** | `&` holds **deleted** from the safe tier. Plain assignment already gives zero-copy immutable sharing (CoW); visible-update sharing is `Shared` by name. With no storable views, *every* remaining check is static — the runtime-checked exclusivity tier is gone from the design |
+| F4 | "Functions that can't mutate args are useless" | **deflected, wording landed** | rule restated: code acts on its *subject* for free (methods, external-method syntax); non-subject mutation is one char (`transfer(~a, ~b)`); Swift precedent; v3's "no function can change what you pass" overclaim retired |
+| F5 | "Unmarked mutating receivers = signatures lie where it matters most (review diffs without LSP)" | **held as explicit trade** | badges/metadata/semver-diff + `@Pure`; option B (declared `~self`) preserved on the ballot as the const-correct variant; owner picks the axis |
+| F6 | "ARC traffic on aggregate handoffs (N count bumps per escaping struct)" | **landed** | move-first lowering + borrow inference acknowledged as necessary-not-sufficient; **benchmark ratification gate** added — default tier must hit an owner-set envelope vs Rust on real workloads or D-MEM1 reopens |
+| F7 | "Refcounts and threads: atomic tax or unsoundness" | **deflected** | whole-program escape analysis: atomic only for types that actually cross task boundaries; conservative fallback atomic; unsoundness impossible (counts are compiler-emitted, never user-visible) |
+| F8 | "Deterministic destruction dies under CoW" | **deflected** | destructors exist only on `@Resource` types; resources are move-only and never snapshotted; drop points as static as Rust. Plain-data frees have no user-visible timing |
+| F9 | "Policy modules fragment the language into dialects" | **deflected** | semantics identical everywhere; policy converts silent lowering into required explicitness; moving code changes compilability, never meaning |
+| F10 | "FFI: CoW containers can't cross a C boundary" | **deflected** | `#Unsafe` tier forces uniqueness (`make_mut` class) before exposing pointers; `no_count` modules use arenas/fixed arrays — the embedded story already |
+
+Net design changes from the pass: `&` deleted (safe surface is now `~` and `^`
+only, both rare); all ownership checking static; `@NoImplicitCopy` added;
+atomicity by escape analysis; benchmark gate added; mutation rule restated.
+
+## What this deletes / keeps (vs ratified state)
+
+**Deleted if A:** D-CAP8 elevation/freeze + `api: explicit`; L0201 (implicit
+copy is defined semantics, surfaced and bannable); D-REF-SHORTHAND1/2 + `#Ref`
++ E0207/E0427 (no storable views exist to infer owners for); `&T` as share
+param *and* as stored ref (glyph reserved, unminted in the safe tier); routine
+call-site mirroring (survives only on `~` args and `^` gives).
+**Kept:** `~`/`^`/`*` glyph meanings (D-CAP7, collapsed frequency); `copy`
+(D-CAP2); D-MUTSELF1 receiver-on-self declarations (`^self`; `~self` under
+option B); S63 RAII; #SingleUse → `@Resource`; arenas/`uninit`/`*T`/`#Unsafe`;
+S53/D-DETACH1 posture; D-CAP5 metadata (extended with badges).
+**New (follow-on ballots if A):** `@NoImplicitCopy`; `policy no_implicit_copy |
+no_count | no_alloc`; `Shared<T>`/`Pool<T>` APIs; `@Resource` naming; badge
+voice; `--explain-copies` voice; rare-mutation marker spelling menu
+(`~x` / `mut x` / `inout x` / `x!`).
+
+## D-MEM1 (v3.1) — the decision
+
+**A — Progressive ceremony, hardened (recommended).** Everything above. Safe
+surface: no sigils except rare `~`/`^`; no storable views; all checks static;
+per-type and per-module control; benchmark gate before build.
+
+**B — A + declared mutating receivers (`fn heal(~self)`).** Const-correct
+source at the price of `~` on every mutating method (its highest-frequency
+site). Call sites unchanged. Badge machinery identical.
+
+**C — v2 completed sigils** (explicit everywhere + `from` clauses). On record;
+already disliked.
+
+**D — Status quo** (D-CAP7/8 + D-REF-SHORTHAND, six diagnosed inconsistencies).
+
+Recommendation: **A**, with B the live alternative if source-level const-
+correctness outweighs sigil frequency.

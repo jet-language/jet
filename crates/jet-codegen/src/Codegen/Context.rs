@@ -53,6 +53,13 @@ pub(crate) struct Cx {
     /// S55: explicit `derive Comparable;` → PartialOrd in Rust.
     pub(crate) partial_ord: HashSet<String>,
     pub(crate) patchable: HashSet<String>,
+    /// D-FIELDPOL1: struct name -> computed field names. Sema already
+    /// synthesized a `fn <field>(self) -> T` getter for each on `s.methods`
+    /// (`Sema::CheckerFieldPolicy`); this set is consulted at every
+    /// `Expr::Field`/`LValue::Field` lowering site so a read of the field
+    /// emits a call to that getter instead of a struct member access — the
+    /// field simply isn't a Rust struct member (see `emit_struct`).
+    pub(crate) computed_fields: HashMap<String, HashSet<String>>,
     pub(crate) src: String,
     pub(crate) file: String,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
@@ -891,6 +898,7 @@ pub(crate) fn build_cx_items(
         hashable: HashSet::new(),
         partial_ord: HashSet::new(),
         patchable: HashSet::new(),
+        computed_fields: HashMap::new(),
         src: src.to_string(),
         file: file.to_string(),
         test_mode: false,
@@ -992,6 +1000,17 @@ pub(crate) fn build_cx_items(
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect(),
                 );
+                // D-FIELDPOL1: computed field names, so TIR lowering routes a
+                // read of one to a getter call instead of a member access.
+                let computed: HashSet<String> = s
+                    .fields
+                    .iter()
+                    .filter(|f| f.computed.is_some())
+                    .map(|f| f.name.clone())
+                    .collect();
+                if !computed.is_empty() {
+                    cx.computed_fields.insert(s.name.clone(), computed);
+                }
                 let mut labels = HashMap::new();
                 for f in &s.fields {
                     if f.is_stored_ref {

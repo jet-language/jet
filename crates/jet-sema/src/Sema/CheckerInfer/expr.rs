@@ -1679,6 +1679,23 @@ impl<'a> Checker<'a> {
         self.field_type(&t, member, span)
     }
 
+    /// D-FIELDPOL1: true when `member` is a computed field on struct type `t`
+    /// (`Named` or `Apply`) — used at every WRITE site (`x.field = …`,
+    /// `x.field++`) to reject with E0339 before `field_type` would otherwise
+    /// resolve it as a normal (settable) field.
+    pub(crate) fn field_is_computed(&self, t: &Type, member: &str) -> bool {
+        let type_name = match t {
+            Type::Named(n) => n.as_str(),
+            Type::Apply { name, .. } => name.as_str(),
+            _ => return false,
+        };
+        let Some(owner_mod) = self.struct_owner_module(type_name, None) else {
+            return false;
+        };
+        self.computed_field_types_of(owner_mod, type_name)
+            .is_some_and(|c| c.contains_key(member))
+    }
+
     /// Resolve the type of `member` on the struct type `t` (S71 reuses this for
     /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
     pub(crate) fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
@@ -1727,6 +1744,15 @@ impl<'a> Checker<'a> {
                             return Some(fty.clone());
                         }
                     }
+                    // D-FIELDPOL1: a computed field is never in `fields` (it's
+                    // not stored) but a *read* still resolves its declared
+                    // type — only the write side (assignment/incdec/struct-lit)
+                    // rejects it with E0339.
+                    if let Some(computed) = self.computed_field_types_of(owner_mod, type_name) {
+                        if let Some((_, cty)) = computed.get(member) {
+                            return Some(cty.clone());
+                        }
+                    }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
                     let mut fix = format!("check the field names on `{}`", type_name);
                     if let Some(suggest) = suggest_field(member, &field_names) {
@@ -1762,6 +1788,14 @@ impl<'a> Checker<'a> {
                                 return None;
                             }
                             return Some(self.trait_reg.instantiate_type(fty, &subst));
+                        }
+                    }
+                    // D-FIELDPOL1: see the `Type::Named` branch above — a
+                    // computed field resolves for reads even though it's
+                    // absent from `fields`.
+                    if let Some(computed) = self.computed_field_types_of(owner_mod, name) {
+                        if let Some((_, cty)) = computed.get(member) {
+                            return Some(self.trait_reg.instantiate_type(cty, &subst));
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
