@@ -205,7 +205,7 @@ impl Provider for CoreProvider {
         // `executable`, today's behavior.
         let manifest = PackageManifest::PackManifest::load(&repo).and_then(|r| r.ok());
         // D-ILE1: `kind` is inferred when `pkg.jet` omits it (or there is no
-        // `pkg.jet`): a top-level `fn main` in the package source means
+        // `pkg.jet`): a top-level `fn run` in the package source means
         // executable, otherwise library. An explicit `library`/`executable`
         // always wins.
         let kind = manifest
@@ -297,9 +297,9 @@ fn build_rlib_from_cargo(pkg_dir: &Path, store_dir: &Path) -> Option<String> {
     Some(rlib.to_string_lossy().into_owned())
 }
 
-/// D-ILE1: infer a package's kind from its source. A top-level `fn main` in any
+/// D-ILE1: infer a package's kind from its source. A top-level `fn run` in any
 /// of the package's `.jet` files means `executable`; otherwise `library`. The
-/// source is lexed (not string-matched) so `fn main` inside a comment or string
+/// source is lexed (not string-matched) so `fn run` inside a comment or string
 /// literal never produces a false positive.
 fn infer_package_kind(dir: &Path) -> PackageManifest::PackageKind {
     // A staged, non-empty `bin/` is the realized-package convention for "installs
@@ -307,14 +307,14 @@ fn infer_package_kind(dir: &Path) -> PackageManifest::PackageKind {
     let has_bin = std::fs::read_dir(dir.join("bin"))
         .map(|mut d| d.next().is_some())
         .unwrap_or(false);
-    if has_bin || dir_has_top_level_main(dir) {
+    if has_bin || dir_has_top_level_run(dir) {
         PackageManifest::PackageKind::Executable
     } else {
         PackageManifest::PackageKind::Library
     }
 }
 
-fn dir_has_top_level_main(dir: &Path) -> bool {
+fn dir_has_top_level_run(dir: &Path) -> bool {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return false;
     };
@@ -326,12 +326,12 @@ fn dir_has_top_level_main(dir: &Path) -> bool {
             continue;
         }
         if path.is_dir() {
-            if dir_has_top_level_main(&path) {
+            if dir_has_top_level_run(&path) {
                 return true;
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT) {
             if let Ok(src) = std::fs::read_to_string(&path) {
-                if file_has_top_level_main(&src) {
+                if file_has_top_level_run(&src) {
                     return true;
                 }
             }
@@ -340,8 +340,8 @@ fn dir_has_top_level_main(dir: &Path) -> bool {
     false
 }
 
-/// True when `src` declares a top-level `fn main` (brace depth 0).
-fn file_has_top_level_main(src: &str) -> bool {
+/// True when `src` declares a top-level `fn run` (brace depth 0).
+fn file_has_top_level_run(src: &str) -> bool {
     use crate::Lexer::TokKind;
     let (toks, _diags) = crate::Lexer::lex(src);
     let mut depth: i32 = 0;
@@ -350,7 +350,7 @@ fn file_has_top_level_main(src: &str) -> bool {
             TokKind::LBrace => depth += 1,
             TokKind::RBrace => depth -= 1,
             TokKind::KwFn if depth == 0 => {
-                if matches!(toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Ident(n)) if n == "main")
+                if matches!(toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Ident(n)) if n == "run")
                 {
                     return true;
                 }
@@ -840,22 +840,22 @@ mod tests {
     }
 
     #[test]
-    fn top_level_main_drives_kind_inference() {
-        // D-ILE1: a top-level `fn main` means executable.
-        assert!(file_has_top_level_main("fn main() {}\n"));
-        assert!(file_has_top_level_main(
-            "fn helper() -> Int { return 1; }\nfn main() { print(\"hi\"); }\n"
+    fn top_level_run_drives_kind_inference() {
+        // D-ILE1: a top-level `fn run` means executable.
+        assert!(file_has_top_level_run("fn run() {}\n"));
+        assert!(file_has_top_level_run(
+            "fn helper() -> Int { return 1; }\nfn run() { print(\"hi\"); }\n"
         ));
-        // A `main` nested in a module/impl block is not the entry point.
-        assert!(!file_has_top_level_main("module m { fn main() {} }\n"));
-        // A library: no top-level `fn main`.
-        assert!(!file_has_top_level_main(
+        // A `run` nested in a module/impl block is not the entry point.
+        assert!(!file_has_top_level_run("module m { fn run() {} }\n"));
+        // A library: no top-level `fn run`.
+        assert!(!file_has_top_level_run(
             "fn add(a: Int, b: Int) -> Int { return a + b; }\n"
         ));
-        // `fn main` inside a comment or string never counts.
-        assert!(!file_has_top_level_main("// fn main()\nfn lib() {}\n"));
-        assert!(!file_has_top_level_main(
-            "fn lib() { let s = \"fn main()\"; }\n"
+        // `fn run` inside a comment or string never counts.
+        assert!(!file_has_top_level_run("// fn run()\nfn lib() {}\n"));
+        assert!(!file_has_top_level_run(
+            "fn lib() { let s = \"fn run()\"; }\n"
         ));
     }
 

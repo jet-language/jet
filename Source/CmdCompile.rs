@@ -502,7 +502,7 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         eprintln!("error: couldn't write {}: {}", jet::Syntax::PAYLOAD_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
-    let main_src = "fn main() {\n    print(\"hello, world\");\n}\n";
+    let main_src = "fn run() {\n    print(\"hello, world\");\n}\n";
     fs::write(jet_dir.join("main.jet"), main_src).unwrap_or_else(|e| {
         eprintln!("error: couldn't write .jet/main.jet: {}", e);
         exit(ExitCodes::USER_ERROR);

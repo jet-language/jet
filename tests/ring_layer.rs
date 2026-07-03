@@ -46,7 +46,7 @@ fn math_import_infers_core_layer() {
     let main = r#"
 use core.math as math
 
-fn main() {
+fn run() {
     print(math.sqrt(9.0))
 }
 "#;
@@ -76,7 +76,7 @@ fn fs_import_infers_std_layer() {
     let main = r#"
 use core.fs as fs
 
-fn main() {
+fn run() {
     print("ok")
 }
 "#;
@@ -106,7 +106,7 @@ fn ceiling_blocks_std_import() {
     let main = r#"
 use core.fs as fs
 
-fn main() {
+fn run() {
     print("ok")
 }
 "#;
@@ -132,7 +132,7 @@ fn alloc_ceiling_allows_mem_not_fs() {
     let main = r#"
 use core.mem as mem
 
-fn main() {
+fn run() {
     print("ok")
 }
 "#;
@@ -157,7 +157,7 @@ fn ambient_input_infers_std_layer() {
     )
     .unwrap();
     let main = r#"
-fn main() {
+fn run() {
     _ :: input("name? ")
     print("ok")
 }
@@ -186,7 +186,7 @@ fn ceiling_blocks_ambient_input_helper() {
     )
     .unwrap();
     let main = r#"
-fn main() {
+fn run() {
     _ :: input("name? ")
     print("ok")
 }

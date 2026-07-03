@@ -334,15 +334,14 @@ pub fn compile_tests(
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when the file
 /// defines a top-level `fn dev()` — compiles NATIVELY with `dev()` swapped in
-/// as the program's real entry point instead of `main()`. Mechanically: an
+/// as the program's real entry point instead of `run()`. Mechanically: an
 /// AST-level rename before sema ever runs (I3: codegen stays dumb; sema never
-/// special-cases any literal function name other than `"main"` — see
-/// `Registration.rs`/`Bundle.rs`'s `funcs.get("main")` checks and
-/// `Codegen::mangle`, which renames Jet's `main` to Rust's literal `fn main`).
-/// The function literally named `entry_fn` becomes literally named `main`;
-/// whatever was previously named `main` (if anything) is renamed to a
-/// collision-free name first, so a file with both `fn main()` and `fn dev()`
-/// never ends up with two functions racing to become the generated `fn main`.
+/// special-cases any entry name other than `"run"` — see
+/// `Registration.rs`/`Bundle.rs`'s `funcs.get("run")` checks. The function
+/// literally named `entry_fn` becomes literally named `run`; whatever was
+/// previously named `run` (if anything) is renamed to a collision-free name
+/// first, so a file with both `fn run()` and `fn dev()` never has two entry
+/// candidates.
 /// Native only — never freestanding/impure/web (those toggles don't apply to
 /// the `fn dev()` entry path; a `dev()` function's job is to configure and run
 /// an ordinary value like `core.devserver`, nothing more).
@@ -397,24 +396,24 @@ pub fn compile_bundle_path_with_entry(
 }
 
 /// Rename the function literally named `entry_fn` in the entry module to
-/// `main`, first moving any pre-existing `main` out of the way. A no-op when
-/// `entry_fn` is already `"main"`.
+/// `run`, first moving any pre-existing `run` out of the way. A no-op when
+/// `entry_fn` is already `"run"`.
 fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
-    if entry_fn == "main" {
+    if entry_fn == "run" {
         return;
     }
     let items = &mut bundle.modules[bundle.entry].items;
     for item in items.iter_mut() {
         if let crate::AST::Item::Func(f) = item {
-            if f.name == "main" {
-                f.name = "__jet_unused_main".to_string();
+            if f.name == "run" {
+                f.name = "__jet_unused_run".to_string();
             }
         }
     }
     for item in items.iter_mut() {
         if let crate::AST::Item::Func(f) = item {
             if f.name == entry_fn {
-                f.name = "main".to_string();
+                f.name = "run".to_string();
             }
         }
     }

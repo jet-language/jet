@@ -544,21 +544,21 @@ pub(crate) enum SendCrossing {
     ChannelSend,
 }
 
-/// What the driver is compiling — affects `main` / test requirements (M6).
+/// What the driver is compiling — affects `run` / test requirements (M6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompileMode {
-    /// `jet run` / `jet build` — needs `main`, ignores test blocks in codegen.
+    /// `jet run` / `jet build` — needs `run`, ignores test blocks in codegen.
     Run,
-    /// `jet test` — needs at least one test; `main` is optional.
+    /// `jet test` — needs at least one test; `run` is optional.
     Test,
     /// `jet bench` (D-BENCH1) — type-check `#Bench` block bodies and emit the
-    /// timing harness; `main` is optional, like `Test`.
+    /// timing harness; `run` is optional, like `Test`.
     Bench,
     /// `jet check` / LSP — type-check only; imported modules and library files
-    /// need not define `main`.
+    /// need not define `run`.
     Check,
-    /// `jet eval` — full sema type-checking, but `main` may return a non-`()`
-    /// type (E0122 is relaxed). The entry still requires a `main` function.
+    /// `jet eval` — full sema type-checking, but `run` may return a non-`()`
+    /// type (E0122 is relaxed). The entry still requires a `run` function.
     Eval,
 }
 

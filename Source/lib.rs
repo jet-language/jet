@@ -161,7 +161,7 @@ pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`
 /// defines a top-level `fn dev()` — a normal native compile, but with `dev()`
-/// swapped in as the program's real entry point instead of `main()` (see
+/// swapped in as the program's real entry point instead of `run()` (see
 /// `Driver::compile_bundle_path_with_entry`).
 pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     Driver::compile_bundle_path_with_entry(file, entry_fn)
@@ -320,7 +320,7 @@ pub fn has_test_blocks(file: &str) -> bool {
 
 /// D-COV1: every user function the `jet test --coverage` probes can record, as
 /// `(name, 1-based line)`. Mirrors the probe set: free functions, inherent
-/// methods, and trait-impl methods in the entry file (`main` is excluded — it is
+/// methods, and trait-impl methods in the entry file (`run` is excluded — it is
 /// never probed). The runner diffs the recorded hit lines against this set to
 /// report per-function / per-line coverage.
 pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
@@ -340,7 +340,7 @@ pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
     let mut out = Vec::new();
     for item in &entry.items {
         match item {
-            AST::Item::Func(f) if f.name != "main" => {
+            AST::Item::Func(f) if f.name != "run" => {
                 out.push((f.name.clone(), line_of(f.name_span.start)));
             }
             AST::Item::Struct(s) => {
@@ -432,12 +432,12 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
         })
         .collect();
 
-    let main_fn = func_map.get("main").ok_or_else(|| {
+    let main_fn = func_map.get("run").ok_or_else(|| {
         vec![Diagnostics::Diagnostic::error(
             "E3401",
-            "no `main` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `@Pure fn main()` entry point".to_string(),
-            "add `@Pure fn main() { … }` to the program".to_string(),
+            "no `run` function found for `jet eval`".to_string(),
+            "pure evaluation needs a `@Pure fn run()` entry point".to_string(),
+            "add `@Pure fn run() { … }` to the program".to_string(),
             None,
         )]
     })?;
@@ -453,7 +453,7 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
 
 /// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
 /// interpreter and return its output as a stable JSON string. The program's
-/// `main()` function is interpreted using the comptime engine; any print calls
+/// `run()` function is interpreted using the comptime engine; any print calls
 /// are captured; the captured output is returned as a JSON string value.
 ///
 /// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
@@ -479,12 +479,12 @@ pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic
         })
         .collect();
 
-    let main_fn = func_map.get("main").ok_or_else(|| {
+    let main_fn = func_map.get("run").ok_or_else(|| {
         vec![Diagnostics::Diagnostic::error(
             "E3401",
-            "no `main` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `@Pure fn main()` entry point".to_string(),
-            "add `@Pure fn main() { … }` to the program".to_string(),
+            "no `run` function found for `jet eval`".to_string(),
+            "pure evaluation needs a `@Pure fn run()` entry point".to_string(),
+            "add `@Pure fn run() { … }` to the program".to_string(),
             None,
         )]
     })?;

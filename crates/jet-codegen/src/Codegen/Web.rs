@@ -168,7 +168,7 @@ fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
     parts.push("  \"wasmTriple\": \"wasm32-unknown-unknown\"".to_string());
     let entry = funcs
         .iter()
-        .find(|f| f.name == "main")
+        .find(|f| f.name == "run")
         .map(|f| f.bucket.name())
         .unwrap_or(Syntax::WEB_BUCKET_JS);
     parts.push(format!("  \"entry\": {}", json_quote(entry)));
@@ -334,7 +334,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
     }
     for f in wasm_funcs {
         let export = f.marker == Some(WebPartitionMarker::WasmExport)
-            || (f.name == "main" && f.bucket == WebBucket::Wasm);
+            || (f.name == "run" && f.bucket == WebBucket::Wasm);
         if export {
             emit_wasm_fn(bundle, f, export, &mut out);
         }
@@ -476,18 +476,18 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
 
     let js_funcs: Vec<&FuncWeb> = funcs
         .iter()
-        .filter(|f| f.bucket == WebBucket::Js && f.name != "main")
+        .filter(|f| f.bucket == WebBucket::Js && f.name != "run")
         .collect();
     for f in &js_funcs {
         emit_js_fn(f, &mut out, funcs);
     }
 
-    if let Some(main_fn) = funcs.iter().find(|f| f.name == "main") {
+    if let Some(main_fn) = funcs.iter().find(|f| f.name == "run") {
         if main_fn.bucket == WebBucket::Js {
             out.push_str("export async function jet_main() {\n");
             out.push_str(&format!(
                 "  jetDom.enterRenderScope({});\n",
-                json_quote("main")
+                json_quote("run")
             ));
             out.push_str("  try {\n");
             emit_js_body(&main_fn.body, &mut out, funcs, 2);
@@ -498,7 +498,7 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
         } else {
             out.push_str("export async function jet_main() {\n");
             out.push_str("  const wasm = await loadWasm();\n");
-            out.push_str(&format!("  wasm.{}();\n", wasm_export_symbol("main")));
+            out.push_str(&format!("  wasm.{}();\n", wasm_export_symbol("run")));
             out.push_str("}\n");
         }
     } else {

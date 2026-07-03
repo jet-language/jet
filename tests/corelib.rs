@@ -90,7 +90,7 @@ fn canonical_core_import_resolves() {
         r#"
 use core.fs as fs
 
-fn main() {
+fn run() {
     print(fs.exists("/tmp"))
 }
 "#,
@@ -112,7 +112,7 @@ use core.random as random
 use core.time as time
 use core.encoding.json as json
 
-fn main() {
+fn run() {
     print("ok")
 }
 "#,
@@ -138,7 +138,7 @@ fn io_input_reads_a_line_from_stdin() {
         r#"
 use core.io as io
 
-fn main() {
+fn run() {
     name :: io.input("name? ") ?? panic("read failed")
     print("hello, {name}")
 }
@@ -171,7 +171,7 @@ fn random_and_time_output_pins_with_seed_and_epoch() {
 use core.random as random
 use core.time as time
 
-fn main() {
+fn run() {
     random.seed(42)
     print(random.int(1, 100))
     print(random.float())
@@ -202,7 +202,7 @@ fn deadline_context_exceed_reports_e3003() {
         r#"
 use core.time as time
 
-fn main() {
+fn run() {
     #Context(deadline: time.now()) {
         time.sleep(5)
     }
@@ -240,7 +240,7 @@ fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
 
     fs::write(
         dir.join("hello.jet"),
-        "fn main() {\n    print(\"hello, world\");\n}\n",
+        "fn run() {\n    print(\"hello, world\");\n}\n",
     )
     .unwrap();
     fs::write(
@@ -255,7 +255,7 @@ use core.random as random
 use core.time as time
 use core.encoding.json as json
 
-fn main() {
+fn run() {
     print("ok")
 }
 "#,
@@ -307,7 +307,7 @@ fn json_decode_lenient_surfaces_coercions() {
         "json_coerce_a",
         r#"
 use core.encoding.json as json
-fn main() {
+fn run() {
     data :: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
@@ -337,7 +337,7 @@ fn main() {
         "json_coerce_b",
         r#"
 use core.encoding.json as json
-fn main() {
+fn run() {
     data :: json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
@@ -362,7 +362,7 @@ fn main() {
         "json_coerce_c",
         r#"
 use core.encoding.json as json
-fn main() {
+fn run() {
     data :: json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Int(n) {
@@ -426,7 +426,7 @@ fn json_parser_is_rfc8259_complete() {
         "json_full_a",
         r#"
 use core.encoding.json as json
-fn main() {
+fn run() {
     raw :: "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
     data :: json.parse(raw) ?? panic("bad json")
     print(json.to_string(data))
@@ -449,7 +449,7 @@ fn main() {
         "json_full_b",
         r#"
 use core.encoding.json as json
-fn main() {
+fn run() {
     if json.parse("{{\"x\":\"a\\qb\"}}") == {
         ok(_) -> { print("OK") }
         err(e) -> { print("ERR: {e.message}") }
@@ -471,7 +471,7 @@ fn main() {
         "json_full_c",
         "
 use core.encoding.json as json
-fn main() {
+fn run() {
     if json.parse(\"{{\\\"x\\\":\\\"a\tb\\\"}}\") == {
         ok(_) -> { print(\"OK\") }
         err(e) -> { print(\"ERR: {e.message}\") }
@@ -507,7 +507,7 @@ fn channel_stress_1000_messages() {
         r#"
 use core.tasks as tasks
 
-fn main() {
+fn run() {
 ch: Channel<Int> : tasks.channel()
 sender: Sender<Int> : ch.sender()
     producer :: tasks.spawn(take(sender) () => {
@@ -547,7 +547,7 @@ fn scheduler_spawn_1000_tasks() {
         r#"
 use core.tasks as tasks
 
-fn main() {
+fn run() {
 ch: Channel<Int> :: tasks.channel()
 sender: Sender<Int> :: ch.sender()
     loop i in 1..1000 {
@@ -587,7 +587,7 @@ fn scheduler_spawn_10000_tasks() {
         r#"
 use core.tasks as tasks
 
-fn main() {
+fn run() {
 ch: Channel<Int> :: tasks.channel()
 sender: Sender<Int> :: ch.sender()
     loop i in 1..10000 {
@@ -628,7 +628,7 @@ fn scheduler_spawn_100000_tasks_bench() {
         r#"
 use core.tasks as tasks
 
-fn main() {
+fn run() {
 ch: Channel<Int> :: tasks.channel()
 sender: Sender<Int> :: ch.sender()
     loop i in 1..100000 {
@@ -678,7 +678,7 @@ fn slow_one() -> Int {
     return 1
 }
 
-fn main() {
+fn run() {
     taskgroup g {
         slow :: g.task { slow_one() }
         fast :: g.task { fast_nine() }
@@ -794,7 +794,7 @@ struct Id<K> {
     #[Skip] marker: K?
 }
 
-fn main() {
+fn run() {
     print("x")
 }
 "#,
@@ -853,7 +853,7 @@ struct Id<K> {
     #[Skip] marker: K?
 }
 
-fn main() {
+fn run() {
     wi :: Wrap<Int>.{ value: 7 }
     print(json.to_string(wi))
     back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
@@ -896,7 +896,7 @@ use core.encoding.toml as toml
 struct Server { host: String  port: Int }
 @[Codable]
 struct Config { title: String  server: Server  ports: [Int] }
-fn main() {
+fn run() {
     raw :: "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
     cfg :: toml.decode<Config>(raw) ?? panic("bad toml")
     print(cfg.title)
@@ -921,7 +921,7 @@ fn main() {
         "toml_dyn",
         r#"
 use core.encoding.toml as toml
-fn main() {
+fn run() {
     raw :: "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n"
     d :: toml.parse(raw) ?? panic("bad")
     print(toml.to_string(d))
@@ -959,7 +959,7 @@ use core.encoding.yaml as yaml
 struct Service { name: String  port: Int }
 @[Codable]
 struct Config { app: String  services: [Service] }
-fn main() {
+fn run() {
     raw :: "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
     cfg :: yaml.decode<Config>(raw) ?? panic("bad yaml")
     print(cfg.app)
@@ -980,7 +980,7 @@ fn main() {
         "yaml_adv",
         r#"
 use core.encoding.yaml as yaml
-fn main() {
+fn run() {
     raw :: "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
     d :: yaml.parse(raw) ?? panic("bad yaml")
     if d == Object(top) {
@@ -1039,7 +1039,7 @@ migration UserRecord {
     rename name -> display_name
 }
 
-fn main() {
+fn run() {
     // Plain (non-@PublishedSchema) type: decode_traced still works.
     p :: json.decode_traced<Point>("{{\"x\":1,\"y\":2}}") ?? panic("bad point")
     print(p.value.x)
@@ -1090,7 +1090,7 @@ use core.encoding.csv as csv
 @[Codable]
 struct Config { port: Int }
 
-fn main() {
+fn run() {
     r :: toml.decode_traced<Config>("port = 8080\n") ?? panic("bad toml")
     print(r.value.port)
     print(r.migration.migrated)
@@ -1157,7 +1157,7 @@ migration Profile {
     change score: Int -> Rank via { (n) => Rank.{ value: n } }
 }
 
-fn main() {
+fn run() {
     // v1 data walks both steps.
     v1 :: "{{\"legacy_id\": 9, \"name\": \"Ada\", \"score\": 95}}"
     r :: json.decode_traced<Profile>(v1) ?? panic("bad v1")
@@ -1228,7 +1228,7 @@ migration Config {
     add host: String = "localhost"
 }
 
-fn main() {
+fn run() {
     t :: toml.decode_traced<Config>("port = 8080\n") ?? panic("bad toml")
     print(t.value.host)
     print(t.migration.migrated)
@@ -1266,7 +1266,7 @@ struct Point { x: Int  y: Int }
 @[PublishedSchema, Codable]
 struct UserRecord { id: Int  display_name: String }
 
-fn main() {
+fn run() {
     p :: json.decode<Point>("{{\"x\":1,\"y\":2}}") ?? panic("bad")
     print(p.x)
     u :: json.decode_traced<UserRecord>("{{\"id\":1,\"display_name\":\"Ada\"}}") ?? panic("bad")
@@ -1320,7 +1320,7 @@ fn option_zip_and_lift2_combinators() {
         &dir,
         "option_combinators",
         r#"
-fn main() {
+fn run() {
     both_a: Float? :: value(2.0)
     both_b: Float? :: value(5.0)
     print(both_a.zip(both_b).map((pair) => pair.a * pair.b))

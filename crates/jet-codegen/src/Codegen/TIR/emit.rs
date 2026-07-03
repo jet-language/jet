@@ -25,7 +25,7 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
     }
 }
 
-/// A module-level free function: `pub fn name(params) -> ret { … }` (or `fn main`).
+/// A module-level free function: `pub fn name(params) -> ret { … }`.
 /// Byte-identical to `emit_func`'s output.
 pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     let ret_clause = match &tir.ret {

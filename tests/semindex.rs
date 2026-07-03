@@ -21,7 +21,7 @@ fn semindex_hello_json_shape() {
     assert!(json.starts_with('{'));
     assert!(json.contains("\"schema_version\":1"));
     assert!(json.contains("\"definitions\""));
-    assert!(json.contains("\"main\""));
+    assert!(json.contains("\"run\""));
 }
 
 #[test]

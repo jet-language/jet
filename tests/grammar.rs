@@ -207,26 +207,26 @@ fn s6r_terminator_insertion_and_suppression() {
 
     // Negative case: two real statements → a terminator between them (+ one
     // before the closing `}`), so 2 synthetic terminators inside the body.
-    assert_eq!(count_semis("fn main() {\n    x :: 1\n    y :: 2\n}\n"), 2);
+    assert_eq!(count_semis("fn run() {\n    x :: 1\n    y :: 2\n}\n"), 2);
 
     // Dot-chain continuation (S69): a leading `.` suppresses insertion, so the
     // whole `a.b()` is one statement → just the pre-`}` terminator.
-    assert_eq!(count_semis("fn main() {\n    a()\n        .b()\n}\n"), 1);
+    assert_eq!(count_semis("fn run() {\n    a()\n        .b()\n}\n"), 1);
 
     // Broken boolean: a leading `&&` suppresses insertion → one statement.
-    assert_eq!(count_semis("fn main() {\n    x :: a\n        && b\n}\n"), 1);
+    assert_eq!(count_semis("fn run() {\n    x :: a\n        && b\n}\n"), 1);
 
     // Broken arithmetic: a leading `+` suppresses insertion → one statement.
-    assert_eq!(count_semis("fn main() {\n    x :: a\n        + b\n}\n"), 1);
+    assert_eq!(count_semis("fn run() {\n    x :: a\n        + b\n}\n"), 1);
 
     // A closing `)` on its own line never gets a terminator before it
     // (multi-line call args) → one statement.
-    assert_eq!(count_semis("fn main() {\n    f(\n        a\n    )\n}\n"), 1);
+    assert_eq!(count_semis("fn run() {\n    f(\n        a\n    )\n}\n"), 1);
 }
 
 #[test]
 fn dot_zero_in_statement_lexes_as_dot_then_int() {
-    let (toks, diags) = jet::Lexer::lex("fn main() { val x = p.0; }");
+    let (toks, diags) = jet::Lexer::lex("fn run() { val x = p.0; }");
     assert!(diags.is_empty(), "{diags:?}");
     let dot = toks
         .iter()
@@ -254,7 +254,7 @@ fn find_even(limit: Int) -> (Int?) {
     }
     return null;
 }
-fn main() {}
+fn run() {}
 "#;
     let (toks, _) = jet::Lexer::lex(src);
     let prog = jet::Parser::parse(&toks).expect("parse");
@@ -267,7 +267,7 @@ fn parse_pipe_switch_arms_as_subject_tests() {
     // `subject == value`; a `||` chain of bare values re-applies the comparison
     // to each (`orange || mango` ≡ `fruit == orange || fruit == mango`).
     let src = r#"
-fn main() {
+fn run() {
     fruit :: "orange"
     if fruit == {
         apple -> { print("Apple Juice") }
@@ -338,7 +338,7 @@ fn use_collections(items: [String], counts: [String, Int]) {}
 
 #[test]
 fn parse_numeric_field_emits_e0049() {
-    let src = "fn main() { x :: p.0 }";
+    let src = "fn run() { x :: p.0 }";
     let (toks, _) = jet::Lexer::lex(src);
     let (_prog, diags) = jet::Parser::parse_for_check(&toks).expect("recoverable parse");
     assert!(

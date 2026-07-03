@@ -295,16 +295,16 @@ mod tests {
 
     #[test]
     fn impact_finds_report_callers() {
-        let idx = open(&fixture("effects.jet")).expect("effects indexes");
+        let idx = open(&fixture("effects/effects.jet")).expect("effects indexes");
         let report = ImpactReport::analyze(&idx, "report", 3);
         assert!(report.found);
         assert!(!report.call_sites.is_empty() || !report.upstream_callers.is_empty());
-        assert!(report.upstream_callers.iter().any(|e| e.caller == "main"));
+        assert!(report.upstream_callers.iter().any(|e| e.caller == "run"));
     }
 
     #[test]
     fn impact_json_shape() {
-        let idx = open(&fixture("effects.jet")).expect("effects indexes");
+        let idx = open(&fixture("effects/effects.jet")).expect("effects indexes");
         let report = ImpactReport::analyze(&idx, "square", 2);
         let json = report.to_json();
         assert!(json.contains("\"symbol\":\"square\""));

@@ -805,31 +805,31 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     }
 
     if mode == CompileMode::Run || mode == CompileMode::Eval {
-        match funcs.get("main") {
+        match funcs.get("run") {
             None => {
                 diags.push(Diagnostic::error(
                     "E0101",
-                    "this program has no `main` function".to_string(),
-                    "running a program starts at `fn main`, and this file doesn't define one"
+                    "this program has no `run` function".to_string(),
+                    "running a program starts at `fn run`, and this file doesn't define one"
                         .to_string(),
-                    "add one to this file: fn main() { ... }".to_string(),
+                    "add one to this file: fn run() { ... }".to_string(),
                     None,
                 ));
             }
             Some(sig) => {
-                // E0122: in Run mode main must be `fn main()` with no params and no return.
-                // In Eval mode we allow a return type (e.g. `pure fn main() -> Int`).
-                if mode == CompileMode::Run && (!sig.params.is_empty() || sig.return_type.is_some())
+                // E0122: in Run mode plain run must return Unit. A single typed
+                // CLI parameter is checked later in Bundle.
+                if mode == CompileMode::Run && sig.params.is_empty() && sig.return_type.is_some()
                 {
                     let span = prog.items.iter().find_map(|i| match i {
-                        Item::Func(f) if f.name == "main" => Some(f.name_span),
+                        Item::Func(f) if f.name == "run" => Some(f.name_span),
                         _ => None,
                     });
                     diags.push(Diagnostic::error(
                         "E0122",
-                        "`main` takes no parameters and returns nothing".to_string(),
-                        "`main` is where running starts; nothing calls it with values".to_string(),
-                        "write it as: fn main() { ... }".to_string(),
+                        "`run` returns a value".to_string(),
+                        "`run` is where running starts; in run mode there is no caller waiting for a value".to_string(),
+                        "write it as: fn run() { ... }".to_string(),
                         span,
                     ));
                 }

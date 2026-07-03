@@ -10,7 +10,7 @@
 //!
 //! Also validates `enum Cmd { Variant(Payload) … }` subcommand parameters
 //! (E1307) and the `fn run` entry-parameter shape (E1308, invoked from
-//! `Bundle.rs`'s entry-point check next to the existing `main` checks).
+//! `Bundle.rs`'s entry-point check next to the existing `run` checks).
 
 use crate::AST::{Field, Item, Type};
 use crate::Diagnostics::{Diagnostic, Span};

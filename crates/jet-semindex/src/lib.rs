@@ -78,7 +78,7 @@ mod tests {
         let path = fixture("effects/effects.jet");
         let idx = open(&path).expect("effects example should index");
         assert_eq!(idx.schema_version(), SCHEMA_VERSION);
-        assert!(idx.lookup("main").is_some());
+        assert!(idx.lookup("run").is_some());
         assert!(idx.lookup("report").is_some());
         assert!(
             !idx.call_edges().is_empty(),
@@ -108,6 +108,6 @@ mod tests {
         assert!(json.contains("\"references\""));
         assert!(json.contains("\"calls\""));
         assert!(json.contains("\"effects\""));
-        assert!(json.contains("\"main\""));
+        assert!(json.contains("\"run\""));
     }
 }

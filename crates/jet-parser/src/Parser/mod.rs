@@ -514,12 +514,12 @@ mod s61_tests {
     fn spaced_minus_is_subtraction() {
         // Also a single-line-block regression guard (S6-R Go-rule part 2: a
         // terminator may be omitted before the closing `}`).
-        let p = program("fn main() { d :: 5 - 3 }");
+        let p = program("fn run() { d :: 5 - 3 }");
         let func = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) => Some(f),
             _ => None,
         });
-        let func = func.expect("a main function");
+        let func = func.expect("a run function");
         let val = func.body.iter().find_map(|s| match s {
             Stmt::Val(b) => Some(b),
             _ => None,
@@ -536,12 +536,12 @@ mod s61_tests {
     #[test]
     fn taskgroup_task_block_parses_as_spawn() {
         let p =
-            program("fn main() {\n    taskgroup g {\n        h :: g.task { return 1 }\n    }\n}\n");
-        let main = p.items.iter().find_map(|i| match i {
-            crate::AST::Item::Func(f) if f.name == "main" => Some(f),
+            program("fn run() {\n    taskgroup g {\n        h :: g.task { return 1 }\n    }\n}\n");
+        let run = p.items.iter().find_map(|i| match i {
+            crate::AST::Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         });
-        let body = &main.expect("main").body;
+        let body = &run.expect("run").body;
         let taskgroup = body.iter().find_map(|s| match s {
             Stmt::TaskGroup { body, .. } => Some(body),
             _ => None,
@@ -573,7 +573,7 @@ priv fn secret() -> Int {
     return 0
 }
 
-fn main() {
+fn run() {
     return
 }"#;
         let p = program(src);
@@ -589,15 +589,15 @@ fn main() {
         funcs.sort_by_key(|f| f.name.as_str());
         let greet = funcs.iter().find(|f| f.name == "greet").expect("greet");
         let secret = funcs.iter().find(|f| f.name == "secret").expect("secret");
-        let main = funcs.iter().find(|f| f.name == "main").expect("main");
+        let run = funcs.iter().find(|f| f.name == "run").expect("run");
         assert!(greet.is_pub);
         assert!(!secret.is_pub);
-        assert!(main.is_pub);
+        assert!(run.is_pub);
     }
 
     #[test]
     fn pub_file_section_label_emits_e0415() {
-        let src = "#PubFile\n\npriv:\nfn main() { return }\n";
+        let src = "#PubFile\n\npriv:\nfn run() { return }\n";
         let (toks, errs) = lex(src);
         assert!(errs.is_empty(), "lex errors: {errs:?}");
         let toks = crate::Lexer::without_comments(&toks);

@@ -588,7 +588,7 @@ impl<'a> Parser<'a> {
                 Err(Diagnostic::error(
                     "E0601",
                     format!("`#{}` blocks only belong at the top of a file", Syntax::KW_TEST),
-                    "test blocks group checks that `jet test` runs separately from `main`"
+                    "test blocks group checks that `jet test` runs separately from `run`"
                         .to_string(),
                     format!(
                         "move this block to the top level, after your functions: #{} (\"name\") {{ ... }}",

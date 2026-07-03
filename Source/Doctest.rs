@@ -8,7 +8,7 @@
 //! `LineComment` tokens, but scanning the source directly is simpler and keeps
 //! the producing-line numbers exact). Each block is compiled and run as a
 //! self-contained Jet program: setup lines are emitted verbatim inside
-//! `fn main()`, and each `EXPR // => VALUE` line is run as `print("{EXPR}")` so
+//! `fn run()`, and each `EXPR // => VALUE` line is run as `print("{EXPR}")` so
 //! its `JetShow` rendering can be compared against the claimed `VALUE`.
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -134,12 +134,12 @@ fn fence_lang_is_jet(fence: &str) -> bool {
 }
 
 /// Build the synthetic Jet program for one doctest block: setup lines verbatim
-/// inside `fn main()`, then one `print("{EXPR}")` per expectation (source order).
+/// inside `fn run()`, then one `print("{EXPR}")` per expectation (source order).
 /// The program's stdout is one line per expectation, compared to the expected
 /// values by the runner.
 pub fn synth_program(block: &DocBlock) -> String {
     let mut out = String::new();
-    out.push_str("fn main() {\n");
+    out.push_str("fn run() {\n");
     for line in &block.setup {
         out.push_str("    ");
         out.push_str(line);

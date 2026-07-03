@@ -867,7 +867,7 @@ fn jit_covers_program(program: &JitProgram) -> bool {
     let main_ok = program
         .funcs
         .iter()
-        .any(|f| f.is_main && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
+        .any(|f| f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
     if !main_ok {
         return false;
     }
@@ -1164,7 +1164,7 @@ fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> 
 }
 
 fn jit_fn_name(name: &str) -> String {
-    if name == "main" {
+    if name == "run" {
         "jet_jit_main".to_string()
     } else {
         format!("jet_jit_fn_{}", name.replace("::", "__"))
@@ -2884,7 +2884,7 @@ fn compile_program(
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     for f in &program.funcs {
         let sig = func_signature(module, f)?;
-        let id = if f.is_main {
+        let id = if f.name == "run" {
             match existing_main {
                 Some(id) => id,
                 None => module
@@ -2933,9 +2933,9 @@ fn compile_program(
 
     module.finalize_definitions().map_err(|e| e.to_string())?;
     Ok(func_ids
-        .get("main")
+        .get("run")
         .copied()
-        .ok_or_else(|| "jit program missing main".to_string())?)
+        .ok_or_else(|| "jit program missing run".to_string())?)
 }
 
 fn fresh_runtime() -> JitRuntime {
@@ -3129,14 +3129,14 @@ pub fn jit_func_coverage_detail(bundle: &ProgramBundle, name: &str) -> Option<St
     jit_covers_func_detail(f, &names)
 }
 
-/// Test hook: dump lowered main stmt tags.
+/// Test hook: dump lowered run stmt tags.
 #[doc(hidden)]
 pub fn jit_dump_main_stmts(bundle: &ProgramBundle) -> Vec<String> {
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return vec!["<no program>".into()];
     };
-    let Some(m) = program.funcs.iter().find(|f| f.is_main) else {
-        return vec!["<no main>".into()];
+    let Some(m) = program.funcs.iter().find(|f| f.name == "run") else {
+        return vec!["<no run>".into()];
     };
     m.body
         .iter()
@@ -3145,12 +3145,12 @@ pub fn jit_dump_main_stmts(bundle: &ProgramBundle) -> Vec<String> {
         .collect()
 }
 
-/// Test hook: count select recv/timer arms on the first `SelectWait` in `main`.
+/// Test hook: count select recv/timer arms on the first `SelectWait` in `run`.
 #[doc(hidden)]
 pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
     let program = TIR::lower_jit_program(bundle)?;
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let m = program.funcs.iter().find(|f| f.is_main)?;
+    let m = program.funcs.iter().find(|f| f.name == "run")?;
     for s in &m.body {
         if let TStmt::Region(body) = s {
             for inner in body {
@@ -3170,7 +3170,7 @@ pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
 pub fn jit_main_uncovered_detail(bundle: &ProgramBundle) -> Option<String> {
     let program = TIR::lower_jit_program(bundle)?;
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let m = program.funcs.iter().find(|f| f.is_main)?;
+    let m = program.funcs.iter().find(|f| f.name == "run")?;
     for (i, s) in m.body.iter().enumerate() {
         if jit_covers_stmt(s, &names) {
             continue;
@@ -3292,16 +3292,16 @@ pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
     let main_ok = program
         .funcs
         .iter()
-        .any(|f| f.is_main && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
+        .any(|f| f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
     if !main_ok {
         for f in &program.funcs {
-            if f.is_main {
+            if f.name == "run" {
                 if let Some(d) = jit_covers_func_detail(f, &names) {
-                    return format!("main not jit-covered: {d}");
+                    return format!("run not jit-covered: {d}");
                 }
             }
         }
-        return "main not jit-covered".to_string();
+        return "run not jit-covered".to_string();
     }
     for f in &program.funcs {
         if !jit_covers_func(f, &names) {

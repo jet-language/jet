@@ -45,7 +45,7 @@ fn check_snapshot(name: &str, actual: &str) {
 /// sibling's `jet check` read (seeing a momentarily-empty file).
 fn bad_file(tag: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_bad_{tag}.jet"));
-    fs::write(&p, "fn main() {\n    pirnt(\"hi\");\n}\n").unwrap();
+    fs::write(&p, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
     p
 }
 
@@ -75,7 +75,7 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 #[test]
 fn exit_code_ok_check() {
     let p = std::env::temp_dir().join("jet_cli_ok.jet");
-    fs::write(&p, "fn main() {\n    print(\"hi\");\n}\n").unwrap();
+    fs::write(&p, "fn run() {\n    print(\"hi\");\n}\n").unwrap();
     let out = Command::new(jet()).arg("check").arg(&p).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "clean check should exit 0");
 }
@@ -347,7 +347,7 @@ fn question_mark_is_help_golden() {
 fn file_sugar_runs_without_run_subcommand() {
     let stem = std::env::temp_dir().join("jet_cli_file_sugar");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn main() {\n    print(\"file-sugar\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"file-sugar\");\n}\n").unwrap();
     let out = Command::new(jet()).arg(&file).output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -366,7 +366,7 @@ fn file_sugar_runs_without_run_subcommand() {
 fn file_sugar_ext_optional() {
     let stem = std::env::temp_dir().join("jet_cli_file_sugar_extopt");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn main() {\n    print(\"ext-sugar\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"ext-sugar\");\n}\n").unwrap();
     let out = Command::new(jet()).arg(&stem).output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -416,7 +416,7 @@ fn did_you_mean_golden() {
 #[test]
 fn unknown_flag_is_e2102() {
     let p = std::env::temp_dir().join("jet_cli_ok2.jet");
-    fs::write(&p, "fn main() {\n    print(\"hi\");\n}\n").unwrap();
+    fs::write(&p, "fn run() {\n    print(\"hi\");\n}\n").unwrap();
     let out = Command::new(jet())
         .arg("check")
         .arg(&p)
@@ -490,7 +490,7 @@ fn fix_dry_run_does_not_write() {
     // (`or` → `??`) carries a machine-applicable `replace` edit, and the parser
     // recovers so sema still runs.
     let p = std::env::temp_dir().join("jet_cli_fix.jet");
-    let original = "fn main() {\n    val x: Int? = none;\n    print(x or 0);\n}\n";
+    let original = "fn run() {\n    val x: Int? = none;\n    print(x or 0);\n}\n";
     fs::write(&p, original).unwrap();
     let out = Command::new(jet())
         .arg("fix")
@@ -568,7 +568,7 @@ fn osc8_hyperlinks_only_when_forced_on() {
     );
     // The hyperlink layer is gated behind a real TTY; since tests run piped,
     // we exercise the renderer directly to prove the escape appears when asked.
-    let src = "fn main() {}\n";
+    let src = "fn run() {}\n";
     let d = jet::Diagnostics::Diagnostic::error(
         "E0001",
         "x".into(),
@@ -596,7 +596,7 @@ fn ext_optional_check_resolves_dot_jet() {
     // path does not exist but the .jet file does.
     let stem = std::env::temp_dir().join("jet_cli_extopt_check");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn main() {\n    print(\"ok\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"ok\");\n}\n").unwrap();
     let out = Command::new(jet())
         .arg("check")
         .arg(&stem)
@@ -616,7 +616,7 @@ fn ext_optional_run_resolves_dot_jet() {
     // Same resolution for `jet run`.
     let stem = std::env::temp_dir().join("jet_cli_extopt_run");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn main() {\n    print(\"hello-extopt\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"hello-extopt\");\n}\n").unwrap();
     let out = Command::new(jet()).arg("run").arg(&stem).output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -653,7 +653,7 @@ fn ext_optional_missing_path_keeps_original_name() {
 
 #[test]
 fn simple_exec_runs_without_a_manifest() {
-    // A single file with a top-level `fn main` and no pkg.jet runs as an
+    // A single file with a top-level `fn run` and no pkg.jet runs as an
     // executable with zero ceremony (R9 / D-ILE1).
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/main.jet");
@@ -685,7 +685,7 @@ fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
     fs::write(
         &p,
-        "use core.io as io\nfn main() {\n    args :: io.args()\n    print(args.len())\n}\n",
+        "use core.io as io\nfn run() {\n    args :: io.args()\n    print(args.len())\n}\n",
     )
     .unwrap();
     p
@@ -786,7 +786,7 @@ fn profile_unknown_name_emits_e1219() {
     // D-BUILDPROFILE1: `--profile=<unknown>` with no pkg.jet defining that name
     // must emit E1219 and exit 1 (user error).
     let p = std::env::temp_dir().join("jet_cli_profile_test.jet");
-    fs::write(&p, "fn main() { print(\"ok\") }\n").unwrap();
+    fs::write(&p, "fn run() { print(\"ok\") }\n").unwrap();
     let out = Command::new(jet())
         .args(["build", p.to_str().unwrap(), "--profile=staging"])
         .env("NO_COLOR", "1")
@@ -812,7 +812,7 @@ fn profile_unknown_name_emits_e1219() {
 fn profile_release_flag_is_accepted() {
     // `--release` is valid (blessed profile) and must not emit E1219.
     let p = std::env::temp_dir().join("jet_cli_release_test.jet");
-    fs::write(&p, "fn main() { print(\"ok\") }\n").unwrap();
+    fs::write(&p, "fn run() { print(\"ok\") }\n").unwrap();
     // We can't guarantee rustc is in PATH for the binary build, but `jet check`
     // doesn't accept --release yet, so test that `jet build --release` at least
     // doesn't emit E1219. We check that the exit code is NOT 1-with-E1219.
@@ -831,7 +831,7 @@ fn profile_release_flag_is_accepted() {
 #[test]
 fn profile_ci_flag_is_accepted() {
     let p = std::env::temp_dir().join("jet_cli_ci_test.jet");
-    fs::write(&p, "fn main() { print(\"ok\") }\n").unwrap();
+    fs::write(&p, "fn run() { print(\"ok\") }\n").unwrap();
     let out = Command::new(jet())
         .args(["build", p.to_str().unwrap(), "--profile=ci"])
         .env("NO_COLOR", "1")
@@ -862,7 +862,7 @@ build: { staging: Build.{ optimize: basic } }
     )
     .unwrap();
     let main = dir.join("main.jet");
-    fs::write(&main, "fn main() { print(\"ok\") }\n").unwrap();
+    fs::write(&main, "fn run() { print(\"ok\") }\n").unwrap();
     // Isolated cwd: this fixture's stem is `main` — see `isolated_cwd`. Also
     // the semantically correct place for `build/` to land, since it's this
     // fixture's own project directory.

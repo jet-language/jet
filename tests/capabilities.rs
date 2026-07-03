@@ -16,7 +16,7 @@ fn caps(src: &str) -> Capabilities {
 /// A plain program declares no special capabilities.
 #[test]
 fn plain_program_has_no_capabilities() {
-    let c = caps(r#"fn main() { print("hi"); }"#);
+    let c = caps(r#"fn run() { print("hi"); }"#);
     assert!(
         !c.uses_network
             && !c.uses_file_io
@@ -35,7 +35,7 @@ fn fs_call_sets_file_io() {
     let c = caps(
         r#"
 use core.fs as fs
-fn main() { x :: fs.read("a") ?? ""; print(x); }
+fn run() { x :: fs.read("a") ?? ""; print(x); }
 "#,
     );
     assert!(
@@ -52,7 +52,7 @@ fn time_call_sets_concurrency() {
     let c = caps(
         r#"
 use core.time as time
-fn main() { t :: time.now(); print("{t}"); }
+fn run() { t :: time.now(); print("{t}"); }
 "#,
     );
     assert!(
@@ -68,7 +68,7 @@ fn main() { t :: time.now(); print("{t}"); }
 /// fooled by the literal in the generated Rust — proving why c110 matters.
 #[test]
 fn capabilities_ignore_rust_text_lookalikes() {
-    let out = jet::compile(r#"fn main() { print("jet_net_ is only text"); }"#).expect("compiles");
+    let out = jet::compile(r#"fn run() { print("jet_net_ is only text"); }"#).expect("compiles");
     assert!(
         !out.capabilities.uses_network,
         "sema must not flag network for a mere string literal"

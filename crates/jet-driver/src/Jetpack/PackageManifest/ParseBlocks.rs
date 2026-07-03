@@ -150,7 +150,7 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
             continue;
         }
         // D-TGT1: a package declares `targets:`, not `kind:`. A bare `name` leaves
-        // targets inferred from the module's `fn main` (D-ILE1); `name: <target>`
+        // targets inferred from the module's `fn run` (D-ILE1); `name: <target>`
         // is the single-target shorthand (D-TGT3); `name: { targets: [ … ] }` lists
         // them.
         let (name, targets, api) = match entry.split_once(':') {

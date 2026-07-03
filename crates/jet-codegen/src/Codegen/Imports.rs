@@ -470,7 +470,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
     }
     for item in items {
         if let Item::Func(f) = item {
-            if f.name == "main" && !include_main {
+            if f.name == "run" && !include_main {
                 continue;
             }
             // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic

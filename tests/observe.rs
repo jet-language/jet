@@ -22,7 +22,7 @@ fn structured_log_json_fields() {
 
     let src = r#"
 use core.log as log
-fn main() {
+fn run() {
     log.set_level("debug")
     log.info("hello world")
     log.warn("disk low")
@@ -86,7 +86,7 @@ fn structured_log_level_filter() {
     // Default level is "info" — debug messages are suppressed.
     let src = r#"
 use core.log as log
-fn main() {
+fn run() {
     log.info("visible")
     log.debug("hidden")
 }
@@ -115,7 +115,7 @@ fn structured_log_trace_id() {
 
     let src = r#"
 use core.log as log
-fn main() {
+fn run() {
     log.set_trace_id("req-abc-123")
     log.info("with trace")
 }
@@ -140,7 +140,7 @@ fn structured_log_json_escape() {
     // Special characters in the message must be JSON-escaped.
     let src = r#"
 use core.log as log
-fn main() {
+fn run() {
     log.info("say \"hello\"")
 }
 "#;
@@ -169,7 +169,7 @@ fn rich_panic_shows_jet_location() {
 fn check(n: Int) {
     require(n > 0, "must be positive")
 }
-fn main() {
+fn run() {
     check(0)
 }
 "#;
@@ -202,11 +202,11 @@ fn safe_locals_shown_in_dev_mode() {
 
     // Int and Bool locals should appear; String should not (non-scalar).
     let src = r#"
-fn run(count: Int, active: Bool, name: String) {
+fn capture(count: Int, active: Bool, name: String) {
     require(count > 10, "not enough")
 }
-fn main() {
-    run(3, true, "test")
+fn run() {
+    capture(3, true, "test")
 }
 "#;
     let (_code, _stdout, stderr) = build_and_run_debug("safe_locals", src);
@@ -245,11 +245,11 @@ fn unsafe_block_locals_not_leaked() {
     }
 
     let src = r#"
-fn run(secret: String, count: Int) {
+fn capture(secret: String, count: Int) {
     require(count > 5, "failed")
 }
-fn main() {
-    run("password123", 1)
+fn run() {
+    capture("password123", 1)
 }
 "#;
     let (_code, _stdout, stderr) = build_and_run_debug("no_leak", src);
@@ -270,7 +270,7 @@ fn main() {
 #[test]
 fn source_map_marker_in_generated_rust() {
     let src = r#"
-fn main() {
+fn run() {
     print("hello")
 }
 "#;
@@ -311,7 +311,7 @@ fn double(raw: String) -> Int ? ParseError {
     n :: load(raw)?
     return ok((n * 2))
 }
-fn main() {
+fn run() {
     if double("") == {
         ok(n) -> { print(n) }
         err(e) -> { print("failed") }

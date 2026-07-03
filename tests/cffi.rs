@@ -105,7 +105,7 @@ fn jet_bind_native_backend_end_to_end() {
         &main,
         r#"use c.jetc as jc;
 
-fn main() {
+fn run() {
     print(jc.jetc_add_ints(2, 40));
     print(jc.jetc_greeting());
 }
@@ -179,7 +179,7 @@ fn cffi_end_to_end_links_and_runs() {
         &main,
         r#"use c.jetc as jc;
 
-fn main() {
+fn run() {
     print(jc.add_ints(2, 40));
     print(jc.greeting());
 }
@@ -247,7 +247,7 @@ fn cffi_string_param_emits_cstring_conversion() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        "use c.strlib as s;\nfn main() { print(s.slen(\"hello\")); }\n",
+        "use c.strlib as s;\nfn run() { print(s.slen(\"hello\")); }\n",
     )
     .unwrap();
     let src = fs::read_to_string(&main).unwrap();
@@ -284,7 +284,7 @@ fn cffi_empty_overlay_is_bindgen_only() {
         &main,
         r#"use c.jetc as jc;
 #Extern module c.jetc { }
-fn main() { print(jc.ping()); }
+fn run() { print(jc.ping()); }
 "#,
     )
     .unwrap();
@@ -315,7 +315,7 @@ fn cffi_overlay_overrides_bindgen() {
         &main,
         r#"use c.jetc as jc;
 #Extern module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add"; }
-fn main() { print(jc.add(1, 2)); }
+fn run() { print(jc.add(1, 2)); }
 "#,
     )
     .unwrap();
@@ -346,7 +346,7 @@ fn cffi_header_use_form_lowers_to_lib() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        "use \"demo.h\" as d;\nfn main() { print(d.ping()); }\n",
+        "use \"demo.h\" as d;\nfn run() { print(d.ping()); }\n",
     )
     .unwrap();
     let src = fs::read_to_string(&main).unwrap();
@@ -385,7 +385,7 @@ fn auto_bind_on_cache_miss() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        "use \"include/mylib.h\" as m;\nfn main() { print(m.mylib_ping(1)); }\n",
+        "use \"include/mylib.h\" as m;\nfn run() { print(m.mylib_ping(1)); }\n",
     )
     .unwrap();
 
@@ -447,7 +447,7 @@ fn hash_invalidation_on_header_change() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        "use \"include/mylib2.h\" as m;\nfn main() { print(m.mylib2_v2(2)); }\n",
+        "use \"include/mylib2.h\" as m;\nfn run() { print(m.mylib2_v2(2)); }\n",
     )
     .unwrap();
 
@@ -517,7 +517,7 @@ fn cache_hit_no_rebind() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        "use \"include/mylib3.h\" as m;\nfn main() { print(m.mylib3_ping(0)); }\n",
+        "use \"include/mylib3.h\" as m;\nfn run() { print(m.mylib3_ping(0)); }\n",
     )
     .unwrap();
     let src = fs::read_to_string(&main).unwrap();
@@ -763,7 +763,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     )
     .unwrap();
     let path = root.join("main.jet");
-    let src = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) -> String = \"base64::encode\";\n}\nfn main() { print(b64encode(\"hi\")); }\n";
+    let src = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) -> String = \"base64::encode\";\n}\nfn run() { print(b64encode(\"hi\")); }\n";
     fs::write(&path, src).unwrap();
 
     let shown = path.to_string_lossy();

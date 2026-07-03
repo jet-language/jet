@@ -196,7 +196,7 @@ pub fn scale(v: Vec3, factor: Float) {
     v.x = v.x * factor
 }
 
-fn main() {
+fn run() {
     p := Vec3.{ x: 1.0, y: 2.0, z: 3.0 }
     scale(~p, 2.0)
     print("{p.x}")
@@ -210,7 +210,7 @@ pub fn length_sq(v: Vec3) -> Float {
     return v.x * v.x + v.y * v.y + v.z * v.z
 }
 
-fn main() {
+fn run() {
     p := Vec3.{ x: 1.0, y: 2.0, z: 3.0 }
     print("{length_sq(p)}")
 }

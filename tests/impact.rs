@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 #[test]
-fn impact_report_upstream_main() {
+fn impact_report_upstream_run() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");

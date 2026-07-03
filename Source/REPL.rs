@@ -141,7 +141,7 @@ pub struct Session {
     /// binding stubs so sema sees them as undefined in later inputs.
     pub moved_names: HashSet<String>,
     /// Accumulated raw statement source text for each successfully executed
-    /// statement input. Used by `:run` to materialize a `main()` body.
+    /// statement input. Used by `:run` to materialize a `run()` body.
     pub stmt_srcs: Vec<String>,
     /// D-CTCORE1: alias → Core module path (e.g. `"math"` → `"core.math"`),
     /// derived from successfully accepted `use` declarations. Passed to
@@ -417,15 +417,15 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         return;
     }
 
-    // Materialize: imports + items + a main() that replays statement inputs.
+    // Materialize: imports + items + a run() that replays statement inputs.
     let import_src = session.import_src();
     let item_src = session.item_srcs.join("\n");
     let stmt_body = session.stmt_srcs.join("\n");
     let jet_src = if stmt_body.trim().is_empty() {
-        format!("{}{}\nfn main() {{}}\n", import_src, item_src)
+        format!("{}{}\nfn run() {{}}\n", import_src, item_src)
     } else {
         format!(
-            "{}{}\nfn main() {{\n{}\n}}\n",
+            "{}{}\nfn run() {{\n{}\n}}\n",
             import_src, item_src, stmt_body
         )
     };
@@ -469,7 +469,7 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
 }
 
 /// Transcript-test variant of `:run`: materializes the session and interprets
-/// the materialized `main()` with unlimited fuel (no cap). Used in tests so
+/// the materialized `run()` with unlimited fuel (no cap). Used in tests so
 /// we can verify `:run` semantics without invoking rustc.
 fn cmd_run_transcript(session: &Session) -> String {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
@@ -480,10 +480,10 @@ fn cmd_run_transcript(session: &Session) -> String {
     let item_src = session.item_srcs.join("\n");
     let stmt_body = session.stmt_srcs.join("\n");
     let jet_src = if stmt_body.trim().is_empty() {
-        format!("{}{}\nfn main() {{}}\n", import_src, item_src)
+        format!("{}{}\nfn run() {{}}\n", import_src, item_src)
     } else {
         format!(
-            "{}{}\nfn main() {{\n{}\n}}\n",
+            "{}{}\nfn run() {{\n{}\n}}\n",
             import_src, item_src, stmt_body
         )
     };
@@ -505,7 +505,7 @@ fn cmd_run_transcript(session: &Session) -> String {
             )
         }
     };
-    // Find main() and run it through the interpreter with DEV_FUEL_BUDGET.
+    // Find run() and run it through the interpreter with DEV_FUEL_BUDGET.
     let mut func_defs: HashMap<String, Func> = HashMap::new();
     for item in &prog.items {
         if let Item::Func(f) = item {
@@ -513,8 +513,8 @@ fn cmd_run_transcript(session: &Session) -> String {
         }
     }
     let funcs: HashMap<String, &Func> = func_defs.iter().map(|(k, v)| (k.clone(), v)).collect();
-    let Some(main) = func_defs.get("main") else {
-        return "note: no main in materialized session\n".to_string();
+    let Some(main) = func_defs.get("run") else {
+        return "note: no run in materialized session\n".to_string();
     };
     let main_clone = main.clone();
     let base_dir = std::path::PathBuf::from(".");
@@ -961,8 +961,8 @@ fn type_check_item(session: &Session, new_item_src: &str) -> Vec<Diagnostic> {
 }
 
 /// Parse + sema-check `src`, return errors only.
-/// Uses `Check` mode so E0101 (no `main`) is not fired — the REPL never has
-/// a `main` function in its synthetic programs (D-REPL: session is a library).
+/// Uses `Check` mode so E0101 (no `run`) is not fired — the REPL never has
+/// a `run` function in its synthetic programs (D-REPL: session is a library).
 fn run_sema(src: &str) -> Vec<Diagnostic> {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     if !lex_diags.is_empty() {
@@ -984,7 +984,7 @@ fn run_sema(src: &str) -> Vec<Diagnostic> {
     if !prog.imports.is_empty() {
         return run_sema_bundle(src);
     }
-    // CompileMode::Check: type-check without requiring `main`.
+    // CompileMode::Check: type-check without requiring `run`.
     let all = crate::Sema::check_with_mode(&mut prog, crate::Sema::CompileMode::Check);
     all.into_iter()
         .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
@@ -993,7 +993,7 @@ fn run_sema(src: &str) -> Vec<Diagnostic> {
 
 /// Sema-check a synthetic program that contains imports, via the Loader bundle
 /// path (the only path that registers core-module aliases). Writes `src` to a
-/// temp `.jet` file and runs `Check` mode so no `main` is required.
+/// temp `.jet` file and runs `Check` mode so no `run` is required.
 fn run_sema_bundle(src: &str) -> Vec<Diagnostic> {
     let tmp_path = std::env::temp_dir().join(unique_temp_name("check"));
     if std::fs::write(&tmp_path, src).is_err() {
@@ -1080,7 +1080,7 @@ fn cmd_load(
             return;
         }
     };
-    // Parse to count items and detect main.
+    // Parse to count items and detect run.
     let (toks, lex_diags) = crate::Lexer::lex(&src);
     if !lex_diags.is_empty() {
         let n = lex_diags.len();
@@ -1095,10 +1095,10 @@ fn cmd_load(
         }
     };
     let item_count = prog.items.len();
-    let has_main = prog
+    let has_run = prog
         .items
         .iter()
-        .any(|i| matches!(i, Item::Func(f) if f.name == "main"));
+        .any(|i| matches!(i, Item::Func(f) if f.name == "run"));
 
     // Add each item's source to the session (approximate: use the whole file).
     session.item_srcs.push(src.clone());
@@ -1106,9 +1106,9 @@ fn cmd_load(
 
     let _ = writeln!(out_sink, "loaded {} items from `{}`", item_count, path_str);
 
-    // Run main() if present.
-    if has_main {
-        if let Some(main) = session.func_defs.get("main") {
+    // Run run() if present.
+    if has_run {
+        if let Some(main) = session.func_defs.get("run") {
             let main_clone = main.clone();
             let funcs: HashMap<String, &Func> = session
                 .func_defs

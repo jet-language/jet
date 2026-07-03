@@ -67,7 +67,7 @@ fn comptime_matches_runtime() {
     let dir = std::env::temp_dir();
     for (i, expr) in CASES.iter().enumerate() {
         let src = format!(
-            "comptime C = {e}\n\nfn main() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
+            "comptime C = {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
             e = expr
         );
         let compiled = match jet::compile(&src) {
@@ -133,7 +133,7 @@ fn build() -> List<Int> {
     return xs
 }
 
-fn main() {
+fn run() {
     comptime xs = build()
     print("{xs}")
     print("{xs[1]}")
@@ -163,7 +163,7 @@ enum Light {
 comptime P = Pair.{left: 7, right: "seven"}
 comptime L = Light.Green
 
-fn main() {
+fn run() {
     p :: Pair.{left: 7, right: "seven"}
     l :: Light.Green
     print("{P.left}")
@@ -188,7 +188,7 @@ fn if_expr_comptime_matches_runtime() {
 comptime C = if 3 > 2 { 10 } else { 20 }
 comptime D = if 1 > 2 { 10 } else { 20 }
 
-fn main() {
+fn run() {
     c :: if 3 > 2 { 10 } else { 20 }
     d :: if 1 > 2 { 10 } else { 20 }
     print("{C}")
@@ -214,7 +214,7 @@ fn double(x: Int) -> Int {
 
 comptime C = double.[1, 2, 3]
 
-fn main() {
+fn run() {
     c :: double.[1, 2, 3]
     print("{C}")
     print("{c}")

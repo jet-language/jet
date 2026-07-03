@@ -28,7 +28,7 @@ fn fixture(tag: &str, src: &str) -> String {
 }
 
 const LOOPS: &str = "\
-fn main() {
+fn run() {
     n := 3
     total := 0
     loop i in 1..n {
@@ -43,7 +43,7 @@ fn double(x: Int) -> Int {
     y := x * 2
     return y
 }
-fn main() {
+fn run() {
     a := 5
     b := double(a)
     print(\"{b}\")
@@ -202,7 +202,7 @@ fn help_lists_the_verbs() {
 fn unsupported_feature_stops_at_e2203_boundary() {
     let file = fixture(
         "boundary",
-        "use core.fs as fs\nfn main() {\n    print(\"hi\")\n}\n",
+        "use core.fs as fs\nfn run() {\n    print(\"hi\")\n}\n",
     );
     let out = jet::Debug::run_session(&file, &["c"]);
     assert!(
@@ -296,7 +296,7 @@ fn needs_native_is_false_for_an_interpreter_safe_program() {
 /// instead of erroring.
 #[test]
 fn needs_native_is_true_for_a_native_only_import() {
-    let src = "use core.fs as fs\nfn main() {\n    print(\"hi\")\n}\n";
+    let src = "use core.fs as fs\nfn run() {\n    print(\"hi\")\n}\n";
     let file = native_fixture("needs_native_true", src);
     assert_eq!(jet::Debug::needs_native(&file), Some(true));
 }

@@ -115,7 +115,7 @@ fn alloc_and_use_compiles_and_runs() {
     let src = r#"
 use core.mem
 
-fn main() {
+fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     y :: arena.alloc(100)
@@ -146,7 +146,7 @@ fn leak() -> Int {
     return x
 }
 
-fn main() {
+fn run() {
     print(leak())
 }
 "#;
@@ -162,7 +162,7 @@ fn view_stored_in_binding_is_e0631() {
     let src = r#"
 use core.mem
 
-fn main() {
+fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     stash :: x
@@ -181,7 +181,7 @@ fn use_after_reset_is_e0632() {
     let src = r#"
 use core.mem
 
-fn main() {
+fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     arena.reset()
@@ -200,7 +200,7 @@ fn use_after_free_is_e0632() {
     let src = r#"
 use core.mem
 
-fn main() {
+fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     arena.free()
@@ -219,7 +219,7 @@ fn explicit_region_spans_two_arenas() {
     let src = r#"
 use core.mem
 
-fn main() {
+fn run() {
     region work {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
@@ -248,7 +248,7 @@ fn region_confines_view_escape() {
     let src = r#"
 use core.mem
 
-fn main() {
+fn run() {
     region r {
         a :: mem.Arena.new()
         v :: a.alloc(5)

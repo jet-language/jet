@@ -12,7 +12,7 @@
 /// - `name_of(p: Player)` — body only reads, infers Read
 /// - `drain(t: Token)` — body passes `^t` to consume (^Token), infers Move
 ///
-/// The main function exercises all three with the correct call-site sigils so
+/// The run function exercises all three with the correct call-site sigils so
 /// the capability checks pass.
 const MULTI_INFER_SRC: &str = r#"
 struct Player { hp: Int, name: String }
@@ -34,7 +34,7 @@ fn drain(t: Token) {
     consume(^t)
 }
 
-fn main() {
+fn run() {
     p := Player.{ hp: 90, name: "Aria" }
     heal(~p)
     print(name_of(p))
@@ -74,7 +74,7 @@ fn heal(p: Player) {
     p.hp = p.hp + 1
 }
 
-fn main() {
+fn run() {
     p := Player.{ hp: 100 }
     heal(~p)
     print(p.hp)
@@ -100,7 +100,7 @@ fn name_of(p: Player) -> String {
     return p.name
 }
 
-fn main() {
+fn run() {
     p := Player.{ hp: 100, name: "Aria" }
     print(name_of(p))
 }
@@ -124,7 +124,7 @@ fn drain(t: Token) {
     consume(^t)
 }
 
-fn main() {
+fn run() {
     tok := Token.{ id: 42 }
     drain(^tok)
     print("done")

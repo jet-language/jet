@@ -79,7 +79,7 @@ fn gzip_compress_decompress_round_trip() {
     let src = r#"
 use core.archive as ar
 
-fn main() {
+fn run() {
 original: [U8] :: [72, 101, 108, 108, 111]
     compressed :: ar.gzip_compress(original)
     print((compressed.len() > 5))
@@ -101,7 +101,7 @@ fn gzip_compress_reduces_repetitive_data() {
     let src = r#"
 use core.archive as ar
 
-fn main() {
+fn run() {
 data: [U8] :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

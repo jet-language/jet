@@ -7,7 +7,7 @@ fn consume(s: ^String) {
     print(s)
 }
 
-fn main() {
+fn run() {
 msg: String :: "hello"
     consume(msg)
 }
@@ -27,7 +27,7 @@ fn touch(n: ~Int) {
     print(n)
 }
 
-fn main() {
+fn run() {
     x: Int := 1
     touch(x)
 }
@@ -43,7 +43,7 @@ fn consume(item: ^NoClone) {
     print(0)
 }
 
-fn main() {
+fn run() {
 msg: String :: "hi"
     consume(msg)
 }
@@ -59,7 +59,7 @@ fn peek(msg: String) -> &String {
     return msg
 }
 
-fn main() {
+fn run() {
     print(0)
 }
 "#;
@@ -88,7 +88,7 @@ msg: String :: "ok"
     return msg
 }
 
-fn main() {
+fn run() {
     print(0)
 }
 "#;
@@ -106,7 +106,7 @@ fn show(source: String) {
     t: TokenView :: TokenView.{ text: source }
     print(t.text)
 }
-fn main() {
+fn run() {
     show("hello")
 }
 "#;
@@ -120,7 +120,7 @@ struct Holder {
     data: &String,
 }
 
-fn main() {
+fn run() {
     print(0)
 }
 "#;
@@ -150,7 +150,7 @@ fn loop_user(h: Shared<Int>) {
     }
 }
 
-fn main() {
+fn run() {
     print(0)
 }
 "#;
@@ -171,7 +171,7 @@ fn show(n: Int) {
     print(n)
 }
 
-fn main() {
+fn run() {
     show(LIMIT)
 }
 "#;
@@ -190,7 +190,7 @@ fn both(a: ~Int, b: Int) {
     print(b)
 }
 
-fn main() {
+fn run() {
     x: Int := 1
     both(~x, x)
 }
@@ -208,7 +208,7 @@ fn consume(s: ^String) {
     print(s)
 }
 
-fn main() {
+fn run() {
 msg: String :: "hello"
     consume(msg)
     print(msg)
@@ -232,7 +232,7 @@ fn consume(s: ^String) {
     print(s)
 }
 
-fn main() {
+fn run() {
 msg: String :: "hello"
     consume(msg)
 }
@@ -247,7 +247,7 @@ msg: String :: "hello"
 #[test]
 fn deref_outside_unsafe_is_error() {
     let src = r#"
-fn main() {
+fn run() {
 x: Int :: 1
     print(*x)
 }
@@ -270,7 +270,7 @@ fn consume(s: ^String) {
 
 fn maybe(b: Bool) -> Bool { return b }
 
-fn main() {
+fn run() {
 msg: String :: "hello"
     if maybe(true) {
         consume(msg)
@@ -297,7 +297,7 @@ fn consume(s: ^String) {
 
 fn maybe(b: Bool) -> Bool { return b }
 
-fn main() {
+fn run() {
 msg: String :: "hello"
     if maybe(true) {
         consume(msg)

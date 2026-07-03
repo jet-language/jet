@@ -57,15 +57,13 @@ fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegistry) -> CliE
     }
 }
 
-/// E0101 (D-CLIFLAG1 wording): neither `fn main` nor a qualifying `fn run` exists.
-fn no_main_or_run_error() -> Diagnostic {
+/// E0101: the entry file has no canonical `fn run`.
+fn no_run_error() -> Diagnostic {
     Diagnostic::error(
         "E0101",
-        "this program has no `main` function".to_string(),
-        "running a program starts at `fn main`, and the entry file doesn't define one (a typed \
-         `fn run(args: T)` also works, when `T` is `@[Cli]`-derived — D-CLIFLAG1)"
-            .to_string(),
-        "add `fn main() { ... }` to the entry file".to_string(),
+        "this program has no `run` function".to_string(),
+        "running a program starts at `fn run`, and the entry file doesn't define one".to_string(),
+        "add `fn run() { ... }` to the entry file".to_string(),
         None,
     )
 }
@@ -1558,33 +1556,24 @@ pub(crate) fn check_bundle_opts(
     let entry = &states[bundle.entry];
     if mode == CompileMode::Run || mode == CompileMode::Eval {
         let entry_items = &bundle.modules[bundle.entry].items;
-        if entry.funcs.contains_key("main") {
-            if let Some(sig) = entry.funcs.get("main") {
-                // E0122: in Run mode main must have no params and no return type.
-                // In Eval mode a return type is allowed (e.g. `pure fn main() -> Int`).
-                if mode == CompileMode::Run
-                    && (!sig.params.is_empty() || sig.return_type.is_some())
-                {
-                    diags.push(Diagnostic::error(
-                        "E0122",
-                        "`main` takes no parameters and returns nothing".to_string(),
-                        "`main` is where running starts; nothing calls it with values"
-                            .to_string(),
-                        "write it as: fn main() { ... }".to_string(),
-                        None,
-                    ));
-                }
-            }
-        } else if let Some(run_fn) = entry_items.iter().find_map(|i| match i {
+        if let Some(run_fn) = entry_items.iter().find_map(|i| match i {
             Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         }) {
-            // D-CLIFLAG1: `run` is a second entry-point name, live only when it
-            // takes exactly one parameter shaped like a CLI spec (a `@[Cli]`
-            // struct, or an enum of `@[Cli]` payloads — S12). Any other arity
-            // (including zero, S12's "`fn run()` stays byte-identical") makes
-            // `run` an ordinary function — not an entry — same "no main" story.
-            if run_fn.params.len() == 1 {
+            // S12/D-CLIFLAG1: `run` is the only program entry name. It is either
+            // zero-arg, or one typed CLI-spec parameter (`@[Cli]` struct / enum).
+            if run_fn.params.is_empty() {
+                if mode == CompileMode::Run && run_fn.return_type.is_some() {
+                    diags.push(Diagnostic::error(
+                        "E0122",
+                        "`run` returns a value".to_string(),
+                        "`run` is where running starts; in run mode there is no caller waiting for a value"
+                            .to_string(),
+                        "write it as: fn run() { ... }".to_string(),
+                        Some(run_fn.name_span),
+                    ));
+                }
+            } else if run_fn.params.len() == 1 {
                 let param = &run_fn.params[0];
                 match cli_entry_param_shape(entry_items, &param.ty, &entry.trait_reg) {
                     CliEntryShape::Struct | CliEntryShape::Enum => {}
@@ -1592,10 +1581,10 @@ pub(crate) fn check_bundle_opts(
                     CliEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),
                 }
             } else {
-                diags.push(no_main_or_run_error());
+                diags.push(e1308(Some(run_fn.name_span)));
             }
         } else {
-            diags.push(no_main_or_run_error());
+            diags.push(no_run_error());
         }
     }
     match mode {

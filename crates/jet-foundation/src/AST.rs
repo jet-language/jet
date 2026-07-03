@@ -3273,11 +3273,7 @@ impl CtValue {
 }
 
 fn ct_mangle(name: &str) -> String {
-    if name == "main" {
-        "main".to_string()
-    } else {
-        format!("user_{}", name)
-    }
+    format!("user_{}", name)
 }
 
 // ── C-FFI data types ──────────────────────────────────────────────────────────

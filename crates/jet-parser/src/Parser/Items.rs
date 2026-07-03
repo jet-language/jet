@@ -988,7 +988,7 @@ impl<'a> Parser<'a> {
                         ),
                         "at the top level of a file, only definitions can appear".to_string(),
                         format!(
-                            "define a function ({} main() {{ ... }}), #{} block, struct, or const",
+                            "define a function ({} run() {{ ... }}), #{} block, struct, or const",
                             Syntax::KW_FN,
                             Syntax::KW_TEST
                         ),

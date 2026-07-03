@@ -35,7 +35,7 @@ fn codes_of(src: &str) -> Vec<String> {
 fn consumed_once_compiles() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
     release(^db)
 }
@@ -53,7 +53,7 @@ fn make() -> Lock {
     db :: acquire("db")
     return db
 }
-fn main() {
+fn run() {
     held :: make()
     release(^held)
 }
@@ -70,7 +70,7 @@ fn passthrough_moves_the_duty() {
 fn hold(lock: ^Lock) -> Lock {
     return lock
 }
-fn main() {
+fn run() {
     db :: acquire("db")
     held :: hold(^db)
     release(^held)
@@ -89,7 +89,7 @@ fn main() {
 fn dropped_is_e0140() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
 }
 "#,
@@ -106,7 +106,7 @@ fn main() {
 fn one_branch_is_e0141() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
     early :: true
     if early {
@@ -133,7 +133,7 @@ fn main() {
 fn both_branches_consume_is_clean() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
     early :: true
     if early {
@@ -156,7 +156,7 @@ fn main() {
 fn used_twice_is_e0121() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
     release(^db)
     release(^db)
@@ -178,7 +178,7 @@ fn aliased_is_e0142() {
 fn peek(lock: Lock) {
     print(lock.resource)
 }
-fn main() {
+fn run() {
     db :: acquire("db")
     peek(db)
     release(^db)
@@ -200,7 +200,7 @@ fn main() {
 fn drop_inside_unsafe_block_satisfies_single_use() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
     #Unsafe("the resource is already gone; nothing to release") {
         drop(db)
@@ -226,7 +226,7 @@ fn void_one() {
     db :: acquire("db")
     drop(db)
 }
-fn main() {
+fn run() {
     #Unsafe("calling the audited voider") {
         void_one()
     }
@@ -246,7 +246,7 @@ fn main() {
 fn drop_outside_unsafe_is_e0143() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
     drop(db)
 }
@@ -270,7 +270,7 @@ fn main() {
 fn reuse_after_drop_is_e0121() {
     let codes = err_codes(
         r#"
-fn main() {
+fn run() {
     db :: acquire("db")
     #Unsafe("done with it") {
         drop(db)
@@ -294,7 +294,7 @@ fn user_drop_fn_shadows_builtin() {
 fn drop(n: Int) -> Int {
     return n + 1
 }
-fn main() {
+fn run() {
     db :: acquire("db")
     release(^db)
     x :: drop(41)
@@ -313,7 +313,7 @@ fn main() {
 #[test]
 fn drop_erases_no_unsafe_in_codegen() {
     let src = format!(
-        "{}\nfn main() {{ db :: acquire(\"db\"); #Unsafe(\"gone\") {{ drop(db) }} }}\n",
+        "{}\nfn run() {{ db :: acquire(\"db\"); #Unsafe(\"gone\") {{ drop(db) }} }}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");
@@ -337,7 +337,7 @@ fn make() -> Ticket {
 fn close(t: ^Ticket) {
     print("closed")
 }
-fn main() {
+fn run() {
     t :: make()
 }
 "#;
@@ -354,7 +354,7 @@ fn main() {
 #[test]
 fn tag_erases_in_codegen() {
     let src = format!(
-        "{}\nfn main() {{ db :: acquire(\"db\"); release(^db) }}\n",
+        "{}\nfn run() {{ db :: acquire(\"db\"); release(^db) }}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");

@@ -82,7 +82,7 @@ fn wait_for_version_change(port: u16, baseline: &str, timeout: Duration) -> Stri
 
 const FIXTURE_SRC: &str = r#"use core.ui as ui
 
-fn main() {
+fn run() {
     backend :: ui.null_backend()
     node :: ui.node("hello", 100.0, 20.0)
     constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
@@ -97,7 +97,7 @@ fn main() {
 /// compiler rather than re-serving a cached response.
 const FIXTURE_SRC_EDITED: &str = r#"use core.ui as ui
 
-fn main() {
+fn run() {
     backend :: ui.null_backend()
     node :: ui.node("hello there", 100.0, 20.0)
     constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
@@ -236,7 +236,7 @@ fn dev() {
     server.serve()
 }
 
-fn main() {
+fn run() {
     print("hello, world")
 }
 "#;
@@ -252,7 +252,7 @@ fn dev() {
     server.serve()
 }
 
-fn main() {
+fn run() {
     print("hello there")
 }
 "#;
@@ -386,7 +386,7 @@ fn dev() {
     server.serve()
 }
 
-fn main() {
+fn run() {
     print("hello, world")
 }
 "#,

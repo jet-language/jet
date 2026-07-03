@@ -776,7 +776,7 @@ fn check_pure_if_with_path(
 
 /// From-root transitive purity check for `jet eval --pure`.
 ///
-/// Walks the call graph starting at `entry_fn` (typically `"main"`), following
+/// Walks the call graph starting at `entry_fn` (typically `"run"`), following
 /// calls into `ast_funcs` bodies and accumulating the call chain in `path`.
 /// Fires E3401 on the first impure call with the full transitive chain.
 ///

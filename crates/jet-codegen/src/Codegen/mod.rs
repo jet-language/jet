@@ -409,7 +409,11 @@ fn strip_unused_txn_prelude(out: String) -> String {
 fn strip_unused_term_prelude(out: String) -> String {
     // Fast path: if the term dispatchers are referenced in user code (after the
     // prelude), keep the whole term section.
-    let prelude_end = out.find("fn main()").unwrap_or(out.len());
+    let prelude_end = [out.find("fn user_"), out.find("pub fn user_"), out.find("fn main()")]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(out.len());
     let user_code = &out[prelude_end..];
     if user_code.contains("jet_term_enter") || user_code.contains("jet_term_read_key") {
         return out;
@@ -452,11 +456,7 @@ fn strip_unused_term_prelude(out: String) -> String {
 }
 
 pub(crate) fn mangle(name: &str) -> String {
-    if name == "main" {
-        "main".to_string()
-    } else {
-        format!("user_{}", name)
-    }
+    format!("user_{}", name)
 }
 
 /// Rust identifier for a Jet user type (`Payment.Client` → `user_Payment__Client`).
@@ -672,10 +672,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             emit_func(&cx, f, &mut out);
         }
     }
-    // D-CLIFLAG1: a typed `fn run(args: T)` (no `fn main`) is a second entry
-    // point (S12) — synthesize the `fn main` that parses `io.args()` and
-    // dispatches to it. No-op when the entry file already has `fn main`, or
-    // has neither (sema's E0101/E1308 already rejected that case).
+    // S12/D-CLIFLAG1: Jet's only program entry is `fn run`; Rust still needs
+    // `fn main`, so synthesize that wrapper for zero-arg and typed-CLI forms.
     emit_cli_entry_if_needed(&cx, &prog.items, &mut out);
     strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
         strip_unused_mem_prelude(out),
@@ -786,9 +784,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         if let Item::Func(f) = item {
-            if f.name != "main" {
-                emit_func(&cx, f, &mut out);
-            }
+            emit_func(&cx, f, &mut out);
         }
     }
 
@@ -1113,10 +1109,9 @@ pub fn emit_bundle_dbg(
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
-    // D-CLIFLAG1: a typed `fn run(args: T)` (no `fn main`) is a second entry
-    // point (S12) — synthesize the `fn main` that parses `io.args()` and
-    // dispatches to it. No-op when the entry file already has `fn main`, or
-    // has neither (sema's E0101/E1308 already rejected that case).
+    // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
+    // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
+    // No-op when the entry file has no `run` (sema's E0101 already rejected it).
     emit_cli_entry_if_needed(&cx, &entry.items, &mut out);
     strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
         strip_unused_mem_prelude(out),

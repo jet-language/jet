@@ -381,7 +381,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         ret: f.return_type.clone(),
         is_view: f.is_view_return,
         generics: render_generics(&f.type_params),
-        is_main: f.name == "main",
+        is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
         is_reactive: f.is_reactive,

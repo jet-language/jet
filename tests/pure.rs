@@ -31,7 +31,7 @@ fn pure_fn_compiles() {
 @Pure fn add(a: Int, b: Int) -> Int {
     return a + b;
 }
-fn main() {
+fn run() {
     print("{add(1, 2)}");
 }
 "#;
@@ -47,7 +47,7 @@ fn pure_fn_impure_call_is_e3401() {
     print("side effect");
     return 42;
 }
-fn main() {
+fn run() {
     print("{bad()}");
 }
 "#;
@@ -71,7 +71,7 @@ fn pure_fn_calling_pure_fn_is_ok() {
 @Pure fn cube(n: Int) -> Int {
     return n * square(n);
 }
-fn main() {
+fn run() {
     print("{cube(3)}");
 }
 "#;
@@ -90,7 +90,7 @@ fn pub_pure_fn_compiles() {
 @Pure pub fn double(n: Int) -> Int {
     return n * 2;
 }
-fn main() {
+fn run() {
     print("{double(5)}");
 }
 "#;
@@ -109,7 +109,7 @@ fn read_value() -> Int {
 @Pure fn compute() -> Int {
     return read_value();
 }
-fn main() {
+fn run() {
     print("{compute()}");
 }
 "#;
@@ -139,7 +139,7 @@ fn b() {
 fn a() {
     b()
 }
-fn main() {
+fn run() {
     a()
 }
 "#;
@@ -188,14 +188,14 @@ fn main() {
         .map(|(n, f)| (n.clone(), f))
         .collect();
 
-    let diags = jet::check_pure_program_root("main", &funcs_sig, &ast_funcs);
+    let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
     assert!(!diags.is_empty(), "expected E3401 for transitive impurity");
     let d = &diags[0];
     assert_eq!(d.code, "E3401", "should be E3401");
     // The why-line must contain the transitive chain.
     let why = &d.why;
     assert!(
-        why.contains("main") && why.contains("a") && why.contains("b"),
+        why.contains("run") && why.contains("a") && why.contains("b"),
         "transitive chain missing from why: {:?}",
         why
     );
@@ -206,7 +206,7 @@ fn main() {
     );
 }
 
-/// 2-level transitive: main → helper → print.
+/// 2-level transitive: run → helper → print.
 #[test]
 fn transitive_chain_2_levels() {
     use jet::AST;
@@ -216,7 +216,7 @@ fn transitive_chain_2_levels() {
 fn helper() {
     print("oops")
 }
-fn main() {
+fn run() {
     helper()
 }
 "#;
@@ -264,11 +264,11 @@ fn main() {
         .map(|(n, f)| (n.clone(), f))
         .collect();
 
-    let diags = jet::check_pure_program_root("main", &funcs_sig, &ast_funcs);
+    let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
     assert!(!diags.is_empty(), "expected E3401");
     let why = &diags[0].why;
     assert!(
-        why.contains("main") && why.contains("helper"),
+        why.contains("run") && why.contains("helper"),
         "chain missing in why: {:?}",
         why
     );
@@ -284,7 +284,7 @@ fn transitive_clean_program_no_error() {
 @Pure fn square(n: Int) -> Int {
     return n * n
 }
-fn main() {
+fn run() {
     x :: square(5)
 }
 "#;
@@ -332,7 +332,7 @@ fn main() {
         .map(|(n, f)| (n.clone(), f))
         .collect();
 
-    let diags = jet::check_pure_program_root("main", &funcs_sig, &ast_funcs);
+    let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
     assert!(
         diags.is_empty(),
         "expected no diagnostics, got: {:?}",
@@ -466,7 +466,7 @@ fn store_rollback_invalid_gen() {
 #[test]
 fn eval_type_error_gives_precise_diagnostic_not_e0956() {
     // `"string" + 5` is a String/Int type mismatch — sema must catch this.
-    let src = r#"@Pure fn main() -> Int { return "string" + 5 }"#;
+    let src = r#"@Pure fn run() -> Int { return "string" + 5 }"#;
     let diags = jet::check_for_eval(src, "test_eval_type.jet");
     assert!(
         !diags.is_empty(),
@@ -488,24 +488,24 @@ fn eval_type_error_gives_precise_diagnostic_not_e0956() {
 
 /// `check_for_eval` passes for a valid typed eval program.
 #[test]
-fn eval_valid_typed_main_passes_sema() {
-    let src = r#"@Pure fn main() -> Int { return 2 + 3 }"#;
+fn eval_valid_typed_run_passes_sema() {
+    let src = r#"@Pure fn run() -> Int { return 2 + 3 }"#;
     let diags = jet::check_for_eval(src, "test_eval_valid.jet");
     assert!(
         diags.is_empty(),
-        "`@Pure fn main() -> Int` with correct body should pass sema, got: {:?}",
+        "`@Pure fn run() -> Int` with correct body should pass sema, got: {:?}",
         diags
     );
 }
 
-/// `check_for_eval` passes for a normal `@Pure fn main() -> ()` program.
+/// `check_for_eval` passes for a normal `@Pure fn run() -> ()` program.
 #[test]
-fn eval_normal_void_main_passes_sema() {
-    let src = r#"@Pure fn main() { }"#;
+fn eval_normal_void_run_passes_sema() {
+    let src = r#"@Pure fn run() { }"#;
     let diags = jet::check_for_eval(src, "test_eval_void.jet");
     assert!(
         diags.is_empty(),
-        "`@Pure fn main()` should pass eval sema, got: {:?}",
+        "`@Pure fn run()` should pass eval sema, got: {:?}",
         diags
     );
 }
@@ -514,7 +514,7 @@ fn eval_normal_void_main_passes_sema() {
 #[test]
 fn parse_reactive_block_stmt() {
     let src = r#"
-fn main() {
+fn run() {
     #Reactive {
         print(1)
     }
@@ -523,19 +523,19 @@ fn main() {
     let (toks, lex_diags) = jet::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex: {:?}", lex_diags);
     let prog = jet::Parser::parse(&toks).expect("parse ok");
-    let main = prog
+    let run = prog
         .items
         .iter()
         .find_map(|i| match i {
-            jet::AST::Item::Func(f) if f.name == "main" => Some(f),
+            jet::AST::Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         })
-        .expect("main");
+        .expect("run");
     assert!(
-        main.body
+        run.body
             .iter()
             .any(|s| matches!(s, jet::AST::Stmt::Reactive { .. })),
-        "expected Stmt::Reactive in main body, got {:?}",
-        main.body
+        "expected Stmt::Reactive in run body, got {:?}",
+        run.body
     );
 }

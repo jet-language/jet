@@ -125,14 +125,14 @@ fn run_with_io(
             return (ExitCodes::ICE, io_into_output(io));
         }
     };
-    // Stop at `fn main`'s first REAL statement, by file:line — the same place
+    // Stop at `fn run`'s first REAL statement, by file:line — the same place
     // the step-1 interpreter debugger stops (Resume::Step on the very first
     // statement). A name-based `-n main` breakpoint can resolve to more than
     // one symbol and land with no source line info at all (verified against a
     // live lldb — see the module doc); a marker-based file:line breakpoint has
     // no such ambiguity.
     let Some(entry_line) = map.main_entry_line(rust_src) else {
-        eprintln!("error: internal: couldn't find a line-mapped statement inside `fn main` — compiler bug (I2)");
+        eprintln!("error: internal: couldn't find a line-mapped statement inside `fn run` — compiler bug (I2)");
         return (ExitCodes::ICE, io_into_output(io));
     };
     if let Err(e) = inf.set_breakpoint(rust_file, entry_line) {

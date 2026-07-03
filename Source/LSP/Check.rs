@@ -108,7 +108,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 pub fn run_doctor() {
     println!("jet lsp doctor");
     println!("--------------");
-    let src = "fn main() { print(\"hello\"); }\n";
+    let src = "fn run() { print(\"hello\"); }\n";
     let (toks, lex_errs) = crate::Lexer::lex(src);
     if lex_errs.is_empty() {
         println!("  [ok] lexer");

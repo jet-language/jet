@@ -74,7 +74,7 @@ fn match_groups_find_replace_split() {
     let src = r##"
 use core.regex as re
 
-fn main() {
+fn run() {
     text :: "2024-06-21 build ok"
 
     // is_match. NB: `{N}` regex quantifiers are written `{{N}}` in Jet source —
@@ -141,7 +141,7 @@ fn bad_pattern_is_a_recoverable_error_not_a_crash() {
     let src = r##"
 use core.regex as re
 
-fn main() {
+fn run() {
     if re.is_match("(unclosed", "abc") == {
         ok(_) -> { print("unexpected-ok") }
         err(e) -> { print("caught") }

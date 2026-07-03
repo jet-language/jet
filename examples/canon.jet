@@ -153,7 +153,7 @@ fn describe_excerpt(source: String, kind: String) -> String {
 // --- typed CLI args: `@Cli` struct + `@[Doc(...)]` fields -----------------
 // D-CLIFLAG1=A: an entry function's `@Cli` parameter type IS the CLI spec.
 // Constructed by hand here (not run as the CLI entry point) to keep this
-// file's single `fn main()` the one program entry.
+// file's single `fn run()` the one program entry.
 @Cli
 struct ServeArgs {
     @[Doc("port to listen on")] #[Default(3000)] port: Int
@@ -223,7 +223,7 @@ impl LinuxBackend.Backend {
 
 // --- `#Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`
 // D-DOTSCOPE1: contextual dot-member blocks inside a `#Test` marker scope.
-// Run by `jet test`, not by this file's `fn main()`.
+// Run by `jet test`, not by this file's `fn run()`.
 #Test("uninit then write is provably safe") {
     .setup {
         base :: show_uninit()
@@ -252,7 +252,7 @@ impl LinuxBackend.Backend {
 }
 
 // --- main: exercise each feature with deterministic output ---------------
-fn main() {
+fn run() {
     show_values()
     print(greet("world"))
     same :: id(99)

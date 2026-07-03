@@ -24,7 +24,7 @@ fn check_freestanding_src(src: &str, label: &str) -> String {
 fn e3301_fs_read_in_freestanding() {
     let src = r#"use core.fs as fs
 
-fn main() {
+fn run() {
     _ :: fs.read("config.txt")
 }
 "#;
@@ -45,7 +45,7 @@ fn main() {
 fn e3301_http_in_freestanding() {
     let src = r#"use core.http as http
 
-fn main() {
+fn run() {
     _ :: http.get("http://example.com")
 }
 "#;
@@ -61,7 +61,7 @@ fn main() {
 fn e3301_tasks_in_freestanding() {
     let src = r#"use core.tasks as tasks
 
-fn main() {
+fn run() {
     t :: tasks.spawn(() => 42)
     t.join()
 }
@@ -79,7 +79,7 @@ fn freestanding_allows_core_math() {
     // core.math is not OS-dependent; must not trigger E3301.
     let src = r#"use core.math as math
 
-fn main() {
+fn run() {
     x :: math.sqrt(4.0)
     print(x)
 }
@@ -97,7 +97,7 @@ fn freestanding_allows_core_json() {
     // core.encoding.json does not need an OS.
     let src = r#"use core.encoding.json as json
 
-fn main() {
+fn run() {
     s :: json.to_string("hello")
     print(s)
 }

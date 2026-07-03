@@ -27,7 +27,7 @@ fn arithmetic_and_helper_call() {
 fn double(n: Int) -> Int {
     return (n * 2)
 }
-fn main() {
+fn run() {
     sum :: (7 + (3 * 4))
     print(\"sum {sum}\")
     print(double(sum))
@@ -48,7 +48,7 @@ fn if_expression_and_string_param() {
 fn shout(s: String) -> String {
     return \"{s}!\"
 }
-fn main() {
+fn run() {
     n :: 7
     parity :: if ((n % 2) == 0) { \"even\" } else { \"odd\" }
     print(shout(parity))
@@ -77,7 +77,7 @@ fn label(n: Int) -> String {
     }
     return \"{n}\"
 }
-fn main() {
+fn run() {
     print(label(3))
     print(label(5))
     print(label(15))
@@ -109,7 +109,7 @@ impl Counter {
 fn add(a: Int, b: Int) -> Int {
     return (a + b)
 }
-fn main() {
+fn run() {
     c :: Counter.{ n: 41 }
     print(add(c.bumped(), 0))
 }
@@ -127,7 +127,7 @@ fn overflow_still_traps_on_tir_path() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
 a: U8 :: 200
 b: U8 :: 100
     print(a + b)
@@ -147,7 +147,7 @@ fn infinite_and_while_loops() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     x := 0
     loop {
         x = (x + 1)
@@ -177,7 +177,7 @@ fn range_loops_inclusive_and_step() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     total := 0
     loop n in 1..5 {
         total = (total + n)
@@ -202,7 +202,7 @@ fn labeled_break_and_continue() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     outer@ loop i in 1..3 {
         loop j in 1..3 {
             if (j == 2) {
@@ -248,7 +248,7 @@ fn sum_pt(p: Point) -> Int {
 fn origin() -> Point {
     return Point.{ x: 0, y: 0 }
 }
-fn main() {
+fn run() {
     p :: Point.{ x: 3, y: 4 }
     print(sum_pt(p))
     print(p.x)
@@ -277,7 +277,7 @@ struct Person {
 fn describe(p: Person) {
     print(\"{p.name} is {p.age}\")
 }
-fn main() {
+fn run() {
     label :: \"Ada\"
     p :: Person.{ name: label, age: 36 }
     describe(p)
@@ -308,7 +308,7 @@ struct Outer {
 fn deep(o: Outer) -> Int {
     return (o.inner.v + o.label)
 }
-fn main() {
+fn run() {
     o :: Outer.{ inner: Inner.{ v: 10 }, label: 5 }
     print(deep(o))
     print(o.inner.v)
@@ -350,7 +350,7 @@ fn label(light: Light) -> String {
         Green -> { return \"go\" }
     }
 }
-fn main() {
+fn run() {
     start :: Light.Red
     print(label(start))
     print(label(next(start)))
@@ -384,7 +384,7 @@ fn describe(c: Conn) -> String {
     }
     return \"unknown\"
 }
-fn main() {
+fn run() {
     print(describe(Conn.Active(42)))
     print(describe(Conn.Reconnecting(7)))
     print(describe(Conn.Idle(99)))
@@ -417,7 +417,7 @@ fn classify(r: Http) -> String {
     }
     return \"unknown\"
 }
-fn main() {
+fn run() {
     print(classify(Http.Good(201)))
     print(classify(Http.Good(404)))
     print(classify(Http.Good(302)))
@@ -447,7 +447,7 @@ fn grade(score: Int) -> String {
         else -> { return \"?\" }
     }
 }
-fn main() {
+fn run() {
     print(grade(95))
     print(grade(72))
     print(grade(45))
@@ -479,7 +479,7 @@ fn total(xs: [Int]) -> Int {
     }
     return sum
 }
-fn main() {
+fn run() {
     nums := [10, 20, 30, 40]
     print(nums[0])
     print(nums[1..2])
@@ -498,7 +498,7 @@ fn list_index_assignment() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     nums := [1, 2, 3]
     nums[1] = 99
     print(nums[0])
@@ -520,7 +520,7 @@ fn map_literal_index_insert_and_iteration() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     counts: [String, Int] := [:]
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
@@ -554,7 +554,7 @@ struct Person {
 fn name_of(p: Person) -> String {
     return p.name
 }
-fn main() {
+fn run() {
     p :: Person.{ name: \"Grace\", age: 40 }
     print(name_of(p))
 }
@@ -581,12 +581,12 @@ struct Calc {
         return ((self.base + x) + y)
     }
 }
-fn run(c: Calc) -> Int {
+fn calc(c: Calc) -> Int {
     return c.add(10, 20)
 }
-fn main() {
+fn run() {
     c :: Calc.{ base: 1 }
-    print(run(c))
+    print(calc(c))
 }
 ";
     let (code, stdout) = build_and_run("tir_method_args", src);
@@ -610,13 +610,13 @@ struct Crate {
         return \"{self.label}-{other}\"
     }
 }
-fn run(b: Crate) -> String {
+fn calc(b: Crate) -> String {
     name :: \"x\"
     return b.combine(name)
 }
-fn main() {
+fn run() {
     b :: Crate.{ label: \"t\" }
-    print(run(b))
+    print(calc(b))
 }
 ";
     let (code, stdout) = build_and_run("tir_method_string_arg", src);
@@ -647,7 +647,7 @@ impl Dog.Named {
 fn describe(d: Dog) -> String {
     return d.label()
 }
-fn main() {
+fn run() {
     d :: Dog.{ sound: \"woof\" }
     print(describe(d))
 }
@@ -676,11 +676,11 @@ enum Light {
         }
     }
 }
-fn run(l: Light) -> Int {
+fn calc(l: Light) -> Int {
     return l.code()
 }
-fn main() {
-    print(run(Light.Green))
+fn run() {
+    print(calc(Light.Green))
 }
 ";
     let (code, stdout) = build_and_run("tir_enum_method", src);
@@ -699,7 +699,7 @@ fn map_literal_with_entries() {
 fn scores() -> [String, Int] {
     return [\"a\": 1, \"b\": 2]
 }
-fn main() {
+fn run() {
     s := scores()
     print(s[\"a\"])
     print(s[\"b\"])
@@ -735,7 +735,7 @@ struct Counter {
         return self.n
     }
 }
-fn main() {
+fn run() {
     c :: Counter.make(5)
     print(c.value())
 }
@@ -760,7 +760,7 @@ struct Acc {
         return (self.total + self.total)
     }
 }
-fn main() {
+fn run() {
     a := Acc.{ total: 7 }
     print(a.doubled())
 }
@@ -794,7 +794,7 @@ enum Sign {
         }
     }
 }
-fn main() {
+fn run() {
     s :: Sign.make_pos()
     print(s.to_num())
 }
@@ -827,7 +827,7 @@ struct Vec2 {
         return Vec2.{ x: (self.x + dx), y: self.y }
     }
 }
-fn main() {
+fn run() {
     p :: Vec2.make(3, 4)
     q :: p.shifted(10)
     print(q.sum())
@@ -866,7 +866,7 @@ fn load(raw: Int) -> Int ? ParseError {
     n :: parse_age(raw)?
     return ok((n + 1))
 }
-fn main() {
+fn run() {
     a :: load(21) ?? 0
     print(a)
     b :: load(0) ?? 99
@@ -896,7 +896,7 @@ fn checked(x: Int) -> Int ? Error {
 fn safe(x: Int) -> Int {
     return checked(x) ?? return -1
 }
-fn main() {
+fn run() {
     print(safe(4))
     print(safe(0))
 }
@@ -922,7 +922,7 @@ fn first_even(limit: Int) -> (Int?) {
     }
     return null
 }
-fn main() {
+fn run() {
     print(first_even(9) ?? 0)
     print(first_even(1) ?? 0)
 }
@@ -950,7 +950,7 @@ struct Account {
 fn handle_of(a: (Account?)) -> (String?) {
     return a?.profile?.handle
 }
-fn main() {
+fn run() {
     p :: Profile.{ handle: value(\"jay\") }
     acct :: Account.{ profile: p }
     print(handle_of(value(acct)) ?? \"none\")
@@ -984,7 +984,7 @@ fn build() -> [Int] {
     xs.reverse()
     return xs
 }
-fn main() {
+fn run() {
     xs := build()
     print(xs.len())
     print(xs.contains(5))
@@ -1010,7 +1010,7 @@ fn string_builtin_methods() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     s := \"  Hello, World  \"
     t := s.trim()
     print(t.to_upper())
@@ -1041,7 +1041,7 @@ fn map_builtin_methods() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     m: [String, Int] := [:]
     m.insert(\"banana\", 3)
     m.insert(\"apple\", 5)
@@ -1078,7 +1078,7 @@ fn drop_key(m: [String, Int]) -> Int {
     r := m2.remove(\"a\")
     return m2.len()
 }
-fn main() {
+fn run() {
     print(drop_first([10, 20, 30]))
     counts: [String, Int] := [:]
     counts[\"a\"] = 1
@@ -1098,7 +1098,7 @@ fn list_join_with_separator() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     words := [\"a\", \"b\", \"c\"]
     print(words.join(\"-\"))
 }
@@ -1122,7 +1122,7 @@ fn classify(x: Int) -> Int ? Error {
     }
     return ok((x + 10))
 }
-fn main() {
+fn run() {
     if classify(5) == {
         ok(n) -> {
             print(n)
@@ -1172,7 +1172,7 @@ fn make_path(a: String, b: String) -> String {
 fn hash(s: String) -> String {
     return crypto.sha256(s)
 }
-fn main() {
+fn run() {
     print(calc(16.0))
     print(make_path(\"/usr\", \"bin\"))
     print(hash(\"hello\"))
@@ -1202,7 +1202,7 @@ use core.fs as fs
 fn read_or(p: String) -> String {
     return (fs.read(p) ?? \"missing\")
 }
-fn main() {
+fn run() {
     print(read_or(\"/no/such/file/at/all/xyzzy\"))
 }
 ";
@@ -1235,7 +1235,7 @@ fn closure_collection_methods() {
         return;
     }
     let src = "\
-fn run() -> Int {
+fn calc() -> Int {
     base := 10
     nums := [1, 2, 3, 4, 5]
     squares := nums.map((n: Int) => (n * n))
@@ -1250,8 +1250,8 @@ fn run() -> Int {
     print(every)
     return total
 }
-fn main() {
-    print(run())
+fn run() {
+    print(calc())
 }
 ";
     let (code, stdout) = build_and_run("tir_closure_methods", src);
@@ -1271,14 +1271,14 @@ fn fnmut_each_closure() {
         return;
     }
     let src = "\
-fn run() -> Int {
+fn calc() -> Int {
     nums := [1, 2, 3, 4]
     total := 0
     nums.each((n: Int) => { total = (total + n) })
     return total
 }
-fn main() {
-    print(run())
+fn run() {
+    print(calc())
 }
 ";
     let (code, stdout) = build_and_run("tir_fnmut_each", src);
@@ -1294,13 +1294,13 @@ fn sort_by_closure() {
         return;
     }
     let src = "\
-fn run() -> Int {
+fn calc() -> Int {
     nums := [3, 1, 2]
     nums.sort_by((n: Int) => n)
     return nums[0]
 }
-fn main() {
-    print(run())
+fn run() {
+    print(calc())
 }
 ";
     let (code, stdout) = build_and_run("tir_sort_by", src);
@@ -1320,13 +1320,13 @@ fn fan_out_operator() {
 fn double(n: Int) -> Int {
     return (n * 2)
 }
-fn run() -> Int {
+fn calc() -> Int {
     doubled := double.[1, 2, 3]
     print(doubled)
     return doubled[1]
 }
-fn main() {
-    print(run())
+fn run() {
+    print(calc())
 }
 ";
     let (code, stdout) = build_and_run("tir_fan_out", src);
@@ -1347,7 +1347,7 @@ fn fn_typed_param_call_stays_on_ast_path() {
 fn apply(f: fn(Int) -> Int, x: Int) -> Int {
     return f(x)
 }
-fn main() {
+fn run() {
     print(apply((n: Int) => (n + 1), 41))
 }
 ";
@@ -1375,7 +1375,7 @@ fn narrow(channel: I32) -> U8 {
 fn to_real(x: Int) -> Float {
     return x.to_float()
 }
-fn main() {
+fn run() {
     print(widen(255))
     print(narrow(100))
     print(narrow(100000))
@@ -1406,7 +1406,7 @@ fn finite(f: Float) -> Bool {
 fn show(n: I32) -> String {
     return n.to_string()
 }
-fn main() {
+fn run() {
     print(bits(13))
     print(finite(1.5))
     print(show(42))
@@ -1457,7 +1457,7 @@ impl Square.Shape {
 fn describe(s: Shape) -> String {
     return \"{s.name()}: {s.area()}\"
 }
-fn main() {
+fn run() {
 shapes: [Shape] :: [Circle.{radius: 2.0}, Square.{side: 3.0}]
     shapes.each((s) => {
         print(describe(s))
@@ -1490,7 +1490,7 @@ fn pick(a: Int, b: Int) -> Int {
     }
     return 0
 }
-fn main() {
+fn run() {
     print(pick(5, 3))
     print(pick(2, 7))
     print(pick(0, 0))
@@ -1519,7 +1519,7 @@ fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
 fn double(x: Int) -> Int {
     return (x * 2)
 }
-fn main() {
+fn run() {
     print(apply_twice(double, 3))
     print(apply_twice((n: Int) => (n + 1), 5))
     g :: double
@@ -1542,20 +1542,20 @@ fn fn_value_call_through_local() {
         return;
     }
     let src = "\
-fn run(f: fn(Int) -> Int) -> Int {
+fn calc(f: fn(Int) -> Int) -> Int {
     return f(10)
 }
 fn inc(x: Int) -> Int {
     return (x + 1)
 }
-fn main() {
-    print(run(inc))
-    print(run((y: Int) => (y * y)))
+fn run() {
+    print(calc(inc))
+    print(calc((y: Int) => (y * y)))
 }
 ";
     let (code, stdout) = build_and_run("tir_fn_value_local", src);
     assert_eq!(code, 0);
-    // run(inc)=11; run(square)=100.
+    // calc(inc)=11; calc(square)=100.
     assert_eq!(stdout, "11\n100\n");
 }
 
@@ -1573,7 +1573,7 @@ fn work() {
     _g :: scope.guard(() => { print(\"cleanup\") })
     print(\"working\")
 }
-fn main() {
+fn run() {
     work()
 }
 ";
@@ -1600,7 +1600,7 @@ fn launch() -> Int {
     t :: tasks.spawn(() => compute())
     return t.join()
 }
-fn main() {
+fn run() {
     print(launch())
 }
 ";
@@ -1633,7 +1633,7 @@ fn write_file(path: String, text: String) -> Int {{
     _f :: w.flush()
     return 1
 }}
-fn main() {{
+fn run() {{
     done :: write_file(\"{path}\", \"hello handle\")
     print(done)
     contents :: fs.read(\"{path}\") ?? \"<none>\"
@@ -1713,7 +1713,7 @@ module math {
         return (a + b)
     }
 }
-fn main() {
+fn run() {
     print(math.double(5))
     print(math.add(3, 4))
 }
@@ -1738,7 +1738,7 @@ module math {
         return (n * 2)
     }
 }
-fn main() {
+fn run() {
     print(double(7))
 }
 ";
@@ -1758,7 +1758,7 @@ fn file_module_qualified_call() {
     }
     let main_src = "\
 module math
-fn main() {
+fn run() {
     print(math.clamp(15, 0, 10))
     print(math.label(\"x\", 5))
 }
@@ -1798,7 +1798,7 @@ fn unqualified_file_module_call() {
 use mathlib.clamp
 use mathlib.{lo, hi}
 module mathlib
-fn main() {
+fn run() {
     print(clamp(200, lo(), hi()))
 }
 ";
@@ -1839,7 +1839,7 @@ fn reexport_module_call() {
     }
     let main_src = "\
 module text
-fn main() {
+fn run() {
     print(text.wrap(\"hi\"))
 }
 ";
@@ -1886,7 +1886,7 @@ fn pick(x: Int) -> Int {
     }
     return 0
 }
-fn main() {
+fn run() {
     print(\"{pick(5)}\")
 }
 ";
@@ -1915,7 +1915,7 @@ fn grade(score: Int) -> String {
     }
     return \"?\"
 }
-fn main() {
+fn run() {
     print(grade(85))
     print(grade(95))
     print(grade(100))
@@ -1952,7 +1952,7 @@ struct Megaphone {
     inner: Voice
 }
 impl Megaphone.Speaker using inner
-fn main() {
+fn run() {
     v := Voice.{ prefix: \"HEY\" }
     m := Megaphone.{ inner: v }
     print(m.say(\"go\"))
@@ -1984,7 +1984,7 @@ fn risky(count: Int, ratio: Float) -> Int {
     got :: maybe(count) ?? panic(\"no value at {count}\")
     return got + base
 }
-fn main() {
+fn run() {
     print(\"{risky(5, 1.5)}\")
 }
 ";
@@ -2016,7 +2016,7 @@ fn render(m: Msg) -> String {
     }
     return \"?\"
 }
-fn main() {
+fn run() {
     m :: wrap(\"hi\")
     print(render(m))
 }
@@ -2050,7 +2050,7 @@ fn leaf_val(t: Tree) -> Int {
     }
     return 0
 }
-fn main() {
+fn run() {
     a :: Tree.Leaf(7)
     b :: wrap(a)
     print(\"{leaf_val(b)}\")
@@ -2088,7 +2088,7 @@ fn first(s: Shape) -> Int {
     }
     return 0
 }
-fn main() {
+fn run() {
     pt :: Point.{ x: 3, y: 4 }
     sh :: mk(pt)
     print(\"{first(sh)}\")
@@ -2119,7 +2119,7 @@ enum Holder {
 fn mk(xs: [Int]) -> Holder {
     return Holder.Nums(xs)
 }
-fn main() {
+fn run() {
     b :: Bag.{ items: [1, 2, 3], label: \"x\" }
     d :: mk([4, 5])
     print(b.label)
@@ -2155,7 +2155,7 @@ fn firstof<T>(xs: ^[T]) -> T {
 fn wrap<T>(x: ^T) -> [T] {
     return [x]
 }
-fn main() {
+fn run() {
     print(\"{id(5)}\")
     print(\"{pick(1, 2, true)}\")
     print(\"{firstof([10, 20, 30])}\")
@@ -2185,7 +2185,7 @@ struct Rec {
 fn name_of(rec: Rec) -> &String {
     return rec.name
 }
-fn main() {
+fn run() {
     r :: Rec.{ name: \"alpha\", value: \"beta\" }
     print(\"{name_of(r)}\")
 }
@@ -2211,7 +2211,7 @@ fn build_resp(body: String) -> HttpResponse {
 fn build_req() -> HttpRequest {
     return HttpRequest.{method: \"GET\", path: \"/\", body: \"\", headers: [:]}
 }
-fn main() {
+fn run() {
     r :: build_resp(\"hi\")
     q :: build_req()
     print(\"built\")
@@ -2262,7 +2262,7 @@ fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
-fn main() {
+fn run() {
 cell: Int :: 1337
     addr :: mem.address_of(cell)
     #Unsafe(\"addr is the address of `cell`, a live Int on this stack frame\") {
@@ -2291,7 +2291,7 @@ fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
-fn main() {
+fn run() {
 cell: Int :: 1337
     addr :: mem.address_of(cell)
     #Unsafe(\"safe: cell is live\") {
@@ -2423,7 +2423,7 @@ fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
     copy.items.push(item)
     return copy
 }
-fn main() {
+fn run() {
 p: Pair<Int> :: make_pair(1, 2)
     print(p.first)
     st: Stack<Int> := empty_stack()
@@ -2456,7 +2456,7 @@ use \"note\"
 fn make() -> Note {
     return note.Note.{ title: \"hello\", pages: 3 }
 }
-fn main() {
+fn run() {
     n := make()
     print(n.title)
     print(n.pages)
@@ -2490,7 +2490,7 @@ fn stopwatch_elapsed_millis() {
     }
     let src = "\
 use core.time
-fn main() {
+fn run() {
     sw := time.start()
     n := 0
     loop i in 0..100 {
@@ -2516,7 +2516,7 @@ fn arena_alloc_reset_free() {
     }
     let src = "\
 use core.mem
-fn main() {
+fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     print(x)
@@ -2546,7 +2546,7 @@ fn arena_region_block() {
     }
     let src = "\
 use core.mem
-fn main() {
+fn run() {
     region scratch {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
@@ -2572,7 +2572,7 @@ fn smart_context_block() {
     }
     let src = "\
 use core.mem
-fn main() {
+fn run() {
     arena :: mem.Arena.new()
     #Context(allocator: arena) {
         x :: arena.alloc(10)
@@ -2604,7 +2604,7 @@ fn polymorphic_core_specials() {
 use core.math as math
 use core.random as random
 use core.io as io
-fn run() -> Int {
+fn calc() -> Int {
     a :: math.abs((-5))
     b :: math.min(3, 7)
     c :: math.max(3, 7)
@@ -2615,8 +2615,8 @@ fn run() -> Int {
     p :: random.pick(xs)
     return ((((a + b) + c) + d) + (p ?? 0))
 }
-fn main() {
-    print(run())
+fn run() {
+    print(calc())
 }
 ";
     let (code, _stdout) = build_and_run("tir_poly_specials", src);
@@ -2655,7 +2655,7 @@ fn describe(resp: HttpResponse) -> String {
     b :: resp.body()
     return \"{s}: {b}\"
 }
-fn main() {
+fn run() {
     req :: http.parse(\"GET /x HTTP/1.1\\nHost: localhost\")
     resp :: handle(req)
     print(describe(resp))
@@ -2683,7 +2683,7 @@ fn sum_range(first: Int, last: Int) -> Int {
     }
     return total
 }
-fn main() {
+fn run() {
     a :: tasks.spawn(() => sum_range(1, 25))
     b :: tasks.spawn(() => sum_range(26, 50))
     print((a.join() + b.join()))
@@ -2703,7 +2703,7 @@ fn task_detach() {
     }
     let src = "\
 use core.tasks
-fn main() {
+fn run() {
     tasks.spawn(() => 42).detach()
     print(\"launched\")
 }
@@ -2723,7 +2723,7 @@ fn channel_send_receive() {
     }
     let src = "\
 use core.tasks as tasks
-fn main() {
+fn run() {
 ch: Channel<Int> :: tasks.channel()
 s1: Sender<Int> :: ch.sender()
     t1 :: tasks.spawn(take(s1) () => {
@@ -2772,7 +2772,7 @@ fn join_words(s: String) -> String {
     }
     return out
 }
-fn main() {
+fn run() {
     print(count_chars(\"hello\"))
     print(join_words(\"a,b,c\"))
 }
@@ -2811,7 +2811,7 @@ fn first_even(xs: [Int]) -> Int {
     }
     return out.len()
 }
-fn main() {
+fn run() {
     nothing: Int? :: null
     print(describe(value(7)))
     print(describe(nothing))
@@ -2841,7 +2841,7 @@ fn pure_fn() {
 @Pure fn greeting(name: String) -> String {
     return \"hi, {name}\"
 }
-fn main() {
+fn run() {
     print(double(21))
     print(greeting(\"jet\"))
 }
@@ -2866,7 +2866,7 @@ fn double(n: Int) -> Int {
 fn not_yet(n: Int) -> Int {
     return #Todo
 }
-fn main() {
+fn run() {
     print(double(21))
 }
 ";
@@ -2887,7 +2887,7 @@ fn default_param_values() {
 fn box_dims(w: Int, h: Int = w, d: Int = h) -> String {
     return \"{w}x{h}x{d}\"
 }
-fn main() {
+fn run() {
     print(box_dims(4))
     print(box_dims(4, 2))
     print(box_dims(4, 2, 1))
@@ -2910,7 +2910,7 @@ fn named_args() {
 fn area(width: Int, height: Int) -> Int {
     return (width * height)
 }
-fn main() {
+fn run() {
     print(area(width: 4, height: 3))
     print(area(4, height: 3))
 }
@@ -2935,7 +2935,7 @@ UserId :: distinct Int;
 fn greet(id: UserId) -> String {
     return \"user {(id.raw())}\"
 }
-fn main() {
+fn run() {
     uid :: UserId(42)
     print(greet(uid))
     a :: Meters(3.0)
@@ -2967,7 +2967,7 @@ fn checked(raw: Int) -> Severity ? String {
     return ok(Severity(raw)?)
 }
 
-fn main() {
+fn run() {
     a :: checked(4) ?? Severity(0)
     b :: Severity(6)
     widened: Int :: a + b
@@ -2992,7 +2992,7 @@ fn named_tuples() {
 fn bounds() -> (max: Int, min: Int) {
     return (min: 0, max: 10)
 }
-fn main() {
+fn run() {
     p :: (x: 1, y: 2)
     q :: (y: 3, x: 4)
     same_shape :: (p == q)
@@ -3019,7 +3019,7 @@ fn json_value_construct_match_render() {
     }
     let src = "\
 use core.encoding.json as json
-fn main() {
+fn run() {
     raw :: \"{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}\"
     data :: json.parse(raw) ?? panic(\"bad json\")
     if data == Object(entries) {
@@ -3047,7 +3047,7 @@ fn json_nested_variant_matching() {
     }
     let src = "\
 use core.encoding.json as json
-fn main() {
+fn run() {
     raw :: \"{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}\"
     data :: json.decode(raw) ?? panic(\"bad json\")
     if data == Object(entries) {
@@ -3077,7 +3077,7 @@ fn main() {
 fn regex_match_group() {
     let src = "\
 use core.regex as re
-fn main() {
+fn run() {
     text :: \"order 42 shipped\"
     m :: re.match(\"(\\\\d+) shipped\", text) ?? panic(\"bad pattern\")
     if m == value(mat) {
@@ -3119,7 +3119,7 @@ comptime BANNER = \"logbook {VERSION}\"
 fn wrap(s: String) -> String {
     return \"{BANNER}: {s}\"
 }
-fn main() {
+fn run() {
     print(wrap(\"hi\"))
 }
 ";
@@ -3162,7 +3162,7 @@ pub fn kind_str(n: Note) -> String {
         Reference -> { return \"reference\" }
     }
 }
-fn main() { print(\"note\") }
+fn run() { print(\"note\") }
 ";
     let entry = "\
 use \"note\"
@@ -3182,7 +3182,7 @@ fn describe(n: Note, q: Query) -> String {
         Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
     }
 }
-fn main() {
+fn run() {
     n :: note.make_note(\"x\", NoteType.User)
     q :: classify(\"user\")
     print(describe(n, q))
@@ -3222,7 +3222,7 @@ impl Rect {
         return (self.width * self.height)
     }
 }
-fn main() {
+fn run() {
     r :: Rect.new(4, 3)
     print(r.area())
 }
@@ -3246,7 +3246,7 @@ fn greet() -> String {
     name :: input() ?? \"world\"
     return \"hello, {name}\"
 }
-fn main() {
+fn run() {
     print(greet())
 }
 ";
@@ -3276,7 +3276,7 @@ fn handle_user(req: HttpRequest) -> HttpResponse {
     id :: req.param(\"id\") ?? \"unknown\"
     return HttpResponse.{status: \"200 OK\", body: \"user={id}\", headers: [:]}
 }
-fn main() {
+fn run() {
     router :: http.router()
     router.get(\"/\", handle_root)
     router.get(\"/users/:id\", handle_user)
@@ -3300,7 +3300,7 @@ fn require_builtins() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     require(((1 + 1) == 2))
     require(true, \"unreachable\")
     require_eq(6, (2 * 3))
@@ -3323,7 +3323,7 @@ fn caps_block() {
 fn announce(label: String, n: Int) #(Io) {
     print(\"{label}: {n}\")
 }
-fn main() {
+fn run() {
     #Caps(Io) {
         announce(\"answer\", 42)
     }
@@ -3351,7 +3351,7 @@ fn bump(n: ~Int) {
 fn archive(name: ^String) -> String {
     return name
 }
-fn main() {
+fn run() {
     score: Int := 41
     bump(~score)
     print(score)
@@ -3377,7 +3377,7 @@ fn list_destructure() {
 fn double(n: Int) -> Int {
     return (n * 2)
 }
-fn main() {
+fn run() {
     doubled :: double.[1, 2, 3]
     [a, b, c] :: doubled
     print(a)
@@ -3409,7 +3409,7 @@ fn double(x: Int) -> Int {
 struct Worker {
     step: fn(Int) -> Int
 }
-fn main() {
+fn run() {
     double_fn :: double
     print(apply_twice(double_fn, 3))
     print(apply_twice((x: Int) => (x + 1), 5))
@@ -3435,7 +3435,7 @@ fn sized_integers() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
 red: U8 :: 255
 channel: I32 :: 100000
 depth: I8 :: -120
@@ -3554,7 +3554,7 @@ fn collect() -> [String] {
     }
     return out
 }
-fn main() {
+fn run() {
     got :: collect()
     print(\"count={got.len()}\")
     loop g in got {
@@ -3636,7 +3636,7 @@ struct Score {
     points: Int
     derive Comparable
 }
-fn main() {
+fn run() {
 shapes: [Shape] :: [Circle.{radius: 1.0}, Square.{side: 2.0}]
     shapes.each((s) => {
         print_area(s)
@@ -3679,7 +3679,7 @@ impl Dog.Named {
         return self.name
     }
 }
-fn main() {
+fn run() {
     d :: Dog.{ name: \"Rex\" }
     print(d.label())
 }
@@ -3705,7 +3705,7 @@ struct Ledger {
         self.rows = s
     }
 }
-fn main() {
+fn run() {
     data: [Int] :: [1, 2, 3]
     ledger: Ledger := Ledger.{ rows: [] }
     ledger.put_back(data)
@@ -3737,7 +3737,7 @@ struct Counter {
         self.n += k
     }
 }
-fn main() {
+fn run() {
     c: Counter := Counter.{ n: 0 }
     c.bump()
     c.add(10)
@@ -3764,7 +3764,7 @@ struct Counter {
         self = Counter.{ n: 0 }
     }
 }
-fn main() {
+fn run() {
     c: Counter := Counter.{ n: 9 }
     c.reset()
     print(c.n)
@@ -3795,7 +3795,7 @@ impl Counter.Bumpable {
         self.n = self.n + 1
     }
 }
-fn main() {
+fn run() {
     c: Counter := Counter.{ n: 0 }
     c.bump()
     c.bump()
@@ -3824,7 +3824,7 @@ struct Tree {
     value: Int
     child: Tree?
 }
-fn main() {
+fn run() {
     root :: Tree.{
         value: 3,
         child: value(Tree.{
@@ -3853,7 +3853,7 @@ fn unqualified_foreign_struct_literal() {
     }
     let main_src = "\
 use \"notes\"
-fn main() {
+fn run() {
     n :: Note.{ text: \"hi\" }
     print(n.text)
 }
@@ -3893,7 +3893,7 @@ struct Bag {
         return 7
     }
 }
-fn main() {
+fn run() {
     b :: Bag.{ items: [1, 2, 3] }
     print(b.get())
     print(b.len())
@@ -3921,7 +3921,7 @@ fn check(xs: [Int]) {
         print(\"not empty\")
     }
 }
-fn main() {
+fn run() {
     e :: [1, 2, 3].is_empty()
     print(e)
     m :: [1: 2]
@@ -3954,7 +3954,7 @@ fn f(xs: [Int]) {
     x := xs.first() ?? return
     print(x)
 }
-fn main() {
+fn run() {
     f([10, 20])
 empty: [Int] :: []
     f(empty)
@@ -3993,7 +3993,7 @@ kid: Tree? :: t.child
     }
     return total
 }
-fn main() {
+fn run() {
     root :: Tree.{
         value: 3,
         child: value(Tree.{
@@ -4027,7 +4027,7 @@ struct Person {
 fn make(n: String) -> Person {
     return Person.{ name: n }
 }
-fn main() {
+fn run() {
     p :: make(\"Ada\")
     print(p.name)
 }
@@ -4046,7 +4046,7 @@ fn struct_destructure_binding() {
     }
     let src = "\
 struct Point { x: Int, y: Int }
-fn main() {
+fn run() {
     p :: Point.{ x: 1, y: 2 }
     Point.{ x, y } :: p
     print(x + y)
@@ -4073,7 +4073,7 @@ fn f(m: Msg) -> Int {
         return -1
     }
 }
-fn main() {
+fn run() {
     print(f(Msg.Ping(7)))
     print(f(Msg.Pong))
 }
@@ -4098,7 +4098,7 @@ struct Grid { row: [Int#3] }
 fn firstof(xs: [Int#3]) -> Int {
     return xs[0]
 }
-fn main() {
+fn run() {
     print(firstof(double.[1, 2, 3]))
     g :: Grid.{ row: double.[1, 2, 3] }
     print(g.row[1])
@@ -4126,7 +4126,7 @@ fn f(h: Holder) -> Int {
         else -> { return 0 }
     }
 }
-fn main() {
+fn run() {
     hold :: Holder.{ val: value(5) }
     print(f(hold))
     empty :: Holder.{ val: null }
@@ -4159,7 +4159,7 @@ fn classify() -> Int {
         else -> { return 0 }
     }
 }
-fn main() {
+fn run() {
     print(classify())
 }
 ";
@@ -4186,7 +4186,7 @@ fn build() -> List<Int> {
     }
     return xs
 }
-fn main() {
+fn run() {
     comptime xs = build()
     print(\"{xs}\")
     print(\"{xs[1]}\")
@@ -4219,7 +4219,7 @@ fn loop_user(h: Shared<Int>) {
         noop(h)
     }
 }
-fn main() {
+fn run() {
     print(0)
 }
 ";
@@ -4286,7 +4286,7 @@ struct P {
     name: String
 }
 
-fn main() {
+fn run() {
     p :: P.{ name: \"x\" }
     s :: p.name
     t :: p.name
@@ -4321,7 +4321,7 @@ struct S {
     scores: Map<String, Int>
 }
 
-fn main() {
+fn run() {
     s := S.{ scores: [:] }
     s.scores[\"a\"] = 1
     print(s.scores[\"a\"])
@@ -4354,7 +4354,7 @@ struct S {
     scores: Map<String, Int>
 }
 
-fn main() {
+fn run() {
     s := S.{ scores: [:] }
     print(s.scores.len())
 }
@@ -4394,7 +4394,7 @@ enum Light {
 comptime P = Pair.{left: 7, right: \"seven\"}
 comptime L = Light.Green
 
-fn main() {
+fn run() {
     p :: Pair.{left: 7, right: \"seven\"}
     l :: Light.Green
     print(\"{P.left}\")
@@ -4440,7 +4440,7 @@ enum Wrapper {
     Some(Int)
     None
 }
-fn main() {
+fn run() {
     w :: Wrapper.Some(42)
     if w == Some(_) {
         print(\"has value\")
@@ -4470,7 +4470,7 @@ fn string_lines_and_to_int() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
     n :: \"42\".to_int() ?? -1
     print((n + 1))
     bad :: \"abc\".to_int() ?? -1
@@ -4538,7 +4538,7 @@ fn total(ps: [P]) -> Float {
     }
     return s
 }
-fn main() {
+fn run() {
     ps: [P] := [P.{ x: 0.0, mass: 1.0 }, P.{ x: 1.0, mass: 2.0 }]
     ps.push(P.{ x: 2.0, mass: 3.0 })
     print(ps.len())
@@ -4594,7 +4594,7 @@ use core.encoding.json as json
 struct Pt { a: Int, b: Int }
 @[Codable]
 struct PlainPt { a: Int, b: Int }
-fn main() {
+fn run() {
     cs: [Pt] :: [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]
     ps: [PlainPt] :: [PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 }]
     print(json.to_string(cs) == json.to_string(ps))
@@ -4614,7 +4614,7 @@ fn linalg_vectors_and_matrices() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
 a: Vec3 :: Vec3(1.0, 2.0, 3.0)
 b: Vec3 :: Vec3(4.0, 5.0, 6.0)
     print(a.dot(b))
@@ -4642,7 +4642,7 @@ fn simd_lanes_ops_and_reductions() {
         return;
     }
     let src = "\
-fn main() {
+fn run() {
 v: F32x4 :: F32x4(1.0, 2.0, 3.0, 4.0)
 w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
 s: F32x4 :: v + w
@@ -4673,7 +4673,7 @@ fn user_type_shadows_builtin_math_name() {
     }
     let src = "\
 struct Vec3 { x: Int, y: Int }
-fn main() {
+fn run() {
     v: Vec3 :: Vec3.{ x: 3, y: 4 }
     print(v.x)
     print(v.y)
@@ -4693,7 +4693,7 @@ fn reactive_signal_derived_effect() {
     }
     let src = "\
 use core.reactive as reactive
-fn main() {
+fn run() {
     n := reactive.signal(1)
     doubled := reactive.derived(() => (n.get() * 2))
     print(doubled.get())
@@ -4719,7 +4719,7 @@ fn reactive_scope_marker() {
     }
     let src = "\
 use core.reactive as reactive
-fn main() {
+fn run() {
     n := reactive.signal(1)
     doubled := reactive.computed(() => (n.get() * 2))
     print(doubled.get())
@@ -4744,7 +4744,7 @@ fn reactive_string_signal() {
     }
     let src = "\
 use core.reactive as reactive
-fn main() {
+fn run() {
     name := reactive.signal(\"world\")
     greeting := reactive.derived(() => \"hello, {name.get()}\")
     print(greeting.get())

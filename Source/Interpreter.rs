@@ -3,7 +3,7 @@
 //! This is the dev-loop convenience layer (D-DEV1…D-DEV4): it re-checks and
 //! re-runs the entry file on every save, streaming output, for sub-200ms
 //! feedback. It does NOT introduce a second interpreter — it reuses the M9.5
-//! comptime tree-walker (`crate::comptime`) to execute `fn main()`. The bytes
+//! comptime tree-walker (`crate::comptime`) to execute `fn run()`. The bytes
 //! it produces are identical to the compiled program (I2); the differential
 //! battery in `tests/dev.rs` is the enforcement.
 //!
@@ -35,16 +35,16 @@ pub enum DevMode {
     Resident,
 }
 
-/// c77 (D-DEVMODE1=A): auto-detect whether `main` runs to completion or stays
-/// resident. A `main` whose body contains a top-level `loop { … }` or a
+/// c77 (D-DEVMODE1=A): auto-detect whether `run` runs to completion or stays
+/// resident. A `run` whose body contains a top-level `loop { … }` or a
 /// `*.spawn(...)` call (the `core.tasks` spawn surface) is `Resident`;
-/// everything else is `RunToCompletion`. The scan only looks at `main`'s own
+/// everything else is `RunToCompletion`. The scan only looks at `run`'s own
 /// statement list (top level) per the D-DEVMODE1 Q2 rule — a `loop` buried
 /// inside a helper does not make a program resident.
 pub fn detect_dev_mode(bundle: &ProgramBundle) -> DevMode {
     let funcs = collect_funcs(bundle);
-    if let Some(main) = funcs.get("main") {
-        for stmt in &main.body {
+    if let Some(run) = funcs.get("run") {
+        for stmt in &run.body {
             if stmt_is_resident(stmt) {
                 return DevMode::Resident;
             }
@@ -544,15 +544,15 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         }
     }
     let funcs = collect_funcs(bundle);
-    let main = match funcs.get("main") {
+    let main = match funcs.get("run") {
         Some(f) => *f,
         None => {
             return RunOutcome::Problems(vec![Diagnostic::error(
                 "E2201",
-                "`jet dev` needs a `main` function to run".to_string(),
-                "`jet dev` runs a program; a library with no `main` has nothing to execute"
+                "`jet dev` needs a `run` function to run".to_string(),
+                "`jet dev` runs a program; a library with no `run` has nothing to execute"
                     .to_string(),
-                "add `fn main() { … }`, or use `jet check <file>` to look for problems without running"
+                "add `fn run() { … }`, or use `jet check <file>` to look for problems without running"
                     .to_string(),
                 None,
             )]);
@@ -624,28 +624,28 @@ mod tests {
 
     #[test]
     fn run_to_completion_is_the_default() {
-        let b = bundle_from("fn main() {\n    print(\"hi\")\n}\n", "rtc");
+        let b = bundle_from("fn run() {\n    print(\"hi\")\n}\n", "rtc");
         assert_eq!(detect_dev_mode(&b), DevMode::RunToCompletion);
     }
 
     #[test]
     fn top_level_loop_is_resident() {
-        let b = bundle_from("fn main() {\n    loop {\n        break\n    }\n}\n", "loop");
+        let b = bundle_from("fn run() {\n    loop {\n        break\n    }\n}\n", "loop");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
     }
 
     #[test]
     fn loop_inside_a_helper_is_not_resident() {
-        // Only a top-level `loop` in `main` makes a program resident; a loop in
+        // Only a top-level `loop` in `run` makes a program resident; a loop in
         // a callee runs to completion.
-        let src = "fn work() {\n    loop {\n        break\n    }\n}\nfn main() {\n    work()\n}\n";
+        let src = "fn work() {\n    loop {\n        break\n    }\n}\nfn run() {\n    work()\n}\n";
         let b = bundle_from(src, "helper");
         assert_eq!(detect_dev_mode(&b), DevMode::RunToCompletion);
     }
 
     #[test]
     fn task_spawn_is_resident() {
-        let src = "use core.tasks as tasks\nfn job() -> Int {\n    return 1\n}\nfn main() {\n    h :: tasks.spawn(() => job())\n    print(h.join())\n}\n";
+        let src = "use core.tasks as tasks\nfn job() -> Int {\n    return 1\n}\nfn run() {\n    h :: tasks.spawn(() => job())\n    print(h.join())\n}\n";
         let b = bundle_from(src, "spawn");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
     }

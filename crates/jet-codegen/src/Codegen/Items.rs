@@ -468,27 +468,23 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     ));
 }
 
-/// D-CLIFLAG1: `fn run(args: T)` / `fn run(cmd: Enum)` is a second entry-point
-/// name (S12), live only when the entry file has no `fn main` and `run`'s one
-/// parameter is a `@[Cli]` struct or an enum of `@[Cli]` payloads (sema
-/// already enforced this shape — `Sema::Bundle`'s entry check, E0101/E1308 —
-/// so this function can assume it holds and just emit `fn main`). Generates
-/// down onto the same `__jet_cli_spec_*`/`__jet_cli_decode_*` functions
-/// `emit_struct_cli` produced, and the same `core.args` runtime surface a
-/// hand-written `.parse(io.args())` call would hit (I8: no second parser).
+/// S12/D-CLIFLAG1: Jet's only program entry is `fn run`. Rust still needs
+/// `fn main`, so synthesize a wrapper. Zero-arg `run` calls straight through;
+/// typed `run(args: T)` / `run(cmd: Enum)` generates down onto the same
+/// `__jet_cli_spec_*`/`__jet_cli_decode_*` functions `emit_struct_cli`
+/// produced, and the same `core.args` runtime surface a hand-written
+/// `.parse(io.args())` call would hit (I8: no second parser).
 pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String) {
-    let has_main = items
-        .iter()
-        .any(|i| matches!(i, Item::Func(f) if f.name == "main"));
-    if has_main {
-        return;
-    }
     let Some(run_fn) = items.iter().find_map(|i| match i {
         Item::Func(f) if f.name == "run" => Some(f),
         _ => None,
     }) else {
         return;
     };
+    if run_fn.params.is_empty() {
+        out.push_str("fn main() {\n    user_run();\n}\n\n");
+        return;
+    }
     if run_fn.params.len() != 1 {
         return;
     }

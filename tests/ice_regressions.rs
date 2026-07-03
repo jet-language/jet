@@ -65,7 +65,7 @@ fn wrap(x: String) -> String {
     j :: Json.Text(x)
     return json.to_string(j)
 }
-fn main() {
+fn run() {
     print(wrap("hi"))
 }
 "#,
@@ -78,7 +78,7 @@ fn b2_std_struct_field_uses_plain_name() {
         "b2_process_result_field",
         r#"
 use core.process as process
-fn main() {
+fn run() {
     result :: process.run(["echo", "hi"]) ?? panic("run failed")
     print(result.code)
     print(result.output)
@@ -94,7 +94,7 @@ fn b3_map_get_through_object_pattern() {
         "b3_map_get_object_pattern",
         r#"
 use core.encoding.json as json
-fn main() {
+fn run() {
     data :: json.parse("{{\"a\":1}}") ?? panic("bad")
     if data == Object(root) {
         v :: root.get("a") ?? Json.Null
@@ -113,7 +113,7 @@ fn b4_for_in_field_subject_parses_body_not_struct_lit() {
 struct Holder {
     items: [String, Int]
 }
-fn main() {
+fn run() {
     h := Holder.{ items: [:] }
     h.items["x"] = 1
     loop k, v in h.items {

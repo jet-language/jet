@@ -463,7 +463,7 @@ fn lsp_teaching_autocorrect_let_to_val() {
     );
 
     let uri = "file:///tmp/lsp_test_let.jet";
-    let src = "fn main() {\n    let x = 1;\n}\n";
+    let src = "fn run() {\n    let x = 1;\n}\n";
     let open = format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
         uri,
@@ -523,7 +523,7 @@ fn lsp_c_style_snippet_autocorrects() {
     print("ok");
 }
 
-fn main() {
+fn run() {
     let count = 1;
     println("hi");
 }
@@ -639,7 +639,7 @@ fn lsp_completion_returns_items() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet(name: String) {\n    print(name);\n}\nfn main() {\n    \n}\n";
+    let source = "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    \n}\n";
     let uri = "file:///tmp/lsp_completion_test.jet";
 
     run_transcript(
@@ -680,7 +680,7 @@ fn lsp_hover_returns_signature() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn main() {\n    val r = add(1, 2);\n}\n";
+    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    val r = add(1, 2);\n}\n";
     let uri = "file:///tmp/lsp_hover_test.jet";
 
     run_transcript(
@@ -721,7 +721,7 @@ fn lsp_rename_produces_workspace_edit() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn main() {\n    greet();\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet();\n    greet();\n}\n";
     let uri = "file:///tmp/lsp_rename_test.jet";
 
     run_transcript(
@@ -762,7 +762,7 @@ fn lsp_definition_returns_location() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
     let uri = "file:///tmp/lsp_def_test.jet";
 
     run_transcript(
@@ -803,7 +803,7 @@ fn lsp_semantic_tokens_returns_data() {
     if !jet.exists() {
         return;
     }
-    let source = "fn main() {\n    val x: Int = 1;\n}\n";
+    let source = "fn run() {\n    val x: Int = 1;\n}\n";
     let uri = "file:///tmp/lsp_semtok_test.jet";
 
     run_transcript(
@@ -844,7 +844,7 @@ fn lsp_inlay_hints_returns_type_labels() {
     if !jet.exists() {
         return;
     }
-    let source = "fn main() {\n    x :: 42\n    count := 0\n}\n";
+    let source = "fn run() {\n    x :: 42\n    count := 0\n}\n";
     let uri = "file:///tmp/lsp_inlay_test.jet";
 
     run_transcript(
@@ -885,7 +885,7 @@ fn lsp_references_finds_all_uses() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn main() {\n    greet();\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet();\n    greet();\n}\n";
     let uri = "file:///tmp/lsp_refs_test.jet";
 
     run_transcript(
@@ -932,7 +932,7 @@ fn c40_is_keyword_retired_words_not_keywords() {
     // they are FOREIGN_ teaching-error tokens. Rename must accept them as names.
     let diags = jet::check_document(
         "c40_retired.jet",
-        "fn main() {\n    val switch_count = 0;\n    val import_count = 1;\n}\n",
+        "fn run() {\n    val switch_count = 0;\n    val import_count = 1;\n}\n",
     );
     // These should compile/parse (the names `switch_count` and `import_count` are
     // legal identifiers; `val` itself triggers E0009 but that's fine here).
@@ -961,7 +961,7 @@ fn c40_is_keyword_real_keywords_recognized() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
     let uri = "file:///tmp/c40_rename_keyword.jet";
 
     // `if` is a real keyword; rename to it must fail.
@@ -1007,7 +1007,7 @@ fn c40_is_keyword_value_is_not_a_keyword() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
     let uri = "file:///tmp/c40_rename_value.jet";
 
     run_transcript(
@@ -1051,7 +1051,7 @@ fn c40_is_keyword_switch_not_a_keyword() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
     let uri = "file:///tmp/c40_rename_switch.jet";
 
     run_transcript(
@@ -1095,7 +1095,7 @@ fn c40_is_keyword_import_not_a_keyword() {
     if !jet.exists() {
         return;
     }
-    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
     let uri = "file:///tmp/c40_rename_import.jet";
 
     run_transcript(
@@ -1138,7 +1138,7 @@ fn c40_keyword_like_identifier_usable_as_variable() {
     // are regular identifiers. Use current Jet binding syntax (:: sigil).
     let diags = jet::check_document(
         "c40_kw_in_ident.jet",
-        "fn main() {\n    printer :: \"hp\";\n    in_count :: 3;\n    sprint :: 9.8;\n}\n",
+        "fn run() {\n    printer :: \"hp\";\n    in_count :: 3;\n    sprint :: 9.8;\n}\n",
     );
     // None of the diagnostics should claim these identifiers are keywords.
     for d in &diags {
@@ -1170,7 +1170,7 @@ fn c40_drift_guard_foreign_words_not_blocked_in_rename() {
 
     // `switch` — FOREIGN_SWITCH, not a keyword; was wrongly in JET_KEYWORDS
     {
-        let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+        let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
         let uri = "file:///tmp/c40_drift_switch.jet";
         run_transcript(
             source,

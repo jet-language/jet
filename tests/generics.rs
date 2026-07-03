@@ -38,7 +38,7 @@ struct Pair<T> {{
     second: T
 }}
 
-fn main() {{
+fn run() {{
     p :: twice({lit})
     print(p.first)
 }}
@@ -61,7 +61,7 @@ struct Pair<T> {
     second: T
 }
 
-fn main() {
+fn run() {
     a :: twice(1)
     b :: twice(2.5)
     print(a.first)
@@ -86,7 +86,7 @@ fn wrap<Kind>(x: Kind) -> Wrap<Kind> {
     return Wrap<Kind>.{ val: x }
 }
 
-fn main() {
+fn run() {
     b :: wrap(42)
     print(b.val)
 }
@@ -107,7 +107,7 @@ fn identity<Elem>(x: Elem) -> Elem {
     return x
 }
 
-fn main() {
+fn run() {
     n :: identity(7)
     s :: identity("hello")
     print(n)
@@ -136,7 +136,7 @@ struct Pair<Elem> {
     second: Elem
 }
 
-fn main() {
+fn run() {
     p :: twice(1)
     print(p.first)
 }

@@ -131,7 +131,7 @@ before continuing.
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
 | E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
 | E0999 | parse | teaching: stacked `#[…]` marker lines → one `#[A, B]` list or lone `#A` (D-ATTR2) |
-| E0101 | sema  | no `main` function                        |
+| E0101 | sema  | no `run` function                         |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
 | E0104 | sema  | wrong number of arguments                 |
@@ -155,7 +155,7 @@ before continuing.
 | E0119 | sema  | unknown type name                         |
 | E0120 | sema  | moving/returning a parameter without move (`^`) access |
 | E0121 | sema  | value used after it was given away        |
-| E0122 | sema  | `main` with parameters or a return type   |
+| E0122 | sema  | plain `run` returns a value in run mode   |
 | E0123 | sema  | `for` range `step` must be a positive Int (S22, D-SG8) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |
@@ -545,8 +545,8 @@ or query methods are called with the wrong number of arguments.
 ### Typed entry-signature CLI parsing (D-CLIFLAG1)
 
 `@[Cli]` is a derive (sibling of `@[Codable]`) that turns a struct's fields into
-`core.args` flag registrations; `fn run(args: T)` / `fn run(cmd: Enum)` is a
-second entry-point name (alongside `fn main`) that parses `io.args()` against
+`core.args` flag registrations; `fn run(args: T)` / `fn run(cmd: Enum)` is the
+typed form of Jet's only entry point. It parses `io.args()` against
 the derived spec before calling the user's function. See docs/spec/spec.md
 "Typed entry-signature CLI parsing" for the full field-mapping rule. These
 errors are all compile-time shape checks; a bad flag value at runtime reuses
@@ -1101,7 +1101,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `@Pure fn` may only call other `@Pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `main` is checked transitively; the why-line shows the full chain (`main → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `@Pure fn`, or remove the call from `{pure_fn}`. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `@Pure fn` may only call other `@Pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `run` is checked transitively; the why-line shows the full chain (`run → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `@Pure fn`, or remove the call from `{pure_fn}`. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
 | E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `@Pure`. |
 

@@ -75,7 +75,7 @@ fn view_return_case(src: Source) -> Case {
     };
     Case {
         label: label.to_string(),
-        src: format!("{}fn main() {{\n    print(0);\n}}\n", body),
+        src: format!("{}fn run() {{\n    print(0);\n}}\n", body),
     }
 }
 
@@ -110,7 +110,7 @@ fn ref_field_case(src: Source) -> Case {
     };
     Case {
         label: label.to_string(),
-        src: format!("{}fn main() {{\n    print(0);\n}}\n", body),
+        src: format!("{}fn run() {{\n    print(0);\n}}\n", body),
     }
 }
 
@@ -120,11 +120,11 @@ fn generic_view_cases() -> Vec<Case> {
     vec![
         Case {
             label: "view_return/generic_field_of_param".to_string(),
-            src: "struct Wrap<T> { item: T; }\nfn make<T>(w: Wrap<T>) -> &T {\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
+            src: "struct Wrap<T> { item: T; }\nfn make<T>(w: Wrap<T>) -> &T {\n    return w.item;\n}\nfn run() {\n    print(0);\n}\n".to_string(),
         },
         Case {
             label: "view_return/generic_field_of_local".to_string(),
-            src: "struct Wrap<T> { item: T; }\nfn make<T>(x: T) -> &T {\n    val w: Wrap<T> = Wrap<T>.{ item: x };\n    return w.item;\n}\nfn main() {\n    print(0);\n}\n".to_string(),
+            src: "struct Wrap<T> { item: T; }\nfn make<T>(x: T) -> &T {\n    val w: Wrap<T> = Wrap<T>.{ item: x };\n    return w.item;\n}\nfn run() {\n    print(0);\n}\n".to_string(),
         },
     ]
 }

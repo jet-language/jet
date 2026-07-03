@@ -592,10 +592,10 @@ pub(crate) fn run_bind(args: &[&String]) {
     }
 }
 
-/// S60 / D-PURE1 (E2-M16): evaluate a `pure fn main()` program.
+/// S60 / D-PURE1 (E2-M16): evaluate a `pure fn run()` program.
 /// D-EVAL1=A: pretty output by default; `--json` for stable machine JSON.
 ///
-/// When `--pure` is given, the entire call graph from `main` is checked for
+/// When `--pure` is given, the entire call graph from `run` is checked for
 /// purity violations (E3401 with the full transitive chain, not just the
 /// direct callee). This replaces the old hand-rolled `impure_fns` check.
 pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
@@ -671,7 +671,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                 ast_funcs.insert(f.name.clone(), f);
             }
         }
-        let diags = jet::check_pure_program_root("main", &funcs_sig, &ast_funcs);
+        let diags = jet::check_pure_program_root("run", &funcs_sig, &ast_funcs);
         if !diags.is_empty() {
             eprint!(
                 "{}",
@@ -682,7 +682,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
     }
 
     // Full sema type-check with CompileMode::Eval — runs all type/ownership
-    // checks but relaxes E0122 (main return type) so `pure fn main() -> T`
+    // checks but relaxes E0122 (run return type) so `pure fn run() -> T`
     // is accepted. This ensures type errors (e.g. `"string" + 5`) surface with
     // their precise diagnostics rather than falling through to E0956.
     {

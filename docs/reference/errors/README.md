@@ -5,7 +5,7 @@ run `./scripts/gen_errors.sh` after changing snapshots.
 
 | Code | Topic |
 |------|-------|
-| [E0101](E0101.md) | no `main` function |
+| [E0101](E0101.md) | no `run` function |
 | [E0102](E0102.md) | unknown function |
 | [E0103](E0103.md) | `print` arity |
 | [E0104](E0104.md) | wrong argument count |

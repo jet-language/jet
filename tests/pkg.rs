@@ -227,7 +227,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
         &(min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [Io],\n}\n"),
     );
     let entry = tmp.join("main.jet");
-    fs::write(&entry, "fn main() { print(\"hi\"); }\n").unwrap();
+    fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
 
     let result = jet::compile_with_path("", &entry.to_string_lossy());
     assert!(
@@ -256,7 +256,7 @@ fn cli_build_prints_effect_summary() {
     write(
         &tmp,
         "hello.jet",
-        "use core.fs as fs\nfn main() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\"); }\n",
+        "use core.fs as fs\nfn run() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\"); }\n",
     );
 
     let out = jet_cmd(&["build", "hello.jet"], &tmp, &store);
@@ -306,7 +306,7 @@ fn cli_build_enforces_effect_budget_e1220() {
     write(
         &tmp,
         "main.jet",
-        "use netdep;\nfn main() { netdep.ping(); }\n",
+        "use netdep;\nfn run() { netdep.ping(); }\n",
     );
 
     let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
@@ -810,7 +810,7 @@ fn path_dep_compiles_ok() {
     let entry = tmp.join("main.jet");
     fs::write(
         &entry,
-        "use greeter;\nfn main() { print(greeter.greet()); }\n",
+        "use greeter;\nfn run() { print(greeter.greet()); }\n",
     )
     .unwrap();
 
@@ -847,7 +847,7 @@ fn version_conflict_emits_e1201() {
         ),
     );
     let entry = tmp.join("main.jet");
-    fs::write(&entry, "fn main() {}\n").unwrap();
+    fs::write(&entry, "fn run() {}\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
         .expect_err("version conflict must fail with E1201");
@@ -880,7 +880,7 @@ fn stale_lock_emits_e1202() {
     );
 
     let entry = tmp.join("main.jet");
-    fs::write(&entry, "fn main() {}\n").unwrap();
+    fs::write(&entry, "fn run() {}\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
         .expect_err("stale lock must fail with E1202");
@@ -899,7 +899,7 @@ fn toolchain_mismatch_emits_e1208() {
         "payload: {\n    name: \"app\",\n    version: \"0.1.0\",\n    jet: \">=99.0.0\",\n}\n",
     );
     let entry = tmp.join("main.jet");
-    fs::write(&entry, "fn main() { print(\"hi\"); }\n").unwrap();
+    fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
         .expect_err("toolchain mismatch must fail with E1208");
@@ -918,7 +918,7 @@ fn reserved_section_emits_e1209() {
         &(min_manifest("app", "0.1.0") + "\ndev_deps: {\n    testlib: path@../testlib,\n}\n"),
     );
     let entry = tmp.join("main.jet");
-    fs::write(&entry, "fn main() {}\n").unwrap();
+    fs::write(&entry, "fn run() {}\n").unwrap();
 
     let diags = jet::compile_with_path("", &entry.to_string_lossy())
         .expect_err("reserved section must fail with E1209");
@@ -1278,7 +1278,7 @@ fn cli_build_sbom_writes_spdx() {
     let tmp = tmp_dir("cli_build_sbom");
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
-    write(&tmp, "hello.jet", "fn main() { print(\"hi\"); }\n");
+    write(&tmp, "hello.jet", "fn run() { print(\"hi\"); }\n");
 
     let out = jet_cmd(&["build", "--sbom", "hello.jet"], &tmp, &store);
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1552,7 +1552,7 @@ fn vendored_offline_locked_build() {
     write(
         &tmp,
         "main.jet",
-        "use greeter;\nfn main() { print(greeter.greet()); }\n",
+        "use greeter;\nfn run() { print(greeter.greet()); }\n",
     );
 
     let entry = tmp.join("main.jet");
@@ -1850,7 +1850,7 @@ fn cli_publish_refuses_dirty_git_tree() {
 
     // Create a minimal project.
     write(&tmp, "pkg.jet", &min_manifest("dirtypkg", "1.0.0"));
-    write(&tmp, "main.jet", "fn main() { print(\"hello\"); }\n");
+    write(&tmp, "main.jet", "fn run() { print(\"hello\"); }\n");
 
     // Init git, commit everything (clean tree first).
     for cmd_args in &[
@@ -2091,7 +2091,7 @@ fn pub_package_function_is_visible_inside_project_scope() {
     .unwrap();
     fs::write(
         s.join("main.jet"),
-        "use helper;\n\nfn main() {\n    print(helper.secret())\n}\n",
+        "use helper;\n\nfn run() {\n    print(helper.secret())\n}\n",
     )
     .unwrap();
 
@@ -2116,7 +2116,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     .unwrap();
     fs::write(
         app.join("main.jet"),
-        "use dep;\n\nfn main() {\n    print(dep.secret())\n}\n",
+        "use dep;\n\nfn run() {\n    print(dep.secret())\n}\n",
     )
     .unwrap();
     fs::write(
@@ -2147,7 +2147,7 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     .unwrap();
     fs::write(
         s.join("main.jet"),
-        "use helper;\n\nfn main() {\n    s :: helper.make()\n    print(s.value)\n}\n",
+        "use helper;\n\nfn run() {\n    s :: helper.make()\n    print(s.value)\n}\n",
     )
     .unwrap();
 

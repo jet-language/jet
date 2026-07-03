@@ -87,16 +87,18 @@ beside S17 (owner-chosen I8 exception).
 
 **S1 — Function keyword**: `fn`.
 
-**S12 — Entry point**: `fn main()`; no `pub` required. May be fallible:
-`fn main() -> Unit ?` (S80). **D-CLIFLAG1** (implemented, c7cliflag): a
+**S12 — Entry point**: `fn run()`; no `pub` required. May be fallible:
+`fn run() -> Unit ?` (S80). **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`@[Cli]`/`@[Doc("...")]` markers, bracket form matching `@[Codable]`); an
-`enum` param derives subcommands. `fn run()` (zero-arg) and `fn main()` are
-both unaffected — see docs/spec/spec.md "Typed entry-signature CLI parsing"
-for the full field-mapping rule. The existing `core.args` `ArgsSpec`
-builder (D-ARGS1) remains the library floor for non-entry parsing; the
-typed layer generates onto it rather than adding a second parser.
+`enum` param derives subcommands. There is no Jet `main` entry and no
+variadic entry signature. Raw argv access stays explicit inside `fn run()`
+via `core.args`/`core.io.args`. See docs/spec/spec.md
+"Typed entry-signature CLI parsing" for the full field-mapping rule. The
+existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
+for non-entry parsing; the typed layer generates onto it rather than adding
+a second parser.
 
 **S27 — Methods**: `self` receiver with capability sigils (`~self`, `^self`,
 `&self`; bare `self` = read). Call `value.method(args)`. Methods live in the
@@ -465,7 +467,7 @@ Rust `Result` (not surface syntax).
 
 **S80 — Error carrier & fallible main** *(D-ERR2)*: default `Error` carries
 message + optional code + optional source (`Error.message("…")`,
-`Error.code(n)`, `Error.with_source(e)`). `fn main() -> Unit ?` allowed;
+`Error.code(n)`, `Error.with_source(e)`). `fn run() -> Unit ?` allowed;
 returned errors print in the diagnostic voice, exit non-zero. Cross-type `?`
 conversion is opt-in via the `Fallible` trait (`fn to_error(self) -> Error`);
 prelude types implement it, unrelated enums never convert silently.
@@ -1106,7 +1108,7 @@ build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
-fn main() {
+fn run() {
     comptime if build.os == {
         .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
         .Macos   -> { b :: MacosBackend.{ name: "appkit" } print(b.label()) }
@@ -1225,7 +1227,7 @@ probe; `nixpkgs@…` never probed). No `via:` marker.
 `library`, `executable`, `test`, `example`, `benchmark`; `plugin` reserved.
 Bare keyword or block (`executable { entry: "src/cli.jet" }`); bare
 `executable` searches `src/main.jet` then `<package>.jet`. **D-ILE1**:
-omitted targets infer from `fn main()` (executable else library; two mains
+omitted targets infer from `fn run()` (executable else library; two entries
 E_DUPMAIN).
 
 **D-CAP4/5/6 + c129 — API freeze**: `library { api: stable | explicit }`;
@@ -1245,7 +1247,7 @@ opt-in (D-PKGSIGN1). `jet vendor`, `jet audit`, `jet build --sbom`
 **Build system** *(D-BUILDENTRY1, D-BUILDPOLICY1, D-BUILDSCOPE1, D-BUILDGEN1,
 D-BUILDPROFILE1, D-BUILDNORM1)*: compile-time build entry is
 `fn build(b: BuildContext)`, living in the unit's own definition file (beside
-`fn main` / in `pkg.jet` / in `workspace.jet`); `jet build` runs it when
+`fn run` / in `pkg.jet` / in `workspace.jet`); `jet build` runs it when
 defined, else the batteries pipeline. Build code is tiered: Tier 1
 pure+locked by default; Tier 2 needs `#Impure("reason")` + explicit
 permission + provenance; deps never get Tier 2 implicitly. Generated source

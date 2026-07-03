@@ -60,26 +60,31 @@ impl LineMap {
     }
 
     /// The first marked rust line AT OR AFTER `rust_line` — used to place the
-    /// initial breakpoint at `fn main`'s first real statement by `-f -l`
-    /// (line-based) rather than `-n main` (name-based, which can resolve to
-    /// more than one symbol and land with no source line at all).
+    /// initial breakpoint at the generated `user_run` body's first real
+    /// statement by `-f -l` (line-based) rather than `-n main` (name-based,
+    /// which can resolve to more than one symbol and land with no source line
+    /// at all).
     pub(crate) fn first_at_or_after(&self, rust_line: usize) -> Option<usize> {
         self.rust_to_jet.range(rust_line..).next().map(|(k, _)| *k)
     }
 
-    /// The rust line to set the INITIAL breakpoint on: `fn main`'s first real
-    /// statement. Locates the literal `fn main(` header text (codegen always
-    /// emits this — the golden tests assert `contains("fn main()")`), then the
-    /// first marked line at or after it. Shared by the terminal session
+    /// The rust line to set the INITIAL breakpoint on: `user_run`'s first real
+    /// statement. Rust still has a tiny `fn main` wrapper, but the Jet user's
+    /// code lives in `user_run`, which carries the line markers. Shared by the terminal session
     /// (`Native.rs`) and the DAP `launch` handler (`Dap.rs`) so both use the
     /// same file:line breakpoint, never the ambiguous `-n main`.
     pub(crate) fn main_entry_line(&self, rust_src: &str) -> Option<usize> {
-        let main_header = rust_src
+        let entry_header = rust_src
             .lines()
-            .position(|l| l.trim_start().starts_with("fn main("))
+            .position(|l| l.trim_start().starts_with("pub fn user_run("))
+            .or_else(|| {
+                rust_src
+                    .lines()
+                    .position(|l| l.trim_start().starts_with("fn main("))
+            })
             .map(|i| i + 1)
             .unwrap_or(1);
-        self.first_at_or_after(main_header)
+        self.first_at_or_after(entry_header)
     }
 }
 

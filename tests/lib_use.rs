@@ -124,7 +124,7 @@ fn realized_library_is_consumed_with_use() {
     );
     write(
         &consumer.join("main.jet"),
-        "use jsonutil;\nfn main() {\n    print(jsonutil.parse(\"x\"));\n}\n",
+        "use jsonutil;\nfn run() {\n    print(jsonutil.parse(\"x\"));\n}\n",
     );
     fs::create_dir_all(consumer.join("build")).unwrap();
 
@@ -176,7 +176,7 @@ fn executable_is_not_importable() {
     );
     write(
         &consumer.join("main.jet"),
-        "use deploy;\nfn main() {\n    print(\"hi\");\n}\n",
+        "use deploy;\nfn run() {\n    print(\"hi\");\n}\n",
     );
     fs::create_dir_all(consumer.join("build")).unwrap();
 
@@ -222,7 +222,7 @@ fn unrealized_library_points_at_build() {
     );
     write(
         &consumer.join("main.jet"),
-        "use jsonutil;\nfn main() {\n    print(jsonutil.parse(\"x\"));\n}\n",
+        "use jsonutil;\nfn run() {\n    print(jsonutil.parse(\"x\"));\n}\n",
     );
     fs::create_dir_all(consumer.join("build")).unwrap();
 

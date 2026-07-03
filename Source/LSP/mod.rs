@@ -48,7 +48,7 @@ mod tests {
         // no longer a single-keyword swap, so no auto-edit is synthesized (the
         // `replace `X` with `Y`` shape). `jet fmt` performs the migration. The
         // teaching diagnostic still fires and points at the sigil form.
-        let src = "fn main() {\n    let x = 1\n}\n";
+        let src = "fn run() {\n    let x = 1\n}\n";
         let diags = check_document("test.jet", src);
         let e0009 = diags.iter().find(|d| d.code == "E0009").expect("E0009");
         assert!(
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn lsp_pos_round_trip() {
-        let src = "fn main() {\n    val x = 1;\n}\n";
+        let src = "fn run() {\n    val x = 1;\n}\n";
         let offset = 18; // somewhere in 'val'
         let pos = byte_offset_to_lsp(src, offset);
         let back = lsp_pos_to_offset(src, pos);
@@ -69,19 +69,19 @@ mod tests {
 
     #[test]
     fn symbol_db_finds_function() {
-        let src = "fn greet(name: String) {\n    print(name);\n}\nfn main() {\n    greet(\"world\");\n}\n";
+        let src = "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    greet(\"world\");\n}\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         assert!(db.defs.iter().any(|d| d.name == "greet"));
-        assert!(db.defs.iter().any(|d| d.name == "main"));
+        assert!(db.defs.iter().any(|d| d.name == "run"));
         assert!(db.refs.iter().any(|r| r.name == "greet"));
     }
 
     #[test]
     fn hover_returns_function_signature() {
         let src =
-            "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn main() { val r = add(1, 2); }\n";
+            "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn run() { val r = add(1, 2); }\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn rename_basic_function() {
-        let src = "fn greet() {}\nfn main() { greet(); }\n";
+        let src = "fn greet() {}\nfn run() { greet(); }\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn rename_rejects_keyword() {
-        let src = "fn greet() {}\nfn main() { greet(); }\n";
+        let src = "fn greet() {}\nfn run() { greet(); }\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn semantic_tokens_non_empty() {
-        let src = "fn main() { val x: Int = 1; }\n";
+        let src = "fn run() { val x: Int = 1; }\n";
         let (toks, _) = crate::Lexer::lex(src);
         let data = encode_semantic_tokens(&toks, src);
         // Should emit at least one token (5 u32s per token)
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn inlay_hints_for_int_literal() {
-        let src = "fn main() {\n    x :: 42\n    count := 0\n}\n";
+        let src = "fn run() {\n    x :: 42\n    count := 0\n}\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn completion_includes_keywords() {
-        let src = "fn main() {\n    \n}\n";
+        let src = "fn run() {\n    \n}\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);

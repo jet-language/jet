@@ -217,7 +217,7 @@ fn interpreter_matches_expected_golden() {
 #[test]
 fn infinite_loop_hits_e2202_fuel_stop() {
     use std::collections::HashMap;
-    let src = "fn main() {\n    n := 0\n    loop {\n        n = n + 1\n    }\n}\n";
+    let src = "fn run() {\n    n := 0\n    loop {\n        n = n + 1\n    }\n}\n";
     let prog = jet::Parser::parse(&jet::Lexer::lex(src).0).expect("fixture should parse");
     let mut funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
     for item in &prog.items {
@@ -225,10 +225,10 @@ fn infinite_loop_hits_e2202_fuel_stop() {
             funcs.insert(f.name.clone(), f);
         }
     }
-    let main = funcs.get("main").copied().expect("fixture has main");
+    let run = funcs.get("run").copied().expect("fixture has run");
     let mut sink = jet::Comptime::DevSink::new();
     let err = jet::Comptime::run_main_with_fuel(
-        main,
+        run,
         &funcs,
         std::path::Path::new("."),
         &mut sink,
@@ -673,7 +673,7 @@ fn jit_covers_implies_tir_lowers() {
 #[test]
 fn cranelift_covers_string_interpolation() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    n := 7\n    print(\"value {n}\")\n}\n",
+        "fn run() {\n    n := 7\n    print(\"value {n}\")\n}\n",
         "str_interp",
     );
 }
@@ -682,7 +682,7 @@ fn cranelift_covers_string_interpolation() {
 #[test]
 fn cranelift_covers_checked_arithmetic() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    a := 10\n    b := 3\n    print(a + b)\n    print(a * b)\n    print(a - b)\n}\n",
+        "fn run() {\n    a := 10\n    b := 3\n    print(a + b)\n    print(a * b)\n    print(a - b)\n}\n",
         "arith",
     );
 }
@@ -691,7 +691,7 @@ fn cranelift_covers_checked_arithmetic() {
 #[test]
 fn cranelift_covers_let_and_if() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    n := 5\n    if n > 3 {\n        print(1)\n    } else {\n        print(0)\n    }\n    m := n + 1\n    print(m)\n}\n",
+        "fn run() {\n    n := 5\n    if n > 3 {\n        print(1)\n    } else {\n        print(0)\n    }\n    m := n + 1\n    print(m)\n}\n",
         "let_if",
     );
 }
@@ -700,7 +700,7 @@ fn cranelift_covers_let_and_if() {
 #[test]
 fn cranelift_covers_function_calls() {
     assert_cranelift_matches_interpreter(
-        "fn double(n: Int) -> Int {\n    return n * 2\n}\nfn main() {\n    print(double(3))\n    print(double(0))\n}\n",
+        "fn double(n: Int) -> Int {\n    return n * 2\n}\nfn run() {\n    print(double(3))\n    print(double(0))\n}\n",
         "calls",
     );
 }
@@ -709,7 +709,7 @@ fn cranelift_covers_function_calls() {
 #[test]
 fn cranelift_covers_counted_loop() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    sum := 0\n    loop i := 0; i < 5; i += 1 {\n        sum += i\n    }\n    print(sum)\n}\n",
+        "fn run() {\n    sum := 0\n    loop i := 0; i < 5; i += 1 {\n        sum += i\n    }\n    print(sum)\n}\n",
         "counted_loop",
     );
 }
@@ -718,7 +718,7 @@ fn cranelift_covers_counted_loop() {
 #[test]
 fn cranelift_covers_while_loop() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    fuel := 3\n    loop fuel > 0 {\n        print(fuel)\n        fuel -= 1\n    }\n}\n",
+        "fn run() {\n    fuel := 3\n    loop fuel > 0 {\n        print(fuel)\n        fuel -= 1\n    }\n}\n",
         "while_loop",
     );
 }
@@ -727,7 +727,7 @@ fn cranelift_covers_while_loop() {
 #[test]
 fn cranelift_covers_range_loop() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    loop n in 1..3 {\n        print(n)\n    }\n}\n",
+        "fn run() {\n    loop n in 1..3 {\n        print(n)\n    }\n}\n",
         "range_loop",
     );
 }
@@ -736,7 +736,7 @@ fn cranelift_covers_range_loop() {
 #[test]
 fn cranelift_covers_logic_ops() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    a := true\n    b := false\n    if a && !b {\n        print(1)\n    }\n    if b || a {\n        print(2)\n    }\n}\n",
+        "fn run() {\n    a := true\n    b := false\n    if a && !b {\n        print(1)\n    }\n    if b || a {\n        print(2)\n    }\n}\n",
         "logic_ops",
     );
 }
@@ -745,7 +745,7 @@ fn cranelift_covers_logic_ops() {
 #[test]
 fn cranelift_covers_string_print() {
     assert_cranelift_matches_interpreter(
-        "fn main() {\n    msg := \"hello, jit\"\n    print(msg)\n    print(\"done\")\n}\n",
+        "fn run() {\n    msg := \"hello, jit\"\n    print(msg)\n    print(\"done\")\n}\n",
         "strings",
     );
 }
@@ -765,8 +765,8 @@ fn cranelift_hot_swap_preserves_live_state() {
         b
     }
 
-    let v1 = checked_bundle("fn main() {\n    print(\"v1\")\n}\n", "jit_swap_v1");
-    let v2 = checked_bundle("fn main() {\n    print(\"v2\")\n}\n", "jit_swap_v2");
+    let v1 = checked_bundle("fn run() {\n    print(\"v1\")\n}\n", "jit_swap_v1");
+    let v2 = checked_bundle("fn run() {\n    print(\"v2\")\n}\n", "jit_swap_v2");
 
     let mut backend = CraneliftBackend::new(InterpreterBackend::new());
     let out1 = match backend.run(&v1, false) {
@@ -776,7 +776,7 @@ fn cranelift_hot_swap_preserves_live_state() {
     assert_eq!(out1, "v1\n");
     assert_eq!(jet_jit::resident_invocations_for_test(), 1);
 
-    let out2 = match backend.hot_swap("main", &v2, false) {
+    let out2 = match backend.hot_swap("run", &v2, false) {
         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
         Ok(RunOutcome::Problems(ds)) => panic!("hot_swap produced diagnostics: {ds:?}"),
         Err(ds) => panic!("hot_swap failed: {ds:?}"),
@@ -789,7 +789,7 @@ fn cranelift_hot_swap_preserves_live_state() {
     );
 
     let mut backend2 = CraneliftBackend::new(InterpreterBackend::new());
-    let out3 = match backend2.hot_swap("main", &v1, false) {
+    let out3 = match backend2.hot_swap("run", &v1, false) {
         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
         Ok(RunOutcome::Problems(ds)) => panic!("second backend hot_swap failed: {ds:?}"),
         Err(ds) => panic!("second backend hot_swap errored: {ds:?}"),
@@ -816,7 +816,7 @@ fn front_end_errors_surface_in_dev_iteration() {
     // Write a broken program to a temp file.
     let dir = std::env::temp_dir();
     let file = dir.join("jet_dev_broken.jet");
-    fs::write(&file, "fn main() {\n    print(nope);\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(nope);\n}\n").unwrap();
     let shown = file.to_string_lossy().to_string();
     match dev_iteration(&shown, false, true) {
         RunOutcome::Problems(diags) => {
@@ -862,18 +862,18 @@ fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
     jet::Loader::load_entry(p.to_str().unwrap()).expect("bundle should load")
 }
 
-const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn main() {\n    print(f(P.{x: 1}))\n}\n";
+const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1}))\n}\n";
 
 /// A body-only edit keeps the type surface stable → swap (Ok).
 #[test]
 fn body_only_edit_is_type_stable() {
     let old = bundle_of(STRUCT_OLD, "stable_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x + 1\n}\nfn main() {\n    print(f(P.{x: 2}))\n}\n",
+        "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x + 1\n}\nfn run() {\n    print(f(P.{x: 2}))\n}\n",
         "stable_new",
     );
     assert!(
-        jet::Sema::HotSwap::type_stable_check(&old, &new, "main").is_ok(),
+        jet::Sema::HotSwap::type_stable_check(&old, &new, "run").is_ok(),
         "a body-only edit must be type-stable (swap path)"
     );
 }
@@ -883,10 +883,10 @@ fn body_only_edit_is_type_stable() {
 fn struct_field_change_emits_e2210() {
     let old = bundle_of(STRUCT_OLD, "field_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn main() {\n    print(f(P.{x: 1, y: 2}))\n}\n",
+        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1, y: 2}))\n}\n",
         "field_new",
     );
-    match jet::Sema::HotSwap::type_stable_check(&old, &new, "main") {
+    match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
         Ok(()) => panic!("adding a struct field must force a restart"),
         Err(diags) => {
             assert_eq!(diags.len(), 1);
@@ -904,14 +904,14 @@ fn struct_field_change_emits_e2210() {
 #[test]
 fn fn_signature_change_emits_e2210() {
     let old = bundle_of(
-        "fn g(a: Int) -> Int {\n    return a\n}\nfn main() {\n    print(g(1))\n}\n",
+        "fn g(a: Int) -> Int {\n    return a\n}\nfn run() {\n    print(g(1))\n}\n",
         "sig_old",
     );
     let new = bundle_of(
-        "fn g(a: Int) -> Bool {\n    return a == 0\n}\nfn main() {\n    print(g(1))\n}\n",
+        "fn g(a: Int) -> Bool {\n    return a == 0\n}\nfn run() {\n    print(g(1))\n}\n",
         "sig_new",
     );
-    match jet::Sema::HotSwap::type_stable_check(&old, &new, "main") {
+    match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
         Ok(()) => panic!("a return-type change must force a restart"),
         Err(diags) => {
             assert_eq!(diags[0].code, "E2210");
@@ -924,14 +924,14 @@ fn fn_signature_change_emits_e2210() {
 #[test]
 fn enum_variant_change_emits_e2210() {
     let old = bundle_of(
-        "enum E {\n    A\n    B\n}\nfn main() {\n    print(1)\n}\n",
+        "enum E {\n    A\n    B\n}\nfn run() {\n    print(1)\n}\n",
         "enum_old",
     );
     let new = bundle_of(
-        "enum E {\n    A\n    B\n    C\n}\nfn main() {\n    print(1)\n}\n",
+        "enum E {\n    A\n    B\n    C\n}\nfn run() {\n    print(1)\n}\n",
         "enum_new",
     );
-    match jet::Sema::HotSwap::type_stable_check(&old, &new, "main") {
+    match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
         Ok(()) => panic!("adding an enum variant must force a restart"),
         Err(diags) => {
             assert_eq!(diags[0].code, "E2210");
@@ -971,12 +971,12 @@ fn persist_marker_is_codegen_inert() {
             .join("\n")
     };
     let plain = strip_source_map(compile(
-        "const counter = 0;\nfn main() {\n    print(counter)\n}\n",
+        "const counter = 0;\nfn run() {\n    print(counter)\n}\n",
         "counter.jet",
     ));
     fs::remove_file(dir.join("counter.jet")).ok();
     let persisted = strip_source_map(compile(
-        "@Persist const counter = 0;\nfn main() {\n    print(counter)\n}\n",
+        "@Persist const counter = 0;\nfn run() {\n    print(counter)\n}\n",
         "counter.jet",
     ));
     assert_eq!(

@@ -7,7 +7,7 @@ fn apply(f: fn(Int) -> Int, x: Int) -> Int {
     return f(f(x))
 }
 
-fn main() {
+fn run() {
     nums :: [1, 2, 3]
     print(nums.map((n: Int) => n * n).len())
     total := 0
@@ -41,7 +41,7 @@ fn run_each(xs: [Int], f: fn(Int)) {
     }
 }
 
-fn main() {
+fn run() {
     run_each([1, 2, 3], (x) => {
         print(x)
     })
@@ -63,7 +63,7 @@ fn twice(f: fn(Int) -> Int, x: Int) -> Int {
     return f(f(x))
 }
 
-fn main() {
+fn run() {
     bump :: (x: Int) => x + 1
     print(twice(bump, 10))
 }
@@ -76,7 +76,7 @@ fn main() {
 fn take_prefix_moves_non_clone_capture() {
     let src = r#"
 struct NoClone { label: Int }
-fn main() {
+fn run() {
     item :: NoClone.{ label: 7 }
     f :: take(item) (n: Int) => n + item.label
     print(f(1))
@@ -89,7 +89,7 @@ fn main() {
 fn fn_field_callback() {
     let src = r#"
 struct Worker { step: fn(Int) -> Int }
-fn main() {
+fn run() {
     w :: Worker.{ step: (n: Int) => n + 1 }
     print(w.step(4))
 }
@@ -101,7 +101,7 @@ fn main() {
 #[test]
 fn sort_by_with_lambda() {
     let src = r#"
-fn main() {
+fn run() {
     nums := [3, 1, 2]
     nums.sort_by((n: Int) => n)
     print(nums[0])
@@ -114,7 +114,7 @@ fn main() {
 #[test]
 fn iter_adapters_compile() {
     let src = r#"
-fn main() {
+fn run() {
     nums := [1, 2, 3, 4, 5]
     print(nums.take(3))
     print(nums.skip(2))
@@ -160,7 +160,7 @@ fn main() {
 #[test]
 fn iter_chunks_windows() {
     let src = r#"
-fn main() {
+fn run() {
     nums := [1, 2, 3, 4, 5, 6]
     print(nums.chunks(2).len())
     print(nums.windows(3).len())

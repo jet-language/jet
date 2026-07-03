@@ -294,7 +294,7 @@ fn reason_show(f: &FuncWebMeta, effects: &EffectSet) -> String {
     if let Some(c) = f.ceiling {
         return format!("#{}({})", Syntax::ATTR_TARGET, c.name());
     }
-    if f.name == "main" {
+    if f.name == "run" {
         return "entry".to_string();
     }
     "inferred: pure / no Browser effect".to_string()

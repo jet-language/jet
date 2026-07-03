@@ -21,7 +21,7 @@ fn expect_error(src: &str, code: &str) {
 #[test]
 fn deeply_nested_expression_gets_diagnostic() {
     let src = format!(
-        "fn main() {{\n    print({}1{});\n}}\n",
+        "fn run() {{\n    print({}1{});\n}}\n",
         "(".repeat(600),
         ")".repeat(600)
     );
@@ -32,7 +32,7 @@ fn deeply_nested_expression_gets_diagnostic() {
 fn list_index_assign_requires_var() {
     expect_error(
         r#"
-fn main() {
+fn run() {
     xs :: [1, 2, 3]
     xs[0] = 9
 }
@@ -52,7 +52,7 @@ struct Greeter {
     }
 }
 
-fn main() {
+fn run() {
     g :: Greeter.{ prefix: "hi" }
     name :: "bob"
     print(g.greet(name))
@@ -73,7 +73,7 @@ struct P {
     name: String
 }
 
-fn main() {
+fn run() {
     p :: P.{ name: "x" }
     s :: p.name
     t :: p.name
@@ -96,7 +96,7 @@ fn maybe() -> (Int?) {
     return null
 }
 
-fn main() {
+fn run() {
     m: Map<String, Int> := [:]
     m["k"] = 7
     x :: maybe() ?? m["k"]
@@ -121,7 +121,7 @@ fn parse_count(raw: String) -> Int? {
     return ok(1)
 }
 
-fn main() {
+fn run() {
     n :: parse_count("") ?? 0
     print(n)
 }
@@ -141,7 +141,7 @@ struct S {
     scores: Map<String, Int>
 }
 
-fn main() {
+fn run() {
     s := S.{ scores: [:] }
     s.scores["a"] = 1
     print(s.scores["a"])
@@ -163,7 +163,7 @@ struct S {
     scores: Map<String, Int>
 }
 
-fn main() {
+fn run() {
     s := S.{ scores: [:] }
     print(s.scores.len())
 }
@@ -179,7 +179,7 @@ fn pick(items: List<String>) -> &List<String> {
     return items
 }
 
-fn main() {
+fn run() {
     xs :: ["a", "b"]
     ys :: pick(xs)
     print(ys.len())
@@ -202,7 +202,7 @@ struct Bag {
     }
 }
 
-fn main() {
+fn run() {
     b :: Bag.{ n: 1 }
     b.poke()
 }
@@ -227,7 +227,7 @@ fn use_it(t: Token) {
     t.consume()
 }
 
-fn main() {
+fn run() {
     print(0)
 }
 "#,
@@ -239,7 +239,7 @@ fn main() {
 fn if_pattern_binding_moves_subject() {
     expect_error(
         r#"
-fn main() {
+fn run() {
 o: String? :: value("hi")
     if o == value(n) {
         print(n)
@@ -260,7 +260,7 @@ enum Shape {
     Empty
 }
 
-fn main() {
+fn run() {
     s :: Shape.Circle("big")
     if s == {
         Circle(label) -> {
@@ -295,7 +295,7 @@ struct Bag {
     }
 }
 
-fn main() {
+fn run() {
     b := Bag.{ items: [0] }
     b.add(5)
     print(b.items.len())
@@ -316,7 +316,7 @@ struct Bag {
     }
 }
 
-fn main() {
+fn run() {
     print(0)
 }
 "#,
@@ -336,7 +336,7 @@ fn eat(v: ^NoClone) {
     print(v.n)
 }
 
-fn main() {
+fn run() {
     v :: NoClone.{ n: 1 }
     eat(v)
 }
@@ -358,7 +358,7 @@ fn show(p: P) {
     print(p.n)
 }
 
-fn main() {
+fn run() {
     show(7)
 }
 "#,
@@ -378,7 +378,7 @@ fn bump(n: ~Int) {
     n = n + 1
 }
 
-fn main() {
+fn run() {
     s :: S.{ n: 1 }
     bump(~s.n)
 }
@@ -411,7 +411,7 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"my-utils\" as util\nfn main() {\n    print(util.helper())\n}\n",
+        "use \"my-utils\" as util\nfn run() {\n    print(util.helper())\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -432,7 +432,7 @@ fn imported_struct_constructs_and_reads_fields() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"shapes\"\nfn main() {\n    p :: shapes.Point.{ x: 1, y: 2 }\n    print(p.x)\n}\n",
+        "use \"shapes\"\nfn run() {\n    p :: shapes.Point.{ x: 1, y: 2 }\n    print(p.x)\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -465,7 +465,7 @@ fn duplicate_file_stems_get_unique_module_names() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"a/util\" as autil\nuse \"b/util\" as butil\nfn main() {\n    print(autil.one())\n    print(butil.two())\n}\n",
+        "use \"a/util\" as autil\nuse \"b/util\" as butil\nfn run() {\n    print(autil.one())\n    print(butil.two())\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -483,7 +483,7 @@ fn show(label: String, value: Int) {
     print("{label}: {value}")
 }
 
-fn main() {
+fn run() {
     show("score", 42)
 }
 "#;

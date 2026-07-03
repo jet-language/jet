@@ -89,8 +89,9 @@ expr     = precedence climbing over:
 
 - Types: `Int`, `Float`, `Bool`, `String`. Local inference: annotations on
   bindings are optional; mismatched annotations are E0108.
-- A program must define `fn main` with no parameters and no return type
-  (E0101, E0122); execution starts there. `main` never takes `pub` (S12).
+- A program must define `fn run` with no parameters and no return type, or
+  a single typed CLI parameter as described by D-CLIFLAG1 (E0101, E0122,
+  E1308). Execution starts there. `run` never takes `pub` (S12).
 - `name :: value` and `name: Type :: value` are immutable; `name := value` and
   `name: Type := value` are mutable (D-BIND4).
   Assigning to an immutable binding is E0111.
@@ -284,7 +285,7 @@ fn bump(c: Counter, by: Int) {
     c.value = c.value + by
 }
 
-fn main() {
+fn run() {
     c := Counter.{ value: 0 }
     bump(~c, 5)    // ~ still required at the call site
     bump(~c, 3)
@@ -309,7 +310,7 @@ struct Player { hp: Int }
 impl Player { fn damage(~self, n: Int) { self.hp =  self.hp - n } }
 
 fn hurt(p: Player) { p.damage(5) }    // p is bare; body calls ~self → infers ~Player
-fn main() { x := Player.{ hp: 100 }; hurt(~x); print(x.hp) }
+fn run() { x := Player.{ hp: 100 }; hurt(~x); print(x.hp) }
 ```
 
 ### Optional composition
@@ -853,9 +854,9 @@ on the search path. An **`executable`** package goes on PATH, not `use`: naming
 one in `use` is **E0982**. A package's **`kind` is inferred when omitted**
 (D-ILE1): in a `pkg.jet` `packages:` block a bare `name` (no `: kind`), or a
 package with no `pkg.jet` at all, resolves to `executable` when its source stages
-a `bin/` or declares a top-level `fn main`, otherwise `library`; an explicit
+a `bin/` or declares a top-level `fn run`, otherwise `library`; an explicit
 `library`/`executable` always wins. Single-file `jet run`/`build file.jet` stays
-executable-requiring (R9; E0101 if it has no `main`). A `library` dependency the project declares but hasn't
+executable-requiring (R9; E0101 if it has no `run`). A `library` dependency the project declares but hasn't
 realized yet is **E0983** (run `jetpack build`) — `jet build`/`run` never realize
 on demand, keeping them offline and deterministic, the same flow as pre-fetched
 deps. Resolver: `Source/Loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`
@@ -1341,7 +1342,7 @@ caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 ```
 
 ```jet
-fn main() {
+fn run() {
     #Caps(Fs, Io) {
         text :: core.fs.read("x") ?? "";   // Fs — allowed
         print(text);                            // Io — allowed
@@ -1475,8 +1476,8 @@ generated-code license statement — lives in docs/spec/release-policy.md.
 ## Typed entry-signature CLI parsing (D-CLIFLAG1, c7cliflag)
 
 The entry function's typed parameter IS the CLI spec — no separate flag
-DSL to learn. `fn main()` (S12, zero-arg) is unchanged; a program opts into
-CLI parsing by defining `fn run` instead, with one parameter:
+DSL to learn. `fn run()` (S12, zero-arg) is the simple program entry; a program
+opts into CLI parsing by defining `fn run` with one parameter:
 
 ```jet
 @[Cli]
@@ -1498,14 +1499,11 @@ machinery (D-MARKERMOVE1). `@[Doc("...")]` is a field-level marker giving
 that flag's `--help` line; a field with no `@[Doc(...)]` gets a generic
 "value for --name" line instead.
 
-**Entry semantics.** `run` is a second entry-point name, alongside `main`
-(S12). It is live only when the entry file has **no** `fn main` and `run`
-takes **exactly one** parameter shaped like a CLI spec (below); any other
-`run` (zero args, wrong arity, an unrelated param type) is an ordinary
-function, not an entry — `fn run()` with no parameters is completely
-unaffected by this feature. A file with `fn main()` behaves exactly as
-before; `run` is simply irrelevant to it. Bad shapes on a `run` that *is*
-attempting to be an entry are diagnosed (E1308 below), not silently ignored.
+**Entry semantics.** `run` is the only program entry name (S12). It is valid
+as either `fn run()` or `fn run(args: T)` where `T` is a CLI spec shape below.
+No variadic entry signature exists; raw argv access stays explicit inside
+`fn run()` via `core.args`/`core.io.args`. `main` has no entry meaning in Jet.
+Bad typed-entry shapes are diagnosed (E1308 below), not silently ignored.
 
 **Pinned field-mapping rule** — every `@[Cli]` struct field maps to exactly
 one flag, by this rule (checked top to bottom, first match wins):

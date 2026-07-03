@@ -197,7 +197,7 @@ impl Debugger {
                 .stack
                 .last()
                 .map(|f| f.func.clone())
-                .unwrap_or_else(|| "main".to_string());
+                .unwrap_or_else(|| "run".to_string());
             self.emit(&format!(
                 "breakpoint hit  {}:{}  in {}()",
                 self.file, line, func
@@ -475,10 +475,10 @@ fn emit_diags(io: &mut Io, file: &str, src: &str, diags: &[Diagnostic]) {
 /// program's own stdout/stderr around the debugger's `(jet)` session.
 fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: Io) -> (i32, String) {
     let funcs = collect_funcs(bundle);
-    let main = match funcs.get("main") {
+    let main = match funcs.get("run") {
         Some(f) => *f,
         None => {
-            let line = "this program has no `main` to debug — `jet debug` runs a program";
+            let line = "this program has no `run` to debug — `jet debug` runs a program";
             if io.is_scripted() {
                 io.push_line(line);
             } else {

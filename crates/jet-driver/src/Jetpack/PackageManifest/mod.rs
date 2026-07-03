@@ -172,7 +172,7 @@ impl ApiMode {
 
 /// One entry in the `packages: { … }` block (U10 + D-TGT1). `targets` is empty when
 /// the manifest declares none (D-ILE1) — the kind is then inferred from the module's
-/// `fn main` at realize time.
+/// `fn run` at realize time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageEntry {
     pub name: String,
@@ -433,7 +433,7 @@ deps: {
     #[test]
     fn targets_are_optional_and_inferred() {
         // D-ILE1/D-TGT1: a bare `name` declares no targets (inferred from the
-        // module's `fn main` at realize time); an explicit target still wins.
+        // module's `fn run` at realize time); an explicit target still wins.
         let src = "payload: { name: \"x\", version: \"1\" }\npackages: { deploy, web: library }";
         let m = parse(src).unwrap();
         assert_eq!(m.packages.len(), 2);

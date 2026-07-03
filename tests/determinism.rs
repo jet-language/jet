@@ -18,7 +18,7 @@ fn pure_fn_injected_clock_ok() {
 @Pure fn at(clock: Clock) -> Int {
     return clock.now()
 }
-fn main() {
+fn run() {
     c :: time.clock(500)
     print("{at(c)}")
 }
@@ -40,7 +40,7 @@ use core.random as random;
 @Pure fn draw(rng: ~Rng) -> Int {
     return rng.int(1, 6)
 }
-fn main() {
+fn run() {
     r := random.rng(7)
     print("{draw(~r)}")
 }
@@ -61,7 +61,7 @@ use core.random as random;
     r := random.rng(1)
     return c.now() + r.int(0, 0)
 }
-fn main() { print("{seeded()}") }
+fn run() { print("{seeded()}") }
 "#;
     let res = jet::compile(src);
     assert!(
@@ -80,7 +80,7 @@ use core.time as time;
 @Pure fn bad() -> Int {
     return time.now()
 }
-fn main() { print("{bad()}") }
+fn run() { print("{bad()}") }
 "#;
     let res = jet::compile(src);
     assert!(res.is_err(), "ambient time.now() in @Pure fn must fail");
@@ -100,7 +100,7 @@ use core.random as random;
 @Pure fn bad() -> Int {
     return random.int(1, 6)
 }
-fn main() { print("{bad()}") }
+fn run() { print("{bad()}") }
 "#;
     let res = jet::compile(src);
     assert!(res.is_err(), "ambient random.int() in @Pure fn must fail");
@@ -126,7 +126,7 @@ use core.time as time;
     }
     return t
 }
-fn main() { print("{risky()}") }
+fn run() { print("{risky()}") }
 "#;
     let res = jet::compile(src);
     assert!(
@@ -146,7 +146,7 @@ fn assume_deterministic_suppresses_e3401() {
     }
     return 42
 }
-fn main() { print("{risky()}") }
+fn run() { print("{risky()}") }
 "#;
     let res = jet::compile(src);
     assert!(
@@ -167,7 +167,7 @@ use core.time as time;
     }
     return time.now()
 }
-fn main() { print("{risky()}") }
+fn run() { print("{risky()}") }
 "#;
     let res = jet::compile(src);
     assert!(
@@ -187,7 +187,7 @@ fn main() { print("{risky()}") }
 #[test]
 fn assume_deterministic_contextual_keyword() {
     let src = r#"
-fn main() {
+fn run() {
     assume_deterministic :: 5
     print("{assume_deterministic}")
 }
@@ -220,7 +220,7 @@ use core.random as random;
     rng.shuffle(~deck)
     return flip || chosen == 0
 }
-fn main() {
+fn run() {
     r := random.rng(7)
     print("{draws(~r)}")
 }
@@ -242,7 +242,7 @@ use core.random as random;
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
 }
-fn main() {
+fn run() {
     r := random.rng(1)
     print("{choose(~r)}")
 }
@@ -260,7 +260,7 @@ fn main() {
 fn rng_bool_needs_mut_receiver() {
     let src = r#"
 use core.random as random;
-fn main() {
+fn run() {
     r :: random.rng(3)
     b := r.bool()
     print("{b}")
@@ -281,7 +281,7 @@ fn main() {
 fn rng_shuffle_needs_mut_list_arg() {
     let src = r#"
 use core.random as random;
-fn main() {
+fn run() {
     r := random.rng(3)
     deck := [1, 2, 3]
     r.shuffle(deck)
@@ -306,14 +306,14 @@ fn main() {
 fn pure_fn_widened_clock_ok() {
     let src = r#"
 use core.time as time;
-@Pure fn run(clock: ~Clock) -> Int {
+@Pure fn drive_clock(clock: ~Clock) -> Int {
     base := clock.advance(5000)
     span := time.secs(1)
     return base + clock.wait(span)
 }
-fn main() {
+fn run() {
     c := time.clock(0)
-    print("{run(~c)}")
+    print("{drive_clock(~c)}")
 }
 "#;
     let res = jet::compile(src);
@@ -329,7 +329,7 @@ fn main() {
 fn clock_advance_needs_mut_receiver() {
     let src = r#"
 use core.time as time;
-fn main() {
+fn run() {
     c :: time.clock(0)
     n := c.advance(100)
     print("{n}")
@@ -355,7 +355,7 @@ use core.time as time;
     d := time.secs(3)
     return d.millis()
 }
-fn main() { print("{span_ms()}") }
+fn run() { print("{span_ms()}") }
 "#;
     let res = jet::compile(src);
     assert!(

@@ -74,7 +74,7 @@ pub enum TJitSpawnBody {
 pub struct JitProgram {
     /// Display path of the entry module (for overflow trap messages).
     pub source_file: String,
-    /// All top-level `tir_covers` functions in the entry module, including `main`.
+    /// All top-level `tir_covers` functions in the entry module, including `run`.
     pub funcs: Vec<TFunc>,
     /// c139 M4: spawn lambda bodies in program traversal order (parallel to spawn sites in TIR).
     pub spawn_lambdas: Vec<TJitSpawnLambda>,
@@ -88,18 +88,18 @@ pub struct JitProgram {
 
 /// c139 M3: every lowered function the JIT may compile from the entry module.
 ///
-/// Returns `None` when there is no plain top-level `main`, or when `main` is
+/// Returns `None` when there is no plain top-level `run`, or when `run` is
 /// outside the existing `tir_covers` gate.
 pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
     lower_jit_program(bundle).map(|p| {
         p.funcs
             .into_iter()
-            .find(|f| f.is_main)
-            .expect("lower_jit_program always includes main")
+            .find(|f| f.name == "run")
+            .expect("lower_jit_program always includes run")
     })
 }
 
-/// Rust local place for JIT variable lookup (`user_x`, or `main`).
+/// Rust local place for JIT variable lookup (`user_x`).
 pub fn local_place(name: &str) -> String {
     super::mangle(name)
 }
@@ -118,7 +118,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
     let mut funcs = Vec::new();
-    let mut have_main = false;
+    let mut have_run = false;
     cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
         match item {
@@ -127,8 +127,8 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     continue;
                 }
                 let lowered = lower_func(f, &cx);
-                if f.name == "main" && f.params.is_empty() {
-                    have_main = true;
+                if f.name == "run" && f.params.is_empty() {
+                    have_run = true;
                 }
                 funcs.push(lowered);
             }
@@ -148,7 +148,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
-    if !have_main {
+    if !have_run {
         return None;
     }
     let spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
@@ -207,27 +207,27 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         &extern_funcs,
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
-    let mut saw_main = false;
-    let mut main_tir = false;
+    let mut saw_run = false;
+    let mut run_tir = false;
     for item in &module.items {
         let Item::Func(f) = item else {
             continue;
         };
-        if f.name == "main" && f.params.is_empty() {
-            saw_main = true;
-            main_tir = tir_covers(f, &cx);
+        if f.name == "run" && f.params.is_empty() {
+            saw_run = true;
+            run_tir = tir_covers(f, &cx);
         }
     }
-    if !saw_main {
-        return "no plain main".to_string();
+    if !saw_run {
+        return "no plain run".to_string();
     }
-    if !main_tir {
+    if !run_tir {
         let mut locals: std::collections::HashSet<String> = std::collections::HashSet::new();
         for item in &module.items {
             let Item::Func(f) = item else {
                 continue;
             };
-            if f.name != "main" {
+            if f.name != "run" {
                 continue;
             }
             for (i, stmt) in f.body.iter().enumerate() {
@@ -235,15 +235,15 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
                 if !subset::stmt_in_subset(stmt, &cx, &mut probe) {
                     if let crate::AST::Stmt::Val(b) = stmt {
                         if !subset::expr_in_subset(&b.init, &cx, &locals) {
-                            return format!("main stmt {i} init outside tir_covers");
+                            return format!("run stmt {i} init outside tir_covers");
                         }
                     }
-                    return format!("main stmt {i} outside tir_covers");
+                    return format!("run stmt {i} outside tir_covers");
                 }
                 let _ = subset::stmt_in_subset(stmt, &cx, &mut locals);
             }
         }
-        return "main outside tir_covers".to_string();
+        return "run outside tir_covers".to_string();
     }
     "unknown".to_string()
 }
@@ -2395,8 +2395,8 @@ fn mk() {
     fn covers_unsafe_block_and_address_of() {
         // c109 Phase 18: a `#Unsafe("…") { … }` audited region + `mem.address_of` (the
         // inert address cast, legal outside unsafe) are covered.
-        let src = "use core.mem\nfn main() {\n cell: Int :: 7\n addr :: mem.address_of(cell)\n #Unsafe(\"live\") {\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
-        assert!(covers_with_mem(src, "main"));
+        let src = "use core.mem\nfn run() {\n cell: Int :: 7\n addr :: mem.address_of(cell)\n #Unsafe(\"live\") {\n p :: mem.Ptr<Int>.from_addr(addr)\n seen :: mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
+        assert!(covers_with_mem(src, "run"));
     }
 
     #[test]
@@ -2587,8 +2587,8 @@ fn mk() {
     #[test]
     fn covers_enum_local_and_literal_in_main() {
         // An enum-typed local bound from a literal, passed to a covered helper.
-        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start :: Light.Red\n print(label(start))\n}\n";
-        assert!(covers(src, "main"));
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn run() {\n start :: Light.Red\n print(label(start))\n}\n";
+        assert!(covers(src, "run"));
     }
 
     #[test]
@@ -3637,12 +3637,12 @@ fn build() -> List<Int> {
     }
     return xs
 }
-fn main() {
+fn run() {
     comptime xs = build()
     print(\"{xs}\")
 }
 ";
-        assert!(covers_after_sema(src, "main"));
+        assert!(covers_after_sema(src, "run"));
     }
 
     #[test]
@@ -3663,7 +3663,7 @@ fn loop_user(h: Shared<Int>) {
         noop(h)
     }
 }
-fn main() {
+fn run() {
     print(0)
 }
 ";
@@ -3896,7 +3896,7 @@ struct P {
     name: String
 }
 
-fn main() {
+fn run() {
     p :: P.{ name: "x" }
     s :: p.name
     t :: p.name
@@ -3905,7 +3905,7 @@ fn main() {
 }
 "#;
         assert!(
-            covers_after_sema(src, "main"),
+            covers_after_sema(src, "run"),
             "owning field-read clone not covered"
         );
     }
@@ -3923,14 +3923,14 @@ struct S {
     scores: Map<String, Int>
 }
 
-fn main() {
+fn run() {
     s := S.{ scores: [:] }
     s.scores["a"] = 1
     print(s.scores["a"])
 }
 "#;
         assert!(
-            covers_after_sema(src, "main"),
+            covers_after_sema(src, "run"),
             "map-assign through field not covered"
         );
     }
@@ -3949,13 +3949,13 @@ struct S {
     scores: Map<String, Int>
 }
 
-fn main() {
+fn run() {
     s := S.{ scores: [:] }
     print(s.scores.len())
 }
 "#;
         assert!(
-            covers_after_sema(src, "main"),
+            covers_after_sema(src, "run"),
             "map builtin on field receiver not covered"
         );
     }
@@ -3982,14 +3982,14 @@ enum Light {
 comptime P = Pair.{left: 7, right: "seven"}
 comptime L = Light.Green
 
-fn main() {
+fn run() {
     print("{P.left}")
     print("{P.right}")
     print("{L == Light.Green}")
 }
 "#;
         assert!(
-            covers_after_sema(src, "main"),
+            covers_after_sema(src, "run"),
             "field-read/== on inlined comptime values not covered"
         );
     }
@@ -4005,7 +4005,7 @@ enum Wrapper {
     Some(Int)
     None
 }
-fn main() {
+fn run() {
     w :: Wrapper.Some(42)
     if w == Some(_) {
         print(\"has value\")
@@ -4013,7 +4013,7 @@ fn main() {
 }
 ";
         assert!(
-            covers(src, "main"),
+            covers(src, "run"),
             "wildcard enum-payload if-let not covered"
         );
     }

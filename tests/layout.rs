@@ -83,7 +83,7 @@ fn equal_split_compiles_and_runs() {
     // both constraints REQUIRED, so the solution is a single exact point:
     // a.width == b.width, a.width + b.width == 200 → both 100.
     let src = r#"
-fn main() {
+fn run() {
     layout form {
         a.width == b.width
         a.width + b.width == 200.0
@@ -109,7 +109,7 @@ fn min_max_bounds_clamp() {
     // range must clamp to the upper bound — proves the required bounds win
     // over the soft preference, not the other way around.
     let src = r#"
-fn main() {
+fn run() {
     layout form {
         x.width >= 50.0
         x.width <= 80.0
@@ -135,7 +135,7 @@ fn proportional_split_via_addition() {
     // ratified D-LAYOUT1 example — no `*`/`/`), so "a is twice as wide as
     // b" is expressed as repeated addition: a == b + b.
     let src = r#"
-fn main() {
+fn run() {
     layout form {
         a.width == b.width + b.width
         a.width + b.width == 300.0
@@ -158,7 +158,7 @@ fn main() {
 #[test]
 fn cross_axis_width_vs_height_is_e2932() {
     let src = r#"
-fn main() {
+fn run() {
     layout form {
         a.width >= a.height
     }
@@ -170,7 +170,7 @@ fn main() {
 #[test]
 fn non_comparison_line_is_e2933() {
     let src = r#"
-fn main() {
+fn run() {
     x :: 1
     layout form {
         x == 1
@@ -185,7 +185,7 @@ fn duplicate_constraint_is_lint_not_error() {
     // E2934 is a WARNING (`out.lints`), not a hard error — the fixture must
     // still compile clean.
     let src = r#"
-fn main() {
+fn run() {
     layout form {
         a.width >= 80.0
         a.width >= 80.0
@@ -216,7 +216,7 @@ fn infeasible_required_constraints_report_conflict() {
     // be false and `conflict()` must name at least one of them (a real
     // simplex-derived trace, not a canned message).
     let src = r#"
-fn main() {
+fn run() {
     layout form {
         a.width >= 100.0
         a.width <= 50.0
@@ -247,7 +247,7 @@ fn infeasible_value_read_panics_loudly() {
     // `is_feasible()` first panics (I1: a loud failure beats a silent
     // wrong number) rather than returning a made-up 0.
     let src = r#"
-fn main() {
+fn run() {
     layout form {
         a.width >= 100.0
         a.width <= 50.0

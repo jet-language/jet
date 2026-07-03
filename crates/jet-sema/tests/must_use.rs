@@ -58,7 +58,7 @@ fn must_use_fn_ignored_is_e0419() {
 @MustUse fn ticket() -> Int {
     return 1
 }
-fn main() {
+fn run() {
     ticket()
 }
 "#;
@@ -79,7 +79,7 @@ fn must_use_type_ignored_is_e0419() {
 fn issue() -> Receipt {
     return Receipt.{ id: 1 }
 }
-fn main() {
+fn run() {
     issue()
 }
 "#;
@@ -97,7 +97,7 @@ fn must_use_drop_suppresses_e0419() {
 @MustUse fn ping() -> Int {
     return 1
 }
-fn main() {
+fn run() {
     ping().drop("telemetry only")
 }
 "#;
@@ -119,7 +119,7 @@ fn must_use_enum_ignored_is_e0419() {
 fn issue() -> Ticket {
     return Ticket.Open
 }
-fn main() {
+fn run() {
     issue()
 }
 "#;
@@ -138,7 +138,7 @@ fn must_use_bound_value_ok() {
 @MustUse fn mint(id: Int) -> Token {
     return Token.{ id: id }
 }
-fn main() {
+fn run() {
     t := mint(1)
     print(t.id)
 }

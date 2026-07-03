@@ -20,8 +20,8 @@ struct Square { side: Int }
 impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
 @Pure fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) #(Io) { print(p); }
-fn run(n: Int) #(Io) { load("{sq(n)}"); }
-fn main() { s :: Square.{ side: 3 }; print("{s.area()}"); run(2); }
+fn invoke(n: Int) #(Io) { load("{sq(n)}"); }
+fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
 "#;
     let plain = r#"
 trait Shape { fn area(self) -> Int; }
@@ -29,8 +29,8 @@ struct Square { side: Int }
 impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
 fn sq(n: Int) -> Int { return n * n; }
 fn load(p: String) { print(p); }
-fn run(n: Int) { load("{sq(n)}"); }
-fn main() { s :: Square.{ side: 3 }; print("{s.area()}"); run(2); }
+fn invoke(n: Int) { load("{sq(n)}"); }
+fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
@@ -46,7 +46,7 @@ fn main() { s :: Square.{ side: 3 }; print("{s.area()}"); run(2); }
 #[test]
 fn caps_region_erases_to_plain_block() {
     let src = r#"
-fn main() {
+fn run() {
     #Caps(Io) {
         print("inside");
     }
@@ -77,7 +77,7 @@ use core.fs as fs
 fn load(path: String) #(Fs) -> String {
     return fs.read(path) ?? "";
 }
-fn main() { print(load("x")); }
+fn run() { print(load("x")); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -94,7 +94,7 @@ use core.fs as fs
 fn load(path: String) #(Net) -> String {
     return fs.read(path) ?? "";
 }
-fn main() { print(load("x")); }
+fn run() { print(load("x")); }
 "#;
     assert!(
         codes(src).contains(&"E0740"),
@@ -111,7 +111,7 @@ fn effects_propagate_transitively() {
 use core.fs as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn load(path: String) #(Net) -> String { return helper(path); }
-fn main() { print(load("x")); }
+fn run() { print(load("x")); }
 "#;
     assert!(
         codes(src).contains(&"E0740"),
@@ -128,7 +128,7 @@ use core.fs as fs
 fn load(path: String) #(Fs, Net) -> String {
     return fs.read(path) ?? "";
 }
-fn main() { print(load("x")); }
+fn run() { print(load("x")); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -142,7 +142,7 @@ fn main() { print(load("x")); }
 fn io_effect_from_print_ok() {
     let src = r#"
 fn announce(n: Int) #(Io) { print("{n}"); }
-fn main() { announce(1); }
+fn run() { announce(1); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -157,7 +157,7 @@ fn unannotated_function_never_trips_e0740() {
     let src = r#"
 use core.fs as fs
 fn load(path: String) -> String { return fs.read(path) ?? ""; }
-fn main() { print(load("x")); }
+fn run() { print(load("x")); }
 "#;
     assert!(
         !codes(src).contains(&"E0740"),
@@ -171,7 +171,7 @@ fn main() { print(load("x")); }
 fn pure_with_effects_is_e0745() {
     let src = r#"
 @Pure fn calc() #(Fs) -> Int { return 1; }
-fn main() { print(calc()); }
+fn run() { print(calc()); }
 "#;
     assert!(
         codes(src).contains(&"E0745"),
@@ -190,7 +190,7 @@ struct Doc { path: String }
 impl Doc.Hasher {
     fn hash(self) -> Int { body :: fs.read(self.path) ?? ""; return body.len(); }
 }
-fn main() { d :: Doc.{ path: "x" }; print(d.hash()); }
+fn run() { d :: Doc.{ path: "x" }; print(d.hash()); }
 "#;
     assert!(
         codes(src).contains(&"E0742"),
@@ -208,7 +208,7 @@ struct Square { side: Int }
 impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side; }
 }
-fn main() { s :: Square.{ side: 5 }; print("{s.area()}"); }
+fn run() { s :: Square.{ side: 5 }; print("{s.area()}"); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -226,7 +226,7 @@ use core.fs as fs
 fn readit() -> String { return fs.read("x") ?? ""; }
 fn apply(f: fn() -> String) -> String { return f(); }
 fn caller() #(Net) -> String { return apply(readit); }
-fn main() { print(caller()); }
+fn run() { print(caller()); }
 "#;
     assert!(
         codes(src).contains(&"E0740"),
@@ -242,7 +242,7 @@ fn lambda_callback_flows_into_region() {
     let src = r#"
 use core.fs as fs
 fn apply(f: fn() -> String) -> String { return f(); }
-fn main() {
+fn run() {
     #Caps(Net) {
         r :: apply(() => fs.read("x") ?? "");
         print(r);
@@ -263,7 +263,7 @@ fn pure_callback_flows_nothing() {
 fn inc(n: Int) -> Int { return n + 1; }
 fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x); }
 fn caller() #(Io) { print("{apply(inc, 1)}"); }
-fn main() { caller(); }
+fn run() { caller(); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -280,7 +280,7 @@ fn pure_fn_with_core_effect_is_e3401() {
     let src = r#"
 use core.fs as fs
 @Pure fn readit(p: String) -> String { return fs.read(p) ?? ""; }
-fn main() { print(readit("x")); }
+fn run() { print(readit("x")); }
 "#;
     assert!(
         codes(src).contains(&"E3401"),
@@ -294,7 +294,7 @@ fn main() { print(readit("x")); }
 fn caps_region_within_set_ok() {
     let src = r#"
 fn announce(n: Int) #(Io) { print("{n}"); }
-fn main() {
+fn run() {
     #Caps(Io) {
         announce(1);
     }
@@ -312,7 +312,7 @@ fn main() {
 fn caps_region_out_of_set_is_e0741() {
     let src = r#"
 use core.fs as fs
-fn main() {
+fn run() {
     #Caps(Net) {
         text :: fs.read("x") ?? "";
         print(text);
@@ -333,7 +333,7 @@ fn caps_region_transitive_is_e0741() {
     let src = r#"
 use core.fs as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
-fn main() {
+fn run() {
     #Caps(Io) {
         text :: helper("x");
         print(text);
@@ -352,7 +352,7 @@ fn main() {
 fn unknown_effect_name_is_e0119_only() {
     let src = r#"
 fn work() #(Bogus) { print("hi"); }
-fn main() { work(); }
+fn run() { work(); }
 "#;
     let c = codes(src);
     assert!(c.contains(&"E0119"), "expected E0119, got {:?}", c);
@@ -371,7 +371,7 @@ fn main() { work(); }
 fn grant_within_set_ok() {
     let src = r#"
 use core.fs as fs
-fn main() {
+fn run() {
     #Grant(Fs, Io) { caps ->
         text :: fs.read("x") ?? "";
         print(text);
@@ -391,7 +391,7 @@ fn main() {
 fn grant_out_of_set_is_e0712() {
     let src = r#"
 use core.fs as fs
-fn main() {
+fn run() {
     #Grant(Net) { caps ->
         text :: fs.read("x") ?? "";
         print(text);
@@ -412,7 +412,7 @@ fn grant_transitive_is_e0712() {
     let src = r#"
 use core.fs as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
-fn main() {
+fn run() {
     #Grant(Io) { caps ->
         text :: helper("x");
         print(text);
@@ -431,7 +431,7 @@ fn main() {
 #[test]
 fn grant_handle_alias_is_e0711() {
     let src = r#"
-fn main() {
+fn run() {
     #Grant(Io) { caps ->
         alias :: caps;
         print("hi");
@@ -450,7 +450,7 @@ fn main() {
 #[test]
 fn grant_unused_handle_ok() {
     let src = r#"
-fn main() {
+fn run() {
     #Grant(Io) { caps ->
         print("granted");
     }
@@ -468,7 +468,7 @@ fn main() {
 #[test]
 fn grant_unknown_effect_is_e0119() {
     let src = r#"
-fn main() {
+fn run() {
     #Grant(Bogus) { caps ->
         print("hi");
     }
@@ -489,7 +489,7 @@ fn main() {
 #[test]
 fn grant_region_erases_to_plain_block() {
     let src = r#"
-fn main() {
+fn run() {
     #Grant(Io) { caps ->
         print("inside");
     }
@@ -526,7 +526,7 @@ fn main() {
 #[test]
 fn grant_lowers_like_caps_region() {
     let granted = r#"
-fn main() {
+fn run() {
     #Grant(Io) { caps ->
         print("a");
         print("b");
@@ -534,7 +534,7 @@ fn main() {
 }
 "#;
     let caps = r#"
-fn main() {
+fn run() {
     #Caps(Io) {
         print("a");
         print("b");
@@ -557,7 +557,7 @@ fn main() {
 fn transact_irreversible_fs_is_e0746() {
     let src = r#"
 use core.fs as fs
-fn main() {
+fn run() {
     #Transact(tx) {
         text :: fs.read("x") ?? "";
         print(text);
@@ -576,7 +576,7 @@ fn main() {
 fn transact_irreversible_net_is_e0746() {
     let src = r#"
 use core.http as http
-fn main() {
+fn run() {
     #Transact(tx) {
         r :: http.get("http://x") ?? "";
         print(r);
@@ -595,7 +595,7 @@ fn main() {
 #[test]
 fn transact_reversible_io_ok() {
     let src = r#"
-fn main() {
+fn run() {
     #Transact(tx) {
         print("reversible work");
     }
@@ -614,7 +614,7 @@ fn main() {
 fn transact_fs_in_on_commit_ok() {
     let src = r#"
 use core.fs as fs
-fn main() {
+fn run() {
     #Transact(tx) {
         print("reversible work");
         tx.on_commit(() => {
@@ -634,7 +634,7 @@ fn main() {
 #[test]
 fn transact_on_commit_needs_zero_param_lambda() {
     let src = r#"
-fn main() {
+fn run() {
     #Transact(tx) {
         tx.on_commit((n: Int) => { print("{n}"); });
     }
@@ -652,7 +652,7 @@ fn main() {
 #[test]
 fn transact_generates_no_unsafe() {
     let src = r#"
-fn main() {
+fn run() {
     #Transact(tx) {
         print("work");
         tx.on_commit(() => { print("hook"); });
@@ -684,7 +684,7 @@ fn main() {
 #[test]
 fn transact_on_rollback_ok() {
     let src = r#"
-fn main() {
+fn run() {
     #Transact(tx) {
         print("work");
         tx.on_rollback(() => { print("undo"); });
@@ -709,7 +709,7 @@ fn main() {
 #[test]
 fn transact_on_rollback_needs_zero_param_lambda() {
     let src = r#"
-fn main() {
+fn run() {
     #Transact(tx) {
         tx.on_rollback((n: Int) => { print("{n}"); });
     }
@@ -739,7 +739,7 @@ fn transfer(from: ~Int, to: ~Int, amount: Int) -> Int ? Fail {
     }
     return ok(amount);
 }
-fn main() {
+fn run() {
     a: Int := 100
     b: Int := 0
     n :: transfer(~a, ~b, 40) ?? (-1)
@@ -777,7 +777,7 @@ fn bump(x: ~Int) -> Int ? Fail {
     }
     return ok(0);
 }
-fn main() { a: Int := 0; n :: bump(~a) ?? (-1); print("{n}"); }
+fn run() { a: Int := 0; n :: bump(~a) ?? (-1); print("{n}"); }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     // The only `unsafe` is inside `mod jet_txn { … }`. Strip it and assert none remain.
@@ -817,7 +817,7 @@ fn main() { a: Int := 0; n :: bump(~a) ?? (-1); print("{n}"); }
 #[test]
 fn transact_bare_no_handle_ok() {
     let src = r#"
-fn main() {
+fn run() {
     #Transact {
         print("bare transaction");
     }
@@ -842,7 +842,7 @@ fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
     return items.map((x) => f(x));
 }
 @Pure fn inc(n: Int) -> Int { return n + 1; }
-fn main() { print("{transform([1, 2], inc)}"); }
+fn run() { print("{transform([1, 2], inc)}"); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -859,7 +859,7 @@ fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
     return items.map((x) => f(x));
 }
 fn noisy(n: Int) -> Int { print("{n}"); return n; }
-fn main() { print("{transform([1, 2], noisy)}"); }
+fn run() { print("{transform([1, 2], noisy)}"); }
 "#;
     assert_eq!(
         codes(src),
@@ -872,11 +872,11 @@ fn main() { print("{transform([1, 2], noisy)}"); }
 #[test]
 fn callback_set_bound_within_ok() {
     let src = r#"
-fn run(n: Int, act: #(Io) fn(Int)) {
+fn invoke(n: Int, act: #(Io) fn(Int)) {
     act(n);
 }
 fn show(n: Int) { print("{n}"); }
-fn main() { run(5, show); }
+fn run() { invoke(5, show); }
 "#;
     assert!(
         codes(src).is_empty(),
@@ -891,11 +891,11 @@ fn main() { run(5, show); }
 fn callback_set_bound_exceeded_is_e0747() {
     let src = r#"
 use core.fs as fs
-fn run(p: String, act: #(Io) fn(String)) {
+fn invoke(p: String, act: #(Io) fn(String)) {
     act(p);
 }
 fn read_it(p: String) { x :: fs.read(p) ?? ""; print("{x}"); }
-fn main() { run("f.txt", read_it); }
+fn run() { invoke("f.txt", read_it); }
 "#;
     assert_eq!(
         codes(src),
@@ -908,9 +908,9 @@ fn main() { run("f.txt", read_it); }
 #[test]
 fn callback_bound_unknown_effect_is_e0119() {
     let src = r#"
-fn run(n: Int, act: #(Nope) fn(Int)) { act(n); }
+fn invoke(n: Int, act: #(Nope) fn(Int)) { act(n); }
 fn show(n: Int) { print("{n}"); }
-fn main() { run(5, show); }
+fn run() { invoke(5, show); }
 "#;
     assert_eq!(
         codes(src),
@@ -925,12 +925,12 @@ fn main() { run(5, show); }
 #[test]
 fn effect_via_publishes_callback_effect() {
     let src = r#"
-fn run(n: Int, act: #(Io) fn(Int)) #(via act) {
+fn invoke(n: Int, act: #(Io) fn(Int)) #(via act) {
     act(n);
 }
 fn show(n: Int) { print("{n}"); }
-@Pure fn caller() -> Int { run(5, show); return 0; }
-fn main() { print("{caller()}"); }
+@Pure fn caller() -> Int { invoke(5, show); return 0; }
+fn run() { print("{caller()}"); }
 "#;
     assert_eq!(
         codes(src),
@@ -943,9 +943,9 @@ fn main() { print("{caller()}"); }
 #[test]
 fn effect_via_unknown_param_is_e0748() {
     let src = r#"
-fn run(n: Int, act: #(Io) fn(Int)) #(via missing) { act(n); }
+fn invoke(n: Int, act: #(Io) fn(Int)) #(via missing) { act(n); }
 fn show(n: Int) { print("{n}"); }
-fn main() { run(5, show); }
+fn run() { invoke(5, show); }
 "#;
     assert_eq!(codes(src), vec!["E0748"], "#(via missing) is E0748");
 }
@@ -954,8 +954,8 @@ fn main() { run(5, show); }
 #[test]
 fn effect_via_non_callback_param_is_e0748() {
     let src = r#"
-fn run(n: Int) #(via n) { print("{n}"); }
-fn main() { run(5); }
+fn invoke(n: Int) #(via n) { print("{n}"); }
+fn run() { invoke(5); }
 "#;
     assert_eq!(
         codes(src),
@@ -972,19 +972,19 @@ fn eff2_levers_are_erased() {
 fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
     return items.map((x) => f(x));
 }
-fn run(n: Int, act: #(Io) fn(Int)) #(via act) { act(n); }
+fn invoke(n: Int, act: #(Io) fn(Int)) #(via act) { act(n); }
 @Pure fn inc(n: Int) -> Int { return n + 1; }
 fn show(n: Int) { print("{n}"); }
-fn main() { print("{transform([1], inc)}"); run(5, show); }
+fn run() { print("{transform([1], inc)}"); invoke(5, show); }
 "#;
     let plain = r#"
 fn transform(items: [Int], f: fn(Int) -> Int) -> [Int] {
     return items.map((x) => f(x));
 }
-fn run(n: Int, act: fn(Int)) { act(n); }
+fn invoke(n: Int, act: fn(Int)) { act(n); }
 fn inc(n: Int) -> Int { return n + 1; }
 fn show(n: Int) { print("{n}"); }
-fn main() { print("{transform([1], inc)}"); run(5, show); }
+fn run() { print("{transform([1], inc)}"); invoke(5, show); }
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;

@@ -46,7 +46,7 @@ impl Reservation {
 #[test]
 fn correct_lifecycle_ok() {
     let src = format!(
-        "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+        "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
     assert!(
         codes(&src).is_empty(),
@@ -59,7 +59,7 @@ fn correct_lifecycle_ok() {
 #[test]
 fn transition_in_wrong_state_is_error() {
     let src =
-        format!("{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n");
+        format!("{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n");
     assert!(
         codes(&src).contains(&"E0150"),
         "skipping pay() must be E0150: {:?}",
@@ -71,7 +71,7 @@ fn transition_in_wrong_state_is_error() {
 #[test]
 fn guarded_read_in_wrong_state_is_error() {
     let src = format!(
-        "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  print(r.room_key())\n}}\n"
+        "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  print(r.room_key())\n}}\n"
     );
     assert!(
         codes(&src).contains(&"E0150"),
@@ -84,7 +84,7 @@ fn guarded_read_in_wrong_state_is_error() {
 #[test]
 fn guarded_read_after_full_lifecycle_ok() {
     let src = format!(
-        "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+        "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
     assert!(
         !codes(&src).contains(&"E0150"),
@@ -101,7 +101,7 @@ struct Box { n: Int }
 impl Box {
     fn get(self) -> Int { return self.n }
 }
-fn main() {
+fn run() {
     b :: Box.{ n: 1 }
     print(b.get())
 }
@@ -130,7 +130,7 @@ impl Crate {
     }
 }
 
-fn main() {
+fn run() {
     b := Crate.fill(1)
     print(b.get())
 }
@@ -156,7 +156,7 @@ impl Crate {
     }
 }
 
-fn main() { }
+fn run() { }
 "#;
     assert!(
         codes(src).contains(&"E0151"),
@@ -173,7 +173,7 @@ fn dead_end_state_is_l0151() {
     // DECL declares `state Reservation { Pending, Confirmed, CheckedIn }`.
     // `CheckedIn` has no outgoing transition → L0151.
     let src = format!(
-        "{DECL}\nfn main() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+        "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
     assert!(
         lint_codes(&src).contains(&"L0151"),
@@ -196,7 +196,7 @@ impl Gate {
     #Transition(Open -> Closed) fn close(self: ^Gate) -> Gate { return self }
 }
 
-fn main() {
+fn run() {
     g := Gate.new(1)
     g = g.open()
     g = g.close()

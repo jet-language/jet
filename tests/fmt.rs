@@ -37,7 +37,7 @@ fn fmt_preserves_s61_call_labels() {
     // S61: call-site argument labels (`name:`) must survive fmt — previously
     // `fmt_call_args` dropped them, so `area(width: 3, height: 4)` round-tripped
     // to `area(3, 4)`, silently losing the labels.
-    let src = "fn area(width: Int, height: Int) -> Int {\n    return width * height\n}\n\nfn main() {\n    print(area(width: 3, height: 4))\n}\n";
+    let src = "fn area(width: Int, height: Int) -> Int {\n    return width * height\n}\n\nfn run() {\n    print(area(width: 3, height: 4))\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on labeled calls");
     assert!(
         out.contains("width: 3") && out.contains("height: 4"),
@@ -51,7 +51,7 @@ fn fmt_preserves_s61_call_labels() {
 fn fmt_preserves_block_comments() {
     // S5: `/* … */` block comments, nesting allowed.
     let src = r#"/* a leading block comment */
-fn main() {
+fn run() {
     /* explains the next line, /* with a nested comment */ inside */
     x :: 5
     print("{x}")
@@ -89,7 +89,7 @@ fn fmt_comptime_os_switch_round_trips() {
     // OS-dispatch switch. New token shape: the `comptime if <subject> == { }`
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
-    let src = r#"fn main() {
+    let src = r#"fn run() {
     comptime if build.os == {
         .Linux -> {
             b :: LinuxBackend.{ name: "gtk" }
@@ -127,7 +127,7 @@ fn fmt_comptime_os_switch_round_trips() {
 fn fmt_if_expression_preserves_condition_parens() {
     // S68 (D-SG2): `if` as a value round-trips.
     // D-FMTPARENS1=A: author-written grouping parens are always preserved.
-    let src = r#"fn main() {
+    let src = r#"fn run() {
     m :: if (a > b) {
         a
     } else {
@@ -160,7 +160,7 @@ fn fmt_preserves_author_placed_chain_breaks() {
     // S69 (D-SG3): a broken dot-chain keeps one step per line, each step may
     // carry its own trailing comment, and the final step's comment stays after
     // the statement terminator.
-    let src = r#"fn main() {
+    let src = r#"fn run() {
     raw :: "  hi  "
     out :: raw
         .trim()  // strip padding
@@ -185,7 +185,7 @@ fn fmt_preserves_author_placed_chain_breaks() {
 fn fmt_preserves_triple_quoted_strings() {
     // S70 (D-SG5): a `"""…"""` string keeps its multi-line shape, relative
     // indentation, and interpolation across fmt.
-    let src = r#"fn main() {
+    let src = r#"fn run() {
     who :: "Jet"
     banner :: """
     hello, {who}
@@ -218,7 +218,7 @@ fn fmt_preserves_destructuring_targets() {
     // form (E0320 recovery) is auto-fixed to the new form by fmt.
     let src = r#"struct Point { x: Int, y: Int }
 
-fn main() {
+fn run() {
     Point.{ x, y } :: make()
     [a, b, c] := nums()
     print("{x}{y}{a}{b}{c}")
@@ -243,7 +243,7 @@ fn fmt_flush_construction() {
     // Old dotless input (E0320 recovery) is auto-fixed by fmt.
     let src = r#"struct Point { x: Int, y: Int }
 
-fn main() {
+fn run() {
     p :: Point.{ x: 1, y: 2 }
     print("{p.x}")
 }
@@ -268,7 +268,7 @@ fn fmt_preserves_named_tuples() {
     return (min: 0, max: 10)
 }
 
-fn main() {
+fn run() {
     p :: (x: 1, y: 2)
     (a, b) :: p
     print("{p.x}{a}{b}")
@@ -294,7 +294,7 @@ fn main() {
 #[test]
 fn fmt_preserves_optional_chaining() {
     // S71 (D-SG6): `?.` chains round-trip unchanged.
-    let src = r#"fn main() {
+    let src = r#"fn run() {
     n :: o.mid?.inner?.name
     print("{n}")
 }
@@ -340,7 +340,7 @@ fn use_collections(items: List<String>, counts: Map<String, Int>) {}
 
 #[test]
 fn fmt_still_errors_on_real_parse_problems() {
-    let src = "fn main() { x :: ; }\n";
+    let src = "fn run() { x :: ; }\n";
     assert!(
         jet::format_source(src).is_err(),
         "fmt must not run when the AST is not recoverable"
@@ -385,7 +385,7 @@ fn fmt_preserves_leading_dot_enum_lit() {
 fn paint(c: Color) {
     print(c)
 }
-fn main() {
+fn run() {
     c: Color = .Red
     paint(.Blue)
     paint(c)
@@ -416,7 +416,7 @@ fn fmt_preserves_named_payload_variant_dot_brace() {
     Text(text: String)
     Box(width: Int)
 }
-fn main() {
+fn run() {
     a: View :: .Text.{ text: "hi" }
     b: View :: .Box.{ width: 10 }
 }
@@ -443,7 +443,7 @@ fn fmt_preserves_take_pattern_literal() {
     // D-SHIFT1 (c7shift): `cursor.take_pattern("…{hole:Type}…")` — the
     // pattern-literal argument (typed holes, D-PARSESTR1 grammar) must
     // round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash).
-    let src = r#"fn main() {
+    let src = r#"fn run() {
     c :: Cursor.over("inc-4411 sev 3: disk full")
     c.skip_ws()
     m :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("no match")
@@ -483,14 +483,14 @@ fn assert_fmt_stable(src: &str, label: &str) {
 #[test]
 fn fmt_preserves_single_line_if() {
     // A one-line `if` body the author placed inline survives unchanged.
-    let src = "fn main() {\n    ready :: true\n    if ready { launch() }\n}\n";
+    let src = "fn run() {\n    ready :: true\n    if ready { launch() }\n}\n";
     assert_fmt_stable(src, "single-line if");
 }
 
 #[test]
 fn fmt_preserves_multiline_if() {
     // The 3-line form the author chose stays 3 lines.
-    let src = "fn main() {\n    ready :: true\n    if ready {\n        launch()\n    }\n}\n";
+    let src = "fn run() {\n    ready :: true\n    if ready {\n        launch()\n    }\n}\n";
     assert_fmt_stable(src, "multiline if");
 }
 
@@ -499,10 +499,10 @@ fn fmt_if_else_chain_one_multiline_expands_all() {
     // D-FMT1 chain rule: if any branch is multiline, the whole chain expands.
     // Author wrote `then` inline but `else` multiline → whole chain goes
     // multiline; the expanded form is then stable.
-    let src = "fn main() {\n    if a { x() } else {\n        y()\n    }\n}\n";
+    let src = "fn run() {\n    if a { x() } else {\n        y()\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should accept the mixed chain");
     assert_eq!(
-        out, "fn main() {\n    if a {\n        x()\n    } else {\n        y()\n    }\n}\n",
+        out, "fn run() {\n    if a {\n        x()\n    } else {\n        y()\n    }\n}\n",
         "mixed if/else chain should expand wholesale, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("expanded chain should re-fmt");
@@ -512,7 +512,7 @@ fn fmt_if_else_chain_one_multiline_expands_all() {
 #[test]
 fn fmt_single_line_comment_forces_expand() {
     // Gate (c): a comment inside the braces forces the body multiline.
-    let src = "fn main() {\n    if ready { launch() /* go */ }\n}\n";
+    let src = "fn run() {\n    if ready { launch() /* go */ }\n}\n";
     let out = jet::format_source(src).expect("fmt should accept the commented body");
     assert!(
         out.contains("if ready {\n"),
@@ -526,7 +526,7 @@ fn fmt_single_line_comment_forces_expand() {
 fn fmt_single_line_over_width_forces_expand() {
     // Gate (d): a one-line body whose rendered width exceeds 100 expands.
     let long = "x".repeat(120);
-    let src = format!("fn main() {{\n    if ready {{ print(\"{long}\") }}\n}}\n");
+    let src = format!("fn run() {{\n    if ready {{ print(\"{long}\") }}\n}}\n");
     let out = jet::format_source(&src).expect("fmt should accept the wide body");
     assert!(
         out.contains("if ready {\n"),
@@ -540,7 +540,7 @@ fn fmt_single_line_over_width_forces_expand() {
 fn fmt_single_line_nested_forces_expand() {
     // Gate (b): the lone statement is itself a block (`if`), so it cannot stay
     // inline — the outer body expands.
-    let src = "fn main() {\n    if a { if b { x() } }\n}\n";
+    let src = "fn run() {\n    if a { if b { x() } }\n}\n";
     let out = jet::format_source(src).expect("fmt should accept the nested if");
     assert!(
         out.contains("if a {\n"),
@@ -558,10 +558,10 @@ fn fmt_single_line_nested_forces_expand() {
 #[test]
 fn fmt_preserves_single_line_loops_and_fn() {
     // The rule applies uniformly to `while`/`for`/`fn` bodies.
-    let while_src = "fn main() {\n    n :: 0\n    loop n < 3 { n += 1 }\n}\n";
+    let while_src = "fn run() {\n    n :: 0\n    loop n < 3 { n += 1 }\n}\n";
     assert_fmt_stable(while_src, "single-line while/loop");
 
-    let for_src = "fn main() {\n    loop i in 0..3 { print(\"{i}\") }\n}\n";
+    let for_src = "fn run() {\n    loop i in 0..3 { print(\"{i}\") }\n}\n";
     assert_fmt_stable(for_src, "single-line for/loop");
 
     let fn_src = "fn one() -> Int { return 1 }\n";
@@ -571,7 +571,7 @@ fn fmt_preserves_single_line_loops_and_fn() {
 #[test]
 fn fmt_preserves_single_line_if_expr_branch() {
     // If-expression branches (routed through fmt_value_block) follow the rule.
-    let src = "fn main() {\n    a :: true\n    n :: if a { 1 } else { 2 }\n    print(\"{n}\")\n}\n";
+    let src = "fn run() {\n    a :: true\n    n :: if a { 1 } else { 2 }\n    print(\"{n}\")\n}\n";
     assert_fmt_stable(src, "single-line if-expression");
 }
 
@@ -615,7 +615,7 @@ struct Order {
     #[Rename(\"customer\")] who: String
 }
 
-fn main() {
+fn run() {
     raw :: \"x\"
     back :: json.decode<Order>(raw) ?? panic(\"bad\")
     print(back.who)
@@ -828,7 +828,7 @@ fn fmt_box_drawing_comment_does_not_panic() {
     // glyph in the source that offset could land mid-codepoint and the raw slice
     // panicked. fmt must never panic on valid input (I2). The box-drawing glyphs
     // round-trip verbatim.
-    let src = "fn main() {\n    x :: foo()\n        // \u{2502}\u{250c}\u{2514}\u{2500}\n        .bar()\n    print(x)\n}\n";
+    let src = "fn run() {\n    x :: foo()\n        // \u{2502}\u{250c}\u{2514}\u{2500}\n        .bar()\n    print(x)\n}\n";
     let out = jet::format_source(src).expect("fmt should not panic on box-drawing comments");
     assert!(
         out.contains('\u{250c}') && out.contains('\u{2502}'),
@@ -842,7 +842,7 @@ fn fmt_box_drawing_comment_does_not_panic() {
 fn fmt_impure_block_round_trips() {
     // D-CTEFFECT1: `#Impure("reason") { … }` must survive a format round-trip
     // with the reason string and body intact.
-    let src = "fn main() {\n    #Impure(\"reading build config\") {\n        print(\"inside\")\n    }\n}\n";
+    let src = "fn run() {\n    #Impure(\"reading build config\") {\n        print(\"inside\")\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on #Impure block");
     assert!(
         out.contains("#Impure(\"reading build config\")"),
@@ -856,7 +856,7 @@ fn fmt_impure_block_round_trips() {
 fn fmt_impure_block_no_reason_round_trips() {
     // D-CTEFFECT1: `#Impure { … }` without a reason also round-trips (triggers
     // L3102 lint but is parseable).
-    let src = "fn main() {\n    #Impure {\n        print(\"inside\")\n    }\n}\n";
+    let src = "fn run() {\n    #Impure {\n        print(\"inside\")\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on #Impure block without reason");
     assert!(
         out.contains("#Impure {") || out.contains("#Impure{"),
@@ -871,7 +871,7 @@ fn fmt_keeps_parens_around_binary_receiver() {
     // c143(b): `(a + b).method()` must keep its parens — dropping them rebinds
     // the `.method()` to `b` alone and changes the meaning. Likewise `(a + b) * c`
     // must not become `a + b * c`.
-    let src = "fn main() {\n    c :: (1 + 2).to_string()\n    d :: (1 + 2) * 3\n    print(c)\n    print(d)\n}\n";
+    let src = "fn run() {\n    c :: (1 + 2).to_string()\n    d :: (1 + 2) * 3\n    print(c)\n    print(d)\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed");
     assert!(
         out.contains("(1 + 2).to_string()"),
@@ -882,7 +882,7 @@ fn fmt_keeps_parens_around_binary_receiver() {
         "parens around lower-prec binary operand dropped:\n{out}"
     );
     // The common case must NOT gain spurious parens.
-    let plain = jet::format_source("fn main() {\n    a :: 1 + 2 * 3\n    print(a)\n}\n").unwrap();
+    let plain = jet::format_source("fn run() {\n    a :: 1 + 2 * 3\n    print(a)\n}\n").unwrap();
     assert!(
         plain.contains("a :: 1 + 2 * 3"),
         "added spurious parens:\n{plain}"
@@ -897,7 +897,7 @@ fn fmt_comptime_block_is_idempotent() {
     // round-trips — the block keyword, brace, and body all survive a second fmt.
     let src = r#"comptime LIMIT = 1000
 
-fn main() {
+fn run() {
     comptime {
         comptime ratio = LIMIT / 10
         if ratio < 1 { panic("bad") }
@@ -921,7 +921,7 @@ fn fmt_dot_construction_d_dotctor1() {
     // `Type { … }` form (E0320 recovery) is auto-fixed to `Type.{ … }`.
 
     // Named form round-trips unchanged.
-    let named = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p :: Pt.{ x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+    let named = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn run() {\n    p :: Pt.{ x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
     let out_named = jet::format_source(named).expect("fmt should accept Pt.{ … }");
     assert!(
         out_named.contains("Pt.{"),
@@ -935,7 +935,7 @@ fn fmt_dot_construction_d_dotctor1() {
     assert_eq!(out_named, twice_named, "named form must be fmt-idempotent");
 
     // Old dotless form (E0320 recovery) is auto-fixed to `Type.{`.
-    let old = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn main() {\n    p :: Pt { x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
+    let old = "struct Pt {\n    x: Int\n    y: Int\n}\n\nfn run() {\n    p :: Pt { x: 1, y: 2 }\n    print(\"{p.x}\")\n}\n";
     let out_old = jet::format_source(old).expect("fmt should recover dotless E0320 form");
     assert!(
         out_old.contains("Pt.{"),
@@ -972,7 +972,7 @@ fn describe(s: Shape) -> String {
     return \"?\"
 }
 
-fn main() {
+fn run() {
     print(describe(Shape.Circle(2.0)))
     print(describe(Shape.Empty))
 }
@@ -998,7 +998,7 @@ fn area(s: Shape) -> Float {
     return 0.0
 }
 
-fn main() {
+fn run() {
     print(area(Shape.Circle(3.0)))
 }
 ";
@@ -1024,7 +1024,7 @@ fn fmt_comptime_splice_stability() {
     // (Expr::ComptimeSplice). The formatter must emit it as `$name` so that
     // the round-trip is stable (previously the `$` would be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive T.Debug {\n    info :: T.reflect()\n    tname :: info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn main() {\n    print(\"ok\")\n}\n";
+    let src = "derive T.Debug {\n    info :: T.reflect()\n    tname :: info.name\n    emit(\"impl $tname {{ fn tag(self) -> String {{ return \\\"ok\\\" }} }}\")\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
     let once = jet::format_source(src).expect("fmt should accept derive with $name in string");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(
@@ -1033,7 +1033,7 @@ fn fmt_comptime_splice_stability() {
     );
 
     // Standalone `$name` expression (outside emit string) round-trips as `$name`.
-    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn main() {}\n";
+    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: $tname\n    emit(\"impl $tname {{ }}\")\n}\n\nfn run() {}\n";
     let splice_once = jet::format_source(splice_src).expect("fmt should accept $name expression");
     assert!(
         splice_once.contains("$tname"),
@@ -1072,7 +1072,7 @@ impl Foo.Greet {
 fn fmt_test_paren_name_stability() {
     // D-TESTPAREN1=A: `#Test("name") { … }` must survive fmt unchanged.
     let src = "\
-fn main() {}
+fn run() {}
 #Test(\"double returns twice\") {
     require_eq(2 * 2, 4)
 }
@@ -1091,7 +1091,7 @@ fn fmt_scope_members_stability() {
     // duration literal and the reason string — and the terminator inserted
     // between two members (`}` then `.name {`) must round-trip.
     let src = "\
-fn main() {
+fn run() {
 
 }
 
@@ -1118,7 +1118,7 @@ fn fmt_explicit_binding_d_bind3_stability() {
     // D-BIND4: `name: Type :: val` (immutable) and `name: Type := val` (mutable)
     // must survive fmt unchanged.
     let src = "\
-fn main() {
+fn run() {
     x: Int :: 42
     s: String := \"hi\"
     print(\"{x} {s}\")
@@ -1138,7 +1138,7 @@ fn main() {
 fn fmt_loop_label_d_looplabel2_stability() {
     // D-LOOPLABEL2=A: `outer@ loop { break outer@ }` must survive fmt unchanged.
     let src = "\
-fn main() {
+fn run() {
     outer@ loop i in [1, 2] {
         loop j in [1, 2] {
             if i == j {
@@ -1159,7 +1159,7 @@ fn main() {
 fn fmt_counted_loop_d_loop_semicolon1_stability() {
     // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` must survive fmt unchanged.
     let src = "\
-fn main() {
+fn run() {
     sum := 0
     loop i := 0; i < 5; i += 1 {
         sum += i
@@ -1187,7 +1187,7 @@ module math {
 
 use math.{clamp, clamp as c2}
 
-fn main() {
+fn run() {
     print(clamp(15, 0, 10))
     print(c2(5, 0, 3))
 }
@@ -1210,7 +1210,7 @@ fn process(input: #Tainted String) -> String {
     return \"{input}-clean\"
 }
 
-fn main() {
+fn run() {
     result :: process(\"hello\")
     print(result)
 }
@@ -1230,7 +1230,7 @@ fn fmt_layout_block_round_trips_byte_for_byte() {
     // round-trips STABILITY, not just idempotence (memory: a prior formatter
     // change silently dropped tokens while only idempotence was checked).
     let src = "\
-fn main() {
+fn run() {
     layout form {
         label.width >= 80.0
         label.right + 16.0 == input.left
@@ -1261,7 +1261,7 @@ fn twice(f: fn()) {
     f()
 }
 
-fn main() {
+fn run() {
     twice {
         print(\"hi\")
     }
@@ -1276,7 +1276,7 @@ fn fmt_preserves_bare_lambda_params() {
     // would be reading noise the ballot explicitly rejects. `(x) => …` stays
     // exactly as written; an already-annotated `(n: Int) => …` also survives.
     let src = "\
-fn main() {
+fn run() {
     nums :: [1, 2, 3, 4, 5]
     big :: nums.filter((x) => x > 3)
     print(big)
@@ -1297,7 +1297,7 @@ struct Incident {
     title: String
 }
 
-fn main() {
+fn run() {
     Incident.{id, severity: sev, ..} :: Incident.{id: 1, severity: 5, title: \"boom\"}
     print(\"{id} {sev}\")
 }
@@ -1315,7 +1315,7 @@ struct Incident {
     kind: String
 }
 
-fn main() {
+fn run() {
     routed :: Incident.{title: \"database down\", kind: \"page\"}
     if routed == {
         .{ kind: \"page\", title, .. } -> print(\"page {title}\")
@@ -1337,7 +1337,7 @@ fn fmt_preserves_unit_literal() {
     let src = "\
 #UnitFamily(time) { ms, s }
 
-fn main() {
+fn run() {
     a :: 500ms
     print(\"{a.raw()}\")
 }
@@ -1353,7 +1353,7 @@ fn fmt_preserves_range_constraint() {
     let src = "\
 Severity :: distinct Int(0..10);
 
-fn main() {
+fn run() {
     sev :: Severity(3)
     print(\"{sev.raw()}\")
 }
@@ -1369,7 +1369,7 @@ fn fmt_preserves_parse_pattern() {
     // c-fmt data-loss regression class) wouldn't catch the formatter
     // silently dropping it.
     let src = "\
-fn main() {
+fn run() {
     ticket :: \"inc-42-open\"
     if ticket == {
         \"inc-{id:Int}-{status}\" -> { print(\"incident #{id} {status}\") }
@@ -1402,7 +1402,7 @@ fn render(h: Html) {
     print(\"html: {h.text()}\")
 }
 
-fn main() {
+fn run() {
     id :: 42
     run_query(\"select * from t where id = {id}\")
     trusted :: Html.raw(\"<b>audited</b>\")
@@ -1425,7 +1425,7 @@ fn count(n: Int) -> Stream<Int> {
     }
 }
 
-fn main() {
+fn run() {
     loop x in count(3) {
         print(\"{x}\")
     }
@@ -1440,7 +1440,7 @@ fn fmt_preserves_chained_comparison() {
     // must survive byte-for-byte — single spaces around each operator, no
     // operand dropped, no extra parens inserted between pairs.
     let src = "\
-fn main() {
+fn run() {
     sev :: 5
     if 0 <= sev < 10 {
         print(\"in range\")
@@ -1462,7 +1462,7 @@ fn fmt_preserves_capbundle_markers() {
 
 @Printable @CodableAsBase CustomerId :: distinct Int;
 
-fn main() {
+fn run() {
     a :: Usd(100)
     print(a.raw())
 }
@@ -1482,7 +1482,7 @@ fn fmt_preserves_contracts() {
     return cents + 5
 }
 
-fn main() {
+fn run() {
     print(\"{(add_fee(100))}\")
 }
 ";
@@ -1496,7 +1496,7 @@ fn fmt_preserves_persist() {
     let src = "\
 @Persist const counter = 0
 
-fn main() {
+fn run() {
     print(\"{counter}\")
 }
 ";
@@ -1514,7 +1514,7 @@ fn log_all(parts: ...Renderable) {
     }
 }
 
-fn main() {
+fn run() {
     log_all(1, \"two\", true)
 }
 ";
@@ -1534,7 +1534,7 @@ fn log_all(prefix: String, parts: ...[Renderable]) {
     }
 }
 
-fn main() {
+fn run() {
     log_all(\"first:\", 1, \"two\")
     log_all(\"second:\", 3.5, false, \"x\")
 }
@@ -1567,7 +1567,7 @@ fn fmt_preserves_view_call_range_args() {
     // (own-CLAUDE-memory rule: new syntax needs a formatter round-trip test,
     // not just a parser).
     let src = "\
-fn main() {
+fn run() {
     incidents: [Int] := [1, 2, 3]
     window :: incidents.view(0..2)
     print(window.len())
@@ -1586,7 +1586,7 @@ fn fmt_preserves_uninit_sentinel() {
     let src = "\
 use core.mem
 
-fn main() {
+fn run() {
     n: Int := uninit
     n = 99
     print(n)
@@ -1613,7 +1613,7 @@ fn describe(source: String, kind: String) {
     print(s.text)
 }
 
-fn main() {
+fn run() {
     describe(\"a\", \"b\")
 }
 ";
@@ -1643,7 +1643,7 @@ struct Meters {
     }
 }
 
-fn main() {
+fn run() {
     m :: Meters.{value: 7}
     print(\"{square(4)} {double(5)} {m.plus(3)}\")
 }
@@ -1664,7 +1664,7 @@ fn fmt_target_web_marker_stability() {
     // captured span (same treatment as `#PubFile`) — it renders at a fixed
     // canonical position right after imports, not wherever the author
     // originally wrote it.
-    let src = "use core.io as io\n#Target(Web)\n\nfn main() {\n    io.print(\"hi\")\n}\n";
+    let src = "use core.io as io\n#Target(Web)\n\nfn run() {\n    io.print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#Target(Web) marker");
 }
 
@@ -1672,7 +1672,7 @@ fn fmt_target_web_marker_stability() {
 fn fmt_html_marker_stability() {
     // D-HTMLPAIR1=A: `#Html(\"path.html\")` — same marker family as
     // `#Target(Web)`, same fixed-position treatment.
-    let src = "use core.ui as ui\n#Target(Web)\n\n#Html(\"dashboard.html\")\n\nfn main() {\n    ui.print(\"hi\")\n}\n";
+    let src = "use core.ui as ui\n#Target(Web)\n\n#Html(\"dashboard.html\")\n\nfn run() {\n    ui.print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#Html(...) marker");
 }
 
@@ -1681,7 +1681,7 @@ fn fmt_os_target_marker_stability() {
     // D-OSTARGET1=A: `#Target(Os.Linux)` precedes the `impl` block it gates,
     // on its own line — item-scoped, not file-scoped, so (unlike the two
     // markers above) it keeps the author's own position.
-    let src = "trait Backend {\n    fn label(self) -> String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(Os.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) -> String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn main() {\n    print(\"hi\")\n}\n";
+    let src = "trait Backend {\n    fn label(self) -> String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(Os.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) -> String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn run() {\n    print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#Target(Os.Linux) marker");
 }
 
@@ -1698,7 +1698,7 @@ fn fmt_pub_file_precedes_imports() {
     // import it gates produced `priv use …` with no preceding `#PubFile`,
     // which doesn't even reparse (E0413). `#PubFile` must render before
     // imports, not after.
-    let src = "#PubFile\n\nuse core.io\n\nfn main() {\n    print(\"hi\")\n}\n";
+    let src = "#PubFile\n\nuse core.io\n\nfn run() {\n    print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#PubFile before imports");
 }
 
@@ -1710,7 +1710,7 @@ fn fmt_verbatim_derive_body_comment_not_duplicated() {
     // body. The next item's `emit_leading` then found that comment
     // "unconsumed" and re-emitted it a second time before `#Label struct
     // Cube` — the comment kept duplicating on every subsequent fmt pass.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    emit(\"impl $lbl {{ fn label(self) -> String {{ return \\\"$lbl\\\" }} }}\")\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn main() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    emit(\"impl $lbl {{ fn label(self) -> String {{ return \\\"$lbl\\\" }} }}\")\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),
@@ -1729,7 +1729,7 @@ fn fmt_preserves_call_spread() {
     // that flag, so every spread call argument silently lost its `...` on
     // the first fmt pass (a real behavior change: `join("tags:", ...parts)`
     // reformatted to `join("tags:", parts)`, which then fails to type-check).
-    let src = "fn join(prefix: String, msgs: ...String) -> String {\n    return [prefix, ...msgs].join(\" \")\n}\n\nfn main() {\n    parts: [String] := [\"one\", \"two\"]\n    b :: join(\"tags:\", ...parts)\n    print(b)\n}\n";
+    let src = "fn join(prefix: String, msgs: ...String) -> String {\n    return [prefix, ...msgs].join(\" \")\n}\n\nfn run() {\n    parts: [String] := [\"one\", \"two\"]\n    b :: join(\"tags:\", ...parts)\n    print(b)\n}\n";
     assert_fmt_stable(src, "call-argument spread");
 }
 
@@ -1738,7 +1738,7 @@ fn fmt_preserves_trait_associated_type() {
     // D-LIB2: `fmt_trait` only ever walked `t.methods`, never
     // `t.assoc_types` — a trait's `type Elem` associated-type declaration
     // was silently dropped on every fmt pass.
-    let src = "trait Indexed {\n    type Elem\n    fn at(self, i: Int) -> Elem\n    fn count(self) -> Int\n}\n\nstruct Nums {\n    vals: [Int]\n}\n\nimpl Nums.Indexed {\n    type Elem = Int\n\n    fn at(self, i: Int) -> Int {\n        return self.vals[i]\n    }\n\n    fn count(self) -> Int {\n        return self.vals.len()\n    }\n}\n\nfn main() {\n    n :: Nums.{vals: [10, 20, 30]}\n    print(n.at(0))\n    print(n.count())\n}\n";
+    let src = "trait Indexed {\n    type Elem\n    fn at(self, i: Int) -> Elem\n    fn count(self) -> Int\n}\n\nstruct Nums {\n    vals: [Int]\n}\n\nimpl Nums.Indexed {\n    type Elem = Int\n\n    fn at(self, i: Int) -> Int {\n        return self.vals[i]\n    }\n\n    fn count(self) -> Int {\n        return self.vals.len()\n    }\n}\n\nfn run() {\n    n :: Nums.{vals: [10, 20, 30]}\n    print(n.at(0))\n    print(n.count())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on trait assoc types");
     assert!(
         out.contains("type Elem\n"),
@@ -1756,7 +1756,7 @@ fn fmt_preserves_pure_callback_bound_sigil() {
     // `#` directive-plane prefix instead — every `f: @Pure fn(T) -> U`
     // parameter type downgraded to the retired `#Pure fn(T) -> U` spelling
     // on the first fmt pass, which then fails to parse (E0062).
-    let src = "fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {\n    return items.map((x) => f(x))\n}\n\nfn main() {\n    doubled :: transform([1, 2, 3], (n: Int) => n * 2)\n    print(\"{doubled}\")\n}\n";
+    let src = "fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {\n    return items.map((x) => f(x))\n}\n\nfn run() {\n    doubled :: transform([1, 2, 3], (n: Int) => n * 2)\n    print(\"{doubled}\")\n}\n";
     assert_fmt_stable(src, "@Pure callback bound");
 }
 
@@ -1768,7 +1768,7 @@ fn fmt_preserves_int_literal_radix() {
     // destroying the radix the author chose (same failure class as a dropped
     // token; caught decimalizing examples/features/parsing/binary-reader.jet
     // and the crypto examples' key material).
-    let src = "fn main() {\n    packet: [U8] :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]\n    big :: 1_000_000\n    print(\"{packet.len()} {big}\")\n}\n";
+    let src = "fn run() {\n    packet: [U8] :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]\n    big :: 1_000_000\n    print(\"{packet.len()} {big}\")\n}\n";
     assert_fmt_stable(src, "int literal radix");
 }
 
@@ -1781,7 +1781,7 @@ fn fmt_preserves_web_partition_markers() {
     // cross-partition checks: web_showcase_dashboard_roundtrip and
     // web_compute_wasm_bridge_roundtrip in tests/web_build.rs went red after
     // the #177 §5 tree reformat.
-    let src = "#Js\nfn render_stat(label: String) -> String {\n    return \"<div>{label}</div>\"\n}\n\n#Wasm\nfn crunch(n: Int) -> Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) -> Int {\n    return crunch(n)\n}\n\nfn main() {\n    print(\"{bridge_total(4)}\")\n}\n";
+    let src = "#Js\nfn render_stat(label: String) -> String {\n    return \"<div>{label}</div>\"\n}\n\n#Wasm\nfn crunch(n: Int) -> Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) -> Int {\n    return crunch(n)\n}\n\nfn run() {\n    print(\"{bridge_total(4)}\")\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on web partition markers");
     for tag in ["#Js\n", "#Wasm\n", "#WasmExport\n"] {
         assert!(

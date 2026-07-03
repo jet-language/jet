@@ -43,7 +43,7 @@ fn compute() -> Int {
     return 1
 }
 
-fn main() {
+fn run() {
     print("{compute()}")
 }
 "#;

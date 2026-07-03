@@ -281,7 +281,7 @@ fn jet_cli_infers_web_target_from_file_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\nuse core.ui as ui\nfn main() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
+        "#Target(Web)\nuse core.ui as ui\nfn run() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
     )
     .unwrap();
 
@@ -328,7 +328,7 @@ fn jet_cli_infers_web_target_from_manifest() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use core.ui as ui\nfn main() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
+        "use core.ui as ui\nfn run() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
     )
     .unwrap();
 
@@ -373,7 +373,7 @@ fn jet_cli_run_never_infers_web_target_from_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         &dir.join("app.jet"),
-        "#Target(Web)\nfn main() {\n    print(\"native\")\n}\n",
+        "#Target(Web)\nfn run() {\n    print(\"native\")\n}\n",
     )
     .unwrap();
 
@@ -410,7 +410,7 @@ fn jet_cli_uses_explicit_html_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#Html(\"custom.html\")\nfn main() {}\n",
+        "#Target(Web)\n#Html(\"custom.html\")\nfn run() {}\n",
     )
     .unwrap();
     // A sibling `app.html` exists too — the explicit marker must win over it.
@@ -454,7 +454,7 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#Html(\"does_not_exist.html\")\nfn main() {}\n",
+        "#Target(Web)\n#Html(\"does_not_exist.html\")\nfn run() {}\n",
     )
     .unwrap();
 

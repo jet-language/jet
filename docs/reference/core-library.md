@@ -26,7 +26,7 @@ use core.fs as fs
 use core.io as io
 use core.env as env
 
-fn main() {
+fn run() {
     args :: io.args()
     if args.len() < 2 {
         io.eprint("usage: greet <name>")
@@ -88,7 +88,7 @@ result — with `?`, `??`, or a pattern test:
 ```jet
 use core.fs as fs
 
-fn main() {
+fn run() {
     text :: fs.read("data.txt") ?? return   // stop on error
     upper :: text.to_upper()
     fs.write("out.txt", upper) ?? panic("couldn't save")  // bug if this fails
@@ -150,7 +150,7 @@ Whole-file helpers only (streaming I/O added in E2-M7). Paths are plain
 ```jet
 use core.fs as fs
 
-fn main() {
+fn run() {
     path :: "/tmp/notes.txt"
     fs.write(path, "hello\n") ?? return
     fs.append(path, "world\n") ?? return
@@ -199,7 +199,7 @@ hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
 ```jet
 use core.io as io
 
-fn main() {
+fn run() {
     args :: io.args()                    // [String]; index 0 is the program name
     name :: io.input("your name? ") ?? return  // reads one line, strips newline
     print("hi, {name}")
@@ -238,7 +238,7 @@ instead of hand-walking `[String]`:
 ```jet
 use core.args as args
 
-fn main() {
+fn run() {
     spec :: args.spec()
         .flag("verbose", "print extra detail")
         .option("output", "write result to FILE", "FILE")
@@ -295,7 +295,7 @@ struct Point {
     }
 }
 
-fn main() {
+fn run() {
     p :: Point.{ x: 3, y: 4 }
     v :: reflect.of(p)
     print(v.type_name())    // "Point"
@@ -333,7 +333,7 @@ Example: `examples/features/reflection/reflect-value.jet`.
 ```jet
 use core.env as env
 
-fn main() {
+fn run() {
     home :: env.home_dir()               // String? — may be null
     mode :: env.get("MODE") ?? "dev"     // String? from the environment
     env.set("MODE", "prod")              // set for child processes
@@ -358,7 +358,7 @@ fn main() {
 ```jet
 use core.process as process
 
-fn main() {
+fn run() {
     result :: process.run(["echo", "hi"]) ?? return
     print(result.code)       // exit code as Int
     print(result.output)     // stdout as String
@@ -381,7 +381,7 @@ fn main() {
 ```jet
 use core.math as math
 
-fn main() {
+fn run() {
     print(math.sqrt(2.0))
     print(math.pow(2.0, 10.0))
     print(math.abs(-3))                     // works on Int and Float
@@ -414,7 +414,7 @@ column-major. Operators `+`/`-` are element-wise, `*` is element-wise on vectors
 (Hadamard) / matrix-multiply on matrices, and `Mat * Vec` transforms a vector.
 
 ```jet
-fn main() {
+fn run() {
 a: Vec3 :: Vec3(1.0, 2.0, 3.0)
 b: Vec3 :: Vec3(4.0, 5.0, 6.0)
 sum: Vec3 :: a + b
@@ -452,7 +452,7 @@ lower to a safe scalar-array fallback (no intrinsics, no `std::simd` gate) — a
 portable-SIMD backend can replace it later behind the same surface.
 
 ```jet
-fn main() {
+fn run() {
 v: F32x4 :: F32x4(1.0, 2.0, 3.0, 4.0)
 w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
 s: F32x4 :: v + w
@@ -481,7 +481,7 @@ s: F32x4 :: v + w
 ```jet
 use core.random as random
 
-fn main() {
+fn run() {
     random.seed(42)                         // make the sequence repeatable
     print(random.int(1, 6))                 // inclusive range (like dice)
     print(random.float())                   // 0.0 .. 1.0
@@ -513,7 +513,7 @@ through it — the seed makes the stream reproducible on every machine:
 @Pure fn roll(rng: ~Rng) -> Int {
     return rng.int(1, 6)            // inclusive; advances the stream (needs ~Rng)
 }
-fn main() {
+fn run() {
     r := random.rng(42)            // same seed → same draws everywhere
     print(roll(~r))
 }
@@ -542,7 +542,7 @@ formatting (use `core.time` for calendars).
 ```jet
 use core.time as time
 
-fn main() {
+fn run() {
     started :: time.now()                // milliseconds since 1970-01-01 UTC
     time.sleep(100)                      // pause ~100 ms (blocking)
     sw :: time.start()                   // Stopwatch
@@ -575,7 +575,7 @@ result is reproducible:
 @Pure fn at(clock: Clock) -> Int {
     return clock.now()             // current value in ms; pure read
 }
-fn main() {
+fn run() {
     c :: time.clock(1000)          // a Clock starting at 1000 ms
     print(at(c))                   // 1000, on every machine
 }
@@ -619,7 +619,7 @@ Every format speaks the same two verbs: `parse` (text → value) and `to_string`
 ```jet
 use core.encoding
 
-fn main() {
+fn run() {
     raw :: "{\"name\":\"jet\",\"ok\":true,\"n\":1.5}"
     data :: encoding.json.parse(raw) ?? return
     print(encoding.json.to_string(data))           // compact one line
@@ -696,7 +696,7 @@ struct Order {
     note: String?                          // absent optional is omitted on the wire
 }
 
-fn main() {
+fn run() {
     o :: Order.{ id: 7, who: "Ada", items: ["pen", "ink"], note: null }
     print(json.to_string(o))               // {"id":7,"customer":"Ada","items":["pen","ink"]}
 
@@ -806,7 +806,7 @@ fn sum_range(first: Int, last: Int) -> Int {
     return total
 }
 
-fn main() {
+fn run() {
     a :: tasks.spawn(() => sum_range(1, 25))
     b :: tasks.spawn(() => sum_range(26, 50))
     c :: tasks.spawn(() => sum_range(51, 75))
@@ -820,7 +820,7 @@ Channels carry one type:
 ```jet
 use core.tasks as tasks
 
-fn main() {
+fn run() {
 ch: Channel<Int> :: tasks.channel()
     sender :: ch.sender()
     task :: tasks.spawn(take(sender) () => {
@@ -871,7 +871,7 @@ range).
 ```jet
 use core.regex as re
 
-fn main() {
+fn run() {
     text :: "order 42 shipped"
     print(re.is_match("\\d+", text) ?? panic("bad pattern"))   // true
 
@@ -930,7 +930,7 @@ re-runs every subscriber.
 ```jet
 use core.reactive as reactive
 
-fn main() {
+fn run() {
     price :: reactive.signal(100)
     qty :: reactive.signal(2)
     total :: reactive.derived(() => (price.get() * qty.get()))
@@ -970,7 +970,7 @@ many values into one buffer and frees them all at once.
 ```jet
 use core.mem
 
-fn main() {
+fn run() {
     arena :: mem.Arena.new()             // or .new(capacity: 4096)
     x :: arena.alloc(42)                 // x is a *view* into the arena
     y :: arena.alloc("hi")
@@ -999,7 +999,7 @@ narrower than the function — write an explicit **`region r { … }`** block:
 ```jet
 use core.mem
 
-fn main() {
+fn run() {
     region scratch {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
@@ -1028,7 +1028,7 @@ Turn text into values and split it into lines. `to_int` is fallible — it retur
 the same `Int ? ParseError` result `Int.parse` does, so handle it with `?`/`??`.
 
 ```jet
-fn main() {
+fn run() {
     n :: "42".to_int() ?? -1                 // 42
     bad :: "oops".to_int() ?? -1             // -1 (parse failed → fallback)
     print(n + bad)
@@ -1057,7 +1057,7 @@ grammar (D-PARSESTR1) in consume mode: it matches a *prefix* of the remaining
 text and returns the typed holes. A miss is an ordinary error value.
 
 ```jet
-fn main() {
+fn run() {
     c :: Cursor.over("  inc-4411 sev 3: disk full\n")
     c.skip_ws()
     m :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("bad line")
@@ -1083,7 +1083,7 @@ The `U8` type holds one byte (0–255). Literals outside that range are a compil
 error (**E1003**).
 
 ```jet
-fn main() {
+fn run() {
 b: U8 :: 255
     print(b.to_int())                       // 255 as Int
     n :: 42.to_u8() ?? return              // checked conversion
@@ -1110,7 +1110,7 @@ panic or silent truncation. This is the "shift" kernel of linear wire-format
 parsing, without a dedicated operator.
 
 ```jet
-fn main() {
+fn run() {
     packet: [U8] :: [0x2a, 0x00, 0x00, 0x00, 0x03, 0x00]
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("short")   // 42
@@ -1154,7 +1154,7 @@ a result outside the type's range stops the program with a Jet panic instead of
 silently wrapping. Opt a single op out at the use site:
 
 ```jet
-fn main() {
+fn run() {
 hi: U8 :: 200
 lo: U8 :: 100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
