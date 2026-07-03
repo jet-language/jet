@@ -5785,12 +5785,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "deciding",
       "priority": "P2",
       "workOrder": 90,
       "plan": "tools/Tower/docs/plans/epoch-3/reactive-ui-stack.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Phase 9 done end-to-end (committed 771d8562, full suite green): 9.1/9.2 housekeeping + formatter gap closed (found jet fmt silently DELETING #Target/#Html markers — fixed + stability tests; fixed two stale #Html example paths), 9.3 #Target(Os.*) impl gating live (OsTarget sema pass, E-OSTARGET-MIXED-AXIS / E-OSTARGET-UNMATCHED-CALL as signature-level check, active-OS codegen filter, example+goldens+cross.rs). Card moves to DECIDING — all remaining work owner-gated: D-STYLEUNIT1 (open), new D-UIDEVSHELL1 (Phase 8 toolkit deps), new D-OSTARGET2 (ungated dispatch to OS-gated impls). Pre-existing bugs noted, untouched: #PubFile formatter reorder breaks idempotence; Type.{} zero-field construction E0119."
+        },
         {
           "at": "2026-07-02",
           "by": "agent",
@@ -5925,7 +5930,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-02",
+      "updated": "2026-07-03",
       "decisions": [
         {
           "id": "D-STYLEUNIT1",
@@ -5969,6 +5974,68 @@
             }
           ],
           "rec": "A — reuses the one ratified unit mechanism (D-QUAL3 + D-UNITLIT1), so `320px` is compile-checked with zero ceremony and no second style-only unit system (I8)."
+        },
+        {
+          "id": "D-UIDEVSHELL1",
+          "cardId": "c2qj06uq",
+          "status": "open",
+          "title": "Phase 8 native UI backends: how do GTK/AppKit/Win32 toolchain deps enter the dev environment?",
+          "gist": "Building a real native UI backend needs OS toolkit headers/libs the dev shell does not have; decide how they get there.",
+          "story": "Hank wants the reactive UI showcase to open a real Linux window instead of the web renderer. The compiler side (OS gating, renderer seam) is ready, but the flake devShell has no GTK headers or pkg-config, so nothing can link. Nothing an agent does can proceed until the dependency route is chosen.",
+          "inWild": "#Target(Os.Linux)\nimpl GtkBackend: JetBackend {\n    fn mount(root: Node) { /* #Extern gtk4 calls */ }\n}\n// jet build  ->  error: linking with cc failed: cannot find -lgtk-4",
+          "comparisons": "Rust gtk4-rs: system gtk4 via pkg-config, user installs it (apt/brew/nix). Tauri: webview system dep, documented per-OS. Flutter: bundles its own engine (huge, but zero system deps).",
+          "options": [
+            {
+              "key": "A",
+              "name": "nixpkgs devShell deps now (recommended)",
+              "detail": "Add gtk4 + pkg-config (Linux) to the flake devShell per the existing owner guidance for native deps (nixpkgs stopgap, jetpack core provider owns it long-term). macOS/Windows backends wait for contributors on those hosts. Non-Nix users get a clear \"install gtk4\" message.",
+              "code": "# flake.nix devShell\nbuildInputs = [ gtk4 pkg-config ];\n\n# then Phase 8 builds:\nnix develop -c jet run ui_showcase.jet   # real window"
+            },
+            {
+              "key": "B",
+              "name": "Defer Phase 8 to Epoch 4",
+              "detail": "Ship Epoch 3 UI as web-renderer only; native backends land with the jetpack core provider that owns native deps properly.",
+              "code": "// e3: web target stays the only real renderer\njet build --target=web ui_showcase.jet"
+            },
+            {
+              "key": "C",
+              "name": "Headless native backend first",
+              "detail": "Build the native backend against a stub/offscreen renderer (no toolkit linkage) so the seam is exercised end-to-end; real toolkits follow later behind A or B.",
+              "code": "#Target(Os.Linux)\nimpl HeadlessBackend: JetBackend { /* draws to a buffer, asserts in tests */ }"
+            }
+          ],
+          "rec": "A — matches the ratified native-deps guidance (nixpkgs stopgap while jetpack matures); unblocks Phase 8 for the primary dev host without new invariant pressure."
+        },
+        {
+          "id": "D-OSTARGET2",
+          "cardId": "c2qj06uq",
+          "status": "open",
+          "title": "How does ungated code get \"the impl for this OS\"?",
+          "gist": "#Target(Os.*) now gates impls, but plain main has no ratified way to construct/dispatch to whichever gated impl survived the build.",
+          "story": "Doris writes a desktop app. She gates LinuxBackend and MacosBackend impls per D-OSTARGET1. Now her ungated main needs a backend value. Constructing LinuxBackend directly in main is (correctly) E-OSTARGET-UNMATCHED-CALL — main is not Linux-only. There is no blessed way to say \"give me the one that matched this build.\"",
+          "inWild": "#Target(Os.Linux)\nimpl LinuxBackend: JetBackend { ... }\n#Target(Os.Macos)\nimpl MacosBackend: JetBackend { ... }\n\nfn main() {\n    b :: ???            // needs: the surviving backend for this build\n    app.mount(b)\n}",
+          "comparisons": "Rust: #[cfg(target_os)] on a fn returning Box<dyn Backend> — each cfg variant defines the same fn, exactly one compiles. Go: build tags per file, one file defines newBackend() per OS. Zig: comptime switch on builtin.os.",
+          "options": [
+            {
+              "key": "A",
+              "name": "fn-level #Target(Os.*) + one-survivor rule (recommended)",
+              "detail": "Extend gating to fns: several fns share one name/signature, each gated to a different OS, exactly one survives per build; ungated code calls it like any fn. Missing an OS the build targets = compile error listing covered OSes. Mirrors Rust cfg/Go build tags; no new expression syntax.",
+              "code": "#Target(Os.Linux)\nfn backend() -> JetBackend { return LinuxBackend.{} }\n#Target(Os.Macos)\nfn backend() -> JetBackend { return MacosBackend.{} }\n\nfn main() {\n    app.mount(backend())    // ungated, resolves to the survivor\n}"
+            },
+            {
+              "key": "B",
+              "name": "Comptime OS switch expression",
+              "detail": "A compiler-known comptime value (e.g. build.os) usable in a match whose non-matching arms are discarded before OS-gating checks run. More general (any per-OS choice), but new comptime surface + a second way to express what A does (I8 pressure).",
+              "code": "b :: match build.os {\n    .Linux -> LinuxBackend.{}\n    .Macos -> MacosBackend.{}\n}"
+            },
+            {
+              "key": "C",
+              "name": "Status quo — gated modules own the choice",
+              "detail": "Ungated code never touches gated types; each app ships a per-OS gated module exporting a common fn. Works today only if fn-level gating exists somewhere, which it does not — effectively forces apps to gate their whole main, hollowing the check.",
+              "code": "// every call chain from main must itself be OS-gated — main per OS."
+            }
+          ],
+          "rec": "A — smallest ratified-shape extension (same marker, fns instead of impls), proven pattern in Rust/Go, keeps one dispatch idiom (I8)."
         }
       ]
     },
