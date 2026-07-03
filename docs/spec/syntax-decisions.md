@@ -1247,15 +1247,17 @@ expr }` (converter: inline `via` → `impl Old -> New` in scope → E0910); no
 machinery (json/csv/toml/yaml); `DecodeResult<T> = { value: T, migration:
 MigrationStatus }`, `MigrationStatus = { migrated: Bool, from: String, steps:
 [String] }`. `decode` unchanged (I8, zero cost for callers not asking).
-`.migrated` is always `false` today (no snapshot-of-old-data runtime
-conversion exists yet to set it true) — reachable cases are a plain type and a
-`@PublishedSchema` type decoding fresh data.
-**D-MIGRATE4 (=A, ratified 2026-07-03, c105migrate4)**: the runtime half —
-codegen lowers each `migration { }` block to a step function; decoding a
-`@PublishedSchema` type first tries the current shape, on mismatch walks
-the chain oldest→current applying steps. Plain `decode` applies silently;
-`decode_traced` records `from` + `steps`. Zero cost for types without
-migrations. Supersedes the "always false today" caveat above once built.
+`.migrated` is `false` for a plain type and for a `@PublishedSchema` type
+decoding fresh (current-shape) data; the migrated cases are D-MIGRATE4.
+**D-MIGRATE4 (=A, ratified 2026-07-03, c105migrate4; shipped)**: the runtime
+half — codegen lowers each `migration { }` block to a step function; decoding
+a `@PublishedSchema` type first tries the current shape (prefer-newest
+ambiguity rule), on mismatch detects the source shape by field-name set
+(newest matching historical shape wins) and walks the chain oldest→current
+applying steps. Plain `decode` applies silently; `decode_traced` records
+`from` + `steps` (positional labels: `v1` oldest, steps `"v1->v2"`). No
+matching shape → the ordinary decode error. Zero cost for types without
+migrations. Runtime semantics: spec.md "Runtime migration chain".
 
 **D-EXPANDCLI1 (=A, ratified 2026-07-03, c183expand)**: the transparency
 command is `jet expand --facts <lens> <file>`; bare `jet expand <file>`

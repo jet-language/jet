@@ -38,6 +38,10 @@ pub(crate) struct Cx {
     /// Recursive-type edges that need `Box<…>` in Rust (`(owner, edge_key)`).
     pub(crate) boxed_edges: HashSet<(String, String)>,
     pub(crate) cloneable: HashSet<String>,
+    /// D-MIGRATE4: `migration TypeName { … }` blocks per type, in source order
+    /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
+    /// the runtime step functions + `jet_decode_traced` chain-walker.
+    pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
     /// D-SOA1: struct names declared `#layout(columnar)`. A `[S]` of such a
     /// struct lowers to the generated `user_<S>_columns` struct-of-arrays type;
     /// `rust_type` maps the list type and the list ops route to its inherent API.
@@ -865,6 +869,7 @@ pub(crate) fn build_cx_items(
         variant_owner: HashMap::new(),
         boxed_edges: HashSet::new(),
         cloneable: HashSet::new(),
+        migrations: HashMap::new(),
         columnar: HashSet::new(),
         comparable: HashSet::new(),
         partial_ord: HashSet::new(),
@@ -1045,8 +1050,17 @@ pub(crate) fn build_cx_items(
             }
             // D-QUAL2: a tag erases — it contributes no codegen names.
             Item::Tag(_) => {}
+            // D-MIGRATE4: collect migration blocks per type (source order = the
+            // chain, oldest step first) so `emit_struct_migration` can emit the
+            // runtime step functions + chain-walker for decodable
+            // `@PublishedSchema` types. Types without blocks get nothing.
+            Item::Migration(m) => {
+                cx.migrations
+                    .entry(m.type_name.clone())
+                    .or_default()
+                    .push(m.clone());
+            }
             Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
-            | Item::Migration(_) // D-MIGRATE1
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)

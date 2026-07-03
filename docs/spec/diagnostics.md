@@ -1291,9 +1291,10 @@ E0910 is the umbrella for every such case; the what/why/fix is case-specific.
 D-MIGRATE2B converter resolution for `change`: (1) the inline `via { … }`, else
 (2) an `impl Old -> New` in scope (the same surface as D-ERR-CONV), else (3) E0910.
 D-MIGRATE2F: reordering fields is keyed by name, never a breaking change — no op,
-no error. The runtime `from_vXXX` data conversion (reading old records through the
-declared converter/default) is the Build-tier versioning library (follow-on #11);
-E0910 checks intent only.
+no error. E0910 checks intent; the runtime data conversion (reading old records
+through the declared converter/default at decode time) is the D-MIGRATE4 chain
+(spec.md "Runtime migration chain") and reuses ordinary decode errors — no new
+diagnostic.
 
 ### E0911 — Unknown migration verb
 

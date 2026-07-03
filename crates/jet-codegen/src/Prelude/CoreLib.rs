@@ -728,18 +728,18 @@ mod jet_std {
         fn jet_show(&self) -> String { render_datatree_json(self, false, 0) }
     }
 
-    // D-MIGRATE3=A: decode-time migration transparency. `decode_traced<T>` sits
-    // beside `decode<T>` on every codec that shares this decode machinery;
-    // `decode` itself is byte-for-byte unchanged (I8, zero cost for callers not
-    // asking). `.migrated` is false and `.from`/`.steps` are empty both for
-    // fresh data and for any non-`@PublishedSchema` type; today that is the
-    // only case there is to report — `@PublishedSchema` + `migration { }` is a
-    // sema-only intent check (E0910) with no runtime data conversion yet (see
-    // `docs/spec/spec.md`'s migrations section / SchemaMigration.rs), so a real
-    // record read through an old shape still needs the shape to satisfy the
-    // current struct exactly. `MigrationStatus` reports what actually happened
-    // at decode time, honestly, and starts reporting migrations the moment
-    // that runtime engine lands, with no call-site change.
+    // D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency plus the
+    // runtime engine. `decode_traced<T>` sits beside `decode<T>` on every codec
+    // that shares this decode machinery. Decoding a `@PublishedSchema` type
+    // with `migration { }` blocks tries the current shape first; on mismatch
+    // the type's generated `jet_decode_traced` override detects which
+    // historical shape the data's key set matches and walks the step functions
+    // forward (oldest matching version → current). Plain `decode` walks the
+    // same chain silently; `decode_traced` reports it here — `migrated`,
+    // `from` (the source shape's version label), and `steps` (one entry per
+    // step applied, "v1->v2" style). Types without migrations keep the trait's
+    // default identity path: `migrated` false, `from`/`steps` empty, no
+    // per-type code emitted.
     #[derive(Clone, Debug, PartialEq)]
     pub struct MigrationStatus {
         pub migrated: bool,
@@ -757,6 +757,16 @@ mod jet_std {
     pub struct DecodeResult<T> {
         pub value: T,
         pub migration: MigrationStatus,
+    }
+
+    /// D-MIGRATE4: the sorted set of top-level object keys of a `DataTree`, used
+    /// by a `@PublishedSchema` type's migration chain-walker to detect which
+    /// historical shape a decoded record matches. A non-object tree has no keys.
+    pub fn jet_datatree_key_set(t: &DataTree) -> std::collections::BTreeSet<String> {
+        match t {
+            DataTree::Object(pairs) => pairs.iter().map(|(k, _)| k.clone()).collect(),
+            _ => std::collections::BTreeSet::new(),
+        }
     }
 
     // D-SERDE-ACCESS=B: dynamic accessor methods on DataTree.
@@ -3681,6 +3691,18 @@ pub trait user_Encode {
 #[allow(non_camel_case_types)]
 pub trait user_Decode: Sized {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>;
+    /// D-MIGRATE4: decode this value, reporting whether it arrived as an older
+    /// `@PublishedSchema` shape and was walked forward through the migration
+    /// chain. The default is the zero-cost identity: no migrations declared, so
+    /// decode the current shape and report `fresh`. Codegen overrides this only
+    /// for a `@PublishedSchema` type that has `migration { }` blocks and a
+    /// runtime decode path — every other type keeps this default, so no
+    /// per-type code is emitted and the decode path is byte-for-byte unchanged.
+    fn jet_decode_traced(
+        tree: &jet_std::DataTree,
+    ) -> Result<(Self, jet_std::MigrationStatus), jet_std::DecodeError> {
+        Ok((Self::jet_decode(tree)?, jet_std::MigrationStatus::fresh()))
+    }
 }
 
 impl user_Encode for i64 {
@@ -3836,14 +3858,19 @@ fn jet_enc_json_to_string_pretty<T: user_Encode>(v: &T) -> String {
 fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
     let j = jet_std::parse_json(text)
         .map_err(|e| jet_std::DecodeError::new(format!("invalid JSON (line {}): {}", e.line, e.message)))?;
-    T::jet_decode(&jet_std::datatree_from_json(&j))
+    // D-MIGRATE4: plain decode walks the same migration chain, silently — the
+    // status is dropped. Types without migrations hit the trait default, which
+    // is exactly `jet_decode` (zero cost).
+    Ok(T::jet_decode_traced(&jet_std::datatree_from_json(&j))?.0)
 }
 
 // D-MIGRATE3=A: `decode_traced<T>` — same decode, wrapped in `DecodeResult` so the
 // caller can ask whether/how it migrated, without `decode` itself paying for it.
 fn jet_enc_json_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
-    let value = jet_enc_json_decode::<T>(text)?;
-    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
+    let j = jet_std::parse_json(text)
+        .map_err(|e| jet_std::DecodeError::new(format!("invalid JSON (line {}): {}", e.line, e.message)))?;
+    let (value, migration) = T::jet_decode_traced(&jet_std::datatree_from_json(&j))?;
+    Ok(jet_std::DecodeResult { value, migration })
 }
 
 // CSV typed decode: header row maps columns to fields by name; each data row
@@ -3864,15 +3891,42 @@ fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, jet_std::
             })
             .collect();
         let tree = jet_std::DataTree::Object(obj);
-        out.push(T::jet_decode(&tree).map_err(|e| jet_std::DecodeError::under(&format!("row {}", i + 1), e))?);
+        // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
+        out.push(T::jet_decode_traced(&tree).map(|(v, _)| v).map_err(|e| jet_std::DecodeError::under(&format!("row {}", i + 1), e))?);
     }
     Ok(out)
 }
 
 // D-MIGRATE3=A: traced sibling of `jet_enc_csv_decode` — see json's for the shape.
 fn jet_enc_csv_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<Vec<T>>, jet_std::DecodeError> {
-    let value = jet_enc_csv_decode::<T>(text)?;
-    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
+    let rows = jet_ring_csv_parse(text).map_err(jet_std::DecodeError::new)?;
+    let mut it = rows.into_iter();
+    let Some(header) = it.next() else {
+        return Ok(jet_std::DecodeResult { value: Vec::new(), migration: jet_std::MigrationStatus::fresh() });
+    };
+    let mut value = Vec::new();
+    // Each row decodes independently; the record-level status is the first row
+    // that actually migrated (a CSV file is one shape per column layout, so a
+    // migrated file migrates uniformly — the first hit describes the batch).
+    let mut migration = jet_std::MigrationStatus::fresh();
+    for (i, row) in it.enumerate() {
+        let obj: Vec<(String, jet_std::DataTree)> = header
+            .iter()
+            .enumerate()
+            .map(|(c, name)| {
+                let cell = row.get(c).cloned().unwrap_or_default();
+                (name.clone(), jet_std::DataTree::Text(cell))
+            })
+            .collect();
+        let tree = jet_std::DataTree::Object(obj);
+        let (v, m) = T::jet_decode_traced(&tree)
+            .map_err(|e| jet_std::DecodeError::under(&format!("row {}", i + 1), e))?;
+        if m.migrated && !migration.migrated {
+            migration = m;
+        }
+        value.push(v);
+    }
+    Ok(jet_std::DecodeResult { value, migration })
 }
 
 // CSV typed encode: `[T]` → header row (field names from the first row's Object)
@@ -3916,13 +3970,16 @@ fn jet_std_toml_render(d: &jet_std::DataTree) -> String { jet_std::toml::render(
 fn jet_enc_toml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
     let tree = jet_std::toml::parse_to_tree(text)
         .map_err(|e| jet_std::DecodeError::new(format!("invalid TOML (line {}): {}", e.line, e.message)))?;
-    T::jet_decode(&tree)
+    // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
+    Ok(T::jet_decode_traced(&tree)?.0)
 }
 
 // D-MIGRATE3=A: traced sibling of `jet_enc_toml_decode` — see json's for the shape.
 fn jet_enc_toml_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
-    let value = jet_enc_toml_decode::<T>(text)?;
-    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
+    let tree = jet_std::toml::parse_to_tree(text)
+        .map_err(|e| jet_std::DecodeError::new(format!("invalid TOML (line {}): {}", e.line, e.message)))?;
+    let (value, migration) = T::jet_decode_traced(&tree)?;
+    Ok(jet_std::DecodeResult { value, migration })
 }
 
 // YAML typed decode: parse flat scalars into a DataTree::Object of Text, then decode.
@@ -3938,13 +3995,16 @@ fn jet_std_yaml_render(d: &jet_std::DataTree) -> String { jet_std::yaml::render(
 fn jet_enc_yaml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
     let tree = jet_std::yaml::parse_to_tree(text)
         .map_err(|e| jet_std::DecodeError::new(format!("invalid YAML (line {}): {}", e.line, e.message)))?;
-    T::jet_decode(&tree)
+    // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
+    Ok(T::jet_decode_traced(&tree)?.0)
 }
 
 // D-MIGRATE3=A: traced sibling of `jet_enc_yaml_decode` — see json's for the shape.
 fn jet_enc_yaml_decode_traced<T: user_Decode>(text: &String) -> Result<jet_std::DecodeResult<T>, jet_std::DecodeError> {
-    let value = jet_enc_yaml_decode::<T>(text)?;
-    Ok(jet_std::DecodeResult { value, migration: jet_std::MigrationStatus::fresh() })
+    let tree = jet_std::yaml::parse_to_tree(text)
+        .map_err(|e| jet_std::DecodeError::new(format!("invalid YAML (line {}): {}", e.line, e.message)))?;
+    let (value, migration) = T::jet_decode_traced(&tree)?;
+    Ok(jet_std::DecodeResult { value, migration })
 }
 fn jet_enc_toml_to_string<T: user_Encode>(v: &T) -> String {
     jet_std::toml::render(&v.jet_encode())

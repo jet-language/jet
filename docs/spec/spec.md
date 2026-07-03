@@ -446,9 +446,8 @@ impl Circle {
 
   A declared op that contradicts the real shape (e.g. `remove f` where `f` still
   exists, `add f` where `f` already existed, a `change` whose from/to types don't
-  match) is itself an E0910-family teaching error. Codegen never lowers the runtime
-  data conversion — reading old records through a converter/default is the
-  Build-tier versioning library (follow-on #11); E0910 checks *intent* only.
+  match) is itself an E0910-family teaching error. E0910 checks *intent*; the
+  runtime data conversion is the D-MIGRATE4 chain below.
   Single-file runs accept the marker but only enforce the check when a project
   snapshot exists.
 
@@ -466,22 +465,55 @@ impl Circle {
   -> DecodeResult<T> ?` sits beside `decode<T>` on every codec that shares this
   decode machinery (json/csv/toml/yaml, D-ENC1). `DecodeResult<T>` is `{ value:
   T, migration: MigrationStatus }`; `MigrationStatus` carries `.migrated: Bool`,
-  `.from` (source schema version), and `.steps` (applied migration names).
-  `decode` itself is unchanged — same call, same cost, for anyone not asking
-  (I8). `.migrated` is `false` and `.from`/`.steps` are empty both for a plain
-  type and for a `@PublishedSchema` type decoding data already shaped like the
-  current struct — that is the only reachable case today, since the runtime
-  conversion above (reading an *old* stored shape through a migration) is not
-  yet built (Build-tier versioning library, follow-on #11); `decode_traced` is
-  fully wired now so no call site changes the day that engine ships.
+  `.from` (the source shape's version label), and `.steps` (one entry per
+  migration step applied, `"v1->v2"` style). `decode` itself is unchanged —
+  same call, same cost, for anyone not asking (I8). `.migrated` is `false` and
+  `.from`/`.steps` are empty for a plain type and for a `@PublishedSchema`
+  type decoding data already shaped like the current struct.
 
   ```jet
   r    :: json.decode_traced<UserRecord>(raw)?
   user :: r.value
   if r.migration.migrated {
-      log.info("record {user.id} arrived as schema v{r.migration.from}")
+      log.info("record {user.id} arrived as schema {r.migration.from}")
   }
   ```
+
+  **Runtime migration chain (D-MIGRATE4=A):** decoding a concrete
+  `@PublishedSchema` type that derives `Decode` and has `migration { }` blocks
+  runs the chain. The blocks, in source order, are the steps: with `K` blocks
+  the historical shapes are `v1` (oldest) … `vK`, and the current struct is
+  `v(K+1)`; each historical shape's field set is derived at compile time by
+  inverting the ops (`add` ⇒ absent before, `remove` ⇒ present before,
+  `rename a -> b` ⇒ `a` before, `change` ⇒ no field-set difference). At decode
+  time:
+
+  1. **Current shape first** — the ordinary decode is tried as-is. Success is
+     the fresh case (`migrated: false`). This is also the ambiguity rule:
+     *prefer the newest matching version*, so data that satisfies the current
+     shape never migrates.
+  2. **Shape detection** — on failure, the data's top-level field-name set
+     (wire keys, after any `#[Rename]`/`#[RenameAll]` treatment) is compared
+     against the historical shapes, newest (`vK`) to oldest (`v1`); the first
+     match wins.
+  3. **Walk forward** — the matched shape's data is rewritten step by step,
+     oldest-matching → current: `rename` moves a key, `remove` drops one,
+     `add` evaluates its default expression and fills the field, `change`
+     decodes the old field type, runs the `via { … }` converter (or the
+     `impl Old -> New` conversion, D-MIGRATE2B), and re-encodes the result.
+     Converter bodies and `add` defaults are ordinary Jet expressions,
+     type-checked and lowered through the normal pipeline. The rewritten data
+     then decodes as the current shape.
+  4. **No match** — the ordinary decode error is returned unchanged (garbage
+     stays garbage).
+
+  Plain `decode` applies the same chain silently; `decode_traced` reports it
+  (`from: "v1"`, `steps: ["v1->v2", "v2->v3"]`, …). Version labels are
+  positional — `v1` is the oldest shape the blocks describe. Types without
+  migration blocks pay nothing: no step functions and no per-type chain code
+  are emitted, and their decode path is unchanged. CSV applies the chain per
+  row (an old-header file migrates every row; the batch-level status reports
+  the first migrated row).
 
 - **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer

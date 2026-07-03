@@ -5167,6 +5167,7 @@ impl<'a> Parser<'a> {
                         ty_span,
                         default,
                         default_span,
+                        default_fn: None,
                     });
                 }
                 // D-MIGRATE2D: `remove field`.
@@ -5213,6 +5214,7 @@ impl<'a> Parser<'a> {
                         to_span,
                         converter,
                         converter_span,
+                        conv_fn: None,
                     });
                 }
                 // D-MIGRATE2D: `drop` → teach `remove` (E0911 teaching error).

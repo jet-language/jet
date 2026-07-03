@@ -710,6 +710,12 @@ pub(crate) fn check_bundle_opts(
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
     // meet the taken arm. Rewrites into a `comptime if` chain (reuses D-WHEN1).
     diags.extend(super::desugar_os_switches(bundle));
+    // D-MIGRATE4: desugar each `change … via { (old) => … }` converter on a
+    // decodable `@PublishedSchema` type into a synthetic top-level converter
+    // function, so the runtime migration step (codegen) can call it. Runs before
+    // registration/checking so those synthetic functions are type-checked and
+    // lowered through the normal pipeline. Sets `conv_fn` on the `change` op.
+    super::desugar_migrations(bundle);
     // D-GENMOD2=A: expand module aliases into concrete CodeModules before any
     // sibling-call mangling or registration sees the items.
     expand_generic_module_aliases(bundle, &mut diags);

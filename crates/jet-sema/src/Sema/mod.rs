@@ -851,7 +851,7 @@ pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.
 pub use Capability::resolve_capabilities;
 pub use CapabilityFreeze::check_capability_freeze;
-pub use SchemaMigration::check_schema_migrations;
+pub use SchemaMigration::{check_schema_migrations, desugar_migrations};
 
 /// D-REACTCORE1: free variable reads in a statement block (for reactive-scope capture cloning).
 pub fn block_free_var_reads(stmts: &[crate::AST::Stmt]) -> HashSet<String> {

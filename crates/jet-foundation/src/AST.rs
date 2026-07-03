@@ -610,7 +610,7 @@ pub struct ErrorConvDef {
 }
 
 /// D-MIGRATE1 (ratified 2026-06-22): `migration TypeName { op; … }` block.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MigrationDecl {
     pub type_name: String,
     pub type_span: Span,
@@ -619,7 +619,7 @@ pub struct MigrationDecl {
 }
 
 /// D-MIGRATE1 / D-MIGRATE2: one operation inside a `migration { }` block.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MigrationOp {
     /// D-MIGRATE1: `rename old_field -> new_field` — declares a field was renamed.
     Rename {
@@ -629,8 +629,9 @@ pub enum MigrationOp {
         to_span: Span,
     },
     /// D-MIGRATE2A: `add f: T = default` — a new field with a default for old
-    /// records. The `default` expr is the value old data is read with; sema only
-    /// checks intent here (the runtime fill is the Build-tier versioning library).
+    /// records. The `default` expr is the value old data is read with; sema
+    /// checks intent, and D-MIGRATE4 lowers the default through `default_fn`
+    /// for the runtime chain.
     Add {
         field: String,
         field_span: Span,
@@ -638,6 +639,11 @@ pub enum MigrationOp {
         ty_span: Span,
         default: Expr,
         default_span: Span,
+        /// D-MIGRATE4: the mangled name of the synthetic zero-arg default
+        /// function this `add` desugars to (`Sema::desugar_migrations`), so the
+        /// runtime step function can evaluate the default. `None` until the
+        /// desugar runs (and for a type with no runtime decode path).
+        default_fn: Option<String>,
     },
     /// D-MIGRATE2D: `remove f` — deletes a field (verb is `remove`, not `drop`).
     Remove { field: String, field_span: Span },
@@ -653,6 +659,11 @@ pub enum MigrationOp {
         to_span: Span,
         converter: Option<Expr>,
         converter_span: Option<Span>,
+        /// D-MIGRATE4: the mangled name of the synthetic top-level converter
+        /// function this `change` desugars to (`Sema::desugar_migrations`), so
+        /// the runtime step function codegen can call it. `None` until the
+        /// desugar runs (and for a type with no runtime decode path).
+        conv_fn: Option<String>,
     },
 }
 

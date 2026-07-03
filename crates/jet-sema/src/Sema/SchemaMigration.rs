@@ -15,18 +15,231 @@
 //!    still exists, `add f` where `f` isn't actually new), so a nonsensical
 //!    migration teaches rather than silently passing.
 //!
-//! NOTE (Build-tier versioning library, follow-on #11): this pass checks *intent*
-//! only. It never codegens the actual `from_vXXX` runtime data conversion — the
-//! `via { … }` converter and `add` default are recorded but not lowered here.
-//! Runtime old-data reading is a named downstream deliverable, not part of c73.
+//! D-MIGRATE4 (ratified 2026-07-03): the runtime half lives in two places —
+//! `desugar_migrations` below rewrites `via { … }` converters and `add`
+//! defaults into synthetic top-level functions (type-checked and lowered
+//! through the normal pipeline), and codegen
+//! (`Codegen/Items.rs::emit_struct_migration`) emits per-block step functions
+//! plus a `jet_decode_traced` chain-walker for each decodable
+//! `@PublishedSchema` type with migration blocks.
 //!
-//! I3: all checking here; codegen sees nothing of migration state.
+//! I3: all checking here; codegen only performs the mechanical lowering.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Schema::load_snapshot;
-use crate::AST::{Item, MigrationOp};
-use std::collections::HashMap;
+use crate::AST::{
+    AccessConvention, Expr, Func, Item, LambdaBody, MigrationOp, Param, ProgramBundle, Stmt, Type,
+};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+
+/// D-MIGRATE4: the mangled name of the synthetic converter function a `change …
+/// via { … }` op lowers to. Deterministic from the type, the migration block's
+/// index (source order, per type), and the field — so codegen and this desugar
+/// agree without a shared side-table.
+fn converter_fn_name(type_name: &str, block_idx: usize, field: &str) -> String {
+    format!("__migrate_conv_{}_{}_{}", type_name, block_idx, field)
+}
+
+/// D-MIGRATE4: the mangled name of the synthetic zero-arg default function an
+/// `add f: T = val` op lowers to. Same determinism contract as
+/// `converter_fn_name`.
+fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String {
+    format!("__migrate_add_{}_{}_{}", type_name, block_idx, field)
+}
+
+/// D-MIGRATE4: rewrite each runtime-relevant migration op on a decodable
+/// `@PublishedSchema` type into synthetic top-level `fn`s so the runtime step
+/// functions (codegen, `Codegen/Items.rs::emit_struct_migration`) can call
+/// them, and so the op expressions are type-checked and lowered through the
+/// normal pipeline:
+///   - `change … via { (old) => body }` → `fn __migrate_conv_<T>_<i>_<f>(old: Old) -> New`
+///   - `add f: T = val`                 → `fn __migrate_add_<T>_<i>_<f>() -> T`
+/// The op's `conv_fn`/`default_fn` is set to the synthetic name. Types that
+/// never decode at runtime (no `Decode` derive, or generic) get nothing — the
+/// migration stays a compile-time intent check only, and codegen emits nothing
+/// (zero cost).
+pub fn desugar_migrations(bundle: &mut ProgramBundle) {
+    for module in &mut bundle.modules {
+        // Types that have a runtime decode path: `@PublishedSchema` + `Decode`,
+        // concrete (a generic published schema has no single runtime shape).
+        let mut decodable_published: HashSet<String> = HashSet::new();
+        for item in &module.items {
+            if let Item::Struct(s) = item {
+                // `@PublishedSchema struct` sets the flag; the grouped
+                // `@[PublishedSchema, Codable]` spelling leaves the marker in
+                // `derives` — accept both.
+                let published = s.is_published_schema
+                    || s.derives
+                        .iter()
+                        .any(|(t, _)| t == crate::Syntax::ATTR_PUBLISHED_SCHEMA);
+                if published
+                    && s.type_params.is_empty()
+                    && s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+                {
+                    decodable_published.insert(s.name.clone());
+                }
+            }
+        }
+        if decodable_published.is_empty() {
+            continue;
+        }
+
+        // Per-type migration-block counter (source order defines the chain).
+        let mut block_of_type: HashMap<String, usize> = HashMap::new();
+        let mut synthetic: Vec<Item> = Vec::new();
+        for item in &mut module.items {
+            let Item::Migration(m) = item else { continue };
+            if !decodable_published.contains(&m.type_name) {
+                continue;
+            }
+            let block_idx = {
+                let c = block_of_type.entry(m.type_name.clone()).or_insert(0);
+                let v = *c;
+                *c += 1;
+                v
+            };
+            for op in &mut m.ops {
+                match op {
+                    MigrationOp::Change {
+                        field,
+                        from_ty,
+                        to_ty,
+                        converter: Some(conv),
+                        converter_span,
+                        conv_fn,
+                        ..
+                    } => {
+                        let name = converter_fn_name(&m.type_name, block_idx, field);
+                        let span = converter_span.unwrap_or(m.span);
+                        let f = build_converter_func(&name, from_ty, to_ty, conv, span);
+                        synthetic.push(Item::Func(f));
+                        *conv_fn = Some(name);
+                    }
+                    MigrationOp::Add {
+                        field,
+                        ty,
+                        default,
+                        default_span,
+                        default_fn,
+                        ..
+                    } => {
+                        let name = add_default_fn_name(&m.type_name, block_idx, field);
+                        let f = build_default_func(&name, ty, default, *default_span);
+                        synthetic.push(Item::Func(f));
+                        *default_fn = Some(name);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        module.items.extend(synthetic);
+    }
+}
+
+/// Build `fn <name>() -> T { return <default expr> }` for an `add` op.
+fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func {
+    Func {
+        is_pub: false,
+        is_package_pub: false,
+        external_type: None,
+        name: name.to_string(),
+        name_span: span,
+        type_params: Vec::new(),
+        params: Vec::new(),
+        return_type: Some(ty.clone()),
+        is_view_return: false,
+        is_unsafe: false,
+        is_pure: false,
+        is_reactive: false,
+        is_must_use: false,
+        must_use_span: None,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: None,
+        is_sanitizer: false,
+        declared_effects: None,
+        effect_via: None,
+        state_requires: None,
+        state_transition: None,
+        web_marker: None,
+        pre: Vec::new(),
+        post: Vec::new(),
+        body: vec![Stmt::Return(Some(default.clone()), span)],
+    }
+}
+
+/// Build `fn <name>(<param>: Old) -> New { <converter body> }` from a `change`
+/// op's inline converter. The canonical converter is a one-parameter lambda
+/// `(old) => expr`; anything else is treated as a callable applied to the old
+/// value.
+fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, span: Span) -> Func {
+    let (param_name, body): (String, Vec<Stmt>) = match conv {
+        Expr::Lambda(l) if l.params.len() == 1 => {
+            let pname = l.params[0].name.clone();
+            let body = match &l.body {
+                LambdaBody::Expr(e) => vec![Stmt::Return(Some((**e).clone()), span)],
+                LambdaBody::Block(stmts) => stmts.clone(),
+            };
+            (pname, body)
+        }
+        other => {
+            // Non-lambda converter (a function value written inline): apply it
+            // to the old value.
+            let arg = crate::AST::CallArg {
+                convention: AccessConvention::Move,
+                expr: Expr::Ident("__old".to_string(), span),
+                span,
+                flags: crate::AST::CallArgFlags::default(),
+                label: None,
+                spread: false,
+            };
+            let call = Expr::CallValue {
+                callee: Box::new(other.clone()),
+                args: vec![arg],
+                span,
+            };
+            ("__old".to_string(), vec![Stmt::Return(Some(call), span)])
+        }
+    };
+    Func {
+        is_pub: false,
+        is_package_pub: false,
+        external_type: None,
+        name: name.to_string(),
+        name_span: span,
+        type_params: Vec::new(),
+        params: vec![Param {
+            name: param_name,
+            name_span: span,
+            ty: old_ty.clone(),
+            ty_span: span,
+            convention: AccessConvention::Move,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+        }],
+        return_type: Some(new_ty.clone()),
+        is_view_return: false,
+        is_unsafe: false,
+        is_pure: false,
+        is_reactive: false,
+        is_must_use: false,
+        must_use_span: None,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: None,
+        is_sanitizer: false,
+        declared_effects: None,
+        effect_via: None,
+        state_requires: None,
+        state_transition: None,
+        web_marker: None,
+        pre: Vec::new(),
+        post: Vec::new(),
+        body,
+    }
+}
 
 /// A declared migration op for one type, flattened for diffing.
 enum DeclaredOp {
@@ -608,6 +821,7 @@ mod tests {
                     ty_span: zero(),
                     default: crate::AST::Expr::Bool(false, zero()),
                     default_span: zero(),
+                    default_fn: None,
                 }],
             ),
         ];
@@ -636,6 +850,7 @@ mod tests {
                     to_span: zero(),
                     converter: Some(crate::AST::Expr::Int(0, zero(), None)),
                     converter_span: Some(zero()),
+                    conv_fn: None,
                 }],
             ),
         ];
@@ -658,6 +873,7 @@ mod tests {
                     to_span: zero(),
                     converter: None,
                     converter_span: None,
+                    conv_fn: None,
                 }],
             ),
         ];

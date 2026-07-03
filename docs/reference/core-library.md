@@ -723,28 +723,32 @@ sales :: csv.decode<Sale>(raw) ?? panic("bad csv")   // [Sale]
 print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}]
 ```
 
-**Traced decode — was this migrated?** (D-MIGRATE3=A): `decode_traced<T>(text)`
-sits beside `decode<T>` on every codec (json/csv/toml/yaml share the decode
-machinery) and returns `DecodeResult<T> ? DecodeError` — `{ value: T, migration:
-MigrationStatus }`. `MigrationStatus` carries `.migrated: Bool`, `.from` (the
-source schema version), and `.steps` (applied migration names). `decode` itself
-is untouched — same call, same cost, for anyone not asking (I8).
+**Traced decode — was this migrated?** (D-MIGRATE3=A, D-MIGRATE4=A):
+`decode_traced<T>(text)` sits beside `decode<T>` on every codec
+(json/csv/toml/yaml share the decode machinery) and returns
+`DecodeResult<T> ? DecodeError` — `{ value: T, migration: MigrationStatus }`.
+`MigrationStatus` carries `.migrated: Bool`, `.from` (the source shape's
+version label, `"v1"` = oldest), and `.steps` (one entry per migration step
+applied, `"v1->v2"` style). `decode` itself is untouched — same call, same
+cost, for anyone not asking (I8).
 
 ```jet
 r    :: json.decode_traced<UserRecord>(raw)?
 user :: r.value
 if r.migration.migrated {
-    log.info("record {user.id} arrived as schema v{r.migration.from}")
+    log.info("record {user.id} arrived as schema {r.migration.from}")
 }
 ```
 
-`.migrated` is `false` and `.from`/`.steps` are empty both for a plain type and
-for a `@PublishedSchema` type decoding data already shaped like the current
-struct — today, that is the only case there is: `@PublishedSchema` + `migration
-{ }` (below) checks *intent* at compile time against a committed snapshot; it
-does not yet convert an old stored shape at decode time, so no decode can
-report a real migration until that runtime engine ships. `decode_traced` is
-fully wired now so no call site has to change the day it does.
+Decoding a `@PublishedSchema` type with `migration { }` blocks (below) runs
+the runtime chain: the current shape is tried first; on mismatch the data's
+field-name set picks the historical shape it matches (newest match wins) and
+the migration steps rewrite it forward — `rename` moves a key, `remove` drops
+one, `add` fills the default, `change` runs the `via { … }` converter. Plain
+`decode` applies the same chain silently; data matching no shape keeps the
+ordinary decode error. `.migrated` is `false` and `.from`/`.steps` are empty
+for a plain type and for fresh (current-shape) data, and types without
+migration blocks pay nothing.
 
 **Field attributes** (D-SERDE5):
 
@@ -1255,7 +1259,7 @@ the package system fully stabilizes.
 | `examples/features/serde/serde_derive.jet` | `@[Codable]` encode + typed `decode<T>` with `#[Rename]` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
-| `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus` on a plain type and a `@PublishedSchema` type |
+| `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus`, incl. a real v1→v2 migration at decode time |
 | `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.

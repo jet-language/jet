@@ -830,10 +830,232 @@ fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
         }
         let inits: Vec<String> = s.fields.iter().map(|f| mangle(&f.name)).collect();
         out.push_str(&format!(
-            "        Ok(user_{} {{ {} }})\n    }}\n}}\n\n",
+            "        Ok(user_{} {{ {} }})\n    }}\n",
             s.name,
             inits.join(", ")
         ));
+        // D-MIGRATE4: a decodable `@PublishedSchema` type with migration blocks
+        // gets a `jet_decode_traced` override (the chain-walker). Every other
+        // type keeps the trait's zero-cost default — nothing extra is emitted.
+        if migration_blocks(cx, s).is_some() {
+            emit_migration_chain_walker(cx, s, style, out);
+        }
+        out.push_str("}\n\n");
+        if migration_blocks(cx, s).is_some() {
+            emit_migration_step_fns(cx, s, style, out);
+        }
+    }
+}
+
+/// D-MIGRATE4: the migration blocks for a struct, when the runtime chain
+/// applies: `@PublishedSchema`, concrete (no type params), with at least one
+/// `migration { }` block in the module. Mirrors the gate in
+/// `Sema::desugar_migrations` — the two must agree on which types get runtime
+/// machinery, since sema pre-lowers the converter/default functions the step
+/// functions call.
+fn migration_blocks<'a>(cx: &'a Cx, s: &StructDef) -> Option<&'a [crate::AST::MigrationDecl]> {
+    // `@PublishedSchema struct` sets the flag; the grouped
+    // `@[PublishedSchema, Codable]` spelling leaves the marker in `derives`.
+    let published = s.is_published_schema
+        || s.derives
+            .iter()
+            .any(|(t, _)| t == crate::Syntax::ATTR_PUBLISHED_SCHEMA);
+    if !published || !s.type_params.is_empty() {
+        return None;
+    }
+    let blocks = cx.migrations.get(&s.name)?;
+    if blocks.is_empty() {
+        None
+    } else {
+        Some(blocks)
+    }
+}
+
+/// The wire key a field name carries for migration shape detection: the
+/// current struct's `#[Rename]`/`RenameAll` treatment when the name is a
+/// current field, else the container casing style applied to the bare name
+/// (fields that only exist in historical shapes can't carry markers).
+fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String {
+    if let Some(f) = s.fields.iter().find(|f| f.name == name) {
+        return field_wire_key(style, f);
+    }
+    match style {
+        Some(st) => apply_rename_all(st, name),
+        None => name.to_string(),
+    }
+}
+
+/// D-MIGRATE4: the historical field-name shapes of a published record, derived
+/// at compile time by inverting the migration chain from the current shape.
+/// Returns `shapes[0] = v1 (oldest) … shapes[K-1] = vK`; the current shape is
+/// `v{K+1}`. Each shape is a sorted set of wire keys.
+fn migration_shapes(
+    style: Option<&str>,
+    s: &StructDef,
+    blocks: &[crate::AST::MigrationDecl],
+) -> Vec<Vec<String>> {
+    use crate::AST::MigrationOp;
+    let mut shape: std::collections::BTreeSet<String> = s
+        .fields
+        .iter()
+        .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP))
+        .map(|f| field_wire_key(style, f))
+        .collect();
+    let mut shapes: Vec<Vec<String>> = Vec::with_capacity(blocks.len());
+    for block in blocks.iter().rev() {
+        for op in &block.ops {
+            match op {
+                MigrationOp::Add { field, .. } => {
+                    shape.remove(&migration_wire_key(style, s, field));
+                }
+                MigrationOp::Remove { field, .. } => {
+                    shape.insert(migration_wire_key(style, s, field));
+                }
+                MigrationOp::Rename { from, to, .. } => {
+                    shape.remove(&migration_wire_key(style, s, to));
+                    shape.insert(migration_wire_key(style, s, from));
+                }
+                // A type change never moves a key.
+                MigrationOp::Change { .. } => {}
+            }
+        }
+        shapes.push(shape.iter().cloned().collect());
+    }
+    shapes.reverse(); // oldest (v1) first
+    shapes
+}
+
+/// D-MIGRATE4: the `jet_decode_traced` override emitted inside the type's
+/// `user_Decode` impl. Tries the current shape first (plain `jet_decode` — the
+/// cheap happy path, and the documented "prefer newest" ambiguity rule); on
+/// failure detects which historical shape the data's key set matches, newest
+/// first, and walks the step functions forward from there. Data matching no
+/// shape returns the original decode error unchanged.
+fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mut String) {
+    let blocks = migration_blocks(cx, s).expect("caller checked");
+    let shapes = migration_shapes(style, s, blocks);
+    let k = shapes.len();
+    out.push_str(&format!(
+        "    // D-MIGRATE4: @PublishedSchema migration chain — v1..v{} are historical shapes.\n",
+        k
+    ));
+    out.push_str("    fn jet_decode_traced(__t: &jet_std::DataTree) -> Result<(Self, jet_std::MigrationStatus), jet_std::DecodeError> {\n");
+    out.push_str("        let __err = match Self::jet_decode(__t) {\n");
+    out.push_str("            Ok(__v) => return Ok((__v, jet_std::MigrationStatus::fresh())),\n");
+    out.push_str("            Err(__e) => __e,\n");
+    out.push_str("        };\n");
+    out.push_str("        let __keys = jet_std::jet_datatree_key_set(__t);\n");
+    // Newest historical shape first (prefer the newest matching version).
+    for j in (0..k).rev() {
+        let shape = &shapes[j];
+        let cond = if shape.is_empty() {
+            "__keys.is_empty()".to_string()
+        } else {
+            let lits: Vec<String> = shape.iter().map(|kk| format!("{:?}", kk)).collect();
+            format!(
+                "__keys.len() == {} && [{}].iter().all(|__k| __keys.contains(*__k))",
+                shape.len(),
+                lits.join(", ")
+            )
+        };
+        out.push_str(&format!("        if {} {{\n", cond));
+        out.push_str("            let mut __pairs = match __t { jet_std::DataTree::Object(__es) => __es.clone(), _ => return Err(__err) };\n");
+        out.push_str("            let mut __steps: Vec<String> = Vec::new();\n");
+        for i in j..k {
+            out.push_str(&format!(
+                "            jet_migrate_step_{}_{}(&mut __pairs)?;\n",
+                s.name,
+                i + 1
+            ));
+            out.push_str(&format!(
+                "            __steps.push(\"v{}->v{}\".to_string());\n",
+                i + 1,
+                i + 2
+            ));
+        }
+        out.push_str("            let __tree = jet_std::DataTree::Object(__pairs);\n");
+        out.push_str("            let __v = Self::jet_decode(&__tree)?;\n");
+        out.push_str(&format!(
+            "            return Ok((__v, jet_std::MigrationStatus {{ migrated: true, from: \"v{}\".to_string(), steps: __steps }}));\n",
+            j + 1
+        ));
+        out.push_str("        }\n");
+    }
+    out.push_str("        Err(__err)\n");
+    out.push_str("    }\n");
+}
+
+/// D-MIGRATE4: one step function per migration block —
+/// `jet_migrate_step_<Type>_<i>` rewrites a decoded object's pairs from shape
+/// v<i> to shape v<i+1>. `rename` moves a key, `remove` drops one, `add`
+/// evaluates the sema-lowered default function and encodes it in, `change`
+/// decodes the old field type, runs the sema-lowered converter (or the
+/// `impl Old -> New` conversion, D-MIGRATE2B), and encodes the result back.
+fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mut String) {
+    use crate::AST::MigrationOp;
+    let blocks = migration_blocks(cx, s).expect("caller checked");
+    for (idx, block) in blocks.iter().enumerate() {
+        out.push_str(&format!(
+            "// D-MIGRATE4: migration step v{} -> v{} for @PublishedSchema `{}`.\n",
+            idx + 1,
+            idx + 2,
+            s.name
+        ));
+        out.push_str(&format!(
+            "fn jet_migrate_step_{}_{}(__pairs: &mut Vec<(String, jet_std::DataTree)>) -> Result<(), jet_std::DecodeError> {{\n",
+            s.name,
+            idx + 1
+        ));
+        for op in &block.ops {
+            match op {
+                MigrationOp::Rename { from, to, .. } => {
+                    let from_key = migration_wire_key(style, s, from);
+                    let to_key = migration_wire_key(style, s, to);
+                    out.push_str(&format!(
+                        "    for __p in __pairs.iter_mut() {{ if __p.0 == {from_key:?} {{ __p.0 = {to_key:?}.to_string(); }} }}\n"
+                    ));
+                }
+                MigrationOp::Remove { field, .. } => {
+                    let key = migration_wire_key(style, s, field);
+                    out.push_str(&format!("    __pairs.retain(|__p| __p.0 != {key:?});\n"));
+                }
+                MigrationOp::Add {
+                    field, default_fn, ..
+                } => {
+                    let key = migration_wire_key(style, s, field);
+                    let df = default_fn.as_deref().unwrap_or_else(|| {
+                        panic!(
+                            "internal compiler error: migration `add {}` on `{}` reached codegen without its sema-lowered default function (I3)",
+                            field, s.name
+                        )
+                    });
+                    out.push_str(&format!(
+                        "    __pairs.push(({key:?}.to_string(), user_Encode::jet_encode(&{}())));\n",
+                        mangle(df)
+                    ));
+                }
+                MigrationOp::Change {
+                    field,
+                    from_ty,
+                    to_ty,
+                    conv_fn,
+                    ..
+                } => {
+                    let key = migration_wire_key(style, s, field);
+                    let old_rust = cx.rust_type(from_ty);
+                    // Inline `via { … }` → the sema-lowered converter fn;
+                    // no `via` → the `impl Old -> New` conversion fn (D-MIGRATE2B).
+                    let conv = match conv_fn {
+                        Some(f) => mangle(f),
+                        None => crate::Sema::error_conv_fn_name(&from_ty.name(), &to_ty.name()),
+                    };
+                    out.push_str(&format!(
+                        "    for __p in __pairs.iter_mut() {{\n        if __p.0 == {key:?} {{\n            let __old: {old_rust} = <{old_rust} as user_Decode>::jet_decode(&__p.1).map_err(|__e| jet_std::DecodeError::under({key:?}, __e))?;\n            __p.1 = user_Encode::jet_encode(&{conv}(__old));\n        }}\n    }}\n"
+                    ));
+                }
+            }
+        }
+        out.push_str("    Ok(())\n}\n\n");
     }
 }
 

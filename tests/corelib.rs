@@ -1004,19 +1004,14 @@ fn main() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// ── D-MIGRATE3=A: decode-time migration transparency ─────────────────────────
+// ── D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency ──────────
 // `decode_traced<T>` sits beside `decode<T>` on every codec that shares the
 // decode machinery. `MigrationStatus.migrated` is false and `.from`/`.steps`
 // are empty both for a plain type (no `@PublishedSchema`) and for a
 // `@PublishedSchema` type decoding data already shaped like the current
-// struct (the "fresh" case) — that is the only case there is to report today:
-// `@PublishedSchema` + `migration { }` (D-MIGRATE1/D-MIGRATE2A-F) is a
-// sema-only intent check (E0910) against a committed snapshot; there is no
-// runtime engine yet that reads an *old* stored shape and reports it having
-// migrated (see docs/spec/spec.md's migrations section). This test covers the
-// three reachable cases: a plain type, a `@PublishedSchema` type decoding
-// fresh data, and a second codec (toml) end to end — not a `migrated: true`
-// case, since nothing can produce one until that engine exists.
+// struct (the "fresh" case). This test covers those non-migrated cases; the
+// migrated paths (D-MIGRATE4 runtime chain) are `decode_traced_migration_*`
+// below.
 #[test]
 fn decode_traced_json_plain_and_published_fresh() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
@@ -1112,6 +1107,200 @@ fn main() {
     assert_eq!(code, 0, "decode_traced toml/csv program failed: {stderr}");
     assert_eq!(stdout, "8080\nfalse\n2\n8080\nfalse\n");
     let _ = fs::remove_dir_all(&dir);
+}
+
+// ── D-MIGRATE4=A: the runtime migration chain ────────────────────────────────
+// Decoding a `@PublishedSchema` type tries the current shape first; on
+// mismatch it detects which historical shape the data's field-name set
+// matches (newest matching version preferred) and walks the migration blocks
+// forward, oldest→current. `decode_traced` reports `from` + `steps`
+// ("v1->v2" style, one per block applied); plain `decode` applies the same
+// chain silently. Data matching no shape keeps the ordinary decode error.
+// This covers: a two-block chain (v1→v3: remove + rename + `change … via`),
+// the newest-match rule (v2 data walks one step, not two), the silent plain
+// `decode`, and garbage still erroring.
+#[test]
+fn decode_traced_migration_chain() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping decode_traced_migration_chain (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_migrate_chain_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "migrate_chain",
+        r#"
+use core.encoding.json as json
+
+@Codable
+struct Rank { value: Int }
+
+// v1: { legacy_id, name, score: Int }
+// v2: { name, score: Int }     (block 1: remove legacy_id)
+// v3: { title, score: Rank }   (block 2: rename + change via)
+@[PublishedSchema, Codable]
+struct Profile {
+    title: String
+    score: Rank
+}
+
+migration Profile {
+    remove legacy_id
+}
+
+migration Profile {
+    rename name -> title
+    change score: Int -> Rank via { (n) => Rank.{ value: n } }
+}
+
+fn main() {
+    // v1 data walks both steps.
+    v1 :: "{{\"legacy_id\": 9, \"name\": \"Ada\", \"score\": 95}}"
+    r :: json.decode_traced<Profile>(v1) ?? panic("bad v1")
+    print(r.value.title)
+    print(r.value.score.value)
+    print(r.migration.migrated)
+    print(r.migration.from)
+    print(r.migration.steps.len())
+    print(r.migration.steps[0])
+    print(r.migration.steps[1])
+
+    // v2 data matches the newer historical shape — one step, not two.
+    v2 :: "{{\"name\": \"Grace\", \"score\": 7}}"
+    r2 :: json.decode_traced<Profile>(v2) ?? panic("bad v2")
+    print(r2.migration.from)
+    print(r2.migration.steps.len())
+
+    // Plain decode applies the same chain silently.
+    p :: json.decode<Profile>(v1) ?? panic("bad plain")
+    print(p.title)
+    print(p.score.value)
+
+    // Data matching no shape keeps the ordinary decode error.
+    g :: json.decode<Profile>("{{\"nonsense\": 1}}") ?? Profile.{ title: "rejected", score: Rank.{ value: 0 } }
+    print(g.title)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "migration chain program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "Ada\n95\ntrue\nv1\n2\nv1->v2\nv2->v3\nv2\n1\nAda\n95\nrejected\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// D-MIGRATE4 across codecs (D-ENC1: one decode machinery): an `add … = default`
+// migration fills old records in toml and csv exactly as in json. The csv case
+// also proves per-row application (every row of an old-header file migrates,
+// the batch-level status reports it once).
+#[test]
+fn decode_traced_migration_toml_and_csv() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping decode_traced_migration_toml_and_csv (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_migrate_codecs_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "migrate_codecs",
+        r#"
+use core.encoding.toml as toml
+use core.encoding.csv as csv
+
+@[PublishedSchema, Codable]
+struct Config {
+    port: Int
+    host: String
+}
+
+migration Config {
+    add host: String = "localhost"
+}
+
+fn main() {
+    t :: toml.decode_traced<Config>("port = 8080\n") ?? panic("bad toml")
+    print(t.value.host)
+    print(t.migration.migrated)
+    print(t.migration.from)
+
+    c :: csv.decode_traced<Config>("port\n1\n2\n") ?? panic("bad csv")
+    print(c.value.len())
+    print(c.value[1].host)
+    print(c.migration.migrated)
+    print(c.migration.steps[0])
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "migration codec program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "localhost\ntrue\nv1\n2\nlocalhost\ntrue\nv1->v2\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// D-MIGRATE4 zero cost: a type without migration blocks — published or not —
+// gets NO runtime chain code: no step functions, no per-type
+// `jet_decode_traced` override. Compile-only (asserts on the generated Rust).
+#[test]
+fn migration_free_types_emit_no_runtime_chain() {
+    let src = r#"
+use core.encoding.json as json
+
+@Codable
+struct Point { x: Int  y: Int }
+
+@[PublishedSchema, Codable]
+struct UserRecord { id: Int  display_name: String }
+
+fn main() {
+    p :: json.decode<Point>("{{\"x\":1,\"y\":2}}") ?? panic("bad")
+    print(p.x)
+    u :: json.decode_traced<UserRecord>("{{\"id\":1,\"display_name\":\"Ada\"}}") ?? panic("bad")
+    print(u.value.id)
+}
+"#;
+    let dir = std::env::temp_dir().join(format!("jet_migrate_free_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("migration_free.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected fixture:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    let _ = fs::remove_dir_all(&dir);
+    assert!(
+        !out.rust.contains("jet_migrate_step_"),
+        "no step functions may be emitted for migration-free types"
+    );
+    // The only `jet_decode_traced` definitions are the prelude's (the trait
+    // default) — no per-type override in the user section.
+    let user_section = out
+        .rust
+        .split("impl user_Decode for user_")
+        .skip(1)
+        .collect::<String>();
+    assert!(
+        !user_section.contains("fn jet_decode_traced"),
+        "no per-type jet_decode_traced override may be emitted for migration-free types"
+    );
 }
 
 #[test]
