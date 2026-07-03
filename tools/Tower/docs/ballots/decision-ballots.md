@@ -23,20 +23,106 @@ it's time to decide it.
 
 ---
 
-## Open decisions
+## Open decisions — 2026-07-03 quick round
 
-Three open (raised 2026-07-02; full ballot-ready cards live in Tower
-`decisions[]` and render in the Decide lane / Focus Mode — not duplicated here):
+Five ballots, written short on purpose. Answer with a letter each (e.g.
+"STYLEUNIT1=A"); full facet cards live in Tower Focus Mode if you want the
+long version. (D-E4EXIT1 / D-BUILDFLAGS1 on card #95 stay ratified-pending-build.)
 
-- **D-MIGRATE3** (card #105) — decode-time migration transparency: how a program asks a
-  decoded `#PublishedSchema` value "were you migrated?" (`DecodeResult` follow-up
-  ordered by D-SELFVER1=A). Rec: A — separate `decode_traced`, default `decode` untouched.
-- **D-E4EXIT1** (card #95) — Epoch 4 exit bar: fn-build MVP (§15) vs +typed
-  targets/actions vs full §12 build-graph parity. Rec: C — MVP + targets/actions
-  (Jai-parity bar); toolchains/cache/probes ballot in e5.
-- **D-BUILDFLAGS1** (card #95) — single-file Tier-2 build grant spelling; refines-or-keeps
-  the ratified blanket `--allow-impure`. Rec: A — per-effect `--allow-<effect>` + TTY
-  prompt fallback.
+### 1. D-STYLEUNIT1 — how do you write "320 pixels" in a UI style? (card #134)
+
+```jet
+style.{ width: 320px }                        // A — unit literal (recommended)
+style.{ width: .Px.{value: 320.0} }           // B — enum variant
+style.{ width: Length.{value: 320.0, unit: .Px} }  // C — struct pair (what Phase 3 shipped)
+style.{ width: 320.0 }                        // D — bare Float, pixels by convention
+style.{ width: "320px" }                      // E — CSS string, parsed at runtime
+```
+
+**A** reuses the one ratified unit mechanism (`#UnitFamily` + `320ms`-style
+literals) — compile-checked, zero ceremony, no second unit system. **D** is
+least typing but the unit lives in docs only; **E** turns typos into runtime
+failures. **Recommendation: A.**
+
+**Answer:** ___
+
+### 2. D-UIDEVSHELL1 — native UI backends need GTK headers; how do they get in? (card #134)
+
+Phase 8 (real Linux/macOS windows) can't link today: the dev shell has no
+toolkit libs. Nothing an agent does can proceed until you pick the route.
+
+- **A — nixpkgs devShell deps now (recommended).** Add `gtk4` + `pkg-config`
+  to the flake (your existing native-deps stopgap rule). Linux backend ships;
+  macOS/Windows wait for those hosts.
+- **B — defer Phase 8 to Epoch 4.** Epoch 3 UI stays web-renderer only;
+  native lands with the jetpack core provider.
+- **C — headless native backend first.** Stub renderer, no toolkit linkage;
+  exercises the seam, real windows later via A or B.
+
+**Answer:** ___
+
+### 3. D-OSTARGET2 — how does plain `main` get "the impl for this OS"? (card #134)
+
+`#Target(Os.Linux)` now gates impls (shipped tonight), but ungated code has
+no blessed way to construct whichever impl survived the build.
+
+```jet
+// A — fn-level gating, one survivor per build (recommended; Rust cfg / Go build-tags shape)
+#Target(Os.Linux) fn backend() -> JetBackend { return LinuxBackend.{} }
+#Target(Os.Macos) fn backend() -> JetBackend { return MacosBackend.{} }
+fn main() { app.mount(backend()) }   // ungated call resolves to the survivor
+
+// B — comptime switch (new surface, second way to say A — I8 pressure)
+b :: match build.os { .Linux -> LinuxBackend.{}  .Macos -> MacosBackend.{} }
+
+// C — status quo: every call chain from main must itself be OS-gated (main per OS)
+```
+
+**Recommendation: A.**
+
+**Answer:** ___
+
+### 4. D-EXPANDCLI1 — exact shape of the transparency command (card #183)
+
+Three ratified decisions promised a "show me what the compiler proved" lens
+(inline decisions, resolved ref owners). The spelling:
+
+```shell
+jet expand --facts inline main.jet    # A — ratified wording; bare `jet expand` shows ALL lenses (recommended)
+jet expand --facts inline main.jet    # B — same flag, but bare `jet expand` prints a lens menu + exits nonzero
+jet expand inline main.jet            # C — positional lens (amends 3 ratified texts)
+jet facts inline main.jet             # D — new subcommand (amends 3 ratified texts)
+jet semindex main.jet --facts inline  # E — fold into semindex
+jet check main.jet --facts inline     # F — hang off jet check
+```
+
+**A** honors the ratified wording verbatim; bare-shows-everything is the
+magic default (beginner needs no lens names). Deciding this unblocks the
+deferred lenses from #166/#174/#134. **Recommendation: A.**
+
+**Answer:** ___
+
+### 5. D-MIGRATE4 — should decode actually apply `migration {}` blocks to old data? (card #184)
+
+Found while shipping #105: migration blocks are compile-time checks only —
+codegen erases them. Old stored JSON still fails to decode, and
+`decode_traced` can never report `migrated: true`.
+
+```jet
+// today: v1 JSON -> DecodeError, always
+user :: json.decode<UserRecord>(raw)?
+```
+
+- **A — generate the migration chain into decode (recommended).** Old data
+  loads and upgrades silently; `decode_traced` reports from+steps. Zero cost
+  for types without migrations. The semantics both ratified surfaces
+  (migration verbs, decode_traced) were designed around.
+- **B — separate `decode_migrating` verb.** Plain decode keeps failing on old
+  shapes; three decode verbs to learn (I8 pressure).
+- **C — defer past Epoch 3.** Stored-data users hand-write upgraders;
+  decode_traced stays always-false.
+
+**Answer:** ___
 
 ---
 
