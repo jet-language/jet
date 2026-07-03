@@ -2543,7 +2543,7 @@ impl<'a> Checker<'a> {
         // case the edge to that user function is recorded below).
         if !self.funcs.contains_key(&call.name) {
             if let Some(e) = builtin_effect(&call.name) {
-                self.record_effect(e);
+                self.record_effect(e.name());
             }
         }
         if call.name == Syntax::FOREIGN_PRINTLN || call.name == Syntax::FOREIGN_EPRINTLN {

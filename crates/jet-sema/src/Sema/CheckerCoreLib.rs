@@ -408,7 +408,13 @@ impl<'a> Checker<'a> {
         // D-EFF1: record the effect this Core call contributes to the enclosing
         // function's inferred set (erased in codegen; purely a sema fact).
         if let Some(e) = core_effect(module, name) {
-            self.record_effect(e);
+            // D-EFFTREE1: Core calls stay tagged with a bare root — real
+            // stdlib call sites are unchanged (no migration break: existing
+            // diagnostics naming `Fs`/`Db`/… keep their exact wording). Leaf
+            // precision (`Fs.Read`, `Db.Write`, …) is a user-declared-contract
+            // concept (a function's own `#(…)` bound, D-PROP1-seeded into its
+            // `direct` set) — see Registration.rs / Bundle.rs.
+            self.record_effect(e.name());
             // D-TXN2: an irreversible effect (Net/Fs/Exec — a network/file/
             // subprocess effect) can't be rolled back, so it is rejected when it
             // occurs directly inside a `#Transact { … }` block (E0746). The fix
@@ -2022,7 +2028,7 @@ impl<'a> Checker<'a> {
         match method {
             "query" => {
                 self.check_db_sql_params_args("query", args, span);
-                self.record_effect(Effect::Db);
+                self.record_effect(Effect::Db.name());
                 Some(Some(result_ty(
                     Type::List(Box::new(db_row_ty())),
                     db_error_ty(),
@@ -2030,7 +2036,7 @@ impl<'a> Checker<'a> {
             }
             "query_one" => {
                 self.check_db_sql_params_args("query_one", args, span);
-                self.record_effect(Effect::Db);
+                self.record_effect(Effect::Db.name());
                 Some(Some(result_ty(
                     Type::Option(Box::new(db_row_ty())),
                     db_error_ty(),
@@ -2038,7 +2044,7 @@ impl<'a> Checker<'a> {
             }
             "execute" => {
                 self.check_db_sql_params_args("execute", args, span);
-                self.record_effect(Effect::Db);
+                self.record_effect(Effect::Db.name());
                 Some(Some(result_ty(Type::Int, db_error_ty())))
             }
             "begin" | "commit" | "rollback" | "close" => {
@@ -2049,7 +2055,7 @@ impl<'a> Checker<'a> {
                         self.infer(&mut a.expr);
                     }
                 }
-                self.record_effect(Effect::Db);
+                self.record_effect(Effect::Db.name());
                 Some(Some(Type::Bool))
             }
             _ => None,

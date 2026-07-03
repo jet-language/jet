@@ -870,7 +870,10 @@ pub use Bundle::{
 pub use Effects::SemIndexEffectFacts;
 // D-EFFBUDGET1: the closed effect vocabulary, exposed so jet-driver can
 // validate `pkg.jet` `effects:`/`grants:` manifest keys against it.
-pub use Effects::{Effect, EffectSet};
+// D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and
+// manifest parsing need root validation and ancestor-subsumption coverage
+// too, not just the bare enum.
+pub use Effects::{effect_covers, effect_root, parse_effect_name, Effect, EffectSet};
 // D-EXPANDCLI1 (card #183): `jet expand --facts refs` reads these off
 // `SemIndexEffectFacts::refs`.
 pub use Facts::{RefFact, RefOwnerHow};

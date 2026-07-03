@@ -2733,7 +2733,7 @@ pub(crate) fn check_func_body_bundle(
     if let Some(declared_list) = &f.declared_effects {
         for (name, _) in declared_list {
             if !name.starts_with('!') {
-                if let Some(e) = Effect::parse(name.as_str()) {
+                if let Some(e) = parse_effect_name(name.as_str()) {
                     direct.insert(e);
                 }
             }

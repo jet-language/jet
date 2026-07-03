@@ -2861,8 +2861,9 @@ impl<'a> Parser<'a> {
     }
 
     /// D-EFF1 / D-QUAL1: parse an optional `#(Net, Db)` effect bound. Returns
-    /// `None` when the cursor is not at `#(`. Effect names are bare idents here;
-    /// sema validates them against the known effect vocabulary.
+    /// `None` when the cursor is not at `#(`. D-EFFTREE1: an entry may be a
+    /// dotted effect path (`Fs.Read`); sema validates the root against the
+    /// known effect vocabulary.
     fn parse_opt_effect_annotation(&mut self) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
         // Trait methods (and any caller that can't host a `#(via f)` pass-through)
         // route through here: a `via` clause is parsed and discarded as a list,
@@ -2901,7 +2902,7 @@ impl<'a> Parser<'a> {
                 if prohibited {
                     self.bump(); // consume `!`
                 }
-                let (name, span) = self.expect_ident("for an effect name")?;
+                let (name, span) = self.expect_effect_path_name("for an effect name")?;
                 let entry = if prohibited {
                     format!("!{}", name)
                 } else {

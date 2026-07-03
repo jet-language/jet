@@ -274,16 +274,12 @@ fn convert_kind(kind: &SymKind) -> SymbolKind {
 pub(crate) fn convert_effects(facts: &jet_sema::SemIndexEffectFacts) -> Vec<EffectFact> {
     let mut out = Vec::new();
     for (function, summary) in &facts.summaries {
-        let direct: Vec<String> = summary
-            .direct
-            .iter()
-            .map(|e| e.name().to_string())
-            .collect();
+        let direct: Vec<String> = summary.direct.iter().cloned().collect();
         let callees: Vec<String> = summary.edges.iter().cloned().collect();
         let inferred: Vec<String> = facts
             .solved
             .get(function)
-            .map(|s| s.iter().map(|e| e.name().to_string()).collect())
+            .map(|s| s.iter().cloned().collect())
             .unwrap_or_default();
         out.push(EffectFact {
             function: function.clone(),

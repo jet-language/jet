@@ -19,7 +19,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Jetpack::PackageManifest::PackManifest;
-use crate::Sema::{Effect, EffectSet};
+use crate::Sema::{effect_covers, parse_effect_name, EffectSet};
 use crate::AST::{Item, ProgramBundle};
 use std::collections::{BTreeMap, HashMap};
 
@@ -63,7 +63,7 @@ fn collect_item_effects(item: &Item, solved: &HashMap<String, EffectSet>, out: &
     match item {
         Item::Func(f) => {
             if let Some(set) = solved.get(&crate::Sema::effect_key(None, &f.name)) {
-                out.extend(set.iter().copied());
+                out.extend(set.iter().cloned());
             }
         }
         Item::Impl(im) => {
@@ -71,21 +71,21 @@ fn collect_item_effects(item: &Item, solved: &HashMap<String, EffectSet>, out: &
                 if let Some(set) =
                     solved.get(&crate::Sema::effect_key(Some(&im.type_name), &m.name))
                 {
-                    out.extend(set.iter().copied());
+                    out.extend(set.iter().cloned());
                 }
             }
         }
         Item::Struct(s) => {
             for m in &s.methods {
                 if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&s.name), &m.name)) {
-                    out.extend(set.iter().copied());
+                    out.extend(set.iter().cloned());
                 }
             }
             for block in &s.trait_impls {
                 for m in &block.methods {
                     if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&s.name), &m.name))
                     {
-                        out.extend(set.iter().copied());
+                        out.extend(set.iter().cloned());
                     }
                 }
             }
@@ -93,7 +93,7 @@ fn collect_item_effects(item: &Item, solved: &HashMap<String, EffectSet>, out: &
         Item::Enum(e) => {
             for m in &e.methods {
                 if let Some(set) = solved.get(&crate::Sema::effect_key(Some(&e.name), &m.name)) {
-                    out.extend(set.iter().copied());
+                    out.extend(set.iter().cloned());
                 }
             }
         }
@@ -106,7 +106,7 @@ fn collect_item_effects(item: &Item, solved: &HashMap<String, EffectSet>, out: &
 pub fn summary_line(entries: &[PackageEffects]) -> String {
     let mut all: EffectSet = EffectSet::new();
     for e in entries {
-        all.extend(e.effects.iter().copied());
+        all.extend(e.effects.iter().cloned());
     }
     if all.is_empty() {
         return "effects: none".to_string();
@@ -115,7 +115,7 @@ pub fn summary_line(entries: &[PackageEffects]) -> String {
         .iter()
         .filter(|e| e.name != "root" && !e.effects.is_empty())
         .count();
-    let names: Vec<&str> = all.iter().map(|e| e.name()).collect();
+    let names: Vec<&str> = all.iter().map(|e| e.as_str()).collect();
     if dep_count == 0 {
         format!("effects: {}", names.join(", "))
     } else {
@@ -133,7 +133,7 @@ pub fn provenance_for(entries: &[PackageEffects], name: &str) -> Vec<String> {
     entries
         .iter()
         .find(|e| e.name == name)
-        .map(|e| e.effects.iter().map(|x| x.name().to_string()).collect())
+        .map(|e| e.effects.iter().cloned().collect())
         .unwrap_or_default()
 }
 
@@ -146,14 +146,17 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackManifest) -> Vec<Diagn
     if !manifest.effects_enabled {
         return Vec::new();
     }
+    // D-EFFTREE1: allow/deny/grants entries may be ancestor roots (or leaves);
+    // coverage (`effect_covers`), not exact membership, decides whether a
+    // dependency's solved effect is inside the budget.
     let allow: Option<EffectSet> = manifest
         .effects_allow
         .as_ref()
-        .map(|names| names.iter().filter_map(|n| Effect::parse(n)).collect());
+        .map(|names| names.iter().filter_map(|n| parse_effect_name(n)).collect());
     let deny: EffectSet = manifest
         .effects_deny
         .as_ref()
-        .map(|names| names.iter().filter_map(|n| Effect::parse(n)).collect())
+        .map(|names| names.iter().filter_map(|n| parse_effect_name(n)).collect())
         .unwrap_or_default();
     let grants: HashMap<&str, EffectSet> = manifest
         .grants
@@ -163,7 +166,7 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackManifest) -> Vec<Diagn
                 dep.as_str(),
                 effects
                     .iter()
-                    .filter_map(|n| Effect::parse(n))
+                    .filter_map(|n| parse_effect_name(n))
                     .collect::<EffectSet>(),
             )
         })
@@ -175,14 +178,16 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackManifest) -> Vec<Diagn
             continue;
         }
         let granted = grants.get(pkg.name.as_str());
-        for &effect in &pkg.effects {
+        for effect in &pkg.effects {
             if let Some(g) = granted {
-                if g.contains(&effect) {
+                if g.iter().any(|b| effect_covers(b, effect)) {
                     continue;
                 }
             }
-            let outside_allow = allow.as_ref().is_some_and(|a| !a.contains(&effect));
-            let inside_deny = deny.contains(&effect);
+            let outside_allow = allow
+                .as_ref()
+                .is_some_and(|a| !a.iter().any(|b| effect_covers(b, effect)));
+            let inside_deny = deny.iter().any(|b| effect_covers(b, effect));
             if outside_allow || inside_deny {
                 diags.push(e1220(&pkg.name, effect));
             }
@@ -217,17 +222,15 @@ pub fn update_lock_provenance(
 }
 
 /// E1220: a transitive dependency uses an effect outside this package's budget.
-pub fn e1220(dep: &str, effect: Effect) -> Diagnostic {
+pub fn e1220(dep: &str, effect: &str) -> Diagnostic {
     Diagnostic::error(
         "E1220",
         format!(
-            "`{dep}` uses the `{}` effect, which this package's budget doesn't allow",
-            effect.name()
+            "`{dep}` uses the `{effect}` effect, which this package's budget doesn't allow"
         ),
         "an `effects:` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error".to_string(),
         format!(
-            "add `{}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency",
-            effect.name()
+            "add `{effect}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency"
         ),
         None::<Span>,
     )

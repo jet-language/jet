@@ -3022,8 +3022,90 @@ impl CtValue {
                     .collect();
                 format!("{}({})", type_name, parts.join(", "))
             }
-            CtValue::Enum { variant, .. } => variant.clone(),
+            // The compiled program's Rust `#[derive(Debug)]` output for a user
+            // enum: the variant's Rust identifier is `user_<Variant>` (S34,
+            // `Codegen::mangle_variant`), and a payload prints tuple-style with
+            // each arg in Rust `{:?}` form — matching that exactly here keeps
+            // `jet dev` byte-identical to the compiled binary (I2).
+            CtValue::Enum { variant, args, .. } => {
+                let mangled = format!("user_{}", variant.replace('.', "__"));
+                if args.is_empty() {
+                    mangled
+                } else if args.iter().all(|(label, _)| label.is_some()) {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            format!("{}: {}", label.as_deref().unwrap_or(""), v.debug_rust())
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.debug_rust()).collect();
+                    format!("{}({})", mangled, parts.join(", "))
+                }
+            }
             CtValue::Unit => String::new(),
+        }
+    }
+
+    /// Rust `{:?}` (Debug) rendering of this value — used to format a value
+    /// nested inside an enum-variant payload the same way the compiled
+    /// program's derived `Debug` impl would (I2). Distinct from `jet_show`,
+    /// which is the user-facing `Display`-style rendering `print` uses at the
+    /// top level (e.g. an unquoted string).
+    fn debug_rust(&self) -> String {
+        match self {
+            CtValue::Int(n) => n.to_string(),
+            CtValue::Float(f) => format!("{:?}", f),
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => format!("{:?}", c),
+            CtValue::Str(s) => format!("{:?}", s),
+            CtValue::Bytes(bs) => format!("{:?}", bs),
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.debug_rust()).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::Map(m) => {
+                let parts: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.to_value().debug_rust(), v.debug_rust()))
+                    .collect();
+                format!("{{{}}}", parts.join(", "))
+            }
+            CtValue::Some(v) => format!("Some({})", v.debug_rust()),
+            CtValue::None(_) => "None".to_string(),
+            CtValue::ResOk(v) => format!("Ok({})", v.debug_rust()),
+            CtValue::ResErr(v) => format!("Err({})", v.debug_rust()),
+            CtValue::Struct { type_name, fields } => {
+                let mangled = format!("user_{}", type_name.replace('.', "__"));
+                if fields.is_empty() {
+                    mangled
+                } else {
+                    let parts: Vec<String> = fields
+                        .iter()
+                        .map(|(n, v)| format!("{}: {}", n, v.debug_rust()))
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Enum { variant, args, .. } => {
+                let mangled = format!("user_{}", variant.replace('.', "__"));
+                if args.is_empty() {
+                    mangled
+                } else if args.iter().all(|(label, _)| label.is_some()) {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            format!("{}: {}", label.as_deref().unwrap_or(""), v.debug_rust())
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.debug_rust()).collect();
+                    format!("{}({})", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Unit => "()".to_string(),
         }
     }
 

@@ -442,13 +442,15 @@ pub(super) fn parse_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, Man
 }
 
 /// A `[ Db, Net ]`-shaped list of effect names, each validated against the
-/// closed D-EFF4 vocabulary (`crate::Sema::Effects::Effect`).
+/// closed D-EFF4 vocabulary (`crate::Sema::Effects::Effect`). D-EFFTREE1: an
+/// entry may be a dotted effect path (`Fs.Read`) — only the root is checked
+/// against the closed vocabulary; further segments are an open leaf path.
 fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, ManifestError> {
     let names = parse_string_list(value).map_err(|_| ManifestError::BadEffectsBlock {
         detail: format!("`{field}:` must be a list like `[Db, Net]`"),
     })?;
     for name in &names {
-        if crate::Sema::Effect::parse(name).is_none() {
+        if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {
             return Err(ManifestError::BadEffectsBlock {
                 detail: format!("`{name}` isn't a known effect (see docs/spec — the ten-effect D-EFF4 vocabulary)"),
             });

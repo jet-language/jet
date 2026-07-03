@@ -1241,7 +1241,7 @@ pub(crate) fn check_effect_boundaries(
             } else {
                 (false, name.as_str())
             };
-            match Effect::parse(base_name) {
+            match parse_effect_name(base_name) {
                 Some(e) => {
                     if is_prohibited {
                         prohibited.insert(e);
@@ -1264,8 +1264,11 @@ pub(crate) fn check_effect_boundaries(
             .unwrap_or_default();
         // E0740: only check positive bounds — prohibition-only annotations (`#(!Net)`)
         // have no upper-bound constraint; only the prohibition check applies.
+        // D-EFFTREE1: `declared` may name ancestor roots — an ancestor entry
+        // covers any effect at or below it, so this is a subsumption-aware
+        // check, not a flat set difference.
         if !declared.is_empty() {
-            let over: EffectSet = inferred.difference(&declared).copied().collect();
+            let over: EffectSet = effects_uncovered(&inferred, &declared);
             if !over.is_empty() {
                 let span = declared_list
                     .first()
@@ -1276,9 +1279,10 @@ pub(crate) fn check_effect_boundaries(
         }
         // D-PROP1=A: check prohibitions — the inferred transitive set must not
         // contain any prohibited effect. E0749 names the effect and the function.
+        // D-EFFTREE1: symmetric ancestor subsumption — a prohibited root
+        // prohibits its whole subtree, so this is coverage, not intersection.
         if !prohibited.is_empty() {
-            let reached_prohibited: EffectSet =
-                inferred.intersection(&prohibited).copied().collect();
+            let reached_prohibited: EffectSet = effects_covered(&inferred, &prohibited);
             if !reached_prohibited.is_empty() {
                 let span = declared_list
                     .iter()
@@ -1330,7 +1334,7 @@ pub(crate) fn check_effect_boundaries(
                         let mut set = EffectSet::new();
                         let mut ok = true;
                         for (name, span) in list {
-                            match Effect::parse(name) {
+                            match parse_effect_name(name) {
                                 Some(e) => {
                                     set.insert(e);
                                 }
@@ -2175,7 +2179,7 @@ pub(crate) fn check_func_body(
     if let Some(declared_list) = &f.declared_effects {
         for (name, _) in declared_list {
             if !name.starts_with('!') {
-                if let Some(e) = Effect::parse(name.as_str()) {
+                if let Some(e) = parse_effect_name(name.as_str()) {
                     direct.insert(e);
                 }
             }

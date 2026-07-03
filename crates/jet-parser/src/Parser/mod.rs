@@ -450,6 +450,24 @@ impl<'a> Parser<'a> {
         }
         Ok((name, Span::new(start, end)))
     }
+
+    /// D-EFFTREE1: an *effect path* — `ident (.ident)*` — for effect-list
+    /// entries (`Fs`, `Fs.Read`, `Net.Http.Get`). The root is validated in
+    /// sema against the closed ten-name D-EFF4/5 vocabulary; further segments
+    /// are an open, user-chosen leaf path (mirrors D-TAG1's tag-tree dotted
+    /// paths) — not validated here, and with no depth limit.
+    fn expect_effect_path_name(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {
+        let (mut name, first_span) = self.expect_ident(where_)?;
+        let mut end = first_span.end;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump(); // `.`
+            let (seg, seg_span) = self.expect_ident("for an effect path segment after `.`")?;
+            name.push('.');
+            name.push_str(&seg);
+            end = seg_span.end;
+        }
+        Ok((name, Span::new(first_span.start, end)))
+    }
 }
 
 /// End byte of a parsed `System` field value, for the field's span.

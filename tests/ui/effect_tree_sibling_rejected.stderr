@@ -1,0 +1,7 @@
+Error [E0740]: `read_only` uses the effect `Fs.Write`, which its signature doesn't allow
+  --> tests/ui/effect_tree_sibling_rejected.jet:12:30
+    |
+ 12 | fn read_only(path: String) #(Fs.Read) {
+    |                              ^^^^^^^
+ Why: the signature declares `#(Fs.Read)`, so the body may only use those; `Fs.Write` is outside that set
+ Fix: add `Fs.Write` to the effect list, or stop using it in `read_only`

@@ -1808,6 +1808,17 @@ fn fmt_preserves_pure_callback_bound_sigil() {
 }
 
 #[test]
+fn fmt_preserves_dotted_effect_paths() {
+    // D-EFFTREE1: an effect-list entry may now be a dotted path (`Fs.Read`,
+    // `Net.Http.Get`) — a leaf under one of the ten D-EFF4/5 roots. The name
+    // is stored as one opaque string end to end, so fmt needs no new emission
+    // logic; this pins that the dot survives every printer that touches an
+    // effect list (`#(…)` bounds, prohibitions, `#Caps`/`#Grant` regions).
+    let src = "fn load(path: String) #(Fs.Read) -> String {\n    return path\n}\n\nfn archive(path: String) #(Fs.Write) {\n    print(path)\n}\n\nfn read_only(path: String) #(Fs.Read, !Fs.Write) {\n    load(path)\n}\n\nfn boot() #(Fs) {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Caps(Net.Http.Get) {\n        print(\"net\")\n    }\n    #Grant(Fs.Read) { caps ->\n        load(\"app.conf\")\n    }\n}\n";
+    assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
+}
+
+#[test]
 fn fmt_preserves_int_literal_radix() {
     // S34/S67: `0x`/`0o`/`0b` prefixes and `_` digit separators are ratified
     // author-facing spelling. fmt used to re-emit every integer literal from

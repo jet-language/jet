@@ -7,6 +7,7 @@ use crate::AST::{EnumDef, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use std::collections::HashMap;
 
 use super::effect_key;
+use super::effect_set_has_root;
 use super::Effect;
 use super::EffectSet;
 use super::EffectSummary;
@@ -181,7 +182,7 @@ fn assign_bucket(
     if let Some(m) = marker {
         return m.bucket();
     }
-    if effects.contains(&Effect::Browser) {
+    if effect_set_has_root(effects, Effect::Browser) {
         return WebBucket::Js;
     }
     if let Some(c) = ceiling {
@@ -289,7 +290,7 @@ fn reason_show(f: &FuncWebMeta, effects: &EffectSet) -> String {
     if let Some(m) = f.marker {
         return format!("#{}", marker_show(Some(m)));
     }
-    if effects.contains(&Effect::Browser) {
+    if effect_set_has_root(effects, Effect::Browser) {
         return "inferred: Browser effect".to_string();
     }
     if let Some(c) = f.ceiling {
@@ -302,7 +303,7 @@ fn reason_show(f: &FuncWebMeta, effects: &EffectSet) -> String {
 }
 
 fn effects_show(effects: &EffectSet) -> String {
-    let mut names: Vec<&str> = effects.iter().map(|&e| e.name()).collect();
+    let mut names: Vec<&str> = effects.iter().map(|e| e.as_str()).collect();
     names.sort_unstable();
     if names.is_empty() {
         "(pure)".to_string()
@@ -368,7 +369,7 @@ fn check_target_browser(
     effects: &EffectSet,
     diags: &mut Vec<Diagnostic>,
 ) {
-    if bucket == WebBucket::Wasm && effects.contains(&Effect::Browser) {
+    if bucket == WebBucket::Wasm && effect_set_has_root(effects, Effect::Browser) {
         diags.push(Syntax::web_target_browser(&f.name, Some(f.name_span)));
     }
 }

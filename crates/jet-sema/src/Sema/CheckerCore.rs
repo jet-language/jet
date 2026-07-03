@@ -1960,7 +1960,7 @@ impl<'a> Checker<'a> {
                 let mut cap_set = crate::Sema::EffectSet::new();
                 let mut bad = false;
                 for (name, span) in caps.iter() {
-                    match crate::Sema::Effect::parse(name) {
+                    match crate::Sema::parse_effect_name(name) {
                         Some(e) => {
                             cap_set.insert(e);
                         }
@@ -2012,7 +2012,7 @@ impl<'a> Checker<'a> {
                 let mut cap_set = crate::Sema::EffectSet::new();
                 let mut bad = false;
                 for (name, span) in caps.iter() {
-                    match crate::Sema::Effect::parse(name) {
+                    match crate::Sema::parse_effect_name(name) {
                         Some(e) => {
                             cap_set.insert(e);
                         }

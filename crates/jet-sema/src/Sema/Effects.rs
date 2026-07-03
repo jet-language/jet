@@ -14,6 +14,21 @@
 //! a `@Pure fn`). Casing is PascalCase per D-CASING1.
 //!
 //! D-WASM1=A amends D-EFF4 with `Browser` — DOM / browser API use (c123).
+//!
+//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the ten flat names below
+//! become tree **roots**. A user-written effect name may now be a dotted path
+//! rooted at one of them (`Fs.Read`, `Net.Http.Get`) — the root is validated
+//! against the closed vocabulary (E0119 otherwise); further segments are an
+//! open, user-chosen leaf path with no fixed vocabulary of children (the same
+//! shape as D-TAG1's tag-tree dotted paths). An `EffectSet` element is now the
+//! canonical dotted string (`"Fs"`, `"Fs.Read"`) rather than a bare `Effect`.
+//! **Ancestor matching is subsumption**: a bound entry covers any effect at or
+//! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
+//! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
+//! `variant.starts_with(&format!("{c}."))`). `Effect` itself stays the closed
+//! eleven-root enum, unchanged, used for root validation/classification and by
+//! the small set of call sites (D-TXN2, D-TAINT1, D-WASM1) that only ever care
+//! about a whole root regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{BTreeSet, HashMap};
@@ -73,7 +88,9 @@ impl Effect {
     }
 
     /// Every effect — the maximal set, used for foreign (`extern`) calls whose
-    /// body the compiler cannot inspect and for escaping function values.
+    /// body the compiler cannot inspect and for escaping function values. Each
+    /// entry is a bare root, which (D-EFFTREE1 ancestor subsumption) covers
+    /// its whole subtree — so this is still the true maximal set.
     pub fn all() -> EffectSet {
         [
             Effect::Net,
@@ -89,20 +106,81 @@ impl Effect {
             Effect::Browser,
         ]
         .into_iter()
+        .map(|e| e.name().to_string())
         .collect()
     }
 }
 
-pub type EffectSet = BTreeSet<Effect>;
+/// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"Fs"`,
+/// `"Fs.Read"`) rather than bare `Effect` roots — see the module doc.
+pub type EffectSet = BTreeSet<String>;
+
+/// The root segment of a dotted effect path (`"Fs.Read"` → `"Fs"`; a bare
+/// name is its own root). D-EFFTREE1.
+pub fn effect_root(name: &str) -> &str {
+    name.split('.').next().unwrap_or(name)
+}
+
+/// D-EFFTREE1: validate a user-written effect path — bare (`Fs`) or dotted
+/// (`Fs.Read`, `Net.Http.Get`). The root must be one of the closed ten
+/// D-EFF4/5 names (the caller reports E0119 on `None`); further segments are
+/// an open, user-chosen leaf path with no fixed vocabulary — mirrors D-TAG1's
+/// tag-tree dotted paths. Returns the path unchanged (as the canonical form)
+/// when the root is known.
+pub fn parse_effect_name(name: &str) -> Option<String> {
+    Effect::parse(effect_root(name))?;
+    Some(name.to_string())
+}
+
+/// D-EFFTREE1: does `bound` (one entry of a declared/granted/prohibited set)
+/// cover `e`? Exact match, or `bound` is a dot-path ancestor of `e` — ancestor
+/// subsumption, the same rule as D-TAG1's tag-tree subtree matching. A
+/// root-only bound (`Fs`) covers every leaf under it; a leaf bound
+/// (`Fs.Read`) covers only itself and any deeper path under it — a sibling
+/// (`Fs.Write`) is never covered.
+pub fn effect_covers(bound: &str, e: &str) -> bool {
+    e == bound || e.starts_with(&format!("{bound}."))
+}
+
+/// The subset of `inferred` NOT covered by any entry of `bound_set` — the
+/// tree-aware replacement for a flat `BTreeSet::difference` now that ancestor
+/// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
+/// inferred set within its declared bound" check (E0740/E0741/E0712/E0747/E0742).
+pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
+    inferred
+        .iter()
+        .filter(|e| !bound_set.iter().any(|b| effect_covers(b, e)))
+        .cloned()
+        .collect()
+}
+
+/// The subset of `inferred` covered by any entry of `set` — used for
+/// prohibition matching (D-PROP1 + D-EFFTREE1): a prohibited root prohibits
+/// its whole subtree, the symmetric reading of ancestor-subsumption.
+pub fn effects_covered(inferred: &EffectSet, set: &EffectSet) -> EffectSet {
+    inferred
+        .iter()
+        .filter(|e| set.iter().any(|b| effect_covers(b, e)))
+        .cloned()
+        .collect()
+}
+
+/// True when `set` contains an effect rooted at `root` (the bare root itself,
+/// or any leaf under it) — for the few call sites that only care about a
+/// whole root regardless of leaf precision (D-WASM1's `Browser` web-partition
+/// check).
+pub fn effect_set_has_root(set: &EffectSet, root: Effect) -> bool {
+    set.iter().any(|e| effect_root(e) == root.name())
+}
 
 impl<'a> super::Checker<'a> {
     /// D-EFF1: record an effect this function reaches directly — into the
     /// function's set and every open `#Caps(…)` region (which must account for
     /// effects reached inside it, E0741).
-    pub(crate) fn record_effect(&mut self, e: Effect) {
-        self.fx_direct.insert(e);
+    pub(crate) fn record_effect(&mut self, e: &str) {
+        self.fx_direct.insert(e.to_string());
         for r in &mut self.region_stack {
-            r.direct.insert(e);
+            r.direct.insert(e.to_string());
         }
     }
 
@@ -152,7 +230,7 @@ impl<'a> super::Checker<'a> {
     ) {
         let mut bound: EffectSet = EffectSet::new();
         for (name, nspan) in bound_names {
-            match Effect::parse(name) {
+            match parse_effect_name(name) {
                 Some(e) => {
                     bound.insert(e);
                 }
@@ -162,7 +240,7 @@ impl<'a> super::Checker<'a> {
                 }
             }
         }
-        let direct: EffectSet = self.fx_direct.difference(before_direct).copied().collect();
+        let direct: EffectSet = self.fx_direct.difference(before_direct).cloned().collect();
         let edges: BTreeSet<String> = self.fx_edges.difference(before_edges).cloned().collect();
         let maximal = self.fx_maximal && !before_maximal;
         self.fx_callback_obligations.push(CallbackObligation {
@@ -188,9 +266,9 @@ impl<'a> super::Checker<'a> {
     }
 }
 
-/// Render a set as `Net, Fs` (canonical order) for diagnostics.
+/// Render a set as `Net, Fs.Read` (canonical order) for diagnostics.
 pub fn show_set(set: &EffectSet) -> String {
-    set.iter().map(|e| e.name()).collect::<Vec<_>>().join(", ")
+    set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
 
 /// The effect carried by a Core call `module.method`, or `None` if pure.
@@ -226,6 +304,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         _ => return None,
     })
 }
+
 
 /// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
 /// effect that, once performed, cannot be rolled back. These are rejected when
@@ -381,7 +460,7 @@ pub fn solve(summaries: &HashMap<String, EffectSummary>) -> HashMap<String, Effe
             for callee in &s.edges {
                 if let Some(cs) = sets.get(callee) {
                     for e in cs {
-                        add.insert(*e);
+                        add.insert(e.clone());
                     }
                 }
             }
@@ -438,7 +517,7 @@ pub fn apply_effect_via(
         match effect_bound {
             Some(names) => {
                 for (n, ns) in names {
-                    match Effect::parse(n) {
+                    match parse_effect_name(n) {
                         Some(e) => {
                             via_set.insert(e);
                         }
@@ -527,10 +606,10 @@ pub fn check_callback_bounds(
             }
             for callee in &ob.edges {
                 if let Some(cs) = solved.get(callee) {
-                    cb.extend(cs.iter().copied());
+                    cb.extend(cs.iter().cloned());
                 }
             }
-            let over: EffectSet = cb.difference(&ob.bound).copied().collect();
+            let over: EffectSet = effects_uncovered(&cb, &ob.bound);
             if !over.is_empty() {
                 diags.push(e0747(&over, &ob.bound, ob.span));
             }
@@ -641,10 +720,10 @@ pub fn check_region_caps(
             }
             for callee in &region.edges {
                 if let Some(cs) = solved.get(callee) {
-                    inferred.extend(cs.iter().copied());
+                    inferred.extend(cs.iter().cloned());
                 }
             }
-            let over: EffectSet = inferred.difference(&region.caps).copied().collect();
+            let over: EffectSet = effects_uncovered(&inferred, &region.caps);
             if !over.is_empty() {
                 if region.grant {
                     diags.push(e0712(&over, &region.caps, region.caps_span));
@@ -1030,7 +1109,7 @@ pub fn check_trait_obligations(
         };
         let key = format!("{type_name}::{method}");
         let inferred = solved.get(&key).cloned().unwrap_or_default();
-        let over: EffectSet = inferred.difference(bound).copied().collect();
+        let over: EffectSet = effects_uncovered(&inferred, bound);
         if !over.is_empty() {
             diags.push(e0742(trait_name, method, &over, bound, *span));
         }

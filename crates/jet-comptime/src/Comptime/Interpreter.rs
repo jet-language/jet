@@ -7,8 +7,8 @@ use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
-    BinOp, BindPattern, EnumLitArg, Expr, Func, IncDecOp, OrFallback as FallbackKind, Stmt,
-    StrPart, Type, UnOp,
+    BinOp, BindPattern, EnumLitArg, Expr, Func, IncDecOp, OrFallback as FallbackKind, PatSlot,
+    Pattern, Stmt, StrPart, Type, UnOp,
 };
 
 use super::Builtins::{as_bool, as_int, eval_binop};
@@ -321,8 +321,13 @@ impl<'a> Interp<'a> {
                 ..
             } => {
                 // Sema rewrites enum/equality arms into ordinary Bool
-                // conditions, so a switch is a first-true-arm chain.
-                let _ = self.eval(subject, scope)?;
+                // conditions, so a switch is a first-true-arm chain. D-IF3: a
+                // complex subject (call/field, not a bare ident) is bound to
+                // the synthesized name `it` so arm patterns (`PatternTest`)
+                // have something to match against — mirrors what `if_arms`
+                // does at parse time (Statements.rs).
+                let subj_val = self.eval(subject, scope)?;
+                scope.insert(crate::Syntax::KW_IT.to_string(), subj_val);
                 for arm in arms {
                     let c = self.eval(&arm.cond, scope)?;
                     if as_bool(&c, arm.cond.span())? {
@@ -999,7 +1004,181 @@ impl<'a> Interp<'a> {
                 }
             }
             Expr::Paren(inner, _) => self.eval(inner, scope),
+            // S31: `subject == pattern` — evaluate the subject once, test it
+            // against the pattern, and bind any names the pattern captures
+            // into the current scope (so they're visible in the rest of the
+            // condition / the `if`'s then-body, matching the switch-arm
+            // semantics `Stmt::Switch` already relies on).
+            Expr::PatternTest {
+                subject, pattern, ..
+            } => {
+                let v = self.eval(subject, scope)?;
+                let matched = self.match_pattern(&v, pattern, scope)?;
+                Ok(CtValue::Bool(matched))
+            }
             other => Err(unsupported_expr(other)),
+        }
+    }
+
+    /// S31/S32/S34/D-PATW/D-PATR/D-PATO/D-DESTRUCT1: match `v` against
+    /// `pattern`, binding any names the pattern captures into `scope` when it
+    /// matches. Mirrors the shapes `CtValue` construction already produces
+    /// (`Expr::EnumLit`/`Expr::Present`/`Expr::Ok`/`Expr::Err` above) — every
+    /// pattern kind here has a matching value-construction arm elsewhere in
+    /// this file.
+    fn match_pattern(
+        &mut self,
+        v: &CtValue,
+        pattern: &Pattern,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<bool, Diagnostic> {
+        match pattern {
+            Pattern::Present { binding, .. } => match v {
+                CtValue::Some(inner) => {
+                    scope.insert(binding.clone(), (**inner).clone());
+                    Ok(true)
+                }
+                CtValue::None(_) => Ok(false),
+                other => Err(unsupported(
+                    &format!(
+                        "matching `value(..)` against a value that isn't an option (got {})",
+                        other.jet_show()
+                    ),
+                    pattern.span(),
+                )),
+            },
+            Pattern::Absent(_) => match v {
+                CtValue::None(_) => Ok(true),
+                CtValue::Some(_) => Ok(false),
+                other => Err(unsupported(
+                    &format!(
+                        "matching `null` against a value that isn't an option (got {})",
+                        other.jet_show()
+                    ),
+                    pattern.span(),
+                )),
+            },
+            Pattern::Ok { binding, .. } => match v {
+                CtValue::ResOk(inner) => {
+                    scope.insert(binding.clone(), (**inner).clone());
+                    Ok(true)
+                }
+                CtValue::ResErr(_) => Ok(false),
+                other => Err(unsupported(
+                    &format!(
+                        "matching `ok(..)` against a value that isn't a result (got {})",
+                        other.jet_show()
+                    ),
+                    pattern.span(),
+                )),
+            },
+            Pattern::Err { binding, .. } => match v {
+                CtValue::ResErr(inner) => {
+                    scope.insert(binding.clone(), (**inner).clone());
+                    Ok(true)
+                }
+                CtValue::ResOk(_) => Ok(false),
+                other => Err(unsupported(
+                    &format!(
+                        "matching `err(..)` against a value that isn't a result (got {})",
+                        other.jet_show()
+                    ),
+                    pattern.span(),
+                )),
+            },
+            Pattern::Variant {
+                variant, bindings, ..
+            } => match v {
+                CtValue::Enum {
+                    variant: vname,
+                    args,
+                    ..
+                } => {
+                    if vname != variant {
+                        return Ok(false);
+                    }
+                    for (slot, (_, arg_val)) in bindings.iter().zip(args.iter()) {
+                        match slot {
+                            PatSlot::Wildcard => {}
+                            PatSlot::Bind(name) => {
+                                scope.insert(name.clone(), arg_val.clone());
+                            }
+                            PatSlot::Range { lo, hi } => {
+                                let n = as_int(arg_val, pattern.span())?;
+                                if n < *lo || n > *hi {
+                                    return Ok(false);
+                                }
+                            }
+                        }
+                    }
+                    Ok(true)
+                }
+                other => Err(unsupported(
+                    &format!(
+                        "matching an enum-variant pattern against a value that isn't an enum (got {})",
+                        other.jet_show()
+                    ),
+                    pattern.span(),
+                )),
+            },
+            Pattern::Range { lo, hi, .. } => match v {
+                CtValue::Int(n) => Ok(*n >= *lo && *n <= *hi),
+                CtValue::Char(c) => {
+                    let n = *c as i64;
+                    Ok(n >= *lo && n <= *hi)
+                }
+                other => Err(unsupported(
+                    &format!(
+                        "matching a range pattern against a value that isn't Int/Char (got {})",
+                        other.jet_show()
+                    ),
+                    pattern.span(),
+                )),
+            },
+            Pattern::Or(alts, _) => {
+                for alt in alts {
+                    if self.match_pattern(v, alt, scope)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            Pattern::Struct { fields, .. } => match v {
+                CtValue::Struct { fields: sfields, .. } => {
+                    for f in fields {
+                        match f {
+                            crate::AST::StructPatField::Bind { field, local, .. } => {
+                                let val = sfields
+                                    .iter()
+                                    .find(|(n, _)| n == field)
+                                    .map(|(_, v)| v.clone())
+                                    .ok_or_else(|| {
+                                        unsupported(&format!("the field `.{}`", field), pattern.span())
+                                    })?;
+                                scope.insert(local.clone(), val);
+                            }
+                            crate::AST::StructPatField::Value { field, value, .. } => {
+                                let expected = self.eval(value, scope)?;
+                                let actual = sfields.iter().find(|(n, _)| n == field).map(|(_, v)| v);
+                                if actual != Some(&expected) {
+                                    return Ok(false);
+                                }
+                            }
+                        }
+                    }
+                    Ok(true)
+                }
+                other => Err(unsupported(
+                    &format!(
+                        "matching a struct pattern against a value that isn't a struct (got {})",
+                        other.jet_show()
+                    ),
+                    pattern.span(),
+                )),
+            },
+            Pattern::StrMatch { span, .. } => {
+                Err(unsupported("a string-match pattern in `jet dev`", *span))
+            }
         }
     }
 }

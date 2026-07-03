@@ -793,7 +793,7 @@ impl<'a> Parser<'a> {
         let mut effects = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
-                let (name, span) = self.expect_ident("for an effect name")?;
+                let (name, span) = self.expect_effect_path_name("for an effect name")?;
                 effects.push((name, span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
