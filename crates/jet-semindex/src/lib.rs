@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn open_finds_definitions_and_calls() {
-        let path = fixture("effects.jet");
+        let path = fixture("effects/effects.jet");
         let idx = open(&path).expect("effects example should index");
         assert_eq!(idx.schema_version(), SCHEMA_VERSION);
         assert!(idx.lookup("main").is_some());
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn references_filter_by_name() {
-        let path = fixture("01_hello.jet");
+        let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let refs = idx.references_to("print");
         assert!(!refs.is_empty());
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn json_snapshot_shape() {
-        let path = fixture("01_hello.jet");
+        let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
         assert!(json.contains("\"schema_version\":1"));

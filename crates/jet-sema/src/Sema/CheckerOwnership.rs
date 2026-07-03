@@ -115,10 +115,12 @@ impl<'a> Checker<'a> {
             // in-scope values whose type matches the referent — exactly one
             // means "the owner," two or more is ambiguous (E0207).
             let candidates = self.ref_candidate_owners(referent);
+            let mut how = RefOwnerHow::Inferred;
             let owner: Option<String> =
                 if let Some(label) = self.registry.ref_field_label(type_name, fname) {
                     let label = label.to_string();
                     if candidates.iter().any(|c| c == &label) {
+                        how = RefOwnerHow::Labeled;
                         Some(label)
                     } else {
                         self.diags.push(self.e2306_unknown_ref_owner(
@@ -138,6 +140,19 @@ impl<'a> Checker<'a> {
                         }
                     }
                 };
+            // D-EXPANDCLI1 (card #183): remember the resolved owner for
+            // `jet expand --facts refs` — the same resolution above, recorded
+            // once instead of thrown away (I8: no second analysis).
+            if let Some(owner_name) = &owner {
+                self.ref_facts.push(RefFact {
+                    struct_name: type_name.clone(),
+                    field: fname.clone(),
+                    owner: owner_name.clone(),
+                    how,
+                    span: *fspan,
+                    module_idx: self.module_idx,
+                });
+            }
             let root = ref_field_init_root(fexpr);
             if let (Some(owner), Some(root)) = (owner.as_deref(), root) {
                 if let Expr::Index { .. } | Expr::Slice { .. } = fexpr {

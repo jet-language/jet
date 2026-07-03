@@ -2093,6 +2093,7 @@ pub(crate) fn check_func_body(
         taskgroup_stack: Vec::new(),
         in_taskgroup_spawn: false,
         inline_addr_taken: HashSet::new(),
+        ref_facts: Vec::new(),
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.

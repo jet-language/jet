@@ -1538,6 +1538,56 @@ helper functions use unqualified `jet_std`/`user_*` paths, so — like
 the entry file, not an imported module file (tracked, not fixed here;
 same gap, same fix when it lands).
 
+## `jet expand` — transparency command (D-EXPANDCLI1, card #183)
+
+Every "the compiler inferred this for you" mechanism (I8: magic default,
+expert opt-in) needs a way to ask the compiler what it decided. `jet expand`
+is that one command for all of them — never a second, mechanism-specific
+CLI flag per feature.
+
+```
+jet expand --facts <lens> <file.jet>   # one lens's facts
+jet expand <file.jet>                  # every lens, grouped, empty ones skipped
+```
+
+Facts are read straight off the ordinary check pass — never a second
+analysis, never rustc (I2/I3). A lens renders either fields already sitting
+on the checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by
+the time the bundle compiled at all) or a fact recorded once during checking
+and threaded out on `SemIndexEffectFacts` (e.g. `refs`, via
+`crates/jet-sema/src/Sema/Facts.rs::RefFact`) — the same side-channel
+`jet semindex`/`jet impact` already read, not a parallel pipeline.
+
+**Floor lenses (this card):**
+
+- `inline` (D-METHODMACRO1) — every fn/method carrying `@Inline` or
+  `@InlineAlways`: the contract and the Rust attribute codegen emits
+  (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
+  no line — the lens reports contracts, not every function in the program.
+- `refs` (D-REF-SHORTHAND1) — every `&T` stored-ref struct field's resolved
+  owner at its construction site: `labeled #Ref(x)` when the field named its
+  owner explicitly, `inferred — sole candidate` when sema found exactly one
+  in-scope value of the referent type.
+
+```
+$ jet expand --facts refs examples/features/memory/ref_field.jet
+refs — resolved owners for &T stored-ref fields (D-REF-SHORTHAND1) (2 facts)
+  examples/features/memory/ref_field.jet:10:22   Span.text   owner: source   (labeled #Ref(source))
+  examples/features/memory/ref_field.jet:10:36   Span.meta   owner: kind   (labeled #Ref(kind))
+```
+
+Unknown `--facts <lens>` lists the registered lenses and exits nonzero
+(usage error, not an E-code — it never reaches the diagnostic renderer). A
+file that fails to compile prints the ordinary front-end diagnostics and
+exits nonzero: facts require a clean check, same as `jet semindex`/
+`jet impact`. A clean program with no facts for a lens (or for every lens,
+bare form) exits 0 — absence of facts is not a failure.
+
+**Extensibility:** lenses live in one static table in `Source/CmdExpand.rs`
+(name, one-line summary, renderer) — adding a lens for a future ratified
+mechanism (effects, layout, derive expansion) is one row, never a new
+subcommand or a new flag (I8).
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged

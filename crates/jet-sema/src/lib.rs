@@ -8,4 +8,4 @@ pub use jet_parser::{
     SHA256,
 };
 pub mod Sema;
-pub use Sema::{effect_key, SemIndexEffectFacts};
+pub use Sema::{effect_key, RefFact, RefOwnerHow, SemIndexEffectFacts};

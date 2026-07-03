@@ -19,6 +19,7 @@ use jet::ExitCodes;
 mod CmdCompile;
 mod CmdDevTools;
 mod CmdDevWeb;
+mod CmdExpand;
 mod CmdImpact;
 mod CmdPkg;
 mod CmdSchema;
@@ -34,6 +35,7 @@ use CmdDevTools::{
     run_explain, run_lint_a11y, run_repl, run_serve, watch_policy_from, WatchPolicy,
 };
 use CmdDevWeb::run_dev_web;
+use CmdExpand::run_expand;
 use CmdImpact::run_impact;
 use CmdPkg::{
     run_add, run_fetch, run_gc, run_remove, run_store_generations, run_store_rollback,
@@ -357,6 +359,8 @@ usage:
   {bin} man [<command>]             print the manual page (roff)
   {bin} lsp doctor                  health-check the language server
   {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
+  {bin} expand <file.{ext}>         print every lens' facts, grouped (D-EXPANDCLI1)
+  {bin} expand --facts <lens> <file.{ext}>   print one lens's facts (inline, refs)
   {bin} version                     print compiler version
   {bin} help                        print this help text
   {bin} ?                           same as help
@@ -673,6 +677,7 @@ fn main() {
                 | "schema"
                 | "semindex"
                 | "impact"
+                | "expand"
         );
     if !known {
         // c6vz465: `jet <file>` → `jet run <file>` when the first word names a
@@ -745,6 +750,7 @@ fn main() {
             | "schema"
             | "semindex"
             | "impact"
+            | "expand"
     );
     if !owns_flags {
         check_flags(jet_argv, cmd);
@@ -831,6 +837,13 @@ fn main() {
             // D-IMPACT1: blast-radius queries over the semantic index.
             let impact_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_impact(&impact_args, mode.json);
+            return;
+        }
+        "expand" => {
+            // D-EXPANDCLI1=A: `jet expand --facts <lens> <file>` / bare `jet
+            // expand <file>` — the transparency command (card #183).
+            let expand_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_expand(&expand_args, mode.json);
             return;
         }
         "audit" => {

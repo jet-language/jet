@@ -878,3 +878,126 @@ build: { staging: Build.{ optimize: basic } }
         "pkg.jet-defined profile must resolve:\n{stderr}"
     );
 }
+
+// ── D-EXPANDCLI1 (card #183): `jet expand` transparency command ────
+
+/// Fixture exercising both floor lenses: an `@Inline` fn, an `@InlineAlways`
+/// method, one inferred `&T` stored-ref owner, and two explicitly labeled ones.
+fn expand_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_facts.jet")
+}
+
+/// Replace the fixture's machine-specific absolute path with a stable token.
+fn scrub_fixture(s: &str, fixture: &Path) -> String {
+    s.replace(&fixture.display().to_string(), "FIXTURE.jet")
+}
+
+#[test]
+fn expand_inline_golden() {
+    let p = expand_fixture();
+    let out = Command::new(jet())
+        .args(["expand", "--facts", "inline"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expand --facts inline should exit 0:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let s = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
+    check_snapshot("expand_inline.txt", &s);
+}
+
+#[test]
+fn expand_refs_golden() {
+    let p = expand_fixture();
+    let out = Command::new(jet())
+        .args(["expand", "--facts", "refs"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expand --facts refs should exit 0:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let s = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
+    check_snapshot("expand_refs.txt", &s);
+}
+
+#[test]
+fn expand_all_golden() {
+    let p = expand_fixture();
+    // Bare `jet expand <file>`: every lens, grouped, magic default.
+    let out = Command::new(jet())
+        .arg("expand")
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "bare expand should exit 0:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let s = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
+    check_snapshot("expand_all.txt", &s);
+}
+
+#[test]
+fn expand_unknown_lens_golden() {
+    let p = expand_fixture();
+    let out = Command::new(jet())
+        .args(["expand", "--facts", "bogus"])
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "unknown lens should exit 1 (USER_ERROR), listing available lenses"
+    );
+    let s = scrub_fixture(&String::from_utf8_lossy(&out.stderr), &p);
+    check_snapshot("expand_unknown_lens.txt", &s);
+}
+
+#[test]
+fn expand_missing_file_is_user_error() {
+    let out = Command::new(jet()).arg("expand").output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "missing entry file is USER_ERROR");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("needs an entry file"),
+        "should explain the missing file:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn expand_compile_error_reports_ordinary_diagnostics() {
+    let p = bad_file(&line!().to_string());
+    let out = Command::new(jet())
+        .arg("expand")
+        .arg(&p)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a program that fails to compile can't print facts (USER_ERROR)"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E0102"),
+        "should render the ordinary front-end diagnostic:\n{}",
+        stderr
+    );
+}

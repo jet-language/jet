@@ -124,15 +124,38 @@ follows whatever the missing-flag path does naturally.
 
 ## Exit criteria
 
-- [ ] D-EXPANDCLI1 ratified; printed surface matches the chosen option.
-- [ ] `ExpandFacts` returned from `check_bundle` beside `SemIndexEffectFacts`;
-      no separate analysis pass.
+- [x] D-EXPANDCLI1 ratified; printed surface matches the chosen option
+      (card #183, built 2026-07-03).
+- [x] Ref facts returned from `check_bundle` beside `SemIndexEffectFacts` —
+      landed as an additive `refs: Vec<RefFact>` field on
+      `SemIndexEffectFacts` itself (`crates/jet-sema/src/Sema/Facts.rs`)
+      rather than a separate `ExpandFacts` type; same "no second analysis
+      pass" shape the plan called for, fewer moving parts. `inline` needed no
+      side table at all — `Source/CmdExpand.rs` reads `Func::is_inline`/
+      `is_inline_always` straight off the already-checked bundle.
 - [ ] semindex schema v2 carries the facts; `jet semindex --json` unchanged
-      except additive fields + version.
-- [ ] `jet expand --facts refs <file>` prints resolved owners for today's
-      labeled `#Ref` examples; `--json` emits the stable document.
-- [ ] `inline` lens registered; populated by c7methodmacro (cross-card
-      dependency noted on both cards).
-- [ ] Unknown lens lists valid lenses; broken file shows ordinary diagnostics.
-- [ ] `tests/expand.rs` green; `tests/cli` fixtures re-blessed; full
-      `nix develop -c cargo test` green.
+      except additive fields + version. **Not done this pass** — card #183's
+      ratified floor scope was the CLI surface + the two lenses, plain text
+      only (no `--json` for `expand` yet); wiring `refs` into the semindex
+      JSON document for LSP inlay hints is follow-on work, not blocking.
+- [x] `jet expand --facts refs <file>` prints resolved owners — both
+      inferred (sole in-scope candidate) and explicitly `#Ref(label)`ed —
+      verified against `examples/features/memory/ref_owner.jet` and
+      `ref_field.jet`. No `--json` rendering (plain text only, per the
+      ratified surface).
+- [x] `inline` lens registered; populated immediately (c7methodmacro/
+      D-METHODMACRO1 already shipped) — verified against
+      `examples/features/contracts/inline_contracts.jet`.
+- [x] Unknown lens lists valid lenses (exit 1); broken file shows ordinary
+      diagnostics (exit 1, no facts printed).
+- [x] CLI coverage green: `tests/cli.rs` `expand_inline_golden` /
+      `expand_refs_golden` / `expand_all_golden` / `expand_unknown_lens_golden`
+      / `expand_missing_file_is_user_error` /
+      `expand_compile_error_reports_ordinary_diagnostics`, fixture
+      `tests/fixtures/expand_facts.jet` (no separate `tests/expand.rs` —
+      the card brief directed CLI-level coverage instead). `completions_*`/
+      `man.txt`/`question_mark_help.txt` re-blessed for the new command.
+      `--test cli`, `--test decisions`, `--test truthfulness`, `--test
+      semindex`, `--test impact`, `--test ownership`, `--test
+      ref_soundness_fuzz`, `-p jet-sema` all green; full suite not run
+      (per standing instruction — targeted tests only).

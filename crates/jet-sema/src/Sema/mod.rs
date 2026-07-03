@@ -778,6 +778,11 @@ pub(crate) struct Checker<'a> {
     /// `global_addr_taken` parameter) so `@InlineAlways` (E0918) can be
     /// checked once every function has run through here.
     inline_addr_taken: HashSet<String>,
+    /// D-EXPANDCLI1 (card #183): resolved `&T` stored-ref owners recorded by
+    /// `check_stored_ref_fields` while checking this function's body — rolled
+    /// into the whole-program `SemIndexEffectFacts::refs` accumulator once the
+    /// body check finishes (see `check_func_body_bundle`).
+    ref_facts: Vec<Facts::RefFact>,
 }
 
 pub mod ApiFreeze;
@@ -796,6 +801,7 @@ mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod Diagnostics;
 mod Effects;
+mod Facts;
 mod FFI;
 pub mod HotSwap;
 mod OsTarget;
@@ -835,6 +841,9 @@ pub use Effects::SemIndexEffectFacts;
 // D-EFFBUDGET1: the closed effect vocabulary, exposed so jet-driver can
 // validate `pkg.jet` `effects:`/`grants:` manifest keys against it.
 pub use Effects::{Effect, EffectSet};
+// D-EXPANDCLI1 (card #183): `jet expand --facts refs` reads these off
+// `SemIndexEffectFacts::refs`.
+pub use Facts::{RefFact, RefOwnerHow};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub use Registration::{check, check_with_mode, effect_key};

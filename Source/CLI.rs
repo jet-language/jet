@@ -169,6 +169,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "expand",
+        summary: "print sema's facts for one lens (--facts <lens>) or every lens (D-EXPANDCLI1)",
+        headline: false,
+    },
+    CommandSpec {
         name: "vendor",
         summary: "copy all dependencies into vendor/",
         headline: false,

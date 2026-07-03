@@ -61,10 +61,11 @@ to `@` in the marker-family migration pass, one parser-table edit.
   `#[inline]` for `ConstAttr::ForceInline`; add the analogous path for
   `is_inline` → `#[inline]`, `is_inline_always` → `#[inline(always)]`, gated
   on the sema check passing (I3: sema decides, codegen just emits).
-- `jet expand --facts inline` — **does not exist** (`grep -r "expand.*facts"
-  crates/jet-driver Source/` is empty). Out of scope for this card unless the
-  owner wants it now; if deferred, say so explicitly in the PR/card note —
-  do not silently drop it, it's a named ballot deliverable.
+- `jet expand --facts inline` — **shipped** (card #183, D-EXPANDCLI1=A):
+  `Source/CmdExpand.rs`'s `inline` lens prints every `@Inline`/
+  `@InlineAlways` fn/method, its contract, and the emitted Rust attribute —
+  read straight off the checked bundle's `Func::is_inline`/`is_inline_always`
+  (no second sema pass; a bundle that compiled already proved the promise).
 
 **New diagnostics** (E09xx contract-check family, next free after E0916):
 - `E0917` — `@InlineAlways fn {name}` cannot be inlined: self-recursive.
@@ -611,10 +612,11 @@ contradict each other and someone needs to close that gap.
    parameters in scope at construction — pin the exact rule in
    `docs/spec/spec.md` before coding).
 4. `jet expand --facts refs` (ballot's transparency mechanism, "materializes
-   the resolved owner") — **does not exist** (no `expand`/`--facts`
-   subcommand anywhere in `crates/jet-driver`/`Source/`). Same situation as
-   §1's `--facts inline`: name it as deferred/out-of-scope explicitly, don't
-   silently drop it.
+   the resolved owner") — **shipped** (card #183, D-EXPANDCLI1=A):
+   `Source/CmdExpand.rs`'s `refs` lens prints every `&T` stored-ref field's
+   resolved owner, sourced from `SemIndexEffectFacts::refs`
+   (`crates/jet-sema/src/Sema/Facts.rs`, recorded by
+   `CheckerOwnership::check_stored_ref_fields` — never recomputed).
 
 **New diagnostics** (rework `E0207`, add new codes in the Tier-2 reference
 family E23xx, next free after E2304/L2301 — and after whatever §2 claims as
@@ -679,8 +681,10 @@ formatter emission + fmt STABILITY test (own-memory rule).
   drafted here if another card landed first and shifted the free range.
 - **`jet expand --facts <lens>`** is named as the transparency mechanism in
   three separate ballots (inline §1, refs §8, and implicitly §2's owner
-  tracking) and **does not exist anywhere in the driver**. This is worth its
-  own small card/ballot rather than three separate half-built copies.
+  tracking) and **shipped as card #183** (D-EXPANDCLI1=A): `Source/CmdExpand.rs`,
+  floor lenses `inline`/`refs`. Bare `jet expand <file>` runs every lens
+  grouped; other ratified surfaces add lenses to the same registry, never a
+  new command.
 - Every card that touches parseable syntax needs a formatter emission path
   and a fmt STABILITY round-trip test — called out per-section above, don't
   skip it (memory: dropped tokens on `jet fmt` shipped silently before).
