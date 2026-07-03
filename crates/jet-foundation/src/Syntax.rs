@@ -279,9 +279,12 @@ pub const ATTR_UNINIT: &str = "Uninit";
 /// position recognizes it.
 pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL1
 
-/// D-REFSTRUCT1 (ratified 2026-06-28): stored-reference field marker —
-/// `#Ref(owner) field: T` stores a view into a named owner; sema proves the
-/// owner relationship. No `use core.mem` gate (owner amendment).
+/// D-REF-SHORTHAND1/2 (ratified 2026-07-02): a stored-reference field spells
+/// its type `&T`; the owner is inferred from the single in-scope value of the
+/// referent type. `#Ref(owner) field: &T` only *disambiguates* the owner when
+/// several candidates exist (E0207). Stays on the `#` directive plane, never
+/// `@Ref` (D-REF-SHORTHAND2). The retired `#Ref(owner) field: T` form (plain
+/// type, no `&`) is E0427. No `use core.mem` gate.
 pub const ATTR_REF: &str = "Ref";
 
 /// D-OPTGC1 (ratified 2026-06-26): opt-in traced GC library module.

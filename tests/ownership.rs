@@ -100,7 +100,7 @@ fn main() {
 fn ref_owner_param_fill_compiles() {
     let src = r#"
 struct TokenView {
-    #Ref(source) text: String
+    text: &String
 }
 fn show(source: String) {
     t: TokenView :: TokenView.{ text: source }
@@ -110,14 +110,14 @@ fn main() {
     show("hello")
 }
 "#;
-    jet::compile(src).expect("param fill of #Ref(source) should compile");
+    jet::compile(src).expect("inferred-owner `&String` field should compile");
 }
 
 #[test]
 fn stored_ref_generates_struct_lifetime() {
     let src = r#"
 struct Holder {
-    #Ref(src) data: String,
+    data: &String,
 }
 
 fn main() {

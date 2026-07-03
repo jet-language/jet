@@ -93,51 +93,63 @@ impl<'a> Checker<'a> {
         let Some(owner_mod) = self.struct_owner_module(type_name, import_ns.as_deref()) else {
             return;
         };
-        let ref_fields: Vec<String> = match self.struct_fields_of(owner_mod, type_name) {
-            Some(defs) => defs
-                .iter()
-                .filter(|(_, _, _, is_ref, _)| *is_ref)
-                .map(|(n, ..)| n.clone())
-                .collect(),
-            None => return,
-        };
-        if ref_fields.is_empty() {
+        // D-REF-SHORTHAND1: referent type of each `&T` field, keyed by name.
+        let ref_field_types: HashMap<String, Type> =
+            match self.struct_fields_of(owner_mod, type_name) {
+                Some(defs) => defs
+                    .iter()
+                    .filter(|(_, _, _, is_ref, _)| *is_ref)
+                    .map(|(n, _, ty, _, _)| (n.clone(), ty.clone()))
+                    .collect(),
+                None => return,
+            };
+        if ref_field_types.is_empty() {
             return;
         }
         for (fname, fspan, fexpr) in fields {
-            if !ref_fields.contains(fname) {
+            let Some(referent) = ref_field_types.get(fname) else {
                 continue;
-            }
-            let owner =
-                self.registry
-                    .ref_field_label(type_name, fname)
-                    .map(str::to_string)
-                    .or_else(|| {
-                        let fields = self.struct_fields_of(owner_mod, type_name)?;
-                        let legacy = self.structs.get(type_name)?;
-                        fields.iter().zip(legacy.iter()).find_map(
-                            |((n, _, _, is_ref, _), (lab, _))| {
-                                if n == fname && *is_ref {
-                                    Some(lab.clone().unwrap_or_else(|| "src".to_string()))
-                                } else {
-                                    None
-                                }
-                            },
-                        )
-                    });
+            };
+            // D-REF-SHORTHAND1/2: resolve the owner. An explicit `#Ref(label)`
+            // must name a candidate (else E2306); otherwise infer from the
+            // in-scope values whose type matches the referent — exactly one
+            // means "the owner," two or more is ambiguous (E0207).
+            let candidates = self.ref_candidate_owners(referent);
+            let owner: Option<String> =
+                if let Some(label) = self.registry.ref_field_label(type_name, fname) {
+                    let label = label.to_string();
+                    if candidates.iter().any(|c| c == &label) {
+                        Some(label)
+                    } else {
+                        self.diags.push(self.e2306_unknown_ref_owner(
+                            fname, &label, referent, &candidates, *fspan,
+                        ));
+                        continue;
+                    }
+                } else {
+                    match candidates.len() {
+                        1 => Some(candidates[0].clone()),
+                        0 => None,
+                        _ => {
+                            self.diags.push(self.e0207_ambiguous_ref_owner(
+                                fname, referent, &candidates, *fspan,
+                            ));
+                            continue;
+                        }
+                    }
+                };
             let root = ref_field_init_root(fexpr);
             if let (Some(owner), Some(root)) = (owner.as_deref(), root) {
                 if let Expr::Index { .. } | Expr::Slice { .. } = fexpr {
                     self.diags.push(Diagnostic::error(
                         "E2302",
                         format!(
-                            "the `#Ref({owner})` field `{fname}` can't store a sliced or indexed piece",
-                            owner = owner,
+                            "the stored-reference field `{fname}` can't store a sliced or indexed piece",
                             fname = fname
                         ),
-                        "indexing or slicing makes a fresh owned value — there is nothing long-lived for a stored view to point into".to_string(),
+                        "indexing or slicing makes a fresh owned value — there is nothing long-lived for a stored reference to point into".to_string(),
                         format!(
-                            "store an owned value in `{fname}`, or fill the `#Ref` field from the whole `{owner}` value",
+                            "store an owned value in `{fname}`, or fill it from the whole `{owner}` value",
                             fname = fname,
                             owner = owner
                         ),
@@ -159,19 +171,21 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E2302",
                         format!(
-                            "the `#Ref({owner})` field `{fname}` must point into `{owner}`",
+                            "the stored-reference field `{fname}` must point into `{owner}`",
                             owner = owner,
                             fname = fname
                         ),
                         format!(
-                            "this field stores a view into `{owner}`, but the value comes from `{root}` instead",
+                            "this field stores a reference into `{owner}`, but the value comes from `{root}` instead",
                             owner = owner,
                             root = root
                         ),
                         format!(
-                            "fill `{fname}` from `{owner}` (or rename the `#Ref` label to match the real owner)",
+                            "fill `{fname}` from `{owner}` (or write `#Ref({root}) {fname}: &{ty}` to point into `{root}`)",
                             fname = fname,
-                            owner = owner
+                            owner = owner,
+                            root = root,
+                            ty = referent.name(),
                         ),
                         Some(*fspan),
                     ));
@@ -190,18 +204,107 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E2302",
                     format!(
-                        "the `#Ref` field `{}` would point at something that dies first",
+                        "the stored-reference field `{}` would point at something that dies first",
                         fname
                     ),
                     format!(
-                        "a `#Ref` field stores a view, not its own copy, so its source has to outlive the struct — but {} doesn't live long enough to promise that here",
+                        "a `&T` field stores a reference, not its own copy, so its source has to outlive the struct — but {} doesn't live long enough to promise that here",
                         why_short
                     ),
-                    "store an owned value (drop `#Ref` so the struct keeps its own copy), or fill the `#Ref` field from the named owner parameter".to_string(),
+                    "store an owned value (drop the `&` so the struct keeps its own copy), or fill the field from a parameter the caller keeps owning".to_string(),
                     Some(*fspan),
                 ));
             }
         }
+    }
+
+    /// D-REF-SHORTHAND1: the in-scope values that could own a stored reference
+    /// to `referent` — every parameter, local, and module const whose type is
+    /// exactly the referent type. Sorted for a stable diagnostic listing.
+    fn ref_candidate_owners(&self, referent: &Type) -> Vec<String> {
+        let want = referent.name();
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        for scope in self.scopes.iter() {
+            for (name, info) in scope.iter() {
+                if info.ty.name() == want && seen.insert(name.clone()) {
+                    out.push(name.clone());
+                }
+            }
+        }
+        for (name, ty) in self.consts.iter() {
+            if ty.name() == want && seen.insert(name.clone()) {
+                out.push(name.clone());
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// E0207: two or more in-scope values could own a `&T` field's reference,
+    /// so the owner can't be inferred — the field must name it with `#Ref(…)`.
+    fn e0207_ambiguous_ref_owner(
+        &self,
+        fname: &str,
+        referent: &Type,
+        candidates: &[String],
+        span: Span,
+    ) -> Diagnostic {
+        let list = candidates.join(", ");
+        let first = candidates.first().map(String::as_str).unwrap_or("owner");
+        Diagnostic::error(
+            "E0207",
+            format!("the owner of stored-reference field `{fname}` is ambiguous"),
+            format!(
+                "{list} all have type `{ty}`, so {lang} can't tell which one `{fname}` points into",
+                list = list,
+                ty = referent.name(),
+                lang = Syntax::LANG_NAME,
+                fname = fname,
+            ),
+            format!(
+                "name the owner: `#{attr}({first}) {fname}: &{ty}` (any of: {list})",
+                attr = Syntax::ATTR_REF,
+                first = first,
+                fname = fname,
+                ty = referent.name(),
+                list = list,
+            ),
+            Some(span),
+        )
+    }
+
+    /// E2306: an explicit `#Ref(label)` named a value that either isn't in
+    /// scope or doesn't have the referent type — so it can't be the owner.
+    fn e2306_unknown_ref_owner(
+        &self,
+        fname: &str,
+        label: &str,
+        referent: &Type,
+        candidates: &[String],
+        span: Span,
+    ) -> Diagnostic {
+        let fix = if candidates.is_empty() {
+            format!(
+                "bring a `{ty}` value into scope for `{fname}` to point into",
+                ty = referent.name(),
+                fname = fname,
+            )
+        } else {
+            format!("name one of: {}", candidates.join(", "))
+        };
+        Diagnostic::error(
+            "E2306",
+            format!("no value named `{label}` can own `{fname}`"),
+            format!(
+                "`#{attr}({label})` must name a value in scope whose type is `{ty}` — the owner this stored reference points into",
+                attr = Syntax::ATTR_REF,
+                label = label,
+                ty = referent.name(),
+            ),
+            fix,
+            Some(span),
+        )
     }
 
     /// If the expression filling a `ref` field won't *provably* outlive the

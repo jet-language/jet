@@ -1,7 +1,17 @@
-// Tier-2 stored references (M2): labeled `#Ref` fields in a struct (D-REFSTRUCT1).
-struct Caption {
-    #Ref(src) text: String
+// D-REF-SHORTHAND2: when several in-scope values share the referent type, the
+// owner of each `&T` borrow is ambiguous — name it with `#Ref(label)` to say
+// which value the reference points into.
+struct Span {
+    #Ref(source) text: &String
+    #Ref(kind) meta: &String
 }
+
+fn describe(source: String, kind: String) {
+    s: Span :: Span.{ text: source, meta: kind }
+    print(s.text)
+    print(s.meta)
+}
+
 fn main() {
-    print(0)
+    describe("hello", "greeting")
 }

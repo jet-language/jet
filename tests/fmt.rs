@@ -1496,3 +1496,28 @@ fn main() {
 ";
     assert_fmt_stable(src, "uninit sentinel binding");
 }
+
+#[test]
+fn fmt_preserves_ref_shorthand_fields() {
+    // D-REF-SHORTHAND1/2: a stored-reference field spells its type `&T`, and an
+    // explicit `#Ref(label)` prefix (owner disambiguation) must survive the
+    // round-trip byte-for-byte. Inference leaves the unlabeled field with just
+    // `&T` and no prefix (own-CLAUDE-memory rule: new syntax needs a formatter
+    // round-trip test, not just a parser).
+    let src = "\
+struct Span {
+    text: &String
+    #Ref(kind) meta: &String
+}
+
+fn describe(source: String, kind: String) {
+    s: Span :: Span.{text: source, meta: kind}
+    print(s.text)
+}
+
+fn main() {
+    describe(\"a\", \"b\")
+}
+";
+    assert_fmt_stable(src, "ref shorthand fields");
+}

@@ -1732,15 +1732,16 @@ pub(crate) fn register_struct(
             columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
         },
     );
+    // D-REF-SHORTHAND1/2: record only *explicit* `#Ref(label)` owners. An
+    // unlabeled `&T` field leaves no entry — its owner is inferred at each
+    // construction site (`check_stored_ref_fields`), so a missing entry here
+    // means "infer," not "default to `src`."
     let mut labels = HashMap::new();
     for f in &s.fields {
         if f.is_stored_ref {
-            labels.insert(
-                f.name.clone(),
-                f.stored_ref_label
-                    .clone()
-                    .unwrap_or_else(|| "src".to_string()),
-            );
+            if let Some(label) = &f.stored_ref_label {
+                labels.insert(f.name.clone(), label.clone());
+            }
         }
     }
     if !labels.is_empty() {
@@ -1775,26 +1776,10 @@ pub(crate) fn register_struct(
             }
         }
     }
-    let ref_fields: Vec<_> = s.fields.iter().filter(|f| f.is_stored_ref).collect();
-    if ref_fields.len() >= 2 {
-        let unlabeled = ref_fields
-            .iter()
-            .filter(|f| f.stored_ref_label.is_none())
-            .count();
-        if unlabeled >= 2 {
-            diags.push(Diagnostic::error(
-                "E0207",
-                "this struct has more than one stored reference without a label".to_string(),
-                "when two `#Ref` fields may come from different owners, each needs a distinct owner label".to_string(),
-                format!(
-                    "add labels: `#{}(a) x: String` and `#{}(b) y: String`",
-                    Syntax::ATTR_REF,
-                    Syntax::ATTR_REF
-                ),
-                Some(s.name_span),
-            ));
-        }
-    }
+    // D-REF-SHORTHAND1: multiple unlabeled `&T` fields are no longer an error
+    // at the *definition* — a struct only becomes ambiguous when it is built
+    // and two or more in-scope values could own a borrow (E0207 fires there,
+    // in `check_stored_ref_fields`).
 }
 
 pub(crate) fn register_enum(

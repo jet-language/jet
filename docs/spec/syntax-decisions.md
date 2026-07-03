@@ -819,6 +819,25 @@ explicit type annotation; the flow-analysis engine (E0420/E0423/E0424) is
 unchanged, only the trigger moved. The old `#Uninit buffer: [U8#4096]`
 spelling is retired: a hard parse error (E0426) teaches the new form.
 
+**D-REF-SHORTHAND1 — Stored-ref field shorthand (opt D, ratified
+2026-07-02)**: a stored-reference field spells its type `&T` — the borrow
+sigil already used at call sites — instead of a bare `T` plus a separate
+marker. The owner is *inferred* at each construction site when exactly one
+in-scope value has the referent type; two or more is ambiguous (**E0207**,
+now fired at the construction site, listing the candidates by name) and one
+in-scope value of the type is named with `#Ref(label)` to disambiguate. The
+retired `#Ref(owner) name: T` form (plain type, no `&`) is a hard teaching
+error (**E0427**) pointing at `name: &T`. `~T` fields and always-required
+labels both stay rejected.
+
+**D-REF-SHORTHAND2 — `#Ref(label)` disambiguator (opt A, ratified
+2026-07-02)**: the owner label stays on the `#` directive plane, spelled
+`#Ref(label)` — *not* `@Ref`. This resolves the sigil clash with
+D-MARKERMOVE1 (which lists `#Ref(Label)` among the markers that stay `#`):
+`@Ref` must **not** ship. `#Ref(label)` is only valid on a `&T` field and
+only names one of the inferred candidate owners; a label naming no candidate
+is **E2306**.
+
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
 and scope-inferred by default (the region is the arena binding's lexical
 scope); explicit `region r { … }` for the expert tier. `arena ::

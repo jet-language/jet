@@ -845,15 +845,24 @@ impl<'a> Fmt<'a> {
             self.write("] ");
         }
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
+        // D-REF-SHORTHAND1/2: a stored-reference field spells its type `&T`; an
+        // explicit `#Ref(label)` prefix survives only when the owner was named
+        // to disambiguate (inference leaves `stored_ref_label` `None`).
         if field.is_stored_ref {
-            self.write("#");
-            self.write(crate::Syntax::ATTR_REF);
-            self.write("(");
-            self.write(field.stored_ref_label.as_deref().unwrap_or("src"));
-            self.write(") ");
+            if let Some(label) = &field.stored_ref_label {
+                self.write("#");
+                self.write(crate::Syntax::ATTR_REF);
+                self.write("(");
+                self.write(label);
+                self.write(") ");
+            }
+            self.write(&field.name);
+            self.write(": &");
+            self.fmt_type(&field.ty);
+        } else {
+            self.write(&field.name);
+            self.write(": ");
+            self.fmt_type(&field.ty);
         }
-        self.write(&field.name);
-        self.write(": ");
-        self.fmt_type(&field.ty);
     }
 }

@@ -3980,27 +3980,30 @@ impl<'a> Parser<'a> {
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-        let mut is_stored_ref = false;
-        let mut stored_ref_label = None;
-        // D-REFSTRUCT1: `#Ref(owner) name: T` stored-reference field marker.
+        // D-REF-SHORTHAND1/2: a stored-reference field spells its type `&T`. An
+        // optional `#Ref(label)` prefix names the owner when inference is
+        // ambiguous. The label is recorded here but only *validates* against a
+        // `&T` type below — a `#Ref(...)` on a plain (non-`&`) type is the
+        // retired `#Ref(owner) name: T` form (E0427).
+        let mut explicit_label: Option<String> = None;
+        let mut ref_prefix_span: Option<Span> = None;
         if matches!(self.peek().kind, TokKind::Hash) {
             let hash_start = self.peek().span.start;
             self.bump();
             let (attr_name, attr_name_span) = self.expect_ident("after `#`")?;
             if attr_name == Syntax::ATTR_REF {
-                is_stored_ref = true;
                 self.expect(TokKind::LParen, "after `#Ref`")?;
-                let (label, label_span) = self.expect_ident("inside `#Ref(…)`")?;
-                stored_ref_label = Some(label);
+                let (label, _label_span) = self.expect_ident("inside `#Ref(…)`")?;
                 let rparen_span = self.peek().span;
                 self.expect(TokKind::RParen, "to close `#Ref(…)`")?;
-                let _ = (hash_start, label_span, rparen_span);
+                explicit_label = Some(label);
+                ref_prefix_span = Some(Span::new(hash_start, rparen_span.end));
             } else {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!("`#{}` isn't a known attribute on a field", attr_name),
-                    "only `#Ref(owner)` marks a stored-reference field".to_string(),
-                    format!("write `#{}(owner) field: Type`", Syntax::ATTR_REF),
+                    "only `#Ref(owner)` names the owner of a stored-reference field".to_string(),
+                    format!("write `#{}(owner) field: &Type`", Syntax::ATTR_REF),
                     Some(Span::new(hash_start, attr_name_span.end)),
                 ));
             }
@@ -4022,20 +4025,17 @@ impl<'a> Parser<'a> {
                 }
             }
             let fix = if label_hint.is_empty() {
-                format!("write `#{}(owner)` before the field name", Syntax::ATTR_REF)
+                "write the field type as `&Type`".to_string()
             } else {
                 format!(
-                    "write `#{}({label_hint})` instead of `ref[{label_hint}]`",
+                    "write `#{}({label_hint}) name: &Type` instead of `ref[{label_hint}]`",
                     Syntax::ATTR_REF
                 )
             };
             return Err(Diagnostic::error(
                 "E0060",
-                format!(
-                    "stored reference fields use `#{}(label)` now",
-                    Syntax::ATTR_REF
-                ),
-                "the old `ref[label]` field keyword was replaced by the `#Ref(label)` marker"
+                "stored reference fields spell the type `&T` now".to_string(),
+                "the old `ref[label]` field keyword was replaced by the `&T` field type"
                     .to_string(),
                 fix,
                 Some(Span::new(start.start, end)),
@@ -4043,7 +4043,37 @@ impl<'a> Parser<'a> {
         }
         let (name, name_span) = self.expect_ident("for a field name")?;
         self.expect(TokKind::Colon, "after a field name")?;
+        // D-REF-SHORTHAND1: a leading `&` on the field type marks a stored
+        // reference. The referent type `T` is kept unwrapped in `ty`; codegen
+        // wraps it back as `&'lifetime T`.
+        let saw_amp = matches!(self.peek().kind, TokKind::Amp);
+        if saw_amp {
+            self.bump();
+        }
         let (ty, ty_span) = self.type_()?;
+        let (is_stored_ref, stored_ref_label) = if saw_amp {
+            (true, explicit_label)
+        } else if let Some(prefix_span) = ref_prefix_span {
+            // D-REF-SHORTHAND1: retired `#Ref(owner) name: T` (plain type, no
+            // `&`). The `&` now carries the "stored reference" fact; the label
+            // only disambiguates the owner.
+            let label = explicit_label.as_deref().unwrap_or("owner");
+            return Err(Diagnostic::error(
+                "E0427",
+                "a stored-reference field needs `&` on its type".to_string(),
+                "`#Ref(owner)` only names the owner — the `&` on the type is what makes the field store a reference (D-REF-SHORTHAND1)"
+                    .to_string(),
+                format!(
+                    "write `#{}({label}) {name}: &{ty}` (add the `&`), or drop `#{}({label})` and write `{name}: &{ty}`",
+                    Syntax::ATTR_REF,
+                    Syntax::ATTR_REF,
+                    ty = ty.name()
+                ),
+                Some(Span::new(prefix_span.start, ty_span.end)),
+            ));
+        } else {
+            (false, None)
+        };
         Ok(Field {
             is_pub,
             is_package_pub,

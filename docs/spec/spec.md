@@ -166,7 +166,24 @@ Borrow-checker mechanics live in the transpiler; tier-1 users never write
 | `fn f(x: ~T)`          | mutable borrow                    | `x: &mut T`      |
 | `fn f(x: ^T)`          | move; caller must write `^`        | `x: T`           |
 | `fn f() -> &T`         | borrow return (elided lifetime)   | `-> &T`          |
-| `ref field: T` (tier 2)| stored reference in a struct      | `field: &'a T`   |
+| `field: &T` (tier 2)   | stored reference in a struct      | `field: &'a T`   |
+
+**Stored-reference fields (D-REF-SHORTHAND1/2):** a struct field written
+`field: &T` holds a borrow of some *owner* rather than its own copy of `T`.
+At each place the struct is built, the field's **owner** — the value the
+borrow points into — is inferred: the *candidate owners* are the in-scope
+values (parameters, `let`/`::` locals, and module consts) whose type is
+exactly the referent type `T`. Exactly one candidate → it is the owner, no
+annotation needed. Two or more → the owner is ambiguous (**E0207**) and the
+field must name it with a `#Ref(label)` prefix, where `label` is one of the
+candidates. Zero candidates → the fill must be a `'static` const, since any
+shorter-lived source would dangle (**E2302**). An explicit `#Ref(label)` that
+names no candidate is **E2306**. `#Ref` is the only annotation and it lives on
+the `#` directive plane (never `@Ref`, per D-REF-SHORTHAND2); it *only*
+disambiguates the owner — it never turns a non-`&` field into a reference, so
+the retired `#Ref(owner) name: T` form (plain type, no `&`) is a hard error
+(**E0427**). Codegen lowers the field to `&'owner T`; distinct labels get
+distinct lifetimes.
 
 **`View<T>` (D-DYNARRAY1):** the collection-side sibling of a stored `ref`
 field, above. `list.view(a..b)` is a zero-copy window into `list`'s own

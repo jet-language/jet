@@ -26,7 +26,12 @@ fn struct_lit_field_root<'a>(e: &'a Expr) -> Option<&'a str> {
     }
 }
 
-/// D-REFSTRUCT1: a `#Ref(owner)` field filled from its owner borrows the param slot.
+/// D-REF-SHORTHAND1: a stored-reference (`&T`) field borrows its owner rather
+/// than moving/cloning it. Sema (`check_stored_ref_fields`) has already proved
+/// the fill is a borrow of a value that outlives the struct, so codegen simply
+/// borrows the fill's own root — the owner's name was inferred in sema and
+/// never needs to be re-derived here. `ref_field_labels` is consulted only for
+/// membership (is this field a stored reference?).
 fn lower_struct_lit_field(
     type_name: &str,
     field_name: &str,
@@ -34,16 +39,16 @@ fn lower_struct_lit_field(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
-    if let Some(owner) = cx
+    let is_stored_ref = cx
         .ref_field_labels
         .get(type_name)
-        .and_then(|m| m.get(field_name))
-    {
-        if struct_lit_field_root(fe) == Some(owner.as_str()) {
-            if env.locals.contains_key(owner) {
-                let ty = env.ty_of(owner).unwrap_or(Type::String);
+        .is_some_and(|m| m.contains_key(field_name));
+    if is_stored_ref {
+        if let Some(root) = struct_lit_field_root(fe) {
+            if env.locals.contains_key(root) {
+                let ty = env.ty_of(root).unwrap_or(Type::String);
                 let place = match fe {
-                    Expr::Ident(_, _) => env.rust_name_of(owner),
+                    Expr::Ident(_, _) => env.rust_name_of(root),
                     Expr::Field(inner, field, _) => {
                         let base = lower_expr(inner, cx, env);
                         format!("&({}).{}", emit_tir_expr(&base, cx), mangle(field))
@@ -55,9 +60,9 @@ fn lower_struct_lit_field(
                             let base = lower_expr(inner, cx, env);
                             format!("&({}).{}", emit_tir_expr(&base, cx), mangle(field))
                         }
-                        _ => env.rust_name_of(owner),
+                        _ => env.rust_name_of(root),
                     },
-                    _ => env.rust_name_of(owner),
+                    _ => env.rust_name_of(root),
                 };
                 return TExpr {
                     ty,

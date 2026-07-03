@@ -586,14 +586,13 @@ impl<'a> Checker<'a> {
             let field_def = def_fields.iter().find(|(n, ..)| n == name);
             let saved_expected = self.expected_type.clone();
             let saved_esc = self.lambda_escapes;
+            // D-REF-SHORTHAND1: a stored-reference (`&T`) field is always filled
+            // by borrowing its owner, never by cloning — suppress the auto
+            // `.clone()` whenever the fill has a borrowable root (an in-scope
+            // value). The owner is inferred at construction, so this no longer
+            // depends on an explicit `#Ref` label matching the fill.
             let skip_clone = field_def.is_some_and(|(_, _, _, is_ref, _)| *is_ref)
-                && self
-                    .registry
-                    .ref_field_label(type_name, name)
-                    .is_some_and(|owner| {
-                        super::CheckerOwnership::ref_field_init_root(expr)
-                            .is_some_and(|root| root == owner)
-                    });
+                && super::CheckerOwnership::ref_field_init_root(expr).is_some();
             if let Some((_, _, fty, _, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 self.expected_type = Some(inst);
