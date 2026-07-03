@@ -51,6 +51,16 @@ impl WebPartitionMarker {
             WebPartitionMarker::Js => WebBucket::Js,
         }
     }
+
+    /// The marker's source spelling (without the `#`), for re-emission by
+    /// `jet fmt` — inverse of `parse`.
+    pub fn name(self) -> &'static str {
+        match self {
+            WebPartitionMarker::Wasm => Syntax::ATTR_WASM,
+            WebPartitionMarker::Js => Syntax::ATTR_JS,
+            WebPartitionMarker::WasmExport => Syntax::ATTR_WASM_EXPORT,
+        }
+    }
 }
 
 /// D-JSBIND1=A: scalars, `String`, and homogeneous `List` / `Map<String, _>` of ABI-safe

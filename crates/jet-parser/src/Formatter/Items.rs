@@ -420,6 +420,16 @@ impl<'a> Fmt<'a> {
             self.write(&format!("#{}", Syntax::KW_UNSAFE));
             self.newline();
         }
+        // D-WASM1: `#Wasm` / `#Js` / `#WasmExport` per-function web partition
+        // override, on its own line before `fn`/`pub` (the convention every
+        // web example uses; the parser skips the lexer-inserted `;` between
+        // marker lines). fmt used to drop this marker entirely — every
+        // browser-side function silently fell back to the Wasm bucket,
+        // breaking the cross-partition checks in tests/web_build.rs.
+        if let Some(marker) = f.web_marker {
+            self.write(&format!("#{}", marker.name()));
+            self.newline();
+        }
         // D-REACTCORE1: `#Reactive fn` marker precedes `pub`/`fn`.
         if f.is_reactive {
             self.write(&format!("#{} ", Syntax::KW_REACTIVE));

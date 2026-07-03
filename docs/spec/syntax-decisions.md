@@ -1066,9 +1066,21 @@ takes `Web`/`Browser`/`Wasm`/`Js` and `Os.Linux`/`Os.Macos`/`Os.Windows`
 `pkg.jet` `target:` > file marker. `#Html("path.html")` names a companion
 page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `Os.*` gates a single `impl` block (item-scoped), not a file/module —
-`E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it; native
-backend impls behind it (Phase 8) still need a devShell/toolkit-dependency
-gate first.
+`E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
+**D-OSTARGET2 (=B, ratified 2026-07-03, c2qj06uq)**: ungated code reaches
+the surviving OS-gated impl through a comptime switch on `build.os` — a
+compiler-known comptime value matched with `.Linux`/`.Macos`/`.Windows`
+arms; non-matching arms are discarded before OS-gating checks run.
+fn-level `#Target(Os.*)` gating (option A) rejected.
+**D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)**: Phase 8 native
+backend toolchain deps enter via nixpkgs devShell (`gtk4` + `pkg-config`,
+Linux first) per the standing native-deps stopgap; jetpack core provider
+owns it long-term; non-Nix users get a clear install message.
+**D-STYLEUNIT1 (=A, ratified 2026-07-03, c2qj06uq)**: UI style lengths are
+unit-family literals — `core.ui.style` declares `#UnitFamily(length) { px }`
+(D-QUAL3), so `width: 320px` is a compile-checked `Px` value via the one
+ratified unit mechanism (D-UNITLIT1); no second style-only unit system (I8).
+Supersedes Phase 3's interim `Length` struct pair.
 
 **D-OBS1 / D-OBS3 — Observability**: source maps + Jet-line panic reports;
 OTel-aligned std-only structured logs/metrics; exporters are FFI-wrapped
@@ -1171,6 +1183,18 @@ MigrationStatus }`, `MigrationStatus = { migrated: Bool, from: String, steps:
 `.migrated` is always `false` today (no snapshot-of-old-data runtime
 conversion exists yet to set it true) — reachable cases are a plain type and a
 `@PublishedSchema` type decoding fresh data.
+**D-MIGRATE4 (=A, ratified 2026-07-03, c105migrate4)**: the runtime half —
+codegen lowers each `migration { }` block to a step function; decoding a
+`@PublishedSchema` type first tries the current shape, on mismatch walks
+the chain oldest→current applying steps. Plain `decode` applies silently;
+`decode_traced` records `from` + `steps`. Zero cost for types without
+migrations. Supersedes the "always false today" caveat above once built.
+
+**D-EXPANDCLI1 (=A, ratified 2026-07-03, c183expand)**: the transparency
+command is `jet expand --facts <lens> <file>`; bare `jet expand <file>`
+runs every lens, grouped (magic default). Lens floor: `inline`
+(D-METHODMACRO1), `refs` (D-REF-SHORTHAND1); other ratified surfaces add
+lenses under the same flag, never new commands (I8).
 
 **Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-GC1,
 D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,
