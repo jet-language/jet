@@ -233,11 +233,16 @@
       "epoch": "e4",
       "phase": "ready",
       "priority": "P2",
-      "plan": "package-ecosystem-trust",
+      "plan": "tools/Tower/docs/plans/epoch-4/signed-package-cache.md",
       "blockedBy": [
         "c96"
       ],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "E4 prep: plan expanded, zero ballots. c96 gate resolved (done; registry push deliberately left to this card). D-JPK-CACHE1=A scopes it: freeze envelope fields into LockedPackage now, HTTP substitution protocol stays e6. Registry is a git repo — push = JSONL index entry + git commit/push, CmdSupply.rs idiom, no new deps. New codes E1226/E1227."
+        },
         {
           "at": "2026-07-02",
           "text": "Direction ratified 2026-07-02: D-JPK-CACHE1=A (output-hash-addressed cache protocol, signed objects; envelope fields frozen into hangar/lock schema now, protocol ships E6-era). This card implements inside that architecture."
@@ -264,7 +269,7 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-07-02",
+      "updated": "2026-07-03",
       "workOrder": 13
     },
     {
@@ -654,13 +659,19 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "package-ecosystem-trust",
+      "plan": "tools/Tower/docs/plans/epoch-4/package-signing.md",
       "blockedBy": [
-        "c96"
+        "c96",
+        "c56"
       ],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "E4 prep: plan expanded, zero ballots — crypto question CLOSED (ed25519-dalek already owner-approved D-DEP-CRYPTO1=A, wired as core.crypto.sign/verify; card body \"only SHA-256\" text stale). Real sequencing dep is #3 index-write (not c96) — build after #3. D-PKGSIGN1 ratified w/ owner Q&A followed verbatim (auto-keygen on publish, silent-unless-mismatch, require_signed off by default). jet keygen / key backup verbs; TOFU pin/rotation; E1228-E1230; one signature field shared with #3 schema. planning→ready."
+        },
         {
           "at": "2026-06-30",
           "text": "Activated into epoch e5 track"
@@ -675,7 +686,7 @@
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-06-30",
+      "updated": "2026-07-03",
       "workOrder": 14
     },
     {
@@ -3447,9 +3458,14 @@
       "epoch": "e4",
       "phase": "ready",
       "priority": "P2",
-      "plan": "D-BUILDNORM1=A: specify and enforce content-addressed build-cache normalization contract. Steps: document AST-level rename-sensitive hashing; add tests for whitespace/comment-insensitive stability and rename sensitivity; wire cache key normalization check where current build cache computes keys.",
+      "plan": "tools/Tower/docs/plans/epoch-4/cas-build-cache.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "E4 prep: plan expanded, zero ballots. Located real cache-poisoning race (CmdCompile.rs build(): rustc -o onto shared build/<stem> before store_cached copy — concurrent same-stem processes cross-contaminate) + fix (per-process temp path, atomic rename). D-BUILDNORM1=A ratified but cache_key hashes post-codegen Rust today, defeating incremental point — plan moves key to pre-sema canonical AST bytes + toolchain salt. Hash naming interlocked with #3 envelope."
+        },
         {
           "at": "2026-07-02",
           "text": "Interlock noted 2026-07-02: D-JPK-CACHE1=A freezes cache-envelope fields (output hash, platform key, signature slot, provenance link) into the hangar/lock schema — normalization contract must carry them."
@@ -3477,7 +3493,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-02"
+      "updated": "2026-07-03"
     },
     {
       "id": "c1eixac0",
