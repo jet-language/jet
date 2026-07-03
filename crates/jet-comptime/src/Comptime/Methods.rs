@@ -495,6 +495,31 @@ impl<'a> Interp<'a> {
             }
         }
 
+        // Enum-variant construction with a payload, called with an explicit type
+        // name (`ParseError.BadDigit(raw)`), mirrors the no-arg `Field` fallback
+        // below in interp.rs (`Color.Red`): sema already checked the variant
+        // exists, so at eval time an unbound, capitalized receiver whose method
+        // is also capitalized (variant-naming convention, S34) is a variant
+        // literal, not a real method call. Checked after the builtin-type and
+        // core-import cases above, and only when the receiver isn't a bound
+        // local, so real static dispatch on a bound value is unaffected.
+        if let Expr::Ident(type_name, _) = receiver {
+            let is_type_name = type_name.chars().next().is_some_and(|c| c.is_uppercase());
+            let is_variant_name = method.chars().next().is_some_and(|c| c.is_uppercase());
+            if is_type_name && is_variant_name && !scope.contains_key(type_name.as_str()) {
+                let mut out = Vec::with_capacity(args.len());
+                for a in args {
+                    let label = a.label.as_ref().map(|(n, _)| n.clone());
+                    out.push((label, self.eval(&a.expr, scope)?));
+                }
+                return Ok(CtValue::Enum {
+                    type_name: type_name.clone(),
+                    variant: method.to_string(),
+                    args: out,
+                });
+            }
+        }
+
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
             "push", "pop", "insert", "remove", "clear", "reverse", "sort",
