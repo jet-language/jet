@@ -18,14 +18,12 @@ fn main() {
         label.right + 16.0 == input.left
         label.width + 16.0 + input.width == form.width
     }
-
     // `form`'s own width is itself just a box anchor (`form.width`) — set it
     // via a soft suggestion (an edit variable): required constraints always
     // win over a suggestion, but with nothing else pinning label.width, the
     // solver settles at its tightest required bound (80.0) and gives the
     // rest of the row to input.width.
     form.suggest(form.h("form", "width"), 300.0)
-
     label_w :: form.value(form.h("label", "width"))
     input_w :: form.value(form.h("input", "width"))
     print("label width: {label_w}")

@@ -14,36 +14,35 @@
 // `Pending` reservation). The states are compile-time facts, threaded through the
 // function by the checker and **erased in codegen** — a typestate program generates
 // the exact same Rust as the untagged version, at zero runtime cost.
-
 state Reservation { Pending, Confirmed, CheckedIn }
 
 struct Reservation {
-    guest: String,
+    guest: String
 }
 
 impl Reservation {
-    // Entry transition: a fresh booking starts life in `Pending`.
     #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
-        return Reservation.{ guest: guest }
+        // Entry transition: a fresh booking starts life in `Pending`.
+        return Reservation.{guest: guest}
     }
 
-    // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
-    // value (`^self` — a move), matching the ratified mechanism: a fn takes the old
-    // state and returns the next. Calling `pay` on anything but a pending
-    // reservation would be E0150.
     #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+        // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
+        // value (`^self` — a move), matching the ratified mechanism: a fn takes the old
+        // state and returns the next. Calling `pay` on anything but a pending
+        // reservation would be E0150.
         print("payment received for {self.guest}")
         return self
     }
 
-    // Checking in advances `Confirmed -> CheckedIn`.
     #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
+        // Checking in advances `Confirmed -> CheckedIn`.
         print("{self.guest} checked in")
         return self
     }
 
-    // A plain guarded read: only legal once checked in. No state change.
     #State(CheckedIn) fn room_key(self) -> String {
+        // A plain guarded read: only legal once checked in. No state change.
         return "key for {self.guest}"
     }
 }
@@ -51,8 +50,8 @@ impl Reservation {
 fn main() {
     // The correct lifecycle: book -> pay -> check_in -> use. `:=` so `r` can be
     // rebound as it advances through its states.
-    r := Reservation.book("Ada")        // r: Pending
-    r = r.pay()                         // r: Confirmed
-    r = r.check_in()                    // r: CheckedIn
-    print(r.room_key())                 // valid: r is CheckedIn
+    r := Reservation.book("Ada")  // r: Pending
+    r = r.pay()  // r: Confirmed
+    r = r.check_in()  // r: CheckedIn
+    print(r.room_key())  // valid: r is CheckedIn
 }

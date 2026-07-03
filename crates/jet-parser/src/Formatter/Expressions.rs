@@ -94,10 +94,15 @@ impl<'a> Fmt<'a> {
                 effect_bound,
             } => {
                 // D-EFF2: render the callback effect bound prefix — `@Pure ` for an
-                // empty bound, `#(E1, E2) ` for a listed one.
+                // empty bound, `#(E1, E2) ` for a listed one. `@Pure` is a
+                // contract marker (`@`-plane, D-MARKER-FAMILY1) — it was
+                // being written with the `#` directive-plane prefix instead,
+                // silently downgrading ratified `@Pure` callback bounds back
+                // to the retired `#Pure` spelling on every fmt pass (a real
+                // regression caught reformatting examples/features/effects/effect_levers.jet).
                 if let Some(bound) = effect_bound {
                     if bound.is_empty() {
-                        self.write("#");
+                        self.write(crate::Syntax::CONTRACT_PREFIX);
                         self.write(crate::Syntax::KW_PURE);
                         self.write(" ");
                     } else {
@@ -216,7 +221,18 @@ impl<'a> Fmt<'a> {
             Expr::StrMatchLit(parts, _) => {
                 self.fmt_str_match_parts(parts);
             }
-            Expr::Int(n, _, _) => self.write(&n.to_string()),
+            // S34/S67: keep the author's radix (`0x2a`/`0o17`/`0b1010`),
+            // digit separators (`1_000_000`), and hex-digit case. The AST
+            // stores only the value, so fmt was rewriting every hex/octal/
+            // binary literal to decimal — destroying ratified spelling (same
+            // failure class as a dropped token). Re-emit the original source
+            // slice, but only when it round-trips to the same value: some
+            // Int nodes are synthesized with a borrowed nearby span whose
+            // text isn't a number at all.
+            Expr::Int(n, span, _) => {
+                let text = int_literal_spelling(self.src, *span, *n);
+                self.write(&text);
+            }
             Expr::Float(v, _, _) => self.write(&fmt_float(*v)),
             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
             Expr::UnitLit {
@@ -861,6 +877,16 @@ impl<'a> Fmt<'a> {
                 AccessConvention::Write => self.write(Syntax::SIGIL_MUTATE),
                 AccessConvention::Move => self.write(Syntax::SIGIL_MOVE),
                 AccessConvention::Share => self.write(Syntax::SIGIL_VIEW),
+            }
+            // D-VARIADIC1: `f(...xs)` call spread — the parser reads this
+            // between the access-convention sigil and the optional label
+            // (see `call_arg` in Parser/Expressions.rs), so fmt re-emits it
+            // in that same position. Dropping this silently changed a spread
+            // call into a plain one (real behavior change, not just style —
+            // caught as a genuine fmt-stability regression on
+            // examples/features/basics/variadics_spread.jet).
+            if arg.spread {
+                self.write("...");
             }
             // S61: preserve the call-site argument label `name:` (canonical
             // `name: value` spacing, matching struct-literal field init).

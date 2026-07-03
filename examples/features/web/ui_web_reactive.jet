@@ -6,7 +6,6 @@ use core.reactive as reactive
 fn main() {
     backend :: ui.null_backend()
     label :: reactive.signal("hello")
-
     ui.reactive_render(() => {
         node :: ui.node(label.get(), 100.0, 20.0)
         constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
@@ -15,13 +14,10 @@ fn main() {
         backend.layout(node, frame)
         backend.paint(node)
     })
-
     loop cmd in backend.commands() {
         print(cmd)
     }
-
     label.set("world")
-
     loop cmd in backend.commands() {
         print(cmd)
     }

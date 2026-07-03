@@ -25,10 +25,8 @@ fn main() {
     router.get("/", handle_root)
     router.get("/users/:id", handle_user)
     router.post("/users", handle_create)
-
-ch: Channel<String> :: tasks.channel()
+    ch: Channel<String> :: tasks.channel()
     sender :: ch.sender()
-
     tasks.spawn(take(sender, router) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         addr :: listener.local_addr()
@@ -42,21 +40,16 @@ ch: Channel<String> :: tasks.channel()
             net.tcp_reply(stream, resp.status(), resp.body())
         }
     })
-
     addr :: ch.receive() ?? panic("no address")
-
     // 1: GET / → "welcome"
     r1 :: http.get("http://{addr}/") ?? panic("GET / failed")
     print(r1.body())
-
     // 2: GET /users/42 → "user=42"
     r2 :: http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
     print(r2.body())
-
     // 3: POST /users → "created"
     r3 :: http.post("http://{addr}/users", "") ?? panic("POST /users failed")
     print(r3.body())
-
     // 4: GET /missing → 404
     r4 :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
     print(r4.status())

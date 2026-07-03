@@ -15,13 +15,11 @@
 // Reordering the fields (title before id, etc.) is NOT a tracked change
 // (D-MIGRATE2F) and needs no op. Without these declarations the compiler would
 // emit E0910 and refuse to build.
-
 struct Rank {
     value: Int
 }
 
-@PublishedSchema
-struct Profile {
+@PublishedSchema struct Profile {
     title: String
     id: Int
     score: Rank
@@ -36,11 +34,6 @@ migration Profile {
 }
 
 fn main() {
-    p :: Profile.{
-        title: "Ada"
-        id: 7
-        score: Rank.{ value: 95 }
-        active: true
-    }
+    p :: Profile.{title: "Ada", id: 7, score: Rank.{value: 95}, active: true}
     print("profile: {p.title} #{p.id}, rank {p.score.value}, active {p.active}")
 }

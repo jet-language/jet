@@ -14,16 +14,15 @@
 //
 // `#SingleUse` implies `#NoCopy`: the value can only be moved (`^`), never
 // copied. The only legal exits are moving it to a `^` parameter or returning it.
-
 #SingleUse struct Lock {
-    resource: String,
+    resource: String
 }
 
 // Acquiring the lock hands back an owned `Lock`. The caller now owns the duty
 // to release it exactly once.
 fn acquire(resource: String) -> Lock {
     print("locked {resource}")
-    return Lock.{ resource: resource }
+    return Lock.{resource: resource}
 }
 
 // `release` takes the lock by move (`^`) — this is the terminal consumption.
@@ -36,7 +35,6 @@ fn main() {
     db :: acquire("db")
     // ... use the locked resource ...
     release(^db)
-
     // The duty travels with the value: handing it to another function that
     // returns it just moves the duty along.
     cache :: acquire("cache")

@@ -1,6 +1,9 @@
 // D-CAP7: all four capabilities in one program.
 // plain T = read; ~T = write; ^T = take/move; &T = share.
-struct Account { owner: String, balance: Int }
+struct Account {
+    owner: String
+    balance: Int
+}
 
 // plain read — no sigil
 fn check(a: Account) -> Bool {
@@ -8,7 +11,7 @@ fn check(a: Account) -> Bool {
 }
 
 // &Account = shared read at a call boundary
-fn print_balance(a: &Account) {
+fn print_balance(a: Account) {
     print("{a.owner}: {a.balance}")
 }
 
@@ -23,11 +26,11 @@ fn close(a: ^Account) -> String {
 }
 
 fn main() {
-    acc := Account.{ owner: "Alice", balance: 100 }
-    print(check(acc))        // plain read
-    print_balance(&acc)      // & share
-    deposit(~acc, 50)        // ~ write
-    print_balance(&acc)      // & share again
-    log := close(^acc)       // ^ take; acc consumed
+    acc := Account.{owner: "Alice", balance: 100}
+    print(check(acc))  // plain read
+    print_balance(&acc)  // & share
+    deposit(~acc, 50)  // ~ write
+    print_balance(&acc)  // & share again
+    log := close(^acc)  // ^ take; acc consumed
     print(log)
 }

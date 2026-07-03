@@ -4,7 +4,6 @@
 // read in plain English, and the compiler keeps the units from mixing.
 // This is sugar over distinct types (D-DIST1/D-DIST3): construct with
 // `Usd(value)`, same-unit arithmetic just works, and `.raw()` strips the unit.
-
 #UnitFamily(currency) { usd, eur }
 
 fn subtotal(price: Usd, qty: Int) -> Usd {
@@ -15,16 +14,13 @@ fn main() {
     unit :: Usd(9.99)
     total :: subtotal(unit, 3)
     print("total {(total.raw())}")
-
     // Same-unit arithmetic stays in the unit.
-    tax :: Usd(2.50)
+    tax :: Usd(2.5)
     grand :: total + tax
     print("grand {(grand.raw())}")
-
     // A different family member is a different type.
     budget :: Eur(20.0)
     print("budget {(budget.raw())}")
-
     // `.raw()` drops back to the base Float.
     bare :: grand.raw()
     print("bare {(bare)}")

@@ -1,6 +1,5 @@
 // 169 — D-CONCCOMB1/A: all fail-fast cancels siblings when one task panics.
 // Expected: process exits non-zero; stderr mentions panic (golden uses .err.out).
-
 use core.tasks as tasks
 use core.time as time
 
@@ -16,8 +15,12 @@ fn boom() -> Int {
 
 fn main() {
     taskgroup g {
-        slow :: g.task { slow_one() }
-        bad :: g.task { boom() }
+        slow :: g.task(() => {
+            slow_one()
+        })
+        bad :: g.task(() => {
+            boom()
+        })
         results :: g.all([slow, bad])
         print(results[0])
     }

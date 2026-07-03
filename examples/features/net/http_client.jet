@@ -6,7 +6,7 @@ use core.tasks as tasks
 
 fn main() {
     // Spin up a minimal loopback server to respond to our client.
-ch: Channel<String> :: tasks.channel()
+    ch: Channel<String> :: tasks.channel()
     sender :: ch.sender()
     t :: tasks.spawn(take(sender) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")

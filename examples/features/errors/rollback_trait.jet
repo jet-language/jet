@@ -1,7 +1,6 @@
 // 122 — D-TXN-ROLLBACK layer 2: the `Rollback` trait.
 // A type implementing `Rollback` supplies a cheap `snapshot`/`restore` pair
 // used instead of a full clone. `Ledger` records only the balance on entry.
-
 struct Ledger {
     balance: Int
     name: String
@@ -13,9 +12,11 @@ struct LedgerSnap {
 
 impl Ledger.Rollback {
     type Snapshot = LedgerSnap
+
     fn snapshot(self) -> LedgerSnap {
-        return LedgerSnap.{ balance: self.balance }
+        return LedgerSnap.{balance: self.balance}
     }
+
     fn restore(~self, snap: ^LedgerSnap) {
         self.balance = snap.balance
     }
@@ -37,14 +38,12 @@ fn transfer(from: ~Ledger, to: ~Ledger, amount: Int) -> Int ? TxnErr {
 }
 
 fn main() {
-    alice := Ledger.{ balance: 100, name: "Alice" }
-    bob   := Ledger.{ balance: 0, name: "Bob" }
-
+    alice := Ledger.{balance: 100, name: "Alice"}
+    bob := Ledger.{balance: 0, name: "Bob"}
     print("=== successful transfer ===")
     r :: transfer(~alice, ~bob, 40) ?? (-1)
     print(alice.balance)
     print(bob.balance)
-
     print("=== overdraft: balances restored by Rollback ===")
     s :: transfer(~alice, ~bob, 200) ?? (-1)
     print(alice.balance)

@@ -1,5 +1,10 @@
 // D-CAP7: asset pipeline — normalize edits in place (~), encode consumes (^).
-struct Image { width: Int, height: Int, format: String, gamma: Float }
+struct Image {
+    width: Int
+    height: Int
+    format: String
+    gamma: Float
+}
 
 // normalize: edit in place — caller keeps ownership
 fn normalize(img: ~Image) {
@@ -21,9 +26,9 @@ fn encode(img: ^Image) -> String {
 }
 
 fn main() {
-    img := Image.{ width: 3840, height: 2160, format: "raw", gamma: 1.0 }
-    normalize(~img)      // ~ write: img is edited, caller keeps it
+    img := Image.{width: 3840, height: 2160, format: "raw", gamma: 1.0}
+    normalize(~img)  // ~ write: img is edited, caller keeps it
     resize(~img, 1920, 1080)
-    result := encode(^img)   // ^ take: img is consumed here
+    result := encode(^img)  // ^ take: img is consumed here
     print(result)
 }

@@ -8,9 +8,8 @@
 //
 // For the rare case where you KNOW a construct is deterministic but the checker
 // can't prove it, `assume_deterministic { … }` is the expert escape hatch.
-
-use core.time as time;
-use core.random as random;
+use core.time as time
+use core.random as random
 
 // Pure: reads time + randomness only through the injected capabilities.
 // `clock` is read-only (`now`); `rng` advances its stream, so it is `~Rng`.
@@ -39,24 +38,20 @@ use core.random as random;
 fn main() {
     clock := time.clock(1000)
     rng := random.rng(42)
-
     print(roll_at(clock, ~rng))
     print(two_rolls(~rng))
     print(coin_and_card(~rng))
-
     // D-DET-CAPAPI: in-place deterministic shuffle (Fisher–Yates) — the list arg
     // needs `~`, the rng receiver needs `~` (every draw advances the stream).
     deck := [1, 2, 3, 4, 5]
     rng.shuffle(~deck)
     print("deck={deck}")
-
     // D-DET-CAPAPI: the widened clock — absolute `advance`, and a `Duration`-based
     // `wait`. `time.ms`/`time.secs` mint a deterministic `Duration` (pure value).
     print("now={clock.now()}")
     print("advanced={clock.advance(5000)}")
     span := time.secs(2)
     print("span={span.millis()}ms waited={clock.wait(span)}")
-
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.
     fixed := 0

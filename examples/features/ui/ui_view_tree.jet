@@ -23,6 +23,7 @@ fn flatten(v: View) -> [String] {
             }
             return out
         }
+
     }
 }
 
@@ -47,16 +48,14 @@ fn repaint(old: [String], updated: [String]) -> Int {
 }
 
 fn main() {
-    initial: View :: .Box.{ children: [.Text.{ text: "a" }, .Text.{ text: "b" }] }
+    initial: View :: .Box.{children: [.Text.{text: "a"}, .Text.{text: "b"}]}
     tree :: reactive.signal(initial)
     leaves :: reactive.derived(() => flatten(tree.get()))
-
     empty: [String] :: []
     before :: leaves.get()
     print("initial repaints: {repaint(empty, before)}")
-
     // Only the second leaf's text changes; the first ("a") must not repaint.
-    next: View :: .Box.{ children: [.Text.{ text: "a" }, .Text.{ text: "zz" }] }
+    next: View :: .Box.{children: [.Text.{text: "a"}, .Text.{text: "zz"}]}
     tree.set(next)
     after :: leaves.get()
     print("update repaints: {repaint(before, after)}")

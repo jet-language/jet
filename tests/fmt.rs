@@ -1644,3 +1644,90 @@ fn fmt_os_target_marker_stability() {
     let src = "trait Backend {\n    fn label(self) -> String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(Os.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) -> String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn main() {\n    print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#Target(Os.Linux) marker");
 }
+
+// ── #177 §5 syntax-lock sweep: 5 formatter bugs found reformatting the full
+// example tree, all fixed in this pass. Each was silent — `jet fmt` printed
+// no error, it just emitted wrong or missing output.
+
+#[test]
+fn fmt_pub_file_precedes_imports() {
+    // D-VISDEFAULT2: `#PubFile` carries no span (a fixed-position file
+    // marker, like `#Target(Web)`), so it used to render *after* the
+    // imports loop. But an import's `priv`/`pub` qualifier is chosen
+    // relative to `#PubFile` being in effect — emitting the marker after the
+    // import it gates produced `priv use …` with no preceding `#PubFile`,
+    // which doesn't even reparse (E0413). `#PubFile` must render before
+    // imports, not after.
+    let src = "#PubFile\n\nuse core.io\n\nfn main() {\n    print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#PubFile before imports");
+}
+
+#[test]
+fn fmt_verbatim_derive_body_comment_not_duplicated() {
+    // D-METADERIVE1: `derive T.Trait { … }` bodies are emitted verbatim
+    // (copied straight from source) rather than walked comment-by-comment,
+    // so `comment_i` never advanced past a comment living inside the derive
+    // body. The next item's `emit_leading` then found that comment
+    // "unconsumed" and re-emitted it a second time before `#Label struct
+    // Cube` — the comment kept duplicating on every subsequent fmt pass.
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    emit(\"impl $lbl {{ fn label(self) -> String {{ return \\\"$lbl\\\" }} }}\")\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn main() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on a derive block");
+    assert_eq!(
+        out.matches("resolves to the same value as `tname`").count(),
+        1,
+        "derive-body comment must not duplicate, got:\n{out}"
+    );
+    assert_eq!(out, src, "derive block with an internal comment must already be canonical");
+    let twice = jet::format_source(&out).expect("second fmt should succeed");
+    assert_eq!(out, twice, "derive-body comment fmt must be idempotent");
+}
+
+#[test]
+fn fmt_preserves_call_spread() {
+    // D-VARIADIC1: `f(...xs)` call spread is tracked as a `CallArg.spread`
+    // flag, not an `Expr::Spread` wrapper — `fmt_call_args` never checked
+    // that flag, so every spread call argument silently lost its `...` on
+    // the first fmt pass (a real behavior change: `join("tags:", ...parts)`
+    // reformatted to `join("tags:", parts)`, which then fails to type-check).
+    let src = "fn join(prefix: String, msgs: ...String) -> String {\n    return [prefix, ...msgs].join(\" \")\n}\n\nfn main() {\n    parts: [String] := [\"one\", \"two\"]\n    b :: join(\"tags:\", ...parts)\n    print(b)\n}\n";
+    assert_fmt_stable(src, "call-argument spread");
+}
+
+#[test]
+fn fmt_preserves_trait_associated_type() {
+    // D-LIB2: `fmt_trait` only ever walked `t.methods`, never
+    // `t.assoc_types` — a trait's `type Elem` associated-type declaration
+    // was silently dropped on every fmt pass.
+    let src = "trait Indexed {\n    type Elem\n    fn at(self, i: Int) -> Elem\n    fn count(self) -> Int\n}\n\nstruct Nums {\n    vals: [Int]\n}\n\nimpl Nums.Indexed {\n    type Elem = Int\n\n    fn at(self, i: Int) -> Int {\n        return self.vals[i]\n    }\n\n    fn count(self) -> Int {\n        return self.vals.len()\n    }\n}\n\nfn main() {\n    n :: Nums.{vals: [10, 20, 30]}\n    print(n.at(0))\n    print(n.count())\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on trait assoc types");
+    assert!(
+        out.contains("type Elem\n"),
+        "trait's `type Elem` associated-type declaration must not be dropped, got:\n{out}"
+    );
+    assert_eq!(out, src, "trait with an associated type must already be canonical");
+    let twice = jet::format_source(&out).expect("second fmt should succeed");
+    assert_eq!(out, twice, "trait assoc-type fmt must be idempotent");
+}
+
+#[test]
+fn fmt_preserves_pure_callback_bound_sigil() {
+    // D-EFF2 / D-MARKER-FAMILY1: the empty callback effect bound renders as
+    // `@Pure ` (a contract marker, `@`-plane) but the code wrote the literal
+    // `#` directive-plane prefix instead — every `f: @Pure fn(T) -> U`
+    // parameter type downgraded to the retired `#Pure fn(T) -> U` spelling
+    // on the first fmt pass, which then fails to parse (E0062).
+    let src = "fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {\n    return items.map((x) => f(x))\n}\n\nfn main() {\n    doubled :: transform([1, 2, 3], (n: Int) => n * 2)\n    print(\"{doubled}\")\n}\n";
+    assert_fmt_stable(src, "@Pure callback bound");
+}
+
+#[test]
+fn fmt_preserves_int_literal_radix() {
+    // S34/S67: `0x`/`0o`/`0b` prefixes and `_` digit separators are ratified
+    // author-facing spelling. fmt used to re-emit every integer literal from
+    // its AST value — rewriting `0x2a` to `42` and `1_000_000` to `1000000`,
+    // destroying the radix the author chose (same failure class as a dropped
+    // token; caught decimalizing examples/features/parsing/binary-reader.jet
+    // and the crypto examples' key material).
+    let src = "fn main() {\n    packet: [U8] :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]\n    big :: 1_000_000\n    print(\"{packet.len()} {big}\")\n}\n";
+    assert_fmt_stable(src, "int literal radix");
+}

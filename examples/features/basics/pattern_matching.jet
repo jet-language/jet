@@ -1,7 +1,6 @@
 // D-PATW (ratified 2026-06-19): `_` in payload slot = wildcard (ignore, bind nothing).
 // D-PATR (ratified 2026-06-19): range patterns `lo..hi` in arm-head and payload slots.
 // D-PATO (ratified 2026-06-19): `|` structural or-patterns `A(x) | B(x)`.
-
 enum Conn {
     Active(Int)
     Reconnecting(Int)
@@ -11,17 +10,18 @@ enum Conn {
 
 fn describe_conn(c: Conn) -> String {
     if c == {
-        // D-PATO: or-pattern — Active and Reconnecting share the same body.
         .Active(id) | .Reconnecting(id) -> {
+            // D-PATO: or-pattern — Active and Reconnecting share the same body.
             return "live:{id}"
         }
-        // D-PATW: wildcard slot — Idle's payload doesn't matter here.
         .Idle(_) -> {
+            // D-PATW: wildcard slot — Idle's payload doesn't matter here.
             return "idle"
         }
         .Closed -> {
             return "closed"
         }
+
     }
     return "unknown"
 }
@@ -33,14 +33,15 @@ enum Http {
 
 fn classify(r: Http) -> String {
     if r == {
-        // D-PATR: range pattern in payload slot.
         .Good(200..299) -> { return "success" }
         .Good(300..399) -> { return "redirect" }
         .Good(400..499) -> { return "client error" }
         .Good(500..599) -> { return "server error" }
         .Good(_) -> { return "other" }
         .Fail(_) -> { return "network error" }
+
     }
+    // D-PATR: range pattern in payload slot.
     return "unknown"
 }
 
@@ -52,7 +53,9 @@ fn score_grade(score: Int) -> String {
         70..79 -> { return "C" }
         80..89 -> { return "B" }
         90..100 -> { return "A" }
-        else -> { return "?" }
+        else -> {
+            return "?"
+        }
     }
 }
 

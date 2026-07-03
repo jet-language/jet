@@ -6,27 +6,23 @@ use core.archive as ar
 fn main() {
     // Compress some bytes with gzip. The type annotation `[U8]` tells the
     // compiler to interpret the integer literals as unsigned bytes (U8).
-original: [U8] :: [72, 101, 108, 108, 111]   // ASCII "Hello"
+    original: [U8] :: [72, 101, 108, 108, 111]  // ASCII "Hello"
     compressed :: ar.gzip_compress(original)
-
     // A gzip stream is always longer than 5 bytes (header alone is 10).
     print((compressed.len() > 5))
-
     // Round-trip: decompress must recover the original bytes exactly.
     restored :: ar.gzip_decompress(compressed)
     print((restored.len() == original.len()))
     print((restored == original))
-
     // Zip round-trip: compress into a single-entry zip archive, then extract.
     zip_data :: ar.zip_compress("entry.txt", original)
     print((zip_data.len() > 0))
     zip_restored :: ar.zip_decompress(zip_data)
     print((zip_restored == original))
-
     // Tar round-trip: build a two-entry archive, extract by name, list names.
-empty: [U8] :: []
+    empty: [U8] :: []
     tar1 :: ar.tar_add(empty, "hello.txt", original)
-bye: [U8] :: [98, 121, 101]   // ASCII "bye"
+    bye: [U8] :: [98, 121, 101]  // ASCII "bye"
     tar2 :: ar.tar_add(tar1, "bye.txt", bye)
     // Archive is non-empty.
     print((tar2.len() > 0))

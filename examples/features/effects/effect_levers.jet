@@ -8,33 +8,32 @@
 //   2. `#(via f)` pass-through — a function whose published effect set IS
 //      whatever its callback parameter `f` carries. A tight, escape-proof
 //      contract instead of the conservative flow-through.
-
 // Lever 1: `transform` insists on a pure callback. An impure one is rejected at
 // the call site before it ever runs.
 fn transform(items: [Int], f: @Pure fn(Int) -> Int) -> [Int] {
-    return items.map((x) => f(x));
+    return items.map((x) => f(x))
 }
 
 // Lever 2: `run_each` publishes a pass-through — its effects are exactly its
 // callback `act`'s. Callers see the tight set even where the callback escapes.
 fn run_each(items: [Int], act: #(Io) fn(Int)) #(via act) {
     loop x in items {
-        act(x);
+        act(x)
     }
 }
 
 @Pure fn double(n: Int) -> Int {
-    return n * 2;
+    return n * 2
 }
 
 // An `Io` callback — `print` carries the `Io` effect, within `run_each`'s
 // `#(Io)` bound on `act`, so `#(via act)` publishes exactly `Io`.
 fn show(n: Int) {
-    print("{n}");
+    print("{n}")
 }
 
 fn main() {
-    doubled :: transform([1, 2, 3], double);
-    print("{doubled}");
-    run_each([10, 20], show);
+    doubled :: transform([1, 2, 3], double)
+    print("{doubled}")
+    run_each([10, 20], show)
 }

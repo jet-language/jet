@@ -1,13 +1,16 @@
 // canon.jet — the compiling syntax showcase.
 //
 // Every line here is RATIFIED and IMPLEMENTED Jet syntax that compiles and
-// runs through `jet`. Golden-tested in tests/canon.rs: if it stops compiling
-// or its output drifts, the suite goes red. Treat it as the canonical
-// "what works today" reference.
+// runs through `jet`. Golden-tested in tests/release_gates.rs (was
+// tests/canon.rs): if it stops compiling or its output drifts, the suite
+// goes red. Treat it as the canonical "what works today" reference.
 //
 // Aspirational / ratified-but-unimplemented syntax lives in
 //   docs/reference/syntax-surface.jet  (non-executable).
 // Decision IDs + rationale live in docs/spec/syntax-decisions.md.
+use core.mem
+use core.encoding.json as json
+
 // --- variables & types ---------------------------------------------------
 // `name :: val` / `name := val` infer types; `name: Type :: val` / `name: Type := val` annotate.
 fn show_values() {
@@ -68,7 +71,7 @@ fn next(light: Light) -> Light {
 
 fn day_kind(day: String) -> String {
     if day == {
-        "sat" || "sun" -> { return "weekend" }
+        "sat" | "sun" -> { return "weekend" }
         else -> {
             return "weekday"
         }
@@ -114,6 +117,140 @@ module math {
     }
 }
 
+// --- low-level: `:= uninit` sentinel --------------------------------------
+// Opts a binding out of automatic zero-fill; sema proves every read happens
+// after a write on all paths (E0420, D-UNINIT-SENTINEL1). Gated by `use core.mem`.
+fn show_uninit() -> Int {
+    n: Int := uninit
+    n = 99
+    return n
+}
+
+// --- stored references: `field: &T` + `#Ref(label)` ----------------------
+// Two candidate owners share the referent type, so each field names its
+// owner explicitly (D-REF-SHORTHAND1/2).
+struct Excerpt {
+    #Ref(source) text: &String
+    #Ref(kind) meta: &String
+}
+
+fn describe_excerpt(source: String, kind: String) -> String {
+    e :: Excerpt.{text: source, meta: kind}
+    return "{e.text} {e.meta}"
+}
+
+// --- inline contracts: `@Inline` / `@InlineAlways` ------------------------
+// D-METHODMACRO1=A: `@Inline` is a soft hint; `@InlineAlways` is a checked
+// promise the compiler proves or refuses to build.
+@Inline fn square(x: Int) -> Int {
+    return x * x
+}
+
+@InlineAlways fn twice(x: Int) -> Int {
+    return x * 2
+}
+
+// --- typed CLI args: `@Cli` struct + `@[Doc(...)]` fields -----------------
+// D-CLIFLAG1=A: an entry function's `@Cli` parameter type IS the CLI spec.
+// Constructed by hand here (not run as the CLI entry point) to keep this
+// file's single `fn main()` the one program entry.
+@Cli
+struct ServeArgs {
+    @[Doc("port to listen on")] #[Default(3000)] port: Int
+    @[Doc("print extra detail")] verbose: Bool
+}
+
+// --- stream parsing: `Reader.over` / `Cursor.over` / `take_pattern` -------
+// D-SHIFT1: the "shift" kernel for linear stream parsing — every read
+// advances position and returns `? Error`, never panics or truncates silently.
+fn parse_packet() -> String {
+    packet: [U8] :: [42, 0, 0, 0, 3, 0, 16, 32, 48]
+    r :: Reader.over(packet)
+    magic :: r.read_u32_le() ?? panic("bad packet: no magic")
+    count :: r.read_u16_le() ?? panic("bad packet: no count")
+    payload :: r.take(count.to_int()) ?? panic("bad packet: short payload")
+    return "magic={magic} count={count} payload_len={payload.len()}"
+}
+
+fn parse_incident(line: String) -> String {
+    c :: Cursor.over(line)
+    c.skip_ws()
+    matched :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("bad incident line")
+    reason :: c.take_until("\n") ?? panic("no newline found")
+    return "id={matched.id} sev={matched.sev} reason={reason}"
+}
+
+// --- decode-time migration transparency: `decode_traced` ------------------
+// D-MIGRATE3=A: `decode_traced<T>` returns `{ value, migration }` so a
+// caller can ask whether a decoded record arrived as an old schema version.
+@[PublishedSchema, Codable]
+struct Account {
+    id: Int
+    display_name: String
+    verified: Bool
+}
+
+migration Account {
+    rename name -> display_name
+    add verified: Bool = false
+}
+
+fn decode_account(raw: String) -> String {
+    r :: json.decode_traced<Account>(raw) ?? panic("bad account")
+    return "id={r.value.id} migrated={r.migration.migrated}"
+}
+
+// --- OS-target gating: `#Target(Os.Linux)` on impl ------------------------
+// D-OSTARGET1=A: only the impl matching the build's OS is compiled in.
+// There is no ratified way yet for ungated code to dispatch to "whichever
+// backend matches this build", so — matching
+// examples/features/lowlevel/os_target_gating.jet — main() never calls
+// this gated impl directly; it only proves the two compile side by side.
+trait Backend {
+    fn label(self) -> String
+}
+
+struct LinuxBackend {
+    name: String
+}
+
+#Target(Os.Linux)
+impl LinuxBackend.Backend {
+    fn label(self) -> String {
+        return "linux: {self.name}"
+    }
+}
+
+// --- `#Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`
+// D-DOTSCOPE1: contextual dot-member blocks inside a `#Test` marker scope.
+// Run by `jet test`, not by this file's `fn main()`.
+#Test("uninit then write is provably safe") {
+    .setup {
+        base :: show_uninit()
+    }
+    require_eq(base, 99)
+}
+
+#Test("expect_fail region must fail") {
+    .expect_fail {
+        require((1 == 2), "one is not two")
+    }
+    require_eq(twice(2), 4)
+}
+
+#Test("timeout bounds a region") {
+    .timeout(500ms) {
+        require_eq(square(5), 25)
+    }
+}
+
+#Test("skip one region") {
+    require_eq(twice(3), 6)
+    .skip {
+        require(false)
+    }
+}
+
 // --- main: exercise each feature with deterministic output ---------------
 fn main() {
     show_values()
@@ -129,8 +266,12 @@ fn main() {
     print("day: {kind}")
     // errors
     if double_age("42") == {
-        ok(n) -> print("ok: {n}")
-        err(e) -> print("err: {e}")
+        ok(n) -> {
+            print("ok: {n}")
+        }
+        err(e) -> {
+            print("err: {e}")
+        }
 
     }
     fallback :: parse_age("") ?? 0
@@ -165,4 +306,21 @@ fn main() {
         sum = sum + i
     }
     print("loop_sum: {sum}")
+    // low-level: uninit sentinel
+    print("uninit: {show_uninit()}")
+    // stored references: #Ref(label)
+    ref_desc :: describe_excerpt("hello", "greeting")
+    print("ref: {ref_desc}")
+    // inline contracts
+    print("inline: {square(4)} {twice(5)}")
+    // typed CLI args struct (constructed by hand, not run as the entry point)
+    args :: ServeArgs.{port: 8080, verbose: true}
+    print("cli: {args.port} {args.verbose}")
+    // stream parsing
+    print("reader: {parse_packet()}")
+    incident_line :: "  inc-4411 sev 3: disk full\n"
+    print("cursor: {parse_incident(incident_line)}")
+    // decode-time migration transparency
+    account_json :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
+    print("decode: {decode_account(account_json)}")
 }

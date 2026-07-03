@@ -3,11 +3,17 @@
 // propagation. Multiple guards in the same scope drop LIFO.
 use core.scope as scope
 
-enum Fail { Bad }
+enum Fail {
+    Bad
+}
 
 fn with_guards(succeed: Bool) -> Int ? Fail {
-    _g1 :: scope.guard(() => { print("guard 1 runs") })
-    _g2 :: scope.guard(() => { print("guard 2 runs") })
+    _g1 :: scope.guard(() => {
+        print("guard 1 runs")
+    })
+    _g2 :: scope.guard(() => {
+        print("guard 2 runs")
+    })
     if succeed {
         return ok(42)
     }
@@ -15,7 +21,9 @@ fn with_guards(succeed: Bool) -> Int ? Fail {
 }
 
 fn question_path() -> Int ? Fail {
-    _cleanup :: scope.guard(() => { print("cleanup before ?") })
+    _cleanup :: scope.guard(() => {
+        print("cleanup before ?")
+    })
     n :: with_guards(false)?
     return ok(n)
 }

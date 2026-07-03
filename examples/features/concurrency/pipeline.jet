@@ -1,6 +1,7 @@
 use core.tasks as tasks
+
 fn main() {
-ch: Channel<Int> :: tasks.channel()
+    ch: Channel<Int> :: tasks.channel()
     s1 :: ch.sender()
     t1 :: tasks.spawn(take(s1) () => {
         s1.send(30)
@@ -16,7 +17,7 @@ ch: Channel<Int> :: tasks.channel()
     t1.join()
     t2.join()
     t3.join()
-     results: [Int]  := []
+    results: [Int] := []
     results.push(ch.receive() ?? panic("channel closed"))
     results.push(ch.receive() ?? panic("channel closed"))
     results.push(ch.receive() ?? panic("channel closed"))

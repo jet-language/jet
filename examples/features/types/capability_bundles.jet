@@ -5,8 +5,8 @@
 // type's operations while preserving nominal identity (`Usd + Usd` is a
 // `Usd`; `Usd + Eur` is still a type error even though both grant `+`).
 // Bundles stack: `@Numeric @Printable` on one type grants both.
-
 @Numeric @Printable Usd :: distinct Int;
+
 @Comparable CustomerId :: distinct Int;
 
 fn main() {
@@ -14,16 +14,14 @@ fn main() {
     tax :: Usd(5)
     total :: price + tax
     print("total: {total}")
-
     a :: CustomerId(1)
     b :: CustomerId(1)
     print("{(a == b)}")
-
-    // `CustomerId` has no `@Numeric`, so arithmetic on it is still rejected
-    // at compile time (E0138/E0127) — see tests/ui/distinct_arith_on_id.jet
-    // and tests/ui/capbundle_operation_not_granted.jet for the sibling
-    // negative cases (a bare `CustomerId(1) * 2` here would not compile).
 }
+// `CustomerId` has no `@Numeric`, so arithmetic on it is still rejected
+// at compile time (E0138/E0127) — see tests/ui/distinct_arith_on_id.jet
+// and tests/ui/capbundle_operation_not_granted.jet for the sibling
+// negative cases (a bare `CustomerId(1) * 2` here would not compile).
 // --- expected output --------------------------------------------------
 // total: 25
 // true

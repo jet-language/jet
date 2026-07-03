@@ -22,39 +22,46 @@ impl<'a> Fmt<'a> {
                 let text = self.src[t.span.start..t.span.end].to_string();
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(t.span.end);
             }
             // Stage 1a: modules are emitted verbatim (non-destructive). A
             // canonical module formatter lands with the eval pipeline.
             Item::Module(m) => {
                 let text = self.src[m.span.start..m.span.end].to_string();
                 self.write(&text);
+                self.skip_verbatim_comments(m.span.end);
             }
             // S59: C FFI modules are emitted verbatim (non-destructive). A
             // canonical formatter can land alongside the bind backend.
             Item::CModule(cm) => {
                 let text = self.src[cm.span.start..cm.span.end].to_string();
                 self.write(&text);
+                self.skip_verbatim_comments(cm.span.end);
             }
             // Code modules are emitted verbatim pending a dedicated formatter.
             Item::CodeModule(cm) => {
                 let text = self.src[cm.span.start..cm.span.end].to_string();
                 self.write(&text);
+                self.skip_verbatim_comments(cm.span.end);
             }
             // D-DIST1: distinct type declarations are emitted verbatim.
             Item::Distinct(d) => {
                 let text = self.src[d.span.start..d.span.end].to_string();
                 self.write(&text);
+                self.skip_verbatim_comments(d.span.end);
             }
             // D-TYPEALIAS1: type alias declarations are emitted verbatim.
             Item::TypeAlias(a) => {
                 let text = self.src[a.span.start..a.span.end].to_string();
                 self.write(&text);
+                self.skip_verbatim_comments(a.span.end);
             }
             // D-QUAL3: unit-family declarations are emitted verbatim (the sugar
             // surface is preserved; it is not expanded into per-member distincts).
             Item::UnitFamily(uf) => {
                 let text = self.src[uf.span.start..uf.span.end].to_string();
                 self.write(&text);
+                self.skip_verbatim_comments(uf.span.end);
             }
             // D-ERR-CONV: error conversion declarations are emitted verbatim.
             Item::ErrorConv(ec) => {
@@ -67,42 +74,49 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(ec.body_span.end);
             }
             // D-MIGRATE1: migration blocks are emitted verbatim (non-destructive).
             Item::Migration(m) => {
                 let text = self.src[m.span.start..m.span.end].to_string();
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(m.span.end);
             }
             // D-STATE-DECL: state-set declarations are emitted verbatim (non-destructive).
             Item::StateDecl(s) => {
                 let text = self.src[s.span.start..s.span.end].to_string();
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(s.span.end);
             }
             // D-PROTO1/D-PROTO2: protocol blocks are emitted verbatim (non-destructive).
             Item::ProtocolDecl(p) => {
                 let text = self.src[p.span.start..p.span.end].to_string();
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(p.span.end);
             }
             // D-METADERIVE1=A: derive blocks are emitted verbatim (non-destructive).
             Item::UserDerive(d) => {
                 let text = self.src[d.span.start..d.span.end].to_string();
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(d.span.end);
             }
             // D-GENMOD2=A: generic module templates emitted verbatim (non-destructive).
             Item::GenericModule(gm) => {
                 let text = self.src[gm.span.start..gm.span.end].to_string();
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(gm.span.end);
             }
             // D-GENMOD2=A: module alias declarations emitted verbatim (non-destructive).
             Item::ModuleAlias(ma) => {
                 let text = self.src[ma.span.start..ma.span.end].to_string();
                 self.write(&text);
                 self.newline();
+                self.skip_verbatim_comments(ma.span.end);
             }
         }
     }
@@ -115,6 +129,16 @@ impl<'a> Fmt<'a> {
         self.write(Syntax::BLOCK_OPEN);
         self.newline();
         self.with_indent(|f| {
+            // D-LIB2: `type Name` associated-type declarations. These were
+            // being dropped entirely — `fmt_trait` only ever walked
+            // `t.methods`, so a trait's `type Elem` line silently vanished
+            // on every fmt pass (a real token-dropping bug, caught
+            // reformatting examples/features/types/associated_types.jet).
+            for (name, _) in &t.assoc_types {
+                f.write("type ");
+                f.write(name);
+                f.newline();
+            }
             for m in &t.methods {
                 // D-EFF3: `@Pure` prefix bound on a trait method.
                 if m.is_pure {
@@ -782,7 +806,17 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_import(&mut self, imp: &ImportDecl) {
-        self.fmt_pub_qualifier(imp.is_pub, imp.is_package_pub);
+        // Imports don't take `priv` — the parser only accepts `use …` (not
+        // re-exported, the ambient default whether or not the file is
+        // `#PubFile`) or `pub use …` (re-exported). Unlike struct/fn/etc.,
+        // there's no `#PubFile`-relative "priv" spelling to fall back to, so
+        // this can't route through `fmt_pub_qualifier` (that produced
+        // unparseable `priv use …` output — a real fmt idempotence bug).
+        if imp.is_package_pub {
+            self.write("pub(package) ");
+        } else if imp.is_pub {
+            self.write("pub ");
+        }
         self.write(Syntax::KW_USE);
         self.write(" ");
         match &imp.kind {

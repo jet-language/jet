@@ -1,33 +1,36 @@
 // D-CAP7: method receivers — ~self (write), ^self (consume), &self (share), self (read).
-struct Buffer { data: String, size: Int }
+struct Buffer {
+    data: String
+    size: Int
+}
 
 impl Buffer {
-    // plain self — read only
     fn peek(self) -> Int { return self.size }
 
-    // &self — shared read (explicit share capability)
-    fn describe(&self) {
+    fn describe(self) {
+        // plain self — read only
+        // &self — shared read (explicit share capability)
         print("buf[{self.size}]: {self.data}")
     }
 
-    // ~self — mutate the receiver in place
     fn append(~self, chunk: String) {
+        // ~self — mutate the receiver in place
         self.data = "{self.data}{chunk}"
         self.size = self.size + 1
     }
 
-    // ^self — consume the receiver; return a new value
     fn seal(^self) -> String {
+        // ^self — consume the receiver; return a new value
         return "[sealed: {self.data}]"
     }
 }
 
 fn main() {
-    buf := Buffer.{ data: "hello", size: 1 }
-    print(buf.peek())      // plain read
-    buf.describe()         // &self share
-    buf.append(" world")   // ~self write
+    buf := Buffer.{data: "hello", size: 1}
+    print(buf.peek())  // plain read
+    buf.describe()  // &self share
+    buf.append(" world")  // ~self write
     buf.describe()
-    result := buf.seal()   // ^self consume; buf gone after this
+    result := buf.seal()  // ^self consume; buf gone after this
     print(result)
 }

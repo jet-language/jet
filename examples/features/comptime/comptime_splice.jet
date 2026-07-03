@@ -3,7 +3,6 @@
 // name from the comptime scope — identical semantics to a bare ident, but
 // exercises the Expr::ComptimeSplice interpreter path and is guarded by E2712
 // outside comptime.
-
 derive T.Label {
     info :: T.reflect()
     tname :: info.name
@@ -12,12 +11,12 @@ derive T.Label {
     emit("impl $lbl {{ fn label(self) -> String {{ return \"$lbl\" }} }}")
 }
 
-#[Label]
+#Label
 struct Cube {
     side: Int
 }
 
 fn main() {
-    c :: Cube.{ side: 5 }
+    c :: Cube.{side: 5}
     print(c.label())
 }

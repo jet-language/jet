@@ -36,8 +36,8 @@ fn place_order(items: Int) -> Int ? Fail {
 // failed transfer, with zero rollback annotation.
 fn transfer(from: ~Int, to: ~Int, amount: Int) -> Int ? Fail {
     #Transact(tx) {
-        from -= amount                // debit — `from` auto-snapshotted on entry
-        to += amount                  // credit — `to` auto-snapshotted on entry
+        from -= amount  // debit — `from` auto-snapshotted on entry
+        to += amount  // credit — `to` auto-snapshotted on entry
         if amount > 100 {
             // `?`-failure mid-transfer: the snapshots of `from`/`to` are restored.
             return err(Fail.Insufficient)
@@ -72,15 +72,15 @@ fn main() {
     alice: Int := 100
     bob: Int := 0
     a :: transfer(~alice, ~bob, 40) ?? (-1)
-    print(alice)        // 60
-    print(bob)          // 40
+    print(alice)  // 60
+    print(bob)  // 40
     print("=== auto-snapshot: failed transfer restores balances ===")
     carol: Int := 100
     dave: Int := 0
     b :: transfer(~carol, ~dave, 150) ?? (-1)
-    print(carol)        // 100 (debit undone)
-    print(dave)         // 0   (credit undone)
-    print(b)            // -1  (the `??` default)
+    print(carol)  // 100 (debit undone)
+    print(dave)  // 0   (credit undone)
+    print(b)  // -1  (the `??` default)
     print("=== explicit on_rollback: success (hook dropped) ===")
     c :: reserve_seat(true) ?? (-1)
     print(c)

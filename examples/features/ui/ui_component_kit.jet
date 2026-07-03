@@ -6,7 +6,6 @@
 // example instead composes all four ideas in one file to show them working
 // together over a shared `View` tree, the same shape as
 // examples/features/ui/ui_view_tree.jet.
-
 enum View {
     Text(text: String)
     Box(children: [View])
@@ -83,27 +82,24 @@ fn flatten(v: View) -> [String] {
             }
             return out
         }
+
     }
 }
 
 fn main() {
     name_label := label("Name:")
     name_input := input("type here…")
-
     save_button := button("Save")
-
     form := container([label_view(name_label), input_view(name_input), button_view(save_button)])
     loop line in flatten(form) {
         print(line)
     }
-
     // Editing the input and pressing the button both return updated values
     // (Jet structs are values) — the form just re-renders from the new state.
     name_input = type_char(name_input, "A")
     name_input = type_char(name_input, "d")
     name_input = type_char(name_input, "a")
     save_button = press(save_button)
-
     updated := container([label_view(name_label), input_view(name_input), button_view(save_button)])
     loop line in flatten(updated) {
         print(line)

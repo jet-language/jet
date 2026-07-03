@@ -27,7 +27,6 @@
 // Rust), so there is nothing load-bearing to wire a typed `Color` into on the
 // backend side yet — the acceptance bar is a real, dot-constructible,
 // meaningfully-used `Style`, which these plain user types satisfy.
-
 enum LengthUnit {
     Px
 }
@@ -68,6 +67,7 @@ fn describe(v: View) -> [String] {
             }
             return out
         }
+
     }
 }
 
@@ -81,6 +81,7 @@ fn total_width(v: View) -> Float {
             }
             return sum
         }
+
     }
 }
 
@@ -89,11 +90,9 @@ fn main() {
     blue :: Color.{r: 30, g: 60, b: 200}
     px10 :: Length.{value: 10.0, unit: .Px}
     px20 :: Length.{value: 20.0, unit: .Px}
-
     a: View :: .Text.{text: "a", style: Style.{color: red, width: px10, height: Length.{value: 4.0, unit: .Px}}}
     b: View :: .Text.{text: "b", style: Style.{color: blue, width: px20, height: Length.{value: 4.0, unit: .Px}}}
     tree: View :: .Box.{children: [a, b]}
-
     loop line in describe(tree) {
         print(line)
     }

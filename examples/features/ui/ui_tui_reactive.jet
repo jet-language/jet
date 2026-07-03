@@ -5,7 +5,6 @@ use core.reactive as reactive
 fn main() {
     backend :: ui.tui_backend()
     label :: reactive.signal("hi")
-
     ui.reactive_render(() => {
         node :: ui.node(label.get(), 2.0, 1.0)
         constraint :: ui.constraint(0.0, 0.0, 80.0, 24.0)
@@ -14,12 +13,10 @@ fn main() {
         backend.layout(node, frame)
         backend.paint(node)
     })
-
     print(backend.render_count())
     loop line in backend.frame_lines() {
         print(line)
     }
-
     label.set("yo")
     print(backend.render_count())
     loop line in backend.frame_lines() {

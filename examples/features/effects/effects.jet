@@ -3,23 +3,22 @@
 // upper bound the inferred set must fit inside; `@Pure` declares the empty set.
 // Effects are erased in codegen: this program generates the same Rust with or
 // without the annotations.
-
 // Pure: the inferred set is empty, matching the `@Pure` contract (S60/D-EFF1).
 @Pure fn square(n: Int) -> Int {
-    return n * n;
+    return n * n
 }
 
 // Declares it may use `Io` — and it does, by printing. `{Io} ⊆ {Io}`, so OK.
 fn announce(label: String, n: Int) #(Io) {
-    print("{label} is {n}");
+    print("{label} is {n}")
 }
 
 // Effects flow along calls: `run` reaches `Io` only through `announce`, and
 // `square` adds nothing (it is pure). Inferred `{Io} ⊆ {Io}`.
 fn report(n: Int) #(Io) {
-    announce("square", square(n));
+    announce("square", square(n))
 }
 
 fn main() {
-    report(7);
+    report(7)
 }

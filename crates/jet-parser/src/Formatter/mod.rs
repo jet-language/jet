@@ -61,6 +61,18 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         pub_file: prog.pub_file,
     };
     let mut first = true;
+    // D-VISDEFAULT2: `#PubFile` must precede any `priv`-qualified import in
+    // the rendered output — imports are formatted relative to `f.pub_file`
+    // (emitting a `priv` prefix when the file is public-by-default), so the
+    // literal `#PubFile` marker has to appear *before* the imports loop, not
+    // after it. Emitting it post-imports produced output that failed to
+    // reparse (`priv use …` with no preceding `#PubFile`) — a real fmt
+    // idempotence bug, not just a reordering of independent items.
+    if prog.pub_file {
+        first = false;
+        f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
+        f.newline();
+    }
     for imp in &prog.imports {
         if !first {
             f.blank_line_between_items();
@@ -70,20 +82,14 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         f.fmt_import(imp);
         f.emit_trailing(imp.span.end);
     }
-    if prog.pub_file {
-        if !first {
-            f.blank_line_between_items();
-        }
-        first = false;
-        f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
-        f.newline();
-    }
     // D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — the file's
     // default CLI backend. D-WASM1: `#Target(Wasm)`/`#Target(Js)` — the file's
     // web partition ceiling. Neither carries a span (single-instance file
-    // markers, same treatment as `#PubFile` above), so — like `#PubFile` —
-    // this fixed post-import position is canonical, not a preservation of
-    // wherever the author originally wrote it in the source.
+    // markers, same treatment as `#PubFile` above), so this fixed post-import
+    // position is canonical, not a preservation of wherever the author
+    // originally wrote it in the source. Unlike `#PubFile`, these markers
+    // don't gate any import's rendered qualifier, so they have no ordering
+    // dependency on the imports loop and keep their original position.
     if prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB) {
         if !first {
             f.blank_line_between_items();
@@ -479,6 +485,23 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// Several item kinds (derive/module/tag/migration/… blocks) are emitted
+    /// **verbatim** — the raw source slice is copied straight to output
+    /// instead of being walked comment-by-comment. Any comment whose span
+    /// falls inside that slice is therefore already visible in the copied
+    /// text, but `comment_i` never advanced past it. Left alone, the next
+    /// `emit_leading`/`emit_remaining_comments` call finds it "unconsumed"
+    /// and re-emits it before the following item — a real duplication bug,
+    /// not just a stale index. Call this right after writing a verbatim
+    /// item's text, with that item's span end, to skip past its internal
+    /// comments without re-printing them.
+    pub(super) fn skip_verbatim_comments(&mut self, end: usize) {
+        while self.comment_i < self.comments.len() && self.comments[self.comment_i].span.start < end
+        {
+            self.comment_i += 1;
+        }
+    }
+
     fn is_trailing_comment_at(&self, span: Span) -> bool {
         if self.out.is_empty() {
             return false;
@@ -738,6 +761,32 @@ fn compound_spell(op: BinOp) -> &'static str {
         BinOp::Shl => "<<=",
         BinOp::Shr => ">>=",
         _ => unreachable!("compound assignment uses arithmetic/bit ops only"),
+    }
+}
+
+/// S34/S67: re-emit an integer literal exactly as the author spelled it —
+/// radix prefix (`0x`/`0o`/`0b`), digit separators (`_`), and hex-digit case
+/// included. The AST stores only the value, so the spelling must come from
+/// the source slice at the literal's span. Falls back to plain decimal when
+/// the slice doesn't round-trip to the same value (synthesized Int nodes
+/// borrow a nearby span whose text isn't a number).
+pub(crate) fn int_literal_spelling(src: &str, span: Span, n: i64) -> String {
+    let Some(slice) = src.get(span.start..span.end) else {
+        return n.to_string();
+    };
+    let cleaned: String = slice.chars().filter(|c| *c != '_').collect();
+    let parsed = if let Some(digits) = cleaned.strip_prefix("0x").or(cleaned.strip_prefix("0X")) {
+        i64::from_str_radix(digits, 16)
+    } else if let Some(digits) = cleaned.strip_prefix("0o").or(cleaned.strip_prefix("0O")) {
+        i64::from_str_radix(digits, 8)
+    } else if let Some(digits) = cleaned.strip_prefix("0b").or(cleaned.strip_prefix("0B")) {
+        i64::from_str_radix(digits, 2)
+    } else {
+        cleaned.parse::<i64>()
+    };
+    match parsed {
+        Ok(v) if v == n => slice.to_string(),
+        _ => n.to_string(),
     }
 }
 

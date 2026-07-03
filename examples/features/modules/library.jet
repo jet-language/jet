@@ -8,6 +8,7 @@ fn greet(name: String, loud: Bool = false) -> String {
     }
     return "hello {name}."
 }
+
 // --- D-LIB2: trait with a default method body ---
 trait Greetable {
     fn greeting(self) -> String
@@ -17,44 +18,50 @@ trait Greetable {
     }
 }
 
-
 struct Person {
     name: String
 }
+
 impl Person.Greetable {
     fn greeting(self) -> String {
         n :: self.name
         return "hi, I'm {n}"
     }
 }
+
 // `announce` uses the default from the trait
 // --- S77: field punning ---
 struct Point {
     x: Int
     y: Int
 }
+
 fn make_point(x: Int, y: Int) -> Point {
     return Point.{x: x, y: y}  // S77 puns: x:x, y:y
 }
+
 // --- S62: trait delegation ---
 trait Logger {
     fn log(self, msg: String)
 }
 
-
 struct ConsoleLogger {
     prefix: String
 }
+
 impl ConsoleLogger.Logger {
     fn log(self, msg: String) {
         p :: self.prefix
         print("{p}: {msg}")
     }
 }
+
 struct App {
     logger: ConsoleLogger
 }
+
 impl App.Logger using logger  // S62: forwards Logger methods to `logger`
+
 fn main() {
     // S61 labels + defaults
     print(greet("world"))

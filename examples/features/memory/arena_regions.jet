@@ -13,14 +13,12 @@ fn main() {
     second :: arena.alloc(20)
     print(first)
     print(second)
-
     // reset keeps the backing buffer; everything allocated so far is gone, so
     // `first`/`second` may not be touched after this point (that would be
     // E0632). A fresh alloc after the reset is fine.
     arena.reset()
     reused :: arena.alloc(30)
     print(reused)
-
     // Explicit `region r { … }` (D-REGION1 opt B): a narrower, named region
     // spanning two allocators. Views made inside live only until the block ends.
     region scratch {
@@ -31,14 +29,12 @@ fn main() {
         print(x)
         print(y)
     }
-
     print(99)
-
-    // Memory safety, enforced at compile time — none of these would compile:
-    //   return first            // E0631: a view can't be returned (it would
-    //                           //        outlive `arena`)
-    //   stash :: first          // E0631: a view can't be stored in another
-    //                           //        binding that may outlive the region
-    //   arena.reset(); print(reused)  // (after reset) E0632: reading a view
-    //                           //        whose arena was reset reads freed memory
 }
+// Memory safety, enforced at compile time — none of these would compile:
+//   return first            // E0631: a view can't be returned (it would
+//                           //        outlive `arena`)
+//   stash :: first          // E0631: a view can't be stored in another
+//                           //        binding that may outlive the region
+//   arena.reset(); print(reused)  // (after reset) E0632: reading a view
+//                           //        whose arena was reset reads freed memory
