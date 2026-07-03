@@ -168,9 +168,35 @@ unless the owner explicitly grants an exception.
 
 ---
 
+## Card lane (2026-07-03 prep pass)
+
+Every e4 card has a vetted plan; ballots below are the only owner input left.
+Sequence (workOrder; jetpack first per owner directive, then FFI program):
+
+| # | Card | Plan | State |
+|---|------|------|-------|
+| 99 | build-from-source + ring shipping | package-build-from-source.md | deciding — D-JPK-RINGSHIP1, D-JPK-BUILDTOOL1; slices T0/T1 buildable now |
+| 176 | vision gates U11–U19(+U20–29) | implementation.md | deciding — D-JPK-ADAPTNAME1 only; rest buildable |
+| 90 | workspace continuation | workspace-continuation.md | ready — slices A–D, zero ballots |
+| 3 | signed package cache | signed-package-cache.md | ready — zero ballots |
+| 13 | package signing (Ed25519) | package-signing.md | ready, after #3 (index dep); crypto already approved (D-DEP-CRYPTO1) |
+| 179 | toolchain as dependency (U30) | toolchain-as-dependency.md | ready — zero ballots |
+| 85 | CAS build cache contract | cas-build-cache.md | ready — includes cache-poisoning race fix |
+| 180 | FFI program frame | ffi-interop-program.md | deciding — D-FFI-PY1, D-DEP-PY1, D-JPK-EXTPROV1; Phase 0 binder seam buildable now |
+| 124 | JS/npm + Swift interop (P0) | ffi-interop-program.md | deciding — D-FFI-JS1, D-FFI-SWIFT1 |
+| 5 | plugin target | ../sidequests/plugin-target.md | deciding — D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1; substrate buildable now |
+| 2 | jetos generations | jetos-generations.md | frozen — gated on Phase A/D prereqs |
+| 9 | flagship slices (Tower-in-Jet web app) | — | frozen — owner deferred to e4 end |
+
+Cross-cuts: #13 shares one signature field with #3's index schema; #5 and
+#124 share one wasmtime wrapper; D-JPK-BUILDTOOL1 underpins #85's
+reproducibility contract; D-JPK-RINGSHIP1=C would ride #179's toolchain object.
+
 ## Open / Proposed
 
-Nothing open. The 2026-07-02 course-correction wave (U20–U29, ratified same
-day) closed the last proposed items; details live in the gate table above and
-the syntax-decisions.md decision log. Follow-up ballot surface still expected:
-exact adapter constructor names (`Pkg.adapt` / `Recipe.*` spellings).
+Ten open ballots (2026-07-03 prep pass), all rendered in Tower's Decide lane:
+D-JPK-RINGSHIP1 · D-JPK-BUILDTOOL1 · D-JPK-ADAPTNAME1 (the adapter-spelling
+follow-up predicted below) · D-FFI-PY1 · D-FFI-JS1 (amends D-NPMTYPE1's
+hand-authored-stub floor — explicit) · D-FFI-SWIFT1 · D-DEP-PY1 (I6 CPython
+runtime approval) · D-JPK-EXTPROV1 (npm/PyPI/SwiftPM providers) ·
+D-PLUGIN-EXPORT1 · D-PLUGIN-VERSION1.
