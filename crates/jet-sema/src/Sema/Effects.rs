@@ -683,22 +683,28 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
     )
 }
 
-/// E0749 (D-PROP1=A): a function's reachable call graph uses a prohibited effect.
-pub fn e0749(fn_name: &str, reached: &EffectSet, span: Span) -> Diagnostic {
-    let list = show_set(reached);
+/// E0749 (D-PROP1=A): a function's reachable call graph uses a prohibited
+/// effect. `reached` is the actual offending effect(s); `prohibited` is the
+/// declared `#(!…)` set that covers them — D-EFFTREE1: since ancestor
+/// prohibits descendant, `reached` may name a leaf (`Fs.Write`) under a
+/// broader declared root (`Fs`), so the two are shown separately rather than
+/// assuming they're always the same text (they always were, pre-D-EFFTREE1).
+pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: Span) -> Diagnostic {
+    let reached_list = show_set(reached);
+    let decl_list = show_set(prohibited);
     Diagnostic::error(
         "E0749",
         format!(
             "`{}` reaches the `{}` effect, which it prohibits with `#(!{})`",
-            fn_name, list, list
+            fn_name, reached_list, decl_list
         ),
         format!(
             "a `#(!{})` annotation means the function and every callee it can reach must not use `{}`",
-            list, list
+            decl_list, reached_list
         ),
         format!(
             "remove the call that introduces `{}`, or drop the `#(!{})` prohibition",
-            list, list
+            reached_list, decl_list
         ),
         Some(span),
     )

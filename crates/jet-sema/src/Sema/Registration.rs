@@ -1289,7 +1289,7 @@ pub(crate) fn check_effect_boundaries(
                     .find(|(n, _)| n.starts_with('!'))
                     .map(|(_, s)| *s)
                     .unwrap_or(f.name_span);
-                diags.push(e0749(&f.name, &reached_prohibited, span));
+                diags.push(e0749(&f.name, &reached_prohibited, &prohibited, span));
             }
         }
     }

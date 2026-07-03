@@ -713,10 +713,23 @@ erased in codegen. Assert/restrict via `#(Net, Db)` on a signature and
 empty effect set; violations name the impure call path. Also valid as a
 function-type bound (D-MARKERMOVE2).
 
-**D-EFF4 / D-EFF5 — Vocabulary**: closed flat set of ten — `Net`, `Fs`, `Io`,
-`Db`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `Gpu`; unknown name E0119; no
-subsumption (`Net` under `#(Io)` is E0740). `effect <Name>` user declarations
+**D-EFF4 / D-EFF5 — Vocabulary**: closed set of ten tree ROOTS — `Net`, `Fs`,
+`Io`, `Db`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `Gpu`; unknown root E0119.
+Amended by D-EFFTREE1: a root may be dotted into an open leaf path (`Fs.Read`)
+and ancestor matching is subsumption. `effect <Name>` user declarations
 reserved, unminted.
+
+**D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the ten
+D-EFF4/5 names are tree roots; a signature/`#Caps`/`#Grant`/`#(!…)` entry may
+be a dotted path rooted at one (`Fs.Read`, `Net.Http.Get`) — root closed
+(E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
+matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
+learned once and reused: `#(Fs)` accepts any `Fs.*` callee; `#(Fs.Read)`
+rejects a sibling `Fs.Write` callee; `#Grant(Fs.Read)` doesn't authorize
+`Fs.Write`; `#(!Fs)` prohibits the whole `Fs.*` subtree. Reverses E0740 for
+the ancestor case, keeps it for out-of-tree/sibling cases. Flat root names
+stay valid (no migration break) — Core stdlib calls are still tagged with a
+bare root; leaf precision is a user-declared-contract concept.
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function
@@ -724,7 +737,7 @@ types (`@Pure fn(T) -> U`, `#(Net) fn(T) -> U`; call-site check E0747) and
 `#(via f)` pass-through publication (E0748).
 
 **D-EFF3 — Traits**: a trait method may declare an effect upper bound — both
-the impl obligation (E0710) and the dispatch contract for trait objects.
+the impl obligation (E0742) and the dispatch contract for trait objects.
 
 **D-PROP1 / D-PROP2 — Prohibition**: `#(!Net)` — the fn and every reachable
 callee must not use the effect (E0749).
