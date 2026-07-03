@@ -2,7 +2,7 @@
   "meta": {
     "version": 3,
     "currentEpoch": "e3",
-    "nextNum": 184,
+    "nextNum": 185,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4455,11 +4455,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-SELFVER1=A implementation plan: (1) add `core.versioned.Value<T>` carrying version id plus conversion log; (2) schema migration hooks append conversion entries; (3) APIs expose current value, original version, and reversible audit trail; (4) no implicit runtime cost for ordinary values; (5) examples for config/schema migration; (6) serialization tests and docs.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Implemented + verified; full suite green; committed 05b2c097. decode_traced<T> live on json/csv/toml/yaml per D-MIGRATE3=A; default decode byte-identical; DecodeResult/MigrationStatus prelude structs w/ user-type-wins. HONEST GAP surfaced: no runtime migration engine exists (SchemaMigration.rs = compile-time E0910 only; codegen erases migration{} blocks — deliberate c73 defer), so .migrated always false today; documented in spec/law/example. Raised D-MIGRATE4 ballot (new card) for the engine. Bonus: fixed chained core-generic-struct field-name mangling + missing user-shadow guard for generic core types."
+        },
         {
           "at": "2026-07-02",
           "text": "Audit: D-MIGRATE3=A ratified — decode-transparency work fully unblocked; card is genuinely ready."
@@ -4495,7 +4500,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-02",
+      "updated": "2026-07-03",
       "workOrder": 9998
     },
     {
@@ -7682,6 +7687,61 @@
           "rec": "A — the only shape that honors all three ratified decisions verbatim (no amendment churn), and bare `jet expand` showing every lens is the right magic default: the beginner who doesn't know lens names still gets the answer, the expert narrows with --facts."
         }
       ]
+    },
+    {
+      "id": "c105migrate4",
+      "num": 184,
+      "title": "Runtime schema-migration engine (make decode actually apply migration{} blocks)",
+      "body": "Surfaced by #105: D-MIGRATE1/2 ship compile-time intent checks (E0910) only — codegen erases migration{} blocks, so old-shaped stored data fails decode instead of migrating, and decode_traced (D-MIGRATE3=A) can never report migrated=true. This card is the runtime half: apply the migration chain during decode for @PublishedSchema types and feed from/steps into MigrationStatus.",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "deciding",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "decisions": [
+        {
+          "id": "D-MIGRATE4",
+          "cardId": "c105migrate4",
+          "status": "open",
+          "title": "Should decode apply migration{} blocks to old stored data at runtime?",
+          "gist": "Old stored data currently fails to decode; should the compiler generate the code that upgrades it in place during decode?",
+          "story": "Betty (from D-MIGRATE3) ships schema v3 of UserRecord. Her nightly import reads three-year-old v1 JSON. Today that decode simply errors — the migration blocks she wrote only prove a migration EXISTS at compile time. She expected the old records to load and upgrade; decode_traced exists to tell her it happened, but nothing can happen yet.",
+          "inWild": "#PublishedSchema\nstruct UserRecord {\n    id: Int\n    display_name: String   // was `name` in v1\n    verified: Bool         // added v2, default false\n}\n\nmigration UserRecord v1 -> v2 { add verified: Bool = false }\nmigration UserRecord v2 -> v3 { change name: String -> display_name via { (old) => old } }\n\nfn import(raw: String) -> UserRecord ? {\n    // raw is v1 JSON: {\"id\":7,\"name\":\"Ada\"}\n    return json.decode<UserRecord>(raw)?   // today: DecodeError. expected: migrated value\n}",
+          "comparisons": "Rust serde: no built-in versioning; versioning crates bolt it on manually. Protobuf/Capn Proto: wire-level defaults + field ids make old data readable by construction. Swift Codable: manual init(from:) branching on version keys. Jet already ratified the authoring surface (migration verbs, D-MIGRATE2A-F); this decides only whether/how the runtime applies them.",
+          "options": [
+            {
+              "key": "A",
+              "name": "Generate the migration chain into decode (recommended)",
+              "detail": "Codegen lowers each migration{} block to a step function; decode of a @PublishedSchema type first tries the current shape, on mismatch walks stored version tags/shape detection oldest to current, applying steps. decode_traced records from+steps; plain decode applies silently. Zero cost for types without migrations (nothing generated).",
+              "code": "user :: json.decode<UserRecord>(raw)?          // v1 JSON now loads\nr :: json.decode_traced<UserRecord>(raw)?\n// r.migration.migrated == true, .from == \"v1\", .steps == [\"v1->v2\",\"v2->v3\"]"
+            },
+            {
+              "key": "B",
+              "name": "Explicit opt-in call: decode_migrating only",
+              "detail": "Plain decode keeps failing on old shapes; a third method decode_migrating<T> applies the chain. Callers must choose migration explicitly; surface grows to three decode verbs (I8 pressure).",
+              "code": "user :: json.decode_migrating<UserRecord>(raw)?   // applies chain\nold  :: json.decode<UserRecord>(raw)               // still errors on v1"
+            },
+            {
+              "key": "C",
+              "name": "Defer past Epoch 3 (status quo)",
+              "detail": "Keep compile-time-only checks; decode_traced stays always-false until a later epoch. Stored-data users must hand-write upgraders.",
+              "code": "// no change; v1 JSON keeps failing:\nuser :: json.decode<UserRecord>(raw) ?? panic(\"DecodeError\")"
+            }
+          ],
+          "rec": "A — the authoring surface (migration verbs) and the transparency surface (decode_traced) are both ratified and shipped; A is the semantics both were designed around, keeps one decode verb (I8), and costs nothing for unversioned types."
+        }
+      ],
+      "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Carded from #105 finding: migration{} blocks are compile-time-only; runtime application never built (c73 defer). Ballot D-MIGRATE4 attached, ballot-ready."
+        }
+      ],
+      "created": "2026-07-03",
+      "updated": "2026-07-03"
     }
   ],
   "decisions": [
