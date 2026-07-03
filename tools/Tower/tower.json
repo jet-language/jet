@@ -2,7 +2,7 @@
   "meta": {
     "version": 3,
     "currentEpoch": "e3",
-    "nextNum": 185,
+    "nextNum": 186,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7640,6 +7640,29 @@
           "at": "2026-07-03",
           "by": "agent",
           "text": "Carded from #105 finding: migration{} blocks are compile-time-only; runtime application never built (c73 defer). Ballot D-MIGRATE4 attached, ballot-ready."
+        }
+      ],
+      "created": "2026-07-03",
+      "updated": "2026-07-03"
+    },
+    {
+      "id": "ci2soundness",
+      "num": 185,
+      "title": "I2 soundness sweep: known reachable ICEs / rustc leaks",
+      "body": "Collector card for user-reachable I2 violations surfaced during e3 burndown. Known: (1) fixed-array index-assign `buf[i] = x` ICEs in TIR codegen (Items.rs:1219 gate miss) with or without := uninit — found closing #173; (2) print(\"{s}\") after moving s into an enum payload trips raw rustc E0382 (sema clone-insertion gap) — found closing #134 STYLEUNIT1. Each fix: repro fixture → root cause → class-level fix → regression test; sweep fuzz/ice_regressions after.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 9,
+      "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Carded from #173 + #134 findings. Both reachable from plain user source — I2 P0 class. Placed at top of e4 lane (workOrder 9, ahead of jetpack) since I2 is an invariant, not a feature."
         }
       ],
       "created": "2026-07-03",
