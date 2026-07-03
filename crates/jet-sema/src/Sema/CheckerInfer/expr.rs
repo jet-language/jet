@@ -373,6 +373,26 @@ impl<'a> Checker<'a> {
                 }
                 Some(Type::String)
             }
+            // D-SHIFT1 (c7shift): a pattern-literal is legal ONLY as
+            // `cursor.take_pattern("…")`'s argument — that call site
+            // intercepts and consumes it directly (`CheckerInfer/calls.rs`)
+            // before generic argument inference ever reaches this arm. If
+            // it's reached anyway (a non-`Cursor` receiver's `take_pattern`
+            // falls through to the generic "unknown method" recovery path,
+            // which infers every arg defensively), report it plainly rather
+            // than let an unhandled AST shape reach codegen (I2).
+            Expr::StrMatchLit(_, span) => {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    "a pattern literal is only valid as a `take_pattern` argument".to_string(),
+                    "this string has typed holes (`{name:Type}`), which only `take_pattern` understands"
+                        .to_string(),
+                    "call it as `cursor.take_pattern(\"…\")`, or drop the `:Type` for an ordinary interpolated string"
+                        .to_string(),
+                    Some(*span),
+                ));
+                None
+            }
             Expr::Ident(name, span) => {
                 // D-PREPOST1 (E0144): `result` names the return value inside a
                 // `@Post` condition; at function entry (a `@Pre` condition)

@@ -1022,6 +1022,32 @@ evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
 `?` / `??` propagate or unwrap them in pure comptime expressions
 (`examples/features/comptime/comptime_parse.jet`).
 
+### `Cursor` — consuming text scanner (D-SHIFT1)
+
+`Cursor.over(s)` wraps a string with a position; each read consumes a prefix
+and advances. `take_pattern` reuses the `if x == "…{hole:Type}…"` pattern
+grammar (D-PARSESTR1) in consume mode: it matches a *prefix* of the remaining
+text and returns the typed holes. A miss is an ordinary error value.
+
+```jet
+fn main() {
+    c :: Cursor.over("  inc-4411 sev 3: disk full\n")
+    c.skip_ws()
+    m :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("bad line")
+    reason :: c.take_until("\n") ?? panic("no newline")
+    print("{m.id} {m.sev} {reason}")        // 4411 3 disk full
+}
+```
+
+| API | Returns | What it does |
+|-----|---------|--------------|
+| `Cursor.over(s)` | `Cursor` | Wrap a `String` in a consuming scanner |
+| `c.take_pattern("…{h:T}…")` | `(holes…) ? String` | Match + consume a prefix; literal pattern only |
+| `c.take_until(delim)` | `String ? String` | Text up to (not including) `delim`; error if absent |
+| `c.skip_ws()` | — | Skip leading whitespace |
+
+`examples/features/parsing/text-cursor.jet` is the golden example.
+
 ---
 
 ## Binary data (`U8`)
@@ -1048,6 +1074,36 @@ b: U8 :: 255
 | `b.to_int()` | `Int` | U8 → Int |
 
 Use `fs.read_bytes` / `fs.write` when you need raw file bytes.
+
+### `Reader` — consuming byte scanner (D-SHIFT1)
+
+`Reader.over(bytes)` wraps a `[U8]` buffer with a position; every read
+advances and is fallible — a bounds miss is an ordinary error value, never a
+panic or silent truncation. This is the "shift" kernel of linear wire-format
+parsing, without a dedicated operator.
+
+```jet
+fn main() {
+    packet: [U8] :: [0x2a, 0x00, 0x00, 0x00, 0x03, 0x00]
+    r :: Reader.over(packet)
+    magic :: r.read_u32_le() ?? panic("short")   // 42
+    count :: r.read_u16_le() ?? panic("short")   // 3
+    print("{magic} {count} {r.remaining()} {r.at_end()}")
+}
+```
+
+| API | Returns | What it does |
+|-----|---------|--------------|
+| `Reader.over(bs)` | `Reader` | Wrap a `[U8]` in a consuming scanner |
+| `r.read_u8()` | `U8 ? String` | One byte |
+| `r.read_u16_le()` / `_be()` | `U16 ? String` | Two bytes, little/big-endian |
+| `r.read_u32_le()` / `_be()` | `U32 ? String` | Four bytes |
+| `r.read_u64_le()` / `_be()` | `U64 ? String` | Eight bytes |
+| `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n: Int`; sized ints widen with `.to_int()`) |
+| `r.remaining()` | `Int` | Bytes left |
+| `r.at_end()` | `Bool` | Position at buffer end |
+
+`examples/features/parsing/binary-reader.jet` is the golden example.
 
 ---
 

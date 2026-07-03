@@ -27,6 +27,8 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
     match (want, got) {
         (Type::Float, Type::Int) => "write the number with a decimal part, like `2.0`".to_string(),
         (Type::Int, Type::Float) => "drop the decimal part, like `2`".to_string(),
+        // S42: sized ints convert by named method, never implicitly.
+        (Type::Int, Type::IntN { .. }) => "widen it explicitly with `.to_int()`".to_string(),
         (Type::String, _) => "put the value in text with interpolation: \"{x}\"".to_string(),
         _ => format!("use {} here", want.show()),
     }

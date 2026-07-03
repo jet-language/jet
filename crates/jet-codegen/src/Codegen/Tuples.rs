@@ -103,7 +103,9 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. } => {}
+        | Expr::ComptimeSplice { .. }
+        // D-SHIFT1 (c7shift): a leaf literal, no nested tuple shapes.
+        | Expr::StrMatchLit(_, _) => {}
         Expr::Call(c) => {
             for a in &c.args {
                 collect_tuple_shapes_from_expr(&a.expr, out);

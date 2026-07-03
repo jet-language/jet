@@ -256,6 +256,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
 pub(crate) use crate::Syntax::alloc_handle_rust_type;
 pub(crate) use crate::Syntax::args_handle_rust_type;
 pub(crate) use crate::Syntax::reflect_handle_rust_type;
+pub(crate) use crate::Syntax::binary_text_handle_rust_type;
 
 impl Cx {
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
@@ -517,6 +518,18 @@ impl Cx {
                     "{}{}",
                     self.root_prefix,
                     reflect_handle_rust_type(name).unwrap()
+                )
+            }
+            // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — plausible
+            // user type names, same collision guard as `Value`/`Field` above.
+            Type::Named(name)
+                if binary_text_handle_rust_type(name).is_some()
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    binary_text_handle_rust_type(name).unwrap()
                 )
             }
             // D-LAYOUT1 / D-LAYOUT-GATES1: `layout` runtime types are top-level

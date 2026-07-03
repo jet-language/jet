@@ -2419,6 +2419,14 @@ pub struct Lambda {
 pub enum Expr {
     /// String literal, possibly with interpolation parts.
     Str(Vec<StrPart>, Span),
+    /// D-SHIFT1 (c7shift): a pattern-literal call argument — the sole legal
+    /// shape of `cursor.take_pattern("…")`'s argument. Same source syntax as
+    /// `Str` (a string literal with `{hole}`/`{hole:Type}` interpolation
+    /// holes) but parsed via the D-PARSESTR1 pattern engine (`StrMatchPart`)
+    /// instead of ordinary `Expr::Str`, because a typed hole `{id:Int}` is
+    /// not a legal interpolation value expression. Legal ONLY as a
+    /// `take_pattern` call argument; sema rejects it anywhere else.
+    StrMatchLit(Vec<StrMatchPart>, Span),
     /// Integer literal. The third field is the D-SG9 elaborated fixed width
     /// `(signed, bits)`, filled by sema when the literal sits in a sized-integer
     /// context; `None` means the default `Int` (i64). Codegen reads it to pick
@@ -2664,6 +2672,7 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Str(_, s)
+            | Expr::StrMatchLit(_, s)
             | Expr::Int(_, s, _)
             | Expr::Float(_, s, _)
             | Expr::Bool(_, s)

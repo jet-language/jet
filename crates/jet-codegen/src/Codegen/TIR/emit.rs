@@ -2412,6 +2412,74 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_path_write_atomic(&({}), &({}))", root, recv, a(0))
                 }
                 THandleOp::PathWalk => format!("{}jet_path_walk(&({}))", root, recv),
+                // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor`. Every read is
+                // fallible (`Result<T, String>`) — a bounds/match miss is an ordinary
+                // `Err`, never a panic (I1/L2).
+                THandleOp::ReaderOver => format!("{}jet_reader_over(&({}))", root, recv),
+                THandleOp::ReaderReadU8 => format!("{}jet_reader_read_u8(&mut ({}))", root, recv),
+                THandleOp::ReaderReadU16Le => {
+                    format!("{}jet_reader_read_u16_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadU16Be => {
+                    format!("{}jet_reader_read_u16_be(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadU32Le => {
+                    format!("{}jet_reader_read_u32_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadU32Be => {
+                    format!("{}jet_reader_read_u32_be(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadU64Le => {
+                    format!("{}jet_reader_read_u64_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadU64Be => {
+                    format!("{}jet_reader_read_u64_be(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderTake => {
+                    format!("{}jet_reader_take(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::ReaderRemaining => format!("{}jet_reader_remaining(&({}))", root, recv),
+                THandleOp::ReaderAtEnd => format!("{}jet_reader_at_end(&({}))", root, recv),
+                THandleOp::CursorOver => format!("{}jet_cursor_over(&({}))", root, recv),
+                THandleOp::CursorTakeUntil => {
+                    format!("{}jet_cursor_take_until(&mut ({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::CursorSkipWs => format!("{}jet_cursor_skip_ws(&mut ({}))", root, recv),
+                // D-SHIFT1: `cursor.take_pattern("…")` — inline scan (I8: the
+                // D-PARSESTR1 engine in consume mode, `str_match_scan_closure_ex`),
+                // built entirely here since it needs `recv`'s already-emitted
+                // Rust text (unlike the other `THandleOp` arms, which only
+                // format-string it — this one embeds it in a bigger block).
+                THandleOp::CursorTakePattern { parts, canonical } => {
+                    let (closure, holes) =
+                        str_match_scan_closure_ex(parts, cx, "__jet_tail", false);
+                    let mut bind_vars: Vec<String> = holes
+                        .iter()
+                        .map(|(n, _)| format!("__jet_sm_{}", mangle(n)))
+                        .collect();
+                    bind_vars.push("__jet_consumed".to_string());
+                    let bind_pat = tuple_join(&bind_vars);
+                    let ok_val = if canonical.is_empty() {
+                        "()".to_string()
+                    } else {
+                        let struct_name = crate::Codegen::Tuples::tuple_struct_name(canonical);
+                        let field_inits: Vec<String> = canonical
+                            .iter()
+                            .zip(holes.iter())
+                            .map(|((n, _), (hn, _))| {
+                                format!("{}: __jet_sm_{}", mangle(n), mangle(hn))
+                            })
+                            .collect();
+                        format!("{} {{ {} }}", struct_name, field_inits.join(", "))
+                    };
+                    format!(
+                        "{{ let __jet_cur = &mut ({recv}); let __jet_tail: &str = &__jet_cur.buf[__jet_cur.pos..]; match {closure} {{ Some(({bind_pat})) => {{ __jet_cur.pos += __jet_consumed; Ok({ok_val}) }}, None => Err(format!(\"pattern did not match at cursor position {{}}\", __jet_cur.pos)) }} }}",
+                        recv = recv,
+                        closure = closure,
+                        bind_pat = bind_pat,
+                        ok_val = ok_val,
+                    )
+                }
                 // D-DBDRIVER1: `DbConnection` instance methods. `query`/`query_one`/
                 // `execute` cross the FFI bridge boundary as plain wire text (params
                 // encoded, rows/count/error decoded) — see `Source/Prelude/Db.rs` and

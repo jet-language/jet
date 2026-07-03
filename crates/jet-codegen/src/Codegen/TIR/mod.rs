@@ -1986,6 +1986,45 @@ pub enum THandleOp {
     DbValueText,
     DbValueBool,
     DbValueIsNull,
+    /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor →
+    /// `{root}jet_reader_over(&(recv))` → `JetReader`. `recv` is the `[U8]`
+    /// argument (same "arg becomes the recv slot" shape as `PathFrom`).
+    ReaderOver,
+    /// D-SHIFT1: `reader.read_u8()` → `{root}jet_reader_read_u8(&mut (recv))`
+    /// → `Result<U8, String>`. Bounds miss is an ordinary `Err`, never a panic.
+    ReaderReadU8,
+    ReaderReadU16Le,
+    ReaderReadU16Be,
+    ReaderReadU32Le,
+    ReaderReadU32Be,
+    ReaderReadU64Le,
+    ReaderReadU64Be,
+    /// D-SHIFT1: `reader.take(n)` → `{root}jet_reader_take(&mut (recv), (a0))`
+    /// → `Result<Vec<u8>, String>` (owned copy — see CoreLib.rs comment on
+    /// why `take` copies rather than borrowing a `View<T>`).
+    ReaderTake,
+    /// D-SHIFT1: `reader.remaining()` → `{root}jet_reader_remaining(&(recv))` → `Int`.
+    ReaderRemaining,
+    /// D-SHIFT1: `reader.at_end()` → `{root}jet_reader_at_end(&(recv))` → `Bool`.
+    ReaderAtEnd,
+    /// D-SHIFT1: `Cursor.over(s)` constructor →
+    /// `{root}jet_cursor_over(&(recv))` → `JetCursor`.
+    CursorOver,
+    /// D-SHIFT1: `cursor.take_until(delim)` →
+    /// `{root}jet_cursor_take_until(&mut (recv), &(a0))` → `Result<String, String>`.
+    CursorTakeUntil,
+    /// D-SHIFT1: `cursor.skip_ws()` → `{root}jet_cursor_skip_ws(&mut (recv))` → `()`.
+    CursorSkipWs,
+    /// D-SHIFT1: `cursor.take_pattern("…")` — consume-mode reuse of the
+    /// D-PARSESTR1 scan engine (`str_match_scan_closure_ex`, I8: one matcher,
+    /// not two). `parts` is the pattern literal's already-parsed holes;
+    /// `canonical` is the same `(name, type)` list sema put in the call's
+    /// `resolved_ret` `Type::Tuple` (so `collect_tuple_shapes_from_expr`
+    /// already registered the `JetTup_<hash>` struct this op constructs).
+    CursorTakePattern {
+        parts: Vec<crate::AST::StrMatchPart>,
+        canonical: Vec<(String, Type)>,
+    },
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so

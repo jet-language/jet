@@ -1521,6 +1521,16 @@ pub const METHOD_DISTINCT_RAW: &str = "raw";
 /// it, I8). See `docs/spec/stdlib-api-laws.md` and `View<T>` in CoreLib.
 pub const METHOD_VIEW: &str = "view";
 
+/// D-SHIFT1 (ratified 2026-07-01, c7shift): `cursor.take_pattern("…")` reuses
+/// the D-PARSESTR1 interpolation-literal-as-pattern grammar (`{hole}` /
+/// `{hole:Type}`), but a typed hole isn't a legal ordinary interpolation
+/// value expression, so the string-literal argument in THIS ONE call
+/// position is parsed as a pattern (`try_str_match_pattern`'s engine, reused
+/// not duplicated — I8) instead of an ordinary `Expr::Str`. Parsed specially
+/// the same way `.view(a..b)` (above) is: one method name, one fixed
+/// argument shape, no second call-argument grammar.
+pub const METHOD_TAKE_PATTERN: &str = "take_pattern";
+
 /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified): `@Numeric` marker
 /// enables same-type arithmetic on a distinct type. Written `@Numeric` on
 /// the same line before the distinct-type name (contract-plane prefix,
@@ -2124,6 +2134,10 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-TEXTUNICODE1: std-only Unicode scalar helpers. Grapheme segmentation stays
     // future work because it needs a Unicode data table/engine.
     "core.text.unicode",
+    // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — the constructors are
+    // bare (no import needed); the modules exist for discoverability/docs.
+    "core.binary",
+    "core.text",
     // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
     "core.uuid",
     // D-CORENS1: ring packages now spelled `core.*` (canonical user-facing name).
@@ -2268,6 +2282,18 @@ pub fn reflect_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "Value" => Some("JetReflectValue"),
         "Field" => Some("JetReflectField"),
+        _ => None,
+    }
+}
+
+/// D-SHIFT1 (c7shift): `binary.Reader`/`text.Cursor` handle types are
+/// top-level prelude structs, same shape as `reflect_handle_rust_type`
+/// above — including the caller's `!type_names.contains(name)` collision
+/// guard, since "Reader"/"Cursor" are plausible user type names.
+pub fn binary_text_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "Reader" => Some("JetReader"),
+        "Cursor" => Some("JetCursor"),
         _ => None,
     }
 }

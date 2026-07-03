@@ -2861,6 +2861,18 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
+                    // D-SHIFT1 (c7shift): `Reader.over(bytes)` / `Cursor.over(s)` —
+                    // same static-constructor admission shape as `Path.from`.
+                    ("Reader", "over", 1) if !cx.type_names.contains("Reader") => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
+                    ("Cursor", "over", 1) if !cx.type_names.contains("Cursor") => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
                     // D-HOLE1: `Option.lift2(f, a, b)` — static combinator, not a
                     // user type. `f` is a plain in-subset lambda arg (no closure-arg
                     // gate needed here — `expr_in_subset`'s `Expr::Lambda` arm already
@@ -3074,6 +3086,17 @@ pub(crate) fn method_call_in_subset(
                 && args
                     .iter()
                     .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+        }
+        // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — not in
+        // `handle_method_op` (its `THandleOp` carries the pattern parts, so
+        // it's built at lowering, not from a `(handle, method, nargs)` key).
+        // The sole argument is a parser-committed `Expr::StrMatchLit` leaf.
+        if handle == "Cursor"
+            && method == Syntax::METHOD_TAKE_PATTERN
+            && args.len() == 1
+            && matches!(args[0].expr, Expr::StrMatchLit(_, _))
+        {
+            return expr_in_subset(receiver, cx, locals);
         }
     }
     // D-LAYOUT1 / D-LAYOUT-GATES1: a method on `LayoutHandle`/`Constraint`
@@ -4154,6 +4177,21 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("DbValue", "text", 0) => THandleOp::DbValueText,
         ("DbValue", "bool", 0) => THandleOp::DbValueBool,
         ("DbValue", "is_null", 0) => THandleOp::DbValueIsNull,
+        // D-SHIFT1 (c7shift): `Reader` instance methods. `take_pattern` isn't
+        // here — Cursor's argument-dependent method, resolved at its call site.
+        ("Reader", "read_u8", 0) => THandleOp::ReaderReadU8,
+        ("Reader", "read_u16_le", 0) => THandleOp::ReaderReadU16Le,
+        ("Reader", "read_u16_be", 0) => THandleOp::ReaderReadU16Be,
+        ("Reader", "read_u32_le", 0) => THandleOp::ReaderReadU32Le,
+        ("Reader", "read_u32_be", 0) => THandleOp::ReaderReadU32Be,
+        ("Reader", "read_u64_le", 0) => THandleOp::ReaderReadU64Le,
+        ("Reader", "read_u64_be", 0) => THandleOp::ReaderReadU64Be,
+        ("Reader", "take", 1) => THandleOp::ReaderTake,
+        ("Reader", "remaining", 0) => THandleOp::ReaderRemaining,
+        ("Reader", "at_end", 0) => THandleOp::ReaderAtEnd,
+        // D-SHIFT1: `Cursor` instance methods (excluding `take_pattern`).
+        ("Cursor", "take_until", 1) => THandleOp::CursorTakeUntil,
+        ("Cursor", "skip_ws", 0) => THandleOp::CursorSkipWs,
         // D-SIMD2 / D-LINALG1 math methods are handled by a dedicated gate + lowering
         // block (user-type-aware via `cx.type_names`), NOT here — `handle_method_op`
         // has no `cx`, and a user struct may share a math name.
@@ -4208,7 +4246,13 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             } else {
                 None
             }
-        });
+        })
+        // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — `take_pattern`
+        // is excluded (like `Gc.new<T>`/`Arena.alloc` above), resolved
+        // directly at its call site since its return type depends on the
+        // pattern literal's holes.
+        .or_else(|| crate::Sema::binary_reader_method_return(handle, method, nargs))
+        .or_else(|| crate::Sema::text_cursor_method_return(handle, method, nargs));
     match ret {
         Some(Some(t)) => t,
         _ => unit_type(),

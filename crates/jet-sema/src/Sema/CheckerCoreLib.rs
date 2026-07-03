@@ -2169,6 +2169,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
         | "Sql" | "Html"
+        // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
+        // fallible, `?`-composed cursors over `[U8]`/`String`.
+        | "Reader" | "Cursor"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -3058,6 +3061,62 @@ pub fn path_method_return(
         "to_string" => Some(Some(Type::String)),
         "write_atomic" => Some(Some(result_ty(unit_ty(), Type::String))),
         "walk" => Some(Some(Type::List(Box::new(path())))),
+        _ => None,
+    }
+}
+
+/// D-SHIFT1 (c7shift): a Jet-sized unsigned int type (`U8`/`U16`/`U32`/`U64`),
+/// the return type of `Reader`'s width-specific reads.
+fn uintn_ty(bits: u8) -> Type {
+    Type::IntN {
+        signed: false,
+        bits,
+    }
+}
+
+/// D-SHIFT1 (c7shift): method calls on `binary.Reader` (`Reader.over(bytes)`
+/// static constructor is handled in `CheckerInfer/calls.rs`, mirroring
+/// `Path.from`). Every read is fallible — a bounds miss is an ordinary `?`
+/// error value (`Result<T, String>`, `path_method_return`'s exact error-type
+/// convention above), never a panic or silent truncation (I1/L2).
+pub fn binary_reader_method_return(
+    type_name: &str,
+    method: &str,
+    n_args: usize,
+) -> Option<Option<Type>> {
+    if type_name != "Reader" {
+        return None;
+    }
+    let bytes = || Type::List(Box::new(u8_ty()));
+    match (method, n_args) {
+        ("read_u8", 0) => Some(Some(result_ty(uintn_ty(8), Type::String))),
+        ("read_u16_le" | "read_u16_be", 0) => Some(Some(result_ty(uintn_ty(16), Type::String))),
+        ("read_u32_le" | "read_u32_be", 0) => Some(Some(result_ty(uintn_ty(32), Type::String))),
+        ("read_u64_le" | "read_u64_be", 0) => Some(Some(result_ty(uintn_ty(64), Type::String))),
+        ("take", 1) => Some(Some(result_ty(bytes(), Type::String))),
+        ("remaining", 0) => Some(Some(Type::Int)),
+        ("at_end", 0) => Some(Some(Type::Bool)),
+        _ => None,
+    }
+}
+
+/// D-SHIFT1 (c7shift): method calls on `text.Cursor` (`Cursor.over(s)` static
+/// constructor is handled in `CheckerInfer/calls.rs`). `take_pattern` is NOT
+/// listed here — it needs its pattern-literal argument's hole types to
+/// compute a return type, so it's dispatched directly at the call site
+/// (`CheckerInfer/calls.rs`), same reason `Gc.new<T>`/`Arena.alloc` are
+/// resolved outside their generic method-return tables.
+pub fn text_cursor_method_return(
+    type_name: &str,
+    method: &str,
+    n_args: usize,
+) -> Option<Option<Type>> {
+    if type_name != "Cursor" {
+        return None;
+    }
+    match (method, n_args) {
+        ("take_until", 1) => Some(Some(result_ty(Type::String, Type::String))),
+        ("skip_ws", 0) => Some(Some(unit_ty())),
         _ => None,
     }
 }
@@ -4154,6 +4213,11 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.args" => &["spec"],
         // D-ANY-JAI1 (c7jaiany §6): the runtime reflection floor.
         "core.reflect" => &["of"],
+        // D-SHIFT1 (c7shift): `Reader.over(bytes)`/`Cursor.over(s)` are bare
+        // static constructors (no import needed, D-PATHFS1's `Path.from`
+        // shape) — these module entries exist for discoverability/docs only.
+        "core.binary" => &["Reader"],
+        "core.text" => &["Cursor"],
         // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
         "core.term" => &["read_key"],
         "core" => &[],

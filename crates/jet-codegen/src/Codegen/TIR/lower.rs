@@ -978,6 +978,15 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter"
                     || n == "TcpStream" || n == "HttpRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
+            )
+            // D-SHIFT1 (c7shift): `Reader`/`Cursor` bindings are usually
+            // written without an annotation (`r :: Reader.over(bytes)`), so
+            // test the resolved type; every read advances `pos` (`&mut self`).
+            // User-type-wins guard as everywhere else for these two names.
+            || matches!(
+                &ty,
+                Type::Named(n) if (n == "Reader" || n == "Cursor")
+                    && !cx.type_names.contains(n.as_str())
             );
             let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
                 "let mut"
@@ -1939,7 +1948,8 @@ fn lower_struct_pattern_bindings(
 /// Holes are non-greedy and anchored: since E0147 already rejected adjacent
 /// holes at parse time, the next literal anchor (or end-of-string) always
 /// exists between/after every hole, so the scan never backtracks — each step
-/// is `starts_with`/`find` from the current cursor.
+/// is `starts_with`/`find` from the current cursor. Thin wrapper over
+/// `str_match_scan_closure_ex` in full-match mode (the `if == {}` shape).
 fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
     let Pattern::StrMatch { parts, .. } = pattern else {
         return (
@@ -1947,9 +1957,33 @@ fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, T
             Vec::new(),
         );
     };
+    str_match_scan_closure_ex(parts, cx, "_jet_switch_subject.as_str()", true)
+}
+
+/// D-PARSESTR1 (extended for D-SHIFT1's `Cursor.take_pattern` consume mode —
+/// I8, one matcher engine, not a second one): the same scan engine as above,
+/// generalized over WHERE the subject text comes from (`subject_src`, a raw
+/// Rust expression) and whether the WHOLE subject must be consumed
+/// (`require_full_match`). The `if == {}` shape uses `_jet_switch_subject`
+/// and requires full consumption; `take_pattern` scans a local `__jet_tail`
+/// slice and only needs a PREFIX match — the caller advances a cursor by the
+/// consumed byte count, which (when `require_full_match` is false) is
+/// appended as one extra trailing `usize` in the returned Rust tuple (not
+/// reflected in the returned `holes` list — callers reconstruct the same
+/// trailing slot themselves, `lower_cursor_take_pattern` below does exactly
+/// that).
+pub(crate) fn str_match_scan_closure_ex(
+    parts: &[crate::AST::StrMatchPart],
+    cx: &Cx,
+    subject_src: &str,
+    require_full_match: bool,
+) -> (String, Vec<(String, Type)>) {
     let mut holes: Vec<(String, Type)> = Vec::new();
     let mut body = String::new();
-    body.push_str("let mut __jet_sm: &str = _jet_switch_subject.as_str();\n");
+    body.push_str(&format!("let mut __jet_sm: &str = {};\n", subject_src));
+    if !require_full_match {
+        body.push_str("let __jet_sm_orig_len: usize = __jet_sm.len();\n");
+    }
     let mut i = 0;
     while i < parts.len() {
         match &parts[i] {
@@ -2025,20 +2059,29 @@ fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, T
             }
         }
     }
-    // A pattern must consume the WHOLE subject, not just a prefix. A trailing
-    // hole (no literal after it) already takes the rest of the string by
-    // construction; a trailing literal only checked a prefix, so require
-    // nothing is left over.
+    // A full-match pattern must consume the WHOLE subject, not just a
+    // prefix. A trailing hole (no literal after it) already takes the rest
+    // of the string by construction; a trailing literal only checked a
+    // prefix, so require nothing is left over. `take_pattern`'s consume mode
+    // (`!require_full_match`) skips this — the caller only wanted a PREFIX
+    // matched, and reads the leftover tail via the consumed-length count.
     let ends_in_lit = matches!(parts.last(), Some(crate::AST::StrMatchPart::Lit(_)));
-    if ends_in_lit {
+    if require_full_match && ends_in_lit {
         body.push_str("if !__jet_sm.is_empty() { return None; }\n");
     }
-    let tuple_vars: Vec<String> = holes
+    let mut tuple_vars: Vec<String> = holes
         .iter()
         .map(|(n, _)| format!("__jet_sm_{}", mangle(n)))
         .collect();
+    let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
+    if !require_full_match {
+        body.push_str(
+            "let __jet_consumed: usize = __jet_sm_orig_len - __jet_sm.len();\n",
+        );
+        tuple_vars.push("__jet_consumed".to_string());
+        tuple_tys.push("usize".to_string());
+    }
     body.push_str(&format!("Some(({}))\n", tuple_join(&tuple_vars)));
-    let tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     let closure = format!(
         "(|| -> Option<({})> {{\n{}}})()",
         tuple_join(&tuple_tys),
@@ -2049,11 +2092,62 @@ fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, T
 
 /// A single-element Rust tuple needs a trailing comma (`(x,)`); zero or 2+
 /// elements render as the ordinary comma-joined list.
-fn tuple_join(items: &[String]) -> String {
+pub(crate) fn tuple_join(items: &[String]) -> String {
     match items.len() {
         0 => String::new(),
         1 => format!("{},", items[0]),
         _ => items.join(", "),
+    }
+}
+
+/// D-SHIFT1 (c7shift): lower `cursor.take_pattern("…")`. Builds the
+/// `(name, type)` canonical hole list the SAME way sema did when it set this
+/// call's `resolved_ret` (untyped hole binds `String`), so the
+/// `JetTup_<hash>` struct `collect_tuple_shapes_from_expr` already
+/// registered from `resolved_ret` matches the one this op constructs
+/// (`tuple_struct_name` is a pure hash of the (name, type) list — same
+/// input, same name, both computed independently rather than threaded
+/// through, matching how `handle_method_return_ty` independently re-derives
+/// sema's tables elsewhere in this file per the project's I3 design).
+fn lower_cursor_take_pattern(
+    receiver: &Expr,
+    parts: &[crate::AST::StrMatchPart],
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let recv_t = lower_expr(receiver, cx, env);
+    let canonical: Vec<(String, Type)> = parts
+        .iter()
+        .filter_map(|p| match p {
+            crate::AST::StrMatchPart::Hole { name, ty, .. } => {
+                Some((name.clone(), ty.clone().unwrap_or(Type::String)))
+            }
+            crate::AST::StrMatchPart::Lit(_) => None,
+        })
+        .collect();
+    let ok_ty = if canonical.is_empty() {
+        unit_type()
+    } else {
+        Type::Tuple(
+            canonical
+                .iter()
+                .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+                .collect(),
+        )
+    };
+    TExpr {
+        ty: Type::Result {
+            ok: Box::new(ok_ty),
+            err: Box::new(Type::String),
+        },
+        kind: TExprKind::HandleMethod {
+            recv: Box::new(recv_t),
+            op: THandleOp::CursorTakePattern {
+                parts: parts.to_vec(),
+                canonical,
+            },
+            args: vec![],
+        },
     }
 }
 
@@ -5549,6 +5643,21 @@ pub(crate) fn lower_method_call(
             }
         }
     }
+    // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — argument-dependent
+    // (the return shape comes from the pattern's holes), same reason
+    // `Gc.new<T>` is resolved directly here instead of through a generic
+    // method-return table. The parser already committed to `Expr::StrMatchLit`
+    // for this argument (sema rejects any other shape), so it's always
+    // present when this method name/receiver-type pair is reached.
+    if let Some(handle) = recv_type {
+        if handle == "Cursor" && method == "take_pattern" {
+            if let Some(arg) = args.first() {
+                if let Expr::StrMatchLit(parts, _) = &arg.expr {
+                    return lower_cursor_take_pattern(receiver, parts, cx, env);
+                }
+            }
+        }
+    }
     // D-LAYOUT1 / D-LAYOUT-GATES1: a method on `LayoutHandle`/`Constraint`.
     // Every Jet method name IS the `jet_layout` Rust method name (pure
     // passthrough, no reduce-marker-style special casing needed).
@@ -5619,6 +5728,39 @@ pub(crate) fn lower_method_call(
                 kind: TExprKind::HandleMethod {
                     recv: Box::new(str_arg),
                     op: THandleOp::PathFrom,
+                    args: vec![],
+                },
+            };
+        }
+        // D-SHIFT1 (c7shift): `Reader.over(bytes)` → `jet_reader_over(&(bytes_arg))`.
+        // Same "arg becomes the recv slot" shape as `Path.from` above.
+        if type_name == "Reader"
+            && method == "over"
+            && args.len() == 1
+            && !cx.type_names.contains("Reader")
+        {
+            let bytes_arg = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::Named("Reader".to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(bytes_arg),
+                    op: THandleOp::ReaderOver,
+                    args: vec![],
+                },
+            };
+        }
+        // D-SHIFT1: `Cursor.over(s)` → `jet_cursor_over(&(s_arg))`.
+        if type_name == "Cursor"
+            && method == "over"
+            && args.len() == 1
+            && !cx.type_names.contains("Cursor")
+        {
+            let s_arg = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::Named("Cursor".to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(s_arg),
+                    op: THandleOp::CursorOver,
                     args: vec![],
                 },
             };

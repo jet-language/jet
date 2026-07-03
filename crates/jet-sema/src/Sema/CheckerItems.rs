@@ -1039,6 +1039,37 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-PARSESTR1 (shared with D-SHIFT1's `take_pattern` — I8, one hole-type
+    /// rule, not two): the bound type of a str-match pattern hole. `None`
+    /// binds `String`; a typed hole must be `Int`/`Float`/`Bool`/`String` —
+    /// the only four types that can read out of matched text — else E0305.
+    pub(crate) fn str_match_hole_type(
+        &mut self,
+        name: &str,
+        ty: &Option<Type>,
+        hole_span: Span,
+    ) -> Type {
+        match ty {
+            None => Type::String,
+            Some(t @ (Type::Int | Type::Float | Type::Bool | Type::String)) => t.clone(),
+            Some(other) => {
+                self.diags.push(Diagnostic::error(
+                    "E0305",
+                    format!(
+                        "`{{{}:{}}}` can't read text as {} — only `Int`, `Float`, `Bool`, or `String` can come out of a pattern hole",
+                        name,
+                        other.show(),
+                        other.show()
+                    ),
+                    "a typed hole reads the matched text into that type, and only these four types know how to read text".to_string(),
+                    "use `Int`, `Float`, `Bool`, or `String`, or drop the type to bind `String`".to_string(),
+                    Some(hole_span),
+                ));
+                Type::String
+            }
+        }
+    }
+
     pub(crate) fn validate_pattern(
         &mut self,
         subject_ty: &Type,
@@ -1477,27 +1508,7 @@ impl<'a> Checker<'a> {
                     let StrMatchPart::Hole { name, ty, span: hole_span } = part else {
                         continue;
                     };
-                    let bound_ty = match ty {
-                        None => Type::String,
-                        Some(t @ (Type::Int | Type::Float | Type::Bool | Type::String)) => {
-                            t.clone()
-                        }
-                        Some(other) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0305",
-                                format!(
-                                    "`{{{}:{}}}` can't read text as {} — only `Int`, `Float`, `Bool`, or `String` can come out of a pattern hole",
-                                    name,
-                                    other.show(),
-                                    other.show()
-                                ),
-                                "a typed hole reads the matched text into that type, and only these four types know how to read text".to_string(),
-                                "use `Int`, `Float`, `Bool`, or `String`, or drop the type to bind `String`".to_string(),
-                                Some(*hole_span),
-                            ));
-                            Type::String
-                        }
-                    };
+                    let bound_ty = self.str_match_hole_type(name, ty, *hole_span);
                     result.insert(name.clone(), bound_ty);
                 }
                 result

@@ -1041,7 +1041,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::ReduceMarker(_, _)
         | AST::Expr::Todo { .. }
         | AST::Expr::UnitLit { .. }
-        | AST::Expr::ComptimeSplice { .. } => {}
+        | AST::Expr::ComptimeSplice { .. }
+        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
+        | AST::Expr::StrMatchLit(_, _) => {}
         AST::Expr::Paren(inner, _) => collect_expr(inner, mp, ctx),
     }
 }

@@ -174,7 +174,9 @@ impl<'a> TaintCtx<'a> {
             | Expr::Todo { .. }
             | Expr::Lambda(_)
             | Expr::UnitLit { .. }
-            | Expr::ComptimeSplice { .. } => false,
+            | Expr::ComptimeSplice { .. }
+            // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
+            | Expr::StrMatchLit(_, _) => false,
             Expr::Paren(inner, _) => self.is_tainted(inner),
             Expr::Spread(inner, _) => self.is_tainted(inner),
         }
@@ -309,7 +311,9 @@ impl<'a> TaintCtx<'a> {
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
             | Expr::UnitLit { .. }
-            | Expr::ComptimeSplice { .. } => {}
+            | Expr::ComptimeSplice { .. }
+            // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
+            | Expr::StrMatchLit(_, _) => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
             Expr::Spread(inner, _) => self.check_expr(inner),
         }

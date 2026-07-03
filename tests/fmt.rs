@@ -398,6 +398,25 @@ fn main() {
     );
 }
 
+#[test]
+fn fmt_preserves_take_pattern_literal() {
+    // D-SHIFT1 (c7shift): `cursor.take_pattern("…{hole:Type}…")` — the
+    // pattern-literal argument (typed holes, D-PARSESTR1 grammar) must
+    // round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash).
+    let src = r#"fn main() {
+    c :: Cursor.over("inc-4411 sev 3: disk full")
+    c.skip_ws()
+    m :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("no match")
+    rest :: c.take_pattern("disk ") ?? panic("no match")
+    print("{m.id} {m.sev}")
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept take_pattern literals");
+    assert_eq!(out, src, "take_pattern literal formatting must be stable");
+    let twice = jet::format_source(&out).expect("take_pattern output should re-fmt");
+    assert_eq!(out, twice, "take_pattern formatting must be idempotent");
+}
+
 // --- D-FMT1 (revises S44): author-intent single-line brace bodies ---
 //
 // A brace body the author wrote on one line stays one line when it holds one

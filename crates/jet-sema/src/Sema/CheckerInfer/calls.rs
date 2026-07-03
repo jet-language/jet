@@ -850,6 +850,38 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-SHIFT1 (c7shift): infer + check one `Reader`/`Cursor` core-method
+    /// argument against its fixed parameter type, with the same E0112
+    /// fallback the general call path uses — `check_type_assignable` only
+    /// reports its special shapes, so a plain mismatch (String where `[U8]`
+    /// is wanted, `U16` where `Int` is wanted) must not pass silently.
+    fn check_shift_arg(&mut self, label: &str, want: &Type, arg: &mut crate::AST::CallArg) {
+        let saved = self.expected_type.replace(want.clone());
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved;
+        let Some(got) = got else { return };
+        let want = self.resolve_type(want.clone());
+        let got = self.resolve_type(got);
+        let reported = self.check_type_assignable(&want, &got, arg.expr.span());
+        // D-FIXARR1: [T#N] widens to [T] at a call site.
+        let fixed_widens = matches!((&want, &got),
+            (Type::List(pe), Type::FixedList { elem: ae, .. }) if pe == ae);
+        if !reported && got != want && !fixed_widens {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "`{}` wants {}, but this is {}",
+                    label,
+                    want.show(),
+                    got.show()
+                ),
+                "every argument must match its parameter's type".to_string(),
+                type_fix_hint(&want, &got),
+                Some(arg.expr.span()),
+            ));
+        }
+    }
+
     pub(crate) fn infer_method_call(
         &mut self,
         receiver: &mut Box<Expr>,
@@ -1150,6 +1182,52 @@ impl<'a> Checker<'a> {
                     self.infer(&mut a.expr);
                 }
                 return Some(Type::Named("Path".to_string()));
+            }
+            // D-SHIFT1 (c7shift): `Reader.over(bytes)` — bare static
+            // constructor over `[U8]`, same shape as `Path.from` above (a
+            // reserved core type name, no import needed; a user's own
+            // `Reader` type always wins — `!self.registry.contains`).
+            // Argument checking for all `Reader`/`Cursor` positions goes
+            // through `check_shift_arg` (E0112 fallback included —
+            // `check_type_assignable` alone lets a plain mismatch through).
+            if type_name == "Reader" && method == "over" && !self.registry.contains("Reader") {
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`Reader.over` takes one `[U8]` argument, got {}", args.len()),
+                        "`Reader.over` wraps a byte list in a consuming, fallible cursor".to_string(),
+                        "write `Reader.over(some_bytes)`".to_string(),
+                        Some(span),
+                    ));
+                }
+                if let Some(arg) = args.first_mut() {
+                    let want = Type::List(Box::new(u8_ty()));
+                    self.check_shift_arg("Reader.over", &want, arg);
+                }
+                for a in args.iter_mut().skip(1) {
+                    self.infer(&mut a.expr);
+                }
+                return Some(Type::Named("Reader".to_string()));
+            }
+            // D-SHIFT1 (c7shift): `Cursor.over(s)` — bare static constructor
+            // over `String`, same shape as `Reader.over` above.
+            if type_name == "Cursor" && method == "over" && !self.registry.contains("Cursor") {
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`Cursor.over` takes one `String` argument, got {}", args.len()),
+                        "`Cursor.over` wraps a string in a consuming, fallible text cursor".to_string(),
+                        "write `Cursor.over(some_string)`".to_string(),
+                        Some(span),
+                    ));
+                }
+                if let Some(arg) = args.first_mut() {
+                    self.check_shift_arg("Cursor.over", &Type::String, arg);
+                }
+                for a in args.iter_mut().skip(1) {
+                    self.infer(&mut a.expr);
+                }
+                return Some(Type::Named("Cursor".to_string()));
             }
             // D-HOLE1: `Option.lift2(f, a, b)` — apply a two-argument function to
             // `a`/`b` only when both are present; `null` otherwise. A static
@@ -1477,6 +1555,83 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some("Path".to_string());
                     return ret;
                 }
+            }
+        }
+        // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — argument-dependent
+        // (the return shape comes from the pattern's holes), resolved
+        // directly here, same reason `Gc.new<T>`/`Arena.alloc` are above.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == "Cursor" && method == Syntax::METHOD_TAKE_PATTERN {
+                *recv_type_out = Some("Cursor".to_string());
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(method, 1, args.len(), span));
+                    return Some(result_ty(unit_ty(), Type::String));
+                }
+                let Expr::StrMatchLit(parts, lit_span) = &args[0].expr else {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`{}` needs a literal pattern string", Syntax::METHOD_TAKE_PATTERN),
+                        "the pattern is matched at compile time, so it can't be a computed `String` value"
+                            .to_string(),
+                        "write the pattern directly: `take_pattern(\"literal-{hole}-pattern\")`"
+                            .to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                    return Some(result_ty(unit_ty(), Type::String));
+                };
+                let _ = lit_span;
+                let mut holes: Vec<(String, Type)> = Vec::new();
+                for part in parts {
+                    if let crate::AST::StrMatchPart::Hole { name, ty, span: hole_span } = part {
+                        let bound_ty = self.str_match_hole_type(name, ty, *hole_span);
+                        holes.push((name.clone(), bound_ty));
+                    }
+                }
+                let ok_ty = if holes.is_empty() {
+                    unit_ty()
+                } else {
+                    Type::Tuple(
+                        holes
+                            .iter()
+                            .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+                            .collect(),
+                    )
+                };
+                let out = result_ty(ok_ty, Type::String);
+                *resolved_ret_out = Some(out.clone());
+                return Some(out);
+            }
+        }
+        // D-SHIFT1 (c7shift): `binary.Reader` instance methods (every read
+        // fallible — bounds miss is an ordinary `?` error, not a panic).
+        // `take(n)` wants an `Int` — sized ints convert explicitly per S42
+        // (`count.to_int()`), never implicitly.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if let Some(ret) = binary_reader_method_return(handle_ty, method, args.len()) {
+                for a in args.iter_mut() {
+                    if method == "take" {
+                        self.check_shift_arg("Reader.take", &Type::Int, a);
+                    } else {
+                        self.infer(&mut a.expr);
+                    }
+                }
+                *recv_type_out = Some(handle_ty.clone());
+                return ret;
+            }
+        }
+        // D-SHIFT1: `text.Cursor` instance methods (excluding `take_pattern`,
+        // handled above). `take_until(delim)` wants a `String`.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if let Some(ret) = text_cursor_method_return(handle_ty, method, args.len()) {
+                for a in args.iter_mut() {
+                    if method == "take_until" {
+                        self.check_shift_arg("Cursor.take_until", &Type::String, a);
+                    } else {
+                        self.infer(&mut a.expr);
+                    }
+                }
+                *recv_type_out = Some(handle_ty.clone());
+                return ret;
             }
         }
         // D-PENDING1=B: method calls on `Loadable<T,E>` handle.

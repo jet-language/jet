@@ -176,7 +176,9 @@ pub(crate) fn walk_expr_for_const_refs(
         }
         Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
-        Expr::Absent(_) | Expr::ReduceMarker(_, _) | Expr::Todo { .. } | Expr::ComptimeSplice { .. } => {}
+        Expr::Absent(_) | Expr::ReduceMarker(_, _) | Expr::Todo { .. } | Expr::ComptimeSplice { .. }
+        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
+        | Expr::StrMatchLit(_, _) => {}
         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken);
         }
@@ -384,7 +386,9 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. } => false,
+        | Expr::ComptimeSplice { .. }
+        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
+        | Expr::StrMatchLit(_, _) => false,
         Expr::Paren(inner, _) => expr_refs_name(inner, name),
         Expr::Spread(inner, _) => expr_refs_name(inner, name),
     }

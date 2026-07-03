@@ -489,7 +489,9 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. } => {}
+        | Expr::ComptimeSplice { .. }
+        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
+        | Expr::StrMatchLit(_, _) => {}
         Expr::Str(parts, _) => {
             for p in parts.iter_mut() {
                 if let StrPart::Interp(e, _) = p {
@@ -2192,7 +2194,9 @@ pub(crate) fn collect_core_expr(
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. } => {}
+        | Expr::ComptimeSplice { .. }
+        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
+        | Expr::StrMatchLit(_, _) => {}
         Expr::Paren(inner, _) => collect_core_expr(inner, imports, used, spans),
         Expr::Spread(inner, _) => collect_core_expr(inner, imports, used, spans),
     }

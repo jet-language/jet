@@ -437,6 +437,21 @@ bindings without an expected type — **not yet implemented** (lexer prefix-
 scan gap, no upstream gate; the no-prefix expected-type path is the common
 case and covers it); user-defined prefixes deferred to E4.
 
+**D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
+Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
+`r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
+position: `read_u8`/`read_u16_le|be`/`read_u32_le|be`/`read_u64_le|be`,
+`take(n: Int)`, `remaining()`, `at_end()`; every read advances and is
+fallible (`T ? String`) — a bounds miss is an ordinary error value.
+`Cursor.over(s)` is the text sibling: `take_until(delim)`, `skip_ws()`, and
+`take_pattern("…{hole:Type}…")`, which reuses the D-PARSESTR1 pattern grammar
+and matcher engine (I8 — one engine) in consume mode: it matches a *prefix*
+of the remaining text, advances past it, and returns the typed holes. The
+pattern must be a literal string (E0003 otherwise); this one call position is
+the only place the literal is parsed as a pattern rather than interpolation.
+`Reader`/`Cursor` are reserved core names with the user-type-wins guard: a
+user type of the same name shadows the core surface entirely.
+
 ### Errors
 
 **S7 — Propagation**: postfix `?` on a fallible call.

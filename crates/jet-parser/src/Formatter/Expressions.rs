@@ -211,6 +211,11 @@ impl<'a> Fmt<'a> {
                     self.fmt_str(parts);
                 }
             }
+            // D-SHIFT1 (c7shift): `cursor.take_pattern("…")`'s pattern-literal
+            // argument — same rendering as a `Pattern::StrMatch` (D-PARSESTR1).
+            Expr::StrMatchLit(parts, _) => {
+                self.fmt_str_match_parts(parts);
+            }
             Expr::Int(n, _, _) => self.write(&n.to_string()),
             Expr::Float(v, _, _) => self.write(&fmt_float(*v)),
             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
@@ -747,24 +752,31 @@ impl<'a> Fmt<'a> {
             // a `:Type` suffix on typed holes (which format literals never
             // have).
             Pattern::StrMatch { parts, .. } => {
-                self.write("\"");
-                for part in parts {
-                    match part {
-                        crate::AST::StrMatchPart::Lit(s) => self.write(&escape_str_lit(s)),
-                        crate::AST::StrMatchPart::Hole { name, ty, .. } => {
-                            self.write("{");
-                            self.write(name);
-                            if let Some(t) = ty {
-                                self.write(":");
-                                self.fmt_type(t);
-                            }
-                            self.write("}");
-                        }
-                    }
-                }
-                self.write("\"");
+                self.fmt_str_match_parts(parts);
             }
         }
+    }
+
+    /// D-PARSESTR1 (shared with `Expr::StrMatchLit` — D-SHIFT1's
+    /// `take_pattern` argument): render a `StrMatchPart` list the same way a
+    /// format literal renders, plus a `:Type` suffix on typed holes.
+    pub(super) fn fmt_str_match_parts(&mut self, parts: &[crate::AST::StrMatchPart]) {
+        self.write("\"");
+        for part in parts {
+            match part {
+                crate::AST::StrMatchPart::Lit(s) => self.write(&escape_str_lit(s)),
+                crate::AST::StrMatchPart::Hole { name, ty, .. } => {
+                    self.write("{");
+                    self.write(name);
+                    if let Some(t) = ty {
+                        self.write(":");
+                        self.fmt_type(t);
+                    }
+                    self.write("}");
+                }
+            }
+        }
+        self.write("\"");
     }
 
     fn fmt_call(&mut self, c: &Call) {

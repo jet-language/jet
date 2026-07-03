@@ -1,0 +1,13 @@
+// D-SHIFT1 (c7shift): `text.Cursor` — `take_pattern` reuses the D-PARSESTR1
+// interpolation-literal-as-pattern matcher (typed holes, non-greedy, anchored
+// by literal text) in CONSUME mode: it advances the cursor past the matched
+// prefix instead of requiring the whole remaining text to match, so more
+// reads can follow.
+fn main() {
+    line :: "  inc-4411 sev 3: disk full on host web-07\n"
+    c :: Cursor.over(line)
+    c.skip_ws()
+    matched :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("bad incident line")
+    reason :: c.take_until("\n") ?? panic("no newline found")
+    print("id={matched.id} sev={matched.sev} reason={reason}")
+}

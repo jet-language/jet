@@ -799,7 +799,22 @@ impl<'a> Parser<'a> {
                     } else if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
-                        if member == Syntax::METHOD_VIEW {
+                        if member == Syntax::METHOD_TAKE_PATTERN {
+                            // D-SHIFT1: `cursor.take_pattern("…")` — the sole
+                            // legal shape is one pattern-literal argument
+                            // (I8: not a second call-argument grammar, just
+                            // like `.view(a..b)` above).
+                            let pat = self.parse_take_pattern_literal()?;
+                            let pat_span = pat.span();
+                            args.push(CallArg {
+                                convention: AccessConvention::Read,
+                                expr: pat,
+                                span: pat_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            });
+                        } else if member == Syntax::METHOD_VIEW {
                             // D-DYNARRAY1: `.view(a..b)` is the ONLY legal shape —
                             // a comma arg list is not a second spelling (I8). Parse
                             // `expr .. expr` directly; the two ends become the
@@ -1686,7 +1701,21 @@ impl<'a> Parser<'a> {
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
-                        if member == Syntax::METHOD_VIEW {
+                        if member == Syntax::METHOD_TAKE_PATTERN {
+                            // D-SHIFT1: `cursor.take_pattern("…")` — mirrors the
+                            // identical carve-out in `expr_postfix` above, for
+                            // the bare-leading-ident receiver fast path.
+                            let pat = self.parse_take_pattern_literal()?;
+                            let pat_span = pat.span();
+                            args.push(CallArg {
+                                convention: AccessConvention::Read,
+                                expr: pat,
+                                span: pat_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            });
+                        } else if member == Syntax::METHOD_VIEW {
                             // D-DYNARRAY1: `.view(a..b)` — mirrors the identical
                             // carve-out in `expr_postfix` above; this is the
                             // separate fast-path `expr_primary` takes when the
@@ -2265,6 +2294,26 @@ impl<'a> Parser<'a> {
         }
 
         let span = self.bump().span;
+        let match_parts = self.build_str_match_parts(parts)?;
+        Ok(Some(Pattern::StrMatch {
+            parts: match_parts,
+            span,
+        }))
+    }
+
+    /// D-PARSESTR1 (shared, extended for D-SHIFT1's `take_pattern` consume
+    /// mode — I8, one matcher engine): turn a string token's already-lexed
+    /// `StrTokPart`s into `StrMatchPart`s — `{name}` or `{name:Type}` holes,
+    /// literal text otherwise — and check E0147 (two holes with nothing
+    /// between them to split on). Callers have already validated hole shape
+    /// (bare ident, optional `:Type`) before calling this; that check lives
+    /// at each call site because the fallback-on-mismatch behavior differs
+    /// (`==` position falls back to ordinary `Expr::Str`; `take_pattern`'s
+    /// argument has no alternate legal meaning, so it errors instead).
+    fn build_str_match_parts(
+        &mut self,
+        parts: Vec<StrTokPart>,
+    ) -> Result<Vec<StrMatchPart>, Diagnostic> {
         let mut match_parts: Vec<StrMatchPart> = Vec::new();
         for part in parts {
             match part {
@@ -2354,10 +2403,65 @@ impl<'a> Parser<'a> {
             i += 1;
         }
 
-        Ok(Some(Pattern::StrMatch {
-            parts: match_parts,
-            span,
-        }))
+        Ok(match_parts)
+    }
+
+    /// D-SHIFT1 (c7shift): parse the sole argument of `cursor.take_pattern(…)`
+    /// as a pattern literal (`Expr::StrMatchLit`), reusing the D-PARSESTR1
+    /// hole grammar/engine (`build_str_match_parts`) instead of a second
+    /// pattern parser (I8). Unlike `try_str_match_pattern` (the `==`
+    /// position), a hole-free literal IS legal here (a fixed prefix to
+    /// consume with no bindings), and a malformed hole is a hard parse error
+    /// — there's no ordinary-`Expr::Str` fallback for a `take_pattern`
+    /// argument, so silently falling back would just move the failure to a
+    /// confusing type error later.
+    fn parse_take_pattern_literal(&mut self) -> Result<Expr, Diagnostic> {
+        let TokKind::Str(parts) = self.peek().kind.clone() else {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "`{}` takes a literal pattern string, not {}",
+                    Syntax::METHOD_TAKE_PATTERN,
+                    describe(&self.peek().kind)
+                ),
+                "the pattern is matched at compile time, so it must be written directly as a string literal"
+                    .to_string(),
+                format!(
+                    "write `{}(\"literal-{{hole}}-pattern\")`",
+                    Syntax::METHOD_TAKE_PATTERN
+                ),
+                Some(self.peek().span),
+            ));
+        };
+        for part in &parts {
+            if let StrTokPart::Interp(toks) = part {
+                let bad_hole = match toks.first() {
+                    Some(Token {
+                        kind: TokKind::Ident(_),
+                        ..
+                    }) => match toks.get(1).map(|t| &t.kind) {
+                        None | Some(TokKind::Eof) => false,
+                        Some(TokKind::Colon) => toks.len() < 3,
+                        _ => true,
+                    },
+                    _ => true,
+                };
+                if bad_hole {
+                    let hole_span = toks.first().map(|t| t.span).unwrap_or(self.peek().span);
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "a `take_pattern` hole must be a bare name, optionally typed".to_string(),
+                        "each `{hole}` binds a name (`{id}`) or a typed, fallibly-parsed name (`{id:Int}`) — the same grammar an `if == {}` pattern hole uses"
+                            .to_string(),
+                        "write `{name}` or `{name:Type}`".to_string(),
+                        Some(hole_span),
+                    ));
+                }
+            }
+        }
+        let span = self.bump().span;
+        let match_parts = self.build_str_match_parts(parts)?;
+        Ok(Expr::StrMatchLit(match_parts, span))
     }
 
     fn struct_pattern_rhs(&mut self) -> Result<Pattern, Diagnostic> {
