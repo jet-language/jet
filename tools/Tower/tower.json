@@ -7629,11 +7629,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Implemented + verified; full suite green; committed. Runtime migration engine live: sema desugar → synthetic converter fns → per-block codegen steps → decode chain-walker; prefer-newest shape detection via inverted op chains; zero-cost for migration-free types (test-asserted); json/toml/csv/yaml verified. Follow-ups noted on card #185-adjacent: bracket-form @[PublishedSchema, Codable] never sets is_published_schema (E0910 check may skip those types); Decode-only+non-Encode-add I2 gap (unreachable today)."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -7656,7 +7661,7 @@
       "id": "ci2soundness",
       "num": 185,
       "title": "I2 soundness sweep: known reachable ICEs / rustc leaks",
-      "body": "Collector card for user-reachable I2 violations surfaced during e3 burndown. Known: (1) fixed-array index-assign `buf[i] = x` ICEs in TIR codegen (Items.rs:1219 gate miss) with or without := uninit — found closing #173; (2) print(\"{s}\") after moving s into an enum payload trips raw rustc E0382 (sema clone-insertion gap) — found closing #134 STYLEUNIT1. Each fix: repro fixture → root cause → class-level fix → regression test; sweep fuzz/ice_regressions after.",
+      "body": "Collector card for user-reachable I2 violations surfaced during e3 burndown. Known: (1) fixed-array index-assign `buf[i] = x` ICEs in TIR codegen (Items.rs:1219 gate miss) with or without := uninit — found closing #173; (2) print(\"{s}\") after moving s into an enum payload trips raw rustc E0382 (sema clone-insertion gap) — found closing #134 STYLEUNIT1. Each fix: repro fixture → root cause → class-level fix → regression test; sweep fuzz/ice_regressions after. (3) From #184: @[PublishedSchema, Codable] bracket form never sets is_published_schema — E0910 snapshot check silently skips bracket-form types. (4) From #184: Decode-only published struct with a non-Encode added field type would emit rejected Rust (unreachable in current shapes, guard it).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -7666,6 +7671,11 @@
       "blockedBy": [],
       "workOrder": 9,
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Added #184 findings: bracket-form is_published_schema gap (E0910 skip); Decode-only/non-Encode-add guard."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
