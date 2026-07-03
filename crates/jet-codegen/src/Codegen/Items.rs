@@ -1323,6 +1323,15 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{\n        format!(\"{}({{}})\", (self.0).jet_show())\n    }}\n}}\n\n",
         d.name, d.name
     ));
+    // JetDebug: a distinct type wrapped in a struct/enum field is debug-rendered
+    // via the derived container `jet_debug`, which calls `.jet_debug()` on each
+    // field. D-STYLEUNIT1 (Tower c134) makes a distinct field a covered value
+    // type, so the newtype must satisfy `JetDebug` — render the base value's own
+    // debug wrapped in the type name (`Meters(10.0)`), mirroring `jet_show`.
+    out.push_str(&format!(
+        "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{\n        format!(\"{}({{}})\", (self.0).jet_debug())\n    }}\n}}\n\n",
+        d.name, d.name
+    ));
     // .raw() method: unwrap to the base type.
     out.push_str(&format!(
         "impl user_{} {{\n    pub fn raw(&self) -> {} {{ self.0 }}\n}}\n\n",

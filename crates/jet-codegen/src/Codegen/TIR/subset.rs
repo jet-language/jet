@@ -750,6 +750,13 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
     if is_covered_foreign_value_ty(ty, cx) {
         return true;
     }
+    // D-STYLEUNIT1 (Tower c134): a DISTINCT-typed enum payload (`Length(Px)`
+    // where `Px` is a `#UnitFamily` member). Same rationale as the struct-field
+    // case in `field_ty_covered`: the distinct newtype is a covered value type,
+    // moved/cloned by `lower_enum_arg` with no new decision.
+    if is_covered_distinct_ty(ty, cx) {
+        return true;
+    }
     match ty {
         Type::Named(n) => {
             if cx.enum_variants.contains_key(n) {
@@ -944,6 +951,19 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     // (Previously `field_ty_covered` admitted only scalar/String/struct/collection fields,
     // so any struct with an enum field stayed on the AST path.)
     if is_covered_enum_ty(ty, cx) {
+        return true;
+    }
+    // D-STYLEUNIT1 (Tower c134): a DISTINCT-typed field (`m: Meters` where
+    // `Meters :: distinct Float`, or a `#UnitFamily` member like `width: Px`).
+    // A distinct type renders via `cx.rust_type` to its generated newtype
+    // (`struct user_Meters(f64)`); a struct-lit field value is a distinct
+    // constructor call (`Meters(10.0)` → the newtype, a covered expr) and a
+    // field read is a plain by-value place — byte-identical to a scalar field,
+    // no clone/deref decision. (Previously a distinct field routed to
+    // `struct_is_covered`, which only knows plain user structs and returned
+    // false, so any struct/enum carrying a unit-family field ICEd once TIR
+    // became the sole codegen path — the standing bug this decision fixes.)
+    if is_covered_distinct_ty(ty, cx) {
         return true;
     }
     // c109 Phase 24: an OPTIONAL / FALLIBLE field (`note: Note?`, `error_msg: String?` on

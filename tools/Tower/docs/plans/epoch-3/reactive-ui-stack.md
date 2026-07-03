@@ -28,7 +28,7 @@
 Typed node tree over `core.reactive`. Composable, diff-based subtree rerenders.
 
 ### Phase 3 — Typed styles (BLOCKED: D-STYLESHAPE1, D-STYLEUNIT1)
-`core.ui.style` module: typed `Style`, `Length`, `Color` value types. Replace raw String color in `JetPaintCmd::FillRect`. Diagnostic range E2920-E2924.
+`core.ui.style` module: typed `Style`, `Color` value types; lengths are unit-family literals (`#UnitFamily(length) { px }`, so `width: 320px` is a `Px` — D-STYLEUNIT1=A, supersedes the interim `Length` struct). Replace raw String color in `JetPaintCmd::FillRect`. Diagnostic range E2920-E2924.
 
 ### Phase 4 — Ownable component kit
 `jetpack add <component>` copies `.jet` source into user tree. Starter: Button, Label, Input, Container. Requires Phase 2 (View type) + Phase 3 (Style).
