@@ -1257,6 +1257,17 @@ pub struct Func {
     /// drop the return value as a bare expression statement (E0419).
     pub is_must_use: bool,
     pub must_use_span: Option<Span>,
+    /// D-METHODMACRO1=A: `@Inline fn` / method — a soft hint (`#[inline]` in
+    /// codegen); never rejected by sema.
+    pub is_inline: bool,
+    /// D-METHODMACRO1=A: `@InlineAlways fn` / method — a checked promise
+    /// (`#[inline(always)]` in codegen). Sema rejects it (E0917/E0918/E0919)
+    /// when the compiler can prove it genuinely cannot inline. Mutually
+    /// exclusive with `is_inline` (E0920 if both are written).
+    pub is_inline_always: bool,
+    /// Span of whichever `@Inline`/`@InlineAlways` marker was written (for
+    /// diagnostics); `None` when neither is present.
+    pub inline_span: Option<Span>,
     /// D-WASM1: `#Wasm` / `#Js` / `#WasmExport` partition marker on the function.
     pub web_marker: Option<crate::WebPartition::WebPartitionMarker>,
     /// D-PREPOST1: `@Pre(cond, "msg")` clauses — a claim about the arguments,

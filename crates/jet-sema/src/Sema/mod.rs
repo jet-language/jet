@@ -770,6 +770,14 @@ pub(crate) struct Checker<'a> {
     /// True while inferring the body passed to `g.task { … }` — suppresses L1101
     /// (the taskgroup owns the handle until scope exit or an explicit join).
     in_taskgroup_spawn: bool,
+    /// D-METHODMACRO1=A: top-level function names whose bare identifier was
+    /// read as a VALUE (not called directly) while checking this one function
+    /// body — see `CheckerInfer/expr.rs`'s `Expr::Ident` arm, the single spot
+    /// that resolves a bare name to a global function's signature. Rolled up
+    /// into a whole-program accumulator (`check_func_body`'s
+    /// `global_addr_taken` parameter) so `@InlineAlways` (E0918) can be
+    /// checked once every function has run through here.
+    inline_addr_taken: HashSet<String>,
 }
 
 pub mod ApiFreeze;
@@ -780,6 +788,7 @@ mod Captures;
 mod CheckerCore;
 mod CheckerCoreLib;
 mod CheckerInfer;
+mod CheckerInline;
 mod CheckerItems;
 mod CheckerOwnership;
 mod CheckerTaskGroup;
@@ -821,6 +830,7 @@ pub use Effects::SemIndexEffectFacts;
 // validate `pkg.jet` `effects:`/`grants:` manifest keys against it.
 pub use Effects::{Effect, EffectSet};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
+pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub use Registration::{check, check_with_mode, effect_key};
 pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.

@@ -486,6 +486,8 @@ impl<'a> Parser<'a> {
                 // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn name(…)` — result cannot be
                 // silently ignored (old `@MustUse` spelling is E0062, taught in `func()`).
                 TokKind::Hash | TokKind::At if self.at_must_use_fn() => self.func().map(Item::Func),
+                // D-METHODMACRO1=A: `@Inline fn name(…)` / `@InlineAlways fn name(…)`.
+                TokKind::Hash | TokKind::At if self.at_inline_fn() => self.func().map(Item::Func),
                 // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` typestate
                 // markers on a free function.
                 TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
@@ -615,6 +617,9 @@ impl<'a> Parser<'a> {
                                     None,
                                     false,
                                     None,
+                                    false,
+                                    None,
+                                    false,
                                     false,
                                     None,
                                 )
@@ -924,6 +929,7 @@ impl<'a> Parser<'a> {
                     ));
                     self.func_after_fn(
                         false, false, false, false, false, None, None, false, None, false, None,
+                        false, false, None,
                     )
                     .map(Item::Func)
                 }
@@ -1167,6 +1173,25 @@ impl<'a> Parser<'a> {
         matches!(self.peek().kind, TokKind::Hash | TokKind::At)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// D-METHODMACRO1=A: true when the cursor is at `@Inline fn`/`@Inline pub
+    /// fn` or `@InlineAlways fn`/`@InlineAlways pub fn` — or the retired `#`
+    /// spelling, so `func()`/`method_in_type()` can consume it and teach
+    /// E0062.
+    pub(super) fn at_inline_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash | TokKind::At)
+            && matches!(&self.peek2().kind, TokKind::Ident(n)
+                if n == Syntax::CONTRACT_INLINE || n == Syntax::CONTRACT_INLINE_ALWAYS)
+            && (matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+                // D-METHODMACRO1=A: `@Inline @InlineAlways fn …` (or the other
+                // order) — recognize the doubled marker too, so `func()` reaches
+                // `parse_inline_marker`'s E0920 conflict check instead of
+                // falling through to the generic `@` teaching error (E0990).
+                || (matches!(self.peek3().kind, TokKind::Hash | TokKind::At)
+                    && matches!(&self.peek4().kind, TokKind::Ident(n)
+                        if n == Syntax::CONTRACT_INLINE || n == Syntax::CONTRACT_INLINE_ALWAYS)
+                    && matches!(self.peek5().kind, TokKind::KwFn | TokKind::KwPub)))
     }
 
     /// D-STATE1: true when the cursor is at `#State(…)` (a require-state fn marker).
@@ -1503,6 +1528,9 @@ impl<'a> Parser<'a> {
             None,
             false,
             None,
+            false,
+            false,
+            None,
         )
     }
 
@@ -1566,6 +1594,9 @@ impl<'a> Parser<'a> {
             None,
             false,
             None,
+            false,
+            None,
+            false,
             false,
             None,
         )
@@ -1871,6 +1902,57 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// D-METHODMACRO1=A (I7/R3 chokepoint): consume a `@Inline`/`@InlineAlways`
+    /// prefix already confirmed present by `at_inline_fn`. Returns `true` when
+    /// the marker was `InlineAlways` (`false` for the soft `Inline` hint),
+    /// plus its span. Teaches E0062 when the retired `#` spelling is used.
+    fn bump_inline_marker(&mut self) -> Result<(bool, Span), Diagnostic> {
+        let start = self.peek().span;
+        let sigil = self.bump(); // `#` or `@`
+        let (name, name_span) = self.expect_ident("after the marker sigil")?;
+        if matches!(sigil.kind, TokKind::Hash) {
+            self.diags
+                .push(Self::e0062_contract_on_hash(&name, name_span));
+        }
+        let is_always = name == Syntax::CONTRACT_INLINE_ALWAYS;
+        Ok((is_always, Span::new(start.start, name_span.end)))
+    }
+
+    /// D-METHODMACRO1=A: parse the `@Inline`/`@InlineAlways` marker slot —
+    /// zero or one marker, with a second one (either name, either order)
+    /// rejected as E0920 (pick one). Shared by `func()` and `method_in_type()`.
+    fn parse_inline_marker(&mut self) -> Result<(bool, bool, Option<Span>), Diagnostic> {
+        if !self.at_inline_fn() {
+            return Ok((false, false, None));
+        }
+        let (is_always, span) = self.bump_inline_marker()?;
+        let (mut is_inline, mut is_inline_always) = (!is_always, is_always);
+        let mut span = Some(span);
+        if self.at_inline_fn() {
+            let (is_always2, span2) = self.bump_inline_marker()?;
+            self.diags
+                .push(Self::e0920_conflicting_inline_markers(span2));
+            is_inline = !is_always2;
+            is_inline_always = is_always2;
+            span = Some(span2);
+        }
+        Ok((is_inline, is_inline_always, span))
+    }
+
+    /// E0920: both `@Inline` and `@InlineAlways` were written on the same
+    /// function/method declaration.
+    pub(super) fn e0920_conflicting_inline_markers(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0920",
+            "a function can't be both `@Inline` and `@InlineAlways`".to_string(),
+            "`@Inline` is a soft hint the compiler may ignore; `@InlineAlways` is a checked \
+             promise it must honor or reject — one declaration can't carry both meanings."
+                .to_string(),
+            "keep one: `@Inline` to suggest inlining, `@InlineAlways` to require it.".to_string(),
+            Some(span),
+        )
+    }
+
     pub(super) fn func(&mut self) -> Result<Func, Diagnostic> {
         // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn` / `@MustUse pub fn`.
         let (is_must_use, must_use_span) = if self.at_must_use_fn() {
@@ -1894,6 +1976,9 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
+        // D-METHODMACRO1=A: `@Inline fn` / `@InlineAlways fn` — checked inline
+        // contracts (E0920 if both are written).
+        let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
         // D-STATE1: `#State(S) fn …` / `#Transition(From -> To) fn …` typestate
         // markers. Each appears at most once before `fn`; either may precede the
         // (already-consumed) `@Pure`/`#Sanitizer` slots or follow them.
@@ -1952,6 +2037,9 @@ impl<'a> Parser<'a> {
             web_marker,
             is_must_use,
             must_use_span,
+            is_inline,
+            is_inline_always,
+            inline_span,
         )?;
         Ok(Func { pre, post, ..f })
     }
@@ -2492,11 +2580,23 @@ impl<'a> Parser<'a> {
         is_pure: bool,
         is_sanitizer: bool,
     ) -> Result<Func, Diagnostic> {
-        self.func_with_modifiers_full(is_pure, is_sanitizer, None, None, None, false, None)
+        self.func_with_modifiers_full(
+            is_pure,
+            is_sanitizer,
+            None,
+            None,
+            None,
+            false,
+            None,
+            false,
+            false,
+            None,
+        )
     }
 
     /// Parse a function whose `@Pure`/`#Sanitizer` and D-STATE1 typestate markers
     /// are already known.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn func_with_modifiers_full(
         &mut self,
         is_pure: bool,
@@ -2506,6 +2606,9 @@ impl<'a> Parser<'a> {
         web_marker: Option<crate::Syntax::WebPartitionMarker>,
         is_must_use: bool,
         must_use_span: Option<Span>,
+        is_inline: bool,
+        is_inline_always: bool,
+        inline_span: Option<Span>,
     ) -> Result<Func, Diagnostic> {
         let (is_pub, is_package_pub) = self.parse_item_visibility();
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
@@ -2521,9 +2624,13 @@ impl<'a> Parser<'a> {
             web_marker,
             is_must_use,
             must_use_span,
+            is_inline,
+            is_inline_always,
+            inline_span,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn func_after_fn(
         &mut self,
         is_pub: bool,
@@ -2537,6 +2644,9 @@ impl<'a> Parser<'a> {
         web_marker: Option<crate::Syntax::WebPartitionMarker>,
         is_must_use: bool,
         must_use_span: Option<Span>,
+        is_inline: bool,
+        is_inline_always: bool,
+        inline_span: Option<Span>,
     ) -> Result<Func, Diagnostic> {
         let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
         let external_type = if (matches!(self.peek().kind, TokKind::Dot)
@@ -2634,6 +2744,9 @@ impl<'a> Parser<'a> {
                 web_marker,
                 is_must_use,
                 must_use_span,
+                is_inline,
+                is_inline_always,
+                inline_span,
                 pre: Vec::new(),
                 post: Vec::new(),
                 body,
@@ -2662,12 +2775,16 @@ impl<'a> Parser<'a> {
             web_marker,
             is_must_use,
             must_use_span,
+            is_inline,
+            is_inline_always,
+            inline_span,
             pre: Vec::new(),
             post: Vec::new(),
             body,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn bump_then_func_after_fn(
         &mut self,
         is_pub: bool,
@@ -2694,6 +2811,9 @@ impl<'a> Parser<'a> {
             web_marker,
             is_must_use,
             must_use_span,
+            false,
+            false,
+            None,
         )
     }
 
@@ -2935,6 +3055,7 @@ impl<'a> Parser<'a> {
                         && matches!(self.peek2().kind, TokKind::KwFn))
                     || self.at_pure_fn()
                     || self.at_sanitizer_fn()
+                    || self.at_inline_fn()
                     || self.at_state_fn()
                     || self.at_transition_fn();
                 if is_method {
@@ -3948,6 +4069,8 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
+        // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` on methods too.
+        let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
         // D-STATE1: `#State(S)` / `#Transition(From -> To)` typestate markers on
         // methods — the common case (typestate methods carry `self`).
         let mut state_requires = None;
@@ -3975,6 +4098,9 @@ impl<'a> Parser<'a> {
             None,
             is_must_use,
             must_use_span,
+            is_inline,
+            is_inline_always,
+            inline_span,
         )
     }
 
@@ -4875,6 +5001,7 @@ impl<'a> Parser<'a> {
                         && matches!(self.peek2().kind, TokKind::KwFn))
                     || self.at_pure_fn()
                     || self.at_sanitizer_fn()
+                    || self.at_inline_fn()
                     || self.at_state_fn()
                     || self.at_transition_fn();
                 if is_method {

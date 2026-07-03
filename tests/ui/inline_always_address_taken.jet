@@ -1,0 +1,14 @@
+// E0918 (D-METHODMACRO1=A): `@InlineAlways` cannot expand a call it never
+// literally sees — passing the function as a value (here, as a callback)
+// means some call sites never write `triple(...)` at all.
+@InlineAlways fn triple(x: Int) -> Int {
+    return x * 3
+}
+
+fn apply(f: fn(Int) -> Int, v: Int) -> Int {
+    return f(v)
+}
+
+fn main() {
+    print(apply(triple, 5))
+}

@@ -412,6 +412,14 @@ impl<'a> Fmt<'a> {
         if f.is_must_use {
             self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));
         }
+        // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` precedes `pub`/`fn`, in
+        // the same slot the parser checks (after `@MustUse`/`@Pure`/
+        // `#Sanitizer`, before the typestate markers).
+        if f.is_inline_always {
+            self.write(&format!("@{} ", Syntax::CONTRACT_INLINE_ALWAYS));
+        } else if f.is_inline {
+            self.write(&format!("@{} ", Syntax::CONTRACT_INLINE));
+        }
         // D-STATE1: typestate markers precede `pub`/`fn`. `#State(S)` is the
         // require-state guard; `#Transition(From -> To)` is the transition (the
         // from-state is `_` for an entry transition). Round-tripped verbatim so

@@ -183,6 +183,9 @@ mod tests {
             post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
+            is_inline: false,
+            is_inline_always: false,
+            inline_span: None,
             body: vec![],
         })
     }

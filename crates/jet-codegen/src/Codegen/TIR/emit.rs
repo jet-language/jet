@@ -43,11 +43,23 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // `vis`, exactly as `emit_func` (`{vis}{unsafe_kw}fn …`). I1: emitted ONLY when the
     // source was `#Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
+    // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` lower to a Rust `#[inline]`/
+    // `#[inline(always)]` attribute right above the signature. `is_inline_always`
+    // is only ever `true` here once sema has confirmed the function can actually
+    // inline (E0917/E0918/E0919 would have failed the build otherwise) — I3:
+    // sema decides, codegen just emits.
+    let inline_attr = if tir.is_inline_always {
+        "#[inline(always)]\n"
+    } else if tir.is_inline {
+        "#[inline]\n"
+    } else {
+        ""
+    };
     // E2-M12 D-OBS1: track the current function name for rich panic reports —
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
+        "{inline_attr}{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
         gen = tir.generics,
         params = params,
@@ -140,10 +152,20 @@ pub(crate) fn emit_tir_method(
     // prefix sits between `pub ` and `fn`, exactly as `emit_method` (`pub {unsafe_kw}fn`).
     // I1: emitted ONLY for a source `#Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
+    // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` on a method — same attribute,
+    // indented to the method's own line (see `emit_tir_toplevel` for the free-
+    // function form).
+    let inline_attr = if tir.is_inline_always {
+        format!("{pad}#[inline(always)]\n")
+    } else if tir.is_inline {
+        format!("{pad}#[inline]\n")
+    } else {
+        String::new()
+    };
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{pad}pub {unsafe_kw}fn {name}({params}){ret} {{\n",
+        "{inline_attr}{pad}pub {unsafe_kw}fn {name}({params}){ret} {{\n",
         name = mangle(&tir.name),
         params = params.join(", "),
         ret = ret_clause,

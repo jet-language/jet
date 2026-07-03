@@ -381,6 +381,10 @@ before continuing.
 | E0914 | sema  | unknown interpolation selector after `@` (D-DISPLAYDBG2) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
 | E0916 | sema  | auto-derived `Debug` blocked by a non-debuggable field (D-DEBUG-REDACT) — *defined, not yet emitted* |
+| E0917 | sema  | `@InlineAlways fn` calls itself — inlining a recursive call has no fixed expansion (D-METHODMACRO1) |
+| E0918 | sema  | `@InlineAlways fn` had its address taken (stored, returned, or passed as a callback) instead of being called directly (D-METHODMACRO1) |
+| E0919 | sema  | `@InlineAlways fn` body exceeds the statement ceiling `@InlineAlways` enforces (D-METHODMACRO1) |
+| E0920 | parse | a function/method written with both `@Inline` and `@InlineAlways` (D-METHODMACRO1) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -1265,6 +1269,45 @@ E0910 checks intent only.
 | What | Why | Fix |
 |------|-----|-----|
 | `` `{type}` can't auto-derive `Debug` because field `{field}` isn't debuggable ``. | Auto-derived `Debug` requires every non-`@[Redact]` field to be debuggable. | Mark `{field}` with `@[Redact]`, change its type, or implement `Debug` manually for `{type}`. |
+
+### E0917 — `@InlineAlways` self-recursive (D-METHODMACRO1)
+
+`@InlineAlways` is a checked promise, not a hint (`@Inline` is the hint): if the
+compiler can't literally inline every call, that's a compile error naming why,
+never a silent miss. A function that calls itself has no fixed expansion.
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `{name}` calls itself, so `@InlineAlways` cannot expand it ``. | Inlining a recursive call would either loop forever at compile time or require an artificial depth cutoff — neither is a real inline. | Drop `@InlineAlways` (use `@Inline` as a hint), or restructure the function to be non-recursive. |
+
+Coverage: direct self-recursion only (a function calling itself by name).
+Mutual recursion between two `@InlineAlways` functions is not checked.
+
+### E0918 — `@InlineAlways` address taken (D-METHODMACRO1)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `{name}` cannot be inlined: its address is taken ``. | `@InlineAlways` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at. | Drop `@InlineAlways`, or call `{name}` directly instead of through a value. |
+
+Methods can't trigger E0918 — Jet's grammar has no way to read a method's bare
+name as a value, so this only ever fires for top-level functions.
+
+### E0919 — `@InlineAlways` too large (D-METHODMACRO1)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `{name}` is too large for `@InlineAlways` ``. | Its body has `{n}` statements — over the 40-statement ceiling `@InlineAlways` enforces so a promised inline doesn't quietly bloat every call site. | Drop `@InlineAlways` (use `@Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline. |
+
+The ceiling is a statement count (`INLINE_ALWAYS_MAX_STMTS = 40` in
+`crates/jet-sema/src/Sema/CheckerInline.rs`), counted transitively through
+nested blocks (`if`/`loop`/`switch`/etc.) but not through a nested lambda
+literal's body (a separate closure, not inline text of the function).
+
+### E0920 — conflicting `@Inline`/`@InlineAlways` markers (D-METHODMACRO1)
+
+| What | Why | Fix |
+|------|-----|-----|
+| a function can't be both `@Inline` and `@InlineAlways`. | `@Inline` is a soft hint the compiler may ignore; `@InlineAlways` is a checked promise it must honor or reject — one declaration can't carry both meanings. | Keep one: `@Inline` to suggest inlining, `@InlineAlways` to require it. |
 
 ### E0912 — Frozen capability signature drift (c129)
 

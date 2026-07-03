@@ -285,6 +285,14 @@ pub struct TFunc {
     pub is_unsafe: bool,
     /// D-REACTCORE1: `#Reactive fn` — the body is emitted inside `jet_reactive_effect`.
     pub is_reactive: bool,
+    /// D-METHODMACRO1=A: `@Inline fn` — emits `#[inline]`. Soft hint; sema never
+    /// rejects it.
+    pub is_inline: bool,
+    /// D-METHODMACRO1=A: `@InlineAlways fn` — emits `#[inline(always)]`. Only ever
+    /// `true` here once sema has confirmed the function can actually inline
+    /// (E0917/E0918/E0919 would have failed the build otherwise) — I3: sema
+    /// decides, codegen just emits.
+    pub is_inline_always: bool,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`

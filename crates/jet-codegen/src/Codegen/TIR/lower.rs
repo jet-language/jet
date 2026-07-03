@@ -364,6 +364,8 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
         is_reactive: f.is_reactive,
+        is_inline: f.is_inline,
+        is_inline_always: f.is_inline_always,
         body,
         kind: TFuncKind::TopLevel,
     }
@@ -541,6 +543,8 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
         is_reactive: f.is_reactive,
+        is_inline: f.is_inline,
+        is_inline_always: f.is_inline_always,
         body,
         kind,
     }
@@ -603,6 +607,8 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         // for this kind, but keep it consistent.
         is_unsafe: f.is_unsafe,
         is_reactive: f.is_reactive,
+        is_inline: f.is_inline,
+        is_inline_always: f.is_inline_always,
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -683,8 +689,12 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
+        // Same for `@Inline`/`@InlineAlways` — a delegation method is pure forwarding,
+        // never parsed with an inline marker.
         is_unsafe: false,
         is_reactive: false,
+        is_inline: false,
+        is_inline_always: false,
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,

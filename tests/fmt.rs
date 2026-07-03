@@ -1521,3 +1521,34 @@ fn main() {
 ";
     assert_fmt_stable(src, "ref shorthand fields");
 }
+
+#[test]
+fn fmt_preserves_inline_contracts() {
+    // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` precede `pub`/`fn` on a free
+    // function and on a method — both must round-trip byte-for-byte (own-
+    // CLAUDE-memory rule: new syntax needs a formatter round-trip test, not
+    // just a parser).
+    let src = "\
+@Inline fn square(x: Int) -> Int {
+    return x * x
+}
+
+@InlineAlways fn double(x: Int) -> Int {
+    return x * 2
+}
+
+struct Meters {
+    value: Int
+
+    @InlineAlways fn plus(self, other: Int) -> Int {
+        return self.value + other
+    }
+}
+
+fn main() {
+    m :: Meters.{value: 7}
+    print(\"{square(4)} {double(5)} {m.plus(3)}\")
+}
+";
+    assert_fmt_stable(src, "inline contracts");
+}

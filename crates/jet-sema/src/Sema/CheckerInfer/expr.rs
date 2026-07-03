@@ -456,6 +456,12 @@ impl<'a> Checker<'a> {
                     return Some(t.clone());
                 }
                 if let Some(sig) = self.funcs.get(name) {
+                    // D-METHODMACRO1=A: a bare top-level function name resolved here
+                    // is read as a VALUE, not called (a direct call never reaches this
+                    // arm — `check_call` short-circuits on a known global function
+                    // name before inferring its callee as an expression). This is
+                    // exactly "this function's address was taken" for E0918.
+                    self.inline_addr_taken.insert(name.clone());
                     return Some(func_sig_to_fn_type(sig));
                 }
                 self.unknown_name(name, *span);

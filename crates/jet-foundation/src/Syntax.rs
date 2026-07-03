@@ -1961,6 +1961,19 @@ pub const CONTRACT_POST: &str = "Post"; // D-PREPOST1
 /// path + binding name). Inert in release builds.
 pub const CONTRACT_PERSIST: &str = "Persist"; // D-PERSIST1
 
+/// D-METHODMACRO1=A / D-CONTRACTCASE1: `@Inline fn` / `@Inline` method — a
+/// soft hint that this function/method should be inlined (`#[inline]` in
+/// codegen). Never rejected by sema; the compiler is free to ignore it.
+/// Methods stay ordinary functions — no macro-rewrite hooks (D-METHODMACRO1).
+pub const CONTRACT_INLINE: &str = "Inline"; // D-METHODMACRO1
+/// D-METHODMACRO1=A / D-CONTRACTCASE1: `@InlineAlways fn` / method — a
+/// checked promise (`#[inline(always)]` in codegen). Sema rejects it
+/// (E0917 self-recursive / E0918 address-taken / E0919 too large) when the
+/// compiler can prove it genuinely cannot inline the call — a compile error
+/// naming why, never a silent miss. Mutually exclusive with `CONTRACT_INLINE`
+/// on the same declaration (E0920).
+pub const CONTRACT_INLINE_ALWAYS: &str = "InlineAlways"; // D-METHODMACRO1
+
 /// D-CAPBUNDLE1 / D-CONTRACTCASE1: capability bundles on a nominal distinct
 /// type — each re-exposes a curated slice of the base type's operations
 /// while keeping nominal identity. Stackable. The `numeric` bundle merged
@@ -2011,6 +2024,9 @@ pub const CONTRACT_MARKERS: &[&str] = &[
     CONTRACT_PRE,
     CONTRACT_POST,
     CONTRACT_PERSIST,
+    // D-METHODMACRO1=A — checked inline contracts
+    CONTRACT_INLINE,
+    CONTRACT_INLINE_ALWAYS,
     CONTRACT_BUNDLE_PRINTABLE,
     CONTRACT_BUNDLE_CODABLE_AS_BASE,
     // D-CLIFLAG1 (G4) — registered, feature not yet implemented

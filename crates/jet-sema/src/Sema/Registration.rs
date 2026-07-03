@@ -922,6 +922,11 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // D-EFF1: per-function effect summaries collected during body checks; the
     // whole-program fixpoint + boundary checks run after the loop.
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
+    // D-METHODMACRO1=A: top-level function names whose address was taken
+    // anywhere in the program, accumulated across every function body check
+    // below; the `@InlineAlways` address-taken pass (E0918) runs after the
+    // loop, once this set is complete.
+    let mut global_addr_taken: HashSet<String> = HashSet::new();
     for item in &mut prog.items {
         match item {
             Item::Func(f) => {
@@ -939,6 +944,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &ct_globals,
                     false,
                     &mut effect_summaries,
+                    &mut global_addr_taken,
                 ));
             }
             Item::Impl(i) => {
@@ -957,6 +963,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &ct_globals,
                         false,
                         &mut effect_summaries,
+                        &mut global_addr_taken,
                     ));
                 }
             }
@@ -976,6 +983,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &ct_globals,
                         false,
                         &mut effect_summaries,
+                        &mut global_addr_taken,
                     ));
                 }
                 for block in &mut s.trait_impls {
@@ -994,6 +1002,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             &ct_globals,
                             false,
                             &mut effect_summaries,
+                            &mut global_addr_taken,
                         ));
                     }
                 }
@@ -1014,6 +1023,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &ct_globals,
                         false,
                         &mut effect_summaries,
+                        &mut global_addr_taken,
                     ));
                 }
             }
@@ -1041,6 +1051,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
+            is_inline: false,
+            is_inline_always: false,
+            inline_span: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body(
@@ -1057,6 +1070,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &ct_globals,
                     false,
                     &mut effect_summaries,
+                    &mut global_addr_taken,
                 ));
                 t.body = synthetic.body;
             }
@@ -1092,6 +1106,21 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
             | Item::GenericModule(_) // D-GENMOD2=A: template — erases
             | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
+        }
+    }
+
+    // D-METHODMACRO1=A: E0918 (address-taken) needs every function body checked
+    // first — `global_addr_taken` is only complete once the loop above has run.
+    // Methods can't appear in it (Jet's grammar has no way to read a method's
+    // bare name as a value), so this only ever fires for top-level functions.
+    for item in &prog.items {
+        if let Item::Func(f) = item {
+            if f.is_inline_always && global_addr_taken.contains(&f.name) {
+                diags.push(super::e0918_address_taken(
+                    &f.name,
+                    f.inline_span.unwrap_or(f.name_span),
+                ));
+            }
         }
     }
 
@@ -1983,6 +2012,7 @@ pub(crate) fn check_func_body(
     ct_globals: &HashMap<String, crate::Comptime::CtValue>,
     freestanding: bool,
     summaries: &mut HashMap<String, EffectSummary>,
+    global_addr_taken: &mut HashSet<String>,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
     let empty_core_imports = HashMap::new();
@@ -2062,12 +2092,21 @@ pub(crate) fn check_func_body(
         liveness_frames: Vec::new(),
         taskgroup_stack: Vec::new(),
         in_taskgroup_spawn: false,
+        inline_addr_taken: HashSet::new(),
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, funcs));
     }
+    // D-METHODMACRO1=A: the local half of the `@InlineAlways` check (self-
+    // recursion E0917 + size ceiling E0919); roll this function's
+    // address-taken names into the whole-program accumulator so the E0918
+    // pass after the full registration loop can see them.
+    if f.is_inline_always {
+        ck.diags.extend(check_inline_always_fn(f));
+    }
+    global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EFF1: record this function's effect summary for the whole-program fixpoint.
     // D-PROP1=A: seed direct with declared positives so solve() propagates the
     // contract of functions whose bodies don't yet exercise the declared effect.
@@ -2148,6 +2187,9 @@ pub(crate) fn check_error_conv_body(
         is_reactive: false,
         is_must_use: false,
         must_use_span: None,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: None,
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
@@ -2172,6 +2214,7 @@ pub(crate) fn check_error_conv_body(
         ct_globals,
         false,
         &mut HashMap::new(),
+        &mut HashSet::new(),
     );
     ec.body = synthetic.body;
     d
@@ -2466,6 +2509,9 @@ pub(crate) fn synthesize_delegation_method(
         is_reactive: false,
         is_must_use: false,
         must_use_span: None,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: None,
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,
@@ -2520,6 +2566,9 @@ pub(crate) fn synthesize_default_method(
         is_reactive: false,
         is_must_use: false,
         must_use_span: None,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: None,
         is_sanitizer: false,
         declared_effects: None,
         effect_via: None,

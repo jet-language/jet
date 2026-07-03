@@ -725,6 +725,14 @@ signature (`result` in Post); conditions pure; checked in every build;
 per-module build-policy strip is an explicit opt-out. Violation quotes the
 clause at the call site.
 
+**D-METHODMACRO1=A — Checked inline contracts**: `@Inline`/`@InlineAlways` on
+a `fn` or `fn Type.method`; methods stay ordinary functions, no macro-rewrite
+hooks. `@Inline` is a soft hint (`#[inline]`; never rejected). `@InlineAlways`
+is a checked promise (`#[inline(always)]`): sema proves the call can actually
+inline or fails the build naming why — self-recursive (E0917), address-taken
+(E0918), or over the statement ceiling (E0919). Both markers on one
+declaration is E0920 (pick one). PascalCase per D-CONTRACTCASE1.
+
 **D-PERSIST1**: `@Persist` module binding survives `jet dev` hot reload;
 identity = module path + name; layout change re-decodes Codable-style, falls
 back to reinit + warning. Dev-tier only. *(rides JIT hot-reload runtime)*

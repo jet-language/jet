@@ -1525,6 +1525,11 @@ pub(crate) fn check_bundle_opts(
     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
     let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
+    // D-METHODMACRO1=A: top-level function names whose address was taken
+    // anywhere in the bundle, accumulated across every module below; the
+    // `@InlineAlways` address-taken pass (E0918) runs after the loop, once
+    // this set is complete across the whole bundle.
+    let mut global_addr_taken: HashSet<String> = HashSet::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         diags.extend(check_module_bodies(
             module,
@@ -1535,9 +1540,26 @@ pub(crate) fn check_bundle_opts(
             allow_impure,
             &mut effect_summaries,
             &mut embed_inputs,
+            &mut global_addr_taken,
         ));
     }
     bundle.comptime_inputs = embed_inputs;
+    // D-METHODMACRO1=A: E0918 (address-taken) needs every module's function
+    // bodies checked first. Methods can't appear in `global_addr_taken`
+    // (Jet's grammar has no way to read a method's bare name as a value), so
+    // this only ever fires for top-level functions.
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let Item::Func(f) = item {
+                if f.is_inline_always && global_addr_taken.contains(&f.name) {
+                    diags.push(e0918_address_taken(
+                        &f.name,
+                        f.inline_span.unwrap_or(f.name_span),
+                    ));
+                }
+            }
+        }
+    }
     // D-EFF2 (`#(via f)`): seed each via-fn's summary with its callback's bound
     // before the fixpoint, so its published effect set is a tight pass-through.
     for module in &bundle.modules {
@@ -2211,6 +2233,7 @@ pub(crate) fn check_module_bodies(
     allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
+    global_addr_taken: &mut HashSet<String>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -2236,6 +2259,7 @@ pub(crate) fn check_module_bodies(
                     allow_impure,
                     summaries,
                     embed_inputs_out,
+                    global_addr_taken,
                 ));
             }
             Item::Struct(s) => {
@@ -2253,6 +2277,7 @@ pub(crate) fn check_module_bodies(
                         allow_impure,
                         summaries,
                         embed_inputs_out,
+                        global_addr_taken,
                     ));
                 }
             }
@@ -2271,6 +2296,7 @@ pub(crate) fn check_module_bodies(
                         allow_impure,
                         summaries,
                         embed_inputs_out,
+                        global_addr_taken,
                     ));
                 }
             }
@@ -2289,6 +2315,7 @@ pub(crate) fn check_module_bodies(
                         allow_impure,
                         summaries,
                         embed_inputs_out,
+                        global_addr_taken,
                     ));
                 }
             }
@@ -2317,6 +2344,9 @@ pub(crate) fn check_module_bodies(
                     is_reactive: false,
                     is_must_use: false,
                     must_use_span: None,
+                    is_inline: false,
+                    is_inline_always: false,
+                    inline_span: None,
                     is_sanitizer: false,
                     declared_effects: None,
                     effect_via: None,
@@ -2340,6 +2370,7 @@ pub(crate) fn check_module_bodies(
                     allow_impure,
                     summaries,
                     embed_inputs_out,
+                    global_addr_taken,
                 ));
                 t.body = synthetic.body;
             }
@@ -2362,6 +2393,9 @@ pub(crate) fn check_module_bodies(
                     is_reactive: false,
                     is_must_use: false,
                     must_use_span: None,
+                    is_inline: false,
+                    is_inline_always: false,
+                    inline_span: None,
                     is_sanitizer: false,
                     declared_effects: None,
                     effect_via: None,
@@ -2385,6 +2419,7 @@ pub(crate) fn check_module_bodies(
                     allow_impure,
                     summaries,
                     embed_inputs_out,
+                    global_addr_taken,
                 ));
                 b.body = synthetic.body;
             }
@@ -2408,6 +2443,7 @@ pub(crate) fn check_module_bodies(
                                 allow_impure,
                                 summaries,
                                 embed_inputs_out,
+                                global_addr_taken,
                             ));
                         }
                     }
@@ -2449,6 +2485,7 @@ pub(crate) fn check_func_body_bundle(
     allow_impure: bool,
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
+    global_addr_taken: &mut HashSet<String>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -2522,12 +2559,21 @@ pub(crate) fn check_func_body_bundle(
         liveness_frames: Vec::new(),
         taskgroup_stack: Vec::new(),
         in_taskgroup_spawn: false,
+        inline_addr_taken: HashSet::new(),
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }
+    // D-METHODMACRO1=A: the local half of the `@InlineAlways` check (self-
+    // recursion E0917 + size ceiling E0919); roll this function's
+    // address-taken names into the whole-program accumulator so the E0918
+    // pass after the full bundle check can see them.
+    if f.is_inline_always {
+        ck.diags.extend(check_inline_always_fn(f));
+    }
+    global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
     embed_inputs_out.extend(std::mem::take(&mut ck.ct_embed_inputs));
     // D-EFF1: record this function's effect summary for the whole-program fixpoint.

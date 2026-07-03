@@ -56,6 +56,9 @@ fn method(name: &str, is_pub: bool) -> Func {
         web_marker: None,
         is_must_use: false,
         must_use_span: None,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: None,
         body: Vec::new(),
     }
 }
