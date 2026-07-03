@@ -964,9 +964,37 @@ foreign toolchain error reaches the user unlaundered. One structure for all
 languages (I8) — S59 is the C instance; S50's block becomes the rust
 binder's declaration format inside `rust.*`; D-NPMTYPE1 stubs are the js
 binder's v1; D-DEP1 vendoring/hash-pinning extends to every language's refs.
-Per-language binder depth (typed projection / runtime broker / shallow
-decls) is a follow-up ballot per language (D-FFI-PY1, D-FFI-JS1,
-D-FFI-SWIFT1 honoring D-JSWIFTFFI1 sequencing).
+Per-language binder depth, all ratified 2026-07-03:
+**D-FFI-PY1 (=A)**: Python's default host is a supervised sidecar CPython
+worker (typed message boundary, crash-isolated, `#(Py)` effect added to the
+D-EFF4 set); opt-in `py@embed` switches to in-process libpython for
+zero-copy buffer-protocol arrays. One `use py.X` surface; the tier never
+moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` surface, host chosen by
+compile target — browser JS engine on the web target, QuickJS/componentize-js
+WASM component on wasmtime for native targets. `jet bind js` generates
+committable typed stubs from a package's `.d.ts` — this AMENDS D-NPMTYPE1's
+hand-authored-only floor; no-`.d.ts` packages get a `#Unsafe`-gated dynamic
+surface; Node-subprocess broker is an opt-in tier. **D-FFI-SWIFT1 (=A)**:
+swift-bridge-style generated projection over the fixed C-ABI transport
+(D-JSWIFTFFI1) — `jet bind swift` runs swiftc to emit `@_cdecl` shims +
+typed Jet wrappers; classes/actors are opaque ref-counted handles;
+throws→Result, async→Jet async; macOS/iOS + Linux-Swift only, honest gated
+error elsewhere. **D-DEP-PY1 (=A)**: CPython approved as a runtime-side
+dependency (libpython for the embed tier + interpreter for the broker) —
+never in Source/ (I6), provisioned nixpkgs-interim/jetpack-long-term,
+hash-pinned, native-ize obligation recorded, acquired only when a project
+uses `py.*`. **D-JPK-EXTPROV1 (=A)**: npm/PyPI/SwiftPM become first-class
+jetpack providers resolved by `<lib>: <lang>@"ref"` — fetched into the
+hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
+no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
+**D-PLUGIN-EXPORT1 (=A)**: a `plugin` target's exported surface is the `pub`
+items of its entry module, named by the manifest `export:` field and frozen
+via the existing D-CAP4 `api: stable` machinery; the `.wit` world is
+generated from those signatures — no new in-source keyword (I8).
+**D-PLUGIN-VERSION1 (=A)**: plugin load-time compatibility is structural —
+the D-CAP4 freeze of the exported interface is the contract; a plugin
+rebuilt with an unchanged interface still loads; mismatch is a clean E-code
+naming the interface delta, never a loader crash (I2).
 
 **D-DEP1 — Dependency law**: the compiler stays zero-external-crate (I6).
 Any crate-backed capability ships as a Jet package wrapping the crate via
@@ -1110,7 +1138,16 @@ owns it long-term; non-Nix users get a clear install message.
 unit-family literals — `core.ui.style` declares `#UnitFamily(length) { px }`
 (D-QUAL3), so `width: 320px` is a compile-checked `Px` value via the one
 ratified unit mechanism (D-UNITLIT1); no second style-only unit system (I8).
-Supersedes Phase 3's interim `Length` struct pair.
+Supersedes Phase 3's interim `Length` struct pair. *Shipped* (Tower c134):
+`examples/features/ui/ui_typed_style.jet` declares `#UnitFamily(length) { px }`
+and its `Style` record carries `width: Px`/`height: Px`; the interim `Length`
+struct/enum pair is deleted. Landing this required closing a standing typed-IR
+gap — a distinct-typed struct/enum field (`width: Px`, `Length(Px)`) was not
+admitted by the TIR subset (`field_ty_covered`/`enum_payload_ty_covered`), so
+any struct/enum carrying a unit-family field ICEd once the TIR became codegen's
+sole path; both predicates now admit distinct types, and the distinct newtype
+emits a `JetDebug` impl so a container's derived debug covers the field.
+Cross-family mixing (`320px + 500ms`) is E0127, unchanged from D-DIST3.
 
 **D-OBS1 / D-OBS3 — Observability**: source maps + Jet-line panic reports;
 OTel-aligned std-only structured logs/metrics; exporters are FFI-wrapped
@@ -1242,6 +1279,27 @@ Offline is a tested guarantee: realize-class verbs never touch the network
 when the lock is satisfied. One canonical merge table (unified-ecosystem §6)
 across env/system/image. Monorepo addressing: `source.package` dot form +
 in-repo path-style + bare-name sugar when unambiguous.
+
+**D-JPK-RINGSHIP1 (=C, ratified 2026-07-03, c1rixz5d)**: first-party
+`core.*` ring libraries ship as prebuilt per-platform artifacts riding the
+pinned toolchain object (D-JPK-TOOLCHAIN1) — realizing the toolchain stages
+them into the hangar (offline forever, D-JPK-OFFLINE1);
+`is_ring_module_staged` flips true when present; the compiler-embedded
+bridge templates remain the zero-config fallback for a dev-built jet. Ring
+version equals toolchain version by construction; one resolution path.
+
+**D-JPK-BUILDTOOL1 (=A, ratified 2026-07-03, c1rixz5d)**: bridge crates
+build with a pinned, realized Rust toolchain (hash-pinned hangar object,
+substituted via D-JPK-CACHE1 or nixpkgs on Nix machines; D-JPK-NONIX1
+honest error otherwise) — never the host cargo/rustc. Same source + same
+pinned toolchain → same output hash → portable cache hits; the toolchain id
+enters output provenance.
+
+**D-JPK-ADAPTNAME1 (=A, ratified 2026-07-03, c9jetpackgates)**: adapter
+spellings confirmed as `Pkg.adapt(name:, source:, recipe:)` + the `Recipe.*`
+family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`, expert
+`Recipe.build(fn(b: BuildContext))`) — the vision-doc spelling is now law;
+`jet add <ref> --adapt` drafts one.
 
 **U1 — manifest history**: superseded — see D-JPK-FILES above (`pkg.jet`).
 
