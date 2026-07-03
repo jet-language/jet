@@ -253,3 +253,119 @@ fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
         out.rust
     );
 }
+
+// ── D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend ────────────────
+//
+// Phase 8 is the real native backend behind the `#Target(Os.Linux)` / `comptime
+// if build.os` frame. These structural tests are the headless proof (this
+// environment has no reliable display): they inspect the generated Rust to show
+// (a) a Linux build emits the vetted `jet_gtk` FFI module and wires real
+// libgtk-4 / GLib C-ABI calls, and (b) a non-Linux build folds the gtk arm away
+// so nothing links gtk. A real `jet build` of the example (golden, gated on
+// `pkg-config gtk4`) is the compile-and-link proof.
+
+fn ui_native_linux_path() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/ui/ui_native_linux.jet")
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[test]
+fn gtk_backend_emits_gtk_ffi_for_linux_triple() {
+    let path = ui_native_linux_path();
+    let src = fs::read_to_string(&path).unwrap();
+    let out = jet::compile_with_target(&src, &path, Some("x86_64-unknown-linux-gnu"))
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected ui_native_linux.jet:\n{}",
+                jet::render_diagnostics(&path, &src, &diags)
+            )
+        });
+    // The native backend is selected, so its vetted FFI module is emitted.
+    assert!(
+        out.rust.contains("mod jet_gtk"),
+        "Linux build should emit the native GTK4 backend prelude:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("jet_ui_gtk()"),
+        "Linux build should construct the GTK backend via core.ui:\n{}",
+        out.rust
+    );
+    // Real libgtk-4 / GLib symbols are declared and called — rustc verifies the
+    // `extern "C"` shims (I2), and the window/mount/click/style floor is present.
+    for sym in [
+        "gtk_init_check",
+        "gtk_window_new",
+        "gtk_box_append",
+        "gtk_label_new",
+        "gtk_label_set_text",
+        "gtk_button_new_with_label",
+        "gtk_widget_set_size_request",
+        "gtk_css_provider_load_from_string",
+        "g_signal_connect_data",
+        "g_main_loop_run",
+    ] {
+        assert!(
+            out.rust.contains(sym),
+            "Linux GTK4 backend should call `{sym}`:\n{}",
+            out.rust
+        );
+    }
+}
+
+#[test]
+fn gtk_backend_folds_away_for_macos_triple() {
+    let path = ui_native_linux_path();
+    let src = fs::read_to_string(&path).unwrap();
+    let out = jet::compile_with_target(&src, &path, Some("aarch64-apple-darwin")).unwrap_or_else(
+        |diags| {
+            panic!(
+                "front end rejected ui_native_linux.jet:\n{}",
+                jet::render_diagnostics(&path, &src, &diags)
+            )
+        },
+    );
+    // A macOS build folds the `.Linux` dispatch arm out (D-OSTARGET2=B), so the
+    // gtk backend is never constructed, the FFI module is never emitted, and the
+    // build never links libgtk-4 — an honest non-Linux degrade.
+    assert!(
+        !out.rust.contains("mod jet_gtk"),
+        "macOS build must not emit the GTK4 backend prelude:\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("gtk_window_new"),
+        "macOS build must not wire any gtk calls:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("not yet on macOS"),
+        "macOS build should keep only the .Macos dispatch arm:\n{}",
+        out.rust
+    );
+}
+
+#[test]
+fn gtk_backend_resolves_gtk4_link_flags() {
+    // `use c.gtk4` names the native link via the S59 pkg-config path. Gated on a
+    // present gtk4 (the nix dev shell); elsewhere link resolution is untested
+    // here and the missing-lib path (E3201) covers absence.
+    let have_gtk = std::process::Command::new("pkg-config")
+        .args(["--exists", "gtk4"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !have_gtk {
+        eprintln!("note: skipping gtk4 link-flag check (no pkg-config gtk4)");
+        return;
+    }
+    let path = ui_native_linux_path();
+    let clinks = jet::resolve_c_links(&path).expect("gtk4 link flags should resolve");
+    assert!(
+        clinks.iter().any(|a| a == "gtk-4"),
+        "expected `-l gtk-4` in the link line; got {:?}",
+        clinks
+    );
+}

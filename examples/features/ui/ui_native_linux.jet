@@ -1,0 +1,59 @@
+// D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): the native Linux UI
+// backend — a real, working GTK4 app. `core.ui.gtk_backend()` is a `JetBackend`
+// over libgtk-4: `label`/`button` create real widgets, `set_text`/`set_size`/
+// `set_color` style and update them, `on_click` wires a button, and `present`
+// opens the window and runs the GLib main loop.
+//
+// The counter below actually counts: the button's click sets a `reactive.signal`,
+// the `ui.reactive_render` effect re-runs (it read the signal), and it updates
+// the label's text in place — the same reactive model the web/DOM backend uses
+// (I8, one reactive core).
+//
+// Run it inside `nix develop` (which provides gtk4):
+//     jet run examples/features/ui/ui_native_linux.jet
+// and a window opens with a live counter. Selection is the shipped `comptime if
+// build.os` dispatch (D-OSTARGET2=B): only the `.Linux` arm compiles into a
+// native Linux build, so the gtk path never reaches a non-Linux target. The
+// native link (`-lgtk-4 …`) is named by `use c.gtk4` via `pkg-config gtk4`
+// (S59); every gtk C call lives in the vetted `jet_gtk` prelude — this file
+// writes no low-level tier code. `JET_UI_HEADLESS=1` skips the window (what the
+// golden test sets, so it terminates); `tests/cross.rs` proves the window/
+// widget/click/style code compiles and links against gtk4.
+use core.ui as ui
+use core.reactive as reactive
+use c.gtk4 as gtk4
+
+fn main() {
+    comptime if build.os == {
+        .Linux -> {
+            clicks :: reactive.signal(0)
+            app :: ui.gtk_backend()
+
+            heading :: app.label("Jet — native GTK4 counter")
+            count :: app.label("count: 0")
+            app.set_size(count, 220, 40)
+            app.set_color(count, "#3366ff")
+            increment :: app.button("Increment")
+
+            // Click → bump the signal. The effect below re-runs and repaints.
+            app.on_click(increment, () => {
+                clicks.set(clicks.get() + 1)
+            })
+
+            // Reactive binding: reading `clicks` subscribes this effect, so every
+            // `.set()` updates the label's text in place — a live counter.
+            ui.reactive_render(() => {
+                app.set_text(count, "count: {clicks.get()}")
+            })
+
+            print("native backend: gtk4")
+            app.present("Jet — GTK4")
+        }
+        .Macos -> {
+            print("native backend: not yet on macOS")
+        }
+        .Windows -> {
+            print("native backend: not yet on Windows")
+        }
+    }
+}

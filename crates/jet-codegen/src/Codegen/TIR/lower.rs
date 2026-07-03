@@ -5419,8 +5419,10 @@ pub(crate) fn lower_method_call(
         };
     }
     // D-RENDERTGT2=A (c133 M1/M2): a UI backend method (gate shape d7b).
-    if matches!(recv_type.as_deref(), Some("NullBackend" | "TuiBackend"))
-        && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
+    if matches!(
+        recv_type.as_deref(),
+        Some("NullBackend" | "TuiBackend" | "GtkBackend")
+    ) && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
     {
         let recv_t = lower_expr(receiver, cx, env);
         let result_ty = match method {
@@ -5430,6 +5432,8 @@ pub(crate) fn lower_method_call(
             "render_count" => Type::Int,
             // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
             "focused_label" => Type::String,
+            // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 widget handles.
+            "label" | "button" => Type::Int,
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();

@@ -240,6 +240,10 @@ const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
 const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
 /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
+/// D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend. Emitted only when
+/// a program constructs `core.ui.gtk_backend()` (`uses_gtk_backend`), so no
+/// other program carries the gtk `extern "C"` surface or needs `-lgtk-4`.
+const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 /// c-devserver (owner-directed 2026-07-01): `core.devserver` — the
 /// configurable `jet dev` server value (`for_app`/`.html`/`.port`/`.serve`).
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
@@ -985,6 +989,22 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
     );
 }
 
+/// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
+/// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
+/// active target OS is Linux. `used_core` is collected before `comptime if
+/// build.os` folds, so a Linux-only backend used under a `.Linux` arm still
+/// shows up on a macOS/Windows build; the `active_os` gate is what actually
+/// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is
+/// Linux-only). The `.Linux` dispatch arm's construction is likewise folded out
+/// of `main` on those targets, so nothing references it.
+fn uses_gtk_backend(bundle: &ProgramBundle) -> bool {
+    bundle.active_os == Syntax::OsTarget::Linux
+        && bundle
+            .used_core
+            .iter()
+            .any(|u| u == "core.ui::gtk_backend")
+}
+
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
     emit_bundle_dbg(bundle, link, false, Syntax::OsTarget::host())
 }
@@ -1026,6 +1046,9 @@ pub fn emit_bundle_dbg(
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
+        if uses_gtk_backend(bundle) {
+            out.push_str(UI_GTK_PRELUDE);
+        }
         out.push_str(DEVSERVER_PRELUDE);
     }
     out.push('\n');
@@ -1152,6 +1175,9 @@ pub fn emit_bundle_tests_cov(
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
+        if uses_gtk_backend(bundle) {
+            out.push_str(UI_GTK_PRELUDE);
+        }
         out.push_str(DEVSERVER_PRELUDE);
     }
     out.push('\n');
@@ -1272,6 +1298,9 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str(CORELIB_PRELUDE);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
+        if uses_gtk_backend(bundle) {
+            out.push_str(UI_GTK_PRELUDE);
+        }
         out.push_str(DEVSERVER_PRELUDE);
     }
     out.push('\n');

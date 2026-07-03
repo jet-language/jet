@@ -2312,6 +2312,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).set_focus_group(({}).clone())", recv, a(0))
                     }
                     "focused_label" => format!("({}).focused_label()", recv),
+                    // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 retained widgets.
+                    "label" => format!("({}).label(&({}))", recv, a(0)),
+                    "button" => format!("({}).button(&({}))", recv, a(0)),
+                    "set_text" => format!("({}).set_text({}, &({}))", recv, a(0), a(1)),
+                    "set_size" => format!("({}).set_size({}, {}, {})", recv, a(0), a(1), a(2)),
+                    "set_color" => format!("({}).set_color({}, &({}))", recv, a(0), a(1)),
+                    "on_click" => format!("({}).on_click({}, {})", recv, a(0), a(1)),
+                    "present" => format!("({}).present(&({}))", recv, a(0)),
                     _ => format!("({}).{}()", recv, method),
                 },
                 // c-devserver (owner-directed 2026-07-01): DevServer builder
@@ -3530,6 +3538,8 @@ pub(crate) fn emit_tir_core_call(
         // D-RENDERTGT2=A (c133 M1): UI backend seam constructors.
         ("core.ui", "null_backend") => format!("{}jet_ui_null()", cx.root_prefix),
         ("core.ui", "tui_backend") => format!("{}jet_ui_tui()", cx.root_prefix),
+        // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
+        ("core.ui", "gtk_backend") => format!("{}jet_ui_gtk()", cx.root_prefix),
         ("core.ui", "point") => format!("{}jet_ui_point({}, {})", cx.root_prefix, arg(0), arg(1)),
         ("core.ui", "size") => format!("{}jet_ui_size({}, {})", cx.root_prefix, arg(0), arg(1)),
         ("core.ui", "rect") => format!(

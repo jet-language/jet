@@ -1845,7 +1845,10 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-RENDERTGT2=A (c133 M1/M2): UI backend measure/layout/paint/on_event.
-            if handle_ty == "NullBackend" || handle_ty == "TuiBackend" {
+            if handle_ty == "NullBackend"
+                || handle_ty == "TuiBackend"
+                || handle_ty == "GtkBackend"
+            {
                 if let Some(ret) =
                     ui_backend_method_return(handle_ty, method, args.len(), span, &mut self.diags)
                 {

@@ -99,6 +99,13 @@
             emscripten
             lldb
             jetDev
+            # D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): native Linux
+            # UI backend links libgtk-4 via the S59 C-FFI path (`use c.gtk4` →
+            # `pkg-config gtk4`). pkg-config + gtk4 dev headers enter the dev
+            # shell under the standing nixpkgs native-deps stopgap. Linux first;
+            # a non-Nix user gets E3201 naming the fix at build time.
+            pkg-config
+            gtk4
           ];
 
           shellHook = ''

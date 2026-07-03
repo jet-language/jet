@@ -483,6 +483,11 @@ impl Cx {
             Type::Named(name) if name == "TuiBackend" && !self.type_names.contains(name) => {
                 format!("{}JetTuiBackend", self.root_prefix)
             }
+            // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend — a
+            // top-level prelude struct re-exported from `mod jet_gtk`.
+            Type::Named(name) if name == "GtkBackend" && !self.type_names.contains(name) => {
+                format!("{}JetGtkBackend", self.root_prefix)
+            }
             // c-devserver (owner-directed 2026-07-01): DevServer is a
             // top-level prelude struct (Prelude/DevServer.rs).
             Type::Named(name) if name == "DevServer" && !self.type_names.contains(name) => {

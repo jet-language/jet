@@ -2183,6 +2183,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-RENDERTGT2=A (c133 M1): UI backend seam types.
         | "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "InputEvent"
         | "EventResult" | "NullBackend" | "TuiBackend"
+        // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend.
+        | "GtkBackend"
         // D-A11YGATE1=B (c134 Phase 6): accessible-role opaque type.
         | "UiAriaRole"
         // c-devserver (owner-directed 2026-07-01): the configurable `jet dev`
@@ -3931,6 +3933,8 @@ pub fn core_fixed_sig(
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
         ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
         ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TuiBackend".to_string())))),
+        // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
+        ("core.ui", "gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
         ("core.ui", "point") => Some((
             vec![(read, float.clone()), (read, float)],
             Some(Type::Named("Point".to_string())),
@@ -4161,10 +4165,10 @@ pub(crate) fn ui_backend_method_return(
     let size_ty = Type::Named("Size".to_string());
     let unit = unit_ty();
     match (backend, method, n_args) {
-        ("NullBackend" | "TuiBackend", "measure", 2) => Some(Some(size_ty)),
-        ("NullBackend" | "TuiBackend", "layout", 2) => Some(Some(unit)),
-        ("NullBackend" | "TuiBackend", "paint", 1) => Some(Some(unit)),
-        ("NullBackend" | "TuiBackend", "on_event", 1) => {
+        ("NullBackend" | "TuiBackend" | "GtkBackend", "measure", 2) => Some(Some(size_ty)),
+        ("NullBackend" | "TuiBackend" | "GtkBackend", "layout", 2) => Some(Some(unit)),
+        ("NullBackend" | "TuiBackend" | "GtkBackend", "paint", 1) => Some(Some(unit)),
+        ("NullBackend" | "TuiBackend" | "GtkBackend", "on_event", 1) => {
             Some(Some(Type::Named("EventResult".to_string())))
         }
         ("NullBackend", "commands", 0) => Some(Some(Type::List(Box::new(Type::String)))),
@@ -4172,8 +4176,21 @@ pub(crate) fn ui_backend_method_return(
         ("TuiBackend", "render_count", 0) => Some(Some(Type::Int)),
         // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing over a flat
         // list of interactive nodes.
-        ("NullBackend" | "TuiBackend", "set_focus_group", 1) => Some(Some(unit)),
-        ("NullBackend" | "TuiBackend", "focused_label", 0) => Some(Some(Type::String)),
+        ("NullBackend" | "TuiBackend" | "GtkBackend", "set_focus_group", 1) => Some(Some(unit)),
+        ("NullBackend" | "TuiBackend" | "GtkBackend", "focused_label", 0) => {
+            Some(Some(Type::String))
+        }
+        // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 retained-widget surface.
+        // `label`/`button` create a widget and return its handle; `set_text`/
+        // `set_size`/`set_color` mutate a live widget; `on_click(id, handler)`
+        // wires a button; `present(title)` opens the window (no-op headless).
+        ("GtkBackend", "label", 1) => Some(Some(Type::Int)),
+        ("GtkBackend", "button", 1) => Some(Some(Type::Int)),
+        ("GtkBackend", "set_text", 2) => Some(Some(unit)),
+        ("GtkBackend", "set_size", 3) => Some(Some(unit)),
+        ("GtkBackend", "set_color", 2) => Some(Some(unit)),
+        ("GtkBackend", "on_click", 2) => Some(Some(unit)),
+        ("GtkBackend", "present", 1) => Some(Some(unit)),
         _ => None,
     }
 }
@@ -4360,6 +4377,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.ui" => &[
             "null_backend",
             "tui_backend",
+            // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend.
+            "gtk_backend",
             "reactive_render",
             "point",
             "size",

@@ -21,6 +21,14 @@ fn examples_compile_and_run() {
     let ext = jet::Syntax::FILE_EXT;
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
+    // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 example links `-lgtk-4`
+    // via `pkg-config gtk4`. Only build+run it where gtk4 dev headers exist
+    // (the nix dev shell); elsewhere the front-end check still runs.
+    let have_gtk = Command::new("pkg-config")
+        .args(["--exists", "gtk4"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
     if !have_rustc {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
@@ -162,7 +170,11 @@ fn examples_compile_and_run() {
             let s = strip_mod(&rust_code, "jet_mem");
             let s = strip_mod(&s, "jet_txn");
             let s = strip_mod(&s, "jet_term_unix");
-            let mut s = strip_mod(&s, "jet_term_windows");
+            let s = strip_mod(&s, "jet_term_windows");
+            // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 backend's vetted
+            // `extern "C"` boundary. Same treatment as the term/C-FFI shims —
+            // its `unsafe` is audited platform-FFI, not user code.
+            let mut s = strip_mod(&s, "jet_gtk");
             // Strip every C-FFI wrapper module (`user___c_<lib>` and the cache
             // module `user___c_cache_<lib>`) — their `unsafe` is the vetted S58
             // boundary shim, not user code. Loop until none remain.
@@ -221,6 +233,15 @@ fn examples_compile_and_run() {
             stem
         );
 
+        // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 example needs gtk4 to
+        // link. Front-end check already ran above; skip build+run without it.
+        let needs_gtk = stem == "ui/ui_native_linux";
+        if needs_gtk && (!have_gtk || !have_rustc) {
+            eprintln!("note: skipping examples/features/{stem}.jet build (need gtk4 + rustc)");
+            checked += 1;
+            continue;
+        }
+
         if have_rustc {
             // stem contains '/' (topic/name) — flatten for the temp filename.
             let flat_stem = stem.replace('/', "_");
@@ -261,7 +282,16 @@ fn examples_compile_and_run() {
                 stem,
                 String::from_utf8_lossy(&out.stderr)
             );
-            let run = Command::new(&bin).output().unwrap();
+            // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 example calls
+            // `backend.present(...)`, which opens a real window and blocks on the
+            // GLib main loop. `JET_UI_HEADLESS=1` makes it skip the window so the
+            // golden run stays deterministic and terminating; a real `jet run`
+            // (no env var) opens the window.
+            let mut run_cmd = Command::new(&bin);
+            if needs_gtk {
+                run_cmd.env("JET_UI_HEADLESS", "1");
+            }
+            let run = run_cmd.output().unwrap();
             let err_path = ex_dir.join("expected").join(format!("{}.err.out", stem));
             if err_path.exists() {
                 let expected_err = fs::read_to_string(&err_path).unwrap_or_else(|_| {

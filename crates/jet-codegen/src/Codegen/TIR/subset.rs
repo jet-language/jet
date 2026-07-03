@@ -3002,8 +3002,10 @@ pub(crate) fn method_call_in_subset(
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
-    if matches!(recv_type.as_deref(), Some("NullBackend" | "TuiBackend"))
-        && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
+    if matches!(
+        recv_type.as_deref(),
+        Some("NullBackend" | "TuiBackend" | "GtkBackend")
+    ) && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -3632,6 +3634,11 @@ pub(crate) fn is_ui_backend_method_name(backend: Option<&str>, method: &str, nar
         (Some("TuiBackend"), "frame_lines" | "render_count", 0) => true,
         // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
         (_, "set_focus_group", 1) | (_, "focused_label", 0) => true,
+        // D-UIDEVSHELL1=A (c134 Phase 8): native GTK4 retained-widget surface.
+        (Some("GtkBackend"), "label" | "button", 1) => true,
+        (Some("GtkBackend"), "set_text" | "set_color" | "on_click", 2) => true,
+        (Some("GtkBackend"), "set_size", 3) => true,
+        (Some("GtkBackend"), "present", 1) => true,
         _ => false,
     }
 }
