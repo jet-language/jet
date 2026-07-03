@@ -830,6 +830,26 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// D-CLIFLAG1 / D-MARKER-FAMILY1: one field-marker group on a single
+    /// plane — always bracketed (`sigil[A, B]`), inline, no trailing
+    /// newline. Sibling of `fmt_marker_group` (struct/enum level), which
+    /// additionally unwraps a lone marker to bare `@A`/`#A` — field position
+    /// never does that (D-ATTR2's field grammar is bracket-only).
+    fn fmt_field_marker_group(&mut self, markers: &[&Marker], sigil: &str) {
+        if markers.is_empty() {
+            return;
+        }
+        self.write(sigil);
+        self.write("[");
+        for (i, m) in markers.iter().enumerate() {
+            if i > 0 {
+                self.write(", ");
+            }
+            self.fmt_marker(m);
+        }
+        self.write("] ");
+    }
+
     fn fmt_field(&mut self, field: &Field) {
         // D-DEBUG-REDACT/D-MARKERMOVE1: `@[Redact]` (contract plane) sits
         // inline before the field, ahead of any `#[…]` serde group (G2
@@ -840,18 +860,20 @@ impl<'a> Fmt<'a> {
             self.write(Syntax::ATTR_REDACT);
             self.write("] ");
         }
-        // D-SERDE5: per-field `#[Rename("x")]`/`#[Skip]`/`#[Default(…)]`/`#[Flatten]`
-        // markers sit inline before the field on the same line.
-        if !field.serde_markers.is_empty() {
-            self.write("#[");
-            for (i, m) in field.serde_markers.iter().enumerate() {
-                if i > 0 {
-                    self.write(", ");
-                }
-                self.fmt_marker(m);
-            }
-            self.write("] ");
-        }
+        // D-SERDE5 / D-CLIFLAG1 (D-MARKER-FAMILY1/G2): field markers split by
+        // plane and sit inline before the field on the same line. A
+        // contract-plane marker (`@[Doc(...)]`) gets its own `@[...]` group;
+        // directive/serde markers (`#[Rename]`/`#[Skip]`/`#[Default]`/
+        // `#[Flatten]`) get their own `#[...]` group, contract first — same
+        // stacking order as struct-level `fmt_type_markers`. Both groups are
+        // always bracketed at field position (no bare `@Name` unwrap here —
+        // fields don't support it, unlike a lone struct/enum-level marker).
+        let (contract_markers, directive_markers): (Vec<&Marker>, Vec<&Marker>) = field
+            .serde_markers
+            .iter()
+            .partition(|m| Syntax::is_contract_marker(&m.name));
+        self.fmt_field_marker_group(&contract_markers, Syntax::CONTRACT_PREFIX);
+        self.fmt_field_marker_group(&directive_markers, Syntax::ATTR_PREFIX);
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
         // D-REF-SHORTHAND1/2: a stored-reference field spells its type `&T`; an
         // explicit `#Ref(label)` prefix survives only when the owner was named

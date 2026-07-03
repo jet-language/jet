@@ -785,6 +785,7 @@ mod Bundle;
 mod Capability;
 mod CapabilityFreeze;
 mod Captures;
+mod CheckerCli;
 mod CheckerCore;
 mod CheckerCoreLib;
 mod CheckerInfer;
@@ -808,6 +809,7 @@ mod WebPartition;
 
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;
+pub(crate) use CheckerCli::*;
 pub use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
 pub(crate) use Effects::*;

@@ -589,6 +589,35 @@ fn main() {
 }
 
 #[test]
+fn fmt_keeps_cli_doc_and_default_field_markers() {
+    // D-CLIFLAG1: a field stacking a contract-plane marker (`@[Doc("...")]`)
+    // with a directive-plane one (`#[Default(...)]`) must render as two
+    // separate bracket groups, one per plane — not merged into a single
+    // `#[...]` group (the bug this test guards: field-marker formatting used
+    // to dump every `serde_markers` entry into one `#[...]` regardless of
+    // which plane it actually came from, silently reclassifying `@[Doc]` as
+    // a directive marker).
+    let src = "\
+@Cli
+struct ServeArgs {
+    @[Doc(\"port to listen on\")] #[Default(3000)] port: Int
+    @[Doc(\"print extra detail\")] verbose: Bool
+}
+
+fn run(args: ServeArgs) {
+    print(args.port)
+    print(args.verbose)
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["@[Doc(\"port to listen on\")]", "#[Default(3000)]", "@Cli"],
+        "cli @[Doc] + #[Default] field markers",
+    );
+    assert_fmt_stable(src, "cli doc/default field markers");
+}
+
+#[test]
 fn fmt_keeps_container_rename_all() {
     // A derive (`@Codable`, contract plane) plus a container serde marker
     // (`#RenameAll(camel)`, directive plane) split across the two planes

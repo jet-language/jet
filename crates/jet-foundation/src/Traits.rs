@@ -536,6 +536,13 @@ impl TraitRegistry {
                 .derives
                 .get(type_name)
                 .is_some_and(|d| d.contains(trait_name)),
+            // D-CLIFLAG1: `@[Cli]` is a derive-trait name like the others above,
+            // just not one of Generics's built-in constants (it's CLI-parsing
+            // specific, not a wire/comparison trait) — same `derives` lookup.
+            _ if trait_name == Syntax::CONTRACT_CLI => self
+                .derives
+                .get(type_name)
+                .is_some_and(|d| d.contains(trait_name)),
             // D-ANY-JAI1: `Renderable` = anything codegen already gives a
             // `JetDisplay` impl — the S55 auto-printable derive, or an explicit
             // `impl Type.Display`.

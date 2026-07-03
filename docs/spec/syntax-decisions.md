@@ -88,11 +88,15 @@ beside S17 (owner-chosen I8 exception).
 **S1 — Function keyword**: `fn`.
 
 **S12 — Entry point**: `fn main()`; no `pub` required. May be fallible:
-`fn main() -> Unit ?` (S80). **D-CLIFLAG1**: a typed entry parameter opts into
-CLI parsing — `fn run(args: ServeArgs)` derives `--flag` names/defaults/help
-from the struct (`@Cli`, `@Doc` markers); enum param derives subcommands;
-`cli.parse<Args>(…)` is the library floor. *(markers registered; feature
-unbuilt — c7cliflag)*
+`fn main() -> Unit ?` (S80). **D-CLIFLAG1** (implemented, c7cliflag): a
+typed entry parameter opts into CLI parsing — `fn run(args: ServeArgs)`
+derives `--flag` names/defaults/help from the struct's fields
+(`@[Cli]`/`@[Doc("...")]` markers, bracket form matching `@[Codable]`); an
+`enum` param derives subcommands. `fn run()` (zero-arg) and `fn main()` are
+both unaffected — see docs/spec/spec.md "Typed entry-signature CLI parsing"
+for the full field-mapping rule. The existing `core.args` `ArgsSpec`
+builder (D-ARGS1) remains the library floor for non-entry parsing; the
+typed layer generates onto it rather than adding a second parser.
 
 **S27 — Methods**: `self` receiver with capability sigils (`~self`, `^self`,
 `&self`; bare `self` = read). Call `value.method(args)`. Methods live in the

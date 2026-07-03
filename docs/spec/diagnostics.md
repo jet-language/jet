@@ -432,6 +432,10 @@ before continuing.
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
 | E1303 | sema  | `ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity (D-ARGS1) |
 | E1304 | sema  | `ArgsSpec.parse` called with wrong arity (D-ARGS1) |
+| E1305 | sema  | `@[Cli]` struct field has a type with no CLI flag mapping (D-CLIFLAG1) |
+| E1306 | sema  | two `@[Cli]` fields (or a field and the reserved `--help`) derive the same flag name (D-CLIFLAG1) |
+| E1307 | sema  | subcommand `enum` variant's payload isn't a `@[Cli]`-derived struct (D-CLIFLAG1) |
+| E1308 | sema  | `fn run`'s entry parameter isn't a `@[Cli]` struct or an enum of `@[Cli]` payloads (D-CLIFLAG1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
@@ -527,6 +531,23 @@ or query methods are called with the wrong number of arguments.
 | E1302 | `` `option` expects 3 arguments (name, help, metavar), got N `` | `ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`; all three strings are required. | Pass three strings: the option name, a help description, and a placeholder like `FILE`, e.g. `.option("output", "write to FILE", "FILE")`. |
 | E1303 | `` `positional` expects 2 arguments (name, help), got N `` | `ArgsSpec.positional(name, help)` registers a required positional argument; both name and help are required. | Pass exactly two strings: the positional name and a help description, e.g. `.positional("input", "file to process")`. |
 | E1304 | `` `parse` expects 1 argument (argv), got N `` | `ArgsSpec.parse(argv)` parses a `[String]` against the spec; pass exactly the argv list. | Pass exactly one argument: the argv list, e.g. `spec.parse(io.args())`. |
+
+### Typed entry-signature CLI parsing (D-CLIFLAG1)
+
+`@[Cli]` is a derive (sibling of `@[Codable]`) that turns a struct's fields into
+`core.args` flag registrations; `fn run(args: T)` / `fn run(cmd: Enum)` is a
+second entry-point name (alongside `fn main`) that parses `io.args()` against
+the derived spec before calling the user's function. See docs/spec/spec.md
+"Typed entry-signature CLI parsing" for the full field-mapping rule. These
+errors are all compile-time shape checks; a bad flag value at runtime reuses
+the `core.args` runtime-error voice above (no new code for that).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int`, `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `@[Cli]` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `@[Cli]` struct. |
+| E1306 | two `@[Cli]` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
+| E1307 | a subcommand variant's payload isn't a `@[Cli]` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `@[Cli]`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `@[Cli]` struct payload. |
+| E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `@[Cli]`-derived, or an `enum` whose every variant carries a `@[Cli]` struct payload. | Mark the struct `@[Cli]`, or give the enum's variants `@[Cli]` struct payloads. |
 
 ## Command-line diagnostics (E2-M3)
 

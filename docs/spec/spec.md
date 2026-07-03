@@ -1371,6 +1371,116 @@ backward-compatibility guarantee, the deprecation window (L2001 → E2002), the
 migration authority (only `jet fix` + edition upgrade, D-REL5), and the
 generated-code license statement — lives in docs/spec/release-policy.md.
 
+## Typed entry-signature CLI parsing (D-CLIFLAG1, c7cliflag)
+
+The entry function's typed parameter IS the CLI spec — no separate flag
+DSL to learn. `fn main()` (S12, zero-arg) is unchanged; a program opts into
+CLI parsing by defining `fn run` instead, with one parameter:
+
+```jet
+@[Cli]
+struct ServeArgs {
+    @[Doc("port to listen on")]
+    #[Default(3000)]
+    port: Int
+    verbose: Bool
+    config: String?
+}
+
+fn run(args: ServeArgs) {
+    http.serve(routes(), port: args.port)
+}
+```
+
+`@[Cli]` is a sibling derive of `@[Codable]` on the same marker/derive
+machinery (D-MARKERMOVE1). `@[Doc("...")]` is a field-level marker giving
+that flag's `--help` line; a field with no `@[Doc(...)]` gets a generic
+"value for --name" line instead.
+
+**Entry semantics.** `run` is a second entry-point name, alongside `main`
+(S12). It is live only when the entry file has **no** `fn main` and `run`
+takes **exactly one** parameter shaped like a CLI spec (below); any other
+`run` (zero args, wrong arity, an unrelated param type) is an ordinary
+function, not an entry — `fn run()` with no parameters is completely
+unaffected by this feature. A file with `fn main()` behaves exactly as
+before; `run` is simply irrelevant to it. Bad shapes on a `run` that *is*
+attempting to be an entry are diagnosed (E1308 below), not silently ignored.
+
+**Pinned field-mapping rule** — every `@[Cli]` struct field maps to exactly
+one flag, by this rule (checked top to bottom, first match wins):
+
+| Field shape | Flag | Absent at runtime |
+|---|---|---|
+| `Bool` | `--name` (boolean flag) | `false` |
+| `T?` (`T` a supported scalar) | `--name VALUE` (optional) | `null` |
+| scalar with `#[Default(expr)]` | `--name VALUE` (optional) | `expr` |
+| any other supported scalar | `--name VALUE` (**required**) | runtime error, `core.args` voice — no new diagnostic code |
+
+Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
+type (a `Map`, a closure, a `[T]`, a nested struct that isn't itself
+`@[Cli]`, …) is **E1305** — there is no flag shape for it. Field defaults
+use the *existing* `#[Default(expr)]` marker (D-SERDE5) — not a second,
+inline `= expr` mechanism (that syntax is reserved for function-parameter
+defaults, S61, a different grammar slot; reusing `#[Default(...)]` here is
+I8: one mechanism for "this field has a default", not two). Field name
+`snake_case` → flag `--snake-case` (underscores become dashes); no
+casing-style menu (that's a wire-format concern, D-SERDE3, not a CLI-flag
+one). No positionals are derived from struct fields in v1 — `core.args`'s
+`.positional(...)` builder is the escape hatch for that shape, used
+directly (not through the typed layer).
+
+Every generated CLI spec also registers `--help` automatically (rendering
+the struct's fields/types/`@[Doc]` text); a field named `help` collides
+with it and is **E1306**.
+
+**Nested `@[Cli]` structs are not supported in v1** — a field whose type is
+itself a `@[Cli]`-derived struct is E1305, same as any other unmapped type.
+(Grouped `--outer-inner` flag prefixing was scoped out rather than bolted
+onto the decode machinery under time pressure that would otherwise force a
+second, prefix-threaded code path — a real feature, not a punt: it needs
+its own worked design before it rides this derive.)
+
+**Subcommands** — an `enum` parameter dispatches by variant:
+
+```jet
+enum Cmd {
+    Serve(ServeArgs)
+    Import(ImportArgs)
+}
+fn run(cmd: Cmd) { ... }   // $ myapp import data.csv
+```
+
+The first positional token picks the variant by its **lowercased** name;
+the rest of argv re-parses against that variant's own `@[Cli]` spec (its
+own `--help`, its own flags — no flag namespace is shared across
+variants). Every variant's payload must be a single `@[Cli]`-derived
+struct — any other payload shape is **E1307**. Given **zero** arguments (no
+subcommand token at all), the generated entry prints the command list to
+stdout and exits 0 — a bare invocation asking "what can this program do"
+is treated as a request for orientation, not a mistake; an unrecognized
+subcommand name is still a real error (nonzero exit, stderr).
+
+**Codegen** generates directly onto `core.args`'s existing `ArgsSpec`/
+`ParsedArgs` builder (D-ARGS1) — the same `.flag`/`.option`/`.parse`
+surface a hand-written call chain uses, so there is exactly one parser
+(I8), not two. A bad flag at runtime (unknown flag, bad `--port` value, a
+missing required flag) is the same `core.args` runtime-error voice as
+`ArgsSpec.parse`'s own messages — no new diagnostic codes for that path,
+only for the compile-time shape checks above (E1305–E1308). `88_args_spec`/
+`64_cli_args`-style direct builder use is untouched; this feature is a
+layer generated on top of it, not a replacement.
+
+**Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
+including the reserved `--help`), E1307 (subcommand payload isn't
+`@[Cli]`), E1308 (`run`'s one parameter isn't a `@[Cli]` struct or an enum
+of `@[Cli]` payloads). See docs/spec/diagnostics.md.
+
+**Known limitation (shared with `@[Codable]`):** the derive's generated
+helper functions use unqualified `jet_std`/`user_*` paths, so — like
+`@[Codable]` — `@[Cli]` only works when the struct and its `fn run` live in
+the entry file, not an imported module file (tracked, not fixed here;
+same gap, same fix when it lands).
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged

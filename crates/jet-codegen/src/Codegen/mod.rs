@@ -664,6 +664,11 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             emit_func(&cx, f, &mut out);
         }
     }
+    // D-CLIFLAG1: a typed `fn run(args: T)` (no `fn main`) is a second entry
+    // point (S12) — synthesize the `fn main` that parses `io.args()` and
+    // dispatches to it. No-op when the entry file already has `fn main`, or
+    // has neither (sema's E0101/E1308 already rejected that case).
+    emit_cli_entry_if_needed(&cx, &prog.items, &mut out);
     strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
         strip_unused_mem_prelude(out),
     )))
@@ -1043,6 +1048,11 @@ pub fn emit_bundle_dbg(
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
+    // D-CLIFLAG1: a typed `fn run(args: T)` (no `fn main`) is a second entry
+    // point (S12) — synthesize the `fn main` that parses `io.args()` and
+    // dispatches to it. No-op when the entry file already has `fn main`, or
+    // has neither (sema's E0101/E1308 already rejected that case).
+    emit_cli_entry_if_needed(&cx, &entry.items, &mut out);
     strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
         strip_unused_mem_prelude(out),
     )))

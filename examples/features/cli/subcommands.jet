@@ -1,0 +1,40 @@
+// D-CLIFLAG1: an `enum` entry parameter derives subcommands. The first
+// positional token picks the variant by its lowercased name; the rest of
+// argv re-parses against that variant's own `@[Cli]` struct (its own flags,
+// its own `--help`). Every variant's payload must itself be `@[Cli]`-derived
+// (E1307 otherwise).
+//
+// Run a subcommand:  jet run examples/features/cli/subcommands.jet -- serve --port 8080
+//                    jet run examples/features/cli/subcommands.jet -- import --file data.csv
+// Run --help:        jet run examples/features/cli/subcommands.jet -- serve --help
+// Golden test (no extra args) exercises the bare-invocation shape: zero
+// arguments prints the command list and exits 0 (docs/spec/spec.md — a bare
+// invocation asking "what can this program do" isn't a mistake).
+@Cli
+struct ServeArgs {
+    #[Default(3000)] port: Int
+}
+
+@Cli
+struct ImportArgs {
+    file: String
+}
+
+enum Cmd {
+    Serve(ServeArgs)
+    Import(ImportArgs)
+}
+
+fn run(cmd: Cmd) {
+    if cmd == {
+        .Serve(a) -> {
+            print("serve")
+            print(a.port)
+        }
+        .Import(a) -> {
+            print("import")
+            print(a.file)
+        }
+
+    }
+}

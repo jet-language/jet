@@ -3,12 +3,72 @@ use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    CodeModule, ConstAttr, ElseBranch, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
+    CodeModule, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
     GenericModuleParam, IfStmt, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg,
-    OrFallback, Param, ProgramBundle, RustConstKind, Stmt, StrPart, Type,
+    OrFallback, Param, ProgramBundle, RustConstKind, Stmt, StrPart, Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+/// D-CLIFLAG1: what `fn run`'s single parameter type turned out to be.
+enum CliEntryShape {
+    /// A `@[Cli]`-derived struct — flags come straight from its fields.
+    Struct,
+    /// An `enum` whose every variant carries a `@[Cli]` struct payload.
+    Enum,
+    /// An `enum` parameter with at least one non-`@[Cli]` variant (E1307).
+    EnumBadVariants(Vec<Diagnostic>),
+    /// Neither of the above (E1308).
+    Invalid,
+}
+
+/// D-CLIFLAG1: classify `fn run`'s parameter type against the entry file's
+/// own struct/enum definitions. Only looks at the entry module (matching the
+/// rest of the entry-point machinery, which only ever inspects the entry
+/// file — same scope as the `main`/E0101 checks above).
+fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegistry) -> CliEntryShape {
+    let Type::Named(name) = ty else {
+        return CliEntryShape::Invalid;
+    };
+    if reg.implements_trait(name, "Cli") {
+        return CliEntryShape::Struct;
+    }
+    let enum_def: Option<&EnumDef> = items.iter().find_map(|i| match i {
+        Item::Enum(e) if &e.name == name => Some(e),
+        _ => None,
+    });
+    let Some(e) = enum_def else {
+        return CliEntryShape::Invalid;
+    };
+    let mut bad = Vec::new();
+    for v in &e.variants {
+        let ok = matches!(
+            &v.payload,
+            VariantPayload::Single(Type::Named(p), _) if reg.implements_trait(p, "Cli")
+        );
+        if !ok {
+            bad.push(e1307(&v.name, v.name_span));
+        }
+    }
+    if bad.is_empty() {
+        CliEntryShape::Enum
+    } else {
+        CliEntryShape::EnumBadVariants(bad)
+    }
+}
+
+/// E0101 (D-CLIFLAG1 wording): neither `fn main` nor a qualifying `fn run` exists.
+fn no_main_or_run_error() -> Diagnostic {
+    Diagnostic::error(
+        "E0101",
+        "this program has no `main` function".to_string(),
+        "running a program starts at `fn main`, and the entry file doesn't define one (a typed \
+         `fn run(args: T)` also works, when `T` is `@[Cli]`-derived — D-CLIFLAG1)"
+            .to_string(),
+        "add `fn main() { ... }` to the entry file".to_string(),
+        None,
+    )
+}
 
 fn package_scope_for(path: &Path, project_root: &Path) -> PathBuf {
     let norm_path = normalize_sem_path(path);
@@ -989,6 +1049,10 @@ pub(crate) fn check_bundle_opts(
         // now that the trait registry resolves field/variant types — keeps the emitted
         // `impl`s rustc-clean (I2).
         diags.extend(validate_serde_items(&module.items, &st.trait_reg));
+        // D-CLIFLAG1: validate `@[Cli]`-derived structs (E1305/E1306), same
+        // timing as the serde pass above (trait registry must be built so
+        // `Cli` is visible on `s.derives`).
+        diags.extend(validate_cli_items(&module.items, &st.trait_reg));
         // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
         diags.extend(check_schema_migrations(&module.items, &bundle.project_root));
         // c129 (D-CAP4/D-CAP6/D-CAP8): capability-freeze drift pass (E0912). Runs
@@ -1469,27 +1533,45 @@ pub(crate) fn check_bundle_opts(
 
     let entry = &states[bundle.entry];
     if mode == CompileMode::Run || mode == CompileMode::Eval {
-        if !entry.funcs.contains_key("main") {
-            diags.push(Diagnostic::error(
-                "E0101",
-                "this program has no `main` function".to_string(),
-                "running a program starts at `fn main`, and the entry file doesn't define one"
-                    .to_string(),
-                "add `fn main() { ... }` to the entry file".to_string(),
-                None,
-            ));
-        } else if let Some(sig) = entry.funcs.get("main") {
-            // E0122: in Run mode main must have no params and no return type.
-            // In Eval mode a return type is allowed (e.g. `pure fn main() -> Int`).
-            if mode == CompileMode::Run && (!sig.params.is_empty() || sig.return_type.is_some()) {
-                diags.push(Diagnostic::error(
-                    "E0122",
-                    "`main` takes no parameters and returns nothing".to_string(),
-                    "`main` is where running starts; nothing calls it with values".to_string(),
-                    "write it as: fn main() { ... }".to_string(),
-                    None,
-                ));
+        let entry_items = &bundle.modules[bundle.entry].items;
+        if entry.funcs.contains_key("main") {
+            if let Some(sig) = entry.funcs.get("main") {
+                // E0122: in Run mode main must have no params and no return type.
+                // In Eval mode a return type is allowed (e.g. `pure fn main() -> Int`).
+                if mode == CompileMode::Run
+                    && (!sig.params.is_empty() || sig.return_type.is_some())
+                {
+                    diags.push(Diagnostic::error(
+                        "E0122",
+                        "`main` takes no parameters and returns nothing".to_string(),
+                        "`main` is where running starts; nothing calls it with values"
+                            .to_string(),
+                        "write it as: fn main() { ... }".to_string(),
+                        None,
+                    ));
+                }
             }
+        } else if let Some(run_fn) = entry_items.iter().find_map(|i| match i {
+            Item::Func(f) if f.name == "run" => Some(f),
+            _ => None,
+        }) {
+            // D-CLIFLAG1: `run` is a second entry-point name, live only when it
+            // takes exactly one parameter shaped like a CLI spec (a `@[Cli]`
+            // struct, or an enum of `@[Cli]` payloads — S12). Any other arity
+            // (including zero, S12's "`fn run()` stays byte-identical") makes
+            // `run` an ordinary function — not an entry — same "no main" story.
+            if run_fn.params.len() == 1 {
+                let param = &run_fn.params[0];
+                match cli_entry_param_shape(entry_items, &param.ty, &entry.trait_reg) {
+                    CliEntryShape::Struct | CliEntryShape::Enum => {}
+                    CliEntryShape::EnumBadVariants(bad) => diags.extend(bad),
+                    CliEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),
+                }
+            } else {
+                diags.push(no_main_or_run_error());
+            }
+        } else {
+            diags.push(no_main_or_run_error());
         }
     }
     match mode {
@@ -1605,7 +1687,22 @@ pub(crate) fn check_bundle_opts(
         }
     }
 
-    let (used_core, usage_spans) = collect_used_core(bundle, &states);
+    let (mut used_core, usage_spans) = collect_used_core(bundle, &states);
+    // D-CLIFLAG1: a `@[Cli]`-derived struct's generated `__jet_cli_spec_*`/
+    // `__jet_cli_decode_*` functions (and the synthesized `fn main` for a
+    // typed `fn run`) call straight into `core.args`'s `JetArgsSpec`/
+    // `JetParsedArgs` prelude — but they're pure codegen text, not a Jet
+    // method call `collect_used_core` can see by walking function bodies.
+    // Force the same `CORELIB_PRELUDE` inclusion a hand-written
+    // `use core.args` would trigger (any key works; the caller only checks
+    // "is this set empty").
+    if bundle
+        .modules
+        .iter()
+        .any(|m| m.items.iter().any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "Cli"))))
+    {
+        used_core.insert("core.args::spec".to_string());
+    }
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     (

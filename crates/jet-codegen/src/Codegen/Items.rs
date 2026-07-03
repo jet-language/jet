@@ -1,8 +1,8 @@
 use super::*;
 use crate::Generics;
 use crate::AST::{
-    ConstAttr, DistinctDef, EnumDef, Expr, Field, Func, ImplDef, Marker, RustConstKind, StrPart,
-    StructDef, TraitImplBlock, Type, Variant, VariantPayload,
+    ConstAttr, DistinctDef, EnumDef, Expr, Field, Func, ImplDef, Item, Marker, RustConstKind,
+    StrPart, StructDef, TraitImplBlock, Type, Variant, VariantPayload,
 };
 use std::collections::HashMap;
 
@@ -244,6 +244,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         ));
     }
     emit_struct_serde(cx, s, out);
+    emit_struct_cli(cx, s, out);
     if s.layout == Some(crate::AST::StructLayout::Columnar) {
         emit_columnar_storage(cx, s, out);
     }
@@ -350,6 +351,235 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
             "impl user_Decode for {cn} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n        let __xs: Vec<user_{name}> = <Vec<user_{name}> as user_Decode>::jet_decode(__t)?;\n        Ok(Self::from_aos(__xs))\n    }}\n}}\n\n"
         ));
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// D-CLIFLAG1 (c7cliflag): `@[Cli]` derive codegen — sibling of the
+// `@[Codable]` serde codegen just above, generating onto `core.args`'s
+// `ArgsSpec`/`ParsedArgs` builder (the same `jet_args_*`/`jet_parsed_*`
+// prelude functions a hand-written `.flag()/.option()` chain compiles to,
+// I8: no second parser). Field-shape validation already ran in sema
+// (`Sema::CheckerCli::validate_cli_items`, E1305/E1306) — every field
+// reaching this function is a supported shape; the `_ => unreachable!()`
+// arms below are a real invariant, not a TODO.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// D-CLIFLAG1: is `ty` one of the scalar types a CLI flag can hold?
+fn is_cli_scalar(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::Float | Type::Bool | Type::String)
+        || matches!(ty, Type::Named(n) if n == "Path")
+}
+
+/// D-CLIFLAG1: a runtime expression converting an owned `String` (from
+/// `ParsedArgs`) into `ty`. `Int`/`Float` are fallible (`return Err(...)`
+/// on a bad value, in the same "core.args runtime error" voice as
+/// `jet_args_parse`'s own messages — no new diagnostic code, I8); `String`
+/// and `Path` are infallible conversions.
+fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str) -> String {
+    match ty {
+        Type::Int => format!(
+            "match {var}.parse::<i64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
+        ),
+        Type::Float => format!(
+            "match {var}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {flag:?}, {var}, __spec.help())) }}"
+        ),
+        Type::String => format!("{var}.clone()"),
+        Type::Named(n) if n == "Path" => format!("jet_path_from(&{var})"),
+        _ => unreachable!("is_cli_scalar gates this to Int/Float/String/Path"),
+    }
+}
+
+/// D-CLIFLAG1: emit `__jet_cli_spec_<Name>`/`__jet_cli_decode_<Name>` for a
+/// `@[Cli]`-derived struct. See the pinned field-mapping rule in
+/// docs/spec/spec.md ("Typed entry-signature CLI parsing (D-CLIFLAG1)").
+fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
+    if !s.derives.iter().any(|(t, _)| t == "Cli") {
+        return;
+    }
+    let cn = user_type_rust(&s.name);
+
+    let mut spec_body = String::new();
+    spec_body.push_str("    let __s = jet_args_spec();\n");
+    spec_body.push_str(
+        "    let __s = jet_args_flag(__s, &\"help\".to_string(), &\"show this help and exit\".to_string());\n",
+    );
+    let mut decode_lines = String::new();
+
+    for f in &s.fields {
+        let flag = f.name.replace('_', "-");
+        let help = serde_marker(&f.serde_markers, crate::Syntax::CONTRACT_DOC)
+            .and_then(marker_str_arg)
+            .unwrap_or_else(|| format!("value for --{}", flag));
+        let metavar = flag.replace('-', "_").to_uppercase();
+        let m = mangle(&f.name);
+
+        match &f.ty {
+            Type::Bool => {
+                spec_body.push_str(&format!(
+                    "    let __s = jet_args_flag(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
+                ));
+                decode_lines.push_str(&format!(
+                    "    let {m}: bool = jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
+                ));
+            }
+            Type::Option(inner) if is_cli_scalar(inner) => {
+                spec_body.push_str(&format!(
+                    "    let __s = jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
+                ));
+                let rust = cx.rust_type(inner);
+                let conv = cli_scalar_from_string(inner, "__v", &flag);
+                decode_lines.push_str(&format!(
+                    "    let {m}: Option<{rust}> = match jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => Some({conv}), None => None }};\n"
+                ));
+            }
+            ty if is_cli_scalar(ty) => {
+                spec_body.push_str(&format!(
+                    "    let __s = jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
+                ));
+                let rust = cx.rust_type(ty);
+                let conv = cli_scalar_from_string(ty, "__v", &flag);
+                let absent = match field_default_rust(f) {
+                    Some(d) => d,
+                    None => format!(
+                        "return Err(format!(\"missing required flag --{{}}\\n\\n{{}}\", {flag:?}, __spec.help()))"
+                    ),
+                };
+                decode_lines.push_str(&format!(
+                    "    let {m}: {rust} = match jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => {conv}, None => {absent} }};\n"
+                ));
+            }
+            _ => unreachable!(
+                "Sema::CheckerCli::validate_cli_items only allows Bool/Option<scalar>/scalar fields on a @[Cli] struct"
+            ),
+        }
+    }
+    spec_body.push_str("    __s\n");
+
+    out.push_str(&format!(
+        "fn __jet_cli_spec_{name}() -> JetArgsSpec {{\n{spec_body}}}\n\n",
+        name = s.name
+    ));
+
+    let inits: Vec<String> = s.fields.iter().map(|f| mangle(&f.name)).collect();
+    out.push_str(&format!(
+        "fn __jet_cli_decode_{name}(__spec: &JetArgsSpec, __parsed: &JetParsedArgs) -> Result<{cn}, String> {{\n{decode_lines}    Ok({cn} {{ {inits} }})\n}}\n\n",
+        name = s.name,
+        inits = inits.join(", ")
+    ));
+}
+
+/// D-CLIFLAG1: `fn run(args: T)` / `fn run(cmd: Enum)` is a second entry-point
+/// name (S12), live only when the entry file has no `fn main` and `run`'s one
+/// parameter is a `@[Cli]` struct or an enum of `@[Cli]` payloads (sema
+/// already enforced this shape — `Sema::Bundle`'s entry check, E0101/E1308 —
+/// so this function can assume it holds and just emit `fn main`). Generates
+/// down onto the same `__jet_cli_spec_*`/`__jet_cli_decode_*` functions
+/// `emit_struct_cli` produced, and the same `core.args` runtime surface a
+/// hand-written `.parse(io.args())` call would hit (I8: no second parser).
+pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String) {
+    let has_main = items
+        .iter()
+        .any(|i| matches!(i, Item::Func(f) if f.name == "main"));
+    if has_main {
+        return;
+    }
+    let Some(run_fn) = items.iter().find_map(|i| match i {
+        Item::Func(f) if f.name == "run" => Some(f),
+        _ => None,
+    }) else {
+        return;
+    };
+    if run_fn.params.len() != 1 {
+        return;
+    }
+    let param_ty = run_fn.params[0].ty.clone();
+    let Type::Named(name) = &param_ty else {
+        return;
+    };
+    let conv = cx
+        .sigs
+        .get("run")
+        .and_then(|params| params.first())
+        .map(|(c, _)| *c)
+        .unwrap_or(run_fn.params[0].convention);
+    let by_ref = rust_param_type(cx, conv, &param_ty).starts_with('&');
+    let arg_expr = |value: &str| -> String {
+        if by_ref {
+            format!("&{value}")
+        } else {
+            value.to_string()
+        }
+    };
+
+    if let Some(s) = items.iter().find_map(|i| match i {
+        Item::Struct(s) if &s.name == name => Some(s),
+        _ => None,
+    }) {
+        if s.derives.iter().any(|(t, _)| t == "Cli") {
+            out.push_str(&format!(
+                "fn main() {{\n    let __argv = jet_std_io_args();\n    let __spec = __jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match __jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ user_run({call_arg}); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                name = name,
+                call_arg = arg_expr("__args"),
+            ));
+        }
+        return;
+    }
+
+    if let Some(e) = items.iter().find_map(|i| match i {
+        Item::Enum(e) if &e.name == name => Some(e),
+        _ => None,
+    }) {
+        emit_cli_subcommand_entry(cx, e, &arg_expr, out);
+    }
+}
+
+/// D-CLIFLAG1: the `enum Cmd { Serve(ServeArgs) Import(ImportArgs) }` case.
+/// The first positional token picks the variant by its lowercased name; the
+/// rest of argv is re-parsed against that variant's own `@[Cli]` spec. Given
+/// zero arguments (no subcommand token at all — the shape the zero-arg
+/// golden-example convention exercises), the generated `main` prints the
+/// command list and exits 0 rather than erroring: a bare invocation asking
+/// "what can this program do" is not a user mistake.
+fn emit_cli_subcommand_entry(
+    cx: &Cx,
+    e: &EnumDef,
+    arg_expr: &dyn Fn(&str) -> String,
+    out: &mut String,
+) {
+    let cmd_names: Vec<String> = e
+        .variants
+        .iter()
+        .map(|v| v.name.to_lowercase())
+        .collect();
+    let usage_lines = cmd_names
+        .iter()
+        .map(|c| format!("  {c}"))
+        .collect::<Vec<_>>()
+        .join("\\n");
+
+    let mut arms = String::new();
+    for v in &e.variants {
+        let VariantPayload::Single(Type::Named(payload_name), _) = &v.payload else {
+            // Sema's E1307 already rejects this shape; unreachable at codegen.
+            continue;
+        };
+        let tag = mangle(&v.name);
+        let ctor = format!("user_{}::{}(__payload)", e.name, tag);
+        arms.push_str(&format!(
+            "        {sub:?} => {{\n            let __spec = __jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match __jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{ user_run({call_arg}); }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            sub = v.name.to_lowercase(),
+            payload = payload_name,
+            call_arg = arg_expr(&ctor),
+        ));
+    }
+    let _ = cx;
+
+    out.push_str(&format!(
+        "fn main() {{\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
+        usage = usage_lines,
+        arms = arms,
+        cmds = cmd_names.join(", "),
+    ));
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
