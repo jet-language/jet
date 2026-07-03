@@ -1477,3 +1477,22 @@ fn main() {
 ";
     assert_fmt_stable(src, "view call range args");
 }
+
+#[test]
+fn fmt_preserves_uninit_sentinel() {
+    // D-UNINIT-SENTINEL1: `name: Type := uninit` — the binding's `init` AST
+    // node is a harmless never-evaluated placeholder, so the formatter must
+    // special-case `b.uninit` and print the `uninit` keyword literally
+    // instead of formatting the placeholder (own-CLAUDE-memory rule: new
+    // syntax needs a formatter round-trip test, not just a parser).
+    let src = "\
+use core.mem
+
+fn main() {
+    n: Int := uninit
+    n = 99
+    print(n)
+}
+";
+    assert_fmt_stable(src, "uninit sentinel binding");
+}

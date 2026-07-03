@@ -838,9 +838,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
         }
         Stmt::Val(b) => {
-            // D-UNINIT1 (ratified 2026-06-21, opt C): lower `#Uninit name: T` to
+            // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: lower
+            // `name: T := uninit` to
             //   `let mut name: T = unsafe { std::mem::MaybeUninit::<T>::uninit().assume_init() };`
-            // The source's `use core.mem` + `#Uninit` is the expert-tier opt-in (I1: no
+            // The source's `use core.mem` + `:= uninit` is the expert-tier opt-in (I1: no
             // `unsafe` in generated code without a source-level gate). Sema proved
             // write-before-read (E0420), so every subsequent read is post-write — the
             // `assume_init()` at declaration yields garbage bytes that are always
@@ -849,7 +850,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             if b.uninit {
                 let ty =
                     b.ty.as_ref()
-                        .expect("E0421 ensures #Uninit binding has a type");
+                        .expect("E0421 ensures a `:= uninit` binding has a type");
                 let rust_ty = cx.rust_type(ty);
                 let init_str = format!(
                     "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",

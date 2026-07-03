@@ -602,7 +602,14 @@ impl<'a> Fmt<'a> {
             });
         }
         self.write(" ");
-        self.fmt_expr(&b.init, Prec::OrFallback);
+        // D-UNINIT-SENTINEL1: `b.init` is a harmless never-evaluated placeholder
+        // for a `:= uninit` binding — print the `uninit` keyword literally
+        // instead of formatting the placeholder expression.
+        if b.uninit {
+            self.write(Syntax::KW_UNINIT);
+        } else {
+            self.fmt_expr(&b.init, Prec::OrFallback);
+        }
     }
 
     fn fmt_bind_pattern(&mut self, pat: &BindPattern) {

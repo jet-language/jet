@@ -1,6 +1,8 @@
-// D-UNINIT1 (ratified 2026-06-21): `#Uninit` opts out of automatic zero-fill for a
-// binding, skipping the default initialisation for raw performance. Gated by
-// `use core.mem`; sema proves every read happens after a write on all paths (E0420).
+// D-UNINIT-SENTINEL1 (ratified 2026-07-02; supersedes D-UNINIT1's `#Uninit`
+// marker): `:= uninit` opts out of automatic zero-fill for a binding,
+// skipping the default initialisation for raw performance. Gated by
+// `use core.mem`; sema proves every read happens after a write on all paths
+// (E0420).
 //
 // The canonical use case is large fixed buffers filled by I/O calls — a real
 // syscall-style fill avoids zero-initializing memory that is immediately overwritten.
@@ -9,12 +11,12 @@ use core.mem
 
 fn main() {
     // A scalar left uninit: the compiler proves `n` is written before `print(n)`.
-    #Uninit n: Int
+    n: Int := uninit
     n = 99
     print(n)
 
     // Both branches write `m`, so every read path is provably post-write.
-    #Uninit m: Int
+    m: Int := uninit
     if 1 > 0 {
         m = 10
     } else {

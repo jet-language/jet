@@ -1047,10 +1047,11 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 #[allow(unreachable_patterns)]
                 Some(_) => false,
                 None => {
-                    // D-UNINIT1 (ratified 2026-06-21, opt C): an `#Uninit` binding needs no
-                    // init expression to be in-subset — lower.rs emits
-                    // `MaybeUninit::uninit().assume_init()` verbatim (the placeholder
-                    // `Expr::Int(0, …)` init is never evaluated or lowered).
+                    // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: a
+                    // `:= uninit` binding needs no init expression to be in-subset —
+                    // lower.rs emits `MaybeUninit::uninit().assume_init()` verbatim
+                    // (the placeholder `Expr::Int(0, …)` init is never evaluated or
+                    // lowered).
                     //
                     // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. Sema
                     // evaluates the value into `b.ct` and the AST `emit_let` emits it as

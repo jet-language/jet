@@ -588,8 +588,9 @@ impl<'a> Checker<'a> {
                 }
                 let vt = self.infer(value);
                 self.note_move_if_direct_ident(value);
-                // D-UNINIT1: a plain `name = …` initializes a `#Uninit` binding; a
-                // compound `name += …` reads it first, so it's a read-before-write.
+                // D-UNINIT-SENTINEL1: a plain `name = …` initializes a `:= uninit`
+                // binding; a compound `name += …` reads it first, so it's a
+                // read-before-write.
                 if let LValue::Local { name, name_span } = &*target {
                     if self.uninit.contains_key(name) {
                         if is_compound {
@@ -597,7 +598,7 @@ impl<'a> Checker<'a> {
                                 "E0420",
                                 format!("`{}` may be read before it is given a value", name),
                                 format!(
-                                    "`{}+=` reads `{}` first, but it was declared `#Uninit` and has no value yet",
+                                    "`{}+=` reads `{}` first, but it was declared `:= uninit` and has no value yet",
                                     name, name
                                 ),
                                 format!("give `{}` a value with `{} = …` before updating it", name, name),
@@ -2184,9 +2185,10 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_if(&mut self, ifs: &mut IfStmt) {
         let before = self.moved.clone();
         let mut after = before.clone();
-        // D-UNINIT1: definite-assignment merge. A `#Uninit` name is initialized
-        // after the `if` only if it is written on *every* path; it stays uninit if
-        // still-uninit in any branch (or, with no `else`, on the fall-through).
+        // D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): definite-assignment
+        // merge. A `:= uninit` name is initialized after the `if` only if it is
+        // written on *every* path; it stays uninit if still-uninit in any branch
+        // (or, with no `else`, on the fall-through).
         let before_u = self.uninit.clone();
         let mut after_u: HashMap<String, Span> = HashMap::new();
         let bindings = self.check_condition_with_bindings(&mut ifs.cond);
@@ -2788,9 +2790,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// D-UNINIT1 (opt C): `#Uninit name: Type` — gate on `use core.mem`, restrict
-    /// to plain-data types (E0423), declare the binding, and record it as
-    /// not-yet-written so the dataflow can prove write-before-read (E0420).
+    /// D-UNINIT-SENTINEL1: `name: Type := uninit` — gate on `use core.mem`,
+    /// restrict to plain-data types (E0423), declare the binding, and record
+    /// it as not-yet-written so the dataflow can prove write-before-read
+    /// (E0420). Reuses D-UNINIT1's engine unchanged; only the surface syntax
+    /// (and this function's diagnostic wording) moved off the retired
+    /// `#Uninit` marker.
     pub(crate) fn check_uninit_binding(&mut self, b: &mut Binding) {
         let has_mem = self
             .core_imports
@@ -2799,10 +2804,10 @@ impl<'a> Checker<'a> {
         if !has_mem {
             self.diags.push(Diagnostic::error(
                 "E0424",
-                format!("`#{}` needs the low-level memory tier", Syntax::ATTR_UNINIT),
+                format!("`{}` needs the low-level memory tier", Syntax::KW_UNINIT),
                 format!(
-                    "`#{}` skips the automatic zero-fill — an expert-tier operation",
-                    Syntax::ATTR_UNINIT
+                    "`{}` skips the automatic zero-fill — an expert-tier operation",
+                    Syntax::KW_UNINIT
                 ),
                 format!(
                     "add `use {}` at the top of this file to opt in",
@@ -2822,7 +2827,7 @@ impl<'a> Checker<'a> {
         if !is_pod_uninit_type(&ty) {
             self.diags.push(Diagnostic::error(
                 "E0423",
-                format!("`#{}` needs a plain-data type", Syntax::ATTR_UNINIT),
+                format!("`{}` needs a plain-data type", Syntax::KW_UNINIT),
                 format!(
                     "`{}` may own heap memory or need cleanup, so leaving it uninitialized is unsafe",
                     ty.show()
@@ -2848,9 +2853,10 @@ impl<'a> Checker<'a> {
         self.uninit.insert(b.name.clone(), b.name_span);
     }
 
-    /// D-UNINIT1: clear an `#Uninit` binding's not-yet-written flag when it is
-    /// passed as a `mut` argument (the fill case) — the callee writes it. Call
-    /// before inferring the args so the read-hook doesn't flag the fill site.
+    /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): clear a `:= uninit`
+    /// binding's not-yet-written flag when it is passed as a `mut` argument (the
+    /// fill case) — the callee writes it. Call before inferring the args so the
+    /// read-hook doesn't flag the fill site.
     pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
         if self.uninit.is_empty() {
             return;
@@ -3543,7 +3549,7 @@ impl<'a> Checker<'a> {
                         "E0420",
                         format!("`{}` may be read before it is given a value", name),
                         format!(
-                            "`{}` was declared `#Uninit` and has no value yet — `++`/`--` read it first",
+                            "`{}` was declared `:= uninit` and has no value yet — `++`/`--` read it first",
                             name
                         ),
                         format!("give `{}` a value with `{} = …` before updating it", name, name),
@@ -3691,9 +3697,10 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// D-UNINIT1: a `#Uninit` binding is restricted to plain-data ("POD") types —
-/// no heap ownership, no Drop glue — so an uninitialized value can never expose
-/// freed/owned state. v1 allows scalars, `Char`, `U8`, and fixed arrays of those.
+/// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): a `:= uninit` binding is
+/// restricted to plain-data ("POD") types — no heap ownership, no Drop glue —
+/// so an uninitialized value can never expose freed/owned state. v1 allows
+/// scalars, `Char`, `U8`, and fixed arrays of those.
 pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char => true,

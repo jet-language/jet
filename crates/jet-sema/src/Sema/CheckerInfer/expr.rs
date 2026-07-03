@@ -427,13 +427,13 @@ impl<'a> Checker<'a> {
                     self.moved.remove(name); // report once
                     return None;
                 }
-                // D-UNINIT1: reading a `#Uninit` binding before it is written.
+                // D-UNINIT-SENTINEL1: reading a `:= uninit` binding before it is written.
                 if self.uninit.contains_key(name) {
                     self.diags.push(Diagnostic::error(
                         "E0420",
                         format!("`{}` may be read before it is given a value", name),
                         format!(
-                            "`{}` was declared `#Uninit`, so it holds no value until you write to it — this read could see garbage",
+                            "`{}` was declared `:= uninit`, so it holds no value until you write to it — this read could see garbage",
                             name
                         ),
                         format!(

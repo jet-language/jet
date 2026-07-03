@@ -21,7 +21,7 @@ separate tracking again.
 | #125 | JIT tier-1a parity | Cranelift dev-loop JIT must converge toward `tir_covers` parity |
 | #126 | Concurrency runtime | M:N scheduler, native parkers, taskgroup combinators, select, deadlines, cancellation, observability |
 | #134 | Reactive UI stack | signals, renderer, typed styles, component kit, motion, a11y, web/TUI/native backends |
-| #1 | Memory/allocation controls | arenas, labeled `#Ref`, explicit buffers/allocators, `#Uninit`, opt-in GC |
+| #1 | Memory/allocation controls | arenas, labeled `#Ref`, explicit buffers/allocators, `:= uninit`, opt-in GC |
 | #117 | Core library breadth | DB driver interface, YAML, Unicode text, compression, linalg |
 | #64 | Crypto/secrets | misuse-resistant envelopes, algorithm agility, TTL/rotting secrets |
 | #65 | Precise numerics | BigInt, Decimal, float-money lint |

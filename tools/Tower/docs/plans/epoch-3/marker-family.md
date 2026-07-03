@@ -96,8 +96,11 @@ sema is separate cards (c8syntaxwave); this card only fixes the spelling + regis
 
 `#Unsafe` `#Impure` `#Reactive` `#Test` `#Bench` `#Todo` `#Tainted` `#Sanitizer`
 `#State` `#Transition` `#Caps` `#Grant` `#Transact` `#Target` `#Wasm` `#Js`
-`#WasmExport` `#Html` `#Uninit` `#Ref` `#UnitFamily` `#SingleUse` `#Layout`
+`#WasmExport` `#Html` `#Ref` `#UnitFamily` `#SingleUse` `#Layout`
 `#Suppress` `#Extern` `#Bindgen` `#Caller` `#(effect …)`.
+(`#Uninit` retired by D-UNINIT-SENTINEL1 — spelling moved to the `uninit`
+contextual keyword, `name: Type := uninit`; the old marker is now a hard
+parse error, E0426.)
 
 Serde **field + container** markers stay `#` (D-MARKERMOVE1=B: "wire-format machinery,
 not promises"): `#Rename` `#Skip` `#Default` `#Flatten` `#RenameAll`

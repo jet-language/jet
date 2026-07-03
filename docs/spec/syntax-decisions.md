@@ -807,10 +807,17 @@ primitive (D-CASTPTR1); no compact pointer-chain syntax (D-POINTERCHAIN1).
 Generated `unsafe` appears only inside user-gated regions + vetted internals
 (I1). Onboarding never mentions any of it.
 
-**D-UNINIT1 — Visible uninitialization**: `#Uninit buffer: [U8#4096]` skips
-zero-fill, gated behind `use core.mem` (E0424); sema proves write-before-read
-on all paths (E0420; POD-only E0423); lowers to `MaybeUninit` after the
-proof. *(sema green; codegen rides D-FIXARR1 stack arrays)*
+**D-UNINIT1 — Visible uninitialization**: skips zero-fill for a binding, gated
+behind `use core.mem` (E0424); sema proves write-before-read on all paths
+(E0420; POD-only E0423); lowers to `MaybeUninit` after the proof. *(sema
+green; codegen rides D-FIXARR1 stack arrays)*
+
+**D-UNINIT-SENTINEL1 — `uninit` contextual keyword (opt D, ratified
+2026-07-02)**: replaces D-UNINIT1's marker spelling. `buffer: [U8#4096] :=
+uninit` — `uninit` is legal only as the RHS of `:=` on a binding with an
+explicit type annotation; the flow-analysis engine (E0420/E0423/E0424) is
+unchanged, only the trigger moved. The old `#Uninit buffer: [U8#4096]`
+spelling is retired: a hard parse error (E0426) teaches the new form.
 
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
 and scope-inferred by default (the region is the arena binding's lexical

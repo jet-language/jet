@@ -2244,10 +2244,12 @@ pub struct Binding {
     /// after ordinary type checking and emitted as literal data.
     pub is_comptime: bool,
     pub ct: Option<CtValue>,
-    /// D-UNINIT1 (ratified 2026-06-21, opt C): `#Uninit name: Type` — an
-    /// uninitialized binding (no `:=`/`::` initializer), gated by `use core.mem`.
-    /// `init` is a harmless placeholder (never evaluated); sema proves write-before-read (E0420)
-    /// and codegen lowers to `MaybeUninit`. `false` for every ordinary binding.
+    /// D-UNINIT-SENTINEL1 (ratified 2026-07-02, opt D; supersedes D-UNINIT1's
+    /// `#Uninit name: Type` marker spelling): `name: Type := uninit` — an
+    /// uninitialized binding, gated by `use core.mem`. `init` is a harmless
+    /// placeholder (the `uninit` token's own span, never evaluated); sema
+    /// proves write-before-read (E0420) and codegen lowers to `MaybeUninit`.
+    /// `false` for every ordinary binding.
     pub uninit: bool,
     /// D-ALLOC2 (ratified 2026-06-21): set by sema when `init` is an
     /// `arena.alloc(value)` call, so this binding holds a scope-bound *view*

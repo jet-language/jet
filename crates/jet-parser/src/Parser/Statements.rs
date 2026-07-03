@@ -530,54 +530,32 @@ impl<'a> Parser<'a> {
     /// with no initializer, gated by `use core.mem` (E0424, checked in sema). The type
     /// annotation is required (E0421); an initializer is rejected here (E0422). Codegen
     /// lowers to `MaybeUninit::uninit().assume_init()` after sema proves write-before-read.
-    fn uninit_binding(&mut self) -> Result<Stmt, Diagnostic> {
+    /// D-UNINIT-SENTINEL1 (ratified 2026-07-02): the old `#Uninit name: Type`
+    /// marker is retired — teaching error E0426 points at the replacement
+    /// spelling `name: Type := uninit`. Mirrors the `ref[label]` → `#Ref(label)`
+    /// retirement pattern (E0060, see `Items.rs`'s struct-field parser).
+    fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
         let hash_span = self.peek().span;
         self.bump(); // `#`
-        let marker = self.bump(); // `uninit`
-        let marker_span = Span::new(hash_span.start, marker.span.end);
-        // S6-R: the marker may end its line; skip the synthetic terminator before
-        // the binding it annotates (same as `#Audit` before `#Unsafe`).
-        if matches!(self.peek().kind, TokKind::Semi) {
-            self.bump();
+        let marker = self.bump(); // `Uninit`
+        let mut end = marker.span.end;
+        let mut name_hint = String::new();
+        if let TokKind::Ident(n) = &self.peek().kind {
+            name_hint = n.clone();
+            end = self.peek().span.end;
         }
-        let (name, name_span) = self.expect_ident("for the uninitialized binding name")?;
-        if !matches!(self.peek().kind, TokKind::Colon) {
-            return Err(Diagnostic::error(
-                "E0421",
-                format!("`#{}` needs a type annotation", Syntax::ATTR_UNINIT),
-                "an uninitialized binding has no value to infer its type from, so the type must be written".to_string(),
-                format!("write `#{} {}: <Type>`, e.g. `#{} buffer: [4096]U8`", Syntax::ATTR_UNINIT, name, Syntax::ATTR_UNINIT),
-                Some(name_span),
-            ));
-        }
-        self.bump(); // `:`
-        let (ty, ty_span) = self.type_()?;
-        if matches!(self.peek().kind, TokKind::ColonColon | TokKind::ColonEq) {
-            let sigil_span = self.peek().span;
-            return Err(Diagnostic::error(
-                "E0422",
-                format!("`#{}` has no initializer", Syntax::ATTR_UNINIT),
-                format!("`#{}` declares a binding you fill in later; it cannot also be given a value here", Syntax::ATTR_UNINIT),
-                format!("drop the initializer — write `#{} {}: <Type>` and write to `{}` before reading it", Syntax::ATTR_UNINIT, name, name),
-                Some(sigil_span),
-            ));
-        }
-        self.finish_stmt()?;
-        Ok(Stmt::Val(Binding {
-            mutable: true,
-            name,
-            name_span,
-            pattern: None,
-            ty: Some(ty),
-            ty_span: Some(ty_span),
-            // Harmless placeholder — never evaluated; sema/codegen branch on
-            // `uninit` first and use `ty` for the binding's type.
-            init: Expr::Int(0, marker_span, None),
-            is_comptime: false,
-            ct: None,
-            uninit: true,
-            arena_view: false,
-        }))
+        let fix = if name_hint.is_empty() {
+            "write `name: Type := uninit`".to_string()
+        } else {
+            format!("write `{name_hint}: <Type> := uninit`")
+        };
+        Err(Diagnostic::error(
+            "E0426",
+            format!("`#{}` is retired", Syntax::ATTR_UNINIT),
+            "uninitialized storage is a fact about the initializer, not the declaration — it now reads `name: Type := uninit`".to_string(),
+            fix,
+            Some(Span::new(hash_span.start, end)),
+        ))
     }
 
     fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -1017,11 +995,11 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::Hash => {
-                // D-UNINIT1 (ratified 2026-06-21, opt C): `#Uninit name: Type` — an
-                // uninitialized binding. Sema proves write-before-read (E0420); codegen
-                // lowers to MaybeUninit. Gated by `use core.mem` (checked in sema, E0424).
+                // D-UNINIT-SENTINEL1 (ratified 2026-07-02): `#Uninit name: Type` is
+                // retired — the spelling moved to `name: Type := uninit` (D-UNINIT1's
+                // sema/codegen engine is unchanged, only the surface syntax moved).
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNINIT) {
-                    return self.uninit_binding();
+                    return self.retired_uninit_marker();
                 }
                 // D-CTX1 (ratified 2026-06-22): `#Context(field: value) { … }`.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
@@ -2313,6 +2291,34 @@ impl<'a> Parser<'a> {
                 // D-BIND4: `name: Type := expr` — explicit mutable.
                 TokKind::ColonEq => {
                     self.bump();
+                    // D-UNINIT-SENTINEL1: `name: Type := uninit` — the contextual
+                    // `uninit` keyword, legal only when it is the whole initializer
+                    // (nothing else follows on the line). Reuses the existing
+                    // sema flow-analysis engine (E0420/E0423/E0424) unchanged; only
+                    // this trigger moved from the retired `#Uninit` marker.
+                    if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
+                        && matches!(
+                            self.peek2().kind,
+                            TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                        )
+                    {
+                        let marker_span = self.bump().span; // `uninit`
+                        return Ok(Binding {
+                            mutable: true,
+                            name,
+                            name_span,
+                            pattern: None,
+                            ty,
+                            ty_span,
+                            // Harmless placeholder — never evaluated; sema/codegen
+                            // branch on `uninit` first and use `ty` for the type.
+                            init: Expr::Int(0, marker_span, None),
+                            is_comptime: false,
+                            ct: None,
+                            uninit: true,
+                            arena_view: false,
+                        });
+                    }
                     let init = self.expr()?;
                     return Ok(Binding {
                         mutable: true,
@@ -2402,6 +2408,24 @@ impl<'a> Parser<'a> {
             }
         }
         let mutable = self.expect_bind_sigil()?;
+        // D-UNINIT-SENTINEL1: `name := uninit` with no type annotation — the type
+        // can't be inferred from `uninit`, so this is E0421 (same rule the retired
+        // `#Uninit name` marker enforced).
+        if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
+            && matches!(
+                self.peek2().kind,
+                TokKind::Semi | TokKind::RBrace | TokKind::Eof
+            )
+        {
+            let uninit_span = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0421",
+                "`uninit` needs a type annotation".to_string(),
+                "an uninitialized binding has no value to infer its type from, so the type must be written".to_string(),
+                format!("write `{name}: <Type> := uninit`, e.g. `buffer: [4096]U8 := uninit`"),
+                Some(uninit_span),
+            ));
+        }
         let init = self.expr()?;
         Ok(Binding {
             mutable,

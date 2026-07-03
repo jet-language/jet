@@ -257,11 +257,12 @@ before continuing.
 | E0417 | parse | conflicting `pub` and `priv` on one item (D-VISDEFAULT2) |
 | E0418 | parse | teaching: `#PublicFile` → `#PubFile` (D-VISDEFAULT2) |
 | E0419 | sema  | `@MustUse` result ignored as a bare statement (D-MUSTUSE1) |
-| E0420 | sema  | `#Uninit` binding read before it is given a value (D-UNINIT1) |
-| E0421 | parse | `#Uninit` binding needs a type annotation (D-UNINIT1) |
-| E0422 | parse | `#Uninit` binding cannot have an initializer (D-UNINIT1) |
-| E0423 | sema  | `#Uninit` binding's type is not plain data (D-UNINIT1) |
-| E0424 | sema  | `#Uninit` used without `use core.mem` (D-UNINIT1) |
+| E0420 | sema  | `:= uninit` binding read before it is given a value (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
+| E0421 | parse | `:= uninit` binding needs a type annotation (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
+| E0422 | parse | *retired by D-UNINIT-SENTINEL1* (was: `#Uninit` binding cannot have an initializer — structurally inapplicable now that `uninit` is the initializer) |
+| E0423 | sema  | `:= uninit` binding's type is not plain data (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
+| E0424 | sema  | `:= uninit` used without `use core.mem` (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
+| E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name: Type := uninit` (D-UNINIT-SENTINEL1) |
 | E0501 | sema  | empty `[]` / `[:]` needs a context type   |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -826,20 +827,27 @@ span is embedded in the message (Jet file + line + function name).
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3005 | `@{Pre\|Post} contract failed: {msg}` — with file:line. | A `@Pre` (argument claim, checked at entry) or `@Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split). | Fix the caller (a failed `@Pre` means an argument violated the function's stated contract) or the function body (a failed `@Post` means it broke its own promise about the result). |
 
-## Uninitialized binding diagnostics (D-UNINIT1)
+## Uninitialized binding diagnostics (D-UNINIT1, spelling moved by D-UNINIT-SENTINEL1)
 
-`#Uninit name: Type` opts out of automatic zero-fill for a single binding. It is
-gated by `use core.mem` (E0424) and restricted to plain-data types (E0423). The
-compiler proves, by forward dataflow, that every read follows a write on all
-control-flow paths (E0420). Codegen lowers to `MaybeUninit::uninit().assume_init()`.
+`name: Type := uninit` opts out of automatic zero-fill for a single binding. It
+is gated by `use core.mem` (E0424) and restricted to plain-data types (E0423).
+The compiler proves, by forward dataflow, that every read follows a write on
+all control-flow paths (E0420). Codegen lowers to
+`MaybeUninit::uninit().assume_init()`.
+
+This is the same engine D-UNINIT1 shipped (ratified 2026-06-21); D-UNINIT-SENTINEL1
+(ratified 2026-07-02) only moved the surface syntax off the `#Uninit name: Type`
+marker onto the `uninit` contextual keyword. The old marker is now a hard parse
+error (E0426) pointing at the new spelling — see D-UNINIT-SENTINEL1's fixture,
+`tests/ui/uninit_marker_retired.jet`.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared `#Uninit`, so it holds no value until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
-| E0421 | `` `#Uninit` needs a type annotation ``. | An uninitialized binding has no value to infer its type from, so the type must be written. | Write `` `#Uninit {name}: <Type>` ``, e.g. `` `#Uninit buffer: [4096]U8` ``. |
-| E0422 | `` `#Uninit` has no initializer ``. | `` `#Uninit` declares a binding you fill in later; it cannot also be given a value here ``. | Drop the initializer — write `` `#Uninit {name}: <Type>` `` and write to `{name}` before reading it. |
-| E0423 | `` `#Uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
-| E0424 | `` `#Uninit` needs the low-level memory tier ``. | `` `#Uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
+| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared `:= uninit`, so it holds no value until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
+| E0421 | `` `uninit` needs a type annotation ``. | An uninitialized binding has no value to infer its type from, so the type must be written. | Write `` `{name}: <Type> := uninit` ``, e.g. `` `buffer: [4096]U8 := uninit` ``. |
+| E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
+| E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
+| E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the initializer, not the declaration — it now reads `` `name: Type := uninit` ``. | Write `` `{name}: <Type> := uninit` ``. |
 
 ## Low-level tier diagnostics (E2-M13, S58)
 

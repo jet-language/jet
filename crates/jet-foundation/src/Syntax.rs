@@ -259,11 +259,25 @@ pub const FOREIGN_UNSAFE: &str = "unsafe";
 /// requires `use core.mem`.
 pub const CORE_MEM_MODULE: &str = "core.mem";
 
-/// D-UNINIT1 (ratified 2026-06-21, opt C): the `#Uninit` binding marker —
-/// `#Uninit name: Type` declares a binding with no initializer, opting out of
-/// the default zero-fill. Gated by `use core.mem` (S58); sema proves
-/// write-before-read (E0420) and codegen lowers to `MaybeUninit`.
+/// D-UNINIT1 (ratified 2026-06-21, opt C): the `#Uninit` binding marker.
+/// **Retired by D-UNINIT-SENTINEL1** (2026-07-02) — the spelling moved to the
+/// `uninit` contextual keyword (see `KW_UNINIT` below); this constant is kept
+/// only so the parser can recognize the old marker and reject it with a
+/// teaching error (E0426) pointing at the new spelling.
 pub const ATTR_UNINIT: &str = "Uninit";
+
+/// D-UNINIT-SENTINEL1 (ratified 2026-07-02, opt D): contextual keyword
+/// `uninit`, legal only as the RHS of `:=` on a binding with an explicit type
+/// annotation — `name: Type := uninit`. Supersedes the `#Uninit name: Type`
+/// marker (D-UNINIT1); reuses that decision's sema flow-analysis engine
+/// unchanged (`CheckerCore.rs`'s uninit tracking map) — only the trigger that
+/// flips `Binding.uninit` moves from seeing the marker to seeing this word in
+/// initializer position. Still gated by `use core.mem` (E0424) and restricted
+/// to plain-data types (E0423). Contextual like `region`/`state`/`migration`:
+/// the word `uninit` stays usable as an ordinary identifier everywhere else;
+/// the lexer emits it as a plain `Ident`, and only the parser's initializer
+/// position recognizes it.
+pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL1
 
 /// D-REFSTRUCT1 (ratified 2026-06-28): stored-reference field marker —
 /// `#Ref(owner) field: T` stores a view into a named owner; sema proves the
@@ -2024,7 +2038,9 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_JS,
     ATTR_WASM_EXPORT,
     ATTR_HTML,
-    ATTR_UNINIT,
+    // ATTR_UNINIT intentionally absent (D-UNINIT-SENTINEL1): `#Uninit` is
+    // retired outright, not merely on the wrong plane, so `@Uninit` isn't
+    // taught "add `#`" — it falls through to an ordinary unknown-marker error.
     ATTR_REF,
     ATTR_UNIT_FAMILY,
     ATTR_SINGLE_USE,

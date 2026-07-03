@@ -700,10 +700,10 @@ pub(crate) struct Checker<'a> {
     /// escape). Mirrors `arena_views`'s shape; kept separate so the arena
     /// mechanism (E0631/E0632, its own wording and drop-tracking) stays untouched.
     list_views: HashMap<String, ListViewInfo>,
-    /// D-UNINIT1 (ratified 2026-06-21): `#Uninit` bindings not yet definitely
-    /// written — maps name → the `#Uninit` decl span. A read while still in this
-    /// map is E0420 (write-before-read proof); a write clears it. Branch-merged
-    /// in `check_if` (intersection of "initialized").
+    /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: `:= uninit`
+    /// bindings not yet definitely written — maps name → the decl span. A read
+    /// while still in this map is E0420 (write-before-read proof); a write
+    /// clears it. Branch-merged in `check_if` (intersection of "initialized").
     uninit: HashMap<String, Span>,
     /// True while inferring an expression that the generated Rust will only
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
