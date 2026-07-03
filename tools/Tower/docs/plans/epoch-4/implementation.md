@@ -87,6 +87,33 @@ Diagnostic:
 
 Exit: every example in this folder parses as written.
 
+### A4. Hangar object envelope + lock schema (`D-JPK-CACHE1=A`, `D-JPK-TOOLCHAIN1=A`)
+
+Goal: freeze the cache-substitution envelope into the hangar/lock schema **now**,
+before adapters, toolchains, and lockfiles proliferate — retrofitting it later
+means migrating every hangar and lock in existence (the reason CACHE1 was
+decided early).
+
+Work:
+
+1. Add envelope fields to every realized hangar object and its `.jet/lock`
+   record: `output_hash` (content hash of the realized output tree),
+   `platform` (target triple key), `signature` slot (empty until the TLS/signing
+   card), `provenance` (resolved source ref + build recipe id). Writer/reader in
+   `Store.rs` + `WorkspaceLock.rs`; keep the human-readable `<name>-<version>-<fp>`
+   id (D-PM1).
+2. Add a `[toolchain]` lock record shape (used by `toolchain-as-dependency.md`)
+   reusing the same envelope fields — a toolchain is an ordinary hangar object.
+3. Make build scratch hangar-scoped and crash-cleaned (D-JPK-GC1); `jet hangar du`
+   reports honestly and never counts `/tmp`.
+
+Tests: `hangar_object_carries_envelope`; `lock_roundtrips_envelope`;
+`build_scratch_is_hangar_scoped`; the D-JPK-OFFLINE1 golden sweep asserts a
+lock-satisfied realize touches no network.
+
+Exit: envelope fields present in schema and round-tripped; no later migration
+needed for CACHE1/TOOLCHAIN1/ADAPTER1.
+
 ---
 
 ## Phase B — independent surfaces
@@ -319,18 +346,150 @@ Milestones:
 
 ---
 
-## Proposed: ad-hoc adapters (`D-JPK-ADAPTER1`)
+## Phase B+ — realization ecosystem (U20–U29, all ratified 2026-07-02)
 
-Not ratified. Do not implement until owner decides.
+These gates were ratified after this file's first draft. They ride Phase B/C;
+the constraints (U22/U28/U29) are asserted from Phase A onward. The build
+substrate for U20 is specified in `package-build-from-source.md` (card #99),
+which lands first in the jetpack lane — this phase consumes its `BuildRecipe`.
 
-Recommended model:
+### U20. Ad-hoc adapters (`D-JPK-ADAPTER1=A`)
 
-- Provider fetches bytes.
-- Adapter recipe turns bytes into a `Pkg`.
-- Adapter lock covers source hash, adapter text hash, helper version, platform,
-  declared tool deps, effects, and output hash.
-- Autodetect drafts recipes but never executes upstream code.
+Ratified. Adapters are `Pkg` values, not a provider kind: a recipe over fetched
+bytes, inline in `env.*` or named in `pkg.jet`, same IR and lock path as any
+package. Safety contract: read-only probe (no upstream script runs); build
+network denied except locked `fetch(url, sha256:)`; ambient commands only via
+`BuildContext` with effect provenance in `.jet/lock`; outputs under the package
+output root; build tools are `Pkg` deps; first build passes the U19 trust gate.
 
-First implementation after ratification should ship `Recipe.prebuilt` and
-`Recipe.copy`, then curated `cargo` / `go` / `node` / `cmake` / `make`, then
-expert `Recipe.build(fn(BuildContext))` once build authority is settled.
+Ship order: `Recipe.prebuilt` / `Recipe.copy` (no `BuildContext`) first, then
+curated `cargo` / `go` / `node` / `cmake` / `make`, then expert
+`Recipe.build(fn(BuildContext))` once the D-BUILDPOLICY1 build-authority slice
+lands (e5 build-as-Jet card). `jet add <ref> --adapt` drafts a recipe from
+read-only probes and never executes upstream code.
+
+**Constructor/​recipe spellings are a follow-up ballot — `D-JPK-ADAPTNAME1`
+(this card). Use internal `BuildRecipe` types until it ratifies; do not bake a
+user-facing spelling into fixtures or golden output before then.**
+
+Touch points: `Jetpack/Recipe.rs` (shared with #99), adapter lock identity
+(source hash, recipe text hash, helper version, platform, tool deps, effects,
+output hash), `jet add --adapt`.
+
+Diagnostics: `E12xx` `adapter-network-ungranted`, `adapter-output-escape`,
+`adapter-probe-only` (reuse #99's `E1236`–`E1238` build-sandbox family).
+
+Tests: probe stays read-only; prebuilt/copy realize; sandbox violations
+diagnose; adapter lock offline-reproducible.
+
+### U21. Channel refs (`D-JPK-CHANNEL1=A`)
+
+`#latest` / `#v0.x` / `#main` resolve **only** in `jet update` and first
+`jet add`; the lock always records the exact resolved identity. `jet outdated`
+is read-only. An unlocked channel ref in CI is an error.
+
+Touch points: channel parse in `RefSpec.rs`; resolve-on-update gate; `jet update`
+/ `jet outdated` verbs.
+
+Diagnostic: `E12xx` `unlocked-channel-in-ci`.
+
+Tests: channel resolves only on update; lock stays exact; CI-unlocked errors;
+`jet outdated` mutates nothing.
+
+### U22. Hangar disk contract (`D-JPK-GC1=B`)
+
+Auto-GC ages out unreferenced objects (14d default, opportunistic, no daemon);
+manual `jet gc`; honest `jet hangar du`. Lockfile/generation-reachable objects
+are never collected. Zero-`/tmp` guarantee is golden-tested. Build scratch is
+hangar-scoped and crash-cleaned. (Envelope/reachability land in A4.)
+
+Tests: unreferenced object aged out; reachable object kept; `/tmp` stays empty
+across a build+crash; `jet hangar du` matches on-disk bytes.
+
+### U23. No-Nix machines (`D-JPK-NONIX1=A`)
+
+Everything Nix-free realizes normally. A package that genuinely needs the Nix
+bridge fails with one `E12xx` naming it plus both fixes (install Nix, or
+`--adapt`). Never holds already-realized packages hostage.
+
+Touch points: provider selection reports Nix-need explicitly; diagnostic path.
+
+Diagnostic: `E12xx` `nix-bridge-required`.
+
+Tests: Nix-free env realizes with `nix` absent; bridge-needing package gives the
+two-fix error; realized packages still run.
+
+### U24. Binary cache direction (`D-JPK-CACHE1=A`)
+
+Envelope fields land in A4. This gate's *protocol/push* (output-hash-addressed
+HTTP, signed objects, hash-verified on arrival) is a later card behind the TLS
+gate — implement only the schema now; leave the signature slot empty.
+
+Tests (schema only): object/lock carry `output_hash`, `platform`, `signature`
+slot, `provenance` (covered by A4).
+
+### U25. Platform tiers (`D-JPK-PLATFORM1=A`)
+
+Linux + macOS + Windows all tier-1 native for jetpack core (hangar, core
+provider, adapters, services, secrets, trust). Stand up per-platform CI lanes in
+Phase A; a platform break is P1. The Nix bridge stays Linux/macOS (U23's
+diagnostic covers the gap); jetos stays Linux.
+
+Work: Windows/macOS CI lanes; platform-key in the envelope; path/exec
+abstractions audited for all three.
+
+Tests: hangar/core/adapter/services/secrets/trust suites run on each lane.
+
+### U26. Discovery (`D-JPK-DISCOVER1=A`)
+
+`jet search` + `jet info` over a fast **local, offline** index built from the
+same metadata the resolver uses; LSP completions/hover for package names and
+typed option fields in `env.*` modules. Follows once provider metadata is
+indexable.
+
+Touch points: local index builder; `jet search` / `jet info` verbs; LSP
+provider hooks.
+
+Tests: offline search hits the index; `jet info` shows resolved identity; LSP
+completes package names and env option fields.
+
+### U27. Failed-build debuggability (`D-JPK-BUILDDBG1=A`)
+
+`--shell-on-fail` opens a shell inside the **preserved** scratch at the failing
+step (the sole exception to the U22 cleanup rule; still GC-swept later).
+`jet explain <ref>` prints the resolution path + locked identity. `jet logs
+<pkg>` is persisted per-step with `--json`.
+
+Touch points: build runner keeps scratch on failure + registers it for GC;
+per-step log capture; `explain` / `logs` verbs.
+
+Tests: failing build preserves scratch and drops a shell; scratch later GC'd;
+`jet explain` prints the path; `jet logs --json` shape.
+
+### U28. No daemon / no root (`D-JPK-NODAEMON1=A`)
+
+Standing constraint CI asserts from Phase A: no resident daemon; no root
+(transient `sudo` only for jetos activation). Unprivileged sandboxing with an
+honest fallback warning + `sandbox require`; file-lock coordination for
+concurrent invocations. A violation requires a new ballot.
+
+Tests: no long-lived process after any verb; concurrent realizes coordinate via
+file lock; sandbox-unavailable warns (or `sandbox require` errors).
+
+### U29. Offline guarantee (`D-JPK-OFFLINE1=A`)
+
+Realize-class verbs never touch the network when the lock is satisfied.
+`--offline` turns any would-be fetch into a loud error; network-class verbs
+refuse under it. Golden test severs the network and sweeps every verb.
+
+Tests: lock-satisfied realize with network severed; `--offline` fetch errors
+loudly; `jet update` (network-class) refuses under `--offline`.
+
+---
+
+## Follow-up ballot surface (this card)
+
+- **`D-JPK-ADAPTNAME1`** — exact adapter constructor + recipe spellings
+  (`Pkg.adapt` / `Recipe.*` and friends). Open; ballot-ready. Until ratified,
+  U20 and #99's build recipe use internal `BuildRecipe` types and no user-facing
+  spelling appears in fixtures or goldens.
