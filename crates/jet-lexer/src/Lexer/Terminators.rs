@@ -77,6 +77,46 @@ fn suppresses_terminator(kind: &TokKind) -> bool {
     )
 }
 
+/// D-DOTSCOPE1: does the token at `i` (a `.`) begin a scope-member statement —
+/// `.ident { … }` or `.ident(args) { … }`? Used to break a fluent chain so the
+/// leading-dot member reads as a new statement. `expr.field { }` is never a
+/// legal chain, so this reinterpretation is unambiguous for the no-arg form; the
+/// arg form wins the scope-member reading at statement position (D-DOTSCOPE1).
+fn scope_member_starts_at(toks: &[Token], i: usize) -> bool {
+    if !matches!(toks.get(i).map(|t| &t.kind), Some(TokKind::Dot)) {
+        return false;
+    }
+    let mut j = i + 1;
+    if !matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Ident(_))) {
+        return false;
+    }
+    j += 1;
+    match toks.get(j).map(|t| &t.kind) {
+        Some(TokKind::LBrace) => true,
+        Some(TokKind::LParen) => {
+            // Scan to the matching `)`, then require a `{` immediately after.
+            let mut depth = 0usize;
+            while j < toks.len() {
+                match &toks[j].kind {
+                    TokKind::LParen => depth += 1,
+                    TokKind::RParen => {
+                        depth -= 1;
+                        if depth == 0 {
+                            j += 1;
+                            break;
+                        }
+                    }
+                    TokKind::Eof => return false,
+                    _ => {}
+                }
+                j += 1;
+            }
+            matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::LBrace))
+        }
+        _ => false,
+    }
+}
+
 /// S6-R post-pass: walk the code tokens (comments are trivia, skipped but kept
 /// in the stream) and insert a synthetic `Semi` whenever a statement-ending
 /// token is followed — across a line break — by a token that does not continue
@@ -146,7 +186,14 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                         Some(cur.span),
                     ));
                     // Do not insert a terminator; let the parser keep going.
-                } else if !suppresses_terminator(&cur.kind)
+                } else if (!suppresses_terminator(&cur.kind)
+                    // D-DOTSCOPE1: a leading `.` normally continues a fluent chain
+                    // (suppressed), but `.name { … }` / `.name(args) { … }` at the
+                    // start of a line is a scope-member statement, not a chain —
+                    // `expr.field { }` is never legal (E0335), so breaking the chain
+                    // here is unambiguous. Insert the terminator so the parser sees
+                    // a fresh statement.
+                    || scope_member_starts_at(toks, i))
                     // A closing `)` / `]` on its own line never begins a
                     // statement, so a terminator before it is never grammatical
                     // (multi-line call args / list / map). Suppress it. A `}` is

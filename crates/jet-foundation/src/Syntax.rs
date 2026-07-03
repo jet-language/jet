@@ -862,6 +862,50 @@ pub const KW_TEST: &str = "Test";
 /// at a package entry; it is not a new engine — it reuses this exact machinery.
 pub const KW_BENCH: &str = "Bench";
 
+/// D-DOTSCOPE1 (ratified 2026-07-02): scope-member vocabulary for `#Test`.
+/// Inside a `#Test { … }` body a statement-position `.name { … }` /
+/// `.name(args) { … }` (I8: the ONE spelling for scope vocabulary) resolves
+/// against this list. `.setup` runs first (init region), `.expect_fail` marks
+/// a region that must fail, `.timeout(dur)` bounds a region's elapsed time,
+/// `.skip` skips a region (or the whole test when it is the first statement).
+pub const SCOPE_TEST_SETUP: &str = "setup";
+pub const SCOPE_TEST_EXPECT_FAIL: &str = "expect_fail";
+pub const SCOPE_TEST_TIMEOUT: &str = "timeout";
+pub const SCOPE_TEST_SKIP: &str = "skip";
+
+/// D-DOTSCOPE1: recognized duration suffixes for `.timeout(<dur>)` and their
+/// nanosecond multiplier. `.timeout` reads a bare unit literal directly, so its
+/// accepted units are fixed here rather than resolved through a `#UnitFamily`
+/// (D-UNITLIT1). Returns `None` for any other suffix. `u128` so the multiply
+/// can't overflow before codegen narrows to `u64` nanos.
+pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
+    match suffix {
+        "ns" => Some(1),
+        "us" | "µs" => Some(1_000),
+        "ms" => Some(1_000_000),
+        "s" | "sec" | "secs" => Some(1_000_000_000),
+        _ => None,
+    }
+}
+
+/// D-DOTSCOPE1: the scope-member vocabulary a `#Marker { }` block declares, or
+/// `None` if the marker declares no members. Each marker that grows a member
+/// vocabulary is added here (an API decision, not a syntax one — the `.name { }`
+/// grammar is fixed). `#Test` is the only marker with members today; `#Bench`
+/// (and every other block marker) declares none, so a member statement inside
+/// it is rejected against this empty vocabulary.
+pub fn scope_members(marker: &str) -> Option<&'static [&'static str]> {
+    match marker {
+        KW_TEST => Some(&[
+            SCOPE_TEST_SETUP,
+            SCOPE_TEST_EXPECT_FAIL,
+            SCOPE_TEST_TIMEOUT,
+            SCOPE_TEST_SKIP,
+        ]),
+        _ => None,
+    }
+}
+
 /// D-TOOL2 (ratified 2026-06-17, E2-M11; PascalCase marker D-CASING1 follow-on
 /// 2026-06-21): typed hole `#Todo` — compiles everywhere, panics at runtime with
 /// file, line, and expected type. Bare lowercase `todo` (FOREIGN_TODO) is the

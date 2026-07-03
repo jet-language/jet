@@ -293,6 +293,11 @@ before continuing.
 | E0611 | sema  | `use alias.item` but item is not defined (D-MOD3) |
 | E0612 | jet   | wildcard imports (`use math.*`) are not supported |
 | E0613 | sema  | property-test (`#Test fn`) parameter has a type the runner can't generate (D-TEST1) |
+| E0614 | sema  | unknown scope member, or a member used in a marker that declares none (D-DOTSCOPE1) |
+| E0615 | sema  | a `.name { … }` scope-member statement outside a member-declaring marker block (D-DOTSCOPE1) |
+| E0616 | sema  | `.setup` is not the first statement in the test (D-DOTSCOPE1) |
+| E0617 | sema  | a scope member has the wrong argument shape (D-DOTSCOPE1) |
+| E0618 | sema  | a scope member is nested instead of a top-level statement of the marker block (D-DOTSCOPE1) |
 | E0631 | sema  | an arena `view` escapes its region — returned, stored, given away, or captured (D-ALLOC2/D-REGION1) |
 | E0632 | sema  | an arena `view` is read after its arena was `reset`/`free`d (D-ALLOC2) |
 | E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |
@@ -791,6 +796,18 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E2912 | `reactive.derived` must compute and return a value. | A derived value is recomputed from its signals, so its lambda has to return the new value (D-REACT1=B). A body that returns nothing is a side effect, not a value. | Return a value from the body, or use `reactive.effect(() => { … })` for a side effect. |
 | E2913 | a reactive {kind} can't hold a {type}. | Signals and derived values hold ordinary data so it can be copied to dependents (D-REACT1=B). A function value isn't reactive data — wrap behaviour in an effect instead. | Use a data value (number, text, list, struct, …); put behaviour in `reactive.effect`. |
 | L2901 | This `#Test` block has no assertions. | A test with no `require`, `require_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
+
+## Scope member diagnostics (D-DOTSCOPE1)
+
+Inside a `#Marker { }` block a statement-position `.name { … }` / `.name(args) { … }` resolves against that marker's declared vocabulary. `#Test`'s members are `.setup`, `.expect_fail`, `.timeout`, `.skip`.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0614 | `.{name}` isn't a member of `#{marker}`. | Inside a marker block a `.name { … }` statement must name one of that marker's declared members. `#{marker}` understands: {list}. | Use one of the listed members, or remove the block. |
+| E0615 | `.{name}` only works inside a marker block that declares it. | A leading-dot member statement resolves against the enclosing `#Marker`'s vocabulary; out here there is no such block. | Move it inside a `#Test("…") { … }` block, or write an ordinary statement. |
+| E0616 | `.setup` must be the first statement in the test. | `.setup` marks the test's initialization; anything before it would run first. | Move `.setup { … }` to the top of the block. |
+| E0617 | this scope member has the wrong arguments. | Each member has a fixed shape: `.timeout(500ms)` takes one duration, `.setup`/`.expect_fail` take none, `.skip` takes an optional reason string. | Match the member's shape, e.g. `.timeout(500ms) { … }` or `.skip("reason") { … }`. |
+| E0618 | scope members can't be nested. | Each member is a top-level region of the marker block; nesting one inside another member or a control block has no meaning. | Move the member out to the top level of the block. |
 
 ## Accessibility diagnostics (D-A11YGATE1=B, c134 Phase 6)
 

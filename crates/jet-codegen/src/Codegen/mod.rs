@@ -798,8 +798,16 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("fn main() {\n");
     out.push_str("    let mut passed = 0usize;\n");
     out.push_str("    let mut failed = 0usize;\n");
+    out.push_str("    let mut skipped = 0usize;\n");
     for (i, test) in tests.iter().enumerate() {
         let name = escape_rust_str(&test.name);
+        // D-DOTSCOPE1: a `.skip` first statement skips the WHOLE test — it never
+        // runs, reports `name: skip`, and counts as skipped (not passed/failed).
+        if whole_test_skip(test) {
+            out.push_str(&format!("    println!(\"{{}}: skip\", {});\n", name));
+            out.push_str("    skipped += 1;\n");
+            continue;
+        }
         out.push_str(&format!("    match jet_test_{}() {{\n", i));
         out.push_str("        Ok(()) => {\n");
         out.push_str(&format!(
@@ -818,7 +826,15 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
         out.push_str("        }\n");
         out.push_str("    }\n");
     }
-    out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
+    // D-DOTSCOPE1: keep the classic `N passed, M failed` summary unless a test was
+    // skipped, so existing goldens are unchanged when nothing skips.
+    out.push_str("    if skipped > 0 {\n");
+    out.push_str(
+        "        println!(\"{} passed, {} failed, {} skipped\", passed, failed, skipped);\n",
+    );
+    out.push_str("    } else {\n");
+    out.push_str("        println!(\"{} passed, {} failed\", passed, failed);\n");
+    out.push_str("    }\n");
     if coverage {
         // D-COV1: write the hit set before any `exit` (which would skip Drop).
         out.push_str("    jet_cov_dump();\n");
@@ -831,6 +847,16 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
 /// the harness needs `PROP_PRELUDE`.
 fn any_property_test(tests: &[&TestDef]) -> bool {
     tests.iter().any(|t| !t.params.is_empty())
+}
+
+/// D-DOTSCOPE1: is this test whole-test-skipped — i.e. does a `.skip` scope
+/// member appear as its FIRST statement? The whole test is then not run and
+/// reports `name: skip`. A `.skip` later in the body is a region-skip instead.
+fn whole_test_skip(test: &TestDef) -> bool {
+    matches!(
+        test.body.first(),
+        Some(crate::AST::Stmt::ScopeMember { name, .. }) if name == Syntax::SCOPE_TEST_SKIP
+    )
 }
 
 /// D-TEST1: emit the per-test functions. A unit test (`#Test "name" { … }`, no

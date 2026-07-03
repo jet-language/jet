@@ -304,6 +304,15 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
+        // D-DOTSCOPE1: a `#Test` scope-member region — check its body for purity.
+        Stmt::ScopeMember { body, .. } => {
+            for st in body {
+                if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
+                    return Some(d);
+                }
+            }
+            None
+        }
         // D-DET1: `assume_deterministic { … }` — the expert determinism-escape.
         // The whole body is asserted deterministic, so the purity post-pass does
         // not descend into it (E3401/E3403 suspended). A semantic footgun.
@@ -701,6 +710,15 @@ fn check_pure_stmt_with_path(
         // D-TERM1 (ratified 2026-06-22): live block is always impure (terminal I/O).
         // CheckerCore emits E3401 via `in_pure`; only recurse for nested violations.
         Stmt::Live { body, .. } => {
+            for st in body {
+                if let Some(d) = rec_s!(st) {
+                    return Some(d);
+                }
+            }
+            None
+        }
+        // D-DOTSCOPE1: a `#Test` scope-member region — recurse into its body.
+        Stmt::ScopeMember { body, .. } => {
             for st in body {
                 if let Some(d) = rec_s!(st) {
                     return Some(d);
@@ -1235,6 +1253,15 @@ fn walk_stmt_for_calls(
         }
         // D-TERM1 (ratified 2026-06-22): walk live block body for call-chain purity.
         Stmt::Live { body, .. } => {
+            for st in body {
+                walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                if !diags.is_empty() {
+                    return;
+                }
+            }
+        }
+        // D-DOTSCOPE1: a `#Test` scope-member region — walk its body for calls.
+        Stmt::ScopeMember { body, .. } => {
             for st in body {
                 walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
                 if !diags.is_empty() {

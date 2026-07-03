@@ -2641,6 +2641,8 @@ impl<'a> Parser<'a> {
                         Stmt::ContextBlock { span, .. } => span.end,
                         // D-TERM1 (ratified 2026-06-22): live block span end.
                         Stmt::Live { span, .. } => span.end,
+                        // D-DOTSCOPE1: `.name { … }` scope member span end.
+                        Stmt::ScopeMember { span, .. } => span.end,
                         // D-DET1: assume_deterministic block span end.
                         Stmt::AssumeDet { span, .. } => span.end,
                         // D-TXN1–D-TXN4: transaction block span end.

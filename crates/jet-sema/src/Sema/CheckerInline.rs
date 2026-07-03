@@ -213,6 +213,7 @@ impl<'a> InlineAlwaysScan<'a> {
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. }
+            | Stmt::ScopeMember { body, .. }
             | Stmt::Transact { body, .. } => self.scan_stmts(body),
             Stmt::Caps { body, .. } => self.scan_stmts(body),
             Stmt::Grant { body, .. } => self.scan_stmts(body),

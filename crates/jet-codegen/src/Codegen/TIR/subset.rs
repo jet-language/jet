@@ -1289,6 +1289,11 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
         // The body leaks into the outer scope like a region; check it on the SAME `locals`.
         Stmt::Live { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-DOTSCOPE1: a `#Test` scope member — in-subset iff its region body is.
+        // Args are literals folded at lowering, not lowered as exprs, so only the
+        // body gates the subset. Check it on the SAME `locals` (bindings from a
+        // `.setup` region leak to the rest of the test).
+        Stmt::ScopeMember { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-DET1: `assume_deterministic { … }` erases to a plain Rust block (the
         // determinism suspension is a compile-time fact, I3). Body leaks like a
         // region; check it on the SAME `locals`.

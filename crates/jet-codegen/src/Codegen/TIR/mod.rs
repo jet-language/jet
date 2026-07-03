@@ -389,6 +389,24 @@ pub enum TIfCond {
     IsNone { subj: TExpr },
 }
 
+/// D-DOTSCOPE1: which `#Test` scope member a `TStmt::ScopeMember` is.
+pub enum ScopeMemberKind {
+    /// `.setup { … }` — the body's statements are spliced inline (bindings leak
+    /// to the rest of the test), running first.
+    Setup,
+    /// `.expect_fail { … }` — the region must fail (a `require` failure or a
+    /// panic). Runs under a panic-catching boundary; if it completes cleanly the
+    /// test fails with "expected this region to fail, but it passed".
+    ExpectFail,
+    /// `.timeout(dur) { … }` — post-hoc budget in nanoseconds. The region runs to
+    /// completion, then its elapsed time is compared against the budget; over
+    /// budget fails the test. (v1: post-hoc — does not interrupt a hang.)
+    Timeout(u64),
+    /// `.skip { … }` — a region that is not executed. Emitted as `if false { … }`
+    /// so the body still type-checks but never runs.
+    Skip,
+}
+
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
 pub enum TStmt {
     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
@@ -697,6 +715,15 @@ pub enum TStmt {
     /// fall-through, early `return`, `?` propagation, and panic unwind. Codegen is dumb
     /// (I3): no decisions here, only emitting the already-checked RAII form.
     Live {
+        body: Vec<TStmt>,
+    },
+    /// D-DOTSCOPE1: a `#Test` scope-member region — `.setup` / `.expect_fail` /
+    /// `.timeout(dur)` / `.skip`. Emitted only inside a `jet test` harness fn
+    /// (`fn jet_test_N() -> Result<(), String>`); see `emit_tir_stmt` for the
+    /// per-kind lowering. Whole-test `.skip` (a `.skip` first statement) is
+    /// handled by the harness `main`, not here.
+    ScopeMember {
+        kind: ScopeMemberKind,
         body: Vec<TStmt>,
     },
     /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a transaction

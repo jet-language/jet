@@ -2133,6 +2133,28 @@ pub enum Stmt {
     /// and suspend until the next pull. Legal only in a function whose return
     /// type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 otherwise).
     Yield(Expr, Span),
+    /// D-DOTSCOPE1: a contextual scope-member statement — `.name { … }` /
+    /// `.name(args) { … }` in statement position inside a marker block
+    /// (`#Test { … }`). The member `name` resolves against the enclosing
+    /// marker's declared vocabulary (`Syntax::scope_members`); using one
+    /// outside such a block is E0615, an unknown member E0614. The required
+    /// trailing block separates it from a leading-dot enum value (D-ENUMDOT1)
+    /// and the ident-after-dot separates it from `.{ }` construction (S74).
+    ScopeMember {
+        /// The member name after the dot (`setup`, `expect_fail`, `timeout`,
+        /// `skip`).
+        name: String,
+        name_span: Span,
+        /// Call-style args, when written (`.timeout(500ms)`, `.skip("why")`).
+        args: Vec<Expr>,
+        /// The span of the whole `(…)` arg group, for arg-shape diagnostics.
+        args_span: Option<Span>,
+        /// The required trailing `{ … }` block body.
+        body: Vec<Stmt>,
+        /// The leading `.` position, anchoring the outside-scope error.
+        dot_span: Span,
+        span: Span,
+    },
 }
 
 impl Stmt {
@@ -2169,7 +2191,8 @@ impl Stmt {
             | Stmt::ContextBlock { span, .. }
             | Stmt::Live { span, .. }
             | Stmt::AssumeDet { span, .. }
-            | Stmt::Transact { span, .. } => *span,
+            | Stmt::Transact { span, .. }
+            | Stmt::ScopeMember { span, .. } => *span,
             Stmt::Yield(_, span) => *span,
             Stmt::If(ifs) => ifs.cond.span(),
         }

@@ -801,6 +801,7 @@ pub mod HotSwap;
 mod Protocol;
 mod Purity;
 mod Registration;
+mod ScopeMembers;
 pub mod Schema;
 mod SchemaMigration;
 mod State;

@@ -738,6 +738,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. }
+        | Stmt::ScopeMember { body, .. }
         | Stmt::Live { body, .. } => block(body),
         // D-CTMARKER1: comptime block erases; no handle can escape a build-time block.
         Stmt::ComptimeBlock { .. } => None,

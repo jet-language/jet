@@ -511,6 +511,10 @@ pub(crate) fn rewrite_inline_calls_stmts(
             Stmt::Live { body, .. } => {
                 rewrite_inline_calls_stmts(body, siblings, modname);
             }
+            // D-DOTSCOPE1: rewrite inline calls in a scope-member region body.
+            Stmt::ScopeMember { body, .. } => {
+                rewrite_inline_calls_stmts(body, siblings, modname);
+            }
         }
     }
 }
@@ -738,6 +742,9 @@ pub(crate) fn check_bundle_opts(
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
+        // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
+        // against each marker's declared vocabulary (E0614/E0615/E0616/E0617/E0618).
+        diags.extend(super::ScopeMembers::check(&module.items));
         let st = &mut states[idx];
         for item in &module.items {
             match item {
@@ -2024,6 +2031,10 @@ pub(crate) fn collect_core_stmts(
             // we mark it as used here.
             Stmt::Live { body, span, .. } => {
                 note_core_usage(used, spans, "core.term", Some(*span));
+                collect_core_stmts(body, imports, used, spans);
+            }
+            // D-DOTSCOPE1: collect core usage in a scope-member region body.
+            Stmt::ScopeMember { body, .. } => {
                 collect_core_stmts(body, imports, used, spans);
             }
         }

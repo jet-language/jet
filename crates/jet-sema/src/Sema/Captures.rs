@@ -104,6 +104,10 @@ pub(crate) fn walk_stmts_for_const_refs(
             Stmt::Live { body, .. } => {
                 walk_stmts_for_const_refs(body, const_names, taken);
             }
+            // D-DOTSCOPE1: walk a scope-member region body for const address refs.
+            Stmt::ScopeMember { body, .. } => {
+                walk_stmts_for_const_refs(body, const_names, taken);
+            }
         }
     }
 }
@@ -486,6 +490,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         }
         // D-TERM1 (ratified 2026-06-22): live block references same as its body.
         Stmt::Live { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
+        Stmt::ScopeMember { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
     }
 }
 
@@ -960,6 +965,13 @@ pub(crate) fn stmt_collect_captures(
         }
         // D-TERM1 (ratified 2026-06-22): collect captures from live block body.
         Stmt::Live { body, .. } => {
+            let mut body_bound = bound.clone();
+            block_collect_captures(body, &mut body_bound, read, mut_cap);
+        }
+        // D-DOTSCOPE1: a scope-member region body is its own block for capture
+        // analysis — except `.setup`, whose bindings leak; scanning a fresh clone
+        // is conservative (over-captures nothing, under-captures nothing needed).
+        Stmt::ScopeMember { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }

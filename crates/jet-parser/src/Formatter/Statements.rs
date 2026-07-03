@@ -342,6 +342,27 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-DOTSCOPE1: a scope-member statement `.name { … }` /
+            // `.name(args) { … }` inside a marker block.
+            Stmt::ScopeMember {
+                name, args, body, ..
+            } => {
+                self.write(&format!(".{}", name));
+                if !args.is_empty() {
+                    self.write("(");
+                    for (i, a) in args.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.fmt_expr(a, Prec::OrFallback);
+                    }
+                    self.write(")");
+                }
+                self.write(" {");
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
         }
     }
 

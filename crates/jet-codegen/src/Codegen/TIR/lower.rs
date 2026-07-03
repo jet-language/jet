@@ -177,6 +177,27 @@ impl LowerEnv {
 ///  - an `Ident` not in scope returns `place_of(name)` with no `&` — `ViewWrap::Bare`;
 ///  - a `Field` read returns `&(<place>)` — `ViewWrap::Addr` over the lowered field;
 ///  - anything else passes straight to `emit_expr` — `ViewWrap::Bare`.
+/// D-DOTSCOPE1: fold a `.timeout(<dur>)` argument (a bare unit literal, sema-
+/// validated) to a nanosecond budget. Falls back to 0 on the impossible shape.
+fn timeout_nanos(args: &[Expr]) -> u64 {
+    if let Some(Expr::UnitLit {
+        int, float, suffix, ..
+    }) = args.first()
+    {
+        if let Some(mult) = Syntax::duration_suffix_nanos(suffix) {
+            let nanos: u128 = if let Some(i) = int {
+                (*i as u128).saturating_mul(mult)
+            } else if let Some(f) = float {
+                (*f * mult as f64) as u128
+            } else {
+                0
+            };
+            return nanos.min(u64::MAX as u128) as u64;
+        }
+    }
+    0
+}
+
 pub(crate) fn lower_view_return(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     match e {
         Expr::Ident(name, _) => {
@@ -1424,6 +1445,29 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Live { body, .. } => TStmt::Live {
             body: lower_stmts(body, cx, env),
         },
+        // D-DOTSCOPE1: a `#Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
+        // `.skip`). Legality/args were checked in sema; here we pick the lowering
+        // kind and fold `.timeout`'s duration literal to a nanosecond budget.
+        // `.setup`'s body leaks into `env` (like a region) so its bindings are
+        // visible to the rest of the test; the others open their own scope in
+        // `emit_tir_stmt`.
+        Stmt::ScopeMember {
+            name, args, body, ..
+        } => {
+            let kind = if name == Syntax::SCOPE_TEST_SETUP {
+                ScopeMemberKind::Setup
+            } else if name == Syntax::SCOPE_TEST_EXPECT_FAIL {
+                ScopeMemberKind::ExpectFail
+            } else if name == Syntax::SCOPE_TEST_TIMEOUT {
+                ScopeMemberKind::Timeout(timeout_nanos(args))
+            } else {
+                ScopeMemberKind::Skip
+            };
+            TStmt::ScopeMember {
+                kind,
+                body: lower_stmts(body, cx, env),
+            }
+        }
         // D-DET1: `assume_deterministic { … }` erases to a plain `TStmt::Region`
         // (byte-for-byte the `Stmt::Region`/`Stmt::Caps` shape). The determinism
         // suspension is a sema-only fact; nothing runtime, no `unsafe` (I3).

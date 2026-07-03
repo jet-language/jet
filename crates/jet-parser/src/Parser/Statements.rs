@@ -994,6 +994,18 @@ impl<'a> Parser<'a> {
                     Some(span),
                 ))
             }
+            // D-DOTSCOPE1: a scope-member statement `.name { … }` /
+            // `.name(args) { … }`. The ident after the dot separates it from
+            // `.{ }` construction (S74) and the required trailing block from a
+            // leading-dot enum value (D-ENUMDOT1). Parsed context-free wherever
+            // the shape appears; sema resolves it against the enclosing marker's
+            // vocabulary (E0614) or rejects it outside a marker block (E0615).
+            TokKind::Dot
+                if matches!(&self.peek2().kind, TokKind::Ident(_))
+                    && matches!(self.peek3().kind, TokKind::LBrace | TokKind::LParen) =>
+            {
+                return self.scope_member_stmt();
+            }
             TokKind::Hash => {
                 // D-UNINIT-SENTINEL1 (ratified 2026-07-02): `#Uninit name: Type` is
                 // retired — the spelling moved to `name: Type := uninit` (D-UNINIT1's
@@ -1287,6 +1299,48 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             )),
         }
+    }
+
+    /// D-DOTSCOPE1: parse a scope-member statement `.name { … }` /
+    /// `.name(args) { … }`. Purely structural — whether `name` is a valid member
+    /// of the enclosing marker (E0614), legal here at all (E0615), correctly
+    /// positioned (E0616), correctly argued (E0617), or un-nested (E0618) is all
+    /// a sema concern. The leading `.` + ident + block/paren shape is guaranteed
+    /// by the caller's guard in `stmt()`.
+    fn scope_member_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let dot_span = self.peek().span;
+        self.bump(); // `.`
+        let (name, name_span) = self.expect_ident("for the scope-member name")?;
+        let mut args = Vec::new();
+        let mut args_span = None;
+        if matches!(self.peek().kind, TokKind::LParen) {
+            let lp = self.peek().span;
+            self.bump(); // `(`
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                loop {
+                    args.push(self.expr()?);
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    self.expect(TokKind::Comma, "between scope-member arguments")?;
+                }
+            }
+            self.expect(TokKind::RParen, "to close the scope-member arguments")?;
+            let rp_end = self.toks[self.pos - 1].span.end;
+            args_span = Some(Span::new(lp.start, rp_end));
+        }
+        self.expect(TokKind::LBrace, "to open the scope-member block")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::ScopeMember {
+            name,
+            name_span,
+            args,
+            args_span,
+            body,
+            dot_span,
+            span: Span::new(dot_span.start, end),
+        })
     }
 
     /// D-IF3: `if subject == { … }` is multi-arm value/pattern dispatch; a plain

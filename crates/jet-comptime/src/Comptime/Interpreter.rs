@@ -422,6 +422,11 @@ impl<'a> Interp<'a> {
             // D-TERM1 (ratified 2026-06-22): `live { … }` is a runtime/codegen
             // construct; the comptime interpreter has no terminal at compile time.
             Stmt::Live { span, .. } => Err(unsupported("a `live` block", *span)),
+            // D-DOTSCOPE1: `.setup`/`.expect_fail`/`.timeout`/`.skip` are `jet test`
+            // harness constructs — the comptime interpreter never runs them.
+            Stmt::ScopeMember { span, .. } => {
+                Err(unsupported("a scope-member block", *span))
+            }
             // D-DET1: `assume_deterministic { … }` is semantically transparent — it
             // only suspends the sema determinism check. The interpreter just runs
             // its body (the suspension is a no-op at comptime, which is already pure).

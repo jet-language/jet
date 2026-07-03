@@ -743,6 +743,10 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::Live { body, .. } => {
             collect_stmts(body, mp, module, ctx);
         }
+        // D-DOTSCOPE1: collect symbols from a scope-member region body.
+        AST::Stmt::ScopeMember { body, .. } => {
+            collect_stmts(body, mp, module, ctx);
+        }
         // D-IGNORERET2=A: collect symbols from suppress-must-use block body.
         AST::Stmt::SuppressMustUse { body, .. } => {
             collect_stmts(body, mp, module, ctx);

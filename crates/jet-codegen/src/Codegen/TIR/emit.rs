@@ -824,6 +824,80 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             emit_tir_stmts(body, cx, out, inner);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-DOTSCOPE1: a `#Test` scope member, emitted inside `fn jet_test_N() ->
+        // Result<(), String>`. Kind decides the framing; a `require` failure or
+        // panic inside a region returns `Err`/unwinds, which each kind handles.
+        TStmt::ScopeMember { kind, body } => {
+            let inner = indent + 1;
+            let ip = "    ".repeat(inner);
+            let ip2 = "    ".repeat(inner + 1);
+            match kind {
+                // `.setup` — no new scope: statements splice inline so bindings
+                // stay visible to the rest of the test. Runs first (sema pins it
+                // to statement one); a failure returns `Err` like any statement.
+                ScopeMemberKind::Setup => {
+                    emit_tir_stmts(body, cx, out, indent);
+                }
+                // `.expect_fail` — the region MUST fail. Run it under a panic
+                // boundary with a silenced hook; if it completes cleanly the test
+                // fails. A failure lets execution continue past the region.
+                ScopeMemberKind::ExpectFail => {
+                    out.push_str(&format!("{}{{\n", pad));
+                    out.push_str(&format!(
+                        "{}let __prev_hook = std::panic::take_hook();\n",
+                        ip
+                    ));
+                    out.push_str(&format!(
+                        "{}std::panic::set_hook(Box::new(|_| {{}}));\n",
+                        ip
+                    ));
+                    out.push_str(&format!(
+                        "{}let __ef = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {{\n",
+                        ip
+                    ));
+                    emit_tir_stmts(body, cx, out, inner + 1);
+                    out.push_str(&format!("{}Ok(())\n", ip2));
+                    out.push_str(&format!("{}}}));\n", ip));
+                    out.push_str(&format!("{}std::panic::set_hook(__prev_hook);\n", ip));
+                    out.push_str(&format!("{}if matches!(__ef, Ok(Ok(()))) {{\n", ip));
+                    out.push_str(&format!(
+                        "{}return Err(\"expected this region to fail, but it passed\".to_string());\n",
+                        ip2
+                    ));
+                    out.push_str(&format!("{}}}\n", ip));
+                    out.push_str(&format!("{}}}\n", pad));
+                }
+                // `.timeout(dur)` — v1 post-hoc: run to completion, then compare
+                // elapsed against the budget. Does not interrupt a hang.
+                ScopeMemberKind::Timeout(nanos) => {
+                    out.push_str(&format!("{}{{\n", pad));
+                    out.push_str(&format!(
+                        "{}let __start = std::time::Instant::now();\n",
+                        ip
+                    ));
+                    emit_tir_stmts(body, cx, out, inner);
+                    out.push_str(&format!("{}let __elapsed = __start.elapsed();\n", ip));
+                    out.push_str(&format!(
+                        "{}let __budget = std::time::Duration::from_nanos({});\n",
+                        ip, nanos
+                    ));
+                    out.push_str(&format!("{}if __elapsed > __budget {{\n", ip));
+                    out.push_str(&format!(
+                        "{}return Err(format!(\"timeout: region took {{:?}}, over the {{:?}} budget\", __elapsed, __budget));\n",
+                        ip2
+                    ));
+                    out.push_str(&format!("{}}}\n", ip));
+                    out.push_str(&format!("{}}}\n", pad));
+                }
+                // `.skip` (region form) — not executed. `if false` keeps the body
+                // type-checked but dead; whole-test skip is the harness's job.
+                ScopeMemberKind::Skip => {
+                    out.push_str(&format!("{}if false {{\n", pad));
+                    emit_tir_stmts(body, cx, out, inner);
+                    out.push_str(&format!("{}}}\n", pad));
+                }
+            }
+        }
         // D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
         TStmt::Reactive { closure } => {
             out.push_str(&format!(

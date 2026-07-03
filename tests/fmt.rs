@@ -1045,6 +1045,35 @@ fn main() {}
 }
 
 #[test]
+fn fmt_scope_members_stability() {
+    // D-DOTSCOPE1: `.setup` / `.expect_fail` / `.timeout(dur)` / `.skip("why")`
+    // scope-member statements must survive fmt byte-for-byte, including the
+    // duration literal and the reason string — and the terminator inserted
+    // between two members (`}` then `.name {`) must round-trip.
+    let src = "\
+fn main() {
+
+}
+
+#Test(\"members\") {
+    .setup {
+        base :: 1
+    }
+    .expect_fail {
+        require(false)
+    }
+    .timeout(500ms) {
+        require((base == 1))
+    }
+    .skip(\"later\") {
+        require(false)
+    }
+}
+";
+    assert_fmt_stable(src, "scope members");
+}
+
+#[test]
 fn fmt_explicit_binding_d_bind3_stability() {
     // D-BIND4: `name: Type :: val` (immutable) and `name: Type := val` (mutable)
     // must survive fmt unchanged.

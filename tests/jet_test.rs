@@ -38,6 +38,99 @@ fn jet_test_example_output() {
 }
 
 #[test]
+fn jet_test_members_example_output() {
+    // D-DOTSCOPE1: `.setup` / `.expect_fail` / `.timeout` / `.skip` scope members.
+    // The example exercises all four; the whole-test `.skip` reports `skip` and the
+    // summary carries a skipped count.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/test_members.jet");
+    let out = Command::new(&jet).arg("test").arg(&example).output().unwrap();
+    assert!(
+        out.status.success(),
+        "scope-member example failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let expected = fs::read_to_string(
+        root.join("examples/features/expected/tooling/test_members.test.out"),
+    )
+    .expect("test_members.test.out");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+}
+
+#[test]
+fn jet_scope_expect_fail_passing_region_fails() {
+    // D-DOTSCOPE1: an `.expect_fail` region that completes cleanly fails the test.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/scope_expect_fail_passes.jet");
+    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    assert!(!out.status.success(), "a passing expect_fail region must fail");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("FAIL"), "expected a FAIL line:\n{}", stdout);
+    assert!(
+        stderr.contains("expected this region to fail, but it passed"),
+        "expected the expect_fail message:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn jet_scope_setup_failure_fails_test() {
+    // D-DOTSCOPE1: a failure inside `.setup` fails the test on the normal path.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/scope_setup_fail.jet");
+    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    assert!(!out.status.success(), "a failing setup must fail the test");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("FAIL"), "expected a FAIL line:\n{}", stdout);
+    assert!(
+        stderr.contains("setup blew up"),
+        "expected the setup failure message:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn jet_scope_timeout_exceeded_fails() {
+    // D-DOTSCOPE1: a `.timeout` region over its (1ns) budget fails the test
+    // post-hoc — the region runs, then its elapsed time is checked.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/scope_timeout_exceeded.jet");
+    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    assert!(!out.status.success(), "an over-budget timeout must fail");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("FAIL"), "expected a FAIL line:\n{}", stdout);
+    assert!(
+        stderr.contains("timeout: region took"),
+        "expected the timeout message:\n{}",
+        stderr
+    );
+}
+
+#[test]
 fn jet_bench_example_regions() {
     // D-BENCH1: `jet bench` on a file with `#Bench` blocks times each region
     // and reports `<name>  <ns> ns/iter (...)  <ops> ops/sec`. Timing values

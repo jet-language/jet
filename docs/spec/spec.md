@@ -528,11 +528,47 @@ line per test (`name: pass` / `name: FAIL`), a summary (`N passed, M failed`),
 and exit **1** when any test fails. **`require_eq`** failures print
 `left: …, right: …` on stderr.
 
+**Scope members (D-DOTSCOPE1)** — inside a `#Test { … }` body, a
+statement-position `.name { … }` / `.name(args) { … }` resolves against the
+marker's declared vocabulary (`Syntax::scope_members`). This is the one spelling
+for scope vocabulary (I8); the parser/sema shape is generic (a marker→members
+table), so other markers can grow members later without new grammar. `#Test`
+declares four; `#Bench` (and every other block marker) declares none, so a member
+there is **E0614**. A member outside any member-declaring marker is **E0615**;
+an unknown member **E0614** (lists the vocabulary); a wrong argument shape
+**E0617**; a member nested instead of a top-level statement of the block
+**E0618**. Members only *run* under **`jet test`** — `jet run`/`jet build` ignore
+`#Test` blocks entirely (unchanged); a malformed member is still reported in any
+mode (structural check).
+
+- **`.setup { … }`** — must be the first statement (**E0616** otherwise). Its
+  statements are spliced inline and run first; a failure inside fails the test on
+  the normal path. It does **not** open a new scope — bindings made in `.setup`
+  are visible to the rest of the test body (init sugar).
+- **`.expect_fail { … }`** — the region *must* fail (a `require` failure or a
+  panic). It runs under the harness's panic-catching boundary with a silenced
+  hook; if it completes cleanly the **test** fails with `expected this region to
+  fail, but it passed`. If it fails, execution continues after the region and the
+  test can still pass.
+- **`.timeout(<dur>) { … }`** — the region must complete within the duration or
+  the test fails with a `timeout: region took …` message. v1 ships **post-hoc**
+  semantics: the region runs to completion, then its elapsed time is compared
+  against the budget (it does not interrupt a hang — out of scope). `<dur>` is a
+  bare duration literal (`ns`/`us`/`ms`/`s`); it needs no `#UnitFamily` in scope.
+- **`.skip { … }` / `.skip("reason") { … }`** — the region is **not executed**
+  (emitted as a dead `if false` block, so it still type-checks). When `.skip` is
+  the **first** statement the whole test is skipped: it reports `name: skip` and
+  the summary gains a `, K skipped` tail (the classic `N passed, M failed` line is
+  unchanged when nothing skips). A `.skip` later in the body skips only that
+  region; the rest of the test still runs.
+
 **`jet new <name>`** creates `<name>/main.jet` (hello world) and
 `<name>/.gitignore` (`build/`). No manifest (M12; opt-in).
 
-Example: `examples/features/tooling/tests.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
-`tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`.
+Example: `examples/features/tooling/tests.jet`; scope members in
+`examples/features/tooling/test_members.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
+`tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`, and the
+`scope_*` fixtures for the member fail paths.
 
 ## `#Bench` region benchmarks + perf timing (c121, D-BENCH1) — done
 

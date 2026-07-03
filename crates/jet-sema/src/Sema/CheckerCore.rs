@@ -2074,6 +2074,21 @@ impl<'a> Checker<'a> {
                 }
                 self.check_block(body, true);
             }
+            // D-DOTSCOPE1: a scope-member statement (`.setup`/`.expect_fail`/
+            // `.timeout`/`.skip` inside a `#Test` block). Member legality, args,
+            // position, and nesting are validated by the `ScopeMembers` pass; here
+            // the checker only type-checks the region body's ordinary statements.
+            // The member args (`.timeout(500ms)`, `.skip("why")`) are intentionally
+            // NOT inferred — a bare duration literal has no `#UnitFamily` in scope.
+            // `.setup` is init sugar: its bindings leak into the test scope (no new
+            // scope), so the rest of the body can use them. Every other member is
+            // its own region (a closure / block / dead branch in codegen), so its
+            // bindings are scoped — referencing them later is a normal unknown-name
+            // error, never reaching codegen.
+            Stmt::ScopeMember { name, body, .. } => {
+                let leak = name == crate::Syntax::SCOPE_TEST_SETUP;
+                self.check_block(body, !leak);
+            }
             // D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the
             // expert determinism-escape. Raise the suppression depth so the
             // determinism rejections inside a `@Pure fn` (E3403 non-deterministic

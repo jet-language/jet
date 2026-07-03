@@ -447,6 +447,7 @@ impl<'a> TaintCtx<'a> {
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. }
+            | Stmt::ScopeMember { body, .. }
             | Stmt::Live { body, .. } => self.check_block(body),
             // D-CTMARKER1: comptime block erases; walk body conservatively.
             Stmt::ComptimeBlock { body, .. } => self.check_block(body),
