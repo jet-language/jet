@@ -1731,3 +1731,26 @@ fn fmt_preserves_int_literal_radix() {
     let src = "fn main() {\n    packet: [U8] :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]\n    big :: 1_000_000\n    print(\"{packet.len()} {big}\")\n}\n";
     assert_fmt_stable(src, "int literal radix");
 }
+
+#[test]
+fn fmt_preserves_web_partition_markers() {
+    // D-WASM1: `#Js` / `#Wasm` / `#WasmExport` per-function partition
+    // overrides, each on its own line before `fn`. fmt dropped the marker
+    // entirely (Func.web_marker was never re-emitted) — every browser-side
+    // function silently fell back to the Wasm bucket, breaking the
+    // cross-partition checks: web_showcase_dashboard_roundtrip and
+    // web_compute_wasm_bridge_roundtrip in tests/web_build.rs went red after
+    // the #177 §5 tree reformat.
+    let src = "#Js\nfn render_stat(label: String) -> String {\n    return \"<div>{label}</div>\"\n}\n\n#Wasm\nfn crunch(n: Int) -> Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) -> Int {\n    return crunch(n)\n}\n\nfn main() {\n    print(\"{bridge_total(4)}\")\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on web partition markers");
+    for tag in ["#Js\n", "#Wasm\n", "#WasmExport\n"] {
+        assert!(
+            out.contains(tag),
+            "fmt must keep the `{}` partition marker, got:\n{out}",
+            tag.trim_end()
+        );
+    }
+    assert_eq!(out, src, "web-partition-marked fns must already be canonical");
+    let twice = jet::format_source(&out).expect("second fmt should succeed");
+    assert_eq!(out, twice, "web partition marker fmt must be idempotent");
+}
