@@ -149,10 +149,26 @@ surfaced). Also renamed a same-name collision: `examples/features/serde/
 serde_generic.jet` (+ 2 test-inline copies) had an unrelated demo struct
 `Id<K>`, predating `Id<T>`'s reservation — renamed to `Tagged<K>`.
 
-**S7 — `policy` floors.**
-Module-level `policy` item (parser + manifest). `no_alloc` first (allocation
-sites error inside the module). The final policy list is a follow-on ballot;
-only ratified members ship.
+**S7 — `policy` floors. DONE (2026-07-04, D-NOALLOC-SEM1=A).**
+`policy no_alloc` is a bare module-level item, parsed like `use` (no
+`pkg.jet`/manifest field — "manifest" in the original plan text meant
+"recognized by the module-file parser," not a separate manifest key). Local-
+only sema pass (no call-graph walk, unlike `@Pure fn`): flags four
+allocation-shaped expression shapes written directly in the policy'd
+module's own function bodies — string interpolation with a `{…}` hole,
+`.push`/`.insert` (method-name match, no receiver-type check), a struct/enum
+literal for a type that owns heap data transitively, `copy` of a heap-owning
+type — as **E0921**. Calling a function defined elsewhere is never followed
+(that function's own module's problem). New `type_owns_heap` helper
+(`Sema/Diagnostics.rs`) walks struct fields/enum variants/distinct
+bases/aliases through the type registry; `Pool<T>` is always heap-owning,
+`Id<T>` never. Deliberate, ratified-text-exact scope cut: a bare list/map/
+string literal outside those four shapes isn't checked (e.g. `xs := [1, 2, 3]`
+sails through) — extending the denylist is a future ballot, not silently
+done here. Example: `examples/features/memory/no_alloc_policy.jet` (clean
+compile) + `tests/ui/no_alloc_policy_violation.jet` (E0921 on interpolation)
++ fmt round-trip test. The final policy list beyond `no_alloc` is still a
+follow-on ballot.
 
 **S8 — Diagnostics + docs sweep (rides every stage, finishes here).**
 Every new/changed error: code + what/why/fix in docs/spec/diagnostics.md + ui

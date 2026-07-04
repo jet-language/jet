@@ -2379,6 +2379,9 @@ pub(crate) fn check_module_bodies(
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): captured once — every function body check
+    // below for this module gets the same file-scoped `policy no_alloc` state.
+    let no_alloc = module.no_alloc_policy.is_some();
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
     let ct_base_dir = module
         .path
@@ -2402,6 +2405,7 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
+                    no_alloc,
                 ));
             }
             Item::Struct(s) => {
@@ -2420,6 +2424,7 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -2439,6 +2444,7 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -2458,6 +2464,7 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -2512,6 +2519,7 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
+                    no_alloc,
                 ));
                 t.body = synthetic.body;
             }
@@ -2560,6 +2568,7 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
+                    no_alloc,
                 ));
                 b.body = synthetic.body;
             }
@@ -2584,6 +2593,7 @@ pub(crate) fn check_module_bodies(
                                 summaries,
                                 embed_inputs_out,
                                 global_addr_taken,
+                                no_alloc,
                             ));
                         }
                     }
@@ -2603,6 +2613,7 @@ pub(crate) fn check_module_bodies(
                     &ct_externs,
                     &ct_base_dir,
                     &ct_globals,
+                    no_alloc,
                 ));
             }
             _ => {}
@@ -2626,6 +2637,8 @@ pub(crate) fn check_func_body_bundle(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
+    no_alloc: bool,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -2663,6 +2676,7 @@ pub(crate) fn check_func_body_bundle(
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
         in_pure: f.is_pure,
+        no_alloc,
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),

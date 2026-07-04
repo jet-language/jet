@@ -243,6 +243,114 @@ fn is_cloneable_rec(
     }
 }
 
+/// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when `ty` owns heap data — directly
+/// (`String`/`[T]`/`[K,V]`/`Shared<T>`/a boxed trait object/a `[T#N]`, which
+/// erases to `Vec<T>` at codegen) or transitively (a struct/enum/tuple/distinct/
+/// alias with a heap-owning part). Backs the `policy no_alloc` struct/enum-
+/// literal and `copy` checks (E0921) — deliberately narrower than
+/// `is_cloneable`, which asks a different question ("can Rust `.clone()` this",
+/// true for nearly everything including heap types).
+pub(crate) fn type_owns_heap(ty: &Type, registry: &TypeRegistry) -> bool {
+    let mut visiting = HashSet::new();
+    type_owns_heap_rec(ty, registry, &mut visiting)
+}
+
+/// `type_owns_heap`'s recursion, with the same self-referential-type cycle
+/// guard as `is_cloneable_rec` (a cycle is already behind a `Box` indirection
+/// by construction, so it's vacuously non-heap-owning here — the walk doesn't
+/// need to unwind further to answer "does this type ITSELF own heap data").
+fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<String>) -> bool {
+    match ty {
+        Type::Int | Type::Bool | Type::Float | Type::Char => false,
+        Type::IntN { .. } | Type::Float32 => false,
+        Type::String | Type::List(_) | Type::Shared(_) => true,
+        Type::Map { .. } => true,
+        Type::Option(inner) => type_owns_heap_rec(inner, registry, visiting),
+        Type::Result { ok, err } => {
+            type_owns_heap_rec(ok, registry, visiting) || type_owns_heap_rec(err, registry, visiting)
+        }
+        // A plain function value/pointer carries no heap-owned data at the
+        // type level (a closure's captured environment isn't tracked here).
+        Type::Fn { .. } => false,
+        // A boxed dyn trait object is a heap allocation (Rust `Box<dyn …>`).
+        Type::TraitObject(_) => true,
+        Type::Named(name) if is_type_var_name(name) => false,
+        Type::Named(name) if core_type_known(name) => false,
+        Type::Named(name) => {
+            if !visiting.insert(name.clone()) {
+                return false;
+            }
+            let result = match registry.types.get(name) {
+                Some(TypeDef::Struct { fields, .. }) => fields
+                    .iter()
+                    .any(|(_, _, fty, _)| type_owns_heap_rec(fty, registry, visiting)),
+                Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, p)| match p {
+                    VariantPayload::Unit => false,
+                    VariantPayload::Single(t, _) => type_owns_heap_rec(t, registry, visiting),
+                    VariantPayload::Named(fs) => {
+                        fs.iter().any(|f| type_owns_heap_rec(&f.ty, registry, visiting))
+                    }
+                }),
+                // D-DIST1: a distinct type wraps a base type — heap-owning iff
+                // the base is (e.g. `UserId :: distinct String`).
+                Some(TypeDef::Distinct { base, .. }) => type_owns_heap_rec(base, registry, visiting),
+                Some(TypeDef::Alias { target, .. }) => type_owns_heap_rec(target, registry, visiting),
+                None => false,
+            };
+            visiting.remove(name);
+            result
+        }
+        // D-POOLID-API1=A: `Pool<T>` is a generational arena (heap-owning
+        // regardless of `T`); `Id<T>` is plain index+generation data (`Copy`,
+        // never heap-owning). Any other generic application: best-effort —
+        // recurse into its type args (approximates a generic field storing
+        // one), OR'd with a direct field-registry lookup by name (no generic
+        // substitution — a known gap for a user generic struct whose fields
+        // are typed by a type PARAMETER rather than a concrete arg; see S7
+        // report). Errs toward flagging (a false positive under `no_alloc` is
+        // cheaper than a silent miss of an actual allocation).
+        Type::Apply { name, args } if name == "Pool" => {
+            let _ = args;
+            true
+        }
+        Type::Apply { name, .. } if name == "Id" => false,
+        Type::Apply { name, args } => {
+            args.iter().any(|a| type_owns_heap_rec(a, registry, visiting))
+                || matches!(
+                    registry.types.get(name),
+                    Some(TypeDef::Struct { fields, .. }) if fields.iter().any(|(_, _, fty, _)| type_owns_heap_rec(fty, registry, visiting))
+                )
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, t)| type_owns_heap_rec(t, registry, visiting)),
+        // D-SG9/S76: `[T#N]` erases to `Vec<T>` at codegen (I3) — always a
+        // heap allocation regardless of the element type.
+        Type::FixedList { .. } => true,
+        Type::Tagged { inner, .. } => type_owns_heap_rec(inner, registry, visiting),
+    }
+}
+
+/// D-MEM1/S7 (D-NOALLOC-SEM1=A): one shared shape for every `policy no_alloc`
+/// floor violation — only `what` varies by call-site shape (interpolation /
+/// `.push`/`.insert` / heap-owning struct-or-enum literal / `copy` of a
+/// heap-owning type); why and fix are identical across all four (I8: one
+/// mechanism, one diagnostic).
+pub(crate) fn no_alloc_violation(what: String, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0921",
+        what,
+        "this module declares `policy no_alloc` (D-NOALLOC-SEM1) — every \
+         allocation-shaped expression in its own function bodies is a compile \
+         error; a call to a function defined elsewhere is that function's own \
+         module's problem, not checked here"
+            .to_string(),
+        "avoid the allocation here, or move this code out of the `policy no_alloc` module"
+            .to_string(),
+        Some(span),
+    )
+}
+
 pub(crate) fn expr_is_same_ident(a: &Expr, name: &str) -> bool {
     matches!(a, Expr::Ident(n, _) if n == name)
 }

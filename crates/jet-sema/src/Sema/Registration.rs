@@ -935,6 +935,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // below; the `@InlineAlways` address-taken pass (E0918) runs after the
     // loop, once this set is complete.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): captured once — every function body check
+    // below for this file gets the same file-scoped `policy no_alloc` state.
+    let no_alloc = prog.no_alloc_policy.is_some();
     for item in &mut prog.items {
         match item {
             Item::Func(f) => {
@@ -953,6 +956,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     false,
                     &mut effect_summaries,
                     &mut global_addr_taken,
+                    no_alloc,
                 ));
             }
             Item::Impl(i) => {
@@ -972,6 +976,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         false,
                         &mut effect_summaries,
                         &mut global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -992,6 +997,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         false,
                         &mut effect_summaries,
                         &mut global_addr_taken,
+                        no_alloc,
                     ));
                 }
                 for block in &mut s.trait_impls {
@@ -1011,6 +1017,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             false,
                             &mut effect_summaries,
                             &mut global_addr_taken,
+                            no_alloc,
                         ));
                     }
                 }
@@ -1032,6 +1039,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         false,
                         &mut effect_summaries,
                         &mut global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -1078,6 +1086,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     false,
                     &mut effect_summaries,
                     &mut global_addr_taken,
+                    no_alloc,
                 ));
                 t.body = synthetic.body;
             }
@@ -1094,6 +1103,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &ct_externs,
                     ct_base_dir,
                     &ct_globals,
+                    no_alloc,
                 ));
             }
             Item::Const(_)
@@ -2048,6 +2058,8 @@ pub(crate) fn check_func_body(
     freestanding: bool,
     summaries: &mut HashMap<String, EffectSummary>,
     global_addr_taken: &mut HashSet<String>,
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
+    no_alloc: bool,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
     let empty_core_imports = HashMap::new();
@@ -2091,6 +2103,7 @@ pub(crate) fn check_func_body(
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
         in_pure: f.is_pure,
+        no_alloc,
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
@@ -2194,6 +2207,8 @@ pub(crate) fn check_error_conv_body(
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
     ct_globals: &HashMap<String, crate::Comptime::CtValue>,
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
+    no_alloc: bool,
 ) -> Vec<Diagnostic> {
     // Synthesise a pseudo-function to reuse check_func_body.
     let mut synthetic = Func {
@@ -2251,6 +2266,7 @@ pub(crate) fn check_error_conv_body(
         false,
         &mut HashMap::new(),
         &mut HashSet::new(),
+        no_alloc,
     );
     ec.body = synthetic.body;
     d

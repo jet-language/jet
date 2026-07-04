@@ -120,6 +120,19 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         f.write(&format!("#{}(\"{}\")", Syntax::ATTR_HTML, html_path));
         f.newline();
     }
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — fixed post-import
+    // position, same single-instance-marker treatment as `#PubFile`/
+    // `#Target(…)`/`#Html(…)` above (no span to preserve original placement).
+    if prog.no_alloc_policy.is_some() {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
+        f.write(Syntax::KW_POLICY);
+        f.write(" ");
+        f.write(Syntax::POLICY_NO_ALLOC);
+        f.newline();
+    }
     for item in &prog.items {
         if !first {
             f.blank_separator_before_item();

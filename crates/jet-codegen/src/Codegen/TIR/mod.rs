@@ -2182,6 +2182,7 @@ mod tests {
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
                 html_path: prog.html_path.clone(),
+                no_alloc_policy: prog.no_alloc_policy,
             }],
             parse_teaching: Vec::new(),
             used_core: std::collections::HashSet::new(),

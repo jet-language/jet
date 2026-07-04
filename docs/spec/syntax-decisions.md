@@ -765,7 +765,21 @@ value round-trip); `.ids()` snapshots every live id; `.remove(id)` removes,
 bumping the slot's generation, returning `T?` (mirrors `Map.remove`'s
 `Option` convention). A stale `Id<T>` (removed/reused slot) panics at
 runtime, mirroring the array-out-of-bounds precedent — not a new diagnostic
-code. S7–S9 remain unbuilt.
+code. **S7 shipped (2026-07-04, D-NOALLOC-SEM1=A)**: `policy no_alloc` is a
+bare module-level item (parses like `use`, no manifest/`pkg.jet` field — it's
+ordinary module-file syntax, nothing else reads it). The check is **local
+only**: it walks only the policy'd module's own function bodies and never
+follows a call into another function (unlike `@Pure fn`'s whole-program
+call-graph fixpoint) — a denylist of four allocation-shaped expressions,
+each **E0921**: string interpolation with a `{…}` hole (a hole-less literal
+isn't flagged); any `.push`/`.insert` call (method-name match only, no
+receiver-type check — capacity headroom isn't provable statically); a
+struct/enum literal for a type that owns heap data directly or transitively
+(`String`/`[T]`/`[K,V]`/`Shared<T>`/`Pool<T>`, walked through struct fields
+and enum variant payloads — `Id<T>` is plain `Copy` data, never flagged);
+`copy` of a heap-owning type. A bare list/map literal outside those four
+shapes (`xs := [1, 2, 3]`) is NOT checked — a deliberate, ratified-text-exact
+scope cut, not silently expanded. S8–S9 remain unbuilt.
 
 **D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower

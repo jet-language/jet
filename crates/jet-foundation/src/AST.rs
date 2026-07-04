@@ -439,6 +439,12 @@ pub struct Program {
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
     pub html_path: Option<String>,
+    /// D-MEM1/S7 (D-NOALLOC-SEM1=A, ratified 2026-07-04): `policy no_alloc;` —
+    /// this file's allocation floor. `Some(span)` = the policy line's span
+    /// (for a "declared twice" check); `None` = no policy. Local-only: sema
+    /// checks only expressions written directly in this file's own function
+    /// bodies, never calls into other modules (E0921).
+    pub no_alloc_policy: Option<Span>,
 }
 
 /// S16: `import "path" [as alias];` or `import name [as alias];`
@@ -600,6 +606,8 @@ pub struct LoadedModule {
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,
+    /// D-MEM1/S7 (D-NOALLOC-SEM1=A): mirrors `Program::no_alloc_policy`.
+    pub no_alloc_policy: Option<Span>,
 }
 
 /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.

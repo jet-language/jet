@@ -271,7 +271,17 @@ impl<'a> Checker<'a> {
                 });
                 Some(Type::Named(type_name))
             }
-            Expr::Str(parts, _) => {
+            Expr::Str(parts, str_span) => {
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): interpolation with at least one
+                // `{…}` hole builds a fresh `String` (unlike a plain literal
+                // with no holes, which is one constant piece of text — not
+                // "concatenation/interpolation that produces a new String").
+                if self.no_alloc && parts.iter().any(|p| matches!(p, StrPart::Interp(..))) {
+                    self.diags.push(no_alloc_violation(
+                        "string interpolation allocates a new `String`".to_string(),
+                        *str_span,
+                    ));
+                }
                 for p in parts.iter_mut() {
                     if let StrPart::Interp(inner, fmt) = p {
                         // Interpolation borrows; never moves.
@@ -655,6 +665,15 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): `copy` of a heap-owning type
+                // is itself an allocation (the whole point of `.clone()`-style
+                // duplication) — flagged regardless of whether it's cloneable.
+                if self.no_alloc && type_owns_heap(&inner_t, self.registry) {
+                    self.diags.push(no_alloc_violation(
+                        format!("`copy` of `{}` allocates — it owns heap data", inner_t.show()),
+                        *span,
+                    ));
+                }
                 Some(inner_t)
             }
             Expr::PtrFromAddr {
@@ -730,6 +749,19 @@ impl<'a> Checker<'a> {
                 recv_type,
                 resolved_ret,
             } => {
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): `.push`/`.insert` may grow a
+                // List/Map's backing heap allocation — capacity headroom isn't
+                // statically provable in general, so ANY call of this shape is
+                // flagged, full stop (no receiver-type check needed).
+                if self.no_alloc && matches!(method.as_str(), "push" | "insert") {
+                    self.diags.push(no_alloc_violation(
+                        format!(
+                            "`.{}` may allocate to grow this collection's heap allocation",
+                            method
+                        ),
+                        *method_span,
+                    ));
+                }
                 // D-TAG1: a payload leaf under a group — `Damage.Fire.Burn(5)`
                 // parses as a method call on the `Damage.Fire` field chain. Fold
                 // chain + method into one dotted variant path and rewrite to an
@@ -809,6 +841,14 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): a struct literal for a type
+                // that owns heap data (directly or transitively) allocates.
+                if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
+                    self.diags.push(no_alloc_violation(
+                        format!("constructing `{}` here allocates — it owns heap data", type_name),
+                        *span,
+                    ));
+                }
                 Some(self.check_struct_lit(
                     type_name,
                     type_args,
@@ -853,6 +893,14 @@ impl<'a> Checker<'a> {
                             return None;
                         }
                     }
+                }
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): an enum literal for a type
+                // that owns heap data (directly or transitively) allocates.
+                if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
+                    self.diags.push(no_alloc_violation(
+                        format!("constructing `{}` here allocates — it owns heap data", type_name),
+                        *span,
+                    ));
                 }
                 Some(self.check_enum_lit(type_name, variant, args, *span))
             }

@@ -683,6 +683,12 @@ pub(crate) struct Checker<'a> {
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,
+    /// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when the enclosing module declared
+    /// `policy no_alloc`. Local-only: set once per function-body check from
+    /// that module's own `no_alloc_policy`, never toggled by a call into
+    /// another function — a callee's own allocations are its own module's
+    /// concern (E0921 only fires on shapes written directly in THIS body).
+    no_alloc: bool,
     /// D-PREPOST1: true while type-checking a `@Pre` clause's condition —
     /// `result` isn't bound yet at function entry, so a reference to it here
     /// is E0144 instead of the normal "undefined name" error.

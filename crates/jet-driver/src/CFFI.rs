@@ -299,6 +299,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             web_target_ceiling: None,
             pub_file: false,
             html_path: None,
+            no_alloc_policy: None,
         });
         lib_to_idx.insert(lib.clone(), synth_idx);
         cffi.libs.push(CLib {
@@ -360,6 +361,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                         web_target_ceiling: None,
                         pub_file: false,
                         html_path: None,
+                        no_alloc_policy: None,
                     });
                     lib_to_idx.insert(lib.clone(), synth_idx);
                     cffi.libs.push(CLib {
@@ -573,6 +575,7 @@ fn load_cache_source(
         web_target_ceiling: prog.web_target_ceiling,
         pub_file: prog.pub_file,
         html_path: prog.html_path.clone(),
+        no_alloc_policy: prog.no_alloc_policy,
     });
 }
 

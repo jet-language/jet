@@ -1204,6 +1204,21 @@ fn run() {
 }
 
 #[test]
+fn fmt_no_alloc_policy_d_mem1_s7_stability() {
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc` is a fixed post-import
+    // file marker, same treatment as `#PubFile`/`#Target(…)` — must survive
+    // fmt unchanged.
+    let src = "\
+policy no_alloc
+
+fn run() {
+    print(\"ok\")
+}
+";
+    assert_fmt_keeps(src, &["policy no_alloc"], "D-MEM1/S7 policy no_alloc");
+}
+
+#[test]
 fn fmt_copy_verb_d_cap2_stability() {
     // D-CAP2 (D-MEM1/S4): `copy x` is a prefix-verb expression — must survive
     // fmt unchanged in binding position, call-arg position, and on a field.
