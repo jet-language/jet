@@ -1295,7 +1295,32 @@ pub const JETPACK_VERBS: &[&str] = &[
     OS_SUBCOMMAND,
     DEV_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
+    BRIDGE_SUBCOMMAND,
 ];
+
+/// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
+/// added to the shell without declaring them in any manifest. Repeatable;
+/// realized once and dropped, same lifecycle as a manifest-declared ref.
+pub const ENV_FLAG_PACKAGE: &str = "-p";
+
+/// U16: force foreign-flake/devenv detection even when the project's own
+/// manifest already declares `env.*` modules (which otherwise wins).
+pub const ENV_FLAG_FLAKE: &str = "--flake";
+
+/// U16: enter an isolated shell with no host environment leaking in —
+/// threaded straight through to the underlying `nix` invocation.
+pub const ENV_FLAG_PURE: &str = "--pure";
+
+/// U16: `jetpack bridge <verb>` — best-effort translators from a foreign
+/// ecosystem descriptor into jetpack's own manifest form.
+pub const BRIDGE_SUBCOMMAND: &str = "bridge";
+pub const BRIDGE_VERB_FLAKE: &str = "flake";
+
+/// U16: foreign dev-shell descriptor filenames `jet env`/`jet bridge flake`
+/// look for. `jet env` only auto-detects one of these when the project's own
+/// manifest declares no `env.*` module; `--flake` forces it either way.
+pub const FOREIGN_FLAKE_FILE: &str = "flake.nix";
+pub const FOREIGN_DEVENV_FILE: &str = "devenv.nix";
 
 /// U19 (D-JPK-DEVCOMPOSE1=D, card c9jetpackgates): the project-level `jetpack
 /// dev` engine verb — distinct from the already-shipped `jet dev <file.jet>`

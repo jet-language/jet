@@ -415,6 +415,249 @@ fn jet_env_delegates_to_jetpack_enter() {
     );
 }
 
+// ── U16: -p ad-hoc packages / --flake foreign-flake fallback ──
+
+#[test]
+fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
+    // U16: `jet env -p <pkg>... -- cmd` needs no env.jet/pkg.jet at all — the
+    // ad-hoc package becomes an ordinary nixpkgs RefSpec, folded into an
+    // otherwise-empty plan, trust-gated and realized exactly like a
+    // manifest-declared ref.
+    let root = Scratch::new("dashp-root");
+    let proj = Scratch::new("dashp-proj");
+    let fixtures = Scratch::new("dashp-fx");
+    let out = Scratch::new("dashp-out");
+    write_runnable_fixture(&fixtures.path, &out.path);
+    let output = jetpack()
+        .args([
+            "enter",
+            "--no-color",
+            "--trust",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args(["-p", "greet", "--", "greet"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jetpack"
+    );
+}
+
+#[test]
+fn enter_dash_p_merges_with_project_declared_packages() {
+    // The project's own declared package (`hello`, a `core` ref) and the
+    // ad-hoc `-p greet` (nixpkgs) both land on PATH in the same shell.
+    let (base, proj, root) = core_hello_project("dashp-merge");
+    let fixtures = base.join("fixtures");
+    let out = base.join("greet-out");
+    write_runnable_fixture(&fixtures, &out);
+    let output = jetpack()
+        .args([
+            "enter",
+            "--no-color",
+            "--trust",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures)
+        .args(["-p", "greet", "--", "sh", "-c", "hello && greet"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("hello from jet-pkgs"), "stdout: {stdout}");
+    assert!(stdout.contains("hello from jetpack"), "stdout: {stdout}");
+}
+
+#[test]
+fn enter_without_env_jet_or_packages_is_still_nothing_to_do() {
+    // The pre-U16 refusal is unchanged when there is truly nothing: no
+    // env.jet and no `-p`.
+    let root = Scratch::new("nothing-root");
+    let proj = Scratch::new("nothing-proj");
+    let output = jetpack()
+        .args(["enter", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("nothing to do"), "stderr: {stderr}");
+}
+
+#[test]
+fn enter_flake_detection_ordering_project_env_wins_without_flag() {
+    // U16's ordering rule: a project that declares `env.*` (here the
+    // Phase-1 directive surface) is never silently swapped for a foreign
+    // flake.nix, even when one is present — only `--flake` forces it. Proven
+    // here by an offline realize of the *declared* `hello` package
+    // succeeding with no `nix` on PATH and no flake.nix ever being touched
+    // (a bad flake.nix would fail loudly if `nix develop` ran against it).
+    let (base, proj, root) = core_hello_project("flake-ordering");
+    fs::write(proj.join("flake.nix"), "this is not valid nix").unwrap();
+    let output = jetpack()
+        .args(["enter", "--no-color", "--trust", "--", "hello"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jet-pkgs"
+    );
+}
+
+#[test]
+fn enter_flake_flag_forces_foreign_flake_and_reports_missing_nix() {
+    // `--flake` forces the foreign-flake fallback even though the project
+    // declares `env.*`; with no `nix` on PATH this is a clean E1256, not a
+    // panic or a raw spawn error.
+    let (base, proj, root) = core_hello_project("flake-forced");
+    fs::write(proj.join("flake.nix"), "{ }").unwrap();
+    let output = jetpack()
+        .args(["enter", "--no-color", "--flake"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1256"), "stderr: {stderr}");
+    assert!(stderr.contains("nix"), "stderr: {stderr}");
+}
+
+#[test]
+fn enter_flake_with_no_foreign_flake_present_is_friendly() {
+    let root = Scratch::new("flake-none-root");
+    let proj = Scratch::new("flake-none-proj");
+    let output = jetpack()
+        .args(["enter", "--no-color", "--flake"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
+}
+
+// ── U16: `jetpack bridge flake` ──
+
+#[test]
+fn bridge_flake_missing_nix_is_e1256_not_a_panic() {
+    let dir = Scratch::new("bridge-nonix");
+    fs::write(dir.join("flake.nix"), "{ }").unwrap();
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1256"), "stderr: {stderr}");
+}
+
+#[test]
+fn bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook() {
+    // The best-effort translation: buildInputs become a plain env.dev
+    // packages list on stdout; a non-empty shellHook (no env.* equivalent)
+    // fires L0204 on stderr without blocking the print.
+    let dir = Scratch::new("bridge-shim");
+    fs::write(dir.join("flake.nix"), "{ }").unwrap();
+    let fixtures = Scratch::new("bridge-shim-fx");
+    fs::write(
+        fixtures.join("flake-devshell.json"),
+        r#"{"buildInputs": ["ripgrep", "fd"], "shellHook": "export FOO=1"}"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&dir.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("module env.dev {"), "stdout: {stdout}");
+    assert!(stdout.contains("packages: [fd, ripgrep]"), "stdout: {stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("L0204"), "stderr: {stderr}");
+    assert!(stderr.contains("shellHook"), "stderr: {stderr}");
+}
+
+#[test]
+fn bridge_flake_twice_produces_identical_shim_stdout() {
+    // Drift-check (U16 plan doc): the bridge is a pure function of the
+    // flake's facts, so two runs against the same fixture print
+    // byte-identical shims.
+    let dir = Scratch::new("bridge-drift");
+    fs::write(dir.join("flake.nix"), "{ }").unwrap();
+    let fixtures = Scratch::new("bridge-drift-fx");
+    fs::write(
+        fixtures.join("flake-devshell.json"),
+        r#"{"buildInputs": ["nodejs", "ripgrep"], "shellHook": ""}"#,
+    )
+    .unwrap();
+    let run = || {
+        jetpack()
+            .args(["bridge", "flake", "--no-color", "--fixtures"])
+            .arg(&fixtures.path)
+            .current_dir(&dir.path)
+            .output()
+            .unwrap()
+    };
+    let a = run();
+    let b = run();
+    assert!(a.status.success());
+    assert!(b.status.success());
+    assert_eq!(a.stdout, b.stdout);
+}
+
+#[test]
+fn bridge_flake_no_flake_nix_here_is_friendly() {
+    let dir = Scratch::new("bridge-noflake");
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no flake.nix"), "stderr: {stderr}");
+}
+
 #[test]
 fn core_provider_runs_first_party_package_without_nix() {
     // R2/U10: a `core` named source realizes a first-party Jet package with no

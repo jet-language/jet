@@ -132,6 +132,19 @@ pub fn fixtures_from_env(explicit: Option<PathBuf>) -> Option<PathBuf> {
     explicit.or_else(|| std::env::var_os("JETPACK_FIXTURES").map(PathBuf::from))
 }
 
+/// Whether the `nix` binary is reachable on PATH (U16). Used by the two call
+/// sites that shell out to `nix` for something other than a package ref —
+/// `jet env`'s foreign-flake/devenv fallback and `jet bridge flake` — so both
+/// fail with a clean E1256 up front instead of a raw spawn error partway
+/// through.
+pub fn nix_on_path() -> bool {
+    Command::new("nix")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 // ──────────────────────────────────────────────
 // Provider boundary (R0; see tools/Tower/docs/plans/epoch-5/unified-ecosystem.md).
 //

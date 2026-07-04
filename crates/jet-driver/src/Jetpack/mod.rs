@@ -9,6 +9,7 @@
 //! Built std-only (I6) and independent from the `jet` binary (D-JPK1). The
 //! consolidated plan lives in `tools/Tower/docs/plans/epoch-5/README.md`.
 
+pub mod Bridge;
 pub mod CLI;
 pub mod Components;
 pub mod EffectBudget;

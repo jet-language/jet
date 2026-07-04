@@ -206,6 +206,7 @@ before continuing.
 | L0201 | sema  | implicit `.clone()` at call site — fired only when the value is dead after the call (D-L0201 liveness gate) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (U11, D-JPK-SCRIPTDEP1) |
+| L0204 | jet   | a `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16) |
 | E0301 | sema  | `impl` for unknown type                   |
 | E0302 | sema  | unknown field (with suggestion)           |
 | E0303 | sema  | struct/variant construction field errors  |
@@ -523,6 +524,7 @@ before continuing.
 | E1253 | jet   | an inline script dependency (`use pkg#version;`) didn't resolve (U11, D-JPK-SCRIPTDEP1) |
 | E1254 | jet   | project-level `jet dev` has neither `fn dev()` nor `fn run()` in its entry file (U19, D-JPK-DEVCOMPOSE1) |
 | E1255 | jet   | an untrusted project env hit a non-interactive path with no `--trust`/prior grant (U19, D-JPK-DEVCOMPOSE1) |
+| E1256 | jet   | `jet bridge flake` or foreign-flake detection needs `nix`, which isn't on PATH (U16) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
@@ -1279,7 +1281,9 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1253 | Inline dependency `{name}#{selector}` didn't resolve. | A manifest-less script's `use {name}#{selector};` (U11) has no source to resolve from — the Jet package registry has no fetch path yet, so an inline dependency only resolves from a committed local copy (D-JPK-SCRIPTDEP1). | Commit a copy at `.jet/inline-deps/{name}/<version>/`, or run `jet init` and depend on `{name}` through `pkg.jet` once you have a real source for it. |
 | E1254 | This project has no `jet dev` entry. | Project-level `jet dev` (no file argument) runs the entry file's top-level `fn dev()` if it defines one, else `fn run()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither. | Add `fn dev() { … }` (a custom dev command) or `fn run() { … }` (the default) to the entry file. |
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
+| E1256 | `{cmd}` needs `nix`, which isn't on PATH. | `jet bridge flake` translates a `flake.nix`'s devShell, and `jet env`'s foreign-flake/`devenv.nix` detection shells out to `nix` as the ratified stopgap (U16); neither works without the `nix` binary. | Install Nix (https://nixos.org/download), or skip the foreign flake and declare packages in `env.*` instead. |
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet lock` to pin it in `<script>.lock`. |
+| L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 
 ## Machine-readable diagnostics (`--json`)
 

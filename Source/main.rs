@@ -668,6 +668,7 @@ fn main() {
                 | "serve"
                 | "debug"
                 | "push"
+                | "bridge"
                 | "publish"
                 | "yank"
                 | "keygen"
@@ -747,6 +748,7 @@ fn main() {
             | "dev"
             | "serve"
             | "push"
+            | "bridge"
             | "add"
             | "remove"
             | "bind"
@@ -956,6 +958,17 @@ fn main() {
             exit(EngineDispatch::dispatch(
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "push",
+                &raw,
+            ));
+        }
+        "bridge" => {
+            // U16 (card c9jetpackgates): `jet bridge flake` translates a
+            // foreign flake.nix's devShell into jetpack's `env.*` form.
+            // D-JPK-DISPATCH1=B: dispatched to the jetpack engine exactly
+            // like `push`/`config`, never linked in-process.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "bridge",
                 &raw,
             ));
         }

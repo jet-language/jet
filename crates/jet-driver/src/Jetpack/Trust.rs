@@ -220,6 +220,73 @@ pub fn gate(
     }
 }
 
+/// A stable hash over a foreign flake/devenv file's content (U16) — the same
+/// role `env_definition_hash` plays for a declared env, but for untrusted
+/// input jetpack didn't write: an arbitrary `flake.nix`/`devenv.nix` runs
+/// Nix-evaluator code the moment jetpack shells out to it, so a first
+/// encounter needs the same trust decision (D-JPK-DEVCOMPOSE1's rationale
+/// extended to U16's two new untrusted-input surfaces, `-p` ad-hoc packages
+/// and a foreign flake).
+pub fn flake_definition_hash(content: &str) -> String {
+    format!("flake:{}", crate::SHA256::sha256_hex(content.as_bytes()))
+}
+
+/// The trust gate for a foreign flake/devenv file (U16) — `jet env`'s
+/// foreign-flake fallback and `jet bridge flake` both reach this before
+/// shelling out to `nix`. Same store, same hash-grant/pattern machinery, same
+/// non-interactive-stdin refusal as [`gate`]; keyed on the file's content
+/// instead of a ref list, since there is no `RefSpec` for "arbitrary flake.nix
+/// text". Ad-hoc `-p` packages do NOT go through this function — they become
+/// ordinary `RefSpec`s and are folded into the normal `gate` call alongside
+/// the project's declared refs, so one trust decision covers both.
+pub fn gate_flake(
+    theme: &Theme,
+    store: &Path,
+    project_dir: &Path,
+    flake_path: &Path,
+    bypass: bool,
+) -> Result<(), i32> {
+    let content = std::fs::read_to_string(flake_path).unwrap_or_default();
+    let hash = flake_definition_hash(&content);
+    if bypass || is_trusted(store, project_dir, &hash) {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        theme.error_coded(
+            "E1255",
+            "this project's environment isn't trusted yet",
+            &format!(
+                "entering `{}` shells out to `nix` against a foreign flake this project didn't \
+                 declare through `env.*`; a first entry needs a trust decision, and stdin isn't a \
+                 terminal to ask interactively",
+                flake_path.display()
+            ),
+            "pass `--trust` for this one run, or pre-authorize with `jetpack config trust add <pattern>`.",
+        );
+        return Err(2);
+    }
+    theme.note(&format!(
+        "first entry to this project's foreign flake: {}",
+        flake_path.display()
+    ));
+    eprint!("  trust this flake? [y/N] ");
+    {
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+    }
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return Err(2);
+    }
+    if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        grant_hash(store, &hash);
+        Ok(())
+    } else {
+        theme.status("not trusted — exiting.");
+        Err(2)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +370,42 @@ mod tests {
         add_pattern(&store, "/home/dev/");
         assert!(is_trusted(&store, Path::new("/home/dev/anything"), "h"));
         assert!(!is_trusted(&store, Path::new("/home/other"), "h"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── U16 foreign-flake trust gate ──
+
+    #[test]
+    fn flake_hash_is_stable_and_content_sensitive() {
+        let a = flake_definition_hash("{ devShells.default = {}; }");
+        let b = flake_definition_hash("{ devShells.default = {}; }");
+        let c = flake_definition_hash("{ devShells.default = { buildInputs = [1]; }; }");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn gate_flake_bypass_never_grants() {
+        let dir = scratch("flake_bypass");
+        let store = dir.join("trust");
+        let flake = dir.join("flake.nix");
+        std::fs::write(&flake, "{ }").unwrap();
+        let theme = Theme::resolve(true);
+        assert!(gate_flake(&theme, &store, &dir, &flake, true).is_ok());
+        // A one-shot bypass persists nothing (mirrors `gate`'s `--trust`).
+        assert!(!is_trusted(&store, &dir, &flake_definition_hash("{ }")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn gate_flake_grant_round_trips() {
+        let dir = scratch("flake_grant");
+        let store = dir.join("trust");
+        let content = "{ devShells.default = {}; }";
+        let hash = flake_definition_hash(content);
+        assert!(!is_trusted(&store, &dir, &hash));
+        grant_hash(&store, &hash);
+        assert!(is_trusted(&store, &dir, &hash));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

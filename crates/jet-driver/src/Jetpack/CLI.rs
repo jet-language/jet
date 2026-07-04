@@ -3,6 +3,7 @@
 //! `jetpack run/build/list/clean/add/remove`. Independent from the `jet`
 //! binary (D-JPK1). All user-facing output flows through `Output::Theme`.
 
+use super::Bridge;
 use super::Components;
 use super::ManifestTOML;
 use super::Output::{self, Theme};
@@ -23,6 +24,18 @@ struct Flags {
     /// U19: one-shot bypass of the env/dev trust gate (`--trust`). Never
     /// persists a grant — unlike accepting the interactive prompt.
     trust: bool,
+    /// U16: ad-hoc nixpkgs packages from `-p <pkg>...`, added to the shell
+    /// without being declared in any manifest. Repeatable across multiple
+    /// `-p` groups.
+    packages: Vec<String>,
+    /// U16: `--flake` forces foreign-flake/devenv detection even when the
+    /// project's own manifest already declares `env.*` modules.
+    flake: bool,
+    /// U16: `--pure` — isolate the shell from the host environment. Threaded
+    /// straight through to the underlying `nix` invocation for the
+    /// foreign-flake fallback; jetpack's own composed shells are already
+    /// PATH-only, so this is a no-op there today.
+    pure: bool,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -39,6 +52,9 @@ fn parse_args(args: &[String]) -> Parsed {
         fixtures: None,
         offline: false,
         trust: false,
+        packages: Vec::new(),
+        flake: false,
+        pure: false,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -53,11 +69,27 @@ fn parse_args(args: &[String]) -> Parsed {
             "--no-color" => flags.no_color = true,
             "--offline" => flags.offline = true,
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
+            a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
+            a if a == Syntax::ENV_FLAG_PURE => flags.pure = true,
             "--fixtures" => {
                 i += 1;
                 if let Some(dir) = args.get(i) {
                     flags.fixtures = Some(PathBuf::from(dir));
                 }
+            }
+            a if a == Syntax::ENV_FLAG_PACKAGE => {
+                // U16: `-p <pkg>...` greedily consumes bare tokens until the
+                // next flag/`--`/end, so `-p nodejs ripgrep -- cmd` and
+                // `-p nodejs -p ripgrep -- cmd` both work.
+                i += 1;
+                while let Some(next) = args.get(i) {
+                    if next == "--" || next.starts_with('-') {
+                        break;
+                    }
+                    flags.packages.push(next.clone());
+                    i += 1;
+                }
+                continue;
             }
             _ => positional.push(a.clone()),
         }
@@ -93,6 +125,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
         "push" => cmd_push(&theme, &parsed),
+        v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
@@ -498,7 +531,34 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
 /// shell (Scale-2; U §8). Unlike `run`, `enter` is project-scoped: it never
 /// takes an explicit ref, it always composes the env declared by the project
 /// `env.jet`. The `-- cmd` form runs a one-off command in that env, then exits.
+///
+/// U16 additions: `-p <pkg>...` folds ad-hoc nixpkgs packages into the plan
+/// (same trust gate, same realize path, as a manifest ref); `--flake` forces
+/// (and the absence of any declared `env.*` module otherwise triggers) a
+/// foreign `flake.nix`/`devenv.nix` fallback that shells straight to `nix
+/// develop` instead of composing jetpack's own env.
 fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
+    let project_dir = std::env::current_dir().unwrap_or_default();
+
+    // U16: a project's own `env.*` always wins; the foreign-flake fallback
+    // only kicks in when it declares none, or when `--flake` forces it.
+    let foreign = foreign_flake_path(&project_dir);
+    if parsed.flags.flake || (foreign.is_some() && !project_declares_env(&project_dir)) {
+        let Some(flake_path) = foreign else {
+            theme.error(
+                "no foreign flake here",
+                &format!(
+                    "`--flake` was passed but no {}/{} was found in this directory.",
+                    Syntax::FOREIGN_FLAKE_FILE,
+                    Syntax::FOREIGN_DEVENV_FILE
+                ),
+                "remove --flake to use the project's own env.*, or add a flake.nix.",
+            );
+            return 2;
+        };
+        return enter_foreign_flake(theme, &project_dir, &flake_path, parsed);
+    }
+
     let roots = Store::resolve();
     if roots.dev_mode {
         theme.detail(&theme.gray(&format!(
@@ -508,15 +568,43 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         )));
     }
 
-    let plan = match load_project_plan(theme) {
-        Ok(plan) => plan,
-        Err(code) => return code,
+    // U16: `-p` needs no manifest at all — a project with no `env.jet` and at
+    // least one ad-hoc package still gets a (package-only) shell instead of
+    // the usual "nothing to do" refusal, which only applies when neither is
+    // present.
+    let has_env_file = EnvFile::path_in(&project_dir).is_file();
+    let mut plan = if has_env_file || parsed.flags.packages.is_empty() {
+        match load_project_plan(theme) {
+            Ok(plan) => plan,
+            Err(code) => return code,
+        }
+    } else {
+        RunPlan {
+            refs: Vec::new(),
+            table: RefSpec::SourceTable::empty(),
+            label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+        }
     };
+
+    // U16: ad-hoc `-p` packages become ordinary nixpkgs `RefSpec`s, folded
+    // into the same plan as any manifest-declared package — same realize
+    // path, same trust gate, no separate machinery.
+    for name in &parsed.flags.packages {
+        plan.refs.push(RefSpec::RefSpec {
+            source: RefSpec::Source::Nixpkgs,
+            package: name.clone(),
+            raw: format!(
+                "{}{}{}",
+                Syntax::REF_SOURCE_NIXPKGS,
+                Syntax::REF_SEPARATOR,
+                name
+            ),
+        });
+    }
 
     // U19: `jet env` never runs a project function (the invariant this card
     // confirms), but it DOES realize the project's own declared packages —
     // first entry to a repo whose env is trust-sensitive gates on it.
-    let project_dir = std::env::current_dir().unwrap_or_default();
     if let Err(code) = Trust::gate(
         theme,
         &Trust::store_path(),
@@ -535,6 +623,99 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     match &parsed.command {
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
         _ => Shell::enter(theme, &env, ShellKind::detect()),
+    }
+}
+
+/// The foreign flake/devenv file in `dir`, if either exists. `flake.nix` wins
+/// when both are present (Nix's own name for the concept jetpack is bridging
+/// from; `devenv.nix` is devenv's flake-backed variant of the same file).
+fn foreign_flake_path(dir: &Path) -> Option<PathBuf> {
+    let flake = dir.join(Syntax::FOREIGN_FLAKE_FILE);
+    if flake.is_file() {
+        return Some(flake);
+    }
+    let devenv = dir.join(Syntax::FOREIGN_DEVENV_FILE);
+    if devenv.is_file() {
+        return Some(devenv);
+    }
+    None
+}
+
+/// Whether the project's own manifest already declares an environment —
+/// either the typed `module env.*` surface or the Phase-1 `pkg.*` directive
+/// surface. U16's foreign-flake auto-detection only fires when this is
+/// false; a malformed typed surface still counts as "has env" (its author
+/// clearly meant to declare one, so this never masks that error by silently
+/// falling through to a foreign flake instead).
+fn project_declares_env(dir: &Path) -> bool {
+    let Ok(src) = std::fs::read_to_string(EnvFile::path_in(dir)) else {
+        return false;
+    };
+    if ModuleEval::is_module_surface(&src) {
+        return ModuleEval::evaluate_env(&src, dir)
+            .map(|p| !p.package_refs.is_empty() || p.prompt.is_some())
+            .unwrap_or(true);
+    }
+    let ef = EnvFile::parse(&src);
+    !ef.packages.is_empty() || ef.default_source.is_some() || !ef.named.is_empty()
+}
+
+/// U16: enter a foreign flake's default devShell directly through `nix
+/// develop` — the ratified stopgap (jetpack never parses/composes a foreign
+/// flake's devShell itself; `jetpack bridge flake` is the best-effort
+/// translator for users who want to adopt it as `env.*` instead). Gated on
+/// the same trust store as a declared env, keyed on the flake's content
+/// (`Trust::gate_flake`) since arbitrary flake.nix text is untrusted input
+/// the moment jetpack shells out to it.
+fn enter_foreign_flake(theme: &Theme, project_dir: &Path, flake_path: &Path, parsed: &Parsed) -> i32 {
+    if !Provider::nix_on_path() {
+        theme.error_coded(
+            "E1256",
+            "this project's foreign flake needs `nix`, which isn't on PATH",
+            "`jet env`'s foreign-flake fallback (U16) shells out to `nix develop`, the ratified \
+             stopgap; without `nix` there's no way to enter that shell.",
+            "install Nix (https://nixos.org/download), or declare packages in env.* instead.",
+        );
+        return 2;
+    }
+    if let Err(code) = Trust::gate_flake(
+        theme,
+        &Trust::store_path(),
+        project_dir,
+        flake_path,
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+    theme.status(&format!(
+        "entering foreign flake shell: {}",
+        theme.bold(&flake_path.display().to_string())
+    ));
+    let flake_dir = flake_path.parent().unwrap_or(project_dir);
+    let mut args = vec![flake_dir.display().to_string()];
+    if parsed.flags.pure {
+        args.push(Syntax::ENV_FLAG_PURE.to_string());
+    }
+    if let Some(inner) = &parsed.command {
+        if !inner.is_empty() {
+            args.push("--command".to_string());
+            args.extend(inner.iter().cloned());
+        }
+    }
+    match std::process::Command::new("nix")
+        .arg("develop")
+        .args(&args)
+        .status()
+    {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(e) => {
+            theme.error(
+                "couldn't run `nix develop`",
+                &e.to_string(),
+                "check that `nix` is installed and on PATH.",
+            );
+            1
+        }
     }
 }
 
@@ -1287,6 +1468,45 @@ fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
     2
 }
 
+/// `jetpack bridge flake` (U16, card c9jetpackgates) — best-effort translator
+/// from a foreign `flake.nix`'s devShell into jetpack's own `env.*` module
+/// form. Never edits the project's `env.jet`; the shim prints to stdout for
+/// the user to review and merge (I8 — one canonical env surface).
+fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
+    match parsed.positional.first().map(String::as_str) {
+        Some(v) if v == Syntax::BRIDGE_VERB_FLAKE => {
+            if !Provider::nix_on_path() {
+                theme.error_coded(
+                    "E1256",
+                    "`jet bridge flake` needs `nix`, which isn't on PATH",
+                    "translating a flake.nix's devShell shells out to `nix eval` (U16); without \
+                     `nix` there's nothing to read the devShell from.",
+                    "install Nix (https://nixos.org/download), or write env.* by hand.",
+                );
+                return 2;
+            }
+            let dir = std::env::current_dir().unwrap_or_default();
+            Bridge::cmd_flake(theme, &dir, fixtures_for(&parsed.flags).as_deref())
+        }
+        Some(other) => {
+            theme.error(
+                &format!("`jetpack bridge {other}` is not a bridge command"),
+                "today `jetpack bridge` only translates `flake` (a flake.nix devShell).",
+                "run `jetpack bridge flake`.",
+            );
+            2
+        }
+        None => {
+            theme.error(
+                "bridge what?",
+                "`jetpack bridge` needs a verb.",
+                "run `jetpack bridge flake`.",
+            );
+            2
+        }
+    }
+}
+
 /// `jetpack os <verb> [<config-path>]@<host>` (U15/U16) — the jetos tier: whole
 /// machine management as a subcommand group, not a separate binary. `<verb>` is
 /// the first positional (`switch`/`build`); the target is the second.
@@ -1312,6 +1532,9 @@ usage:
   {bin} run                            enter the shell described by ./{pack}
   {bin} enter                          enter the project shell described by ./{pack}
   {bin} enter -- cmd                   run a command in the project shell, then exit
+  {bin} enter -p <pkg>...              add ad-hoc nixpkgs packages, undeclared
+  {bin} enter --flake                  force a foreign flake.nix/devenv.nix shell
+  {bin} bridge flake                   print an env.* shim translated from ./flake.nix
   {bin} build [<source>:<package>]     realize a package/environment, don't enter
   {bin} list                           show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
@@ -1336,6 +1559,9 @@ flags:
   --no-color                           disable colored output (also: NO_COLOR)
   --offline                            resolve from fixtures only, never network
   --fixtures <dir>                     read provider output from captured fixtures
+  -p <pkg>...                          (enter) ad-hoc nixpkgs packages, not declared anywhere
+  --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
+  --pure                               (enter) isolate the shell from the host environment
 ",
         bin = bin,
         pack = Syntax::ENV_FILE,
@@ -1367,5 +1593,133 @@ mod tests {
         assert!(p.flags.no_color);
         assert_eq!(p.flags.fixtures, Some(PathBuf::from("/tmp/fx")));
         assert_eq!(p.positional, vec!["nixpkgs:jq"]);
+    }
+
+    // ── U16: -p / --flake / --pure ──
+
+    #[test]
+    fn dash_p_collects_packages_until_dash_dash() {
+        let args: Vec<String> = ["-p", "nodejs", "ripgrep", "--", "some-command"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = parse_args(&args);
+        assert_eq!(p.flags.packages, vec!["nodejs", "ripgrep"]);
+        assert_eq!(p.command, Some(vec!["some-command".to_string()]));
+        assert!(p.positional.is_empty());
+    }
+
+    #[test]
+    fn dash_p_stops_at_next_flag() {
+        let args: Vec<String> = ["-p", "nodejs", "--no-color"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = parse_args(&args);
+        assert_eq!(p.flags.packages, vec!["nodejs"]);
+        assert!(p.flags.no_color);
+    }
+
+    #[test]
+    fn repeated_dash_p_groups_accumulate() {
+        let args: Vec<String> = ["-p", "nodejs", "-p", "ripgrep", "fd"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = parse_args(&args);
+        assert_eq!(p.flags.packages, vec!["nodejs", "ripgrep", "fd"]);
+    }
+
+    #[test]
+    fn parses_flake_and_pure_flags() {
+        let args: Vec<String> = ["--flake", "--pure"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = parse_args(&args);
+        assert!(p.flags.flake);
+        assert!(p.flags.pure);
+    }
+
+    // ── U16: foreign-flake detection ordering ──
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "jetpack_cli_u16_{tag}_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn foreign_flake_not_detected_without_a_flake_file() {
+        let dir = scratch("no_flake");
+        assert_eq!(foreign_flake_path(&dir), None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn foreign_flake_prefers_flake_nix_over_devenv() {
+        let dir = scratch("both");
+        std::fs::write(dir.join("flake.nix"), "{ }").unwrap();
+        std::fs::write(dir.join("devenv.nix"), "{ }").unwrap();
+        assert_eq!(foreign_flake_path(&dir), Some(dir.join("flake.nix")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn project_declares_env_false_with_no_env_file() {
+        let dir = scratch("no_env");
+        assert!(!project_declares_env(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn project_declares_env_true_for_typed_module_with_packages() {
+        let dir = scratch("typed_env");
+        std::fs::write(
+            dir.join(Syntax::ENV_FILE),
+            "module env.dev { packages: [ripgrep] }\n",
+        )
+        .unwrap();
+        assert!(project_declares_env(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn project_declares_env_true_for_phase1_directive_surface() {
+        let dir = scratch("phase1_env");
+        std::fs::write(
+            dir.join(Syntax::ENV_FILE),
+            "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [pkg.packages([\"ripgrep\"])];\n}\n",
+        )
+        .unwrap();
+        assert!(project_declares_env(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn foreign_flake_detection_ordering_only_when_no_env_declared() {
+        // The core U16 ordering rule: a project that already declares env.*
+        // is never silently swapped for a foreign flake, even if one exists —
+        // only `--flake` can force that.
+        let dir = scratch("ordering");
+        std::fs::write(dir.join("flake.nix"), "{ }").unwrap();
+        std::fs::write(
+            dir.join(Syntax::ENV_FILE),
+            "module env.dev { packages: [ripgrep] }\n",
+        )
+        .unwrap();
+        let has_foreign = foreign_flake_path(&dir).is_some();
+        let declares_env = project_declares_env(&dir);
+        assert!(has_foreign);
+        assert!(declares_env);
+        // Auto-detection condition from `cmd_enter`: foreign.is_some() &&
+        // !project_declares_env(..) — false here, so the project's own env
+        // wins unless `--flake` is passed explicitly.
+        assert!(!(has_foreign && !declares_env));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
