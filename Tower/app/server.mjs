@@ -32,6 +32,38 @@ async function serveStatic(req, res) {
   } catch { res.writeHead(404); res.end('not found'); }
 }
 
+// ---- agent presence + message wakeups (server memory; messages persist) ----
+// presence: name → { kind, lastSeen, state: 'listening'|'running'|null }
+const presence = new Map();
+const waiters = new Map();   // name → [res] long-poll responses to flush on send
+export const touch = (name, kind, state) => {
+  if (!name) return;
+  const p = presence.get(name) || {};
+  presence.set(name, { kind: kind || p.kind || 'agent', lastSeen: Date.now(), state: state ?? p.state ?? null });
+};
+function flushWaiters(name) {
+  for (const res of waiters.get(name) || []) { try { res.__flush(); } catch { /* gone */ } }
+  waiters.set(name, []);
+}
+function agentRoster(store) {
+  const s = store.load();
+  const names = new Set([
+    ...(store.config.agents || []).map(a => a.name),
+    ...presence.keys(),
+    ...s.messages.map(m => (m.from === 'owner' ? m.to : m.from)),
+  ]);
+  names.delete('owner');
+  return [...names].map(name => {
+    const cfg = (store.config.agents || []).find(a => a.name === name) || {};
+    const live = presence.get(name);
+    const online = !!live && Date.now() - live.lastSeen < 45_000;
+    return { name, kind: live?.kind || cfg.kind || 'agent',
+      online, state: online ? live.state : null,
+      lastSeen: live ? new Date(live.lastSeen).toISOString() : null,
+      launchable: !!(store.config.commands || {})[cfg.kind || live?.kind || name] };
+  });
+}
+
 // route → (state, payload, config) mutation. Same verbs as the CLI.
 const routes = {
   'card/add':        (s, p, cfg) => db.addCard(s, p, cfg),
@@ -60,9 +92,36 @@ const routes = {
   'milestone/update': (s, p) => db.updateMilestone(s, p.id, p, p.by),
   'milestone/delete': (s, p) => db.deleteMilestone(s, p.id, p.by),
   'ui/toggle':       (s, p) => db.toggleOpen(s, p.key),
+  'message/send':    (s, p) => db.sendMessage(s, p),
+  'message/mark':    (s, p) => db.markMessages(s, p.ids || [], p.field || 'readAt'),
 };
 
 const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500 };
+
+// Spawn a configured headless agent command; its stdout becomes the reply.
+// The message rides in $TOWER_PROMPT (env, not argv — no quoting pitfalls).
+function launch(store, agent, kind, cmd, text) {
+  import('node:child_process').then(({ spawn }) => {
+    import('node:path').then(({ dirname }) => {
+      touch(agent, kind, 'running');
+      const child = spawn('/bin/sh', ['-c', `${cmd} "$TOWER_PROMPT"`], {
+        cwd: dirname(store.dataDir),
+        env: { ...process.env, TOWER_PROMPT: text },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '';
+      const eat = (c) => { out += c; if (out.length > 100_000) out = out.slice(-100_000); };
+      child.stdout.on('data', eat); child.stderr.on('data', eat);
+      const timer = setTimeout(() => child.kill('SIGTERM'), 15 * 60_000);
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        touch(agent, kind, null);
+        const text2 = (out.trim() || `(no output — exit ${code})`).slice(0, 20_000);
+        store.mutate((s) => db.sendMessage(s, { from: agent, to: 'owner', text: text2 }));
+      });
+    });
+  });
+}
 
 export function serve(store, port = 7878, open = false) {
   const server = createServer(async (req, res) => {
@@ -79,12 +138,52 @@ export function serve(store, port = 7878, open = false) {
         const q = new URL(req.url, 'http://x').searchParams;
         return send(res, 200, store.load().events.slice(0, Number(q.get('limit') || 50)));
       }
+      if (req.method === 'GET' && req.url.startsWith('/api/agents')) {
+        return send(res, 200, agentRoster(store));
+      }
+      // Long-poll: hold up to 25s until a message lands for `for`. A listening
+      // agent loops on this; each response marks the batch delivered.
+      if (req.method === 'GET' && req.url.startsWith('/api/messages/wait')) {
+        const q = new URL(req.url, 'http://x').searchParams;
+        const name = q.get('for');
+        if (!name) return send(res, 400, { error: 'E_INVALID', message: 'messages/wait needs ?for=<name>' });
+        touch(name, q.get('kind'), 'listening');
+        const deliver = () => {
+          const pending = db.pendingFor(store.load(), name);
+          if (!pending.length) return false;
+          store.mutate((s) => db.markMessages(s, pending.map(m => m.id), 'deliveredAt'));
+          send(res, 200, pending);
+          return true;
+        };
+        if (deliver()) return;
+        const timer = setTimeout(() => { unhook(); send(res, 200, []); }, 25_000);
+        const unhook = () => { clearTimeout(timer); waiters.set(name, (waiters.get(name) || []).filter(r => r !== res)); };
+        res.__flush = () => { unhook(); touch(name); if (!deliver()) send(res, 200, []); };
+        waiters.set(name, [...(waiters.get(name) || []), res]);
+        req.on('close', unhook);
+        return;
+      }
+      // Launch bridge (opt-in via config.commands): start a headless agent turn
+      // with the owner's message; the reply lands in the thread when it exits.
+      if (req.method === 'POST' && req.url.startsWith('/api/agent/launch')) {
+        const p = await body(req);
+        const roster = agentRoster(store);
+        const a = roster.find(x => x.name === p.agent);
+        const kind = a?.kind || p.agent;
+        const cmd = (store.config.commands || {})[kind];
+        if (!cmd) return send(res, 400, { error: 'E_INVALID', message: `no launch command configured for "${kind}" — add config.commands.${kind}` });
+        if (!p.text || !String(p.text).trim()) return send(res, 400, { error: 'E_INVALID', message: 'launch needs text' });
+        store.mutate((s) => db.sendMessage(s, { from: 'owner', to: p.agent, text: p.text, cardId: p.cardId }));
+        launch(store, p.agent, kind, cmd, String(p.text));
+        return send(res, 200, { ok: true, state: store.project() });
+      }
       if (req.method === 'POST' && req.url.startsWith('/api/')) {
         const name = req.url.slice(5).split('?')[0];
         const fn = routes[name];
         if (!fn) return send(res, 404, { error: 'E_USAGE', message: `unknown route ${name}` });
         const p = await body(req);
         const { result } = store.mutate((s, cfg) => fn(s, p, cfg), { expectRev: p.expectRev });
+        if (name === 'message/send' && result?.to) flushWaiters(result.to);
         return send(res, 200, { ok: true, result, state: store.project() });
       }
       if (req.method === 'GET') return serveStatic(req, res);

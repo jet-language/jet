@@ -13,6 +13,13 @@ export const DEFAULTS = {
   codeLanguage: '',                   // hint for ballot code blocks (highlighting)
   port: 7878,
   backups: 20,
+  // Known agents for the Agents view roster (listeners also self-announce).
+  agents: [],                         // [{ name: "claude-main", kind: "claude" }]
+  // Launch bridge (OPT-IN): lets the board UI start a headless agent turn when
+  // nothing is listening. Value is a shell command; the message is appended as
+  // one quoted argument. Example:
+  //   "commands": { "claude": "claude -p", "codex": "codex exec" }
+  commands: {},
 };
 
 export function loadConfig(dataDir) {

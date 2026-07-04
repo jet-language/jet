@@ -352,6 +352,105 @@ function cmdImport({ pos, flags }) {
   console.log(`imported ${s.cards.length} cards, ${s.decisions.length} decisions, ${s.questions.length} questions, ${s.ideas.length} ideas → ${file}`);
 }
 
+// ---- messaging: owner ⇄ agents ------------------------------------------------
+
+function cmdMessage(store, { pos, flags }) {
+  const [verb] = pos;
+  switch (verb) {
+    case 'send': {
+      const text = flags.text ?? pos.slice(1).join(' ');
+      const payload = { from: flags.from || flags.by || 'owner', to: flags.to, text, cardId: flags.card };
+      // Prefer the running server so a live long-poll listener wakes instantly;
+      // fall back to writing the file directly (listener catches up in ≤3s).
+      return (async () => {
+        try {
+          const r = await fetch(`http://localhost:${store.config.port}/api/message/send`, { method: 'POST', body: JSON.stringify(payload) });
+          const j = await r.json();
+          // A Tower server rejected it on the merits → real error. Anything
+          // else on that port (or no JSON) → treat as no server, write direct.
+          if (!r.ok) {
+            if (['E_INVALID', 'E_NOT_FOUND', 'E_CONFLICT'].includes(j.error)) throw new TowerError(j.error, j.message);
+            throw new Error('not a tower server');
+          }
+          return out(flags, `sent ${j.result.id} → ${j.result.to}`, j.result);
+        } catch (e) {
+          if (e instanceof TowerError) throw e;
+          const { result } = store.mutate((s) => db.sendMessage(s, payload));
+          return out(flags, `sent ${result.id} → ${result.to} (no live server — queued in file)`, result);
+        }
+      })();
+    }
+    case 'list': {
+      const s = store.load();
+      let ms = s.messages;
+      if (flags.thread) ms = ms.filter(m => db.threadKey(m) === flags.thread);
+      if (flags.unread) ms = ms.filter(m => m.to === (flags.for || 'owner') && !m.readAt);
+      ms = ms.slice(-Number(flags.limit || 30));
+      if (flags.json) return out(flags, null, ms);
+      for (const m of ms) console.log(`${m.at}  ${m.from} → ${m.to}: ${m.text.slice(0, 100).replace(/\n/g, ' ')}`);
+      if (!ms.length) console.log('(no messages)');
+      return;
+    }
+    case 'read': {
+      const s = store.load();
+      const who = flags.for || 'owner';
+      const ids = s.messages.filter(m => m.to === who && !m.readAt).map(m => m.id);
+      const { result } = store.mutate((s2) => db.markMessages(s2, ids, 'readAt'));
+      return out(flags, `marked ${result.marked.length} read`, result);
+    }
+    default: throw new TowerError('E_USAGE', `unknown message verb "${verb}" — send/list/read`);
+  }
+}
+
+function cmdAgents(store, { flags }) {
+  return (async () => {
+    try {
+      const r = await fetch(`http://localhost:${store.config.port}/api/agents`);
+      const roster = await r.json();
+      if (flags.json) return out(flags, null, roster);
+      for (const a of roster) console.log(`${a.name.padEnd(16)} ${a.kind.padEnd(8)} ${a.online ? (a.state || 'online') : 'offline'}${a.launchable ? '  (launchable)' : ''}`);
+      if (!roster.length) console.log('(no agents known — declare in config.json agents[] or start a listener)');
+    } catch {
+      const names = new Set([...(store.config.agents || []).map(a => a.name),
+        ...store.load().messages.map(m => (m.from === 'owner' ? m.to : m.from))]);
+      names.delete('owner');
+      if (flags.json) return out(flags, null, [...names].map(name => ({ name, online: null })));
+      for (const n of names) console.log(`${n}  (server down — presence unknown)`);
+      if (!names.size) console.log('(no agents known)');
+    }
+  })();
+}
+
+// Long-lived: print each message addressed to --name as one line on stdout.
+// Under Claude Code, run it inside the Monitor tool so each line wakes the
+// agent. Prefers the server's long-poll; falls back to polling the file.
+async function cmdListen(store, { flags }) {
+  const name = flags.name || flags.by;
+  if (!name) throw new TowerError('E_USAGE', 'agent listen needs --name <agent-name>');
+  const kind = flags.kind || 'agent';
+  const base = `http://localhost:${store.config.port}`;
+  console.log(`listening as ${name} (kind ${kind}) — each owner message prints below`);
+  for (;;) {
+    let batch = null;
+    try {
+      const r = await fetch(`${base}/api/messages/wait?for=${encodeURIComponent(name)}&kind=${encodeURIComponent(kind)}`);
+      if (r.ok) batch = await r.json();
+    } catch { /* server down */ }
+    if (batch === null) {
+      const pending = db.pendingFor(store.load(), name);
+      if (pending.length) {
+        store.mutate((s) => db.markMessages(s, pending.map(m => m.id), 'deliveredAt'));
+        batch = pending;
+      } else {
+        await new Promise(r => setTimeout(r, 3000));
+        batch = [];
+      }
+    }
+    for (const m of batch) console.log(`[${m.from}] ${m.text}${m.cardId ? `  (card ${m.cardId})` : ''}`);
+    if (flags.once && batch.length) return;
+  }
+}
+
 const HELP = `tower — file-backed project board for an owner + AI agents
 
   tower init [--name X] [--dir .]           set up .tower/ in a project
@@ -369,6 +468,13 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower milestone list|add|update|delete
   tower events   [--limit 30]
   tower import <old-tower.json> [--name X] [--force]
+
+  tower message send --to <agent|owner> --text "…" [--by <name>] [--card '#12']
+  tower message list [--thread <agent>] [--unread] [--json]
+  tower agents                              roster + live presence
+  tower agent listen --name <me> [--kind claude|codex]
+                                            long-lived; prints each owner
+                                            message as a line (Monitor-friendly)
 
   Cards accept #num or id. --json everywhere for machine output.
   Complex payloads: --file payload.json or --file - (stdin).
@@ -408,6 +514,12 @@ export async function run(argv) {
       case 'milestone': return cmdMilestone(store, sub);
       case 'next':      return cmdNext(store, sub);
       case 'events':    return cmdEvents(store, sub);
+      case 'message':   return await cmdMessage(store, sub);
+      case 'agents':    return await cmdAgents(store, sub);
+      case 'agent': {
+        if (sub.pos[0] === 'listen') return await cmdListen(store, { flags: sub.flags });
+        throw new TowerError('E_USAGE', 'agent verbs: listen (see also `tower agents`)');
+      }
       default: throw new TowerError('E_USAGE', `unknown command "${cmd}" — run \`tower help\``);
     }
   } catch (e) {
