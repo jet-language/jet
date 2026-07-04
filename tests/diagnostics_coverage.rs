@@ -579,9 +579,20 @@ fn registered_unimplemented_codes_are_expected() {
         "E0005", // retired
         "E0006", // retired
         "E0011", // retired
+        "E0058", // retired (D-MEM1/S3): was `view` return keyword teaching; `-> &T` gone
+        "E0206", // retired (D-MEM1/S3): was `view` return escape check; `-> &T` gone
+        "E0207", // retired (D-MEM1/S3): was stored-ref `&T` field owner ambiguity, D-REF-SHORTHAND1
+        "E0427", // retired (D-MEM1/S3): was `#Ref(owner) name: T` retired-form teaching
+        "E0912", // retired (D-MEM1/S2): was frozen capability signature drift, D-CAP8/c129
+        "L0201", // retired (D-MEM1/S2): was implicit `.clone()` lint; superseded by hard error E0209
         "E2101", // CLI: emitted via eprintln! (not Diagnostic::error) in main.rs
         "E2102", // CLI: emitted via eprintln! (not Diagnostic::error) in main.rs
+        "E2301", // retired (D-MEM1/S3): was returned `view` outlives its owner
+        "E2302", // retired (D-MEM1/S3): was stored `ref` field outliving its source
         "E2303", // alias for E1102 (view crossing task boundary); registered for jet explain
+        "E2304", // retired (D-MEM1/S3): was indexed/sliced piece returned as `view`
+        "E2306", // retired (D-MEM1/S3): was `#Ref(label)` naming no candidate, D-REF-SHORTHAND2
+        "L2301", // retired (D-MEM1/S3): was advisory naming a borrowed return's source
         "E2403", // E2-M6 (library authoring) — staged
         "E2410", // D-SERDE: runtime decode error (missing required field) — emitted as a DecodeError string in generated code, not a compile Diagnostic
         "E2412", // D-SERDE: runtime decode error (unknown field under #[DenyUnknownFields]) — emitted as a DecodeError string, not a compile Diagnostic

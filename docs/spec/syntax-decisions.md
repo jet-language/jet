@@ -76,7 +76,7 @@ params, fields). Never `Type name`.
 
 **S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
 `>>=`. Arithmetic four on Int/Float; the rest Int-only. LHS must be a mutable
-binding or `~` parameter.
+binding or `&` parameter.
 
 **D-INCR1 — Increment/decrement**: `++x`, `x++`, `--x`, `x--` on mutable
 integer lvalues; prefix yields the new value, postfix the old. Indexed slots
@@ -100,8 +100,8 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
-**S27 — Methods**: `self` receiver with capability sigils (`~self`, `^self`,
-`&self`; bare `self` = read). Call `value.method(args)`. Methods live in the
+**S27 — Methods**: `self` receiver with capability sigils (`^self`,
+`&self`; bare `self` = read, D-MEM1). Call `value.method(args)`. Methods live in the
 type body, in `impl Type { }`, or top-level `fn Type.method(self)`
 (**D-EXTMETH1** — `.` connector, orphan rule: same source module; `~~` retired
 → E0325). No-`self` fn in a type = static method (`Circle.unit()`).
@@ -618,7 +618,7 @@ auto-derived; `{value@Debug}` selects it; `#[Redact]` on a field renders
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) ->
-Snapshot; fn restore(self: ~Self, snap: Snapshot) }`; restore total;
+Snapshot; fn restore(&self, snap: Snapshot) }`; restore total;
 `derive Rollback` = field-wise clone impl.
 
 **D-EXT1 — Extensibility ceiling**: Tier 0/1 (methods, traits, operators on
@@ -682,33 +682,47 @@ path, not yet generated.
 
 ### Capabilities & memory
 
-**S10 / D-CAP7 — Capability sigils** *(owner-frozen; supersedes all word
-spellings)*:
+**S10 / D-CAP7 — Capability sigils, memory v5** *(owner-frozen; migration to
+D-MEM1 complete 2026-07-04)*: two sigils ship; unmarked is always read,
+enforced (no elevation, no inference tier):
 
 ```jet
-T     // infer: starts at read/view, elevates only as the body requires
-~T    // edit:  exclusive write/mutate access
-^T    // take:  ownership moved/consumed
-&T    // share: may escape the scope, be retained, cached, spawned, stored
-*T    // raw:   unsafe pointer/address (#Unsafe-gated)
+T     // read: default, enforced — never elevates
+&T    // write: exclusive write access
+^T    // take: ownership moved/consumed
 ```
 
 ```jet
-fn write(file: ~File, data: Bytes)     // read is the default → no sigil
-fn equip(player: ~Player, item: ^Item)
+fn write(file: &File, data: Bytes)     // read is the default → no sigil
+fn equip(player: &Player, item: ^Item)
 ```
 
-Call sites mirror the type — `damage(~player, 10)`, `close(^file)`,
-`cache(&texture)`; receivers carry it on self (`fn damage(~self)`,
-`fn destroy(^self)`, `fn share(&self)`). Capability sits on the type side
-(`name: ~Type`, D-CAP3). `copy x` stays a verb — no sixth sigil (D-CAP2).
-Dereference is **postfix `p.*`** (composes: `p.*.field`); prefix `*x` is
-raw-pointer-of only, `#Unsafe`-gated (D-CAP9). `mut`/`take`/`view` are not
-keywords (E0056–E0058 point at the sigils).
+Call sites mirror the type — `write(&file, data)`, `close(^file)`; receivers
+carry it on self (`fn write(&self)`, `fn destroy(^self)`, bare `self` =
+read). Capability sits on the type side (`name: &Type`, D-CAP3). `copy x`
+stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
+(composes: `p.*.field`); prefix `*x` is raw-pointer-of only, `#Unsafe`-gated
+(D-CAP9), and is not a parameter capability. `mut`/`take`/`view` are not
+keywords (E0056/E0058 point at the sigils; E0057 retired earlier by
+D-S14-PAUSE).
 
-**D-CAP8 — Unmarked default**: infer-in-bodies, freeze-at-API — an unmarked
-param elevates by usage; at a `library { api: explicit }` boundary the
-resolved capability freezes; later drift is E0912, never a silent flip.
+*History:* D-CAP7's original text (pre-2026-07-03) had a third visible
+parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
+an `Infer` tier where a bare `T` param elevated by body usage. D-MEM1
+superseded all of that: unmarked is always read (no elevation, ever), `~` is
+gone from the grammar entirely (ordinary syntax error — no compat, per the
+rule at the top of this file), and `*T` never shipped further than this doc
+as a *parameter* sigil (raw-pointer access stays the separate `p.*`/`*x`
+expression mechanism, D-CAP9, untouched by the migration).
+`AccessConvention::Share`/`::Raw` remain dead enum variants in the compiler,
+inert until a future tier reactivates them.
+
+**D-CAP8 — Unmarked default (retired 2026-07-04 by D-MEM1/S2)**: originally,
+an unmarked param elevated by body usage and froze its resolved capability
+at a `library { api: explicit }` boundary (drift = E0912, see D-CAP4/5/6).
+D-MEM1 deleted elevation and the freeze tier outright: unmarked is always
+read, no inference, no `api:` manifest field (an ordinary unknown-key error,
+E1216) — see D-MEM1 below.
 
 **D-MEM1 — Memory model v5, "the borrow checker, humanized"** *(ratified
 2026-07-03, migration in progress — card #187; plan
@@ -779,12 +793,17 @@ struct/enum literal for a type that owns heap data directly or transitively
 and enum variant payloads — `Id<T>` is plain `Copy` data, never flagged);
 `copy` of a heap-owning type. A bare list/map literal outside those four
 shapes (`xs := [1, 2, 3]`) is NOT checked — a deliberate, ratified-text-exact
-scope cut, not silently expanded. S8–S9 remain unbuilt.
+scope cut, not silently expanded. **S8 shipped (2026-07-04)**: docs sweep —
+diagnostics.md retired-code stubs for every deleted S1-S7 mechanism,
+spec.md's memory chapter rewritten to v5 end to end, this file's
+D-CAP7/D-CAP8/D-CAP4-5-6/D-REF-SHORTHAND1/2 supersession notes, stale
+`~`/`.clone()`/`api:` sweep across docs/reference. S9 (final verification
+gate) remains.
 
-**D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
+**D-MUTSELF1 — Receiver mutation**: a `&self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a
-"write the receiver as `~self`" fix at the assignment.
+"write the receiver as `&self`" fix at the assignment.
 
 **S63 — Resource cleanup**: automatic scope-end cleanup (RAII) is the single
 story — backed by Rust `Drop`, every exit path. No `defer` keyword
@@ -980,24 +999,26 @@ explicit type annotation; the flow-analysis engine (E0420/E0423/E0424) is
 unchanged, only the trigger moved. The old `#Uninit buffer: [U8#4096]`
 spelling is retired: a hard parse error (E0426) teaches the new form.
 
-**D-REF-SHORTHAND1 — Stored-ref field shorthand (opt D, ratified
-2026-07-02)**: a stored-reference field spells its type `&T` — the borrow
-sigil already used at call sites — instead of a bare `T` plus a separate
-marker. The owner is *inferred* at each construction site when exactly one
-in-scope value has the referent type; two or more is ambiguous (**E0207**,
-now fired at the construction site, listing the candidates by name) and one
-in-scope value of the type is named with `#Ref(label)` to disambiguate. The
-retired `#Ref(owner) name: T` form (plain type, no `&`) is a hard teaching
-error (**E0427**) pointing at `name: &T`. `~T` fields and always-required
-labels both stay rejected.
+**D-REF-SHORTHAND1 — Stored-ref field shorthand (retired 2026-07-04 by
+D-MEM1/S3)**: originally, a stored-reference field spelled its type `&T` —
+the borrow sigil already used at call sites — instead of a bare `T` plus a
+separate marker; the owner was *inferred* at each construction site (one
+candidate → it, two or more → **E0207**), disambiguated with `#Ref(label)`
+when needed; the retired `#Ref(owner) name: T` form (plain type, no `&`) was
+a hard teaching error (**E0427**). D-MEM1/S3 deleted the whole mechanism
+outright — `&T` struct fields are not in the v5 grammar (ordinary syntax
+error), and E0207/E0427 are gone (retired stub rows in
+docs/spec/diagnostics.md). The "how do I store a reference?" answer is now
+an owned field, `Shared<T>`, or `Pool<T>`/`Id<T>` (see D-MEM1) — forward
+guidance only, this mechanism is not coming back.
 
-**D-REF-SHORTHAND2 — `#Ref(label)` disambiguator (opt A, ratified
-2026-07-02)**: the owner label stays on the `#` directive plane, spelled
-`#Ref(label)` — *not* `@Ref`. This resolves the sigil clash with
-D-MARKERMOVE1 (which lists `#Ref(Label)` among the markers that stay `#`):
-`@Ref` must **not** ship. `#Ref(label)` is only valid on a `&T` field and
-only names one of the inferred candidate owners; a label naming no candidate
-is **E2306**.
+**D-REF-SHORTHAND2 — `#Ref(label)` disambiguator (retired 2026-07-04 by
+D-MEM1/S3)**: originally the owner label stayed on the `#` directive plane,
+spelled `#Ref(label)` — *not* `@Ref`, resolving the sigil clash with
+D-MARKERMOVE1. Deleted along with D-REF-SHORTHAND1's `&T` fields; a
+`#Ref(label)` naming no candidate owner used to be **E2306** — also gone
+(retired stub row in docs/spec/diagnostics.md). `jet expand --facts refs`
+(the lens that reported these owners) is gone with it.
 
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
 and scope-inferred by default (the region is the arena binding's lexical
@@ -1400,10 +1421,15 @@ Bare keyword or block (`executable { entry: "src/cli.jet" }`); bare
 omitted targets infer from `fn run()` (executable else library; two entries
 E_DUPMAIN).
 
-**D-CAP4/5/6 + c129 — API freeze**: `library { api: stable | explicit }`;
-inference is the default forever. `jet publish` freezes public capability
-signatures into `.jet/cache/api/<package>.api`; drift is E0912; digest folds
-into the lock fingerprint.
+**D-CAP4/5/6 + c129 — API freeze (retired 2026-07-04 by D-MEM1/S2)**:
+originally, `library { api: stable | explicit }` froze public capability
+signatures into `.jet/cache/api/<package>.api` at `jet publish`, drift was
+E0912, digest folded into the lock fingerprint. D-MEM1/S2 deleted the
+mechanism outright: the `api:` field no longer exists (an ordinary
+unknown-key error, E1216, like any typo'd key); `ApiFreeze`'s snapshot
+machinery survives, re-grounded as unconditional pub-fn semver diffing
+(E1218/E2601) — same intent (breaking-change detection at publish), no
+capability-tier freeze.
 
 **Publishing & supply chain**: `jet publish` (version from `pkg.jet`;
 refuses dirty tree/failing tests, `--allow-dirty`; errors E1219+)
@@ -1452,8 +1478,11 @@ migrations. Runtime semantics: spec.md "Runtime migration chain".
 **D-EXPANDCLI1 (=A, ratified 2026-07-03, c183expand)**: the transparency
 command is `jet expand --facts <lens> <file>`; bare `jet expand <file>`
 runs every lens, grouped (magic default). Lens floor: `inline`
-(D-METHODMACRO1), `refs` (D-REF-SHORTHAND1); other ratified surfaces add
-lenses under the same flag, never new commands (I8).
+(D-METHODMACRO1); other ratified surfaces add lenses under the same flag,
+never new commands (I8). A `refs` lens (D-REF-SHORTHAND1) shipped alongside
+`inline` at c183expand; D-MEM1/S3 deleted it along with the `&T`
+stored-ref-field mechanism it reported on (`--facts refs` is an
+unknown-lens usage error today).
 
 **Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-GC1,
 D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,

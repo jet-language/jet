@@ -90,7 +90,7 @@ before continuing.
 | E0026 | parse | *retired by D-S14-PAUSE* (was: `throw`/`raise` teaching) |
 | E0027 | parse | *retired by D-S14-PAUSE* (was: `append` teaching) |
 | E0028 | parse | *retired by D-S14-PAUSE* (was: `Vec`/`dict` teaching) |
-| E0029 | parse | two capability markers on one parameter (D-CAP7) |
+| E0029 | parse | two capability markers on one parameter (D-CAP7/D-MEM1) |
 | E0030 | parse | *retired by D-S14-PAUSE* (was: `as` teaching) |
 | E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
 | E0032 | parse | *retired by D-S14-PAUSE* (was: lambda teaching) |
@@ -118,6 +118,7 @@ before continuing.
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
 | E0056 | parse | teaching: `mut` capability keyword → `&` sigil (D-MEM1) |
 | E0057 | parse | *retired by D-S14-PAUSE* (was: `take` keyword teaching) |
+| E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → `&` sigil; `-> &T` returns no longer exist to point at) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | parse | teaching: a contract marker written with `#` → write it with `@` (D-MARKER-FAMILY1, D-MARKERMOVE1/2/3) |
@@ -198,10 +199,13 @@ before continuing.
 | E0203 | sema  | `take` on a non-consuming parameter       |
 | E0204 | sema  | same value used while `mut` is active in one call |
 | E0205 | sema  | `self.field = v` without write access (`&`) on the receiver (D-MUTSELF1) |
+| E0206 | sema  | *retired by D-MEM1/S3* (was: `view` return can't point at this value; `-> &T` returns no longer exist) |
+| E0207 | sema  | *retired by D-MEM1/S3* (was: a stored-reference `&T` field's owner ambiguous, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
 | E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
 | E0211 | sema  | `copy x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-CAP2/D-MEM1/S4) |
+| L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (U11, D-JPK-SCRIPTDEP1) |
 | L0204 | jet   | a `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16) |
@@ -269,6 +273,7 @@ before continuing.
 | E0423 | sema  | `:= uninit` binding's type is not plain data (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
 | E0424 | sema  | `:= uninit` used without `use core.mem` (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name: Type := uninit` (D-UNINIT-SENTINEL1) |
+| E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0501 | sema  | empty `[]` needs a context type           |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -391,6 +396,7 @@ before continuing.
 | E0909 | sema  | generic instantiation too deep |
 | E0910 | sema  | `@PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
+| E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public capability signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and capability freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
 | E0914 | sema  | unknown interpolation selector after `@` (D-DISPLAYDBG2) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
@@ -463,8 +469,13 @@ before continuing.
 | E1110 | sema  | `.task { … }` outside a `taskgroup` scope, or on the wrong handle (D-TASKSCOPE1) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
+| E2301 | sema  | *retired by D-MEM1/S3* (was: returned `view` outlives the local that owns it; `-> &T` returns no longer exist) |
+| E2302 | sema  | *retired by D-MEM1/S3* (was: stored `ref` field would point at something that dies first; `&T` fields no longer exist) |
 | E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
+| E2304 | sema  | *retired by D-MEM1/S3* (was: an indexed/sliced piece can't be handed back as a `view`; `-> &T` returns no longer exist) |
 | E2305 | sema  | a `View<T>` (`.view(...)`) escapes the scope of the list it borrows from (D-DYNARRAY1) |
+| E2306 | sema  | *retired by D-MEM1/S3* (was: `#Ref(label)` on a `&T` field names no in-scope value of the referent type, D-REF-SHORTHAND2; stored-ref fields no longer exist) |
+| L2301 | sema  | *retired by D-MEM1/S3* (was: advisory naming a borrowed return's source; `-> &T` returns no longer exist) |
 | E2307 | sema  | a string view (`.trim()`/`.after()`/`.before()`) escapes the scope of the `String` it borrows from (D-MEM1 stage S5) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
@@ -480,7 +491,7 @@ before continuing.
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
 | E1214 | jet   | `jetpack.toml` has a malformed line — not a valid `key = "value"` assignment or `[table]` header (D-JPK-FILES) |
 | E1215 | jet   | `jetpack.toml` contains an unknown table or key name, with a did-you-mean suggestion (D-JPK-FILES) |
-| E1216 | jet   | a `targets:` block has an unknown field, or `api:` is not `stable`/`explicit` (D-TGT3/D-CAP4) |
+| E1216 | jet   | a `targets:` block has an unknown field (D-TGT3) |
 | E1217 | jet   | a dependency in `pkg.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
 | E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
@@ -695,9 +706,9 @@ CLI.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1101 | A spawned task captures a value it does not own. | Tasks run concurrently and may outlive the scope that created them; shared `var` state is not allowed. | Give the task its own copy or use `take(name)` so the task owns the value; use a channel to send results back. |
-| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; shared views (`&`), `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the shared-view field, or hand a closure over with `take`. |
+| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; a `View<T>`/string view, a trait value, or a non-`take`n closure cannot cross. | Send plain owned data (`copy` it, or use a `Shared<T>` handle for genuinely shared state), or hand a closure over with `take`. |
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
-| E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy` or `share` to the task instead of a `view`. |
+| E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`. |
 | E1104 | `#Layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#Layout(c)` if C interop is not required. |
 | E1105 | `#Layout(packed)` or `#Layout(align(N))` written on a struct. | The supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays); `packed`/`align` are reserved for future milestones. | Use `#Layout(c)` or `#Layout(columnar)`, or omit `#Layout` for the default. |
 | E1107 | The per-container layout prefix `columnar [T]` was written in a type. | A per-use columnar override isn't built yet — only the whole-struct form `#Layout(columnar) struct …` ships in v1 (D-SOA2C reserves this spelling). | Put `#Layout(columnar)` on the `struct` declaration instead. |

@@ -796,10 +796,10 @@ impl<'a> Checker<'a> {
         );
         let fix = match crossing {
             SendCrossing::ChannelSend => {
-                "send plain owned data instead, or rebuild the value without shared-view fields before calling `.send()`"
+                "send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`"
             }
             SendCrossing::TaskCapture | SendCrossing::TaskResult => {
-                "give the task plain owned data, or remove the shared-view field before spawning"
+                "give the task plain owned data, or rebuild the value as an owned copy before spawning"
             }
         };
         // D-DETACH1: if this E1102 fires in a task spawn context, record the task

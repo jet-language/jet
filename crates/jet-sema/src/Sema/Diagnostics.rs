@@ -812,7 +812,7 @@ pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> Stri
                 name
             )
         }
-        SendProblemKind::ViewBorrow => "`&` results are shared views, not owned values".to_string(),
+        SendProblemKind::ViewBorrow => "a view is a borrow, not an owned value".to_string(),
     }
 }
 

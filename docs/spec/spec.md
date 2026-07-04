@@ -156,169 +156,223 @@ A future feature must never die as a generic syntax error. Old Jet and foreign
 syntax teaching is paused until post-Epoch 6 (D-S14-PAUSE); active docs and
 fixtures use canonical syntax only.
 
-## M2 — ownership (done)
+## M2 — ownership (memory model v5, D-MEM1, done 2026-07-04)
 
 Borrow-checker mechanics live in the transpiler; tier-1 users never write
-`&`, `&mut`, `*`, or lifetime parameters.
+Rust's `&`, `&mut`, `*`, or lifetime parameters. Two sigils, enforced (no
+inference, no elevation):
 
-| You write              | It means                          | Compiles to Rust |
-|------------------------|-----------------------------------|------------------|
-| `fn f(x: T)`           | shared read (default)             | `x: &T`          |
-| `fn f(x: ~T)`          | mutable borrow                    | `x: &mut T`      |
-| `fn f(x: ^T)`          | move; caller must write `^`        | `x: T`           |
-| `fn f() -> &T`         | borrow return (elided lifetime)   | `-> &T`          |
-| `field: &T` (tier 2)   | stored reference in a struct      | `field: &'a T`   |
+| You write     | It means                       | Compiles to Rust |
+|----------------|--------------------------------|-------------------|
+| `fn f(x: T)`   | read (default; the only unmarked meaning) | `x: &T`   |
+| `fn f(x: &T)`  | write — exclusive edit access   | `x: &mut T`       |
+| `fn f(x: ^T)`  | take — ownership moves to callee | `x: T`          |
 
-**Stored-reference fields (D-REF-SHORTHAND1/2):** a struct field written
-`field: &T` holds a borrow of some *owner* rather than its own copy of `T`.
-At each place the struct is built, the field's **owner** — the value the
-borrow points into — is inferred: the *candidate owners* are the in-scope
-values (parameters, `let`/`::` locals, and module consts) whose type is
-exactly the referent type `T`. Exactly one candidate → it is the owner, no
-annotation needed. Two or more → the owner is ambiguous (**E0207**) and the
-field must name it with a `#Ref(label)` prefix, where `label` is one of the
-candidates. Zero candidates → the fill must be a `'static` const, since any
-shorter-lived source would dangle (**E2302**). An explicit `#Ref(label)` that
-names no candidate is **E2306**. `#Ref` is the only annotation and it lives on
-the `#` directive plane (never `@Ref`, per D-REF-SHORTHAND2); it *only*
-disambiguates the owner — it never turns a non-`&` field into a reference, so
-the retired `#Ref(owner) name: T` form (plain type, no `&`) is a hard error
-(**E0427**). Codegen lowers the field to `&'owner T`; distinct labels get
-distinct lifetimes.
+An unmarked parameter is **always** read — a body write to it, or handing it
+to a `&`/`^` position, is a hard error at the definition (fix-it: add `&` at
+the parameter and every call site). Call sites mirror the parameter's sigil:
 
-**`View<T>` (D-DYNARRAY1):** the collection-side sibling of a stored `ref`
-field, above. `list.view(a..b)` is a zero-copy window into `list`'s own
-backing storage — unlike `list[a..b]`, which stays the safe, default,
-**copying** slice (unchanged by `View<T>`'s addition). A `View<T>` compiles
-to a plain borrowed Rust slice `&[T]` (an elided-lifetime reference, no
-wrapper struct); the compiler tracks the list it borrows from the same way
-it tracks a `ref` field's owner, and rejects the window escaping that list's
-scope (returned, rebound to another local, or stored in a struct field) with
-**E2305**. Read-only surface in v1: indexing, iteration, `.fold`, and
-`.map` (map-to-owned — returns a fresh `[R]`, never another view); no
-mutation through a view. See `crates/jet-codegen/src/Prelude/CoreLib.rs`
-(the `View<T>` banner) and docs/spec/diagnostics.md's Tier-2 reference table.
+```jet
+fn bump(n: &Int) { n += 1 }
+fn archive(name: ^String) -> String { return name }
 
-The capability is a prefix sigil on the **type** (D-CAP7) — see "Access
-capability sigils" below for the full set. Call-site rules: the call-site sigil
-must match the parameter; omitting `^` on a clonable type inserts `.clone()`
-with lint **L0201** (fired only when the cloned value is dead after the call —
-D-L0201); on a non-clonable type → **E0201**. Omitting `~` on a mutable
-parameter → **E0202**. Using the same name twice in one call while `~` is active
-→ **E0204**. `*` outside `#Unsafe` → **E0208**.
+fn run() {
+    score: Int := 41
+    bump(&score)                 // & mirrors &Int
+    saved :: archive(^"vault")   // ^ mirrors ^String
+}
+```
+
+(examples/features/memory/ownership.jet) Method receivers carry the sigil on
+`self`; plain `self` is read; the sigil lives on the definition, not the call
+site:
+
+```jet
+impl Player {
+    fn show(self) -> Int { return self.hp }                     // read receiver
+    fn heal(&self, amount: Int) { self.hp = self.hp + amount }  // write receiver
+}
+```
+
+```jet
+p.heal(10)    // clean — the &self is on the method definition, not here
+p.show()      // plain read receiver
+```
+
+A write through a read receiver is **E0205** ("write the receiver as
+`&self`"); calling a `&self` method needs a changeable binding at the call
+site (**E0202**, "does not have edit access (`&`)"). Using the same name
+twice in one call while a `&` on it is active is **E0204** ("while something
+is being changed, nobody else may be looking at it") — pass `&x` once, or
+`copy x` first.
+
+**Named binding vs. temporary.** Passing a *named binding* to a `^` (take)
+parameter without `^` is **E0209** — a hard error, never a silent clone (the
+old `L0201` lint that auto-cloned is gone). A *temporary* — a literal,
+`copy x`, or a call result — passes freely with no `^`, since nothing survives
+to be used after. `copy x` (D-CAP2) is the one copy spelling — a real prefix
+expression, not a method: `.clone()` is not user-typable Jet syntax (`clone`
+falls through to the ordinary "no such method" error). `copy` on a value Jet
+can't duplicate — a function, a trait value — is **E0211**; on a scalar it's
+legal but redundant (already trivially copyable).
+
+```jet
+name: String :: "vault"
+saved :: copy name    // fresh, independent value; `name` still usable after
+```
+
+(examples/features/memory/copy_verb.jet)
+
+### Second-class borrows
+
+There is no first-class (storable, returnable) borrow in v1: `-> &T` return
+types and `&T` struct fields are not in the grammar (ordinary syntax errors,
+no special teaching text — the mechanism is gone, not disallowed). A struct
+field always owns its value:
+
+```jet
+struct Span { text: String, meta: String }
+
+fn describe(source: String, kind: String) {
+    s: Span :: Span.{text: source, meta: kind}   // fields own their data
+    print(s.text)
+}
+```
+
+(examples/features/memory/ref_field.jet) When a program genuinely needs
+"many owners, one value," reach for `Shared<T>` or `Pool<T>`/`Id<T>` (below)
+instead of a stored reference.
+
+### Zero-copy string views
+
+`String.trim()`/`.after(sep)`/`.before(sep)` bound to a local return a
+zero-copy view into the receiver's own buffer — a real `&str` borrow,
+invisible in the type (`String` stays one Jet-level type end to end) —
+whenever sema can prove the binding can't outlive its owner:
+
+```jet
+padded := "  nate@jet.dev  "
+email :: padded.trim()
+domain :: email.after("@")
+print("padded still readable: {padded}")   // reading the owner still works
+```
+
+(examples/features/memory/string_view.jet) A view's legal surface is
+narrow: chain another `.trim()/.after()/.before()`, interpolate it
+(`"{domain}"`), or `copy` it into an owned `String`. Any other use —
+return, rebind, struct field, call argument, list/tuple element, any other
+method — is **E2307**. `[T]` list slices (`list.view(a..b)`, D-DYNARRAY1,
+predates this migration) follow the same owner-outlives-view reasoning,
+reported as **E2305**. Either kind of view crossing a `tasks.spawn`/
+`Sender.send` boundary is reported once, as **E1102** (unsendable value) —
+a task or channel moves owned data between threads, and a view can't cross
+without ownership.
+
+### Escape hatches — `Shared<T>` and `Pool<T>`/`Id<T>`
+
+Two named mechanisms cover what a first-class borrow used to promise —
+share-across-scopes and many-owners-one-value — without reviving stored
+references.
+
+**`Shared<T>`** (D-SHARED-API1) is a lock-guarded shared handle — "a
+copyable door":
+
+```jet
+config :: Shared.new(AppConfig.{ name: "jet-server", hits: 0 })
+t1 :: tasks.spawn(() => handle(1, config))   // no `take` needed
+label :: config.read(c => c.name)
+config.edit(c => { c.hits += 1 })
+```
+
+(examples/features/memory/shared_config.jet) `Shared.new(x)` infers `T` from
+`x`; `.read(f)`/`.edit(f)` run a closure against a read- or write-locked view,
+the lock scoped to the call only. Cloning `Shared<T>` is always a cheap
+handle clone, never a deep copy of `T` — so it crosses a `tasks.spawn`
+boundary with no `^`.
+
+**`Pool<T>`/`Id<T>`** (D-POOLID-API1) is a generational arena: every value
+lives in one shared table, and other values point at it by `Id<T>` — plain
+copyable, comparable index+generation data, never touching `T` itself:
+
+```jet
+world := Pool<Player>.new()
+kai :: world.add(Player.{ name: "Kai", hp: 100, attack: 15, target: None })
+world[kai].target = Val(rem)          // nested write through a real place
+fallen :: world.remove(kai)           // T?, mirrors Map.remove
+```
+
+(examples/features/memory/entity_world.jet, entity_tree.jet) `pool[id]`
+indexes for read and write; `.ids()` walks every live entry. A stale `Id<T>`
+(its slot was removed) panics at runtime, mirroring the array-out-of-bounds
+precedent (examples/features/memory/pool_stale_id.jet) — not a new
+diagnostic code.
+
+### `policy no_alloc`
+
+A bare module-level `policy no_alloc` (D-NOALLOC-SEM1) flags four
+allocation-shaped expressions written directly in that module's own function
+bodies — string interpolation with a `{…}` hole, `.push`/`.insert`, a
+struct/enum literal for a heap-owning type, `copy` of a heap-owning type —
+as **E0921**. The check is local only: a call into another function is that
+function's own module's problem, never followed.
+
+```jet
+policy no_alloc
+
+fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
+```
+
+(examples/features/memory/no_alloc_policy.jet)
 
 `const NAME = value` always looks the same; the transpiler emits Rust
 `const` or `static` when the address is taken or the type needs it.
 
-Aliasing rule, stated for humans: *while something is being changed,
-nobody else may be looking at it.* Foreign `read`/`write` spellings get
-teaching errors **E0017**/**E0018** (S14). A `&T` return may only hand
-back a parameter, a scalar local, or a const — not fresh text (**E0206**).
+Aliasing rule, stated for humans: *while something is being changed, nobody
+else may be looking at it.* Foreign `read`/`write` spellings get teaching
+errors **E0017**/**E0018** (S14).
 
-## Access capability sigils (D-CAP7/D-CAP8)
+## Access capability sigils (D-MEM1)
 
-The capability is a prefix sigil on the **type**, not the name. Five sigils; four ship today:
+The capability is a prefix sigil on the **type**, not the name. Two sigils
+ship in v1 (unmarked read is the default, not a sigil):
 
 | Sigil | Capability | Compiles to Rust |
-|-------|-----------|-----------------|
-| `T` (bare) | read/infer — callee reads only; inferred from body (D-CAP8) | `x: &T` |
-| `~T` | edit — exclusive mutable access | `x: &mut T` |
+|-------|-----------|-------------------|
+| `T` (bare) | read — callee only reads; enforced, never elevated | `x: &T` |
+| `&T` | write — exclusive edit access | `x: &mut T` |
 | `^T` | take — ownership moves to callee | `x: T` |
-| `&T` | share — value may escape the call (stored, cached, spawned) | `x: Arc<T>` / retained ref |
-| `*T` | raw pointer (D-CAP9) | `x: *mut T` |
+
+`~` is not part of the v5 grammar (ordinary syntax error). Raw-pointer access
+(`p.*` postfix deref, prefix `*x`) is a separate, `#Unsafe`-gated mechanism
+(D-CAP9) — not a parameter capability; the compiler's `AccessConvention`
+enum keeps dead `Share`/`Raw` variants internally, inert until a future
+tier reactivates them.
 
 ### Placement
 
 Capability rides the type on the parameter:
 
 ```jet
-fn damage(p: ~Player, amount: Int) {   // ~Player: edit; Int: read (bare)
+fn damage(p: &Player, amount: Int) {   // &Player: write; Int: read (bare)
     p.hp = p.hp - amount
 }
-
-fn report(p: &Player) {                // &Player: share
-    print("{p.name}: {p.hp}")
-}
 ```
 
-The call site mirrors the sigil — the capability is always visible where mutation or movement happens:
+The call site mirrors the sigil — the capability is always visible where
+mutation or movement happens:
 
 ```jet
-damage(~p, 30)    // ~ mirrors the parameter's ~Player
-report(&p)        // & mirrors &Player
+damage(&p, 30)    // & mirrors the parameter's &Player
 close(^file)      // ^ mirrors ^File — file is consumed
-```
-
-Method receivers carry the sigil on `self`; plain `self` is read:
-
-```jet
-impl Player {
-    fn show(self) -> Int { return self.hp }      // read receiver
-    fn heal(~self, amount: Int) { self.hp =  self.hp + amount }  // edit receiver
-}
-```
-
-Method call syntax stays clean — the receiver sigil is on the `impl`, not the call site:
-
-```jet
-p.heal(10)    // clean; the ~self is on the method definition, not here
-p.show()      // plain read receiver
-```
-
-### Inference (D-CAP8)
-
-An unmarked parameter is `Infer`: the compiler walks the body and resolves the
-minimum capability the usage requires.
-
-Resolution rules (deterministic, in priority order):
-1. Body assigns a field (`p.field = …`) or calls a `~self` method on the param → resolves to `~`.
-2. Body passes the param to a `^param` position → resolves to `^`.
-3. Body passes the param to a `&param` position → resolves to `&`.
-4. Otherwise → resolves to read (bare `T`, no sigil).
-
-The call site **still requires the resolved sigil** for edits and moves — inference removes
-the annotation from the definition, not the visibility at the call site:
-
-```jet
-// unmarked `c` — body writes c.value → compiler infers ~Counter
-fn bump(c: Counter, by: Int) {
-    c.value = c.value + by
-}
-
-fn run() {
-    c := Counter.{ value: 0 }
-    bump(~c, 5)    // ~ still required at the call site
-    bump(~c, 3)
-    print(value_of(c))
-}
-```
-
-An unmarked parameter whose body only reads it resolves to plain read; the call site needs
-no sigil:
-
-```jet
-fn value_of(c: Counter) -> Int {
-    return c.value    // read only — resolves to bare T
-}
-// call: value_of(c)  — no sigil
-```
-
-Inference also applies when a param calls a `~self` method on itself:
-
-```jet
-struct Player { hp: Int }
-impl Player { fn damage(~self, n: Int) { self.hp =  self.hp - n } }
-
-fn hurt(p: Player) { p.damage(5) }    // p is bare; body calls ~self → infers ~Player
-fn run() { x := Player.{ hp: 100 }; hurt(~x); print(x.hp) }
 ```
 
 ### Optional composition
 
-A capability sigil composes with `?` (optional presence) directly: `~User?`
-means "edit access over an optional User", `&Texture?` means "share an optional
-Texture". The sigil and `?` follow the same type-side grammar as any other type
-annotation — the sigil is the parameter prefix, `?` is the type suffix.
+A capability sigil composes with `?` (optional presence) directly: `&User?`
+means "write access over an optional User", `^Texture?` means "take an
+optional Texture". The sigil and `?` follow the same type-side grammar as
+any other type annotation — the sigil is the parameter prefix, `?` is the
+type suffix.
 
 ### E0029 — two capability markers
 
@@ -328,11 +382,12 @@ Placing more than one capability sigil on a single parameter is a parse error:
 error[E0029]: two capability markers on one parameter
   --> file.jet:3:12
    |
- 3 | fn bad(p: ~^Player) { … }
+ 3 | fn bad(p: &^Player) { … }
    |           ^^ remove one capability marker
 ```
 
-Access capabilities use sigils only: bare `T`, `~T`, `^T`, and `&T`.
+Access capabilities use sigils only: bare `T` (read), `&T` (write), `^T`
+(take) — no fourth spelling.
 
 ## M3 — data & methods (done)
 
@@ -358,14 +413,14 @@ impl Circle {
 }
 ```
 
-- **`self`** is the receiver; prefix the type sigil (`~self`, `^self`, `&self`) like any parameter (D-CAP7).
-- **Self-mutation (D-MUTSELF1):** inside a **`~self`** method the receiver may be
+- **`self`** is the receiver; prefix the type sigil (`^self`, `&self`) like any parameter (D-MEM1) — bare `self` is read.
+- **Self-mutation (D-MUTSELF1):** inside a **`&self`** method the receiver may be
   changed in place — assign a field (`self.field = v`), update one (`self.field += v`,
-  S17), or reassign the whole receiver (`self = New.{…}`). No new syntax (a `~`
-  parameter is already a valid assignment LHS). The same write in a non-`~self`
-  method (a shared-read receiver) is **E0205**, pointed at the assignment with a "write
-  the receiver as `~self`" fix. Calling a `~self` method needs a changeable
-  receiver binding (`:=`/`~`), enforced at the call site by E0202.
+  S17), or reassign the whole receiver (`self = New.{…}`). No new syntax (a `&`
+  parameter is already a valid assignment LHS). The same write in a non-`&self`
+  method (a read receiver) is **E0205**, pointed at the assignment with a "write
+  the receiver as `&self`" fix. Calling a `&self` method needs a changeable
+  receiver binding (`:=`), enforced at the call site by E0202.
 - Invoke with **`c.area()`** (not `area(c)`).
 - Methods may live **inside** the type, in **`impl Type { }`**, or as a top-level
   external inherent method **`fn Type.method(self, ...) { }`** (D-EXTMETH1) —
@@ -1651,12 +1706,10 @@ jet expand <file.jet>                  # every lens, grouped, empty ones skipped
 ```
 
 Facts are read straight off the ordinary check pass — never a second
-analysis, never rustc (I2/I3). A lens renders either fields already sitting
-on the checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by
-the time the bundle compiled at all) or a fact recorded once during checking
-and threaded out on `SemIndexEffectFacts` (e.g. `refs`, via
-`crates/jet-sema/src/Sema/Facts.rs::RefFact`) — the same side-channel
-`jet semindex`/`jet impact` already read, not a parallel pipeline.
+analysis, never rustc (I2/I3). A lens renders fields already sitting on the
+checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by the
+time the bundle compiled at all) — the same side-channel `jet semindex`/
+`jet impact` already read, not a parallel pipeline.
 
 **Floor lenses (this card):**
 
@@ -1664,17 +1717,11 @@ and threaded out on `SemIndexEffectFacts` (e.g. `refs`, via
   `@InlineAlways`: the contract and the Rust attribute codegen emits
   (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
   no line — the lens reports contracts, not every function in the program.
-- `refs` (D-REF-SHORTHAND1) — every `&T` stored-ref struct field's resolved
-  owner at its construction site: `labeled #Ref(x)` when the field named its
-  owner explicitly, `inferred — sole candidate` when sema found exactly one
-  in-scope value of the referent type.
 
-```
-$ jet expand --facts refs examples/features/memory/ref_field.jet
-refs — resolved owners for &T stored-ref fields (D-REF-SHORTHAND1) (2 facts)
-  examples/features/memory/ref_field.jet:10:22   Span.text   owner: source   (labeled #Ref(source))
-  examples/features/memory/ref_field.jet:10:36   Span.meta   owner: kind   (labeled #Ref(kind))
-```
+A `refs` lens (D-REF-SHORTHAND1) once reported resolved owners for `&T`
+stored-reference struct fields; D-MEM1/S3 deleted that mechanism outright
+(no stored-borrow fields in v1), and the lens went with it — `jet expand
+--facts refs` is an unknown-lens usage error today, like any retired name.
 
 Unknown `--facts <lens>` lists the registered lenses and exits nonzero
 (usage error, not an E-code — it never reaches the diagnostic renderer). A

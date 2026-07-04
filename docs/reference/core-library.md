@@ -535,7 +535,7 @@ not for tests.
 | `int(low, high)` | `Int` | Random integer, both ends inclusive |
 | `float()` | `Float` | Random float from 0 up to (but not including) 1 |
 | `pick(xs)` | `T?` | Random element, or null if `xs` is empty |
-| `shuffle(mut xs)` | nothing | Randomly reorder a list in place |
+| `shuffle(&xs)` | nothing | Randomly reorder a list in place |
 | `rng(seed)` | `Rng` | A **deterministic** RNG capability seeded by `seed` (D-DET1) |
 
 The ambient calls above (`int`/`float`/…) read a process-global generator, so a
@@ -544,12 +544,12 @@ randomness inside a `@Pure fn`, take a seeded `Rng` **as a parameter** and draw
 through it — the seed makes the stream reproducible on every machine:
 
 ```jet
-@Pure fn roll(rng: ~Rng) -> Int {
-    return rng.int(1, 6)            // inclusive; advances the stream (needs ~Rng)
+@Pure fn roll(rng: &Rng) -> Int {
+    return rng.int(1, 6)            // inclusive; advances the stream (needs &Rng)
 }
 fn run() {
     r := random.rng(42)            // same seed → same draws everywhere
-    print(roll(~r))
+    print(roll(&r))
 }
 ```
 
@@ -561,10 +561,10 @@ The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
 | `float()` | `Float` | Draw a Float in `[0.0, 1.0)`; advances the stream |
 | `bool()` | `Bool` | Draw a coin; advances the stream |
 | `pick(xs)` | `T?` | Uniform element of `[T]`, or null if empty; advances the stream |
-| `shuffle(~xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
+| `shuffle(&xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
 
-Every draw — including `bool`/`pick`/`shuffle` — needs a `~Rng` receiver, and
-`shuffle` needs the list passed with `~` (it edits in place).
+Every draw — including `bool`/`pick`/`shuffle` — needs a `&Rng` receiver, and
+`shuffle` needs the list passed with `&` (it edits in place).
 
 ---
 
@@ -617,10 +617,10 @@ fn run() {
 
 | `Clock` method | Returns | What it does |
 |----------------|---------|--------------|
-| `now()` | `Int` | The clock's current value in ms (read; no `~` needed) |
-| `tick(ms)` | `Int` | Advance the clock by `ms` (relative) and return the new value (needs `~Clock`) |
-| `advance(to_ms)` | `Int` | Set the clock to the **absolute** instant `to_ms` and return it (needs `~Clock`; D-DET-CAPAPI) |
-| `wait(d)` | `Int` | Advance the clock by a `Duration` `d` and return the new value (needs `~Clock`; D-DET-CAPAPI) |
+| `now()` | `Int` | The clock's current value in ms (read; no `&` needed) |
+| `tick(ms)` | `Int` | Advance the clock by `ms` (relative) and return the new value (needs `&Clock`) |
+| `advance(to_ms)` | `Int` | Set the clock to the **absolute** instant `to_ms` and return it (needs `&Clock`; D-DET-CAPAPI) |
+| `wait(d)` | `Int` | Advance the clock by a `Duration` `d` and return the new value (needs `&Clock`; D-DET-CAPAPI) |
 
 A `Duration` is a deterministic span of milliseconds minted by `time.ms(n)` /
 `time.secs(n)` (pure value constructors). Read it back with `d.millis()`.
@@ -866,7 +866,8 @@ fn run() {
 
 `tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
 destructure it with `(tx, rx) := tasks.channel<T>()`. A second sender is
-`tx.clone()`, not a method on the channel (there's no combined channel value).
+`copy tx` (D-CAP2's one copy verb — a cheap handle duplicate, not a method on
+the channel; there's no combined channel value).
 
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
@@ -878,13 +879,13 @@ destructure it with `(tx, rx) := tasks.channel<T>()`. A second sender is
 | `task.cancel()` | nothing | Request cancellation on the task control plane |
 | `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
 | `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create a linked send/receive pair |
-| `sender.clone()` | `Sender<T>` | Create another send half |
+| `copy sender` | `Sender<T>` | Create another send half (cheap handle duplicate, `copy` verb — not a method) |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 
-Values crossing `spawn` or `send` must be sendable: no `view` borrows, no
-structs containing `ref` fields, no trait values, and no closure values unless
-they are handed over with `take`. A `Task` that goes out of scope without
+Values crossing `spawn` or `send` must be sendable: no `View<T>` or string-view
+windows, no trait values, and no closure values unless they are handed over
+with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
 With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
 `task.wait()` / `ch.receive()`) observe the inherited budget and report runtime
@@ -1028,7 +1029,7 @@ checker enforces both:
 - using a view after `reset()`/`free()` → **E0632**.
 
 Both are compile errors, so a dangling arena pointer can never run. Copy what you
-need out (`x.clone()`) before it leaves the region.
+need out (`copy x`) before it leaves the region.
 
 For the cases scope-inference is too coarse — a region spanning two allocators, or
 narrower than the function — write an explicit **`region r { … }`** block:

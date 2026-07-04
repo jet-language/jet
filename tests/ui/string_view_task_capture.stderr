@@ -3,8 +3,8 @@ Error [E1102]: `d` cannot be shared into a task — it is a view that does not l
     |
   6 |     t :: tasks.spawn(() => d)
     |                      ^^^^^^^
- Why: `&` results are shared views, not owned values; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or remove the shared-view field before spawning
+ Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
+ Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 
 Error [E2307]: `d` can't be used directly here yet
   --> tests/ui/string_view_task_capture.jet:6:28
