@@ -7901,6 +7901,11 @@
         {
           "at": "2026-07-04",
           "by": "agent",
+          "text": "Stage S5 (view values) shipped + independently re-verified (orchestrator, clean, confirmed BEFORE the agent's own final report arrived). [T] slice zero-copy views already existed (D-DYNARRAY1, predates this migration) - only String.trim()/.after()/.before() needed the change. Bound to an immutable (::) LOCAL binding, these now return a genuine &str borrow into the receiver's buffer (zero allocation) whenever sema proves the binding can't outlive its owner; no new Jet-level type (String stays singular per the gallery's 'one String type' framing) - the view-ness lives on a new Binding::string_view AST flag, invisible to the type system. Legal surface deliberately narrow: chain another trim/after/before, interpolate it, or `copy d` to materialize - everything else (return, rebind, struct field, call arg, list/tuple literal element, any other method) is new diagnostic E2307, enforced at one general choke point (Expr::Ident inference arm) after the agent found scattered per-site checks both double-reported AND missed real cases (list literals silently reaching rustc as a type mismatch - a caught I2 near-miss). Scope cuts documented not hidden: split() stays eager (needs S6-sized representation work), views only form from LOCAL (not param) owners, only from immutable :: bindings (a := binding's reassignability can't be represented by an &str place - found via a real regression, tests/tir.rs's string_builtin_methods caught it). Task/channel crossing reuses existing SendProblemKind::ViewBorrow/E1102 via a name-based check. New example examples/features/memory/string_view.jet includes a #Bench block using the EXISTING jet bench/#Bench convention (no new benchmark harness invented - proportionate call). Full nix develop -c cargo test --workspace: 0 failed except the known pre-existing c9webdevfn404. Ready for S6 (Shared<T>/Pool<T>/Id<T>)."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "agent",
           "text": "Stage S4 (copy verb) shipped + independently re-verified (orchestrator, clean). D-CAP2: copy x is the one copy spelling now; new Expr::Copy AST node (mirrors ^/RawOf plumbing) through lexer/parser/formatter/sema/codegen. .clone() deleted as user-callable Jet syntax - falls through to ordinary unrecognized-method error (E0311/E0102), no hand-written message (greenfield). New E0211 for a genuinely non-cloneable type used with copy (scalar copy is legal-but-redundant, not an error) - minted because .clone() previously had NO cloneability check at all, a latent I2 gap this closes. Codegen: copy x lowers to the EXISTING TExprKind::Clone TIR node, not a new one - agent caught+fixed its own initial mistake of minting a redundant TExprKind::Copy that would have duplicated the sema-inserted-clone machinery. Also fixed the separate Web/JS backend's own dead .clone() special case (was silently emitting `undefined` in generated JS, caught by web_showcase_dashboard_roundtrip). Every existing .clone()-recommending fix-it text swept and updated (E0121/E0209/E0631/E0120/E1101/L0801/E0204 across CheckerOwnership/CheckerCoreLib/CheckerCore/CheckerInfer/Diagnostics). ~20 files with embedded .clone() Jet source migrated; 3 identifier collisions renamed (copy variable -> dup/dup2, copy is now reserved). Full nix develop -c cargo test --workspace: 0 failed except the known pre-existing c9webdevfn404 - notably the recurring phantom '8 jet-codegen None-variant failures' claim did NOT appear in this agent's own self-report this time either, consistent with it being a transient artifact rather than a real bug. Ready for S5 (view values / counted string+list slices)."
         },
         {
@@ -21345,6 +21350,26 @@
       "answer": "Final ratification superseded my earlier recommendation. D-VARARGBOUND1 now makes list-form trait sets the one spelling everywhere: `T: [Trait1, Trait2]` and `...items: [Trait1, Trait2]`. Single-trait bounds stay bare (`T: Trait1`, `...items: Trait1`). The older `Trait1 + Trait2` form is no longer the user-facing multi-trait-bound syntax.",
       "created": "2026-07-02T09:29:50.231Z",
       "answeredAt": "2026-07-02"
+    },
+    {
+      "id": "q-tower-moved-cmemgreenfield",
+      "cardId": "cmemgreenfield",
+      "by": "owner",
+      "kind": "note",
+      "text": "TOWER MOVED (2026-07-04): the board now runs from repo-root Tower/ with data in .tower/tower.json — this file (tools/Tower/tower.json) is FROZEN; do not write it. Use the CLI: node Tower/tower.mjs status | next | card update ... --by <you> | question answer. The 7878 server is the new app and your existing POST /api routes (card/update, question/answer, clearance) keep working. Read tools/Tower/MOVED.md + the updated .claude/skills/tower/SKILL.md. Mark this question answered in the NEW board once you have switched.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-04T13:34:25.255Z"
+    },
+    {
+      "id": "q-tower-moved-cv5syntaxdecrees",
+      "cardId": "cv5syntaxdecrees",
+      "by": "owner",
+      "kind": "note",
+      "text": "TOWER MOVED (2026-07-04): the board now runs from repo-root Tower/ with data in .tower/tower.json — this file (tools/Tower/tower.json) is FROZEN; do not write it. Use the CLI: node Tower/tower.mjs status | next | card update ... --by <you> | question answer. The 7878 server is the new app and your existing POST /api routes (card/update, question/answer, clearance) keep working. Read tools/Tower/MOVED.md + the updated .claude/skills/tower/SKILL.md. Mark this question answered in the NEW board once you have switched.",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-04T13:34:25.256Z"
     }
   ]
 }

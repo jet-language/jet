@@ -28,6 +28,9 @@ impl<'a> Checker<'a> {
         self.arena_views.retain(|_, v| v.scope_len < depth);
         // D-DYNARRAY1: `View<T>` bindings leave scope the same way arena views do.
         self.list_views.retain(|_, v| v.scope_len < depth);
+        // D-MEM1 S5: string-`view` bindings (`.trim()`/`.after()`/`.before()`)
+        // leave scope the same way.
+        self.string_views.retain(|_, v| v.scope_len < depth);
         self.scopes.pop();
         self.lambda_mut_borrow_stack.pop();
         self.ct_scopes.pop();
@@ -1238,6 +1241,14 @@ impl<'a> Checker<'a> {
                         } else if let Some(owner) = self.view_call_source(e) {
                             self.report_view_owns_return(&owner, e.span());
                         }
+                        // D-MEM1 stage S5: no dedicated "returning a string
+                        // view" check here — the general E2307 check on the
+                        // `Expr::Ident` read (`self.infer(e)` above already
+                        // ran it) already caught `return d` for a live view;
+                        // a second check here would just double-report the
+                        // same span (unlike `View<T>`, which needs its OWN
+                        // check since its escape is otherwise silent — a
+                        // string view's bare-`&str` read is never silent).
                         // Returning a borrowed parameter would move out of a
                         // borrow in the generated Rust (I2) — require a copy.
                         // Exception: if the param type is a type variable, codegen
@@ -3128,6 +3139,25 @@ impl<'a> Checker<'a> {
                 self.report_list_view_escape(src, "be stored in another binding", *src_span);
             }
         }
+        // D-MEM1 stage S5: `x :: s.trim()` / `x :: s.after(sep)` / `x ::
+        // s.before(sep)` makes `x` a scope-bound string view into `s` — the
+        // same E2305 reasoning as `View<T>`, reported as E2307 since `String`
+        // has no distinct view type for codegen to key off (`b.string_view`
+        // flags the binding itself instead). Immutable (`::`) only, matching
+        // "views are non-reassignable non-escaping locals" (I8) — a `:=`
+        // binding can be reassigned to an ordinary owned `String` later, and
+        // codegen's `&str` place has nowhere to put that; fall back to the
+        // ordinary eager/owned lowering for `:=` (unchanged pre-S5 behavior).
+        if !b.mutable {
+            if let Some(owner) = self.string_view_call_source(&b.init) {
+                b.string_view = true;
+                self.record_string_view(&b.name, owner);
+            }
+        }
+        // No dedicated "rebound to another binding" check here — the general
+        // E2307 check on `Expr::Ident` reads (this binding's init was already
+        // inferred above) already caught `y :: d` for a live view `d`; a
+        // second check here would double-report the same span.
         let task_has_view_capture = self.view_capture_tasks.contains(&b.name);
         self.declare(
             &b.name,

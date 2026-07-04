@@ -710,6 +710,15 @@ pub(crate) struct Checker<'a> {
     /// escape). Mirrors `arena_views`'s shape; kept separate so the arena
     /// mechanism (E0631/E0632, its own wording and drop-tracking) stays untouched.
     list_views: HashMap<String, ListViewInfo>,
+    /// D-MEM1 stage S5 (2026-07-04): string-`view` bindings in scope — a binding
+    /// `x :: s.trim()` / `x :: s.after(sep)` / `x :: s.before(sep)` holds a
+    /// scope-bound `&str` window into `s`'s backing storage (codegen: `b.string_view`).
+    /// Maps the view name → which `String` it points into (for E2307 escape).
+    /// Mirrors `list_views`'s shape exactly; kept separate so `ListViewInfo`'s
+    /// wording stays owner-type-agnostic in the shared struct but the two kinds
+    /// of view (list window vs string window) never alias in one map (I8: one
+    /// owner-tracking shape per kind, not one shared namespace).
+    string_views: HashMap<String, ListViewInfo>,
     /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: `:= uninit`
     /// bindings not yet definitely written — maps name → the decl span. A read
     /// while still in this map is E0420 (write-before-read proof); a write
@@ -719,6 +728,15 @@ pub(crate) struct Checker<'a> {
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.
     borrow_ctx: bool,
+    /// D-MEM1 stage S5: true only while inferring a string-view name (see
+    /// `string_views`) in one of the TWO positions its bare `&str` Rust place
+    /// actually supports — the receiver of a chained `.trim()`/`.after()`/
+    /// `.before()`, or the operand of `copy`. The general `Expr::Ident` arm
+    /// reports E2307 whenever it reads a string-view name and this is false —
+    /// a single, general choke point instead of hunting down every possible
+    /// consuming context (list/tuple literal element, call argument, plain
+    /// assignment, …) one at a time.
+    allow_string_view_read: bool,
     /// M8: when false, a lambda is consumed inline (collection methods / borrow).
     lambda_escapes: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).

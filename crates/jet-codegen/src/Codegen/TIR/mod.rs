@@ -1082,6 +1082,12 @@ pub enum TExprKind {
     /// unconditionally; the TIR carries the lowered receiver and the result type
     /// (the receiver's type).
     Clone(Box<TExpr>),
+    /// D-MEM1 stage S5 (2026-07-04): `copy d` where `d` is a string-view local
+    /// (`Binding.string_view`, a bare `&str` Rust place) — materializes it into
+    /// an owned `String` via `.to_string()`. A plain `.clone()` (the `Clone`
+    /// node above) would be wrong here: cloning a `&str` hands back another
+    /// `&str`, not the owned `String` the copy needs to escape the view's scope.
+    MaterializeView(Box<TExpr>),
     /// c109 Phase 6: a user-defined instance method call `recv.method(args)` on a
     /// covered struct/enum. All dispatch facts are resolved at lowering (totality):
     /// `recv` is the lowered receiver (emitted as the AST path emits it — autoref
@@ -1687,6 +1693,17 @@ pub enum TBuiltinOp {
     /// D-STR-AFTER1: `before(sep)` → `jet_string_before(&(recv), &a0)`. Substring
     /// strictly before the first `sep`; `sep` absent → the whole original string.
     Before,
+    /// D-MEM1 stage S5: the zero-copy sibling of `Trim`, used ONLY as the init
+    /// of a `Binding` sema marked `string_view` (E2307 proves it can't outlive
+    /// its owner) → `jet_string_trim_view(&(recv))`, a borrowed `&str`, no
+    /// `.to_string()`.
+    TrimView,
+    /// D-MEM1 stage S5: the zero-copy sibling of `After`, same `string_view`
+    /// gate → `jet_string_after_view(&(recv), &a0)`.
+    AfterView,
+    /// D-MEM1 stage S5: the zero-copy sibling of `Before`, same `string_view`
+    /// gate → `jet_string_before_view(&(recv), &a0)`.
+    BeforeView,
     /// `keys()` → `(recv).keys().cloned().collect::<Vec<_>>()`.
     Keys,
     /// `values()` → `(recv).values().cloned().collect::<Vec<_>>()`.

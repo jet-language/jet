@@ -207,7 +207,22 @@ impl<'a> Checker<'a> {
                 };
                 let taken = take_set.contains(name);
                 if self.is_task_spawn {
-                    let problem = if !cap_sendable {
+                    // D-MEM1 stage S5: a string view (`Binding.string_view`)
+                    // is `Type::String` at the type level — the general
+                    // sendability check above sees a plain `String` and finds
+                    // nothing wrong, unlike `View<T>` (a distinct type it
+                    // already flags). Check the NAME here instead, mirroring
+                    // the same `ViewBorrow` verdict `View<T>` gets, so a view
+                    // can't cross into a spawned task's `'static` closure any
+                    // more than a `View<T>` can (I2: this must be caught here,
+                    // never surface as a real rustc lifetime rejection).
+                    let problem = if self.is_string_view(name) {
+                        Some(SendabilityProblem {
+                            root: None,
+                            path: Vec::new(),
+                            kind: SendProblemKind::ViewBorrow,
+                        })
+                    } else if !cap_sendable {
                         self.sendability_problem(&cap_ty, taken).or_else(|| {
                             Some(SendabilityProblem {
                                 root: None,
@@ -1310,7 +1325,22 @@ impl<'a> Checker<'a> {
             }
         }
         self.borrow_ctx = true;
-        let recv_ty = self.infer(receiver)?;
+        // D-MEM1 stage S5: chaining `.trim()`/`.after()`/`.before()` onto a
+        // string-view name is the one builtin-method shape its bare `&str`
+        // Rust place supports (the `_view` prelude helpers take `&str`) — the
+        // general `Expr::Ident` E2307 check must not fire for THIS receiver
+        // read. Every other method name reaches the same `self.infer(receiver)`
+        // call with the flag left false, so it fires normally.
+        let recv_is_exempt_view = matches!(receiver.as_ref(), Expr::Ident(n, _)
+            if self.is_string_view(n) && matches!(method, "trim" | "after" | "before"));
+        if recv_is_exempt_view {
+            self.allow_string_view_read = true;
+        }
+        let recv_ty = self.infer(receiver);
+        if recv_is_exempt_view {
+            self.allow_string_view_read = false;
+        }
+        let recv_ty = recv_ty?;
         if let Type::Named(ref n) | Type::Apply { name: ref n, .. } = &recv_ty {
             if n == Syntax::TYPE_TASKGROUP {
                 return self.infer_taskgroup_method(receiver, method, span, args, recv_type_out);

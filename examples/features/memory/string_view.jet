@@ -1,0 +1,36 @@
+// D-MEM1 stage S5 (2026-07-04): `.trim()`/`.after(sep)`/`.before(sep)` bound to
+// a local return a zero-copy view — a genuine `&str` borrow into the receiver's
+// own buffer, not a fresh allocation — whenever sema can prove the binding
+// can't outlive its owner (E2307 otherwise). `String` stays the one Jet-level
+// string type end to end (D-MEM1 gallery): the view is an internal
+// representation choice, invisible in the surface syntax.
+fn run() {
+    padded := "  nate@jet.dev  "
+    email :: padded.trim()
+    domain :: email.after("@")
+    user :: email.before("@")
+    print("user={user} domain={domain}")
+    // The view borrows `padded`'s buffer; reading `padded` again afterward
+    // still works (this is a read, not a move) — proving the view didn't
+    // take ownership away from its owner.
+    print("padded still readable: {padded}")
+    // `email` is itself a view (`padded.trim()`); only `copy` can carry a
+    // view past its own scope — into another call, a struct field, another
+    // binding, or a return (E2307 otherwise; see
+    // tests/ui/string_view_outlives_owner.jet).
+    print("escaped copy={domain_of(copy email)}")
+}
+
+fn domain_of(s: String) -> String {
+    d :: s.after("@")
+    return copy d
+}
+
+#Bench "string view: after/before/trim, no owning materialization" {
+    email := "nate@jet.dev"
+    loop i in 0..1000 {
+        d :: email.after("@")
+        s := "{d}"
+        require_eq(s, "jet.dev")
+    }
+}

@@ -244,7 +244,13 @@ impl<'a> Checker<'a> {
                         StrPart::Interp(mut inner, _fmt) => {
                             args.push(mk_lit(std::mem::take(&mut cur_lit), span));
                             self.borrow_ctx = true;
+                            // D-MEM1 stage S5: a typed-text template hole reads
+                            // via Display (`str` has the impl too, see
+                            // `Prelude/Core.rs`) — safe for a string view.
+                            let was_view_read = self.allow_string_view_read;
+                            self.allow_string_view_read = true;
                             self.infer(&mut inner);
+                            self.allow_string_view_read = was_view_read;
                             args.push(CallArg {
                                 convention: AccessConvention::Read,
                                 span: inner.span(),
@@ -270,7 +276,13 @@ impl<'a> Checker<'a> {
                     if let StrPart::Interp(inner, fmt) = p {
                         // Interpolation borrows; never moves.
                         self.borrow_ctx = true;
+                        // D-MEM1 stage S5: `"{d}"` reads `d` via Display/Debug
+                        // (`str` has both impls too, see `Prelude/Core.rs`) —
+                        // safe for a string view, unlike most other reads.
+                        let was_view_read = self.allow_string_view_read;
+                        self.allow_string_view_read = true;
                         let t = self.infer(inner);
+                        self.allow_string_view_read = was_view_read;
                         if let Some(t) = t {
                             match fmt {
                                 crate::AST::StrFormat::Display => {
@@ -416,6 +428,19 @@ impl<'a> Checker<'a> {
                 // through the method-call path below, so reaching here means a
                 // plain read of the view's value.)
                 self.check_view_use(name, *span);
+                // D-MEM1 stage S5: E2307 — reading a string-view name anywhere
+                // other than the two positions its bare `&str` Rust place
+                // supports (`allow_string_view_read`, set only around chaining
+                // `.trim()`/`.after()`/`.before()` and `copy`'s operand). This
+                // is the ONE general choke point for the whole class of uses
+                // that would otherwise mismatch a callee's `&String`/`String`
+                // signature at the Rust level (list/tuple literal elements,
+                // call arguments, plain assignment, struct fields not already
+                // caught earlier, …) — every one of them reads this same
+                // `Expr::Ident` node to get the name's value.
+                if self.is_string_view(name) && !self.allow_string_view_read {
+                    self.report_string_view_unsupported_use(name, "be used directly here", *span);
+                }
                 if let Some(info) = self.lookup(name) {
                     return Some(info.ty.clone());
                 }
@@ -608,7 +633,15 @@ impl<'a> Checker<'a> {
                 // expression already IS that clone, and wrapping again would
                 // double-clone in the generated Rust.
                 self.borrow_ctx = true;
-                let inner_t = self.infer(inner)?;
+                // D-MEM1 stage S5: `copy d` on a string-view name is the one
+                // legal way to materialize it into an owned `String` — the
+                // general E2307 check on a bare `Expr::Ident` read must not
+                // fire for `copy`'s own operand.
+                let was_view_read = self.allow_string_view_read;
+                self.allow_string_view_read = true;
+                let inner_t = self.infer(inner);
+                self.allow_string_view_read = was_view_read;
+                let inner_t = inner_t?;
                 if !type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry, self.structs) {
                     self.diags.push(Diagnostic::error(
                         "E0211",

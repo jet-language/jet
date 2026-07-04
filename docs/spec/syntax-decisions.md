@@ -739,8 +739,16 @@ expression (`Expr::Copy`), parses on any expression, formatter round-trips
 it. `.clone()` is not user-typable Jet syntax — `clone` falls through to the
 ordinary "no such method" path (I8). `copy x` on a non-cloneable type is
 E0211; on a scalar it's legal but redundant (already `Copy`). Every fix-it
-that used to suggest `.clone()` now suggests `copy name`. S5–S9 remain
-unbuilt.
+that used to suggest `.clone()` now suggests `copy name`. **S5 shipped
+(2026-07-04)**: `[T]` slice views were already live (`View<T>`, D-DYNARRAY1,
+predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
+`.before(sep)` bound to a local now return a zero-copy `&str` view instead of
+an owned `String` when sema proves it can't outlive its owner (no distinct
+Jet-level view type — `String` stays one type; view-ness lives on the binding,
+codegen-invisible to the user); escape (return/rebind/field/call-arg/any other
+method) is **E2307**. `split` stays eager (`Vec<String>`) — a view-of-views
+list needs S6-scale representation work, named as a deferred gap, not built
+here. S6–S9 remain unbuilt.
 
 **D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower

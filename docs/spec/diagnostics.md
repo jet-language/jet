@@ -464,6 +464,7 @@ before continuing.
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
 | E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
 | E2305 | sema  | a `View<T>` (`.view(...)`) escapes the scope of the list it borrows from (D-DYNARRAY1) |
+| E2307 | sema  | a string view (`.trim()`/`.after()`/`.before()`) escapes the scope of the `String` it borrows from (D-MEM1 stage S5) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -702,22 +703,29 @@ CLI.
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 
-## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`)
+## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`, D-MEM1 S5 string views)
 
 D-MEM1/S3 deleted `-> &T` borrow returns and stored-reference (`&T`) fields
 outright — there is no first-class borrow to store or return in v1. What's
 left of this tier is the still-live `View<T>` zero-copy window
-(`list.view(a..b)`, D-DYNARRAY1): it never mentions lifetimes, speaking in
-Jet words instead — *what owns this* and *how long can this view live*.
-E2303 is the reference-specific name for the task/channel rule — that
-situation is **reported once, as E1102** (a `View<T>` value is unsendable);
-E2303 exists so `jet explain E2303` points there and the soundness matrix
-has a named cell.
+(`list.view(a..b)`, D-DYNARRAY1) plus, since D-MEM1 stage S5, the same
+zero-copy treatment for `String` slicing (`s.trim()`/`s.after(sep)`/
+`s.before(sep)` bound to a local): both never mention lifetimes, speaking in
+Jet words instead — *what owns this* and *how long can this view live*. A
+string view carries no distinct Jet-level type the way `View<T>` does
+(`String` stays one type end to end, D-MEM1 gallery) — the check instead
+tracks which *bindings* are views, the same scope-liveness proof applied to
+a different owner kind. E2303 is the reference-specific name for the
+task/channel rule — that situation is **reported once, as E1102** (an
+unsendable value), for both `View<T>` and a captured string view; E2303
+exists so `jet explain E2303` points there and the soundness matrix has a
+named cell.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2303 | A `View<T>` crosses a `tasks.spawn` or `Sender.send` boundary. | A view (`View<T>`) points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy before crossing. |
+| E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`copy x`) before crossing. |
 | E2305 | A `View<T>` (`list.view(a..b)`) escapes the scope of the list it borrows from — returned from a function that owns the list, rebound to another local, or stored in a struct field. | `.view(a..b)` is a zero-copy window into the list's own backing storage, not a copy; if the list is made and freed inside this function (or scope), a window into it would outlive what owns it — there'd be nothing left to look at. | Return/store an owned copy instead (`list[a..b]` for a copying slice, or `.map(...)` the window into an owned list), or accept the list as a parameter so the caller keeps owning it. |
+| E2307 | A string view (`s.trim()`/`s.after(sep)`/`s.before(sep)` bound to a local) escapes the scope of the `String` it borrows from — returned, rebound to another local, or stored in a struct field. | These calls return a zero-copy `&str` window into `s`'s own buffer when sema can prove it stays inside `s`'s scope (D-MEM1 S5); if `s` is made and freed inside this function (or scope), the window would outlive what owns it. | Keep the view inside the owner's scope, or materialize an owned `String` with `copy` before it leaves. |
 
 ## Library authoring diagnostics (E2-M6)
 

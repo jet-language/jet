@@ -674,6 +674,10 @@ impl<'a> Checker<'a> {
                 if self.is_list_view(vname) {
                     self.report_list_view_escape(vname, "be stored in a struct field", *vspan);
                 }
+                // D-MEM1 stage S5: no dedicated check here — the general
+                // E2307 check on the `Expr::Ident` read (the field value was
+                // already inferred earlier in this function) already caught
+                // a live string view stored in a struct field.
             }
             if let Some((_, _, fty, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);

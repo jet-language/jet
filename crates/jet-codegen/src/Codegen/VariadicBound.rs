@@ -208,6 +208,7 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                         ct: None,
                         uninit: false,
                         arena_view: false,
+                        string_view: false,
                     }));
                     out.extend(body.clone());
                 }

@@ -2427,6 +2427,15 @@ pub struct Binding {
     /// binds it as a reference and dereferences reads; sema (E0631/E0632)
     /// forbids it escaping its arena's scope or outliving a `reset`/`free`.
     pub arena_view: bool,
+    /// D-MEM1 stage S5 (2026-07-04): set by sema when `init` is a zero-copy
+    /// string slicing call (`s.trim()` / `s.after(sep)` / `s.before(sep)`) on
+    /// a plain local/param `String` owner, so this binding holds a scope-bound
+    /// *view* (`&str`) into the owner's buffer instead of an owned `String` —
+    /// the same D-DYNARRAY1 reasoning as `View<T>`, applied to strings since
+    /// they have no distinct Jet-level view type (`String` stays one type).
+    /// Codegen emits `&str` for the binding and calls the `_view` prelude
+    /// helper; sema (E2307) forbids it escaping the owner's scope.
+    pub string_view: bool,
 }
 
 #[derive(Debug, Clone)]

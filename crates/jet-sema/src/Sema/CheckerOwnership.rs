@@ -225,6 +225,111 @@ impl<'a> Checker<'a> {
         ));
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // D-MEM1 stage S5 (2026-07-04): string `view`s — `s.trim()` / `s.after(sep)`
+    // / `s.before(sep)` bound to a local name return a zero-copy `&str` window
+    // into `s` instead of an owned `String`. Unlike `View<T>` (a distinct Jet
+    // type), `String` stays ONE type end to end (D-MEM1 gallery: "one String
+    // type") — so the view-ness lives on the *binding* (`Binding::string_view`,
+    // set below), not on the value's static type. Tracking mirrors `list_views`
+    // exactly (same shape, same E-code family): E2307 fires on escape
+    // (returned, rebound, stored in a struct field); crossing a task boundary
+    // is caught separately at the capture-check site (`CheckerInfer/calls.rs`)
+    // since a plain `Type::String` carries no view marker for the general
+    // sendability check to key off.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// If `init` is `s.trim()` / `s.after(sep)` / `s.before(sep)` on a plain
+    /// local `String` name, return `s`'s name — but only when `s` is a genuine
+    /// local (dies at this function's return/scope exit). A parameter or const
+    /// outlives the call, so a view into it is sound without tracking (mirrors
+    /// `view_call_source`'s exemption).
+    pub(crate) fn string_view_call_source(&self, init: &Expr) -> Option<String> {
+        let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = init
+        else {
+            return None;
+        };
+        let arity_ok = match method.as_str() {
+            "trim" => args.is_empty(),
+            "after" | "before" => args.len() == 1,
+            _ => return None,
+        };
+        if !arity_ok {
+            return None;
+        }
+        let Expr::Ident(name, _) = receiver.as_ref() else {
+            return None;
+        };
+        if self.consts.contains_key(name) {
+            return None;
+        }
+        let Some(info) = self.lookup(name) else {
+            return None;
+        };
+        if !matches!(info.ty, Type::String) {
+            return None;
+        }
+        if info.param_conv.is_some() {
+            return None;
+        }
+        Some(name.clone())
+    }
+
+    /// Record `name` as a string view into `owner`, declared at the current
+    /// scope depth.
+    pub(crate) fn record_string_view(&mut self, name: &str, owner: String) {
+        let scope_len = self.scopes.len();
+        self.string_views
+            .insert(name.to_string(), ListViewInfo { owner, scope_len });
+    }
+
+    /// True if `name` is currently a live string-view binding.
+    pub(crate) fn is_string_view(&self, name: &str) -> bool {
+        self.string_views.contains_key(name)
+    }
+
+    /// E2307: a string view named `name` was used somewhere only its full
+    /// `String` representation supports — this is the ONE call site for the
+    /// whole class of unsupported uses (return, rebind, struct field, call
+    /// argument, list/tuple literal element, an arbitrary builtin/user
+    /// method, …): the general `Expr::Ident` inference arm calls this
+    /// whenever it reads a live string-view name outside the two positions
+    /// its bare `&str` Rust place actually supports (chaining another
+    /// `.trim()`/`.after()`/`.before()`, or `copy`'s operand). This is a
+    /// representation limit, not a lifetime one — the view DOES live long
+    /// enough; it just isn't the value shape the destination needs — so the
+    /// wording says so rather than claiming it "doesn't live long enough"
+    /// (unlike `View<T>`, which needs its own escape check since a `List`
+    /// re-assignment/return is otherwise silent). `what` describes the use site.
+    pub(crate) fn report_string_view_unsupported_use(&mut self, name: &str, what: &str, span: Span) {
+        let owner = self
+            .string_views
+            .get(name)
+            .map(|v| v.owner.clone())
+            .unwrap_or_else(|| "its owner".to_string());
+        self.diags.push(Diagnostic::error(
+            "E2307",
+            format!("`{}` can't {} yet", name, what),
+            format!(
+                "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); only chaining another `.trim()`/`.after()`/`.before()` on it works directly — other methods and calls need the full owned value",
+                name, owner
+            ),
+            format!("write `{} {}` first to get an owned `String`, then use that", Syntax::KW_COPY, name),
+            Some(span),
+        ));
+    }
+
+    // No "fresh call made right in the return" shape exists for string views
+    // (unlike `View<T>`, which is type-driven everywhere `.view()` appears):
+    // view-ness here lives on the *binding*, set only for `Stmt::Val`, so
+    // `return s.after(sep)` written directly (no intermediate binding) always
+    // lowers as an ordinary owned `String` — safe, nothing to catch.
+
     /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `#SingleUse` struct/enum,
     /// checking the local registry first and then any imported module that exposes
     /// the type publicly. A `#SingleUse` value must be consumed exactly once and

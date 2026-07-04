@@ -154,6 +154,7 @@ impl<'a> Checker<'a> {
             ct: None,
             uninit: false,
             arena_view: false,
+            string_view: false,
         });
         true
     }

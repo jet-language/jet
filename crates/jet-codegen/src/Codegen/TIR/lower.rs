@@ -52,6 +52,14 @@ pub(crate) struct LowerEnv {
     /// this is the one place that struct name is available, used only to
     /// check `cx.computed_fields` (whether `self.field` needs a getter call).
     self_owner: Option<String>,
+    /// D-MEM1 stage S5: names bound by a `Binding.string_view` init — the Rust
+    /// place is a plain `&str` (not the `String` its `Type::String` would
+    /// ordinarily lower to). Consulted only by `Expr::Copy` lowering, which
+    /// must materialize a view with `.to_string()` (an owned `String`), not
+    /// the ordinary `.clone()` (which on a `&str` would just hand back
+    /// another `&str` — the wrong Rust type for a `copy` result that needs to
+    /// escape the view's scope).
+    string_view_locals: HashSet<String>,
 }
 
 impl LowerEnv {
@@ -62,7 +70,16 @@ impl LowerEnv {
             fn_name,
             panic_locals: Rc::new(RefCell::new(HashMap::new())),
             self_owner: None,
+            string_view_locals: HashSet::new(),
         }
+    }
+    /// D-MEM1 stage S5: mark `name` as a string-view local (see `string_view_locals`).
+    fn mark_string_view(&mut self, name: &str) {
+        self.string_view_locals.insert(name.to_string());
+    }
+    /// D-MEM1 stage S5: true if `name` is a live string-view local.
+    fn is_string_view_local(&self, name: &str) -> bool {
+        self.string_view_locals.contains(name)
     }
     /// Bind `name` to its resolved Rust place + type, updating BOTH `locals` (used for
     /// place/type resolution) and the `panic_locals` replica (used only for the `??`
@@ -786,6 +803,25 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     name: b.name.clone(),
                     kw: "let",
                     ty_clause: String::new(),
+                    init,
+                };
+            }
+            // D-MEM1 stage S5 (2026-07-04): a string-view binding (`x :: s.trim()` /
+            // `x :: s.after(sep)` / `x :: s.before(sep)`; sema set `string_view`
+            // after proving E2307-safety — see `CheckerCore.rs`'s binding check).
+            // Unlike `arena_view` this binds a plain `&str` (no deref needed to
+            // read it): `ty_clause: ": &str"`, `kw: "let"` (non-reassignable,
+            // non-escaping local, I8, same as arena/list views), and the init
+            // goes through the borrowed `_view` builtin op instead of
+            // `resolve_builtin_op`'s owned default.
+            if b.string_view {
+                let init = lower_string_view_init(&b.init, cx, env);
+                env.bind(&b.name, mangle(&b.name), Some(Type::String));
+                env.mark_string_view(&b.name);
+                return TStmt::Let {
+                    name: b.name.clone(),
+                    kw: "let",
+                    ty_clause: ": &str".to_string(),
                     init,
                 };
             }
@@ -2582,6 +2618,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::clone(&env.panic_locals),
         self_owner: env.self_owner.clone(),
+        string_view_locals: env.string_view_locals.clone(),
     }
 }
 
@@ -2596,6 +2633,7 @@ pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::new(RefCell::new(env.panic_locals.borrow().clone())),
         self_owner: env.self_owner.clone(),
+        string_view_locals: env.string_view_locals.clone(),
     }
 }
 
@@ -2930,10 +2968,19 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Copy(inner, _) => {
             let operand = lower_expr(inner, cx, env);
             let ty = operand.ty.clone();
-            TExpr {
-                ty,
-                kind: TExprKind::Clone(Box::new(operand)),
-            }
+            // D-MEM1 stage S5: `copy d` where `d` is a string-view local is the
+            // one legal way to materialize it into an owned `String` that can
+            // leave the view's scope. `d`'s Rust place is a bare `&str` — a
+            // plain `.clone()` on that would hand back another `&str` (the
+            // wrong Rust type for `ty: Type::String`), not an owned `String`;
+            // `.to_string()` is the correct materialization here.
+            let is_view_copy = matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name));
+            let kind = if is_view_copy {
+                TExprKind::MaterializeView(Box::new(operand))
+            } else {
+                TExprKind::Clone(Box::new(operand))
+            };
+            TExpr { ty, kind }
         }
         Expr::Binary(op, l, r, span) => {
             let lhs = lower_expr(l, cx, env);
@@ -6472,6 +6519,41 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             tir_recv_jet_ty(receiver, env)
         }
         _ => None,
+    }
+}
+
+/// D-MEM1 stage S5: lower a `Binding.string_view` init (`s.trim()` /
+/// `s.after(sep)` / `s.before(sep)`) to the borrowed `&str`-returning
+/// `TBuiltinOp::{TrimView,AfterView,BeforeView}` — the zero-copy sibling of
+/// whatever `resolve_builtin_op` would pick for the same call written
+/// somewhere the result isn't scope-tracked. `ty` stays `Type::String` (Jet
+/// has one string type end to end — D-MEM1 gallery); only the generated Rust
+/// text is a borrow, not the Jet-level type.
+fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    let Expr::MethodCall {
+        receiver,
+        method,
+        args,
+        ..
+    } = init
+    else {
+        unreachable!("sema sets `string_view` only for a trim/after/before MethodCall init");
+    };
+    let op = match method.as_str() {
+        "trim" => TBuiltinOp::TrimView,
+        "after" => TBuiltinOp::AfterView,
+        "before" => TBuiltinOp::BeforeView,
+        _ => unreachable!("sema sets `string_view` only for trim/after/before"),
+    };
+    let recv = lower_expr(receiver, cx, env);
+    let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::BuiltinMethod {
+            recv: Box::new(recv),
+            op,
+            args: targs,
+        },
     }
 }
 

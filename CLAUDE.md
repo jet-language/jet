@@ -89,7 +89,7 @@ match behavior, no invariant bent.
 
 Need syntax that isn't Ratified or Provisional in docs/spec/syntax-decisions.md? Develop it
 into a decision card — options, a worked per-option example, your recommendation — get it
-reviewed by another agent, and queue it as a decision in Tower (tools/Tower/tower.json) so
+reviewed by another agent, and queue it as a decision in Tower (`node Tower/tower.mjs decision add --file …` — board data lives in .tower/, never hand-edit it) so
 it surfaces in the board's Decide lane; **stop work on that feature** until the
 owner decides. Build something else meanwhile. When the owner ratifies: update
 `crates/jet-foundation/src/Syntax.rs` / parser, re-bless snapshots, log it in

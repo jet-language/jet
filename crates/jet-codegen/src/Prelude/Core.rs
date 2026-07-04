@@ -21,6 +21,13 @@ impl JetDebug for f64 { fn jet_debug(&self) -> String { format!("{:?}", self) } 
 impl JetShow for String { fn jet_show(&self) -> String { self.clone() } }
 impl JetDisplay for String { fn jet_display(&self) -> String { self.clone() } }
 impl JetDebug for String { fn jet_debug(&self) -> String { format!("{self:?}") } }
+// D-MEM1 stage S5: a string view (`s.trim()`/`.after()`/`.before()` bound to a
+// local, see `jet_string_*_view` below) is a genuine `&str` in generated Rust —
+// `String` stays the one Jet-level type, so anything that already works on a
+// `String` (print/interpolate/debug) must also work on the view directly.
+impl JetShow for str { fn jet_show(&self) -> String { self.to_string() } }
+impl JetDisplay for str { fn jet_display(&self) -> String { self.to_string() } }
+impl JetDebug for str { fn jet_debug(&self) -> String { format!("{self:?}") } }
 impl<T: JetShow> JetShow for &T { fn jet_show(&self) -> String { (**self).jet_show() } }
 impl<T: JetDisplay> JetDisplay for &T { fn jet_display(&self) -> String { (**self).jet_display() } }
 impl<T: JetDebug> JetDebug for &T { fn jet_debug(&self) -> String { (**self).jet_debug() } }
@@ -786,6 +793,28 @@ fn jet_string_before(s: &String, sep: &str) -> String {
         Some(i) => s[..i].to_string(),
         None => s.clone(),
     }
+}
+// D-MEM1 stage S5 (2026-07-04): zero-copy siblings of `jet_string_after`/
+// `_before`/(inline `.trim()`) — a genuine borrow into `s`'s own buffer, no
+// allocation, instead of a fresh owned `String`. Used ONLY when sema proves
+// (E2307, `Binding::string_view`) the resulting binding can't outlive `s`'s
+// scope — the same D-DYNARRAY1 soundness proof `View<T>`/`jet_view_new`
+// already uses, applied to strings. `s: &str` (not `&String`) so a call
+// chain of these composes without a materialize step in between.
+fn jet_string_after_view<'a>(s: &'a str, sep: &str) -> &'a str {
+    match s.find(sep) {
+        Some(i) => &s[i + sep.len()..],
+        None => s,
+    }
+}
+fn jet_string_before_view<'a>(s: &'a str, sep: &str) -> &'a str {
+    match s.find(sep) {
+        Some(i) => &s[..i],
+        None => s,
+    }
+}
+fn jet_string_trim_view(s: &str) -> &str {
+    s.trim()
 }
 // D-TYPEDTEXT1=D: escape a hole's text before it joins an `Html` template —
 // the audited insertion point for every non-`.raw()` interpolation.

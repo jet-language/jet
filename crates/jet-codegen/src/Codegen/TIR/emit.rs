@@ -1198,6 +1198,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Clone(recv) => {
             format!("({}).clone()", emit_tir_expr(recv, cx))
         }
+        // D-MEM1 stage S5: `copy d` on a string-view local — `.to_string()`,
+        // not `.clone()` (see the node's doc comment for why).
+        TExprKind::MaterializeView(recv) => {
+            format!("({}).to_string()", emit_tir_expr(recv, cx))
+        }
         // c109 Phase 23: `.raw()` on a distinct type → `({recv}).0`. Mirrors
         // `emit_method_call`'s `METHOD_DISTINCT_RAW` early return byte-for-byte.
         TExprKind::DistinctRaw(recv) => {
@@ -1325,6 +1330,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // MOD_USE-imported convention as `jet_string_split`/`jet_string_lines`).
                 TBuiltinOp::After => format!("jet_string_after(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Before => format!("jet_string_before(&({}), &{})", recv, a(0)),
+                // D-MEM1 stage S5: zero-copy siblings, `Stmt::Val` lowering only
+                // (see `lower.rs`'s `b.string_view` branch) — bare calls, no
+                // `.to_string()`, no root prefix (same convention as `After`/`Before`).
+                TBuiltinOp::TrimView => format!("jet_string_trim_view(&({}))", recv),
+                TBuiltinOp::AfterView => format!("jet_string_after_view(&({}), &{})", recv, a(0)),
+                TBuiltinOp::BeforeView => format!("jet_string_before_view(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Keys => {
                     format!("({}).keys().cloned().collect::<Vec<_>>()", recv)
                 }

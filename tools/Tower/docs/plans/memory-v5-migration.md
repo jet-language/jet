@@ -81,12 +81,41 @@ path. A non-cloneable type under `copy x` is E0211 (new code); a scalar is
 legal but redundant (already `Copy`, no error). Every E0121/E0201/E0209/etc.
 fix-it that used to suggest `.clone()` now suggests `copy name`.
 
-**S5 — View values (stdlib).**
-`String` slicing ops (`split`, `trim`, `after`/`before` — shares D-STR-AFTER1
-work from card #188) return counted views internally; `[T]` slice views same
-machinery. Vetted internals only (I1; golden greps generated code for the bare
-word "unsafe" — keep it out of emitted text). Golden examples pin zero-copy
-behavior via output, perf pinned by a bench fixture.
+**S5 — View values (stdlib). DONE (2026-07-04).**
+`[T]` slice views were already live (`list.view(a..b)`, D-DYNARRAY1, shipped
+2026-07-01, predates this migration) — nothing to do there; "same machinery"
+turned out to mean the same scope-liveness *reasoning*, reused below, not a
+shared code path (`String` has no distinct view type the way `View<T>` does).
+
+`String.trim()`/`.after(sep)`/`.before(sep)` bound to a local (`d :: s.trim()`)
+now return a zero-copy `&str` window into the receiver's buffer instead of an
+eagerly-allocated `String`, whenever sema proves the binding can't outlive its
+owner — `Binding::string_view` (AST.rs), tracked in a `list_views`-shaped map
+(`Checker::string_views`), escape-checked as **E2307** (new code). Unlike
+`View<T>`, `String` stays ONE Jet-level type end to end (D-MEM1 gallery: "one
+String type") — the view-ness lives on the *binding*, invisible to the type
+system, so codegen (TIR `lower.rs`'s `Stmt::Val` handling) picks the borrowed
+`_view` prelude helper (`jet_string_after_view`/`_before_view`/`_trim_view`,
+`&str -> &str`) instead of the owned one only for THIS shape. A view's legal
+surface is deliberately narrow — chain another `.trim()/.after()/.before()`,
+interpolate it (`"{d}"`, backed by new `impl JetDisplay for str` etc.), or
+`copy d` to materialize an owned `String` — every other read (return, rebind,
+struct field, call argument, list/tuple literal element, any other method)
+is E2307, caught at ONE general choke point (the `Expr::Ident` inference arm,
+gated by `allow_string_view_read`) rather than enumerated per call site.
+
+`split` stays eager (`Vec<String>`, unchanged) — a zero-copy `[View-of-String]`
+needs the same generalized List-of-views representation work as `Shared<T>`/
+`Pool<T>` (S6-scale), not a stage-S5-sized change; deferred, named here as a
+gap, not silently dropped.
+
+Golden pinning: `examples/features/memory/string_view.jet` (view binding,
+original string still readable after, `copy` escaping a function boundary) +
+two ui snapshots (`tests/ui/string_view_outlives_owner.jet` — E2307 on
+`return d`; `tests/ui/string_view_task_capture.jet` — E1102 on a task
+capturing a view, mirroring `task_detach_view_capture.jet`'s existing
+`View<T>` case). Perf: `jet bench` fixture (`#Bench` block, D-BENCH1/D-TOOL5,
+the existing convention — no new benchmarking harness) in the same example.
 
 **S6 — `Shared<T>` and `Pool<T>`/`Id<T>`.**
 CoreLib types + lowering (`Arc<RwLock>` class; generational arena). Ownership

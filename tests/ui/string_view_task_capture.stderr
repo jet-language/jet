@@ -1,0 +1,15 @@
+Error [E1102]: `d` cannot be shared into a task — it is a view that does not live long enough
+  --> tests/ui/string_view_task_capture.jet:6:22
+    |
+  6 |     t :: tasks.spawn(() => d)
+    |                      ^^^^^^^
+ Why: `&` results are shared views, not owned values; tasks and channels move owned values between threads
+ Fix: give the task plain owned data, or remove the shared-view field before spawning
+
+Error [E2307]: `d` can't be used directly here yet
+  --> tests/ui/string_view_task_capture.jet:6:28
+    |
+  6 |     t :: tasks.spawn(() => d)
+    |                            ^
+ Why: `d` is a zero-copy view into `email` (`.trim()`/`.after()`/`.before()`); only chaining another `.trim()`/`.after()`/`.before()` on it works directly — other methods and calls need the full owned value
+ Fix: write `copy d` first to get an owned `String`, then use that
