@@ -8,7 +8,7 @@ let ROSTER = [];              // /api/agents presence
 let VIEW = 'now';
 let THREAD = null;            // selected agent name in Agents view
 let openCard = null;
-let focusIds = null, focusIdx = 0, focusFacet = null, askOpen = false;
+let focusIds = null, focusIdx = 0, focusFacet = null, askOpen = false, focusCompare = false;
 const pick = {};              // decisionId -> tentative option key
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -47,16 +47,85 @@ function toast(text, err = false) {
   t.textContent = text; t.className = 'toast' + (err ? ' toast--err' : ''); t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, err ? 5000 : 2200);
 }
+// Undoable actions surface a toast with an Undo button; expectRev pins the
+// undo to the state the action produced, so it can never revert someone
+// else's interleaved write.
+const UNDOABLE = { 'card/delete': 'Card deleted', 'clearance': 'Decision recorded', 'clearance/batch': 'Decisions recorded', 'card/activate': 'Greenlit', 'idea/delete': 'Idea dismissed', 'milestone/delete': 'Milestone deleted' };
+
 const api = async (route, payload) => {
   const r = await fetch('/api/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.ok === false) { toast(j.message || `request failed: ${route}`, true); throw new Error(j.message || route); }
-  if (j.state) { S = j.state; render(); }
+  if (j.state) applyState(j.state, { own: true });
+  if (UNDOABLE[route] && j.state) undoToast(UNDOABLE[route], j.state.meta.rev);
   return j.result;
 };
-async function refresh() {
-  try { S = await (await fetch('/api/state')).json(); } catch { return; }
+
+// ---- live state: SSE first, gentle polling as fallback -----------------------
+// The page must NEVER yank the DOM out from under the owner: passive updates
+// only re-render when the data actually changed (rev) AND the owner isn't
+// mid-read/mid-type. Otherwise they wait in `pending` until it's safe.
+let pending = null;
+let es = null;
+
+function uiBusy() {
+  if (focusIds) return true;                                   // reading/deciding a ballot
+  if (openCard) return true;                                   // card modal open
+  const a = document.activeElement;
+  if (a && (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable)) return true;
+  const sel = window.getSelection?.();
+  if (sel && !sel.isCollapsed) return true;                    // text selected
+  return false;
+}
+
+function applyState(next, { own = false } = {}) {
+  if (!next) return;
+  const changed = !S || next.meta.rev !== S.meta.rev;
+  if (own) { S = next; renderPreservingScroll(); return; }
+  if (!changed) { S = next; renderBeacon(); return; }          // nothing new — cheap refresh only
+  if (uiBusy()) {
+    pending = next;
+    S = next;                    // data is current for actions; DOM stays put
+    renderBeacon();              // beacon + pill may update, they hold no focus
+    updatePill();
+    return;
+  }
+  S = next; pending = null;
+  renderPreservingScroll();
+}
+
+function maybeApplyPending() {
+  if (pending && !uiBusy()) { pending = null; renderPreservingScroll(); }
+}
+document.addEventListener('focusout', () => setTimeout(maybeApplyPending, 80));
+document.addEventListener('selectionchange', () => { const s = window.getSelection?.(); if (s?.isCollapsed) setTimeout(maybeApplyPending, 300); });
+
+function renderPreservingScroll() {
+  const y = window.scrollY;
+  const log = $('.thread__log');
+  const atBottom = log ? log.scrollHeight - log.scrollTop - log.clientHeight < 60 : false;
   render();
+  window.scrollTo(0, y);
+  const log2 = $('.thread__log');
+  if (log2 && atBottom) log2.scrollTop = log2.scrollHeight;
+}
+
+function connectStream() {
+  try { es = new EventSource('/api/stream'); } catch { return scheduleFallbackPoll(); }
+  es.addEventListener('state', (e) => { try { applyState(JSON.parse(e.data)); } catch { /* bad frame */ } });
+  es.onerror = () => { es.close(); es = null; scheduleFallbackPoll(); setTimeout(connectStream, 8000); };
+}
+let pollTimer = null;
+function scheduleFallbackPoll() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (es || document.hidden) return;
+    try { applyState(await (await fetch('/api/state')).json()); } catch { /* offline */ }
+  }, 30_000);
+}
+
+async function refresh() {
+  try { applyState(await (await fetch('/api/state')).json()); } catch { /* offline */ }
 }
 async function refreshRoster() {
   try { ROSTER = await (await fetch('/api/agents')).json(); } catch { ROSTER = []; }
@@ -83,6 +152,17 @@ const threadsOf = () => {
 };
 const unreadThreads = () => [...threadsOf().values()].filter(t => t.unread > 0);
 
+// waiting-time chip: shown once something has sat for 6+ hours
+function ageChip(iso) {
+  if (!iso) return '';
+  const h = (Date.now() - new Date(iso).getTime()) / 3.6e6;
+  if (h < 6) return '';
+  const label = h < 48 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd';
+  return `<span class="agechip ${h > 72 ? 'agechip--hot' : ''}" title="waiting ${label}">${label}</span>`;
+}
+const ageOf = (it) => it.type === 'msg' ? it.thread.messages.filter(m => m.to === 'owner' && !m.readAt)[0]?.at
+  : it.type === 'decision' ? it.decision.created : it.card.created;
+
 // Every owner-blocking item, in the order the beacon + Now view show them.
 function duties() {
   const out = [];
@@ -99,7 +179,8 @@ function renderBeacon() {
   b.innerHTML = '';
   b.classList.toggle('beacon--clear', !items.length);
   for (const it of items.slice(0, 40)) {
-    const seg = el(`<button class="beacon__seg" title="${esc(it.type === 'msg' ? `message from ${it.thread.agent}` : it.type === 'decision' ? it.decision.title : 'greenlight: ' + it.card.title)}"></button>`);
+    const h = (Date.now() - new Date(ageOf(it) || Date.now()).getTime()) / 3.6e6;
+    const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(it.type === 'msg' ? `message from ${it.thread.agent}` : it.type === 'decision' ? it.decision.title : 'greenlight: ' + it.card.title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
   }
@@ -129,11 +210,25 @@ function renderChrome() {
     tabs.appendChild(t);
   }
   $('#feed').innerHTML = `<b>${S.cards.length}</b> cards · <b>${S.counts.agentReady}</b> agent-ready`;
+  updatePill();
+}
+function updatePill() {
   const fy = duties().length;
   const pill = $('#pill');
   pill.className = 'top__pill' + (fy ? '' : ' clear');
   pill.innerHTML = fy ? `<span class="beat"></span> ${fy} for you` : '✓ tower clear';
   pill.onclick = () => go('now');
+}
+function undoToast(label, rev) {
+  const t = $('#toast');
+  t.className = 'toast'; t.hidden = false;
+  t.innerHTML = `${esc(label)} <button class="btn btn--sm" style="margin-left:10px" id="undo-btn">Undo</button>`;
+  $('#undo-btn', t).addEventListener('click', async () => {
+    t.hidden = true;
+    await api('undo', { expectRev: rev });
+    toast('undone');
+  });
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 7000);
 }
 
 // ---- NOW ----------------------------------------------------------------------
@@ -144,6 +239,9 @@ function viewNow() {
     <span class="viewhead__sub">${items.length ? `<b>${items.length}</b> waiting on you — clear the beacon` : 'nothing needs you'}</span>
     ${openDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openDecisions()[0].id));
+
+  const dig = digestBlock();
+  if (dig) v.appendChild(dig);
 
   if (!items.length) {
     v.appendChild(el(`<div class="nowclear">
@@ -167,13 +265,69 @@ function viewNow() {
   const acts = items.filter(i => i.type === 'activate');
   if (acts.length) section('Greenlights');
   for (const it of acts) v.appendChild(dutyActivate(it.card));
+  updateNowSel();
+}
+
+// ---- while-you-were-away digest -------------------------------------------
+let digestInit = false;
+function digestBlock() {
+  const cursor = S.meta.digestCursor;
+  if (!cursor) {
+    // first run ever: set the cursor quietly so tomorrow's digest starts here
+    if (!digestInit) { digestInit = true; api('digest/seen', {}).catch(() => {}); }
+    return null;
+  }
+  const evs = S.events.filter(e => e.at > cursor && e.by !== 'owner');
+  if (evs.length < 3) return null;
+  const count = (a) => evs.filter(e => e.action === a).length;
+  const doneCards = [...new Set(S.events.filter(e => e.at > cursor && e.action === 'card.update')
+    .map(e => S.cards.find(c => c.id === e.ref)).filter(c => c && c.phase === 'done').map(c => '#' + c.num))];
+  const bits = [];
+  if (doneCards.length) bits.push(`<b>${doneCards.length}</b> done (${doneCards.slice(0, 6).join(' ')})`);
+  const adv = count('card.update');
+  if (adv) bits.push(`<b>${adv}</b> card update${adv > 1 ? 's' : ''}`);
+  const nd = count('decision.add');
+  if (nd) bits.push(`<b>${nd}</b> new ballot${nd > 1 ? 's' : ''}`);
+  const qa = count('question.answer');
+  if (qa) bits.push(`<b>${qa}</b> question${qa > 1 ? 's' : ''} answered`);
+  const nm = count('message.send');
+  if (nm) bits.push(`<b>${nm}</b> message${nm > 1 ? 's' : ''}`);
+  const who = [...new Set(evs.map(e => e.by).filter(b => b && b !== 'agent' && b !== 'tower'))];
+  const since = new Date(cursor).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const node = el(`<div class="digest">
+      <div class="digest__h">Since ${esc(since)}${who.length ? ` · ${who.map(esc).join(', ')}` : ''}</div>
+      <div class="digest__b">${bits.join(' · ') || evs.length + ' events'}</div>
+      <button class="btn btn--sm" data-seen>Caught up</button>
+    </div>`);
+  $('[data-seen]', node).addEventListener('click', () => api('digest/seen', {}));
+  return node;
+}
+
+// ---- j/k keyboard selection on the Now queue --------------------------------
+let nowSel = -1;
+function updateNowSel() {
+  const cards = [...document.querySelectorAll('#view .duty')];
+  cards.forEach((n, i) => n.classList.toggle('duty--sel', i === nowSel));
+  if (nowSel >= 0 && cards[nowSel]) cards[nowSel].scrollIntoView({ block: 'nearest' });
+}
+function nowMove(delta) {
+  const n = document.querySelectorAll('#view .duty').length;
+  if (!n) return;
+  nowSel = Math.max(0, Math.min(n - 1, nowSel + delta));
+  updateNowSel();
+}
+function nowActivate() {
+  const cards = [...document.querySelectorAll('#view .duty')];
+  const node = cards[nowSel];
+  if (node?.__primary) node.__primary();
+  else node?.click?.();
 }
 
 function dutyMessage(t) {
   const last = t.messages.filter(m => m.to === 'owner' && !m.readAt).at(-1);
   const node = el(`<div class="duty duty--msg">
       <div class="duty__top"><span class="duty__kind">Message</span>
-        <span class="duty__meta">${esc(t.agent)} · ${t.unread > 1 ? t.unread + ' unread' : new Date(last.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+        <span class="duty__meta">${esc(t.agent)} · ${t.unread > 1 ? t.unread + ' unread' : new Date(last.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>${ageChip(last.at)}</div>
       <div class="duty__peek">${esc(last.text.slice(0, 600))}${last.text.length > 600 ? '…' : ''}</div>
       <div class="duty__reply"><input placeholder="Reply to ${esc(t.agent)}…"><button class="btn btn--red btn--sm">Send</button></div>
       <div class="duty__actions"><button class="btn btn--ghost btn--sm" data-open>Open thread</button>
@@ -190,6 +344,7 @@ function dutyMessage(t) {
   input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
   $('[data-open]', node).addEventListener('click', () => { THREAD = t.agent; go('agents'); });
   $('[data-read]', node).addEventListener('click', () => markThreadRead(t.agent));
+  node.__primary = () => { THREAD = t.agent; go('agents'); };
   return node;
 }
 
@@ -198,12 +353,13 @@ function dutyDecision(d) {
   const node = el(`<button class="duty" style="display:block;width:100%;text-align:left">
       <div class="duty__top"><span class="duty__kind">Decide</span>
         <span class="num">${esc(d.id)}</span>
-        <span class="duty__meta">card ${c ? ticket(c) : '—'} · ${(d.options || []).length} options${d.rec ? ` · rec ${esc(d.rec)}` : ''}</span></div>
+        <span class="duty__meta">card ${c ? ticket(c) : '—'} · ${(d.options || []).length} options${d.rec ? ` · rec ${esc(d.rec)}` : ''}</span>${ageChip(d.created)}</div>
       <h2 class="duty__title">${esc(d.title)}</h2>
       ${d.gist ? `<p class="duty__gist">${esc(d.gist)}</p>` : ''}
       <div class="duty__actions"><span class="btn btn--red btn--sm">Decide →</span></div>
     </button>`);
   node.addEventListener('click', () => focusAll(d.id));
+  node.__primary = () => focusAll(d.id);
   return node;
 }
 
@@ -211,7 +367,7 @@ function dutyActivate(c) {
   const node = el(`<div class="duty">
       <div class="duty__top"><span class="duty__kind">Greenlight</span>
         <span class="num">${ticket(c)}</span><span class="prio prio-${c.priority}">${c.priority}</span>
-        <span class="duty__meta">${esc(c.kind)}${c.phase === 'frozen' ? ' · frozen' : ''}</span></div>
+        <span class="duty__meta">${esc(c.kind)}${c.phase === 'frozen' ? ' · frozen' : ''}</span>${ageChip(c.created)}</div>
       <h2 class="duty__title">${esc(c.title)}</h2>
       ${c.body ? `<p class="duty__gist">${esc(c.body.slice(0, 180))}${c.body.length > 180 ? '…' : ''}</p>` : ''}
       <div class="duty__actions">
@@ -221,6 +377,7 @@ function dutyActivate(c) {
     </div>`);
   $('[data-go]', node).addEventListener('click', () => api('card/activate', { id: c.id, by: 'owner' }));
   $('[data-open]', node).addEventListener('click', () => showDetail(c.id));
+  node.__primary = () => api('card/activate', { id: c.id, by: 'owner' });
   return node;
 }
 
@@ -256,7 +413,7 @@ function viewAgents() {
     const row = el(`<button class="agentrow" aria-current="${THREAD === a.name}">
         <span class="presence ${on ? (a.roster.state === 'running' ? 'running' : 'online') : ''}"></span>
         <span><span class="agentrow__name">${esc(a.name)}</span><br>
-          <span class="agentrow__sub">${esc(a.roster?.kind || 'agent')} · ${state}</span></span>
+          <span class="agentrow__sub">${esc(a.roster?.kind || 'agent')} · ${state}${a.roster?.statusText ? ` — ${esc(a.roster.statusText.slice(0, 46))}` : ''}</span></span>
         ${a.thread.unread ? `<span class="agentrow__unread">${a.thread.unread}</span>` : ''}
       </button>`);
     row.addEventListener('click', () => { THREAD = a.name; render(); });
@@ -280,20 +437,41 @@ function viewAgents() {
 function threadPane(name, thread) {
   const a = ROSTER.find(x => x.name === name);
   const on = a?.online;
-  const stateTxt = on ? (a.state === 'running' ? 'running a turn…' : 'online — listening') : (a?.lastSeen ? `offline · last seen ${new Date(a.lastSeen).toLocaleString()}` : 'offline');
+  const stateTxt = on
+    ? (a.state === 'running' ? 'running a turn…' : (a.statusText ? a.statusText : 'online — listening'))
+    : (a?.lastSeen ? `offline · last seen ${new Date(a.lastSeen).toLocaleString()}` : 'offline — never connected');
   const pane = el(`<section class="thread">
       <div class="thread__head"><span class="presence ${on ? (a.state === 'running' ? 'running' : 'online') : ''}"></span>
         <span class="thread__name">${esc(name)}</span>
         <span class="chip chip--${esc(a?.kind || 'agent')}">${esc(a?.kind || 'agent')}</span>
         <span class="thread__state">${esc(stateTxt)}</span></div>
       <div class="thread__log" id="log"></div>
+      ${!on ? `<div class="invite">
+        <div class="invite__t">This agent isn't listening. Messages queue — or connect it:</div>
+        <code class="invite__cmd">tower agent listen --name ${esc(name)}${a?.kind && a.kind !== 'agent' ? ` --kind ${esc(a.kind)}` : ''}</code>
+        <button class="btn btn--sm" data-copy>Copy</button>
+      </div>` : ''}
       <div class="composer">
+        <label class="composer__attach" title="Attach a file"><input type="file" hidden>📎</label>
         <textarea rows="1" placeholder="Message ${esc(name)}… (Enter to send, Shift+Enter for newline)"></textarea>
         <button class="btn btn--red" data-send>Send</button>
         ${!on && a?.launchable ? `<button class="btn" data-launch title="Starts a headless ${esc(a.kind)} turn in the project with this message">Send + run</button>` : ''}
       </div>
-      ${!on ? `<div class="composer__hint">${a?.launchable ? `<b>offline:</b> plain Send queues it for the next listener; Send + run starts a headless ${esc(a?.kind || '')} turn now` : `<b>offline:</b> messages queue and deliver when this agent next listens`}</div>` : ''}
+      ${!on && a?.launchable ? `<div class="composer__hint"><b>offline:</b> Send queues it; Send + run starts a headless ${esc(a?.kind || '')} turn now</div>` : ''}
     </section>`);
+  $('[data-copy]', pane)?.addEventListener('click', () => {
+    navigator.clipboard?.writeText($('.invite__cmd', pane).textContent).then(() => toast('copied'));
+  });
+  $('.composer__attach input', pane)?.addEventListener('change', async (e) => {
+    const fl = e.target.files[0]; if (!fl) return;
+    if (fl.size > 10_000_000) return toast('file too large (10MB max)', true);
+    const r = await fetch(`/api/file?name=${encodeURIComponent(fl.name)}&type=${encodeURIComponent(fl.type || 'application/octet-stream')}`, { method: 'POST', body: fl });
+    const j = await r.json();
+    if (!j.ok) return toast(j.message || 'upload failed', true);
+    const caption = $('textarea', pane).value.trim();
+    $('textarea', pane).value = '';
+    await api('message/send', { from: 'owner', to: name, text: caption || fl.name, file: { id: j.file.id, name: j.file.name, type: j.file.type } });
+  });
   const log = $('#log', pane);
   const msgs = thread?.messages || [];
   if (!msgs.length) log.appendChild(el(`<div class="empty" style="padding:30px"><div>No messages yet — say something.</div></div>`));
@@ -302,7 +480,11 @@ function threadPane(name, thread) {
     log.appendChild(el(`<div class="msg ${mine ? 'msg--owner' : ''} ${mine && !m.deliveredAt ? 'msg--queued' : ''}">
         <div class="msg__meta"><div class="msg__from">${esc(m.from)}</div>
           <div class="msg__at">${new Date(m.at).toLocaleDateString([], { month: 'short', day: 'numeric' })} ${new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div></div>
-        <div class="msg__body">${esc(m.text)}${m.cardId && cardById(m.cardId) ? `<a class="msg__card" href="#" data-card="${esc(m.cardId)}">card ${ticket(cardById(m.cardId))}</a>` : ''}</div>
+        <div class="msg__body">${esc(m.text)}${m.file ? (
+          /^image\//.test(m.file.type)
+            ? `<a href="/files/${esc(m.file.id)}" target="_blank"><img class="msg__img" src="/files/${esc(m.file.id)}" alt="${esc(m.file.name)}" loading="lazy"></a>`
+            : `<a class="msg__file" href="/files/${esc(m.file.id)}" target="_blank" download="${esc(m.file.name)}">📄 ${esc(m.file.name)}</a>`
+        ) : ''}${m.cardId && cardById(m.cardId) ? `<a class="msg__card" href="#" data-card="${esc(m.cardId)}">card ${ticket(cardById(m.cardId))}</a>` : ''}</div>
       </div>`));
   }
   log.querySelectorAll('[data-card]').forEach(x => x.addEventListener('click', (e) => { e.preventDefault(); showDetail(x.dataset.card); }));
@@ -631,8 +813,9 @@ function renderFocus() {
       <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
       ${d.gist ? `<div class="fdeck__title">${esc(d.title)}</div>` : ''}
       ${facets.length ? `<div class="facets" id="f-facets">${facets.map(([fk, l]) => `<button class="facet${fk === focusFacet ? ' on' : ''}" data-fk="${fk}">${esc(l)}</button>`).join('')}</div><div class="facetbody" id="f-facetbody">${facetBody(d, focusFacet)}</div>` : ''}
-      <div class="optslabel">Choose one</div>
-      <div class="opts" id="f-opts"></div>
+      <div class="optslabel">Choose one
+        ${(d.options || []).length >= 2 ? `<button class="btn btn--ghost btn--sm" id="f-compare" style="margin-left:10px;text-transform:none;letter-spacing:0">${focusCompare ? '☰ Stack' : '⇆ Compare'}</button>` : ''}</div>
+      <div class="opts ${focusCompare ? 'opts--compare' : ''}" id="f-opts"></div>
       ${d.rec ? `<div class="recline"><b>Recommendation:</b> ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}</div>` : ''}
       <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
       <div class="deck-actions">
@@ -670,6 +853,7 @@ function renderFocus() {
   $('#f-prev', f).onclick = () => focusGo(-1);
   $('#f-next', f).onclick = () => focusGo(1);
   $('#f-close', f).onclick = exitFocus;
+  $('#f-compare', f)?.addEventListener('click', () => { focusCompare = !focusCompare; renderFocus(); });
   $('#f-clear', f)?.addEventListener('click', () => { delete pick[d.id]; updateChoice(); });
   $('#f-ask', f).onclick = () => { askOpen = !askOpen; renderFocus(); };
   $('#f-asksend', f)?.addEventListener('click', async () => {
@@ -741,17 +925,101 @@ document.addEventListener('keydown', (e) => {
     if (n >= 1 && n <= 9 && d && d.options && d.options[n - 1]) { pick[d.id] = d.options[n - 1].key; updateChoice(); }
     return;
   }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); return openPalette(); }
+  if (paletteOpen) return;   // palette handles its own keys
   if (e.key === 'Escape') return closeDetail();
   if (openCard || /input|textarea|select/i.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
+  if (VIEW === 'now') {
+    if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); return nowMove(1); }
+    if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); return nowMove(-1); }
+    if (e.key === 'Enter' && nowSel >= 0) { e.preventDefault(); return nowActivate(); }
+  }
   const i = ['1', '2', '3'].indexOf(e.key);
   if (i >= 0) go(VIEWS[i].id);
 });
+
+// ---- command palette (⌘K / Ctrl-K) -------------------------------------------
+let paletteOpen = false;
+function paletteItems(q) {
+  const needle = q.toLowerCase();
+  const hit = (s) => s.toLowerCase().includes(needle);
+  const items = [];
+  for (const v of VIEWS) if (!q || hit(v.name)) items.push({ label: `view · ${v.name}`, act: () => go(v.id) });
+  for (const a of ROSTER) if (!q || hit(a.name)) items.push({ label: `agent · ${a.name} (${a.online ? 'online' : 'offline'})`, act: () => { THREAD = a.name; go('agents'); } });
+  for (const d of openDecisions()) if (!q || hit(d.id + ' ' + d.title)) items.push({ label: `decide · ${d.id} — ${d.title.slice(0, 60)}`, act: () => focusAll(d.id) });
+  for (const c of S.cards) {
+    if (c.phase === 'done' && q.length < 2) continue;
+    if (!q || hit('#' + c.num + ' ' + c.title)) items.push({ label: `card · #${c.num} ${c.title.slice(0, 60)} (${c.phase})`, act: () => showDetail(c.id) });
+  }
+  return items.slice(0, 12);
+}
+function openPalette() {
+  if (paletteOpen) return;
+  paletteOpen = true;
+  let sel = 0;
+  const box = el(`<div class="palette" role="dialog" aria-label="Jump to">
+      <input class="palette__in" placeholder="Jump to card, ballot, agent, view…" aria-label="Search">
+      <div class="palette__list"></div></div>`);
+  const scrim = el('<div class="scrim"></div>');
+  document.body.append(scrim, box);
+  const input = $('.palette__in', box);
+  const list = $('.palette__list', box);
+  let items = [];
+  const paint = () => {
+    items = paletteItems(input.value.trim());
+    sel = Math.min(sel, Math.max(0, items.length - 1));
+    list.innerHTML = items.map((it, i) => `<button class="palette__item ${i === sel ? 'sel' : ''}">${esc(it.label)}</button>`).join('') || '<div class="palette__empty">no matches</div>';
+    list.querySelectorAll('.palette__item').forEach((n, i) => n.addEventListener('click', () => pick(i)));
+  };
+  const close = () => { paletteOpen = false; box.remove(); scrim.remove(); };
+  const pick = (i) => { const it = items[i]; close(); it?.act(); };
+  input.addEventListener('input', () => { sel = 0; paint(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(items.length - 1, sel + 1); paint(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(sel); }
+  });
+  scrim.addEventListener('click', close);
+  paint(); input.focus();
+}
 $('#scrim').addEventListener('click', closeDetail);
 window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (RENDER[h]) { VIEW = h; render(); } });
 
-// polling: state every 6s; presence every 10s while on Agents
-setInterval(refresh, 6000);
-setInterval(async () => { if (VIEW === 'agents') { await refreshRoster(); render(); } }, 10000);
+// live updates: SSE stream (fallback: slow poll); roster refresh only while
+// on Agents and only when it won't disturb the owner
+connectStream();
+setInterval(async () => {
+  if (VIEW !== 'agents' || uiBusy() || document.hidden) return;
+  await refreshRoster(); renderPreservingScroll();
+}, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); } });
+
+// PWA: service worker + push
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+async function enablePush() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return toast('notifications not allowed', true);
+    const { key } = await (await fetch('/api/push/key')).json();
+    const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+    const r = await fetch('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
+    if ((await r.json()).ok) { toast('push enabled on this device'); render(); }
+  } catch (e) { toast('push failed: ' + (e.message || e), true); }
+}
+window.__towerEnablePush = enablePush;
+(async () => {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  const bell = $('#bell');
+  bell.addEventListener('click', enablePush);
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    bell.hidden = !!sub;
+  } catch { bell.hidden = false; }
+})();
 
 if (RENDER[location.hash.slice(1)]) VIEW = location.hash.slice(1);
 // top-level awaits: the window load event waits for the first full render

@@ -75,7 +75,20 @@ export function openStore(dataDir) {
     return { result, state: s };
   });
 
-  return { file, dataDir, config, load, mutate, project: () => project(load(), config) };
+  // Replace the whole state (undo). Guarded by expectRev so an interleaved
+  // write from another agent can never be silently reverted.
+  const restore = (prevState, { expectRev } = {}) => withLock(file, () => {
+    const cur = load();
+    if (expectRev != null && Number(expectRev) !== cur.meta.rev)
+      fail('E_CONFLICT', `undo refused: board changed since (rev ${cur.meta.rev} ≠ ${expectRev})`);
+    const s = normalize(prevState);
+    s.meta.rev = cur.meta.rev + 1;
+    backup(file, config.backups);
+    writeJSON(file, s);
+    return { result: { restored: true }, state: s };
+  });
+
+  return { file, dataDir, config, load, mutate, restore, project: () => project(load(), config) };
 }
 
 export function normalize(s) {
@@ -146,7 +159,8 @@ export function project(s, config = null) {
     openQuestions: s.questions.filter(q => q.status === 'open').length,
   };
   return { meta: s.meta, config: config || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
-    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas, messages: s.messages, counts };
+    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas, messages: s.messages,
+    events: s.events.slice(0, 300), counts };
 }
 
 // ---- resolution helpers ----------------------------------------------------
@@ -471,10 +485,19 @@ export function sendMessage(s, p) {
   if (p.cardId) mustCard(s, p.cardId);
   const m = { id: newId('msg'), from, to, text: String(p.text).trim(),
     cardId: p.cardId ? findCard(s, p.cardId).id : null,
+    file: p.file || null,    // { id, name, type } — stored in <dataDir>/files/
     at: now(), deliveredAt: null, readAt: null };
   s.messages.push(m);
   if (s.messages.length > 5000) s.messages.splice(0, s.messages.length - 5000);
   logEvent(s, { by: from, action: 'message.send', ref: m.id, note: `→ ${to}: ${m.text.slice(0, 60)}` });
+  return m;
+}
+
+// Rewrite a message's text in place — the launch bridge streams live output
+// into one message this way.
+export function updateMessageText(s, id, text) {
+  const m = s.messages.find(x => x.id === id) || fail('E_NOT_FOUND', `no message ${id}`);
+  m.text = String(text).slice(0, 100_000);
   return m;
 }
 
@@ -503,6 +526,13 @@ export function threads(s) {
     t.lastAt = m.at;
   }
   return [...byKey.values()].sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
+}
+
+// Digest cursor: everything in events[] after this instant is "since you
+// were away". The owner's "Caught up" button advances it.
+export function setDigestCursor(s, at) {
+  s.meta.digestCursor = at || now();
+  return { digestCursor: s.meta.digestCursor };
 }
 
 // ---- ui state ---------------------------------------------------------------

@@ -4,7 +4,7 @@
 //   tower <noun> <verb> [args] [--flags]     e.g. tower card update 12 --phase building
 //   --json on any command → machine-readable output
 //   complex payloads (decisions) → --file payload.json or `-` for stdin
-import { readFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, writeFileSync, readdirSync, chmodSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
@@ -354,17 +354,33 @@ function cmdImport({ pos, flags }) {
 
 // ---- messaging: owner ⇄ agents ------------------------------------------------
 
+// Local CLIs are trusted (they can read config.json anyway) — send the token
+// so `tower …` also works against a server bound on a non-loopback address.
+const authHeaders = (store) => (store.config.auth?.token ? { authorization: `Bearer ${store.config.auth.token}` } : {});
+
 function cmdMessage(store, { pos, flags }) {
   const [verb] = pos;
   switch (verb) {
     case 'send': {
       const text = flags.text ?? pos.slice(1).join(' ');
       const payload = { from: flags.from || flags.by || 'owner', to: flags.to, text, cardId: flags.card };
+      if (flags.attach) {
+        // store the file in <dataDir>/files/ directly (same layout the server uses)
+        const buf = readFileSync(flags.attach);
+        const id = `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+        const filesDir = join(store.dataDir, 'files');
+        mkdirSync(filesDir, { recursive: true });
+        const name = flags.attach.split('/').pop();
+        const type = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.txt': 'text/plain', '.log': 'text/plain' })[name.slice(name.lastIndexOf('.'))] || 'application/octet-stream';
+        writeFileSync(join(filesDir, id), buf);
+        writeFileSync(join(filesDir, id + '.json'), JSON.stringify({ id, name, type, size: buf.length, at: new Date().toISOString() }));
+        payload.file = { id, name, type };
+      }
       // Prefer the running server so a live long-poll listener wakes instantly;
       // fall back to writing the file directly (listener catches up in ≤3s).
       return (async () => {
         try {
-          const r = await fetch(`http://localhost:${store.config.port}/api/message/send`, { method: 'POST', body: JSON.stringify(payload) });
+          const r = await fetch(`http://localhost:${store.config.port}/api/message/send`, { method: 'POST', headers: authHeaders(store), body: JSON.stringify(payload) });
           const j = await r.json();
           // A Tower server rejected it on the merits → real error. Anything
           // else on that port (or no JSON) → treat as no server, write direct.
@@ -405,7 +421,7 @@ function cmdMessage(store, { pos, flags }) {
 function cmdAgents(store, { flags }) {
   return (async () => {
     try {
-      const r = await fetch(`http://localhost:${store.config.port}/api/agents`);
+      const r = await fetch(`http://localhost:${store.config.port}/api/agents`, { headers: authHeaders(store) });
       const roster = await r.json();
       if (flags.json) return out(flags, null, roster);
       for (const a of roster) console.log(`${a.name.padEnd(16)} ${a.kind.padEnd(8)} ${a.online ? (a.state || 'online') : 'offline'}${a.launchable ? '  (launchable)' : ''}`);
@@ -433,7 +449,7 @@ async function cmdListen(store, { flags }) {
   for (;;) {
     let batch = null;
     try {
-      const r = await fetch(`${base}/api/messages/wait?for=${encodeURIComponent(name)}&kind=${encodeURIComponent(kind)}`);
+      const r = await fetch(`${base}/api/messages/wait?for=${encodeURIComponent(name)}&kind=${encodeURIComponent(kind)}`, { headers: authHeaders(store) });
       if (r.ok) batch = await r.json();
     } catch { /* server down */ }
     if (batch === null) {
@@ -448,6 +464,73 @@ async function cmdListen(store, { flags }) {
     }
     for (const m of batch) console.log(`[${m.from}] ${m.text}${m.cardId ? `  (card ${m.cardId})` : ''}`);
     if (flags.once && batch.length) return;
+  }
+}
+
+// ---- undo, agent status, git hook ---------------------------------------------
+
+function cmdUndo(store, { flags }) {
+  const bdir = join(store.dataDir, 'backups');
+  const files = existsSync(bdir) ? readdirSync(bdir).filter(f => f.startsWith('tower-')).sort() : [];
+  if (!files.length) throw new TowerError('E_INVALID', 'nothing to undo (no backups yet)');
+  const cur = store.load();
+  const prev = readJSON(join(bdir, files.at(-1)));
+  store.restore(prev, { expectRev: flags.expectRev ?? cur.meta.rev });
+  return out(flags, `undid last write — board back to rev ${prev.meta?.rev ?? '?'} content (now rev ${cur.meta.rev + 1})`, { ok: true });
+}
+
+async function cmdAgentStatus(store, { flags }) {
+  const name = flags.name || flags.by;
+  if (!name) throw new TowerError('E_USAGE', 'agent status needs --name <me> --text "…"');
+  try {
+    const r = await fetch(`http://localhost:${store.config.port}/api/agent/status`, { method: 'POST', headers: authHeaders(store), body: JSON.stringify({ name, kind: flags.kind, text: flags.text || '' }) });
+    if (!r.ok) throw new Error('bad status');
+    return out(flags, `status set for ${name}`, { ok: true });
+  } catch {
+    throw new TowerError('E_INVALID', 'no Tower server reachable — status is live-only (start `tower serve`)');
+  }
+}
+
+// Installs a post-commit hook that appends any commit mentioning #<num> to
+// that card's log. Silent + always exit 0, so it can never break a commit.
+function cmdGithookInstall(store) {
+  const projectRoot = dirname(store.dataDir);
+  const gitDir = (() => {
+    let d = projectRoot;
+    for (;;) { if (existsSync(join(d, '.git'))) return join(d, '.git'); const p = dirname(d); if (p === d) return null; d = p; }
+  })();
+  if (!gitDir) throw new TowerError('E_NOT_FOUND', 'no .git found at or above the project root');
+  const hooksDir = join(gitDir, 'hooks');
+  mkdirSync(hooksDir, { recursive: true });
+  const hookPath = join(hooksDir, 'post-commit');
+  const towerBin = join(dirname(new URL(import.meta.url).pathname), '..', 'tower.mjs');
+  const line = `node "${towerBin}" githook post-commit >/dev/null 2>&1 || true   # tower card-link`;
+  let cur = existsSync(hookPath) ? readFileSync(hookPath, 'utf8') : '#!/bin/sh\n';
+  if (!cur.includes('tower card-link')) {
+    cur = cur.trimEnd() + '\n' + line + '\n';
+    writeFileSync(hookPath, cur);
+    chmodSync(hookPath, 0o755);
+  }
+  console.log(`installed post-commit hook → ${hookPath}\ncommits mentioning #<num> now append to that card's log`);
+}
+
+// The real post-commit worker: read HEAD, find #N refs, log them.
+async function githookPostCommit(store) {
+  const { execSync } = await import('node:child_process');
+  let subject = '', hash = '';
+  try {
+    hash = execSync('git rev-parse --short HEAD', { cwd: dirname(store.dataDir), encoding: 'utf8' }).trim();
+    subject = execSync('git log -1 --format=%s', { cwd: dirname(store.dataDir), encoding: 'utf8' }).trim();
+  } catch { return; }
+  const nums = [...new Set([...subject.matchAll(/#(\d+)\b/g)].map(m => Number(m[1])))];
+  if (!nums.length) return;
+  const s = store.load();
+  for (const n of nums) {
+    const c = s.cards.find(x => x.num === n);
+    if (!c) continue;
+    try {
+      store.mutate((s2, cfg) => db.updateCard(s2, c.id, { logEntry: `commit ${hash}: ${subject.slice(0, 110)}`, by: 'git' }, cfg));
+    } catch { /* never break a commit */ }
   }
 }
 
@@ -469,12 +552,16 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower events   [--limit 30]
   tower import <old-tower.json> [--name X] [--force]
 
-  tower message send --to <agent|owner> --text "…" [--by <name>] [--card '#12']
+  tower message send --to <agent|owner> --text "…" [--by <name>]
+                     [--card '#12'] [--attach path.png]
   tower message list [--thread <agent>] [--unread] [--json]
   tower agents                              roster + live presence
   tower agent listen --name <me> [--kind claude|codex]
                                             long-lived; prints each owner
                                             message as a line (Monitor-friendly)
+  tower agent status --name <me> --text "building #187 — tests green"
+  tower undo                                revert the last write (rev-guarded)
+  tower githook [install]                   commits mentioning #N → card log
 
   Cards accept #num or id. --json everywhere for machine output.
   Complex payloads: --file payload.json or --file - (stdin).
@@ -516,9 +603,14 @@ export async function run(argv) {
       case 'events':    return cmdEvents(store, sub);
       case 'message':   return await cmdMessage(store, sub);
       case 'agents':    return await cmdAgents(store, sub);
+      case 'undo':      return cmdUndo(store, sub);
+      case 'githook':
+        if (sub.pos[0] === 'post-commit') return await githookPostCommit(store);
+        return cmdGithookInstall(store);
       case 'agent': {
         if (sub.pos[0] === 'listen') return await cmdListen(store, { flags: sub.flags });
-        throw new TowerError('E_USAGE', 'agent verbs: listen (see also `tower agents`)');
+        if (sub.pos[0] === 'status') return await cmdAgentStatus(store, { flags: sub.flags });
+        throw new TowerError('E_USAGE', 'agent verbs: listen | status (see also `tower agents`)');
       }
       default: throw new TowerError('E_USAGE', `unknown command "${cmd}" — run \`tower help\``);
     }

@@ -56,11 +56,19 @@ is up, else falls back to polling the data file every 3s.
 
 ```
 tower message send --to owner --text "verify pass green on #12" --by <me>
+tower message send --to owner --attach shot.png --by <me>   # images render inline
 tower message list --unread --for <me>     # catch up after being away
+tower agent status --name <me> --text "building #12 — tests green"
 ```
 
 Report completions and blockers with a message — that's what reaches the
-owner's phone.
+owner's phone. Update `agent status` when you switch tasks; it shows live in
+the roster. Watch for `[tower]` system messages: ratifications and
+greenlights arrive batched there — treat one as "the board changed, run
+`tower next`", not as N separate work orders.
+
+Auth note: localhost is exempt; remote CLIs read `auth.token` from
+`.tower/config.json` automatically.
 
 Each card has a computed `lane`: `decide`/`activate` (owner), `plan`/
 `implement`/`building`/`verify` (agent), `blocked`/`frozen`/`done` (inert).
