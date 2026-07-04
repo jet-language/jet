@@ -252,6 +252,8 @@ impl<'a> Checker<'a> {
                         | "Stream"
                         // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
                         | "DecodeResult"
+                        // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
+                        | "Pool" | "Id"
                 );
                 if !is_core_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
@@ -722,6 +724,30 @@ impl<'a> Checker<'a> {
                             Some(Type::Named(n)) if self.trait_reg.index_types.contains_key(n) => {
                                 *kind = IndexKind::User(n.clone());
                             }
+                            // D-MEM1 S6: `pool[id] = v` — generation-checked write.
+                            Some(Type::Apply { name, args: pool_args }) if name == "Pool" => {
+                                *kind = IndexKind::Pool;
+                                let is_matching_id = matches!(
+                                    &idx_ty,
+                                    Some(Type::Apply { name, args: id_args })
+                                        if name == "Id" && id_args.first() == pool_args.first()
+                                );
+                                if !is_matching_id {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        format!(
+                                            "`Pool` indexes need a matching `Id<T>`, not {}",
+                                            idx_ty
+                                                .as_ref()
+                                                .map(|t| t.show())
+                                                .unwrap_or_else(|| "this".to_string())
+                                        ),
+                                        "a pool slot is only reached through the `Id<T>` its own `.add()` returned".to_string(),
+                                        "index with the `Id<T>` handle from `.add(...)`".to_string(),
+                                        Some(index.span()),
+                                    ));
+                                }
+                            }
                             _ => {}
                         }
                         // D-SOA1: index-WRITE through a columnar list (`xs[i] = …`)
@@ -750,10 +776,16 @@ impl<'a> Checker<'a> {
                         }
                         // Writing through `[ ]` changes the owner: the root
                         // name must be changeable and not under a `for` borrow.
-                        if matches!(
-                            base_ty,
-                            Some(Type::Map { .. }) | Some(Type::List(_)) | Some(Type::FixedList { .. })
-                        ) {
+                        let base_is_pool =
+                            matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "Pool");
+                        if base_is_pool
+                            || matches!(
+                                base_ty,
+                                Some(Type::Map { .. })
+                                    | Some(Type::List(_))
+                                    | Some(Type::FixedList { .. })
+                            )
+                        {
                             if let Some(root) = expr_root_ident(base) {
                                 let root = root.to_string();
                                 if self.iter_borrowed.contains(&root) {
@@ -1280,7 +1312,7 @@ impl<'a> Checker<'a> {
                                         format!(
                                             "return a copy: `return {} {};` — or take ownership with `{}: {}{}`. \
                                              There's no borrow-return in v1 — to share the value without a full \
-                                             copy, store an owned field, or reach for `Shared<T>`/`Id<T>` (coming soon) \
+                                             copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
                                              once a real program needs shared ownership",
                                             Syntax::KW_COPY,
                                             n,

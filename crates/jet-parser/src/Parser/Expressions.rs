@@ -1736,10 +1736,20 @@ impl<'a> Parser<'a> {
                         return self.ptr_from_addr(type_name, span);
                     }
                     // D-SERDE6: optional call-site turbofish `csv.decode<Order>(raw)`.
+                    // D-MEM1 S6 fix: don't blindly overwrite `type_args` — a
+                    // capitalized receiver's OWN turbofish (`Pool<Player>.new()`,
+                    // parsed above at the type-name position) has no call-site
+                    // turbofish of its own (`self.at_turbofish()` is false right
+                    // after `.new`), so this used to silently clobber it with an
+                    // empty `Vec`, losing `Player` entirely. The two positions are
+                    // mutually exclusive in practice (a lowercase alias like `csv`
+                    // never reaches the type-name turbofish parse above), so
+                    // falling back to the outer `type_args` when there's no
+                    // call-site turbofish is a pure bug fix, not a behavior change.
                     let type_args = if self.at_turbofish() {
                         self.parse_turbofish()?
                     } else {
-                        Vec::new()
+                        type_args
                     };
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();

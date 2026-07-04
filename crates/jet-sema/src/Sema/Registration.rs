@@ -2106,6 +2106,7 @@ pub(crate) fn check_func_body(
         allow_string_view_read: false,
         lambda_escapes: true,
         is_task_spawn: false,
+        lambda_param_mutable: false,
         view_capture_tasks: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,

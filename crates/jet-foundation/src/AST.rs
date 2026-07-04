@@ -2383,6 +2383,11 @@ pub enum IndexKind {
     Lane(String),
     /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index` (+ optional `IndexMut`).
     User(String),
+    /// D-MEM1 S6: `pool[id]` on a `Pool<T>` — generation-checked slot access, panics
+    /// on a stale `Id<T>` (removed/reused slot). Read returns a clone of `T`; write
+    /// (plain overwrite or a nested `pool[id].field = v`) goes through a genuine
+    /// mutable place (`jet_pool_get_mut`), not a value round-trip.
+    Pool,
 }
 
 /// `for i in 1..10` vs `for x in xs` (M5).

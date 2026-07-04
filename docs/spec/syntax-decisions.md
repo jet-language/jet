@@ -748,7 +748,24 @@ Jet-level view type — `String` stays one type; view-ness lives on the binding,
 codegen-invisible to the user); escape (return/rebind/field/call-arg/any other
 method) is **E2307**. `split` stays eager (`Vec<String>`) — a view-of-views
 list needs S6-scale representation work, named as a deferred gap, not built
-here. S6–S9 remain unbuilt.
+here. **S6 shipped (2026-07-04)**: `Shared<T>` (D-SHARED-API1=A) is a
+lock-guarded shared handle — `Shared.new(x)` constructs (bare type-name call,
+`T` inferred from `x`); `.read(f)`/`.edit(f)` run a closure against a read- or
+write-locked view, the lock scoped to the call only; cloning is always a
+cheap handle clone (never a deep copy), so it crosses a `tasks.spawn` boundary
+with no `take`. (`Shared<T>`'s *type* predates this stage as inert signature
+plumbing over a plain `Arc<T>` — never actually constructible, see
+`tests/ownership.rs`'s pre-existing param-signature tests; S6 gives it a real
+constructor and upgrades the representation to `Arc<RwLock<T>>`.) `Pool<T>`/
+`Id<T>` (D-POOLID-API1=A) is a generational arena: `Pool<T>.new()` constructs;
+`.add(val)` inserts and returns an `Id<T>` (plain, `Copy`, comparable —
+index+generation, never touches `T`); `pool[id]` indexes for read AND write
+(including a nested `pool[id].field = v`, a genuine mutable place, not a
+value round-trip); `.ids()` snapshots every live id; `.remove(id)` removes,
+bumping the slot's generation, returning `T?` (mirrors `Map.remove`'s
+`Option` convention). A stale `Id<T>` (removed/reused slot) panics at
+runtime, mirroring the array-out-of-bounds precedent — not a new diagnostic
+code. S7–S9 remain unbuilt.
 
 **D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower

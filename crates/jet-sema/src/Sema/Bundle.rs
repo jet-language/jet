@@ -1722,6 +1722,21 @@ pub(crate) fn check_bundle_opts(
     {
         used_core.insert("core.args::spec".to_string());
     }
+    // D-MEM1 S6: `Shared<T>`/`Pool<T>`/`Id<T>` need `CORELIB_PRELUDE`'s `jet_std`
+    // module (`JetShared`/`JetPool`/`JetId`), but need no `use core.X` import to
+    // reach them (unlike `tasks.spawn` etc.) — `collect_used_core` only walks
+    // import aliases, so it never sees them. Same forced-insert shape as
+    // D-CLIFLAG1 above; a cheap source-text scan is deliberately over-eager (a
+    // false positive just includes the prelude when it wasn't strictly needed —
+    // harmless, `#![allow(warnings)]` covers the unused code).
+    if bundle.modules.iter().any(|m| {
+        m.source.contains("Pool<")
+            || m.source.contains("Shared<")
+            || m.source.contains("Shared.new(")
+            || m.source.contains("Id<")
+    }) {
+        used_core.insert("core.mem::pool_shared".to_string());
+    }
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     (
@@ -2663,6 +2678,7 @@ pub(crate) fn check_func_body_bundle(
         allow_string_view_read: false,
         lambda_escapes: true,
         is_task_spawn: false,
+        lambda_param_mutable: false,
         view_capture_tasks: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,

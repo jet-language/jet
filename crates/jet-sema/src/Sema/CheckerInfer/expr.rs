@@ -1466,6 +1466,27 @@ impl<'a> Checker<'a> {
                 }
                 Some((**elem).clone())
             }
+            // D-MEM1 S6 (D-POOLID-API1=A): `pool[id]` — generation-checked read,
+            // panics at runtime on a stale `Id<T>` (mirrors the array-oob panic
+            // precedent, not a new diagnostic code — see `jet_pool_get`).
+            Type::Apply { name, args } if name == "Pool" && args.len() == 1 => {
+                *kind = IndexKind::Pool;
+                let is_matching_id =
+                    matches!(&idx_ty, Type::Apply { name, args: id_args } if name == "Id" && id_args.first() == args.first());
+                if !is_matching_id {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`Pool` indexes need a matching `Id<T>`, not {}",
+                            idx_ty.show()
+                        ),
+                        "a pool slot is only reached through the `Id<T>` its own `.add()` returned".to_string(),
+                        "index with the `Id<T>` handle from `.add(...)`".to_string(),
+                        Some(index.span()),
+                    ));
+                }
+                Some(args[0].clone())
+            }
             // D-DYNARRAY1: `window[i]` on a `View<T>` — read-only, same bounds
             // discipline as list indexing (runtime panic on out-of-range).
             Type::Apply { name, args } if name == "View" && args.len() == 1 => {

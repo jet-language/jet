@@ -1,0 +1,14 @@
+// D-MEM1 stage S6 (D-POOLID-API1=A): a stale `Id<T>` — its pool slot was
+// removed — panics at runtime, mirroring the array-out-of-bounds panic
+// precedent (jet_index_vec/jet_pool_get): a runtime report, not a new
+// diagnostic code.
+struct Player {
+    name: String
+}
+
+fn run() {
+    world := Pool<Player>.new()
+    kai :: world.add(Player.{ name: "Kai" })
+    world.remove(kai).drop("this example only needs the generation bump, not the removed value")
+    print(world[kai].name)
+}

@@ -3769,7 +3769,11 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
             if a.clone {
                 s = format!("({}).clone()", s);
             } else if a.arc_clone {
-                s = format!("std::sync::Arc::clone(&{})", s);
+                // D-MEM1 S6: `Type::Shared` lowers to `JetShared<T>` (a newtype
+                // wrapping `Arc<RwLock<T>>`, not a bare `Arc<T>`) since this
+                // stage — `.clone()` (its own `impl Clone`, a cheap handle
+                // clone) is the correct call now, not `Arc::clone(&…)`.
+                s = format!("({}).clone()", s);
             }
             // D-FIXARR1: widen a [T#N] (Rust [T; N]) to [T] (Vec<T>) before passing.
             // Applied AFTER clone, BEFORE fn-coerce and borrow wrappers.

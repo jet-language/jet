@@ -741,6 +741,11 @@ pub(crate) struct Checker<'a> {
     lambda_escapes: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
+    /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s
+    /// closure parameter — grants it write access with no `&` sigil (the API
+    /// contract IS the exclusive lock; `check_lambda` reads this once, at bind
+    /// time, then it's irrelevant for the rest of the closure body).
+    lambda_param_mutable: bool,
     /// D-DETACH1: task names whose spawn lambda had a non-view sendability error (E1102 fired).
     /// At `.detach()`, if the task is in this set and NOT in view_borrow_escape_tasks, E1103 fires.
     view_capture_tasks: HashSet<String>,

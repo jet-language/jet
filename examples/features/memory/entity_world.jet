@@ -1,0 +1,40 @@
+// D-MEM1 stage S6 (D-POOLID-API1=A): `Pool<T>`/`Id<T>` — a generational arena.
+// `world.add(val)` inserts and returns an `Id<T>` (plain, copyable, comparable
+// data — never touches `T` itself); `pool[id]` indexes for both read and
+// write, including a nested `pool[id].field = v`; `.ids()` walks every live
+// entry; a stale `Id<T>` (removed slot, generation bumped) panics rather than
+// silently reading garbage.
+struct Player {
+    name: String
+    hp: Int
+    attack: Int
+    target: Id<Player>?
+}
+
+fn tick(world: &Pool<Player>) {
+    loop id in world.ids() {
+        target :: world[id].target
+        if target == Val(t) {
+            dmg :: world[id].attack
+            world[t].hp -= dmg
+        }
+    }
+}
+
+fn run() {
+    world := Pool<Player>.new()
+    kai :: world.add(Player.{ name: "Kai", hp: 100, attack: 15, target: None })
+    rem :: world.add(Player.{ name: "Rem", hp: 100, attack: 10, target: None })
+    world[kai].target = Val(rem)
+    world[rem].target = Val(kai)
+
+    tick(&world)
+
+    print("kai hp={world[kai].hp}")
+    print("rem hp={world[rem].hp}")
+
+    fallen :: world.remove(kai)
+    if fallen == Val(f) {
+        print("removed {f.name}")
+    }
+}

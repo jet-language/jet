@@ -2102,7 +2102,9 @@ pub struct TCallArg {
     pub mut_borrow: bool,
     /// Emit `(...).clone()` (an implicit clone — a value passed by `Move`).
     pub clone: bool,
-    /// Emit `Arc::clone(&...)` (a `Shared` value auto-cloned at the call site).
+    /// Emit `(...).clone()` (a `Shared` value auto-cloned at the call site — its
+    /// own cheap-handle `Clone` impl; D-MEM1 S6 changed this from a hardcoded
+    /// `Arc::clone(&...)` once `Shared<T>` stopped being a bare `Arc<T>`).
     /// c109 Phase 6: method/Arc args may set this; the plain-call path does not.
     pub arc_clone: bool,
     /// c109 Phase 13: the Fn-typed-parameter coercion (`emit_call_args`' fn-arg

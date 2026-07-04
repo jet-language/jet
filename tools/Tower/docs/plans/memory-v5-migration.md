@@ -117,12 +117,37 @@ capturing a view, mirroring `task_detach_view_capture.jet`'s existing
 `View<T>` case). Perf: `jet bench` fixture (`#Bench` block, D-BENCH1/D-TOOL5,
 the existing convention — no new benchmarking harness) in the same example.
 
-**S6 — `Shared<T>` and `Pool<T>`/`Id<T>`.**
-CoreLib types + lowering (`Arc<RwLock>` class; generational arena). Ownership
-diagnostics suggest them by name. Examples + goldens for: shared config across
-tasks, entity world, parent-pointer tree. Any owner-facing spelling not already
-fixed by the ratified proposal text (e.g. `@Resource` naming) gets a mini-ballot
-BEFORE this stage builds it.
+**S6 — `Shared<T>` and `Pool<T>`/`Id<T>`. DONE (2026-07-04).**
+CoreLib types + lowering shipped per the ratified D-SHARED-API1=A /
+D-POOLID-API1=A ballots. `Shared<T>`: `Shared.new(x)` (bare type-name call, `T`
+inferred from `x`), `.read(f)`/`.edit(f)` closure callbacks over
+`Arc<RwLock<T>>` (`jet_std::JetShared<T>`); repurposed the pre-existing
+`Type::Shared`/`Shared<T>` grammar slot (parked since before this migration as
+inert signature plumbing over a plain `Arc<T>` — never actually
+constructible) rather than minting a second mechanism. `Pool<T>`/`Id<T>`:
+`Pool<T>.new()`, `.add(val) -> Id<T>`, `pool[id]` read/write (incl. nested
+`pool[id].field = v` through a genuine mutable place, `jet_pool_get_mut`, not
+a value round-trip), `.ids() -> [Id<T>]`, `.remove(id) -> T?` (mirrors
+`Map.remove`'s `Option` convention — the judgment call the ballot flagged as
+open). `Id<T>` is plain index+generation data (`Copy`, comparable, hand-written
+impls so no `T: Copy`/`Clone`/`Eq` bound leaks). A stale `Id<T>` panics at
+runtime mirroring the array-oob precedent (no new diagnostic code) —
+`examples/features/memory/pool_stale_id.jet` + `.err.out`. E0120's fix-it
+dropped "(coming soon)" — the types are here. Examples + goldens: shared
+config across tasks (`shared_config.jet`), entity world
+(`entity_world.jet`), parent-pointer tree (`entity_tree.jet`). No new
+owner-facing spelling needed a mini-ballot — the ratified text was fully
+decidable. Deliberate scope cuts (documented, not silent): `jet-jit` (the
+Cranelift dev-loop tier) doesn't cover these types yet — functions using
+them run via the AOT/interpreter tiers, not accelerated; `Pool<T>`/`Shared<T>`
+themselves aren't `PartialEq`/`Hash` (only `Id<T>` is) and aren't
+`@[Codable]`-serializable. Found + fixed a real parser bug while landing
+this: `Type<Args>.method()`'s call-site turbofish clobbered the type-name's
+OWN turbofish (`Deque<String>.new()` silently defaulted to `Int` before this
+fix — a latent, unrelated-to-Pool bug this stage's `Pool<Player>.new()` test
+surfaced). Also renamed a same-name collision: `examples/features/serde/
+serde_generic.jet` (+ 2 test-inline copies) had an unrelated demo struct
+`Id<K>`, predating `Id<T>`'s reservation — renamed to `Tagged<K>`.
 
 **S7 — `policy` floors.**
 Module-level `policy` item (parser + manifest). `no_alloc` first (allocation

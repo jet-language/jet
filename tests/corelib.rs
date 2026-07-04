@@ -785,7 +785,7 @@ struct Wrap<T> {
 }
 
 @[Codable]
-struct Id<K> {
+struct Tagged<K> {
     raw: Int
     #[Skip] marker: K?
 }
@@ -806,13 +806,15 @@ fn run() {
         "Wrap's Decode impl must bound T: user_Decode\n{rs}"
     );
     // D-SERDE10: the phantom param K gets NO Encode/Decode bound (only Clone).
+    // (D-MEM1 S6: struct renamed `Id<K>` -> `Tagged<K>` — `Id<T>` is now the
+    // reserved `Pool<T>` handle type.)
     assert!(
-        rs.contains("impl<K: Clone> user_Encode for user_Id<K>"),
-        "Id's Encode impl must NOT bound K with user_Encode (phantom param)\n{rs}"
+        rs.contains("impl<K: Clone> user_Encode for user_Tagged<K>"),
+        "Tagged's Encode impl must NOT bound K with user_Encode (phantom param)\n{rs}"
     );
     assert!(
-        rs.contains("impl<K: Clone> user_Decode for user_Id<K>"),
-        "Id's Decode impl must NOT bound K with user_Decode (phantom param)\n{rs}"
+        rs.contains("impl<K: Clone> user_Decode for user_Tagged<K>"),
+        "Tagged's Decode impl must NOT bound K with user_Decode (phantom param)\n{rs}"
     );
     assert!(
         !rs.contains("K: user_Encode") && !rs.contains("K: user_Decode"),
@@ -844,7 +846,7 @@ struct Wrap<T> {
 }
 
 @[Codable]
-struct Id<K> {
+struct Tagged<K> {
     raw: Int
     #[Skip] marker: K?
 }
@@ -854,9 +856,9 @@ fn run() {
     print(json.to_string(wi))
     back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
-    id :: Id<Wrap<Int>>.{ raw: 9, marker: None }
+    id :: Tagged<Wrap<Int>>.{ raw: 9, marker: None }
     print(json.to_string(id))
-    rid :: json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
 }
 "#,

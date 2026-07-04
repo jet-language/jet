@@ -4163,7 +4163,9 @@ fn run() {
 }
 
 /// c109 Phase 6b: a `Shared<T>` value passed to a FREE (non-method) call inside a loop
-/// auto-clones the Arc — `emit_call_args` emits `Arc::clone(&…)` and the receiving
+/// auto-clones the handle — `emit_call_args` emits `(…).clone()` (D-MEM1 S6: `Shared<T>`
+/// lowers to `jet_std::JetShared<T>`, a newtype with its own cheap-handle `Clone` impl,
+/// not a bare `Arc<T>` — was `Arc::clone(&…)` before this stage) and the receiving
 /// `Shared<T>` `Read` param borrows it (`&(…)`). The gate previously excluded
 /// `shared_auto_clone` on plain `Call` args, routing `loop_user`/`noop` through the AST
 /// path; both now route through the TIR with a byte-identical emit. A `Shared<T>` value
@@ -4199,18 +4201,21 @@ fn run() {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // Byte-exact auto-clone emit: the free-call arg auto-clones the Arc, then the
-    // `Read` non-scalar `Shared<Int>` param borrows it.
+    // Byte-exact auto-clone emit: the free-call arg auto-clones the handle, then
+    // the `Read` non-scalar `Shared<Int>` param borrows it. (D-MEM1 S6: `Shared<T>`
+    // now lowers to `jet_std::JetShared<T>`, not a bare `std::sync::Arc<T>` — its
+    // own `Clone` impl is a cheap handle clone, so plain `.clone()` replaces the
+    // old `Arc::clone(&…)` text.)
     assert!(
         out.rust
-            .contains("user_noop(&(std::sync::Arc::clone(&(*user_h))));"),
+            .contains("user_noop(&(((*user_h)).clone()));"),
         "shared auto-clone free-call arg not byte-exact:\n{}",
         out.rust
     );
     // The receiving param signature is the shared `rust_param_type` form.
     assert!(
         out.rust
-            .contains("pub fn user_noop(user_h: &std::sync::Arc<i64>)"),
+            .contains("pub fn user_noop(user_h: &jet_std::JetShared<i64>)"),
         "Shared<Int> param signature not byte-exact:\n{}",
         out.rust
     );

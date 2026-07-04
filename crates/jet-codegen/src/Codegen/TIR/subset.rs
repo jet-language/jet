@@ -265,15 +265,48 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_concurrency_ty(&ty, cx)
         || is_covered_reactive_ty(&ty, cx)
         || is_covered_shared_ty(&ty, cx)
+        || is_covered_pool_ty(&ty, cx)
+}
+
+/// D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` / `Id<T>` — the generational arena and
+/// its index+generation handle. Same shape as `is_covered_concurrency_ty`:
+/// `cx.rust_type` already renders these to `{root}jet_std::Jet{Pool,Id}<{T}>`, so
+/// binding/passing/returning one is byte-identical to the AST path. `T` must
+/// itself be a covered value type.
+pub(crate) fn is_covered_pool_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Apply { name, args } = ty else {
+        return false;
+    };
+    let Some(elem) = args.first() else {
+        return false;
+    };
+    match name.as_str() {
+        // `Id<T>` is a plain index+generation handle — it never actually stores
+        // or embeds a `T` at runtime (`JetId<T>`'s only field is a zero-size
+        // `PhantomData<fn() -> T>`). So its OWN coverage doesn't need `T`'s full
+        // recursive struct-coverage — just that `T` names a real registered
+        // type. This matters for the self-referential shape a parent-pointer
+        // tree needs (`struct Node { parent: Id<Node>? }`): checking whether
+        // `Node` is covered recurses into this field, which would recurse right
+        // back into "is `Node` covered" through `concurrency_elem_covered` —
+        // an infinite loop `is_covered_struct_ty` has no cycle guard for.
+        "Id" => matches!(elem, Type::Named(n) if cx.type_names.contains(n)),
+        "Pool" => concurrency_elem_covered(elem, cx),
+        _ => false,
+    }
 }
 
 /// c109 Phase 6b: a `Shared<T>` (`Type::Shared`) usable as a param/return/local value
-/// type. `cx.rust_type` already renders it to `std::sync::Arc<{T}>` and `rust_param_type`
-/// borrows a `Read` non-scalar to `&std::sync::Arc<{T}>` — both shared with the AST path,
-/// so the signature is byte-identical. A `Read` param reads as `(*user_h)` (`param_place`'s
-/// non-scalar deref). The element `T` must itself be a covered value type. Admitting the
-/// type is what lets a fn with a `Shared<T>` param route; passing one to a free call
-/// auto-clones the Arc via `lower_one_call_arg`'s `arc_clone` (the gate now admits it).
+/// type. `cx.rust_type` renders it to `{root}jet_std::JetShared<{T}>` (D-MEM1 S6 —
+/// was a bare `std::sync::Arc<{T}>` before this stage, back when the type had no
+/// real constructor; see the type's own doc comment) and `rust_param_type` borrows
+/// a `Read` non-scalar to `&{that}` — both shared with the AST path, so the
+/// signature is byte-identical. A `Read` param reads as `(*user_h)` (`param_place`'s
+/// non-scalar deref). The element `T` must itself be a covered value type. Admitting
+/// the type is what lets a fn with a `Shared<T>` param route; passing one to a free
+/// call auto-clones the handle via `lower_one_call_arg`'s `arc_clone` (the gate now
+/// admits it) — a plain `.clone()` on `JetShared<T>`'s own `Clone` impl, not
+/// `Arc::clone` directly (see `emit_tir_call_args`).
 pub(crate) fn is_covered_shared_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(ty, Type::Shared(inner) if is_subset_param_ty(inner, cx))
 }
@@ -581,6 +614,10 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         // head; an `Option<Note>` is byte-identical (the `value(n)`/`null` constructor is
         // in-subset, the field read plain/sema-cloned).
         || is_covered_foreign_value_ty(ty, cx)
+        // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` payload (`parent: Id<Node>?`'s
+        // `Id<Node>` — the parent-pointer-tree shape D-POOLID-API1's ballot named).
+        || is_covered_pool_ty(ty, cx)
+        || is_covered_shared_ty(ty, cx)
 }
 
 /// c109 Phase 5: `ty` is a list `[E]` or map `[K, V]` the subset can lower. The
@@ -637,6 +674,10 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // is excluded by that call — the recurring "cover the value type, let the next
         // uncovered node exclude its fn" seam.)
         || is_covered_foreign_value_ty(ty, cx)
+        // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` element (`[Id<Node>]` — a
+        // parent-pointer tree's `children` field, or `.ids()`'s `[Id<T>]` result).
+        || is_covered_pool_ty(ty, cx)
+        || is_covered_shared_ty(ty, cx)
 }
 
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
@@ -756,6 +797,9 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
         Type::Map { key, value } => {
             enum_payload_ty_covered(key, cx, seen) && enum_payload_ty_covered(value, cx, seen)
         }
+        // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` enum payload.
+        Type::Apply { .. } => is_covered_pool_ty(ty, cx),
+        Type::Shared(_) => is_covered_shared_ty(ty, cx),
         _ => false,
     }
 }
@@ -986,6 +1030,9 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
             field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
         }
         Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),
+        // D-MEM1 S6: a bare (non-optional) `Pool<T>`/`Id<T>`/`Shared<T>` field.
+        Type::Apply { .. } => is_covered_pool_ty(ty, cx),
+        Type::Shared(_) => is_covered_shared_ty(ty, cx),
         _ => false,
     }
 }
@@ -2729,6 +2776,31 @@ pub(crate) fn method_call_in_subset(
             _ => {}
         }
     }
+    // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids` and
+    // `Shared<T>.read/edit`. Sema sets `recv_type` to `"Pool"`/`"Shared"`
+    // explicitly for these (see `CheckerInfer/calls.rs`'s comment on why — the
+    // method names collide with Set/List/Map's `add`/`remove`, unlike Task/
+    // Sender's globally-unambiguous names), so gate on that instead of a name+
+    // arity guess. `recv_type == Some("Pool")` is ALSO how D-ALLOC1's `mem.Pool`
+    // slab allocator (a completely different, pre-existing type — see
+    // `Type::Named` vs this stage's `Type::Apply` in the type's own doc
+    // comment) marks its `.alloc`/`.reset`/`.free` methods, so only intercept
+    // (and `return`) for the THREE names this stage actually owns — anything
+    // else falls through to the allocator's existing `("Arena"|"Bump"|"Pool"|
+    // "Fixed", …)` shape further down, unbroken.
+    if recv_type.as_deref() == Some("Pool") && matches!(method, "add" | "remove" | "ids") {
+        return match method {
+            "add" => args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals),
+            "remove" => args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals),
+            "ids" => args.is_empty(),
+            _ => unreachable!("matches! above admitted only these"),
+        };
+    }
+    if recv_type.as_deref() == Some("Shared") {
+        return matches!(method, "read" | "edit")
+            && args.len() == 1
+            && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
+    }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
     // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.
     // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
@@ -2890,6 +2962,14 @@ pub(crate) fn method_call_in_subset(
             if !locals.contains(type_name.as_str()) {
                 match (type_name.as_str(), method, args.len()) {
                     ("Set", "from", 1) | ("Bag", "new", 0) | ("Deque", "new", 0) => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
+                    // D-MEM1 S6: `Pool<T>.new()` / `Shared.new(x)` — same bare
+                    // type-name static-constructor shape as `Deque.new()` above.
+                    ("Pool", "new", 0) => return true,
+                    ("Shared", "new", 1) => {
                         return args
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));

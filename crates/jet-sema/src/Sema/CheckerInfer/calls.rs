@@ -295,13 +295,16 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
-                } else if is_reactive_handle_ty(&cap_ty) {
+                } else if is_reactive_handle_ty(&cap_ty) || matches!(cap_ty, Type::Shared(_)) {
                     // D-REACT1=B: a reactive `Signal`/`Derived` is an Rc-backed shared
                     // handle — capturing a "copy" shares the same reactive cell (that is
                     // the whole point: a derived/effect reads the live signal, and the
                     // outer code still `.set`s it). No silent-data-copy to warn about, so
                     // L0801 is suppressed. The capture is still recorded as a clone so
                     // codegen moves an Rc clone into the closure.
+                    // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is the same shape — an
+                    // Arc-backed "copyable door" meant to be captured freely across
+                    // `tasks.spawn` closures with no `take`; suppress the same lint.
                     lam.meta.cloned_captures.push(name.clone());
                 } else if !taken {
                     lam.meta.cloned_captures.push(name.clone());
@@ -329,7 +332,10 @@ impl<'a> Checker<'a> {
                 p.name.clone(),
                 LocalInfo {
                     ty: pty.clone(),
-                    mutable: false,
+                    // D-MEM1 S6: `Shared<T>.edit(f)`'s closure param is the one
+                    // builtin-closure shape that binds its param mutable with no
+                    // `&` sigil — the exclusive write lock IS the API contract.
+                    mutable: self.lambda_param_mutable,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
@@ -538,6 +544,43 @@ impl<'a> Checker<'a> {
                 ("Sender", "send") => {
                     return self.finish_sender_send(recv_ty, args, span);
                 }
+                // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` — generational arena.
+                ("Pool", "add") => {
+                    return self.finish_pool_add(recv_ty, args, span);
+                }
+                ("Pool", "remove") => {
+                    return self.finish_pool_remove(recv_ty, args, span);
+                }
+                ("Pool", "ids") => {
+                    if !args.is_empty() {
+                        self.diags
+                            .push(wrong_core_arity("ids", 0, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                    }
+                    let elem_ty = match recv_ty {
+                        Type::Apply { name, args } if name == "Pool" => {
+                            args.first().cloned().unwrap_or(Type::Int)
+                        }
+                        _ => Type::Int,
+                    };
+                    let id_ty = Type::Apply {
+                        name: "Id".to_string(),
+                        args: vec![elem_ty],
+                    };
+                    return Some(Type::List(Box::new(id_ty)));
+                }
+                _ => {}
+            }
+        }
+        // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is `Type::Shared`, not
+        // `Type::Apply` (it predates this stage — see the type's own doc
+        // comment) — a separate receiver match, same shape as the block above.
+        if let Type::Shared(inner) = recv_ty {
+            match method {
+                "read" => return self.finish_shared_read(inner, args, span),
+                "edit" => return self.finish_shared_edit(inner, args, span),
                 _ => {}
             }
         }
@@ -1210,6 +1253,48 @@ impl<'a> Checker<'a> {
                 }
                 let ret = Type::Apply {
                     name: "Bag".to_string(),
+                    args: vec![elem_ty],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            // D-MEM1 S6 (D-SHARED-API1=A): `Shared.new(x)` — a lock-guarded shared
+            // handle (`Arc<RwLock<T>>` class). `T` is inferred from the constructor
+            // argument, no turbofish — a bare type-name call like `Path.from` above.
+            if type_name == "Shared" && method == "new" {
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`Shared.new` takes exactly one value, got {}", args.len()),
+                        "a `Shared<T>` wraps exactly one starting value".to_string(),
+                        "write `Shared.new(value)`".to_string(),
+                        Some(span),
+                    ));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let elem_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+                let ret = Type::Shared(Box::new(elem_ty));
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` — an empty generational
+            // arena. `T` comes from the call-site turbofish (`Pool<Player>.new()`)
+            // or, failing that, the binding's type annotation — same fallback shape
+            // as `Deque.new()`/`Bag.new()` above.
+            if type_name == "Pool" && method == "new" && args.is_empty() {
+                let elem_ty = type_args.first().cloned().unwrap_or_else(|| {
+                    match &self.expected_type {
+                        Some(Type::Apply { name, args, .. }) if name == "Pool" && !args.is_empty() => {
+                            args[0].clone()
+                        }
+                        _ => Type::Int,
+                    }
+                });
+                let ret = Type::Apply {
+                    name: "Pool".to_string(),
                     args: vec![elem_ty],
                 };
                 *resolved_ret_out = Some(ret.clone());
@@ -2032,6 +2117,30 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
                     return Some(r);
                 }
+            }
+        }
+        // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids`
+        // and `Shared<T>.read/edit` set `recv_type_out` explicitly (unlike Task/
+        // Sender/Receiver, whose method NAMES alone are globally unambiguous —
+        // `add`/`remove`/`ids`/`read`/`edit` collide with Set/List/Map method
+        // names, so codegen's subset gate needs `recv_type` to disambiguate the
+        // receiver, the same reason Signal/Derived/Measurement set it above).
+        // The actual dispatch (`finish_pool_add` etc.) already lives in
+        // `finish_builtin_method`, reached the same way Signal/Derived reach it.
+        if let Type::Apply { name, .. } = &recv_ty {
+            if name == "Pool" {
+                if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+                    let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some("Pool".to_string());
+                    return result;
+                }
+            }
+        }
+        if let Type::Shared(_) = &recv_ty {
+            if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+                let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                *recv_type_out = Some("Shared".to_string());
+                return result;
             }
         }
         // D-SIMD2 / D-LINALG1: methods on the built-in math value types

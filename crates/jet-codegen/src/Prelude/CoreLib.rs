@@ -1270,6 +1270,227 @@ mod jet_std {
     #[derive(Clone, Debug, PartialEq)]
     pub enum Closed { Closed }
 
+    // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` — a lock-guarded shared handle,
+    // "a copyable door". `Shared.new(x)` constructs; `.read(f)`/`.edit(f)` run a
+    // closure against a read- or write-locked view, the lock scoped to the
+    // closure call only (no guard object ever escapes it). Cloning is always a
+    // cheap `Arc` clone, never a deep copy of `T` — that's what lets it cross a
+    // `tasks.spawn` boundary with no `take`.
+    pub struct JetShared<T>(std::sync::Arc<std::sync::RwLock<T>>);
+    impl<T> JetShared<T> {
+        pub fn new(value: T) -> Self {
+            JetShared(std::sync::Arc::new(std::sync::RwLock::new(value)))
+        }
+        pub fn read<F, R>(&self, f: F) -> R
+        where
+            F: FnOnce(&T) -> R,
+        {
+            let guard = self.0.read().unwrap_or_else(|e| e.into_inner());
+            f(&*guard)
+        }
+        pub fn edit<F, R>(&self, f: F) -> R
+        where
+            F: FnOnce(&mut T) -> R,
+        {
+            let mut guard = self.0.write().unwrap_or_else(|e| e.into_inner());
+            f(&mut *guard)
+        }
+    }
+    impl<T> Clone for JetShared<T> {
+        fn clone(&self) -> Self {
+            JetShared(self.0.clone())
+        }
+    }
+    // D-MEM1 S6: an opaque-handle placeholder, mirroring `JetTcpListener`'s
+    // `JetShow` (Prelude/CoreLib.rs) — `Shared<T>`'s point is the lock-guarded
+    // access methods, not a direct print of the handle itself.
+    impl<T> super::JetShow for JetShared<T> {
+        fn jet_show(&self) -> String {
+            "Shared(..)".to_string()
+        }
+    }
+
+    // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` — a generational arena. `Id<T>` is
+    // a lightweight index+generation handle: plain data, `Copy`, comparable,
+    // regardless of whether `T` itself is (it never touches `T` at runtime —
+    // hand-written impls below, not `#[derive]`, so no `T: Copy`/`Clone`/`Eq`
+    // bound leaks onto every `Id<T>`).
+    enum JetPoolSlot<T> {
+        Occupied(u32, T),
+        Vacant(u32),
+    }
+
+    pub struct JetPool<T> {
+        slots: Vec<JetPoolSlot<T>>,
+        free: Vec<usize>,
+    }
+
+    impl<T> JetPool<T> {
+        pub fn new() -> Self {
+            JetPool {
+                slots: Vec::new(),
+                free: Vec::new(),
+            }
+        }
+
+        pub fn add(&mut self, value: T) -> JetId<T> {
+            if let Some(idx) = self.free.pop() {
+                let gen = match self.slots[idx] {
+                    JetPoolSlot::Vacant(g) => g,
+                    JetPoolSlot::Occupied(..) => {
+                        unreachable!("a free-list slot is always Vacant")
+                    }
+                };
+                self.slots[idx] = JetPoolSlot::Occupied(gen, value);
+                return JetId::new(idx as u32, gen);
+            }
+            let idx = self.slots.len();
+            self.slots.push(JetPoolSlot::Occupied(0, value));
+            JetId::new(idx as u32, 0)
+        }
+
+        /// D-POOLID-API1=A: removes the slot `id` names, bumping its generation
+        /// so any other copy of `id` becomes stale — mirrors `Map.remove`'s
+        /// `Option<T>` convention (a miss returns `None`, not a panic).
+        pub fn remove(&mut self, id: JetId<T>) -> Option<T> {
+            let idx = id.index as usize;
+            let occupied = matches!(
+                self.slots.get(idx),
+                Some(JetPoolSlot::Occupied(g, _)) if *g == id.generation
+            );
+            if !occupied {
+                return None;
+            }
+            let next_gen = id.generation.wrapping_add(1);
+            let old = std::mem::replace(&mut self.slots[idx], JetPoolSlot::Vacant(next_gen));
+            self.free.push(idx);
+            match old {
+                JetPoolSlot::Occupied(_, v) => Some(v),
+                JetPoolSlot::Vacant(_) => unreachable!("just checked Occupied above"),
+            }
+        }
+
+        /// A snapshot `Vec` of every live id — small, `Copy` elements, so a
+        /// fresh allocation per call is the simplest correct thing (D-MEM1 S6
+        /// notes deferred a genuine lazy `Iterator` as unneeded polish).
+        pub fn ids(&self) -> Vec<JetId<T>> {
+            self.slots
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| match s {
+                    JetPoolSlot::Occupied(g, _) => Some(JetId::new(i as u32, *g)),
+                    JetPoolSlot::Vacant(_) => None,
+                })
+                .collect()
+        }
+    }
+    // D-MEM1 S6: an opaque-handle placeholder, same rationale as `JetShared`'s
+    // `JetShow` just above.
+    impl<T> super::JetShow for JetPool<T> {
+        fn jet_show(&self) -> String {
+            format!("Pool({} slots)", self.slots.len())
+        }
+    }
+
+    pub struct JetId<T> {
+        index: u32,
+        generation: u32,
+        _marker: std::marker::PhantomData<fn() -> T>,
+    }
+    impl<T> JetId<T> {
+        fn new(index: u32, generation: u32) -> Self {
+            JetId {
+                index,
+                generation,
+                _marker: std::marker::PhantomData,
+            }
+        }
+    }
+    impl<T> Clone for JetId<T> {
+        fn clone(&self) -> Self {
+            *self
+        }
+    }
+    impl<T> Copy for JetId<T> {}
+    impl<T> PartialEq for JetId<T> {
+        fn eq(&self, other: &Self) -> bool {
+            self.index == other.index && self.generation == other.generation
+        }
+    }
+    impl<T> Eq for JetId<T> {}
+    impl<T> std::hash::Hash for JetId<T> {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.index.hash(state);
+            self.generation.hash(state);
+        }
+    }
+    impl<T> std::fmt::Debug for JetId<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Id(#{}@{})", self.index, self.generation)
+        }
+    }
+    // D-MEM1 S6: print/interpolation/derived-Debug support — `Id<T>` shows up as
+    // an ordinary struct field (`parent: Id<Node>?`), whose containing struct's
+    // generated `jet_debug()` calls `.jet_debug()` on every field.
+    impl<T> super::JetShow for JetId<T> {
+        fn jet_show(&self) -> String {
+            format!("Id(#{}@{})", self.index, self.generation)
+        }
+    }
+    impl<T> super::JetDisplay for JetId<T> {
+        fn jet_display(&self) -> String {
+            format!("Id(#{}@{})", self.index, self.generation)
+        }
+    }
+    impl<T> super::JetDebug for JetId<T> {
+        fn jet_debug(&self) -> String {
+            format!("Id(#{}@{})", self.index, self.generation)
+        }
+    }
+
+    /// `pool[id]` read (`Expr::Index`, `IndexKind::Pool`): a generation-checked
+    /// clone of `T`. Panics naming the stale-access class on a mismatched or
+    /// vacant slot, mirroring the array-out-of-bounds panic precedent
+    /// (`jet_index_vec`) — a runtime panic, not a new diagnostic code.
+    pub fn jet_pool_get<T: Clone>(pool: &JetPool<T>, id: JetId<T>, file: &str, line: u32) -> T {
+        match pool.slots.get(id.index as usize) {
+            Some(JetPoolSlot::Occupied(gen, v)) if *gen == id.generation => v.clone(),
+            _ => super::jet_panic(
+                file,
+                line,
+                "this Id no longer refers to a live value — its pool slot was removed",
+            ),
+        }
+    }
+
+    /// `pool[id] = v` / `pool[id].field = v` (`LValue::Index` / `LValue::Field`
+    /// nested on a `Pool` index): a genuine mutable place, not a value
+    /// round-trip — a nested field write edits the real slot. Same stale-access
+    /// panic as `jet_pool_get`.
+    pub fn jet_pool_get_mut<'a, T>(
+        pool: &'a mut JetPool<T>,
+        id: JetId<T>,
+        file: &str,
+        line: u32,
+    ) -> &'a mut T {
+        let idx = id.index as usize;
+        let valid = matches!(
+            pool.slots.get(idx),
+            Some(JetPoolSlot::Occupied(gen, _)) if *gen == id.generation
+        );
+        if !valid {
+            super::jet_panic(
+                file,
+                line,
+                "this Id no longer refers to a live value — its pool slot was removed",
+            );
+        }
+        match &mut pool.slots[idx] {
+            JetPoolSlot::Occupied(_, v) => v,
+            JetPoolSlot::Vacant(_) => unreachable!("just checked Occupied above"),
+        }
+    }
+
     // ── D-REACT1=B: opt-in reactive runtime (signals / derived / effects) ──────
     // Reactivity is a LIBRARY, not core semantics (option B): ordinary bindings are
     // unchanged; these types are the explicit, opt-in surface. Pure std — no external

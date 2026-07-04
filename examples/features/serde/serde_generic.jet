@@ -1,8 +1,10 @@
 // 120 — generic @[Codable] (D-SERDE9-12). The derive auto-adds `T: Encode`/
 // `T: Decode` bounds for the type params that reach the wire — the user never
-// spells them. `Wrap<T>` round-trips for any codable `T`; `Id<K>`'s `K` is
-// phantom (its only field is `#[Skip]`), so `Id` serializes regardless of `K`
-// (D-SERDE10) — the derive injects no Encode/Decode bound on `K`.
+// spells them. `Wrap<T>` round-trips for any codable `T`; `Tagged<K>`'s `K`
+// is phantom (its only field is `#[Skip]`), so `Tagged` serializes regardless
+// of `K` (D-SERDE10) — the derive injects no Encode/Decode bound on `K`.
+// (D-MEM1 S6: this demo struct was originally named `Id<K>` — renamed to
+// `Tagged<K>` once `Id<T>` became the reserved `Pool<T>` handle type.)
 use core.encoding.json as json
 
 @Codable
@@ -11,7 +13,7 @@ struct Wrap<T> {
 }
 
 @Codable
-struct Id<K> {
+struct Tagged<K> {
     raw: Int
     #[Skip] marker: K?
 }
@@ -23,10 +25,10 @@ fn run() {
     print(back.value)
     ws :: Wrap<String>.{value: "hi"}
     print(json.to_string(ws))
-    // Phantom param: K never reaches the wire, so Id<Wrap<Int>> encodes with no
-    // Encode bound on K. The #[Skip] field is omitted from the wire entirely.
-    id :: Id<Wrap<Int>>.{raw: 9, marker: None}
+    // Phantom param: K never reaches the wire, so Tagged<Wrap<Int>> encodes with
+    // no Encode bound on K. The #[Skip] field is omitted from the wire entirely.
+    id :: Tagged<Wrap<Int>>.{raw: 9, marker: None}
     print(json.to_string(id))
-    rid :: json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
 }

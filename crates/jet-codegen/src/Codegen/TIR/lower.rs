@@ -980,7 +980,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // it as the total `is_map` fact (the gate excluded `Unknown`). No compound
             // op on an index lvalue (parser admits only `=`).
             LValue::Index {
-                base, index, kind, ..
+                base,
+                index,
+                kind,
+                span,
             } => {
                 let base_t = lower_expr(base, cx, env);
                 let index_t = lower_expr(index, cx, env);
@@ -991,6 +994,26 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         base: base_t,
                         index: index_t,
                         value: value_t,
+                    };
+                }
+                // D-MEM1 S6: `pool[id] = v` — a genuine mutable place through
+                // `jet_pool_get_mut` (generation-checked, panics on a stale `id`),
+                // not a value round-trip. Reuses the plain `TStmt::Assign` (a raw
+                // Rust place string) rather than `IndexAssign`'s bool-keyed
+                // List/Map dispatch, since Pool needs its own helper + panic text.
+                if matches!(kind, IndexKind::Pool) {
+                    let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                    let b = emit_tir_expr(&base_t, cx);
+                    let i = emit_tir_expr(&index_t, cx);
+                    return TStmt::Assign {
+                        place: format!(
+                            "(*{root}jet_std::jet_pool_get_mut(&mut ({b}), {i}, {file:?}, {line}))",
+                            root = cx.root_prefix,
+                            file = cx.file,
+                        ),
+                        op: *op,
+                        value: value_t,
+                        clone_value: false,
                     };
                 }
                 TStmt::IndexAssign {
@@ -1032,6 +1055,42 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         base: base_t,
                         type_name,
                         lanes: lanes_u8,
+                        value: lower_expr(value, cx, env),
+                        clone_value,
+                    };
+                }
+                // D-MEM1 S6: `pool[id].field = v` — the general fallback below
+                // resolves `place` by re-emitting the FIELD-READ expression (fine
+                // for an owning local/`self`, but a `Pool` index-read is a value
+                // clone via `jet_pool_get` — writing `.field` on that would edit a
+                // throwaway copy and silently drop the change). Build a genuine
+                // mutable place through `jet_pool_get_mut` instead.
+                if let Expr::Index {
+                    base: pool_expr,
+                    index: id_expr,
+                    kind: IndexKind::Pool,
+                    span: idx_span,
+                } = base.as_ref()
+                {
+                    let line = crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
+                    let pool_t = lower_expr(pool_expr, cx, env);
+                    let id_t = lower_expr(id_expr, cx, env);
+                    let p = emit_tir_expr(&pool_t, cx);
+                    let i = emit_tir_expr(&id_t, cx);
+                    let place = format!(
+                        "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line})).{field_rust}",
+                        root = cx.root_prefix,
+                        file = cx.file,
+                        field_rust = mangle(field),
+                    );
+                    let clone_value = if let Expr::Ident(vname, _) = value {
+                        env.is_borrowed(vname) && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                    } else {
+                        false
+                    };
+                    return TStmt::Assign {
+                        place,
+                        op: *op,
                         value: lower_expr(value, cx, env),
                         clone_value,
                     };
@@ -2813,6 +2872,75 @@ pub(crate) fn render_safe_locals(env: &LowerEnv) -> String {
     format!("format!(\"{}\", {})", fmt_str, args)
 }
 
+/// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
+/// `.insert()`, …). Ordinarily identical to `lower_expr`; the one exception is
+/// a place rooted in a `Pool` index (`pool[id]`, or `pool[id].field`) — the
+/// plain read there is a generation-checked VALUE CLONE (`jet_pool_get`,
+/// matching `world[id].attack`'s read semantics), so mutating it in place
+/// would silently edit a throwaway copy. Reroute through `jet_pool_get_mut`
+/// instead, mirroring the `LValue::Field`/`LValue::Index` place-building this
+/// same stage added for `tree[root].children.push(child)` on writes.
+pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    fn pool_mut_place(
+        pool_expr: &Expr,
+        id_expr: &Expr,
+        idx_span: Span,
+        field: Option<&str>,
+        cx: &Cx,
+        env: &mut LowerEnv,
+    ) -> TExpr {
+        let line = crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
+        let pool_t = lower_expr(pool_expr, cx, env);
+        let id_t = lower_expr(id_expr, cx, env);
+        let elem_ty = match &pool_t.ty {
+            Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+            _ => Type::Int,
+        };
+        let p = emit_tir_expr(&pool_t, cx);
+        let i = emit_tir_expr(&id_t, cx);
+        let base_place = format!(
+            "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line}))",
+            root = cx.root_prefix,
+            file = cx.file,
+        );
+        match field {
+            None => TExpr {
+                ty: elem_ty,
+                kind: TExprKind::ConstInline(base_place),
+            },
+            Some(f) => {
+                let field_ty = struct_field_type(cx, &elem_ty, f).unwrap_or(Type::Int);
+                TExpr {
+                    ty: field_ty,
+                    kind: TExprKind::ConstInline(format!("{}.{}", base_place, mangle(f))),
+                }
+            }
+        }
+    }
+    match e {
+        Expr::Index {
+            base,
+            index,
+            span,
+            kind: IndexKind::Pool,
+        } => pool_mut_place(base, index, *span, None, cx, env),
+        Expr::Field(base, field, _) => {
+            if let Expr::Index {
+                base: pool_expr,
+                index: id_expr,
+                span: idx_span,
+                kind: IndexKind::Pool,
+            } = base.as_ref()
+            {
+                pool_mut_place(pool_expr, id_expr, *idx_span, Some(field), cx, env)
+            } else {
+                lower_expr(e, cx, env)
+            }
+        }
+        _ => lower_expr(e, cx, env),
+    }
+}
+
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
         Expr::Int(n, _, width) => TExpr {
@@ -4182,6 +4310,29 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            // D-MEM1 S6 (D-POOLID-API1=A): `pool[id]` read — a generation-checked
+            // clone of `T` via `jet_pool_get` (panics on a stale `id`, mirroring the
+            // array-oob panic precedent). `ConstInline` is the pragmatic vehicle: no
+            // new `TExprKind` needed for a single free-function call, same as the
+            // `Sql.raw`/`.context` escapes in `lower_method_call` below.
+            if matches!(kind, IndexKind::Pool) {
+                let elem_ty = match &base_t.ty {
+                    Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
+                        args[0].clone()
+                    }
+                    _ => Type::Int,
+                };
+                let b = emit_tir_expr(&base_t, cx);
+                let i = emit_tir_expr(&index_t, cx);
+                return TExpr {
+                    ty: elem_ty,
+                    kind: TExprKind::ConstInline(format!(
+                        "{root}jet_std::jet_pool_get(&({b}), {i}, {file:?}, {line})",
+                        root = cx.root_prefix,
+                        file = cx.file,
+                    )),
+                };
+            }
             let result_ty = match &base_t.ty {
                 Type::List(elem) => (**elem).clone(),
                 Type::Map { value, .. } => (**value).clone(),
@@ -5296,8 +5447,24 @@ pub(crate) fn lower_method_call(
     // sema return (`Collections::builtin_method_return`) for totality.
     if recv_type.is_none() {
         if let Some(op) = resolve_builtin_op(receiver, method, method_span, args, env, cx) {
-            let recv_t = lower_expr(receiver, cx, env);
+            // D-MEM1 S6: a mutating builtin (`.push()` etc.) on a place rooted in
+            // a `Pool` index (`tree[root].children.push(child)`) needs the SAME
+            // genuine-mutable-place treatment `LValue::Field`/`LValue::Index`
+            // get above — the ordinary receiver lowering reads `pool[id]` as an
+            // owned CLONE (`jet_pool_get`), so mutating it would silently edit a
+            // throwaway copy instead of the real slot.
             let recv_ast_ty = tir_recv_jet_ty(receiver, env);
+            let recv_mut_ty_hint = recv_ast_ty
+                .clone()
+                .or_else(|| pool_field_ty_hint(receiver, cx, env));
+            let recv_t = if crate::Collections::builtin_needs_mut_receiver(
+                recv_mut_ty_hint.as_ref().unwrap_or(&Type::Int),
+                method,
+            ) {
+                lower_expr_as_mut_place(receiver, cx, env)
+            } else {
+                lower_expr(receiver, cx, env)
+            };
             // D-HOLE1: `Option.zip`'s `b` type is heterogeneous (arg-dependent), so
             // the generic single-receiver-type table (`builtin_result_ty`) can't
             // resolve it; `resolve_builtin_op` already worked it out for the tuple
@@ -5675,6 +5842,91 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids`
+    // and `Shared<T>.read/edit`. Both lower to a PLAIN Rust method call on the
+    // receiver (`(recv).add(val)`, …) — `add`/`remove`/`ids` are genuine
+    // inherent methods on `JetPool<T>` and `read`/`edit` on `JetShared<T>`
+    // (Prelude/CoreLib.rs), so there's no free-function indirection to model
+    // (unlike `Pool`/`Shared` INDEXING, which needs a real mutable-place
+    // helper — see the `Expr::Index`/`LValue::Field` arms). `ConstInline` is
+    // the pragmatic vehicle, same as the concurrency/Sql/Html escapes nearby.
+    {
+        let recv_peek = tir_recv_jet_ty(receiver, env);
+        // Sema sets `recv_type` to `"Pool"`/`"Shared"` explicitly for these calls
+        // (unlike Task/Sender, whose method names alone are globally unambiguous —
+        // `add`/`remove`/`ids`/`read`/`edit` collide with Set/List/Map names).
+        let is_pool = recv_type.as_deref() == Some("Pool");
+        let is_shared = recv_type.as_deref() == Some("Shared");
+        if is_pool && matches!(method, "add" | "remove" | "ids") && args.len() <= 1 {
+            let recv_t = lower_expr(receiver, cx, env);
+            let elem = match &recv_t.ty {
+                Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+                _ => Type::Int,
+            };
+            let id_ty = Type::Apply {
+                name: "Id".to_string(),
+                args: vec![elem.clone()],
+            };
+            let ty = match method {
+                "add" => id_ty,
+                "remove" => Type::Option(Box::new(elem)),
+                "ids" => Type::List(Box::new(id_ty)),
+                _ => unreachable!("matches! above admitted only these"),
+            };
+            let recv_s = emit_tir_expr(&recv_t, cx);
+            let arg_s: Vec<String> = args
+                .iter()
+                .map(|a| emit_tir_expr(&lower_expr(&a.expr, cx, env), cx))
+                .collect();
+            return TExpr {
+                ty,
+                kind: TExprKind::ConstInline(format!(
+                    "({}).{}({})",
+                    recv_s,
+                    method,
+                    arg_s.join(", ")
+                )),
+            };
+        }
+        if is_shared && matches!(method, "read" | "edit") && args.len() == 1 {
+            let inner = match &recv_peek {
+                Some(Type::Shared(inner)) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let recv_t = lower_expr(receiver, cx, env);
+            let recv_s = emit_tir_expr(&recv_t, cx);
+            let Expr::Lambda(lam) = &args[0].expr else {
+                unreachable!("sema's finish_shared_read/finish_shared_edit require a lambda arg");
+            };
+            let expected = std::slice::from_ref(&inner);
+            // `JetShared::read`/`edit` take `f: F where F: FnOnce(&T) -> R` — the
+            // closure param is `&T`, not `T`. `render_lambda_str_expecting` has
+            // no notion of a Rust reference type (Jet's own `Type` doesn't model
+            // one), so patch the rendered `": user_App"` annotation to `": &user_App"`
+            // by hand; the ENV binding (used for the body's field/method
+            // resolution) stays the bare `T` — a read-only view of `T` behaves
+            // exactly like owning one for field reads.
+            let mut tl = lower_lambda_expecting(lam, cx, env, Some(expected));
+            let ref_prefix = if method == "edit" { "&mut " } else { "&" };
+            if let Some(p) = tl.params.get_mut(0) {
+                if let Some(pos) = p.find(": ") {
+                    p.insert_str(pos + 2, ref_prefix);
+                }
+            }
+            let move_kw = if tl.is_move { "move " } else { "" };
+            let raw = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
+            let closure = if tl.prep.is_empty() {
+                raw
+            } else {
+                format!("{{ {} {} }}", tl.prep, raw)
+            };
+            let ty = lambda_body_ty_expecting(lam, cx, env, Some(expected));
+            return TExpr {
+                ty,
+                kind: TExprKind::ConstInline(format!("({}).{}({})", recv_s, method, closure)),
+            };
+        }
+    }
     // c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/…).
     // The gate proved `recv_type == None` + a closure-method name + a literal lambda
     // arg. Resolve the receiver-type + Fn-vs-FnMut dispatch HERE into a total
@@ -5975,6 +6227,52 @@ pub(crate) fn lower_method_call(
                     type_prefix: format!("std::collections::HashMap::<{}, usize>", elem_rust),
                     method_rust: "new".to_string(),
                     args: vec![],
+                },
+            };
+        }
+        // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` → an empty `JetPool<T>`.
+        // The element type comes from `resolved_ret` (sema filled it from the
+        // call-site turbofish or the binding's annotation).
+        if type_name == "Pool" && method == "new" && args.is_empty() {
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
+                _ => Type::Int,
+            };
+            let elem_rust = cx.rust_type(&elem_ty);
+            let pool_ty = Type::Apply {
+                name: "Pool".to_string(),
+                args: vec![elem_ty],
+            };
+            return TExpr {
+                ty: pool_ty,
+                kind: TExprKind::StaticCall {
+                    type_prefix: format!("{}jet_std::JetPool::<{}>", cx.root_prefix, elem_rust),
+                    method_rust: "new".to_string(),
+                    args: vec![],
+                },
+            };
+        }
+        // D-MEM1 S6 (D-SHARED-API1=A): `Shared.new(x)` → a `JetShared<T>`
+        // wrapping `x`; `T` is `x`'s own lowered type (no turbofish, no
+        // annotation needed — the argument alone fixes it).
+        if type_name == "Shared" && method == "new" && args.len() == 1 {
+            let arg_t = lower_expr(&args[0].expr, cx, env);
+            let elem_ty = arg_t.ty.clone();
+            let elem_rust = cx.rust_type(&elem_ty);
+            return TExpr {
+                ty: Type::Shared(Box::new(elem_ty)),
+                kind: TExprKind::StaticCall {
+                    type_prefix: format!("{}jet_std::JetShared::<{}>", cx.root_prefix, elem_rust),
+                    method_rust: "new".to_string(),
+                    args: vec![TCallArg {
+                        value: arg_t,
+                        borrow: false,
+                        mut_borrow: false,
+                        clone: false,
+                        arc_clone: false,
+                        fn_coerce: None,
+                        widen_to_vec: false,
+                    }],
                 },
             };
         }
@@ -6279,26 +6577,40 @@ fn lambda_block_tail<'a>(stmts: &'a [Stmt]) -> Option<(&'a [Stmt], &'a Stmt)> {
 /// closure's `Task<T>` element type. Block bodies use the tail expression/return
 /// (same rule as sema), not `Unit`.
 pub(crate) fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
+    lambda_body_ty_expecting(lam, cx, env, None)
+}
+
+/// `lambda_body_ty`, but seeding a bare (unannotated) param from `expected_params`
+/// at the same position — same fallback `lower_lambda_expecting` uses (D-MEM1 S6:
+/// `Shared<T>.read(s => …)`'s bare `s` needs its real type here too, or the
+/// closure's OWN return type comes back wrong for a chained field/method read).
+pub(crate) fn lambda_body_ty_expecting(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: Option<&[Type]>,
+) -> Type {
+    fn bind_params(lam: &Lambda, env: &LowerEnv, expected_params: Option<&[Type]>) -> LowerEnv {
+        let mut lam_env = clone_env(env);
+        for (i, p) in lam.params.iter().enumerate() {
+            let ty = p
+                .ty
+                .clone()
+                .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
+            lam_env.locals.insert(p.name.clone(), (mangle(&p.name), ty));
+        }
+        lam_env
+    }
     match &lam.body {
         LambdaBody::Expr(e) => {
-            let mut lam_env = clone_env(env);
-            for p in &lam.params {
-                lam_env
-                    .locals
-                    .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
-            }
+            let mut lam_env = bind_params(lam, env, expected_params);
             lower_expr(e, cx, &mut lam_env).ty
         }
         LambdaBody::Block(stmts) => {
             let Some((_, tail)) = lambda_block_tail(stmts) else {
                 return unit_type();
             };
-            let mut lam_env = clone_env(env);
-            for p in &lam.params {
-                lam_env
-                    .locals
-                    .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
-            }
+            let mut lam_env = bind_params(lam, env, expected_params);
             match tail {
                 Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
                 _ => unit_type(),
@@ -6520,6 +6832,31 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
         }
         _ => None,
     }
+}
+
+/// D-MEM1 S6: `pool[id].field`'s type — needed so a MUTATING method call on it
+/// (`tree[root].children.push(child)`) is recognized as needing a real mutable
+/// place (`builtin_needs_mut_receiver`), not the ordinary `jet_pool_get` value
+/// clone. `tir_recv_jet_ty` has no `cx` to look up a struct field type, so this
+/// is a separate small helper rather than a new arm there.
+pub(crate) fn pool_field_ty_hint(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
+    let Expr::Field(base, field, _) = e else {
+        return None;
+    };
+    let Expr::Index {
+        base: pool_expr,
+        kind: IndexKind::Pool,
+        ..
+    } = base.as_ref()
+    else {
+        return None;
+    };
+    let pool_ty = tir_recv_jet_ty(pool_expr, env)?;
+    let elem_ty = match &pool_ty {
+        Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+        _ => return None,
+    };
+    struct_field_type(cx, &elem_ty, field)
 }
 
 /// D-MEM1 stage S5: lower a `Binding.string_view` init (`s.trim()` /
@@ -6906,9 +7243,19 @@ pub(crate) fn lower_lambda_expecting(
         ));
         lam_env.bind(name, cap, None);
     }
-    // Params bind as `mangle(name)` (no deref), typed from the annotation (or `None`).
-    for p in &lam.params {
-        lam_env.bind(&p.name, mangle(&p.name), p.ty.clone());
+    // Params bind as `mangle(name)` (no deref), typed from the annotation, falling
+    // back to `expected_params` at the same position (D-MEM1 S6: this fallback
+    // already drove the RENDERED param text below — a bare param's ENV type must
+    // match, or a chained field/method read off it resolves against the wrong
+    // type, e.g. `Type::Int`'s `struct_field_type` default. `Shared<T>.read(s =>
+    // s.field.method())` is the first caller to actually chain a method off a
+    // bare closure param's field, which is what surfaced the gap).
+    for (i, p) in lam.params.iter().enumerate() {
+        let ty = p
+            .ty
+            .clone()
+            .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
+        lam_env.bind(&p.name, mangle(&p.name), ty);
     }
     // The rendered param list: `name[: ty]`, exactly as `emit_lambda`. A bare
     // param (no annotation) falls back to the expected fn-type's param at the
@@ -7142,7 +7489,20 @@ fn render_spawn_block_body(stmts: &[Stmt], cx: &Cx, lam_env: &mut LowerEnv) -> S
 /// c109 Phase 13: render a lambda via the plain `emit_lambda` form (used by
 /// `http.serve`'s lambda handler and `scope.guard`). Returns the full closure string.
 pub(crate) fn render_lambda_str(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
-    let tl = lower_lambda(lam, cx, env);
+    render_lambda_str_expecting(lam, cx, env, None)
+}
+
+/// D-MEM1 S6: `render_lambda_str`, but seeding the closure param(s) with an
+/// expected type when the source has no annotation (`Shared<T>.read(s => …)`'s
+/// bare `s`) — needed so a chained field/method read off the param resolves
+/// against the right type inside the lambda body (see `lower_lambda_expecting`).
+pub(crate) fn render_lambda_str_expecting(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: Option<&[Type]>,
+) -> String {
+    let tl = lower_lambda_expecting(lam, cx, env, expected_params);
     let move_kw = if tl.is_move { "move " } else { "" };
     let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
     let wrapped = if tl.boxed {

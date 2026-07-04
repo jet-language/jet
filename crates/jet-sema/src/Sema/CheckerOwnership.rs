@@ -1024,6 +1024,203 @@ impl<'a> Checker<'a> {
         }
         None
     }
+
+    /// D-MEM1 S6 (D-SHARED-API1=A): `shared.read(f)` — read-locked closure
+    /// callback; `f`'s param is a read-only view of the wrapped `T` (bare
+    /// access, no sigil). The call's own type is whatever `f` returns.
+    pub(crate) fn finish_shared_read(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        self.finish_shared_closure("read", inner, args, span, false)
+    }
+
+    /// D-MEM1 S6 (D-SHARED-API1=A): `shared.edit(f)` — write-locked closure
+    /// callback, exclusive; `f`'s param is a mutable view of the wrapped `T`
+    /// with no `&` sigil written (the lock IS the write-access grant, scoped
+    /// to the closure body — no guard object ever escapes it).
+    pub(crate) fn finish_shared_edit(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        self.finish_shared_closure("edit", inner, args, span, true)
+    }
+
+    fn finish_shared_closure(
+        &mut self,
+        method: &str,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+        param_mutable: bool,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`{}` expects 1 argument, got {}", method, args.len()),
+                format!("`.{}` takes exactly one closure", method),
+                format!("call `.{}(value => ...)` with a closure", method),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        if !matches!(args[0].expr, Expr::Lambda(_)) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`{}` needs a lambda, not a value", method),
+                format!(
+                    "`.{}` runs a short function against the locked value",
+                    method
+                ),
+                format!("write `.{}(value => …)`", method),
+                Some(args[0].expr.span()),
+            ));
+            self.infer(&mut args[0].expr);
+            return None;
+        }
+        let expected = Type::Fn {
+            params: vec![inner.clone()],
+            ret: None,
+            effect_bound: None,
+        };
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(expected);
+        let saved_mut = self.lambda_param_mutable;
+        self.lambda_param_mutable = param_mutable;
+        let saved_esc = self.lambda_escapes;
+        self.lambda_escapes = false;
+        let fn_ty = self.infer(&mut args[0].expr);
+        self.lambda_escapes = saved_esc;
+        self.lambda_param_mutable = saved_mut;
+        self.expected_type = saved_exp;
+        match fn_ty {
+            Some(Type::Fn { ret: Some(r), .. }) => Some(*r),
+            _ => Some(Type::Named("Unit".to_string())),
+        }
+    }
+
+    /// D-MEM1 S6 (D-POOLID-API1=A): `pool.add(val)` — inserts, consumes `val` (a
+    /// fresh literal passes with no ceremony; a named binding needs `^`, same
+    /// discipline as `Sender.send` above), returns the new `Id<T>` handle.
+    pub(crate) fn finish_pool_add(
+        &mut self,
+        recv_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let elem_ty = match recv_ty {
+            Type::Apply { name, args } if name == "Pool" => {
+                args.first().cloned().unwrap_or(Type::Int)
+            }
+            _ => Type::Int,
+        };
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`add` expects 1 argument, got {}", args.len()),
+                "adding to a pool needs exactly one value".to_string(),
+                "call `.add(value)` with the value to store".to_string(),
+                Some(span),
+            ));
+        }
+        let Some(arg) = args.get_mut(0) else {
+            return Some(Type::Apply {
+                name: "Id".to_string(),
+                args: vec![elem_ty],
+            });
+        };
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(elem_ty.clone());
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved_exp;
+        if let Some(got) = got {
+            let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
+            if !reported && got != elem_ty {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "`add` wants {} for argument 1, but this is {}",
+                        elem_ty.show(),
+                        got.show()
+                    ),
+                    "a pool only stores values of its own element type".to_string(),
+                    type_fix_hint(&elem_ty, &got),
+                    Some(arg.expr.span()),
+                ));
+            }
+        }
+        self.check_take_arg_ownership("add", 0, &elem_ty, arg);
+        Some(Type::Apply {
+            name: "Id".to_string(),
+            args: vec![elem_ty],
+        })
+    }
+
+    /// D-MEM1 S6 (D-POOLID-API1=A): `pool.remove(id)` — removes the slot `id`
+    /// names, bumping its generation so any other copy of `id` becomes stale.
+    /// `Id<T>` is plain copyable data (like `Int`); no move ceremony on the
+    /// argument. Returns `T?` — mirrors `Map.remove`'s `Option<V>` convention
+    /// (the stdlib's existing "remove that might miss" shape), not `List`/
+    /// `Set.remove`'s unit return (those remove by position/value, always
+    /// present by construction at the call site).
+    pub(crate) fn finish_pool_remove(
+        &mut self,
+        recv_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let elem_ty = match recv_ty {
+            Type::Apply { name, args } if name == "Pool" => {
+                args.first().cloned().unwrap_or(Type::Int)
+            }
+            _ => Type::Int,
+        };
+        let id_ty = Type::Apply {
+            name: "Id".to_string(),
+            args: vec![elem_ty.clone()],
+        };
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`remove` expects 1 argument, got {}", args.len()),
+                "removing from a pool needs exactly one `Id<T>`".to_string(),
+                "call `.remove(id)` with the `Id<T>` to remove".to_string(),
+                Some(span),
+            ));
+        }
+        let Some(arg) = args.get_mut(0) else {
+            return Some(Type::Option(Box::new(elem_ty)));
+        };
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(id_ty.clone());
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved_exp;
+        if let Some(got) = got {
+            let reported = self.check_type_assignable(&id_ty, &got, arg.expr.span());
+            if !reported && got != id_ty {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "`remove` wants {} for argument 1, but this is {}",
+                        id_ty.show(),
+                        got.show()
+                    ),
+                    "a pool is only removed from by the `Id<T>` its own `.add()` returned"
+                        .to_string(),
+                    type_fix_hint(&id_ty, &got),
+                    Some(arg.expr.span()),
+                ));
+            }
+        }
+        Some(Type::Option(Box::new(elem_ty)))
+    }
 }
 
 /// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value reached the end of

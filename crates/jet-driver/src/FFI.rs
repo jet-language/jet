@@ -904,6 +904,12 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
             rust_type(key, user_types),
             rust_type(value, user_types)
         ),
+        // D-MEM1 S6: the main codegen path (Codegen/Context.rs) now renders
+        // `Type::Shared` as `jet_std::JetShared<T>` (`Arc<RwLock<T>>`), not a
+        // bare `Arc<T>` — this C-FFI bridge type table is untested for
+        // `Shared<T>` crossing the boundary (no test exercises it; a
+        // concurrency handle in a C-ABI signature is not a realistic shape),
+        // left as the pre-S6 mapping rather than guessed at.
         Type::Shared(inner) => format!("std::sync::Arc<{}>", rust_type(inner, user_types)),
         Type::Option(inner) => format!("Option<{}>", rust_type(inner, user_types)),
         Type::Result { ok, err } => format!(

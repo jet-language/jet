@@ -413,7 +413,16 @@ impl Cx {
                 self.rust_type(key),
                 self.rust_type(value)
             ),
-            Type::Shared(inner) => format!("std::sync::Arc<{}>", self.rust_type(inner)),
+            // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` — a lock-guarded shared
+            // handle (`.read(f)`/`.edit(f)` closure API). Was a plain read-only
+            // `Arc<T>` before this stage (never actually constructible — no
+            // `Shared.new` existed — so there is no live behavior to preserve);
+            // now `Arc<RwLock<T>>`, wrapped so `.clone()` stays a cheap Arc clone.
+            Type::Shared(inner) => format!(
+                "{}jet_std::JetShared<{}>",
+                self.root_prefix,
+                self.rust_type(inner)
+            ),
             Type::Option(inner) => format!("Option<{}>", self.rust_type(inner)),
             Type::Result { ok, err } => {
                 format!("Result<{}, {}>", self.rust_type(ok), self.rust_type(err))
@@ -612,6 +621,22 @@ impl Cx {
             Type::Apply { name, args } if name == "Sender" && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetSender<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>`/`Id<T>` — the generational
+            // arena and its lightweight index+generation handle.
+            Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetPool<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args } if name == "Id" && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetId<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
@@ -1501,6 +1526,13 @@ pub(crate) fn field_type_comparable(
         Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
             false
         }
+        // D-MEM1 S6: `Pool<T>` is a live arena handle (`JetPool`), never comparable
+        // regardless of `T`. `Id<T>` is plain index+generation data — ALWAYS
+        // comparable regardless of `T` (it never touches `T` at runtime), so it
+        // must NOT fall through to the generic "comparable iff every arg is" arm
+        // below (that would wrongly require `T: PartialEq`).
+        Type::Apply { name, .. } if name == "Pool" => false,
+        Type::Apply { name, .. } if name == "Id" => true,
         Type::Apply { args, .. } => args
             .iter()
             .all(|a| field_type_comparable(a, types, param_names)),
@@ -1553,6 +1585,9 @@ pub(crate) fn field_type_hashable(
         Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
             false
         }
+        // D-MEM1 S6: same `Pool`/`Id` split as `field_type_comparable` above.
+        Type::Apply { name, .. } if name == "Pool" => false,
+        Type::Apply { name, .. } if name == "Id" => true,
         Type::Apply { args, .. } => args.iter().all(|a| field_type_hashable(a, types, param_names)),
         Type::Tuple(fields) => fields
             .iter()

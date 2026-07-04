@@ -104,7 +104,10 @@ fn run() {
         out.lints.iter().any(|d| d.code == "L0202"),
         "expected L0202 loop auto-clone lint"
     );
-    assert!(out.rust.contains("Arc::clone"));
+    // D-MEM1 S6: `Shared<T>` lowers to `jet_std::JetShared<T>` now, not a bare
+    // `Arc<T>` — the auto-clone is a plain `.clone()` call (its own cheap-handle
+    // `Clone` impl), not `Arc::clone(&…)`.
+    assert!(out.rust.contains(").clone()"));
 }
 
 #[test]
