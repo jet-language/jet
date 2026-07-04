@@ -69,15 +69,15 @@ fn gather_paths() -> [String] {
 }
 
 fn scan_parallel(paths: [String]) -> [String] {
-    ch: Channel<String> :: tasks.channel()
+    (sender, ch) :: tasks.channel<String>()
     workers: [Task<Unit>] := []
     i := 0
     loop i < paths.len() {
         if paths.get(i) == Val(path) {
-            sender :: ch.sender()
+            tx :: sender.clone()
             file :: path.clone()
-            workers.push(tasks.spawn(take(sender) () => {
-                sender.send(scan_one(file))
+            workers.push(tasks.spawn(take(tx) () => {
+                tx.send(scan_one(file))
             }))
         }
         i += 1

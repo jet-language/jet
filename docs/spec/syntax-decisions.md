@@ -448,6 +448,16 @@ are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).
 Grapheme clusters + NFC/NFD live in opt-in `core.text.unicode` (D-GRAPHEME1).
 
+**D-STR-AFTER1 — `String.after`/`.before`** *(ratified/implemented
+2026-07-04)*: `s.after(sep)` returns the substring strictly after the first
+`sep`; `s.before(sep)` the substring strictly before it. `sep` absent -> the
+whole original string on both sides (symmetric identity fallback, matching
+`.replace`'s no-match-is-unchanged convention — no `Option`/error to
+unwrap; I8, one way to mean it). No `.after_last`/`.before_last`: the
+ratified set covers only the first-occurrence case actually needed
+(email/path-prefix splitting); a last-occurrence sibling is unrequested
+surface growth without a driving example.
+
 **S67 — Numeric literals**: `_` separators (`1_000_000`); `0x`/`0o`/`0b`
 prefixes (E0001 if empty); float exponent `6.022e23`; `1..10` still lexes as
 a range.
@@ -732,7 +742,12 @@ deferred past v1.0 (planned: `tasks.spawn(closure) -> Task<T>`, `t.join()`,
 (race cancels losers; all fails fast; any takes first Ok, D-RACEWIN1);
 **D-DETACH1** `task.detach()` consumes the handle, detached capture of a
 borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
-`async`/`await` coloring (gated on scheduler work).
+`async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
+*(ratified/implemented 2026-07-04)*: `tasks.channel<T>()` returns
+`(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
+`.sender()` method. Destructure with the existing S74 tuple form:
+`(tx, rx) := tasks.channel<T>()`; a second sender is `tx.clone()`. A
+`Receiver<T>` is what `g.select().recv(rx)` takes.
 
 ### Effects & safety
 

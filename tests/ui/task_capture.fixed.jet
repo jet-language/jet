@@ -1,8 +1,7 @@
 use core.tasks
 
 fn run() {
-ch: Channel<Int> :: tasks.channel()
-    sender :: ch.sender()
+(sender, ch) :: tasks.channel<Int>()
     t :: tasks.spawn(take(sender) () => {
         sender.send(1)
     })

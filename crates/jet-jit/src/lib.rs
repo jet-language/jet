@@ -531,7 +531,7 @@ fn jit_concurrency_type(ty: &Type) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    matches!(name.as_str(), "Task" | "Channel" | "Sender")
+    matches!(name.as_str(), "Task" | "Receiver" | "Sender")
         && args.len() == 1
         && jit_concurrency_elem(&args[0])
 }
@@ -560,8 +560,15 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             method,
             args,
         } => {
-            (module == "core.tasks" && method == "channel" && args.is_empty())
-                || jit_covers_expr_list(args, callees)
+            // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` now returns a `(Sender<T>,
+            // Receiver<T>)` tuple bound via a tuple-destructure `let` — a statement
+            // shape this tier has no representation for at all (never covered), so
+            // the producer itself is never claimed here either. Falls back to the
+            // tier-0 interpreter (JIT is an optional accelerator, not load-bearing).
+            if module == "core.tasks" && method == "channel" {
+                return false;
+            }
+            jit_covers_expr_list(args, callees)
         }
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn { .. } => true,
@@ -767,6 +774,22 @@ fn jit_covers_builtin_op(
 fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
         TStmt::Let { init, .. } => jit_covers_expr(init, callees),
+        // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` — the one
+        // tuple-destructure shape this tier covers (general `TupleDestructure` /
+        // `StructDestructure` / `ListDestructure` are not covered at all otherwise;
+        // that's unrelated pre-existing scope, not narrowed here). Mirrors the old
+        // single-handle `let ch := tasks.channel()` + `ch.sender()` shape exactly:
+        // one `channel_new` call for the receiver handle, one `channel_sender` call
+        // on it for the sender handle — same two host calls, now both fired at the
+        // producer site instead of at a later `.sender()` call.
+        TStmt::TupleDestructure { init, binds, .. } => {
+            binds.len() == 2
+                && matches!(
+                    &init.kind,
+                    TExprKind::CoreCall { module, method, args }
+                        if module == "core.tasks" && method == "channel" && args.is_empty()
+                )
+        }
         TStmt::Assign {
             value, clone_value, ..
         } => !clone_value && jit_covers_expr(value, callees),
@@ -1130,8 +1153,8 @@ fn jit_covers_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool {
         THandleOp::TaskJoin | THandleOp::TaskCancel => {
             args.is_empty() && jit_concurrency_type(&recv.ty)
         }
-        THandleOp::ChannelReceive | THandleOp::ChannelSender => {
-            args.is_empty() && matches!(&recv.ty, Type::Apply { name, .. } if name == "Channel")
+        THandleOp::ChannelReceive => {
+            args.is_empty() && matches!(&recv.ty, Type::Apply { name, .. } if name == "Receiver")
         }
         THandleOp::SenderSend => {
             args.len() == 1 && matches!(&recv.ty, Type::Apply { name, .. } if name == "Sender")
@@ -1148,17 +1171,6 @@ fn init_clif_ty(init: &TExpr) -> Result<types::Type, String> {
         return Ok(types::I64);
     }
     if matches!(&init.ty, Type::Named(_)) {
-        return Ok(types::I64);
-    }
-    // `tasks.channel()` carries `Unit` in TIR (annotation on the binding is load-bearing).
-    if matches!(
-        &init.kind,
-        TExprKind::CoreCall {
-            module,
-            method,
-            ..
-        } if module == "core.tasks" && method == "channel"
-    ) {
         return Ok(types::I64);
     }
     Err(format!("jit let type unsupported: {:?}", init.ty))
@@ -1354,6 +1366,34 @@ impl LowerCtx<'_, '_> {
                 let var = self.fresh_var(ty);
                 self.b.def_var(var, val);
                 self.vars.insert(TIR::local_place(name), var);
+            }
+            // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()`. The coverage gate
+            // (`jit_covers_stmt`) admitted only this exact shape: a 2-element
+            // `TupleDestructure` whose init is the `tasks.channel` producer, canonical
+            // field order `(sender, receiver)`. Reproduce the old single-handle
+            // `let ch := tasks.channel(); s := ch.sender();` host calls — `channel_new`
+            // for the receiver handle, then `channel_sender` on it for the sender
+            // handle — both fired here instead of at a later `.sender()` call.
+            TStmt::TupleDestructure { binds, .. } => {
+                let ch_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.channel_new, self.b.func);
+                let ch_call = self.b.ins().call(ch_ref, &[]);
+                let ch_val = self.b.inst_results(ch_call)[0];
+                let tx_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
+                let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
+                let tx_val = self.b.inst_results(tx_call)[0];
+                // `binds[i].0` is already the mangled Rust name (`mangle(elem.name)`,
+                // set at TIR lowering — unlike plain `Let.name`, which is the raw Jet
+                // name and needs `local_place`'s own `mangle` call). Use it directly.
+                let tx_var = self.fresh_var(types::I64);
+                self.b.def_var(tx_var, tx_val);
+                self.vars.insert(binds[0].0.clone(), tx_var);
+                let ch_var = self.fresh_var(types::I64);
+                self.b.def_var(ch_var, ch_val);
+                self.vars.insert(binds[1].0.clone(), ch_var);
             }
             TStmt::Assign {
                 place, op, value, ..
@@ -2490,13 +2530,6 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.conc.task_cancel, self.b.func);
                 self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.ins().iconst(types::I8, 0))
-            }
-            THandleOp::ChannelSender => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
             }
             THandleOp::ChannelReceive => {
                 let line = self.b.ins().iconst(types::I32, 1);

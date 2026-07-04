@@ -1033,6 +1033,32 @@ fn run() {
     );
 }
 
+/// D-STR-AFTER1: `.after(sep)`/`.before(sep)` — first-occurrence substring
+/// split. `sep` absent -> the whole original string on both sides (mirrors
+/// `.replace`'s no-match-is-identity convention; no `Option` to unwrap).
+#[test]
+fn string_after_before() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    email := \"nate@jet.dev\"
+    print(email.after(\"@\"))
+    print(email.before(\"@\"))
+    plain := \"no-separator\"
+    print(plain.after(\"@\"))
+    print(plain.before(\"@\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_string_after_before", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "jet.dev\nnate\nno-separator\nno-separator\n"
+    );
+}
+
 /// Map methods: insert, get, contains_key, keys, values, len, clear. BTreeMap
 /// iterates/collects in sorted key order, so output is deterministic.
 #[test]
@@ -2713,9 +2739,11 @@ fn run() {
     assert_eq!(stdout, "launched\n");
 }
 
-/// c109 Phase 21: the full channel surface — `tasks.channel()` producer, `Channel<T>`
-/// value, `Channel.sender()`, `Sender.send(v)` (inside a `take(..)` spawn closure),
-/// `Task.join()`, and `Channel.receive() ?? panic(..)` (`Result<T, Closed>` unwrap).
+/// c109 Phase 21 / D-TUPLE-DESTRUCT1: the full channel surface —
+/// `tasks.channel<T>()` producer returning `(Sender<T>, Receiver<T>)`,
+/// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `take(..)`
+/// spawn closure), `Task.join()`, and `Receiver.receive() ?? panic(..)`
+/// (`Result<T, Closed>` unwrap).
 #[test]
 fn channel_send_receive() {
     if !have_rustc() {
@@ -2724,12 +2752,11 @@ fn channel_send_receive() {
     let src = "\
 use core.tasks as tasks
 fn run() {
-ch: Channel<Int> :: tasks.channel()
-s1: Sender<Int> :: ch.sender()
+(s1, ch) :: tasks.channel<Int>()
+    s2 :: s1.clone()
     t1 :: tasks.spawn(take(s1) () => {
         s1.send(30)
     })
-    s2 :: ch.sender()
     t2 :: tasks.spawn(take(s2) () => {
         s2.send(12)
     })

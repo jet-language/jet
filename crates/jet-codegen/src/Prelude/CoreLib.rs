@@ -1070,7 +1070,7 @@ mod jet_std {
 
     /// D-CONCSELECT1=A: fluent select builder accumulated at compile time, executed at `.wait()`.
     pub struct JetSelectBuilder<T: Send + 'static> {
-        recvs: Vec<JetChannel<T>>,
+        recvs: Vec<JetReceiver<T>>,
         after_ms: Vec<i64>,
     }
 
@@ -1081,7 +1081,7 @@ mod jet_std {
                 after_ms: Vec::new(),
             }
         }
-        pub fn recv(mut self, ch: JetChannel<T>) -> JetSelectBuilder<T> {
+        pub fn recv(mut self, ch: JetReceiver<T>) -> JetSelectBuilder<T> {
             self.recvs.push(ch);
             self
         }
@@ -1093,13 +1093,13 @@ mod jet_std {
             self
         }
         pub fn wait(self) -> T {
-            let recv_refs: Vec<&JetChannel<T>> = self.recvs.iter().collect();
+            let recv_refs: Vec<&JetReceiver<T>> = self.recvs.iter().collect();
             jet_select_wait(&recv_refs, &self.after_ms)
         }
     }
 
     /// D-CONCSELECT1=A: multiplex channel/timer arms registered by `g.select()`.
-    pub fn jet_select_wait<T: Send + 'static>(recvs: &[&JetChannel<T>], after_ms: &[i64]) -> T {
+    pub fn jet_select_wait<T: Send + 'static>(recvs: &[&JetReceiver<T>], after_ms: &[i64]) -> T {
         let inners: Vec<_> = recvs.iter().map(|c| c.inner.select_inner()).collect();
         let timers: Vec<u64> = after_ms.iter().map(|ms| (*ms).max(0) as u64).collect();
         match super::jet_scheduler_select(inners, timers) {
@@ -1115,20 +1115,33 @@ mod jet_std {
         }
     }
 
-    pub struct JetChannel<T> {
+    /// D-TUPLE-DESTRUCT1: `tasks.channel<T>()` — mirrors Rust's `mpsc::channel()`:
+    /// returns the `(Sender<T>, Receiver<T>)` pair directly (no combined "Channel"
+    /// handle, and no `.sender()` method — a second sender is `tx.clone()`).
+    pub fn channel<T: Send>() -> (JetSender<T>, JetReceiver<T>) {
+        let inner = super::JetSchedulerChannel::new();
+        let tx = inner.sender();
+        (JetSender { tx }, JetReceiver { inner })
+    }
+
+    pub struct JetReceiver<T> {
         inner: super::JetSchedulerChannel<T>,
     }
-    impl<T: Send> JetChannel<T> {
-        pub fn new() -> JetChannel<T> {
-            JetChannel {
-                inner: super::JetSchedulerChannel::new(),
+    // D-TUPLE-DESTRUCT1: the tuple-destructure bind convention clones each
+    // extracted field (`(tx, rx) := tasks.channel<T>()` clones `rx` off the
+    // synthesized `(Sender<T>, Receiver<T>)` struct, same as `Sender` below). The
+    // underlying scheduler channel is `Arc`-backed and already supports concurrent
+    // receivers (the same substrate `g.select()` races multiple receive arms
+    // against), so cloning a `Receiver` is a cheap, sound pointer copy — not a
+    // single-consumer `std::sync::mpsc::Receiver`.
+    impl<T> Clone for JetReceiver<T> {
+        fn clone(&self) -> Self {
+            JetReceiver {
+                inner: self.inner.clone(),
             }
         }
-        pub fn sender(&self) -> JetSender<T> {
-            JetSender {
-                tx: self.inner.sender(),
-            }
-        }
+    }
+    impl<T: Send> JetReceiver<T> {
         pub fn receive(&self) -> Result<T, Closed> {
             if super::jet_scheduler_task_cancelled() {
                 return Err(Closed::Closed);

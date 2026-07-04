@@ -405,6 +405,8 @@ fn scheduler_spawn_runs_via_jit() {
         "scheduler_spawn must be jit-covered: {}",
         jet_jit::jit_covers_bundle_detail(&bundle)
     );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|e| panic!("scheduler_spawn JIT compile failed: {e}"));
 
     let got = match dev_iteration(file, false, false) {
         RunOutcome::Ran { stdout, .. } => stdout,

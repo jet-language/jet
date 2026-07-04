@@ -645,9 +645,20 @@ pub(crate) struct ChannelInner<T> {
     state: Mutex<ChannelState<T>>,
 }
 
-#[derive(Clone)]
 pub struct JetSchedulerChannel<T> {
     inner: Arc<ChannelInner<T>>,
+}
+
+// D-TUPLE-DESTRUCT1: hand-written, not `#[derive(Clone)]` — the derive adds a
+// spurious `T: Clone` bound (it can't see that only the `Arc` is cloned, not a
+// `T`); an `Arc` clone never needs its payload to be `Clone`. Same reasoning as
+// `JetSchedulerSender`'s manual impl right below.
+impl<T> Clone for JetSchedulerChannel<T> {
+    fn clone(&self) -> Self {
+        JetSchedulerChannel {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<T: Send> JetSchedulerChannel<T> {

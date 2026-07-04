@@ -11,8 +11,7 @@ fn handle(req: HttpRequest) -> HttpResponse {
 }
 
 fn run() {
-    ch: Channel<String> :: tasks.channel()
-    sender :: ch.sender()
+    (sender, ch) :: tasks.channel<String>()
     // Start the server in a background task (handles one request for golden-test determinism).
     tasks.spawn(take(sender) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")

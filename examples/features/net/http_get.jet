@@ -6,8 +6,7 @@ use core.net as net
 use core.tasks as tasks
 
 fn run() {
-    ch: Channel<String> :: tasks.channel()
-    sender :: ch.sender()
+    (sender, ch) :: tasks.channel<String>()
     // Mini one-shot server: bind, send address back, handle one request.
     tasks.spawn(take(sender) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")

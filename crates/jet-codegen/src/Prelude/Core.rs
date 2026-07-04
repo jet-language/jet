@@ -772,6 +772,21 @@ fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> 
 }
 fn jet_char_len(s: &String) -> i64 { s.chars().count() as i64 }
 fn jet_string_split(s: &String, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
+// D-STR-AFTER1: first-occurrence substring split. `sep` absent -> the whole
+// original string (both sides agree, mirroring `.replace`'s no-match-is-identity
+// convention — no `Option`/empty-string special case to unwrap).
+fn jet_string_after(s: &String, sep: &str) -> String {
+    match s.find(sep) {
+        Some(i) => s[i + sep.len()..].to_string(),
+        None => s.clone(),
+    }
+}
+fn jet_string_before(s: &String, sep: &str) -> String {
+    match s.find(sep) {
+        Some(i) => s[..i].to_string(),
+        None => s.clone(),
+    }
+}
 // D-TYPEDTEXT1=D: escape a hole's text before it joins an `Html` template —
 // the audited insertion point for every non-`.raw()` interpolation.
 fn jet_html_escape(s: &str) -> String {

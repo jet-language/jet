@@ -933,6 +933,11 @@ impl<'a> Checker<'a> {
             // site is too noisy (breaks showcase golden tests via path-specific output).
             // Revisit when the test harness can normalise paths in exact comparisons.
             ("core.fs", "read") => {}
+            // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns the `(Sender<T>,
+            // Receiver<T>)` pair directly — mirrors the turbofish `decode<T>` pattern
+            // above (the element type `T` comes from the explicit call-site type
+            // argument, not a binding annotation; there's no combined "Channel" value
+            // to infer against anymore).
             ("core.tasks", "channel") => {
                 if !args.is_empty() {
                     self.diags
@@ -942,28 +947,34 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let t = match &self.expected_type {
-                    Some(Type::Apply { name, args }) if name == "Channel" && args.len() == 1 => {
-                        args[0].clone()
-                    }
-                    _ => {
-                        self.diags.push(Diagnostic::error(
-                            "E0904",
-                            "`tasks.channel` needs a type annotation to infer the element type"
-                                .to_string(),
-                            "the element type `T` can't be guessed without a type annotation"
-                                .to_string(),
-                            "annotate the binding: `val ch: Channel<T> = tasks.channel();`"
-                                .to_string(),
-                            Some(span),
-                        ));
-                        return None;
-                    }
+                let Some(t) = type_args.first().cloned() else {
+                    self.diags.push(Diagnostic::error(
+                        "E0904",
+                        "`tasks.channel` needs a type argument to infer the element type"
+                            .to_string(),
+                        "the element type `T` can't be guessed without `<T>`".to_string(),
+                        "call it with an explicit type argument: `tasks.channel<T>()`"
+                            .to_string(),
+                        Some(span),
+                    ));
+                    return None;
                 };
-                return Some(Type::Apply {
-                    name: "Channel".to_string(),
-                    args: vec![t],
-                });
+                return Some(Type::Tuple(vec![
+                    (
+                        "sender".to_string(),
+                        Box::new(Type::Apply {
+                            name: "Sender".to_string(),
+                            args: vec![t.clone()],
+                        }),
+                    ),
+                    (
+                        "receiver".to_string(),
+                        Box::new(Type::Apply {
+                            name: "Receiver".to_string(),
+                            args: vec![t],
+                        }),
+                    ),
+                ]));
             }
             // D-ROUTE1=A: jet.http.router() → HttpRouter.
             ("jet.http", "router") => {
@@ -3457,6 +3468,10 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // element type is inferred from the initial value / closure return — not in
             // `core_fixed_sig`, so codegen reads it from resolved_ret (I3).
             | ("jet.reactive", "signal" | "derived")
+            // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns `(Sender<T>, Receiver<T>)`,
+            // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
+            // reads the whole tuple type from resolved_ret (I3).
+            | ("core.tasks", "channel")
     )
 }
 

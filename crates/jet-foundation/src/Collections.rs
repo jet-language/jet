@@ -94,8 +94,8 @@ pub fn builtin_method_return(
             crate::Numeric::decimal_method_return(method, arg_count)
         }
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
-        Type::Apply { name, args } if name == "Channel" => {
-            channel_method_return(args, method, arg_count)
+        Type::Apply { name, args } if name == "Receiver" => {
+            receiver_method_return(args, method, arg_count)
         }
         Type::Apply { name, args } if name == "Sender" => {
             sender_method_return(args, method, arg_count)
@@ -431,6 +431,9 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("trim" | "to_upper" | "to_lower" | "to_string", 0) => Some(Some(Type::String)),
         ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
+        // D-STR-AFTER1: first-occurrence substring split; `sep` absent -> the
+        // whole original string (mirrors `.replace`'s no-match-is-identity).
+        ("after" | "before", 1) => Some(Some(Type::String)),
         ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
         // c97/D-STRPARSE1: split text into its lines (mirrors `split`).
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
@@ -521,16 +524,16 @@ fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
     }
 }
 
-fn channel_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+/// D-TUPLE-DESTRUCT1: `Receiver<T>.receive()` — the receive half returned
+/// alongside `Sender<T>` by `tasks.channel<T>()`. No `.sender()` method here
+/// (there's no combined "Channel" handle to fetch a sender off of — a second
+/// sender comes from `tx.clone()`, same as any other `Sender<T>`).
+fn receiver_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     let t = args.first().cloned().unwrap_or(Type::Int);
     match (method, nargs) {
         ("receive", 0) => Some(Some(Type::Result {
             ok: Box::new(t),
             err: Box::new(Type::Named("Closed".to_string())),
-        })),
-        ("sender", 0) => Some(Some(Type::Apply {
-            name: "Sender".to_string(),
-            args: vec![t],
         })),
         _ => None,
     }

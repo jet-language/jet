@@ -821,8 +821,7 @@ Channels carry one type:
 use core.tasks as tasks
 
 fn run() {
-ch: Channel<Int> :: tasks.channel()
-    sender :: ch.sender()
+(sender, ch) :: tasks.channel<Int>()
     task :: tasks.spawn(take(sender) () => {
         sender.send(42)
     })
@@ -830,6 +829,10 @@ ch: Channel<Int> :: tasks.channel()
     print(ch.receive() ?? panic("channel closed"))
 }
 ```
+
+`tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
+destructure it with `(tx, rx) := tasks.channel<T>()`. A second sender is
+`tx.clone()`, not a method on the channel (there's no combined channel value).
 
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
@@ -840,10 +843,10 @@ ch: Channel<Int> :: tasks.channel()
 | `task.resume()` | nothing | Clear paused state on the task control plane |
 | `task.cancel()` | nothing | Request cancellation on the task control plane |
 | `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
-| `tasks.channel<T>()` | `Channel<T>` | Create a typed channel receive half |
-| `ch.sender()` | `Sender<T>` | Create a clonable send half |
+| `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create a linked send/receive pair |
+| `sender.clone()` | `Sender<T>` | Create another send half |
 | `sender.send(value)` | nothing | Move one value into the channel |
-| `ch.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
+| `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 
 Values crossing `spawn` or `send` must be sendable: no `view` borrows, no
 structs containing `ref` fields, no trait values, and no closure values unless

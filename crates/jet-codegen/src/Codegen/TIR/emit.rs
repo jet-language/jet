@@ -1333,6 +1333,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.file,
                     line
                 ),
+                // D-STR-AFTER1: `after`/`before` — bare calls, no root prefix (same
+                // MOD_USE-imported convention as `jet_string_split`/`jet_string_lines`).
+                TBuiltinOp::After => format!("jet_string_after(&({}), &{})", recv, a(0)),
+                TBuiltinOp::Before => format!("jet_string_before(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Keys => {
                     format!("({}).keys().cloned().collect::<Vec<_>>()", recv)
                 }
@@ -2274,7 +2278,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
                 THandleOp::TaskTrace => format!("({}).trace()", recv),
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
-                THandleOp::ChannelSender => format!("({}).sender()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
                 // D-REACT1=B: reactive Signal/Derived reads and writes.
                 THandleOp::ReactiveGet => format!("({}).get()", recv),
@@ -2901,8 +2904,35 @@ pub(crate) fn emit_tir_core_call(
         // lowered to a Rust `unsafe` context.
         ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
         ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
-        // c109 Phase 21: the `tasks.channel()` producer, byte-for-byte `emit_core_call`.
-        ("core.tasks", "channel") => format!("{}jet_std::JetChannel::new()", cx.root_prefix),
+        // D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer — returns the
+        // `(Sender<T>, Receiver<T>)` pair as the same `JetTup_<hash>` named-tuple
+        // struct every other `Type::Tuple` value uses (`enumerate`/`zip`/`partition`'s
+        // convention — `Tuples::collect_tuple_shapes` already walks this call's
+        // `resolved_ret` and declares the struct). `T` and the struct shape both come
+        // from the call node's own resolved `ret_ty`, not a binding annotation
+        // (there's no combined "Channel" value left to annotate).
+        ("core.tasks", "channel") => {
+            let fields = match ret_ty {
+                Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                _ => Vec::new(),
+            };
+            let elem = fields
+                .first()
+                .and_then(|(_, t)| match t {
+                    Type::Apply { args, .. } => args.first().cloned(),
+                    _ => None,
+                })
+                .unwrap_or(Type::Int);
+            let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            format!(
+                "{{ let __jet_ch = {}jet_std::channel::<{}>(); {} {{ {}: __jet_ch.0, {}: __jet_ch.1 }} }}",
+                cx.root_prefix,
+                cx.rust_type(&elem),
+                struct_name,
+                mangle("sender"),
+                mangle("receiver"),
+            )
+        }
         // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
         ("jet.reactive", "signal") => {
             format!("{}jet_std::JetSignal::new({})", cx.root_prefix, arg(0))

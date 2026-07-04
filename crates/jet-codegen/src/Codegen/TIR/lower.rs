@@ -5721,15 +5721,15 @@ pub(crate) fn lower_method_call(
             },
         };
     }
-    // c109 Phase 21: a Task/Channel/Sender concurrency method (gate shape d3). The gate
-    // proved `recv_type == None` + a disjoint concurrency name+arity. Resolve the op +
-    // result type HERE (totality). The result type comes from `Collections::
-    // builtin_method_return`'s `Type::Apply` arms (Source/Collections.rs), read off the
-    // receiver's already-resolved type `Task<T>`/`Channel<T>`/`Sender<T>` (the LOWERED
-    // receiver's `.ty`, total from the binding's annotated/inferred slot — never
-    // re-inferred in emit, I3): `join`/`wait` → `T`; `detach`/`pause`/`resume`/`cancel`/`send`
-    // → Unit; `trace` → `String`; `receive` → `Result<T, Closed>`; `sender` → `Sender<T>`.
-    // Args lowered PLAINLY (the AST
+    // c109 Phase 21 / D-TUPLE-DESTRUCT1: a Task/Receiver/Sender concurrency method
+    // (gate shape d3). The gate proved `recv_type == None` + a disjoint concurrency
+    // name+arity. Resolve the op + result type HERE (totality). The result type comes
+    // from `Collections::builtin_method_return`'s `Type::Apply` arms
+    // (Source/Collections.rs), read off the receiver's already-resolved type
+    // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
+    // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`/`wait`
+    // → `T`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit; `trace` → `String`;
+    // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
         let recv_t = lower_expr(receiver, cx, env);
@@ -5751,13 +5751,6 @@ pub(crate) fn lower_method_call(
                 Type::Result {
                     ok: Box::new(elem),
                     err: Box::new(Type::Named("Closed".to_string())),
-                },
-            ),
-            "sender" => (
-                THandleOp::ChannelSender,
-                Type::Apply {
-                    name: "Sender".to_string(),
-                    args: vec![elem],
                 },
             ),
             "send" => (THandleOp::SenderSend, unit_type()),
@@ -6710,6 +6703,9 @@ pub(crate) fn resolve_builtin_op(
         ("starts_with", 1) => TBuiltinOp::StartsWith,
         ("ends_with", 1) => TBuiltinOp::EndsWith,
         ("replace", 2) => TBuiltinOp::Replace,
+        // D-STR-AFTER1: `.after(sep)`/`.before(sep)` — first-occurrence substring split.
+        ("after", 1) => TBuiltinOp::After,
+        ("before", 1) => TBuiltinOp::Before,
         ("to_upper", 0) => TBuiltinOp::ToUpper,
         ("to_lower", 0) => TBuiltinOp::ToLower,
         ("repeat", 1) => TBuiltinOp::Repeat,

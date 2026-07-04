@@ -541,12 +541,12 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`.recv()` takes one channel, got {} argument{}",
+                    "`.recv()` takes one receiver, got {} argument{}",
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
-                "a select receive arm waits on one typed channel".to_string(),
-                "write `.recv(ch)` where `ch` is a `Channel<T>`".to_string(),
+                "a select receive arm waits on one typed receiver".to_string(),
+                "write `.recv(rx)` where `rx` is a `Receiver<T>`".to_string(),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -558,13 +558,13 @@ impl<'a> Checker<'a> {
         let inner = match ch_ty {
             Type::Apply {
                 ref name, ref args, ..
-            } if name == "Channel" && args.len() == 1 => args[0].clone(),
+            } if name == "Receiver" && args.len() == 1 => args[0].clone(),
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!("`.recv()` needs a channel, not {}", other.show()),
-                    "each select receive arm waits on a `Channel<T>`".to_string(),
-                    "write `.recv(ch)` where `ch` came from `tasks.channel()`".to_string(),
+                    format!("`.recv()` needs a receiver, not {}", other.show()),
+                    "each select receive arm waits on a `Receiver<T>`".to_string(),
+                    "write `.recv(rx)` where `rx` came from `tasks.channel<T>()`".to_string(),
                     Some(args[0].expr.span()),
                 ));
                 return None;
@@ -579,7 +579,7 @@ impl<'a> Checker<'a> {
                         prev.show(),
                         inner.show()
                     ),
-                    "every `.recv()` in one select waits on the same `Channel<T>` element type"
+                    "every `.recv()` in one select waits on the same `Receiver<T>` element type"
                         .to_string(),
                     "use channels with the same `T`, or split into separate selects".to_string(),
                     Some(args[0].expr.span()),

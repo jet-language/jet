@@ -1052,9 +1052,11 @@ control-plane state on the handle; `task.trace() -> String` reports
 `paused=...,cancel=...`. In the current thread runtime these are observability
 hooks; scheduler-enforced pause/cancel semantics land with the M:N runtime work.
 
-`tasks.channel<T>() -> Channel<T>` creates a receive half. `ch.sender() ->
-Sender<T>` creates a clonable send half. `sender.send(value)` moves a `T` into
-the channel (`take` semantics for non-copy values), and `ch.receive() -> T or
+`tasks.channel<T>() -> (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
+linked send/receive pair, destructured at the call site: `(tx, rx) :=
+tasks.channel<T>()`. A second sender is `tx.clone()` — there's no combined
+"channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
+channel (`take` semantics for non-copy values), and `receiver.receive() -> T or
 Closed` blocks until a value arrives or all senders are gone. Channel payloads
 must be sendable (**E1102**).
 
@@ -1087,7 +1089,7 @@ Combinators are methods on the group handle only (no detached work):
 winner :: g.select().recv(ch1).recv(ch2).after(ms).wait()?
 ```
 
-`.recv(channel)` registers a channel arm; `.after(ms)` a timer arm; `.read(stream)`
+`.recv(receiver)` registers a receive arm; `.after(ms)` a timer arm; `.read(stream)`
 is reserved for stream I/O (stub until networking lands). `.wait()` blocks until
 one arm wins, deregisters losers, and returns the received value. Example:
 `168_select_channel.jet`.

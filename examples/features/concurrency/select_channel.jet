@@ -3,10 +3,8 @@ use core.tasks as tasks
 
 fn run() {
     taskgroup g {
-        ch1: Channel<Int> :: tasks.channel()
-        ch2: Channel<Int> :: tasks.channel()
-        s1 :: ch1.sender()
-        s2 :: ch2.sender()
+        (s1, ch1) :: tasks.channel<Int>()
+        (s2, ch2) :: tasks.channel<Int>()
         s1.send(11)
         winner :: g.select().recv(ch1).recv(ch2).wait()
         print(winner)

@@ -1,7 +1,7 @@
 Error [E1102]: `cfg` can't be sent because `Config` isn't sendable
-  --> tests/ui/unsendable_send.jet:13:18
+  --> tests/ui/unsendable_send.jet:12:18
     |
- 13 |     sender.send(^cfg)
+ 12 |     sender.send(^cfg)
     |                  ^^^
  Why: `Config` contains `logger`, which holds a `ref` field at `logger.sink`; tasks and channels move owned values between threads
  Fix: send plain owned data instead, or rebuild the value without shared-view fields before calling `.send()`

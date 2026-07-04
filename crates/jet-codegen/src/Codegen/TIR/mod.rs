@@ -1701,6 +1701,13 @@ pub enum TBuiltinOp {
     Repeat,
     /// `slice(a, b)` → `jet_string_slice(&(recv), a0, a1, file, line)`.
     Slice { line: usize },
+    /// D-STR-AFTER1: `after(sep)` → `jet_string_after(&(recv), &a0)`. Substring
+    /// strictly after the first `sep`; `sep` absent → the whole original string
+    /// (mirrors `.replace`'s no-match-is-identity convention).
+    After,
+    /// D-STR-AFTER1: `before(sep)` → `jet_string_before(&(recv), &a0)`. Substring
+    /// strictly before the first `sep`; `sep` absent → the whole original string.
+    Before,
     /// `keys()` → `(recv).keys().cloned().collect::<Vec<_>>()`.
     Keys,
     /// `values()` → `(recv).values().cloned().collect::<Vec<_>>()`.
@@ -1892,10 +1899,9 @@ pub enum THandleOp {
     TaskCancel,
     /// D-COROUTINE1=A: Task control-plane trace string.
     TaskTrace,
-    /// c109 Phase 21: Channel `receive()` → `(recv).receive()` → `Result<T, Closed>`.
+    /// c109 Phase 21 / D-TUPLE-DESTRUCT1: Receiver `receive()` → `(recv).receive()` →
+    /// `Result<T, Closed>`.
     ChannelReceive,
-    /// c109 Phase 21: Channel `sender()` → `(recv).sender()` → `Sender<T>`.
-    ChannelSender,
     /// c109 Phase 21: Sender `send(v)` → `(recv).send(a0)`. Returns unit.
     SenderSend,
     /// c109 Phase 25: HttpRouter `get`/`post`/`put`/`delete` route registration
@@ -3142,9 +3148,10 @@ fn mk() {
         assert!(core_call_covered("core.random", "pick"));
         assert!(core_call_covered("core.random", "shuffle"));
         assert!(core_call_covered("core.io", "eprint"));
-        // c109 Phase 21: the `tasks.channel()` producer is now covered via the core-call
-        // shape (a fixed-string `JetChannel::new()` emit; its `Channel<T>` return type
-        // rides on the binding annotation, not the node). `tasks.spawn` stays out of this
+        // c109 Phase 21 / D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer is
+        // covered via the core-call shape (a fixed-string `jet_std::channel::<T>()`
+        // emit; its `(Sender<T>, Receiver<T>)` return type rides on `resolved_ret`,
+        // filled from the call-site turbofish). `tasks.spawn` stays out of this
         // shape — it has its own bespoke `CoreClosureCall` shape (a `move |…|` closure).
         assert!(core_call_covered("core.tasks", "channel"));
         assert!(!core_call_covered("core.tasks", "spawn"));
@@ -3337,9 +3344,10 @@ fn greet() -> String { return input() }
 
     #[test]
     fn concurrency_method_names() {
-        // c109 Phase 21 + D-COROUTINE1=A: the Task/Channel/Sender method name+arity set. `join` is the
-        // 0-arg form (the 1-arg list `join(sep)` is a collection builtin, NOT here);
-        // `send` is the 1-arg form.
+        // c109 Phase 21 + D-COROUTINE1=A / D-TUPLE-DESTRUCT1: the Task/Receiver/Sender
+        // method name+arity set. `join` is the 0-arg form (the 1-arg list `join(sep)`
+        // is a collection builtin, NOT here); `send` is the 1-arg form. No `sender` —
+        // `tasks.channel<T>()` returns the sender directly, no `.sender()` method.
         assert!(is_concurrency_method_name("join", 0));
         assert!(is_concurrency_method_name("wait", 0));
         assert!(is_concurrency_method_name("detach", 0));
@@ -3348,7 +3356,7 @@ fn greet() -> String { return input() }
         assert!(is_concurrency_method_name("cancel", 0));
         assert!(is_concurrency_method_name("trace", 0));
         assert!(is_concurrency_method_name("receive", 0));
-        assert!(is_concurrency_method_name("sender", 0));
+        assert!(!is_concurrency_method_name("sender", 0));
         assert!(is_concurrency_method_name("send", 1));
         // Disjoint from the list `join(sep)` (1 arg) and any wrong arity.
         assert!(!is_concurrency_method_name("join", 1));
@@ -3376,7 +3384,7 @@ fn greet() -> String { return input() }
         assert!(is_covered_reactive_ty(&apply("Derived"), &cx));
         assert!(is_subset_param_ty(&apply("Signal"), &cx));
         assert!(is_subset_param_ty(&apply("Derived"), &cx));
-        assert!(!is_covered_reactive_ty(&apply("Channel"), &cx));
+        assert!(!is_covered_reactive_ty(&apply("Receiver"), &cx));
         // The producer + closure-call shapes are covered.
         assert!(core_call_covered("jet.reactive", "signal"));
         assert!(crate::Sema::is_polymorphic_core_special(
@@ -3387,8 +3395,9 @@ fn greet() -> String { return input() }
 
     #[test]
     fn concurrency_value_types_covered() {
-        // c109 Phase 21: `Task<T>`/`Channel<T>`/`Sender<T>` are covered value types; the
-        // `Closed` err type is a covered fallible payload (`Channel.receive()`).
+        // c109 Phase 21 / D-TUPLE-DESTRUCT1: `Task<T>`/`Receiver<T>`/`Sender<T>` are
+        // covered value types; the `Closed` err type is a covered fallible payload
+        // (`Receiver.receive()`).
         let cx_src = "fn f() {}\n";
         let (toks, _) = crate::Lexer::lex(cx_src);
         let prog = crate::Parser::parse(&toks).expect("parse");
@@ -3398,7 +3407,7 @@ fn greet() -> String { return input() }
             args: vec![Type::Int],
         };
         assert!(is_covered_concurrency_ty(&apply("Task"), &cx));
-        assert!(is_covered_concurrency_ty(&apply("Channel"), &cx));
+        assert!(is_covered_concurrency_ty(&apply("Receiver"), &cx));
         assert!(is_covered_concurrency_ty(&apply("Sender"), &cx));
         assert!(is_subset_param_ty(&apply("Task"), &cx));
         // A `[Task<Unit>]` worker list (34_parallel_scan) is a covered collection.
@@ -3418,24 +3427,25 @@ fn greet() -> String { return input() }
 
     #[test]
     fn covers_concurrency_methods() {
-        // c109 Phase 21: a function using the channel `sender`/`send`/`receive` surface +
-        // the `tasks.channel()` producer routes. The gate is `build_cx`-only (no sema), so
-        // the method calls carry `recv_type == None` (the unannotated AST default), which
-        // is exactly what the d3 shape keys on; the `Channel<Int>` annotation supplies the
-        // value type. (The `tasks.spawn(take(..) …)`/`Task.join` slice depends on
-        // sema-filled `Lambda.meta`, so it's proven end-to-end in tests/tir.rs.)
+        // c109 Phase 21 / D-TUPLE-DESTRUCT1: a function using the `send`/`receive`
+        // surface + the `tasks.channel<T>()` producer routes. The gate is
+        // `build_cx`-only (no sema), so the method calls carry `recv_type == None`
+        // (the unannotated AST default), which is exactly what the d3 shape keys on;
+        // the `Receiver<Int>` annotation supplies the value type. (The
+        // `tasks.spawn(take(..) …)`/`Task.join` slice depends on sema-filled
+        // `Lambda.meta`, so it's proven end-to-end in tests/tir.rs.)
         let src = "\
 use core.tasks as tasks
 fn produce(s: Sender<Int>) {
     s.send(7)
 }
-fn consume(ch: Channel<Int>) -> Int {
+fn consume(ch: Receiver<Int>) -> Int {
     return ch.receive() ?? panic(\"closed\")
 }
 ";
         // The `Sender.send` method + `Sender<Int>` value type (gate shape d3).
         assert!(covers(src, "produce"));
-        // The `Channel.receive` method + `Channel<Int>` value type + `Result<Int, Closed>`
+        // The `Receiver.receive` method + `Receiver<Int>` value type + `Result<Int, Closed>`
         // unwrap via `?? panic`.
         assert!(covers(src, "consume"));
     }

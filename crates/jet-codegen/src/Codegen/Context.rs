@@ -154,7 +154,7 @@ pub(crate) struct Cx {
     pub(crate) active_os: crate::Syntax::OsTarget,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
 
 /// D-ITER-HOOK: metadata for zero-copy `for x in mytype` lowering.
 #[derive(Debug, Clone)]
@@ -602,9 +602,9 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args } if name == "Channel" && !args.is_empty() => {
+            Type::Apply { name, args } if name == "Receiver" && !args.is_empty() => {
                 format!(
-                    "{}jet_std::JetChannel<{}>",
+                    "{}jet_std::JetReceiver<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
@@ -1518,6 +1518,15 @@ pub(crate) fn field_type_comparable(
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
+        // D-TUPLE-DESTRUCT1: `Task<T>`/`Sender<T>`/`Receiver<T>` wrap an opaque
+        // runtime handle (`JetTask`/`JetSender`/`JetReceiver`) — none implement
+        // `PartialEq`, regardless of whether their element type `T` does. Only
+        // surfaces once one of these lands as a tuple field (`tasks.channel<T>()`'s
+        // `(Sender<T>, Receiver<T>)`); every other `Type::Apply` (Set/Bag/Deque/…)
+        // is still checked structurally through its args below.
+        Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
+            false
+        }
         Type::Apply { args, .. } => args
             .iter()
             .all(|a| field_type_comparable(a, types, param_names)),
@@ -1566,6 +1575,10 @@ pub(crate) fn field_type_hashable(
         Type::List(inner) => field_type_hashable(inner, types, param_names),
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
         Type::Named(n) => types.contains(n),
+        // D-TUPLE-DESTRUCT1: same opaque-handle exclusion as `field_type_comparable`.
+        Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
+            false
+        }
         Type::Apply { args, .. } => args.iter().all(|a| field_type_hashable(a, types, param_names)),
         Type::Tuple(fields) => fields
             .iter()

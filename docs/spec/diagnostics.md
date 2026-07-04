@@ -709,7 +709,7 @@ CLI.
 | E1110 | `.task { … }` was called outside a `taskgroup` block, or on a handle other than the active taskgroup name. | Structured spawning is scoped: only the handle bound by `taskgroup g { … }` may spawn children, and the taskgroup joins them at scope exit. | Wrap the code in `taskgroup g { … }` and write `g.task { … }` using that same name. |
 | L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
-| E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
+| E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 
 ## Tier-2 reference diagnostics (E2-M5, S10 `view`/`ref`)
 

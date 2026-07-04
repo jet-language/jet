@@ -25,8 +25,7 @@ fn run() {
     router.get("/", handle_root)
     router.get("/users/:id", handle_user)
     router.post("/users", handle_create)
-    ch: Channel<String> :: tasks.channel()
-    sender :: ch.sender()
+    (sender, ch) :: tasks.channel<String>()
     tasks.spawn(take(sender, router) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         addr :: listener.local_addr()

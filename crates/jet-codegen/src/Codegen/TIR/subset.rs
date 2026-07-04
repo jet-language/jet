@@ -295,12 +295,13 @@ pub(crate) fn is_covered_shared_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(ty, Type::Shared(inner) if is_subset_param_ty(inner, cx))
 }
 
-/// c109 Phase 21: a concurrency handle type `Task<T>` / `Channel<T>` / `Sender<T>`
-/// (a `Type::Apply` with one type arg) usable as a param/return/local *value* type.
-/// `cx.rust_type` (Source/Codegen/Context.rs) already renders these to
-/// `{root}jet_std::Jet{Task,Channel,Sender}<{T}>`, so passing/binding/returning one is
-/// byte-identical to the AST path with no new emit. The element type `T` must itself be a
-/// covered value type. A METHOD on one (`join`/`detach`/`receive`/`sender`/`send`) carries
+/// c109 Phase 21 / D-TUPLE-DESTRUCT1: a concurrency handle type `Task<T>` /
+/// `Receiver<T>` / `Sender<T>` (a `Type::Apply` with one type arg) usable as a
+/// param/return/local *value* type. `cx.rust_type` (Source/Codegen/Context.rs)
+/// already renders these to `{root}jet_std::Jet{Task,Receiver,Sender}<{T}>`, so
+/// passing/binding/returning one is byte-identical to the AST path with no new emit.
+/// The element type `T` must itself be a covered value type. A METHOD on one
+/// (`join`/`detach`/`receive`/`send`) carries
 /// `recv_type == None` (a Phase-9 builtin gap) and is covered by a dedicated shape — but
 /// covering the value type never *forces* a method, so an uncovered method still excludes
 /// its fn (the recurring "cover the value type, let the next uncovered node exclude its fn"
@@ -311,7 +312,7 @@ pub(crate) fn is_covered_concurrency_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    matches!(name.as_str(), "Task" | "Channel" | "Sender" | "Stream")
+    matches!(name.as_str(), "Task" | "Receiver" | "Sender" | "Stream")
         && args.len() == 1
         && concurrency_elem_covered(&args[0], cx)
 }
@@ -570,8 +571,9 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         if n == "Error" {
             return true;
         }
-        // c109 Phase 21: `Closed` is the err type of `Channel.receive()` →
-        // `Result<T, Closed>` (Source/Collections.rs `channel_method_return`). It renders
+        // c109 Phase 21 / D-TUPLE-DESTRUCT1: `Closed` is the err type of
+        // `Receiver.receive()` → `Result<T, Closed>` (Source/Collections.rs
+        // `receiver_method_return`). It renders
         // via `cx.rust_type` to `{root}jet_std::Closed` (`core_rust_type_name`), so a
         // `T ? Closed` payload (the unwrap target of `ch.receive() ?? …`) is byte-identical.
         if n == "Closed" {
@@ -2954,18 +2956,19 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() && method == "elapsed_millis" && args.is_empty() {
         return expr_in_subset(receiver, cx, locals);
     }
-    // Shape (d3) [c109 Phase 21]: a Task/Channel/Sender concurrency method. Like
-    // Stopwatch (d2), sema types these via `Collections::builtin_method_return`'s
-    // `Type::Apply` arms (`task_method_return`/`channel_method_return`/
-    // `sender_method_return`, Source/Collections.rs) and leaves `recv_type == None` (a
-    // Phase-9 builtin gap). The AST `emit_builtin_method` dispatches them on the method
-    // NAME alone (`join`/`detach`/`receive`/`sender`/`send`). The names + arg counts are
-    // disjoint from every other shape: `Task.join()` is the 0-arg `join` (the 1-arg list
-    // `join(sep)` is claimed by shape d above); `detach`/`receive`/`sender` (0 args) and
-    // `send` (1 arg) are used by no other builtin. The receiver is a `Task`/`Channel`/
-    // `Sender` value `let`-bound from a covered producer (`tasks.channel()` / `ch.sender()`
-    // / `tasks.spawn(…)`). Tried after the collection builtins so a list/map/string method
-    // can't be misclaimed.
+    // Shape (d3) [c109 Phase 21 / D-TUPLE-DESTRUCT1]: a Task/Receiver/Sender
+    // concurrency method. Like Stopwatch (d2), sema types these via
+    // `Collections::builtin_method_return`'s `Type::Apply` arms
+    // (`task_method_return`/`receiver_method_return`/`sender_method_return`,
+    // Source/Collections.rs) and leaves `recv_type == None` (a Phase-9 builtin gap).
+    // The AST `emit_builtin_method` dispatches them on the method NAME alone
+    // (`join`/`detach`/`receive`/`send`). The names + arg counts are disjoint from
+    // every other shape: `Task.join()` is the 0-arg `join` (the 1-arg list
+    // `join(sep)` is claimed by shape d above); `detach`/`receive` (0 args) and
+    // `send` (1 arg) are used by no other builtin. The receiver is a `Task`/
+    // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
+    // `tasks.spawn(…)`-produced. Tried after the collection builtins so a
+    // list/map/string method can't be misclaimed.
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -3567,6 +3570,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
         | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
         | ("to_upper", 0) | ("to_lower", 0) | ("repeat", 1) | ("slice", 2)
+        // D-STR-AFTER1: first-occurrence substring split.
+        | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1. `to_int`/0 on a String reaches here only with `recv_type ==
         // None` (the numeric `to_int` sets a numeric `recv_type`, so it never does);
         // `resolve_builtin_op`'s `is_string` guard is the final filter.
@@ -3603,10 +3608,10 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     // no-arg form never reaches codegen — its AST arm is dead.
 }
 
-/// c109 Phase 21 + D-COROUTINE1=A: is `(method, nargs)` a Task/Channel/Sender
-/// concurrency method (`emit_builtin_method`'s `Type::Apply`-receiver arms)?
-/// `Task.join()/wait()/detach()/pause()/resume()/cancel()/trace()`,
-/// `Channel.receive()/sender()`, `Sender.send(v)`. The arg count disambiguates
+/// c109 Phase 21 + D-COROUTINE1=A / D-TUPLE-DESTRUCT1: is `(method, nargs)` a
+/// Task/Receiver/Sender concurrency method (`emit_builtin_method`'s `Type::Apply`-
+/// receiver arms)? `Task.join()/wait()/detach()/pause()/resume()/cancel()/trace()`,
+/// `Receiver.receive()`, `Sender.send(v)`. The arg count disambiguates
 /// `Task.join()` (0 args) from the list `join(sep)` (1 arg, shape d) and `Sender.send(v)`
 /// (1 arg) — every name+arity here is disjoint from every other covered shape.
 pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
@@ -3620,7 +3625,6 @@ pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
             | ("cancel", 0)
             | ("trace", 0)
             | ("receive", 0)
-            | ("sender", 0)
             | ("send", 1)
     )
 }
@@ -3921,18 +3925,16 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // I3). The EMITTED form is a fixed per-`(module, method)` string (reproduced in
     // `emit_tir_core_call`), args emitted plainly, byte-for-byte `emit_core_call`.
     // (`io.input` is NOT here — it IS in `core_fixed_sig`, covered by Phase 10.)
+    // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` is now a polymorphic core special
+    // (registered in `is_polymorphic_core_special` above) — its `(Sender<T>,
+    // Receiver<T>)` return type is arg-type dependent (the call-site turbofish
+    // `<T>`, sema E0904 requires it), so it's covered by the check just above, not
+    // a dedicated block here. Sema writes the resolved `Type::Tuple` onto the
+    // node's `resolved_ret`; lowering reads it totally (I3), and the emit reads `T`
+    // off that same type to build `{root}jet_std::channel::<{T}>()`
+    // (Source/Codegen/TIR/emit.rs `emit_tir_core_call`). The `Receiver`/`Sender`/
+    // `Task` METHODS route via their own shape (d3 below).
     if crate::Sema::is_polymorphic_core_special(module, method) {
-        return true;
-    }
-    // c109 Phase 21: the `tasks.channel()` PRODUCER. NOT in `core_fixed_sig` (its return
-    // type `Channel<T>` is inferred from the binding annotation, not the args — sema
-    // E0904 requires the annotation). The emit is a plain, arg-free
-    // `{root}jet_std::JetChannel::new()` (Source/Codegen/Expression.rs `emit_core_call`),
-    // so it's a fixed-string `CoreCall` reproduced in `emit_tir_core_call`. The node's
-    // `ty` is not load-bearing (the binding carries `b.ty == Channel<T>`); it lowers to
-    // `Unit` (totality fallback). The `Channel`/`Sender`/`Task` METHODS that read T off
-    // the binding's annotated slot type then route via their own shape.
-    if module == "core.tasks" && method == "channel" {
         return true;
     }
     // c109 Phase 25: the HttpRouter producer + the parse/dispatch core calls (D-ROUTE1=A).
