@@ -130,7 +130,17 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "update",
-        summary: "refresh moving dependency selectors",
+        summary: "refresh moving dependency selectors (`update jet` moves the toolchain pin)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "toolchain",
+        summary: "show the project's pinned jet toolchain and its locked version (D-JPK-TOOLCHAIN1)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "init",
+        summary: "create a pkg.jet here, pinning the running jet's channel",
         headline: false,
     },
     CommandSpec {
@@ -151,6 +161,16 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "yank",
         summary: "mark a published version as yanked (D-VERSION1)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "keygen",
+        summary: "create the Ed25519 key that signs published packages (D-PKGSIGN1)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "key",
+        summary: "manage the package signing key (key backup)",
         headline: false,
     },
     CommandSpec {

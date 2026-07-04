@@ -51,13 +51,29 @@ pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
 }
 
 /// Store a freshly built binary in the cache (best-effort).
+///
+/// Atomic: the binary is copied to a per-process temp file first, then renamed
+/// into place. A concurrent `try_copy_cached` reader therefore never observes a
+/// half-written `bin`. Two processes storing the *same* key are storing the
+/// same content by construction (the key is content-addressed), so a
+/// last-writer-wins rename is safe.
 pub fn store_cached(key: &str, bin: &Path) {
     let dir = cache_dir().join(key);
     if fs::create_dir_all(&dir).is_err() {
         return;
     }
     let dest = dir.join("bin");
-    let _ = fs::copy(bin, &dest);
+    let tmp = dir.join(format!("bin.tmp.{}", std::process::id()));
+    if fs::copy(bin, &tmp).is_err() {
+        let _ = fs::remove_file(&tmp);
+        return;
+    }
+    if fs::rename(&tmp, &dest).is_err() {
+        // Rename can fail across some filesystems; fall back to a direct copy
+        // and clean up the temp file either way.
+        let _ = fs::copy(&tmp, &dest);
+        let _ = fs::remove_file(&tmp);
+    }
 }
 
 #[cfg(test)]

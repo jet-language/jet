@@ -1,0 +1,17 @@
+// A monorepo workspace index (D-WORKSPACE1=B, D-MONOREF1=A).
+//
+// `find("./packages")` discovers every subdirectory of `packages/` that carries
+// its own `pkg.jet`, so adding a package is just adding a directory — no edit
+// here. The `members:` expression is a full comptime expression: it may also
+// reference a sibling `comptime` binding or call a top-level `fn` in this file.
+//
+// Once indexed, a member is addressable three ways from the CLI:
+//   jetpack run repo.hello           # dot form  (source.package)
+//   jetpack run packages/ranker      # path form (relative member path)
+//   jetpack run ranker               # bare form (unique member name)
+//
+// A remote monorepo resolves index-first: only the addressed member's subtree
+// (plus its in-repo dependencies) is sparsely fetched, never the whole repo.
+module workspace {
+    members: find("./packages")
+}

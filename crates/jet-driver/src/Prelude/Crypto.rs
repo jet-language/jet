@@ -153,6 +153,18 @@ pub fn jet_crypto_sign_impl(
     Ok(signing_key.sign(message).to_bytes().to_vec())
 }
 
+/// Generate a fresh Ed25519 keypair. Returns `(seed, public_key)` where `seed`
+/// is the 32-byte secret seed and `public_key` is the 32-byte verifying key.
+/// Randomness comes from the same `/dev/urandom`-then-PRNG path the envelope
+/// nonce uses (`jet_fill_random`). Used by the package-signing helper (c146).
+pub fn jet_crypto_keygen_impl() -> (Vec<u8>, Vec<u8>) {
+    let mut seed = [0u8; 32];
+    jet_fill_random(&mut seed);
+    let signing_key = SigningKey::from_bytes(&seed);
+    let public = signing_key.verifying_key().to_bytes().to_vec();
+    (seed.to_vec(), public)
+}
+
 /// Verify an Ed25519 signature (32-byte public key, 64-byte signature).
 pub fn jet_crypto_verify_impl(
     public_key: &Vec<u8>,

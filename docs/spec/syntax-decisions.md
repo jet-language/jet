@@ -685,6 +685,22 @@ keywords (E0056–E0058 point at the sigils).
 param elevates by usage; at a `library { api: explicit }` boundary the
 resolved capability freezes; later drift is E0912, never a silent flip.
 
+**D-MEM1 — Memory model v5, "the borrow checker, humanized"** *(ratified
+2026-07-03, unbuilt — card #187; plan
+tools/Tower/docs/plans/memory-v5-migration.md)*: supersedes the D-CAP7
+spelling assignments and D-CAP8 when the migration lands. Three sigils:
+unmarked = read (enforced — no elevation, no freeze; no `api:` manifest field),
+`&T` = exclusive write, `^T` = take; `&`/`^` mirrored at call sites;
+`&self`/`^self` receivers. `~` is not part of the v5 grammar (ordinary syntax
+error — no compat, ever, per the rule at the top of this file). Borrows are
+second-class — no `-> &T` returns, no `&T` fields (D-REF-SHORTHAND1/2 and
+E0207/E0427 deleted); string/list slices are counted view values. L0201
+deleted — moves of named bindings are always written `^`; temporaries pass
+freely; `copy x` (D-CAP2) is the one copy spelling. Named escape hatches
+`Shared<T>`, `Pool<T>`/`Id<T>`; module `policy` floors (`no_alloc` first).
+Until the migration lands, the shipped D-CAP7/D-CAP8 behavior above remains
+the live surface.
+
 **D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a
@@ -1225,7 +1241,13 @@ packages, never compiler deps.
 is **`pkg.jet`** (`payload: { name, version }` identity + `packages:` +
 `deps:` + `targets:` + `effects:`); dev shell is **`env.jet`**; monorepo
 index is **`module workspace` in `workspace.jet`** (`members:` may run
-comptime; D-WORKSPACE1/2 — the root `jetpack.toml` index is retired);
+comptime — inline lists, `find("./dir")`, or an expression referencing a
+sibling `comptime`/`fn`; D-WORKSPACE1/2 — the root `jetpack.toml` index is
+retired). A member is addressed three ways (D-MONOREF1=A, implemented):
+dot form `source.package`, path form `infra/logging`, or the bare member
+name `logging`; ambiguous/unknown bare-or-path refs are E1230/E1231. A remote
+monorepo resolves **index-first**: only the addressed member's subtree (plus
+its in-repo deps) is sparsely fetched (E1232/E1233 on fetch/index errors).
 lockfile is the single **`.jet/lock`** (U2); `.jet/` holds only generated
 state; shared store is the hangar at `/etc/jet/hangar/`. `pack.jet`,
 `payload.jet`, `jet.toml` are dead names.

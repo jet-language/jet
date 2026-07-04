@@ -176,7 +176,7 @@ impl<'a> Resolver<'a> {
             // `EffectBudget::update_lock_provenance`.
             effects: Vec::new(),
             effect_grants: Vec::new(),
-        });
+            envelope: None,        });
 
         // Dependency packages in stable order.
         for (name, pkg) in &self.resolved {
@@ -192,7 +192,7 @@ impl<'a> Resolver<'a> {
                 inferred_layer: None,
                 effects: Vec::new(),
                 effect_grants: Vec::new(),
-            });
+                envelope: None,            });
         }
 
         let new_lock = LockFile {
@@ -204,7 +204,7 @@ impl<'a> Resolver<'a> {
                 .map(|lock| lock.workspace_members.clone())
                 .unwrap_or_default(),
             comptime_inputs: Vec::new(),
-        };
+            toolchains: Vec::new(),        };
 
         // Build dep_dirs map.
         let mut dep_dirs = HashMap::new();

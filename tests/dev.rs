@@ -175,6 +175,92 @@ fn interpreter_matches_compiled_binary() {
     );
 }
 
+/// c125 M4 exit gate: the DEFAULT `jet dev` path (Cranelift JIT with
+/// per-construct interpreter fallback — `use_interpreter: false`, what the
+/// `jet dev` CLI actually runs) must be functionally identical to the AOT
+/// compiled binary for every example, same as `interpreter_matches_compiled_binary`
+/// above but exercising the real default backend instead of the forced
+/// interpreter-only tier. This is the owner's "JIT and `jet run` must be
+/// functionally identical on every program the AOT path covers" requirement
+/// (2026-06-30) — distinct from the interpreter-only invariant above, which
+/// stays green even when JIT coverage regresses because it never touches
+/// Cranelift. A stray boundary here (that the interpreter-only test doesn't
+/// also hit) means the JIT fallback dropped correctness the plain interpreter
+/// had — a P0 regression, not a coverage gap.
+#[test]
+fn dev_default_matches_compiled_binary() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: rustc not found; skipping jet dev (default backend) differential battery");
+        return;
+    }
+    let dir = std::env::temp_dir();
+    let mut ran = 0usize;
+    let mut boundary = 0usize;
+    for (i, stem) in all_example_stems().iter().enumerate() {
+        let file = example_path(stem);
+
+        let interpreted = match dev_iteration(&file, false, false) {
+            RunOutcome::Ran { stdout, .. } => stdout,
+            RunOutcome::Problems(diags) => {
+                assert!(
+                    diags.iter().any(|d| BOUNDARY_CODES.contains(&d.code)),
+                    "`{}` neither ran nor stopped at a named boundary {:?} under the default \
+                     jet dev backend; codes were {:?}",
+                    stem,
+                    BOUNDARY_CODES,
+                    diags.iter().map(|d| d.code).collect::<Vec<_>>()
+                );
+                boundary += 1;
+                continue;
+            }
+        };
+        ran += 1;
+
+        let src = fs::read_to_string(&file).unwrap();
+        let compiled = match jet::compile_with_path(&src, &file) {
+            Ok(c) => c,
+            Err(diags) => panic!(
+                "`{}` ran under the default jet dev backend but failed the front end:\n{}",
+                stem,
+                jet::render_diagnostics(&file, &src, &diags)
+            ),
+        };
+        let rs = dir.join(format!("jet_dev_default_diff_{}.rs", i));
+        let bin = dir.join(format!("jet_dev_default_diff_{}", i));
+        fs::write(&rs, &compiled.rust).unwrap();
+        let out = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&rs)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .unwrap();
+        if !out.status.success() {
+            continue;
+        }
+        let run = Command::new(&bin).output().unwrap();
+        let compiled_stdout = String::from_utf8_lossy(&run.stdout).to_string();
+
+        assert_eq!(
+            interpreted, compiled_stdout,
+            "DIVERGENCE for `{}` under the default jet dev backend: JIT/fallback and compiled \
+             binary disagree — this is a P0 miscompile",
+            stem
+        );
+    }
+    eprintln!(
+        "c125 default-backend battery: {} ran (default==compiled), {} boundary-asserted, {} total",
+        ran,
+        boundary,
+        ran + boundary
+    );
+    assert!(
+        ran > 0,
+        "expected at least some examples to run via the default jet dev backend"
+    );
+}
+
 /// Every example that runs in the interpreter and has a checked-in
 /// `expected/*.out` golden (the executable spec, I5) must match it byte for
 /// byte — a cheap check that needs no rustc. Examples that hit a boundary, or
@@ -824,6 +910,64 @@ fn cranelift_hot_swap_preserves_live_state() {
         1,
         "restart must reset resident live state"
     );
+}
+
+/// c125 P0 regression guard: a runtime panic under the default JIT backend
+/// (list index OOB here; the same trapped-flag mechanism covers checked-arith
+/// overflow and the two concurrency panic sites) must report a clean E0953 —
+/// not kill the resident process. The next hot-reload iteration in the SAME
+/// process must then run cleanly, proving the trap didn't leak into the next
+/// run's heap and the process is still alive to serve it. Before the fix,
+/// every one of these host shims called `std::process::exit(70)` directly,
+/// which took the whole `jet dev` server down with it.
+#[test]
+fn cranelift_trap_then_hot_swap_continues() {
+    fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
+        let mut b = bundle_of(src, tag);
+        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+        b
+    }
+
+    let panics = checked_bundle(
+        "fn run() {\n    xs: [Int] :: [1, 2, 3]\n    print(xs[99])\n}\n",
+        "jit_trap_v1",
+    );
+    let recovers = checked_bundle("fn run() {\n    print(\"recovered\")\n}\n", "jit_trap_v2");
+
+    assert!(
+        jet_jit::jit_covers_bundle(&panics),
+        "trap fixture must be jit-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&panics)
+    );
+
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    match backend.run(&panics, false) {
+        RunOutcome::Problems(diags) => {
+            assert!(
+                diags.iter().any(|d| d.code == "E0953"),
+                "expected E0953 for list index OOB, got {:?}",
+                diags.iter().map(|d| d.code).collect::<Vec<_>>()
+            );
+        }
+        RunOutcome::Ran { stdout, .. } => {
+            panic!("expected the list index OOB to trap, got stdout {stdout:?}")
+        }
+    }
+
+    // Same resident process (thread-local module/runtime), next hot-reload
+    // iteration: must run to completion, not carry over the trapped flag or
+    // the crashed run's partial heap.
+    let out = match backend.hot_swap("run", &recovers, false) {
+        Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+        Ok(RunOutcome::Problems(ds)) => panic!("hot_swap after a trap produced diagnostics: {ds:?}"),
+        Err(ds) => panic!("hot_swap after a trap errored: {ds:?}"),
+    };
+    assert_eq!(out, "recovered\n");
 }
 
 /// The dev iteration surfaces front-end errors identically to batch

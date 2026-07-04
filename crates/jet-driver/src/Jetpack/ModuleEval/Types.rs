@@ -18,6 +18,9 @@ pub struct EvaluatedModule {
     pub systems: Vec<SystemPlan>,
     /// U14: `image.<name>:` contributions, captured for the jetos tier.
     pub images: Vec<ImagePlan>,
+    /// U15: `fleet.<name>:` contributions, captured (parse/cross-check now;
+    /// ssh realization rides single-host jetos, Phase D).
+    pub fleets: Vec<FleetPlan>,
 }
 
 /// U11: a field-checked `system.<name>: { … }` contribution, captured so the
@@ -71,6 +74,30 @@ pub struct ImagePlan {
     pub target: Option<String>,
 }
 
+/// U15: a field-checked `fleet.<name>: { hosts: { … } }` contribution, captured
+/// for the jetos deployment tier. Pure data — ssh/rollout realization lives in
+/// Phase D (gated). Each host's `system` ref is cross-checked against the known
+/// systems at plan-assembly time (E1242).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FleetPlan {
+    /// The contribution path — the `<name>` in `fleet.<name>`.
+    pub name: String,
+    /// The hosts this fleet deploys, in source order.
+    pub hosts: Vec<HostPlan>,
+}
+
+/// U15: one `<host>: system.<name>.{ overrides }` entry in a fleet's `hosts:` map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostPlan {
+    /// The host name (the map key), e.g. `web1`.
+    pub name: String,
+    /// The referenced `System`'s role name (the `<name>` in `system.<name>`).
+    pub system: String,
+    /// The raw `.{ … }` copy-with-update override text, if written. Captured
+    /// verbatim; not semantically applied until fleet realization (Phase D).
+    pub overrides: Option<String>,
+}
+
 /// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
 /// the named-source table, the package refs to realize (`<source>:<package>`),
 /// and the prompt label. Only the `env` namespace is consulted — `system`/`image`
@@ -85,4 +112,6 @@ pub struct EnvPlan {
     pub systems: Vec<SystemPlan>,
     /// U14: every captured `Image`, validated so each `from` names a known system.
     pub images: Vec<ImagePlan>,
+    /// U15: every captured `Fleet`, validated so each host names a known system.
+    pub fleets: Vec<FleetPlan>,
 }

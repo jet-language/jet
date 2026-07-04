@@ -27,7 +27,9 @@ mod Types;
 pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, is_module_surface};
-pub use Types::{EnvPlan, EvaluatedModule, ImagePlan, OptionPlan, ServicePlan, SystemPlan};
+pub use Types::{
+    EnvPlan, EvaluatedModule, FleetPlan, HostPlan, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
+};
 
 #[cfg(test)]
 use std::path::Path;
@@ -588,6 +590,78 @@ module m {
         let rendered =
             crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
         assert!(rendered.contains("unknown system `nope`"), "{rendered}");
+    }
+
+    // ── U15: Fleet (D-JPK-FLEET1) ───────────────────────────────────────
+
+    /// A fleet captures its hosts (canonical role-declaration form
+    /// `module fleet.<name> { … }`), each cross-checked to a known system, and
+    /// records the raw `.{ … }` override text verbatim.
+    #[test]
+    fn fleet_captures_hosts_and_cross_checks() {
+        let src = r#"
+module system.web { target: linux.x64 }
+module fleet.prod {
+    hosts: {
+        web1: system.web.{ region: "us-east" },
+        web2: system.web.{ region: "eu-west" },
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.fleets.len(), 1);
+        let fleet = &plan.fleets[0];
+        assert_eq!(fleet.name, "prod");
+        assert_eq!(fleet.hosts.len(), 2);
+        assert_eq!(fleet.hosts[0].name, "web1");
+        assert_eq!(fleet.hosts[0].system, "web");
+        assert_eq!(
+            fleet.hosts[0].overrides.as_deref(),
+            Some("{ region: \"us-east\" }")
+        );
+        assert_eq!(fleet.hosts[1].name, "web2");
+        assert_eq!(fleet.hosts[1].system, "web");
+    }
+
+    /// A bare host ref (no override tail) captures `None` for overrides.
+    #[test]
+    fn fleet_bare_host_ref_has_no_overrides() {
+        let src = r#"
+module system.web { target: linux.x64 }
+module fleet.prod { hosts: { only: system.web } }
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.fleets[0].hosts[0].overrides, None);
+    }
+
+    /// A host referencing a system no contribution defines is E1242.
+    #[test]
+    fn fleet_host_unknown_system_is_e1242() {
+        let src = "module fleet.prod { hosts: { web1: system.nope } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1242");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(
+            rendered.contains("host `web1` names an unknown system `nope`"),
+            "{rendered}"
+        );
+    }
+
+    /// An unknown `Fleet` field is E1244.
+    #[test]
+    fn fleet_unknown_field_is_e1244() {
+        let src = "module fleet.prod { region: \"us\" }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1244");
+    }
+
+    /// A `Fleet` with no `hosts:` is E1245.
+    #[test]
+    fn fleet_missing_hosts_is_e1245() {
+        let src = "module fleet.prod { }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1245");
     }
 
     #[test]

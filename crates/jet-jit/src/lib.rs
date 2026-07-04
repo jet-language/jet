@@ -63,6 +63,24 @@ pub(crate) struct JitRuntime {
     senders: Vec<JetSchedulerSender<i64>>,
     tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     task_controls: Vec<std::sync::Arc<JetTaskControl>>,
+    /// Set by a host shim when the user program hits a runtime panic (overflow,
+    /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
+    /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
+    /// so the trap unwinds through pure Cranelift control flow (never a Rust
+    /// panic through a JIT frame — I1). `resident_invoke` turns it into an
+    /// `E0953` diagnostic, exactly as the tier-0 interpreter reports the same
+    /// panic. Keeps the FIRST message; later traps on the unwind path are noise.
+    trapped: Option<String>,
+}
+
+impl JitRuntime {
+    /// Record a runtime panic. Keeps the first message (the unwind branch may
+    /// re-enter trap sites with dummy values before the epilogue is reached).
+    fn set_trap(&mut self, msg: &str) {
+        if self.trapped.is_none() {
+            self.trapped = Some(msg.to_string());
+        }
+    }
 }
 
 struct ResidentModule {
@@ -80,44 +98,66 @@ fn render_float(v: f64) -> String {
     format!("{v:?}")
 }
 
-fn jet_trap_overflow(op: &str, line: u32) -> ! {
-    with_runtime_mut(|rt| {
-        let msg = match op {
-            "add" => "this addition overflows the value's type (the result is outside its range)",
-            "sub" => {
-                "this subtraction overflows the value's type (the result is outside its range)"
-            }
-            "mul" => {
-                "this multiplication overflows the value's type (the result is outside its range)"
-            }
-            "div" => "this division can't be done (dividing by zero, or overflow)",
-            _ => "this operation overflows the value's type (the result is outside its range)",
-        };
-        rt.stderr.push_str(&format!("panic: {msg}\n"));
-        rt.stderr
-            .push_str(&format!("  --> {}:{line}\n", rt.source_file));
-    });
-    std::process::exit(70);
+/// Record an arithmetic overflow/div-by-zero trap. Returns normally (the
+/// caller yields a dummy `0`); JIT code branches to its epilogue at the next
+/// `emit_trap_check`. Message text is unchanged from the old exit-70 path.
+fn jet_trap_overflow(op: &str) {
+    let msg = match op {
+        "add" => "this addition overflows the value's type (the result is outside its range)",
+        "sub" => "this subtraction overflows the value's type (the result is outside its range)",
+        "mul" => {
+            "this multiplication overflows the value's type (the result is outside its range)"
+        }
+        "div" => "this division can't be done (dividing by zero, or overflow)",
+        _ => "this operation overflows the value's type (the result is outside its range)",
+    };
+    with_runtime_mut(|rt| rt.set_trap(msg));
 }
 
-extern "C" fn jet_jit_add_i64(a: i64, b: i64, line: u32) -> i64 {
-    a.checked_add(b)
-        .unwrap_or_else(|| jet_trap_overflow("add", line))
+/// Reads the resident runtime's trapped flag from JIT code. `1` = a trap is
+/// pending (branch to epilogue); `0` = keep going.
+extern "C" fn jet_jit_is_trapped() -> i64 {
+    Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
 }
 
-extern "C" fn jet_jit_sub_i64(a: i64, b: i64, line: u32) -> i64 {
-    a.checked_sub(b)
-        .unwrap_or_else(|| jet_trap_overflow("sub", line))
+extern "C" fn jet_jit_add_i64(a: i64, b: i64, _line: u32) -> i64 {
+    match a.checked_add(b) {
+        Some(v) => v,
+        None => {
+            jet_trap_overflow("add");
+            0
+        }
+    }
 }
 
-extern "C" fn jet_jit_mul_i64(a: i64, b: i64, line: u32) -> i64 {
-    a.checked_mul(b)
-        .unwrap_or_else(|| jet_trap_overflow("mul", line))
+extern "C" fn jet_jit_sub_i64(a: i64, b: i64, _line: u32) -> i64 {
+    match a.checked_sub(b) {
+        Some(v) => v,
+        None => {
+            jet_trap_overflow("sub");
+            0
+        }
+    }
 }
 
-extern "C" fn jet_jit_div_i64(a: i64, b: i64, line: u32) -> i64 {
-    a.checked_div(b)
-        .unwrap_or_else(|| jet_trap_overflow("div", line))
+extern "C" fn jet_jit_mul_i64(a: i64, b: i64, _line: u32) -> i64 {
+    match a.checked_mul(b) {
+        Some(v) => v,
+        None => {
+            jet_trap_overflow("mul");
+            0
+        }
+    }
+}
+
+extern "C" fn jet_jit_div_i64(a: i64, b: i64, _line: u32) -> i64 {
+    match a.checked_div(b) {
+        Some(v) => v,
+        None => {
+            jet_trap_overflow("div");
+            0
+        }
+    }
 }
 
 extern "C" fn jet_jit_print_i64(v: i64) {
@@ -285,6 +325,7 @@ struct HostFns {
     struct_new_f64: FuncId,
     struct_get_f64: FuncId,
     struct_set_f64: FuncId,
+    is_trapped: FuncId,
     coll: Collections::CollectionsHostFns,
     conc: Concurrency::ConcurrencyHostFns,
 }
@@ -321,6 +362,7 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         "jet_jit_struct_set_f64",
         jet_jit_struct_set_f64 as *const u8,
     );
+    builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
     Collections::register_collections_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     let mut module = JITModule::new(builder);
@@ -382,6 +424,8 @@ fn declare_host_fns(
     sig_struct_set.params.push(AbiParam::new(types::I64));
     sig_struct_set.params.push(AbiParam::new(types::I64));
     sig_struct_set.params.push(AbiParam::new(types::F64));
+    let mut sig_is_trapped = Signature::new(cc);
+    sig_is_trapped.returns.push(AbiParam::new(types::I64));
 
     let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
         module
@@ -410,6 +454,7 @@ fn declare_host_fns(
         struct_new_f64: import("jet_jit_struct_new_f64", &sig_struct_new)?,
         struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get)?,
         struct_set_f64: import("jet_jit_struct_set_f64", &sig_struct_set)?,
+        is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
         coll,
         conc,
     })
@@ -1232,6 +1277,9 @@ struct LowerCtx<'a, 'b> {
     next_var: u32,
     /// Owning struct for inherent methods (`Point::dist_sq` → `Point`).
     method_struct: Option<String>,
+    /// CLIF return type of the function being lowered (`None` = returns void).
+    /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
+    ret_clif: Option<types::Type>,
 }
 
 impl LowerCtx<'_, '_> {
@@ -1246,6 +1294,47 @@ impl LowerCtx<'_, '_> {
         for stmt in stmts {
             self.lower_stmt(stmt)?;
         }
+        Ok(())
+    }
+
+    /// After any call that may set the runtime's trapped flag — a fallible host
+    /// shim (checked arith, list get/set/slice, channel receive/panic) or a call
+    /// to another jet function (a callee's trap must propagate transitively) —
+    /// read the flag and, if set, branch to this function's epilogue returning a
+    /// dummy value. The whole unwind is Cranelift control flow: no Rust panic is
+    /// ever unwound through a JIT frame (cranelift-jit emits no unwind tables —
+    /// doing so would be UB, forbidden by I1). `resident_invoke` observes the
+    /// flag after `main` returns and reports the trap as `E0953`.
+    fn emit_trap_check(&mut self) -> Result<(), String> {
+        let is_ref = self
+            .module
+            .declare_func_in_func(self.host.is_trapped, self.b.func);
+        let call = self.b.ins().call(is_ref, &[]);
+        let flag = self.b.inst_results(call)[0];
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let trapped = self.b.ins().icmp(IntCC::NotEqual, flag, zero);
+        let epilogue = self.b.create_block();
+        let cont = self.b.create_block();
+        self.b.ins().brif(trapped, epilogue, &[], cont, &[]);
+
+        self.b.switch_to_block(epilogue);
+        self.b.seal_block(epilogue);
+        match self.ret_clif {
+            Some(ty) => {
+                let dv = if ty == types::F64 {
+                    self.b.ins().f64const(0.0)
+                } else {
+                    self.b.ins().iconst(ty, 0)
+                };
+                self.b.ins().return_(&[dv]);
+            }
+            None => {
+                self.b.ins().return_(&[]);
+            }
+        }
+
+        self.b.switch_to_block(cont);
+        self.b.seal_block(cont);
         Ok(())
     }
 
@@ -1509,6 +1598,7 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.coll.list_set, self.b.func);
                 self.b.ins().call(host_ref, &[list, idx, val, line]);
+                self.emit_trap_check()?;
             }
             TStmt::ForIn {
                 var,
@@ -1554,6 +1644,7 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.coll.list_get, self.b.func);
                 let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
                 let elem = self.b.inst_results(get_call)[0];
+                self.emit_trap_check()?;
                 let loop_var = self.fresh_var(types::I64);
                 self.b.def_var(loop_var, elem);
                 self.vars.insert(TIR::local_place(var), loop_var);
@@ -1918,11 +2009,9 @@ impl LowerCtx<'_, '_> {
                 let arg_vals = arg_vals?;
                 let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
                 let call = self.b.ins().call(func_ref, &arg_vals);
-                if let Some(_) = clif_ty(&expr.ty) {
-                    Ok(self.b.inst_results(call)[0])
-                } else {
-                    Ok(self.b.ins().iconst(types::I8, 0))
-                }
+                let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+                self.emit_trap_check()?;
+                Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
             TExprKind::Print(inner) => {
                 self.emit_print(inner)?;
@@ -2089,6 +2178,7 @@ impl LowerCtx<'_, '_> {
                             .declare_func_in_func(self.host.conc.panic_channel_closed, self.b.func);
                         let call = self.b.ins().call(host_ref, &[line]);
                         let panic_val = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
                         self.b.ins().jump(merge, &[panic_val]);
                     }
                     _ => return Err("jit or-fallback unsupported".to_string()),
@@ -2114,7 +2204,9 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.coll.list_get, self.b.func);
                 let call = self.b.ins().call(host_ref, &[list, idx, line_const]);
-                Ok(self.b.inst_results(call)[0])
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(result)
             }
             TExprKind::Slice {
                 base,
@@ -2130,7 +2222,9 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.coll.list_slice, self.b.func);
                 let call = self.b.ins().call(host_ref, &[list, s, e, line_const]);
-                Ok(self.b.inst_results(call)[0])
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(result)
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
                 self.lower_builtin_method(recv, op, args, &expr.ty)
@@ -2185,11 +2279,9 @@ impl LowerCtx<'_, '_> {
                 }
                 let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
                 let call = self.b.ins().call(func_ref, &arg_vals);
-                if clif_ty(&expr.ty).is_some() {
-                    Ok(self.b.inst_results(call)[0])
-                } else {
-                    Ok(self.b.ins().iconst(types::I8, 0))
-                }
+                let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+                self.emit_trap_check()?;
+                Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
             TExprKind::StaticCall {
                 type_prefix,
@@ -2208,11 +2300,9 @@ impl LowerCtx<'_, '_> {
                 let arg_vals = arg_vals?;
                 let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
                 let call = self.b.ins().call(func_ref, &arg_vals);
-                if let Some(_) = clif_ty(&expr.ty) {
-                    Ok(self.b.inst_results(call)[0])
-                } else {
-                    Ok(self.b.ins().iconst(types::I8, 0))
-                }
+                let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+                self.emit_trap_check()?;
+                Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
             TExprKind::EnumLit { prefix, payload } => match payload {
                 TEnumPayload::Unit => {
@@ -2414,7 +2504,9 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.channel_receive, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val, line]);
-                Ok(self.b.inst_results(call)[0])
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(result)
             }
             THandleOp::SenderSend => {
                 let val = self.lower_expr(&args[0])?;
@@ -2536,7 +2628,9 @@ impl LowerCtx<'_, '_> {
             let line_const = self.b.ins().iconst(types::I32, line as i64);
             let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
             let call = self.b.ins().call(host_ref, &[l, r, line_const]);
-            return Ok(self.b.inst_results(call)[0]);
+            let result = self.b.inst_results(call)[0];
+            self.emit_trap_check()?;
+            return Ok(result);
         }
         let lhs_ty = self.expr_arith_type(lhs);
         let _rhs_ty = self.expr_arith_type(rhs);
@@ -2695,6 +2789,7 @@ fn lower_spawn_function(
             dead: false,
             next_var: 0,
             method_struct: None,
+            ret_clif: clif_ty(&lam.ret),
         };
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
@@ -2826,6 +2921,7 @@ fn lower_function(
             dead: false,
             next_var: 0,
             method_struct,
+            ret_clif: tir.ret.as_ref().and_then(clif_ty),
         };
         if matches!(tir.kind, TFuncKind::Method { self_conv: Some(_) }) {
             let self_var = lctx.fresh_var(types::I64);
@@ -2952,7 +3048,39 @@ fn fresh_runtime() -> JitRuntime {
         task_controls: Vec::new(),
         lists: Vec::new(),
         structs_f64: Vec::new(),
+        trapped: None,
     }
+}
+
+/// Build the E0953 diagnostic for a trapped run, matching the tier-0
+/// interpreter's own voice for the identical panic (the dev interpreter IS the
+/// comptime tree-walker, so its runtime panics already render this way — see
+/// `crates/jet-comptime/src/Comptime/Diagnostics.rs::comptime_panic`). The JIT
+/// tier must report the SAME code/voice, not a new one, for parity.
+fn jit_panic_diag(msg: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E0953",
+        "your comptime code stopped the build".to_string(),
+        format!("while computing this value at compile time, the program panicked: {msg}"),
+        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
+            .to_string(),
+        None,
+    )
+}
+
+/// Scrub heap state a trapped (partial) run created, so the NEXT resident
+/// invocation (hot-reload iteration or plain re-run) in this same process
+/// starts clean — a crashed run must never leak lists/strings/channels/tasks
+/// into the following one. `source_file`/`invocations` are run-loop
+/// bookkeeping, not per-run heap, and are left alone.
+fn reset_run_heap(rt: &mut JitRuntime) {
+    rt.strings.clear();
+    rt.lists.clear();
+    rt.structs_f64.clear();
+    rt.channels.clear();
+    rt.senders.clear();
+    rt.tasks.clear();
+    rt.task_controls.clear();
 }
 
 fn resident_teardown() {
@@ -3019,6 +3147,15 @@ fn resident_invoke() -> Result<RunOutcome, String> {
         entry();
         jet_codegen::scheduler::jet_scheduler_drain();
         Concurrency::set_active_runtime(None);
+        if let Some(msg) = runtime.trapped.take() {
+            // A runtime panic unwound to `main`'s epilogue via the trapped-flag
+            // branches (no Rust panic crossed a JIT frame — I1). Report it exactly
+            // as the tier-0 interpreter reports the same panic (E0953), and scrub
+            // the partial run's heap so the next hot-reload iteration in this
+            // resident process starts clean.
+            reset_run_heap(runtime);
+            return Ok(RunOutcome::Problems(vec![jit_panic_diag(&msg)]));
+        }
         Ok(RunOutcome::Ran {
             stdout: runtime.stdout.clone(),
             stderr: runtime.stderr.clone(),

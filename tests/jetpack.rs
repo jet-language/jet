@@ -1107,3 +1107,153 @@ fn mono_example_has_two_pkg_jet_members() {
         "workspace.jet should use find-based member discovery"
     );
 }
+
+// ── Card #99 T4: build-from-source surface (build states / vendor / audit) ────
+
+#[test]
+fn jet_build_reports_source_states() {
+    // T4: `jetpack build` reports how each package was satisfied. A first build
+    // of a core package is `built`; the content-addressed re-build is `cached`.
+    let (_base, proj, root) = core_hello_project("t4-build");
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let out1 = String::from_utf8_lossy(&first.stderr);
+    assert!(out1.contains("built"), "first build must report `built`: {out1}");
+    assert!(
+        out1.contains("1 built"),
+        "summary must count the built package: {out1}"
+    );
+
+    let second = run();
+    assert!(second.status.success());
+    let out2 = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        out2.contains("cached"),
+        "re-build of the same content must report `cached`: {out2}"
+    );
+    assert!(out2.contains("1 cached"), "summary must count the cache hit: {out2}");
+}
+
+#[test]
+fn jet_vendor_writes_pinned_sources() {
+    // T4 / D-BFS1: `jetpack vendor` copies each source-built package and writes a
+    // `<name>.sha256` pin (the A4 output hash) so a later build is reproducible.
+    let (_base, proj, root) = core_hello_project("t4-vendor");
+    // Realize first so the hangar has a source-built object.
+    let built = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(built.status.success());
+
+    let out = jetpack()
+        .args(["vendor", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pin = proj.join("vendor/hello.sha256");
+    assert!(pin.is_file(), "vendor must write a per-package sha256 pin");
+    let hash = fs::read_to_string(&pin).unwrap();
+    assert!(
+        hash.trim().starts_with("sha256-"),
+        "the pin must be a content hash: {hash}"
+    );
+    assert!(
+        proj.join("vendor/hello").is_dir(),
+        "vendor must copy the package source tree"
+    );
+}
+
+#[test]
+fn jet_audit_reads_without_exec() {
+    // T4 / D-BUILDSCOPE1: `jetpack audit` reads build provenance and executes
+    // nothing — no "resolving …" / "built" build activity, just a read-only
+    // report of the realized objects' provenance.
+    let (_base, proj, root) = core_hello_project("t4-audit");
+    let built = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(built.status.success());
+
+    let out = jetpack()
+        .args(["audit", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = String::from_utf8_lossy(&out.stderr);
+    assert!(report.contains("read-only, no build ran"), "audit is read-only: {report}");
+    assert!(report.contains("provenance"), "audit reports provenance: {report}");
+    // Audit must not run a build: it never prints the realize progress line.
+    assert!(
+        !report.contains("resolving"),
+        "audit must not realize anything: {report}"
+    );
+}
+
+#[test]
+fn jet_hangar_du_counts_source_built_objects() {
+    // T0 exit: `jetpack hangar du` counts realized objects honestly, marking
+    // source-built ones. A first-party core build shows up as a `(built)` object.
+    let (_base, proj, root) = core_hello_project("t0-du");
+    let built = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(built.status.success());
+
+    let out = jetpack()
+        .args(["hangar", "du", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = String::from_utf8_lossy(&out.stderr);
+    assert!(report.contains("built"), "du must mark source-built objects: {report}");
+    assert!(
+        report.contains("1 built from source"),
+        "du summary must count source-built objects honestly: {report}"
+    );
+}

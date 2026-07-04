@@ -13,7 +13,7 @@ use crate::AST::{ContribValue, Contribution, Expr, Func, Item, ModuleDecl, Names
 
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::Diagnostics::{not_a_namespace_literal, packages_not_a_list, wrong_namespace_type};
-use super::System::{evaluate_image, evaluate_system};
+use super::System::{evaluate_fleet, evaluate_image, evaluate_system};
 use super::Types::EvaluatedModule;
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
@@ -82,6 +82,7 @@ fn evaluate_module<'a>(
     let mut entries = Vec::new();
     let mut systems = Vec::new();
     let mut images = Vec::new();
+    let mut fleets = Vec::new();
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
@@ -94,6 +95,9 @@ fn evaluate_module<'a>(
             (Namespace::Image, ContribValue::Image(lit)) => {
                 images.push(evaluate_image(&c.path, lit)?);
             }
+            (Namespace::Fleet, ContribValue::Fleet(lit)) => {
+                fleets.push(evaluate_fleet(&c.path, lit, src)?);
+            }
             // Namespace/value-shape mismatches can't occur: the parser pairs each
             // namespace with its dedicated value parser (see `contribution`).
             _ => unreachable!("contribution namespace/value shape mismatch"),
@@ -104,6 +108,7 @@ fn evaluate_module<'a>(
         entries,
         systems,
         images,
+        fleets,
     })
 }
 
@@ -112,6 +117,7 @@ fn namespace_type(ns: Namespace) -> &'static str {
         Namespace::Env => Syntax::TYPE_ENV,
         Namespace::System => Syntax::TYPE_SYSTEM,
         Namespace::Image => Syntax::TYPE_IMAGE,
+        Namespace::Fleet => Syntax::TYPE_FLEET,
     }
 }
 

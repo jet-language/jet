@@ -754,6 +754,49 @@ pub use crate::Syntax::{
     is_ring_module_staged, normalize_core_module, KNOWN_CORE_MODULES,
 };
 
+/// D-JPK-RINGSHIP1=C: where a ring module's implementation comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RingResolution {
+    /// A prebuilt artifact staged from the active toolchain object (the hangar).
+    Staged(PathBuf),
+    /// The compiler-embedded bridge template (`FFI.rs` / `CoreLib.rs`) — the
+    /// zero-config fallback that preserves rung-0 magic.
+    Embedded,
+}
+
+/// Resolve where a ring module (`http`, `regex`, …) is realized from. Prefers the
+/// staged hangar artifact when the active toolchain object carries one for this
+/// platform; otherwise the compiler-embedded template. One resolution path, two
+/// sources, no user-visible difference (D-JPK-RINGSHIP1=C). Ring version =
+/// toolchain version by construction: the artifact only exists in a toolchain
+/// object, so a staged ring can never skew from the compiler that ships it.
+pub fn resolve_ring_module(name: &str) -> RingResolution {
+    match crate::Syntax::staged_ring_artifact(name) {
+        Some(artifact) => RingResolution::Staged(artifact),
+        None => RingResolution::Embedded,
+    }
+}
+
+/// E1241 — a ring library is listed in `deps: { core.<ring> }` expecting a
+/// staged hangar object, but the active toolchain object carries no prebuilt
+/// artifact for this platform. Under D-JPK-RINGSHIP1=C the loader falls back to
+/// the embedded template (this diagnostic is the informational form); under
+/// RINGSHIP1=B, where ring libs are independently versioned source packages, it
+/// is a hard error.
+pub fn e1241_ring_platform_miss(ring: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1241",
+        format!("the staged `core.{ring}` artifact is missing for this platform"),
+        "the active toolchain object carries prebuilt ring artifacts, but none for \
+         `core.{ring}` on this platform."
+            .replace("{ring}", ring),
+        "the build falls back to the compiler-embedded `core.{ring}`; to ship the staged \
+         artifact, realize a toolchain object built for this platform (`jet update jet`)."
+            .replace("{ring}", ring),
+        None,
+    )
+}
+
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
     if let Some(module) = core_module_path(imp) {
         if !is_known_core_module(&module) {

@@ -1,12 +1,16 @@
 # Memory model v5: the borrow checker, humanized
 
-**Status:** PROPOSAL — owner gate **D-MEM1** (Tower card #187). No code until ratified.
+**Status:** **RATIFIED — D-MEM1 = A, 2026-07-03** (Tower card #187). Implementation
+plan: [../plans/memory-v5-migration.md](../plans/memory-v5-migration.md).
 **Owner directive (2026-07-03, final reset):** use the Rust borrow checker system;
 make it much more ergonomic and beginner-friendly; read-only by default; sigils not
 words; no `~`; prefer `&`/`^`. Earlier explorations (v1 value semantics, v2 explicit
 sigils + from-clauses, v3 progressive ceremony, v4 identity objects) are dead; kept in
 git history only. If the owner approves v5, the next deliverable is the migration path
 from the current implementation.
+
+**Usage gallery:** [memory-v5-gallery.md](memory-v5-gallery.md) — 13 side-by-side
+Jet-vs-Rust examples across scripting, game, web, concurrency, graphs, low-level.
 
 ---
 
@@ -25,7 +29,7 @@ a targeted fix that does not weaken the semantics:
 | invisible moves (`push(kai)` → E0382 three lines later) | moves are silent at call sites | moves are **always written**: `push(^kai)`. A later use errors pointing at the `^` *you typed* |
 | errors describe the checker, not the fix | diagnostics grew out of the implementation | every borrow error is a teaching diagnostic with a fix menu (what/why/fix, I4-pinned) |
 | walls need wrapper-assembly (`Rc<RefCell<…>>`, `Arc<Mutex<…>>`, slotmap crate) | escape hatches are library type-tetris | escape hatches are **named language-level types**: `Shared<T>`, `Pool<T>`. Errors suggest them by name |
-| `String` vs `&str`, `Vec<T>` vs `&[T]` dualism | exposed borrow types split every API in two | one `Str`, one `List<T>`; cheap views are internal (counted slices), invisible in signatures |
+| `String` vs `&str`, `Vec<T>` vs `&[T]` dualism | exposed borrow types split every API in two | one `String`, one `[T]` list; cheap views are internal (counted slices), invisible in signatures |
 
 Everything else about the checker — exclusivity, move analysis, RAII — is kept
 verbatim. This is Rust with the sharp edges machined off, not a new model.
@@ -44,7 +48,7 @@ verbatim. This is Rust with the sharp edges machined off, not a new model.
 subject is visible left of the dot (D-MUTSELF1, kept).
 
 ```jet
-fn strongest(party: Party) -> Str          // read
+fn strongest(party: Party) -> String     // read
 fn heal(player: &Player, amount: Int)      // write
 fn enroll(party: &Party, player: ^Player)  // write party, take player
 
@@ -55,7 +59,9 @@ enroll(&party, ^kai)                       // both effects visible at the call
 Locals: `x := f()` owns; `x := y` moves iff `y` is written `^y`, otherwise it's an
 error for heap data with a fix menu (`copy y` / `^y`), and a plain copy for scalars
 and small POD — same rule Rust's `Copy` draws, but the failure mode is a fix menu,
-not folklore.
+not folklore. `copy x` (D-CAP2) is the one spelling for duplicating heap data.
+`^` marks giving away a *named binding*; temporaries — literals, call results,
+`copy x` — pass without it, since nothing survives to be used-after.
 
 ## What beginners never see
 
@@ -68,9 +74,9 @@ not folklore.
   `Id<T>` — never a borrow. The single biggest lifetime-infection source in Rust
   (struct `<'a>`) cannot be expressed, so it cannot confuse.
 - **No returned raw borrows.** Functions return owned values or *views* — library
-  value-types that internally share storage (a `Str` slice is a counted view; so
-  are `List` slices). `text.trim()`, `email.after("@")` are zero-copy and their
-  signatures are just `-> Str`. No `&str`-vs-`String` split exists to explain.
+  value-types that internally share storage (a `String` slice is a counted view; so
+  are `[T]` slices). `text.trim()`, `email.after("@")` are zero-copy and their
+  signatures are just `-> String`. No `&str`-vs-`String` split exists to explain.
 - **No invisible moves.** Every transfer is `^` at the call site.
 - **No aliased mutation.** As in Rust — but the error is a story with a fix menu,
   and the escape hatches have names.
@@ -166,7 +172,7 @@ races are unrepresentable, in the type system rather than by lint.
 fn domain<'a>(email: &'a str) -> &'a str { … }
 ```
 ```jet
-fn domain(email: Str) -> Str { email.after("@") }   // view value; zero-copy; no 'a
+fn domain(email: String) -> String { return email.after("@") }   // view; no 'a
 ```
 
 ```rust
@@ -174,7 +180,7 @@ fn domain(email: Str) -> Str { email.after("@") }   // view value; zero-copy; no
 struct Parser<'a> { src: &'a str, pos: usize }
 ```
 ```jet
-struct Parser { src: Str, pos: Int }   // Str view is a value; no lifetime exists
+struct Parser { src: String, pos: Int }   // view value field; no lifetime exists
 ```
 
 ```rust

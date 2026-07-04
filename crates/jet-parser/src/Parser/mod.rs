@@ -501,6 +501,28 @@ fn image_from_not_system(span: Span) -> Diagnostic {
     )
 }
 
+/// U15: a fleet host value must be written `system.<name>[.{ overrides }]`.
+fn fleet_host_not_system(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0003",
+        "a fleet host must name a system".to_string(),
+        "U15: each `hosts:` entry maps a host to a `System`, written `<host>: system.<name>`".to_string(),
+        "write `<host>: system.<name>`, e.g. `web1: system.web`".to_string(),
+        Some(span),
+    )
+}
+
+/// U15: an unterminated `.{ … }` override record on a fleet host.
+fn fleet_unterminated_override(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0003",
+        "unterminated host override record".to_string(),
+        "U15: a `.{ … }` copy-with-update override on a host must be closed with `}`".to_string(),
+        "close the override record with `}`".to_string(),
+        Some(span),
+    )
+}
+
 fn binding_why() -> String {
     format!(
         "a binding is `name {} value` if it never changes, or `name {} value` if it can",

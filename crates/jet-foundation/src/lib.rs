@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 #![deny(warnings)]
 pub mod AST;
+pub mod CanonicalAST;
 pub mod Collections;
 pub mod Diagnostics;
 pub mod Generics;

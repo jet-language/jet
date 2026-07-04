@@ -2,8 +2,8 @@
 #![deny(warnings)]
 // Re-export all lower seams so driver source files can use `crate::AST`, `crate::Sema` etc.
 pub use jet_codegen::{
-    Codegen, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Sema, Syntax,
-    Traits, AST, SHA256,
+    CanonicalAST, Codegen, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser,
+    Sema, Syntax, Traits, AST, SHA256,
 };
 pub mod CBind;
 pub mod CFFI;

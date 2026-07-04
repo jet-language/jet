@@ -34,12 +34,12 @@ pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
     ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = ptr);
 }
 
-fn trap_panic(msg: &str) -> ! {
-    with_runtime_mut(|rt| {
-        rt.stderr.push_str(&format!("panic: {msg}\n"));
-        rt.stderr.push_str(&format!("  --> {}:1\n", rt.source_file));
-    });
-    std::process::exit(70);
+/// Record a panic trap. Returns normally (caller yields a dummy value); JIT
+/// code branches to its epilogue at the next `emit_trap_check` (I1 — no Rust
+/// panic ever unwinds through a JIT frame).
+fn trap_panic(msg: &str) -> i64 {
+    with_runtime_mut(|rt| rt.set_trap(msg));
+    0
 }
 
 extern "C" fn jet_jit_channel_new() -> i64 {
@@ -102,7 +102,7 @@ extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_channel_receive(ch: i64, line: u32) -> i64 {
+extern "C" fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
     with_runtime_mut(|rt| {
         let chan = rt
             .channels
@@ -111,17 +111,15 @@ extern "C" fn jet_jit_channel_receive(ch: i64, line: u32) -> i64 {
         match chan.receive() {
             Some(v) => v,
             None => {
-                rt.stderr.push_str("panic: channel closed\n");
-                rt.stderr
-                    .push_str(&format!("  --> {}:{line}\n", rt.source_file));
-                std::process::exit(70);
+                rt.set_trap("channel closed");
+                0
             }
         }
     })
 }
 
 extern "C" fn jet_jit_panic_channel_closed(_line: u32) -> i64 {
-    trap_panic("channel closed");
+    trap_panic("channel closed")
 }
 
 type SpawnFn0 = extern "C" fn() -> i64;

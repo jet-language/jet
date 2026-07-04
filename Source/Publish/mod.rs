@@ -24,14 +24,18 @@ pub use crate::Sema::Schema::{
 mod Schema;
 pub use Schema::write_schema_snapshots_for_entry;
 mod Diff;
+pub mod Index;
 mod Registry;
 mod Resolve;
 mod SBOM;
 pub mod SemVer;
+// c146 (D-PKGSIGN1): Ed25519 author signing via the hidden crypto bridge helper.
+pub mod Sign;
 mod Vendor;
 
 pub use Advisory::*;
 pub use Diff::*;
+pub use Index::IndexEntry;
 pub use Registry::*;
 pub use Resolve::*;
 pub use SemVer::*;
@@ -319,7 +323,7 @@ mod tests {
             inferred_layer: None,
             effects: Vec::new(),
             effect_grants: Vec::new(),
-        }
+            envelope: None,        }
     }
 
     fn make_lock(pkgs: Vec<LockedPackage>) -> LockFile {
@@ -329,7 +333,7 @@ mod tests {
             root_dependencies: vec![],
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
-        }
+            toolchains: Vec::new(),        }
     }
 
     #[test]

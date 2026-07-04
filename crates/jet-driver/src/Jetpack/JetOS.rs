@@ -284,6 +284,7 @@ fn realize_one(
                 &r.out,
                 &r.bin,
                 &r.rlib,
+                &r.envelope,
             ) {
                 Ok(entry) => Some(entry),
                 Err(e) => {

@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{Expr, Func, Item, StrPart};
+use crate::AST::{ComptimeInput, Expr, Func, Item, StrPart};
 
 // ──────────────────────────────────────────────
 // Public types
@@ -33,6 +33,11 @@ use crate::AST::{Expr, Func, Item, StrPart};
 pub struct WorkspacePlan {
     /// Member packages in source order (the order `members:` produced them).
     pub members: Vec<WorkspaceMember>,
+    /// D-CTEFFECT1 Tier-1: content-addressed inputs (`@embed`, `fetch(url,
+    /// sha256:)`) that a `members:` expression pulled in during evaluation.
+    /// Recorded into `.jet/lock` so the index is reproducible — a changed input
+    /// invalidates the lock the same way it does for any other Tier-1 call site.
+    pub comptime_inputs: Vec<ComptimeInput>,
 }
 
 /// One workspace member package.
@@ -159,17 +164,46 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
         })
         .ok_or_else(|| e0995_no_workspace_module())?;
 
+    // Build the comptime context a `members:` expression evaluates against:
+    // every top-level `fn` (callable) and every top-level `const`/`comptime`
+    // binding (referenceable), evaluated in source order so a later binding can
+    // build on an earlier one. This is what lets `members:` compose a sibling
+    // `comptime PACKAGES = […]` or call a local helper `fn`, rather than being
+    // limited to inline literals + the `find("./dir")` fast path.
+    let funcs: HashMap<String, &Func> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(f) => Some((f.name.clone(), f)),
+            _ => None,
+        })
+        .collect();
+    let extern_names: HashSet<String> = HashSet::new();
+    let mut globals: HashMap<String, crate::Comptime::CtValue> = HashMap::new();
+    for item in &program.items {
+        if let Item::Const(c) = item {
+            let v = crate::Comptime::evaluate(&c.value, &funcs, &extern_names, base_dir, &globals)?;
+            globals.insert(c.name.clone(), v);
+        }
+    }
+
     // Evaluate each `members:` expression (typically just one).
     let mut members = Vec::new();
+    let mut comptime_inputs = Vec::new();
     for expr in &ws_module.members {
-        let paths = eval_members_expr(expr, src, base_dir)?;
+        let (paths, inputs) =
+            eval_members_expr(expr, src, base_dir, &funcs, &extern_names, &globals)?;
+        comptime_inputs.extend(inputs);
         for rel_path in paths {
             let member = resolve_member(&rel_path, base_dir);
             members.push(member);
         }
     }
 
-    Ok(WorkspacePlan { members })
+    Ok(WorkspacePlan {
+        members,
+        comptime_inputs,
+    })
 }
 
 // ──────────────────────────────────────────────
@@ -177,10 +211,21 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
 // ──────────────────────────────────────────────
 
 /// Evaluate one `members:` expression to a list of relative package directory
-/// paths. Handles `find("./dir")` specially (the common case); falls back to
-/// comptime for arbitrary expressions.
-fn eval_members_expr(expr: &Expr, _src: &str, base_dir: &Path) -> Result<Vec<String>, Diagnostic> {
-    // Fast path: `find("./dir")` — scan for package directories.
+/// paths plus any Tier-1 comptime inputs it recorded. Handles `find("./dir")`
+/// specially (the common case, no comptime inputs); otherwise evaluates through
+/// comptime against the workspace file's top-level `fn`s and `const`s.
+fn eval_members_expr(
+    expr: &Expr,
+    _src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    extern_names: &HashSet<String>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+) -> Result<(Vec<String>, Vec<ComptimeInput>), Diagnostic> {
+    // Fast path: `find("./dir")` — scan for package directories. A literal-path
+    // `find` reads the filesystem directly (no comptime input record); the
+    // general `find(glob) -> [String]` builtin (D-CTFIND1/2, unbuilt c157) will
+    // route through the comptime path below once it lands.
     if let Expr::Call(call) = expr {
         if call.name == Syntax::BUILTIN_FIND {
             let span = call.name_span;
@@ -194,25 +239,30 @@ fn eval_members_expr(expr: &Expr, _src: &str, base_dir: &Path) -> Result<Vec<Str
                     Some(span),
                 )
             })?;
-            let dir_str = extract_literal_string(&arg.expr).ok_or_else(|| {
-                Diagnostic::error(
-                    "E0996",
-                    "`find` path must be a string literal".to_string(),
-                    "computed paths can't be used here; write the path inline".to_string(),
-                    "example: `members: find(\"./packages\")`".to_string(),
-                    Some(arg.expr.span()),
-                )
-            })?;
-            let scan_dir = base_dir.join(&dir_str);
-            return find_package_dirs(&scan_dir, base_dir, span);
+            if let Some(dir_str) = extract_literal_string(&arg.expr) {
+                let scan_dir = base_dir.join(&dir_str);
+                return Ok((find_package_dirs(&scan_dir, base_dir, span)?, Vec::new()));
+            }
+            // A non-literal `find` argument (e.g. `find(base + "/pkgs")`) is a
+            // computed path: fall through to the comptime evaluator, which
+            // resolves the argument against `globals`/`funcs` before scanning.
         }
     }
 
-    // General case: evaluate through comptime, expect a list of strings.
-    let funcs: HashMap<String, &Func> = HashMap::new();
-    let extern_names: HashSet<String> = HashSet::new();
-    let v = crate::Comptime::evaluate(expr, &funcs, &extern_names, base_dir, &HashMap::new())?;
-    extract_string_list(v, expr.span())
+    // General case: evaluate through comptime, expect a list of strings, and
+    // capture any Tier-1 inputs (`@embed`, `fetch`) the expression pulled in so
+    // the workspace lock can record them (D-CTEFFECT1).
+    let (v, inputs) = crate::Comptime::evaluate_with_imports_opts_collecting(
+        expr,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        &HashMap::new(),
+        false,
+        0,
+    )?;
+    Ok((extract_string_list(v, expr.span())?, inputs))
 }
 
 /// Extract a plain string literal from an `Expr::Str` with no interpolation.
@@ -423,6 +473,37 @@ mod tests {
         assert_eq!(plan.members[0].name, "hello");
         assert_eq!(plan.members[1].path, "./packages/ranker");
         assert_eq!(plan.members[1].name, "ranker");
+    }
+
+    #[test]
+    fn members_references_sibling_comptime_const() {
+        // Slice A: a `members:` expression can name a top-level `comptime`
+        // binding declared in the same file — not just inline literals.
+        let src = "comptime PKGS = [\"./packages/hello\", \"./packages/ranker\"]\n\
+                   module workspace {\n    members: PKGS\n}\n";
+        let plan = eval(src);
+        let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["hello", "ranker"]);
+    }
+
+    #[test]
+    fn members_composes_comptime_const_with_string_ops() {
+        // A binding can be composed inside the list expression.
+        let src = "comptime BASE = \"./workspace-packages\"\n\
+                   module workspace {\n    members: [\"{BASE}/a\", \"{BASE}/b\"]\n}\n";
+        let plan = eval(src);
+        let paths: Vec<&str> = plan.members.iter().map(|m| m.path.as_str()).collect();
+        assert_eq!(paths, ["./workspace-packages/a", "./workspace-packages/b"]);
+    }
+
+    #[test]
+    fn members_calls_top_level_fn() {
+        // A `members:` expression can call a top-level helper `fn`.
+        let src = "fn member(name: String) -> String { return \"./pkgs/{name}\" }\n\
+                   module workspace {\n    members: [member(\"hello\"), member(\"ranker\")]\n}\n";
+        let plan = eval(src);
+        let paths: Vec<&str> = plan.members.iter().map(|m| m.path.as_str()).collect();
+        assert_eq!(paths, ["./pkgs/hello", "./pkgs/ranker"]);
     }
 
     #[test]

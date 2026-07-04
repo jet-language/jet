@@ -185,6 +185,109 @@ pub enum RefError {
     /// D-MONOREF1=A: bare name with no source prefix, and no workspace member
     /// matches, or the match was ambiguous.
     AmbiguousBare(String),
+    /// E1230 (D-MONOREF1=A): a bare or path-form ref matched more than one
+    /// workspace member. `candidates` are the members' relative paths, so the
+    /// message can point at the exact addresses to disambiguate.
+    AmbiguousMember {
+        query: String,
+        candidates: Vec<String>,
+    },
+    /// E1231 (D-MONOREF1=A): a bare or path-form ref matched no workspace
+    /// member. `suggestions` are the closest member names/paths, for a
+    /// did-you-mean.
+    UnknownMember {
+        query: String,
+        suggestions: Vec<String>,
+    },
+}
+
+impl RefError {
+    /// The registered diagnostic code for the errors that carry one. The older
+    /// classifier errors render without a code (CLI-only, pre-registry); the
+    /// workspace-index errors (Slice B) are registered in docs/spec/diagnostics.md.
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            RefError::AmbiguousMember { .. } => Some("E1230"),
+            RefError::UnknownMember { .. } => Some("E1231"),
+            _ => None,
+        }
+    }
+}
+
+/// A queryable index of the current workspace's members (Slice B). Built once
+/// from a `WorkspacePlan` (or the `.jet/lock` mirror) and consulted by
+/// `classify_with_workspace` to resolve path-form (`infra/logging`) and
+/// bare-form (`logging`) addressing — the forms that have no `source:` prefix.
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceIndex {
+    /// `(member name, normalized relative path)`, in workspace source order.
+    members: Vec<(String, String)>,
+}
+
+impl WorkspaceIndex {
+    /// An index with no members — every bare/path ref is then `UnknownMember`.
+    pub fn empty() -> WorkspaceIndex {
+        WorkspaceIndex::default()
+    }
+
+    /// Build from `(name, path)` pairs (a `WorkspacePlan`'s members). Paths are
+    /// normalized (leading `./` and trailing `/` trimmed) so a query and a
+    /// stored path compare byte-for-byte regardless of how each was spelled.
+    pub fn from_members<I>(members: I) -> WorkspaceIndex
+    where
+        I: IntoIterator<Item = (String, String)>,
+    {
+        WorkspaceIndex {
+            members: members
+                .into_iter()
+                .map(|(name, path)| (name, normalize_member_path(&path)))
+                .collect(),
+        }
+    }
+
+    /// True when the index has no members (no workspace, or an empty one).
+    pub fn is_empty(&self) -> bool {
+        self.members.is_empty()
+    }
+
+    /// Member names + paths, for did-you-mean suggestion lists.
+    fn candidate_labels(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for (name, path) in &self.members {
+            out.push(name.clone());
+            if path != name {
+                out.push(path.clone());
+            }
+        }
+        out
+    }
+
+    /// Resolve a path-form ref (`infra/logging`) to the matching member path.
+    fn by_path(&self, query: &str) -> Vec<&str> {
+        let q = normalize_member_path(query);
+        self.members
+            .iter()
+            .filter(|(_, path)| *path == q)
+            .map(|(_, path)| path.as_str())
+            .collect()
+    }
+
+    /// Resolve a bare-form ref (`logging`) against member names.
+    fn by_name(&self, query: &str) -> Vec<&str> {
+        self.members
+            .iter()
+            .filter(|(name, _)| name == query)
+            .map(|(_, path)| path.as_str())
+            .collect()
+    }
+}
+
+/// Normalize a workspace member path: trim a leading `./` and any trailing `/`,
+/// and collapse `\` to `/` so Windows-spelled paths compare equal to POSIX ones.
+fn normalize_member_path(p: &str) -> String {
+    let p = p.trim().replace('\\', "/");
+    let p = p.strip_prefix("./").unwrap_or(&p);
+    p.trim_end_matches('/').to_string()
 }
 
 /// Classify a `<source>:<package/path>` ref against only the built-in sources.
@@ -244,6 +347,103 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
     }
 
     Err(RefError::MissingSeparator(raw.to_string()))
+}
+
+/// Classify a ref with workspace-member awareness (Slice B, D-MONOREF1=A).
+///
+/// Resolution order, first match wins:
+///   1. colon form  `source:package`  — via `classify_in` (unchanged)
+///   2. dot form    `source.package`  — via `classify_in` (unchanged)
+///   3. path form   `infra/logging`   — exact relative-path match in the index
+///   4. bare form   `logging`         — exact member-name match in the index
+///
+/// The colon/dot forms are tried first so an explicit source prefix always wins
+/// over an accidental index collision. Only a ref with no source prefix (what
+/// `classify_in` reports as `MissingSeparator`) falls through to the index. A
+/// path/bare ref that matches no member is `UnknownMember` (E1231); one that
+/// matches more than one is `AmbiguousMember` (E1230).
+pub fn classify_with_workspace(
+    raw: &str,
+    table: &SourceTable,
+    index: &WorkspaceIndex,
+) -> Result<RefSpec, RefError> {
+    match classify_in(raw, table) {
+        Ok(spec) => Ok(spec),
+        // No source prefix. Consult the workspace index only when a workspace
+        // actually exists — outside a monorepo a bare/path ref is still just a
+        // missing-source error (D-JPK7), not an unknown-member error.
+        Err(RefError::MissingSeparator(raw_owned)) => {
+            if index.is_empty() {
+                Err(RefError::MissingSeparator(raw_owned))
+            } else {
+                resolve_in_index(raw, index)
+            }
+        }
+        Err(other) => Err(other),
+    }
+}
+
+/// Resolve a source-prefix-less ref against the workspace index. `raw` with a
+/// `/` is path form; otherwise bare form.
+fn resolve_in_index(raw: &str, index: &WorkspaceIndex) -> Result<RefSpec, RefError> {
+    let raw = raw.trim();
+    let query = raw;
+    let matches = if raw.contains('/') {
+        index.by_path(query)
+    } else {
+        index.by_name(query)
+    };
+    match matches.len() {
+        1 => Ok(RefSpec {
+            // A workspace member is a local package directory: it realizes
+            // through the `path` source at its relative path.
+            source: Source::Path,
+            package: matches[0].to_string(),
+            raw: raw.to_string(),
+        }),
+        0 => Err(RefError::UnknownMember {
+            query: raw.to_string(),
+            suggestions: nearest(query, &index.candidate_labels()),
+        }),
+        _ => Err(RefError::AmbiguousMember {
+            query: raw.to_string(),
+            candidates: matches.iter().map(|s| s.to_string()).collect(),
+        }),
+    }
+}
+
+/// Up to three closest labels to `query` by a cheap prefix/substring/edit
+/// heuristic, for a did-you-mean list. Deterministic (stable sort).
+fn nearest(query: &str, labels: &[String]) -> Vec<String> {
+    let mut scored: Vec<(usize, &String)> = labels
+        .iter()
+        .map(|l| (edit_distance(query, l), l))
+        .collect();
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    scored
+        .into_iter()
+        .filter(|(d, l)| *d <= query.len().max(l.len()) / 2 + 1)
+        .take(3)
+        .map(|(_, l)| l.clone())
+        .collect()
+}
+
+/// Classic Levenshtein distance (std-only, I6). Small inputs (ref names), so the
+/// simple two-row DP is more than fast enough.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
 }
 
 // ──────────────────────────────────────────────
@@ -393,6 +593,96 @@ mod tests {
         assert!(classify_in("nixpkgs:fd", &table).is_ok());
         assert!(Source::is_builtin("nixpkgs"));
         assert!(!Source::is_builtin("stable"));
+    }
+
+    // ── workspace-index addressing (Slice B, D-MONOREF1=A) ──
+
+    fn ws_index() -> WorkspaceIndex {
+        WorkspaceIndex::from_members([
+            ("logging".to_string(), "./infra/logging".to_string()),
+            ("ranker".to_string(), "packages/ranker".to_string()),
+        ])
+    }
+
+    #[test]
+    fn bare_form_resolves_unique_member() {
+        let r = classify_with_workspace("logging", &SourceTable::empty(), &ws_index()).unwrap();
+        assert_eq!(r.source, Source::Path);
+        assert_eq!(r.package, "infra/logging");
+    }
+
+    #[test]
+    fn path_form_resolves_member() {
+        // Path form matches the normalized relative path (`./` trimmed).
+        let r =
+            classify_with_workspace("infra/logging", &SourceTable::empty(), &ws_index()).unwrap();
+        assert_eq!(r.source, Source::Path);
+        assert_eq!(r.package, "infra/logging");
+        // The other member by its stored path.
+        let r2 =
+            classify_with_workspace("packages/ranker", &SourceTable::empty(), &ws_index()).unwrap();
+        assert_eq!(r2.package, "packages/ranker");
+    }
+
+    #[test]
+    fn unknown_member_is_e1231_with_suggestion() {
+        let err = classify_with_workspace("loggin", &SourceTable::empty(), &ws_index())
+            .expect_err("typo must not resolve");
+        assert_eq!(err.code(), Some("E1231"));
+        match err {
+            RefError::UnknownMember { suggestions, .. } => {
+                assert!(
+                    suggestions.contains(&"logging".to_string()),
+                    "expected a did-you-mean for `logging`, got {suggestions:?}"
+                );
+            }
+            other => panic!("expected UnknownMember, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ambiguous_bare_member_is_e1230_lists_candidates() {
+        let index = WorkspaceIndex::from_members([
+            ("logging".to_string(), "infra/logging".to_string()),
+            ("logging".to_string(), "apps/logging".to_string()),
+        ]);
+        let err = classify_with_workspace("logging", &SourceTable::empty(), &index)
+            .expect_err("two members share the name — must be ambiguous");
+        assert_eq!(err.code(), Some("E1230"));
+        match err {
+            RefError::AmbiguousMember { candidates, .. } => {
+                assert_eq!(candidates.len(), 2);
+                assert!(candidates.contains(&"infra/logging".to_string()));
+                assert!(candidates.contains(&"apps/logging".to_string()));
+            }
+            other => panic!("expected AmbiguousMember, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn colon_form_wins_over_index() {
+        // An explicit `source:package` is never shadowed by the index.
+        let table = SourceTable::from_decls([(
+            "nixpkgs".to_string(),
+            "u".to_string(),
+            ProviderKind::Nix,
+        )]);
+        let r = classify_with_workspace("nixpkgs:logging", &table, &ws_index()).unwrap();
+        assert_eq!(r.source, Source::Nixpkgs);
+        assert_eq!(r.package, "logging");
+    }
+
+    #[test]
+    fn empty_index_falls_through_to_missing_separator() {
+        // With no workspace, a bare ref is still a plain missing-source error —
+        // member resolution is a monorepo-only feature, never a surprise when
+        // there is no workspace at all.
+        let err = classify_with_workspace("logging", &SourceTable::empty(), &WorkspaceIndex::empty())
+            .expect_err("no workspace → not a member");
+        assert!(
+            matches!(err, RefError::MissingSeparator(_)),
+            "expected MissingSeparator, got {err:?}"
+        );
     }
 
     // ── provider@target source refs (U6) ──

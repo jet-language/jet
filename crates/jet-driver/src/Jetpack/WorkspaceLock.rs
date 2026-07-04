@@ -49,6 +49,14 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
             path: m.path.clone(),
         })
         .collect();
+    // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
+    // into the lock, keeping any inputs already recorded by other call sites.
+    // Dedup by path so re-writing the lock is idempotent.
+    for ci in &plan.comptime_inputs {
+        if !lock.comptime_inputs.iter().any(|e| e.path == ci.path) {
+            lock.comptime_inputs.push(ci.clone());
+        }
+    }
     let _ = std::fs::write(lock_path, Lock::write(&lock));
 }
 
@@ -58,6 +66,7 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
 pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     let lock = Lock::load(workspace_root)?;
     Some(WorkspacePlan {
+        comptime_inputs: lock.comptime_inputs.clone(),
         members: lock
             .workspace_members
             .into_iter()
@@ -76,7 +85,7 @@ fn empty_lock() -> LockFile {
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
-    }
+        toolchains: Vec::new(),    }
 }
 
 // ── check that Syntax::PAYLOAD_FILE is accessible (used for doc purposes) ─────
@@ -96,7 +105,10 @@ mod tests {
 
     #[test]
     fn roundtrip_empty() {
-        let plan = WorkspacePlan { members: vec![] };
+        let plan = WorkspacePlan {
+            members: vec![],
+            ..Default::default()
+        };
         let tmp = std::env::temp_dir().join(format!(
             "wlock-empty-{}",
             std::time::SystemTime::now()
@@ -124,6 +136,7 @@ mod tests {
                 member("hello", "packages/hello"),
                 member("ranker", "packages/ranker"),
             ],
+            ..Default::default()
         };
         let tmp = std::env::temp_dir().join(format!(
             "wlock-members-{}",
@@ -165,6 +178,40 @@ mod tests {
     }
 
     #[test]
+    fn comptime_inputs_round_trip_through_lock() {
+        // Slice A (D-CTEFFECT1): a Tier-1 input a `members:` expression recorded
+        // is written into `.jet/lock` and read back by `load`.
+        use crate::AST::ComptimeInput;
+        let tmp = std::env::temp_dir().join(format!(
+            "wlock-ct-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let plan = WorkspacePlan {
+            members: vec![member("hello", "packages/hello")],
+            comptime_inputs: vec![ComptimeInput {
+                path: "assets/index.json".to_string(),
+                hash: "sha256-deadbeef".to_string(),
+            }],
+        };
+        write(&tmp, &plan);
+        let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();
+        assert!(raw.contains("[[comptime_inputs]]"), "{raw}");
+        assert!(raw.contains("assets/index.json"), "{raw}");
+        let loaded = load(&tmp).unwrap();
+        assert_eq!(loaded.comptime_inputs.len(), 1);
+        assert_eq!(loaded.comptime_inputs[0].path, "assets/index.json");
+        // Idempotent re-write does not duplicate the input.
+        write(&tmp, &loaded);
+        let reloaded = load(&tmp).unwrap();
+        assert_eq!(reloaded.comptime_inputs.len(), 1);
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
     fn write_preserves_existing_package_entries() {
         let tmp = std::env::temp_dir().join(format!(
             "wlock-preserve-{}",
@@ -181,6 +228,7 @@ mod tests {
         .unwrap();
         let plan = WorkspacePlan {
             members: vec![member("hello", "packages/hello")],
+            ..Default::default()
         };
         write(&tmp, &plan);
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();

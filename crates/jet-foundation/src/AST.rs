@@ -910,6 +910,8 @@ pub enum ContribValue {
     System(SystemLit),
     /// `image.<name>:` — an `Image` record (U14).
     Image(ImageLit),
+    /// `fleet.<name>:` — a `Fleet` record (U15).
+    Fleet(FleetLit),
 }
 
 impl ContribValue {
@@ -918,6 +920,7 @@ impl ContribValue {
             ContribValue::Expr(e) => e.span(),
             ContribValue::System(s) => s.span,
             ContribValue::Image(i) => i.span,
+            ContribValue::Fleet(f) => f.span,
         }
     }
 }
@@ -1031,8 +1034,56 @@ pub enum ImageFieldValue {
     Other(Expr),
 }
 
+/// U15: a `Fleet { hosts: { <host>: system.<name>.{ … } } }` record. Mirrors
+/// `SystemLit`/`ImageLit`. Field-checking (the one field is `hosts`; every host
+/// value references a known `System`) lives in modeval.
+#[derive(Debug)]
+pub struct FleetLit {
+    pub explicit_type: Option<Span>,
+    pub fields: Vec<FleetField>,
+    pub span: Span,
+}
+
+/// One `name: value` field inside a `Fleet { … }` record.
+#[derive(Debug)]
+pub struct FleetField {
+    pub name: String,
+    pub name_span: Span,
+    pub value: FleetFieldValue,
+    pub span: Span,
+}
+
+/// The parsed value of one `Fleet` field (U15).
+#[derive(Debug)]
+pub enum FleetFieldValue {
+    /// `hosts: { web1: system.<name>.{ … }, … }` — a keyed map of host
+    /// definitions, each referencing a `System` with optional copy-with-update
+    /// overrides captured as raw source text.
+    Hosts(Vec<HostEntry>),
+    /// Any other field — captured so modeval can report it as an unknown
+    /// `Fleet` field with a span.
+    Other(Expr),
+}
+
+/// U15: one `<host>: system.<name>.{ overrides }` entry in a `hosts:` map.
+/// `overrides` is the raw source text of the `.{ … }` copy-with-update tail
+/// (captured, not semantically parsed, until fleet realization in Phase D).
+#[derive(Debug)]
+pub struct HostEntry {
+    pub name: String,
+    pub name_span: Span,
+    /// The referenced `System`'s role name (the `<name>` in `system.<name>`).
+    pub system: String,
+    pub system_span: Span,
+    /// Source span of the `.{ … }` copy-with-update override record, if written
+    /// (`None` for a bare ref). Sliced by modeval; not semantically parsed until
+    /// fleet realization (Phase D).
+    pub overrides: Option<Span>,
+    pub span: Span,
+}
+
 /// U3 (unified-ecosystem §5): the reserved namespaces a module may contribute
-/// to, each with a matching type (`Env`/`System`/`Image`).
+/// to, each with a matching type (`Env`/`System`/`Image`/`Fleet`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Namespace {
     /// `env` → `Env`: a development environment / shell.
@@ -1041,6 +1092,8 @@ pub enum Namespace {
     System,
     /// `image` → `Image`: an ISO / VM / disk image (jetos).
     Image,
+    /// `fleet` → `Fleet`: a map of hosts to `System` refs (U15).
+    Fleet,
 }
 
 /// S45 (M9): type parameter with optional trait bounds.
@@ -3491,4 +3544,8 @@ pub struct FfiLink {
     pub crate_name: String,
     pub rlib_path: PathBuf,
     pub deps_dir: PathBuf,
+    /// Path to the built `jet-crypto-helper` binary, present only when the
+    /// bridge was built with `needs_crypto` (card c146 — package signing shells
+    /// out to this helper for Ed25519 keygen/sign/verify). `None` otherwise.
+    pub helper_bin_path: Option<PathBuf>,
 }

@@ -2,14 +2,13 @@
 
 use super::Concurrency;
 
-fn trap_index(line: u32) -> ! {
+/// Record an out-of-bounds trap. Returns normally; JIT code branches to its
+/// epilogue at the next `emit_trap_check` (I1 — no Rust panic ever unwinds
+/// through a JIT frame; cranelift-jit emits no unwind tables for them).
+fn trap_index() {
     Concurrency::with_runtime_mut(|rt| {
-        rt.stderr
-            .push_str("panic: index out of bounds: the index is outside the list\n");
-        rt.stderr
-            .push_str(&format!("  --> {}:{line}\n", rt.source_file));
+        rt.set_trap("index out of bounds: the index is outside the list");
     });
-    std::process::exit(70);
 }
 
 extern "C" fn jet_jit_list_new() -> i64 {
@@ -38,18 +37,15 @@ extern "C" fn jet_jit_list_len(list: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
+extern "C" fn jet_jit_list_get(list: i64, idx: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get(list as usize)
             .expect("jit list get: bad handle");
         if idx < 0 || (idx as usize) >= xs.len() {
-            rt.stderr
-                .push_str("panic: index out of bounds: the index is outside the list\n");
-            rt.stderr
-                .push_str(&format!("  --> {}:{line}\n", rt.source_file));
-            std::process::exit(70);
+            rt.set_trap("index out of bounds: the index is outside the list");
+            return 0;
         }
         xs[idx as usize]
     })
@@ -69,14 +65,15 @@ extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
+extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, _line: u32) {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get_mut(list as usize)
             .expect("jit list set: bad handle");
         if idx < 0 || (idx as usize) >= xs.len() {
-            trap_index(line);
+            trap_index();
+            return;
         }
         xs[idx as usize] = v;
     });
@@ -91,18 +88,15 @@ extern "C" fn jet_jit_list_sort(list: i64) {
     });
 }
 
-extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, line: u32) -> i64 {
+extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .lists
             .get(list as usize)
             .expect("jit list slice: bad handle");
         if start < 0 || end < start || end > xs.len() as i64 {
-            rt.stderr
-                .push_str("panic: slice out of bounds: the range is outside the list\n");
-            rt.stderr
-                .push_str(&format!("  --> {}:{line}\n", rt.source_file));
-            std::process::exit(70);
+            rt.set_trap("slice out of bounds: the range is outside the list");
+            return 0;
         }
         let slice = xs[start as usize..end as usize].to_vec();
         let id = rt.lists.len() as i64;

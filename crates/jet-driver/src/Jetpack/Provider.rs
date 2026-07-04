@@ -31,6 +31,34 @@ pub struct Realized {
     /// Path to the built Rust rlib artifact (D-BFS1). Set when the core provider
     /// compiles a library package that carries a `Cargo.toml`. Empty otherwise.
     pub rlib: String,
+    /// D-JPK-CACHE1=A: the A4 envelope for this realized output — output hash,
+    /// platform, signature slot, provenance. Makes the object cache-substitutable.
+    pub envelope: super::Envelope::Envelope,
+    /// D-JPK-CACHE1 reporting (T4): how this realization was satisfied.
+    pub source_state: SourceState,
+}
+
+/// How a dependency was realized, for the `jet build` per-package report
+/// (`built | substituted | cached`, mirroring the D-JPK-CACHE1 example output).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceState {
+    /// Compiled from source by the first-party core provider this run.
+    Built,
+    /// Reused an already-realized, content-addressed object (no rebuild).
+    Cached,
+    /// Realized through the Nix compatibility provider (substituted, not built
+    /// from source by Jetpack).
+    Substituted,
+}
+
+impl SourceState {
+    pub fn label(self) -> &'static str {
+        match self {
+            SourceState::Built => "built",
+            SourceState::Cached => "cached",
+            SourceState::Substituted => "substituted",
+        }
+    }
 }
 
 /// What can go wrong realizing a ref through a provider. Each maps to a
@@ -49,6 +77,23 @@ pub enum ProviderError {
     Unsupported(String),
     /// The first-party `core` builder could not realize the package.
     CoreBuild(String),
+    /// E1232 (D-MONOREF1): a monorepo source could not be fetched — the sparse
+    /// subtree checkout and the full-clone fallback both failed.
+    MonorepoFetch(String),
+    /// E1233 (D-MONOREF1): an in-repo transitive dependency names a package that
+    /// is not a member of the source repo's workspace index.
+    MemberOutsideWorkspace(String),
+}
+
+impl ProviderError {
+    /// The registered diagnostic code, for the errors that carry one.
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            ProviderError::MonorepoFetch(_) => Some("E1232"),
+            ProviderError::MemberOutsideWorkspace(_) => Some("E1233"),
+            _ => None,
+        }
+    }
 }
 
 /// What a provider needs to realize a ref, beyond the ref and source table:
@@ -159,7 +204,7 @@ impl Provider for CoreProvider {
         let upstream = table.upstream(source_name).ok_or_else(|| {
             ProviderError::CoreBuild(format!("source `{source_name}` has no upstream"))
         })?;
-        let repo = source_repo(upstream, ctx)?;
+        let repo = source_repo(upstream, &spec.package, ctx)?;
         let src_dir =
             PackageManifest::discover_module_in(&repo, &spec.package).map_err(|e| match e {
                 PackageManifest::DiscoveryError::NotFound { name } => {
@@ -193,7 +238,10 @@ impl Provider for CoreProvider {
         let out_dir = ctx
             .store_dir
             .join(format!("{}-{}", spec.package, &fp[..12]));
-        if !out_dir.exists() {
+        // A pre-existing content-addressed object means this realize is a cache
+        // hit — no source is re-copied and no rlib is rebuilt (T4 reporting).
+        let cache_hit = out_dir.exists();
+        if !cache_hit {
             copy_tree(&src_dir, &out_dir)
                 .map_err(|e| ProviderError::CoreBuild(format!("could not place package: {e}")))?;
         }
@@ -217,73 +265,142 @@ impl Provider for CoreProvider {
             .as_ref()
             .map(|pm| pm.package.version.clone())
             .unwrap_or_default();
-        let (bin, rlib) = match kind {
+        let (bin, rlib, recipe_id) = match kind {
             PackageManifest::PackageKind::Executable => (
                 out_dir.join("bin").to_string_lossy().into_owned(),
                 String::new(),
+                "core-source",
             ),
             PackageManifest::PackageKind::Library => {
                 // D-BFS1: if the package ships a Cargo.toml, compile it to an
-                // rlib now and cache the artifact in the store. The rlib is
-                // stored in a build-cache dir keyed by the same fingerprint that
-                // keys the source dir, so unchanged packages hit the cache and
-                // need no rebuild.
+                // rlib now. The rlib lands *inside* the hangar object (`out_dir`)
+                // so the object is self-contained and content-addressed; the
+                // cargo target dir is a hangar-scoped scratch swept after the
+                // build (D-JPK-GC1: build scratch is hangar-scoped, swept on
+                // crash), never a sibling of the store root.
                 let cargo_toml = out_dir.join("Cargo.toml");
-                let rlib = if cargo_toml.is_file() {
-                    build_rlib_from_cargo(&out_dir, ctx.store_dir).unwrap_or_default()
+                if cargo_toml.is_file() {
+                    // D-JPK-BUILDTOOL1=A: compile through the pinned/realized Rust
+                    // toolchain (a fixture stands in for #179's hangar object),
+                    // never a bare host-`cargo` lookup. `resolve` falls back to the
+                    // host dev toolchain when no pin is configured; only a machine
+                    // with neither a toolchain object nor `cargo` yields `None`,
+                    // the E1240 case (surfaced by the build reporting layer).
+                    let rlib = super::Toolchain::Toolchain::resolve()
+                        .and_then(|tc| build_rlib_from_cargo(&out_dir, ctx.store_dir, &tc))
+                        .unwrap_or_default();
+                    (String::new(), rlib, "core-cargo-rlib")
                 } else {
-                    String::new()
-                };
-                (String::new(), rlib)
+                    (String::new(), String::new(), "core-source")
+                }
             }
+        };
+        let out = out_dir.to_string_lossy().into_owned();
+        let envelope = super::Envelope::Envelope::for_output(&out, &spec.raw, recipe_id);
+        let source_state = if cache_hit {
+            SourceState::Cached
+        } else {
+            SourceState::Built
         };
         Ok(Realized {
             name: spec.package.clone(),
             version,
             reference: spec.raw.clone(),
-            out: out_dir.to_string_lossy().into_owned(),
+            out,
             bin,
             rlib,
+            envelope,
+            source_state,
         })
+    }
+}
+
+/// The hangar-scoped subdir that holds transient build scratch (cargo target
+/// dirs). D-JPK-GC1: build scratch is hangar-scoped and swept on crash, never a
+/// sibling of the store root.
+pub const BUILD_SCRATCH_DIR: &str = "build-scratch";
+
+/// Remove every transient build-scratch dir under the hangar. Idempotent; used
+/// to sweep scratch left behind by a crashed build (D-JPK-GC1). Returns the
+/// number of scratch entries removed.
+pub fn sweep_build_scratch(hangar_dir: &Path) -> usize {
+    let root = hangar_dir.join(BUILD_SCRATCH_DIR);
+    let mut removed = 0;
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for ent in rd.flatten() {
+            if std::fs::remove_dir_all(ent.path()).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
+/// A hangar-scoped scratch dir that removes itself on drop — so a panic or an
+/// early return between build start and finish never leaks a cargo target dir
+/// into the hangar (D-JPK-GC1 crash-clean).
+struct BuildScratch {
+    path: PathBuf,
+}
+
+impl BuildScratch {
+    fn new(hangar_dir: &Path, key: &str) -> BuildScratch {
+        let path = hangar_dir.join(BUILD_SCRATCH_DIR).join(key);
+        let _ = std::fs::remove_dir_all(&path);
+        let _ = std::fs::create_dir_all(&path);
+        BuildScratch { path }
+    }
+}
+
+impl Drop for BuildScratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
 /// D-BFS1: compile a library package's `Cargo.toml` to an rlib artifact.
 ///
-/// The build is run in the package's own directory (so `.cargo/config.toml`
-/// vendor patches are respected). The Cargo target dir is placed in
-/// `<store_dir>/build-cache/<package-dir-name>/` so repeated realizes of the
-/// same content-addressed package skip the rebuild. Returns the absolute path to
-/// the built rlib, or an empty string if `cargo build` is unavailable or fails.
-fn build_rlib_from_cargo(pkg_dir: &Path, store_dir: &Path) -> Option<String> {
-    if Command::new("cargo").arg("--version").output().is_err() {
-        return None;
+/// The rlib is placed *inside* the hangar object (`pkg_dir`, the object root) so
+/// the object is self-contained and content-addressed. The cargo target dir is
+/// a hangar-scoped scratch (`<hangar>/build-scratch/<key>`) swept immediately
+/// after the build and on crash (D-JPK-GC1). A prior realize of the same
+/// content-addressed object leaves the rlib in place, so the rebuild is skipped
+/// (cache hit). Returns the absolute path to the rlib inside the object, or an
+/// empty string if the build is unavailable or fails.
+///
+/// `toolchain` is the resolved pinned/realized build toolchain
+/// (D-JPK-BUILDTOOL1=A): the build execs *its* `cargo`, so a bridge's output
+/// hash does not depend on whatever host `cargo` happens to be on PATH when the
+/// toolchain is a pinned object.
+pub(crate) fn build_rlib_from_cargo(
+    pkg_dir: &Path,
+    hangar_dir: &Path,
+    toolchain: &super::Toolchain::Toolchain,
+) -> Option<String> {
+    // Cache hit: a previously realized object already carries its rlib.
+    if let Some(existing) = find_rlib_in(pkg_dir) {
+        return Some(existing);
     }
     let cache_key = pkg_dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "pkg".to_string());
-    let target_dir = store_dir
-        .parent()
-        .unwrap_or(store_dir)
-        .join("build-cache")
-        .join(&cache_key);
-    let out = Command::new("cargo")
+    let scratch = BuildScratch::new(hangar_dir, &cache_key);
+    let out = Command::new(&toolchain.cargo)
         .arg("build")
         .arg("--lib")
         .arg("--release")
         .arg("--manifest-path")
         .arg(pkg_dir.join("Cargo.toml"))
-        .env("CARGO_TARGET_DIR", &target_dir)
+        .env("CARGO_TARGET_DIR", &scratch.path)
         .output()
         .ok()?;
     if !out.status.success() {
         return None;
     }
-    // Find the rlib: `<target_dir>/release/lib<crate_name>.rlib`. The crate
-    // name is the `package.name` with hyphens replaced by underscores.
-    let release = target_dir.join("release");
-    let rlib = std::fs::read_dir(&release)
+    // Find the rlib in the scratch `release/` dir and copy it into the object.
+    let release = scratch.path.join("release");
+    let built = std::fs::read_dir(&release)
         .ok()?
         .flatten()
         .map(|e| e.path())
@@ -294,7 +411,26 @@ fn build_rlib_from_cargo(pkg_dir: &Path, store_dir: &Path) -> Option<String> {
                     .map(|n| n.starts_with("lib"))
                     .unwrap_or(false)
         })?;
-    Some(rlib.to_string_lossy().into_owned())
+    let dest = pkg_dir.join(built.file_name()?);
+    std::fs::copy(&built, &dest).ok()?;
+    Some(dest.to_string_lossy().into_owned())
+    // `scratch` drops here → the cargo target dir is swept.
+}
+
+/// Find a `lib*.rlib` already sitting in an object root (a cache hit).
+fn find_rlib_in(pkg_dir: &Path) -> Option<String> {
+    std::fs::read_dir(pkg_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("rlib")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("lib"))
+                    .unwrap_or(false)
+        })
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// D-ILE1: infer a package's kind from its source. A top-level `fn run` in any
@@ -363,7 +499,12 @@ fn file_has_top_level_run(src: &str) -> bool {
 
 /// Resolve a `core` upstream to a local checkout. `path:` sources are used in
 /// place; `github:` and git URLs are fetched into a Jetpack source cache.
-fn source_repo(upstream: &str, ctx: &Ctx) -> Result<PathBuf, ProviderError> {
+///
+/// `want_package` is the package being realized. When the remote is a monorepo
+/// (the package lives in a subdirectory with its own `pkg.jet`), resolution is
+/// index-first: only that member's subtree — plus its in-repo dependencies — is
+/// materialized via a sparse checkout, never the whole repo (Slice C, D-MONOREF1).
+fn source_repo(upstream: &str, want_package: &str, ctx: &Ctx) -> Result<PathBuf, ProviderError> {
     if let Some(p) = upstream.strip_prefix("path:") {
         let path = PathBuf::from(p);
         let path = if path.is_absolute() {
@@ -375,7 +516,304 @@ fn source_repo(upstream: &str, ctx: &Ctx) -> Result<PathBuf, ProviderError> {
     }
 
     let remote = parse_remote_source(upstream)?;
-    fetch_remote_repo(&remote, ctx)
+    fetch_remote_repo_indexed(&remote, want_package, ctx)
+}
+
+/// Index-first remote resolution (Slice C). A cached checkout wins; otherwise try
+/// a sparse member-subtree fetch, and fall back to a full clone when the source
+/// is not a monorepo or the provider can't do a partial/sparse checkout. When a
+/// monorepo's sparse fetch fails *and* the full-clone fallback also fails, that
+/// is E1232; a transitive in-repo dependency outside the workspace is E1233.
+fn fetch_remote_repo_indexed(
+    remote: &RemoteSource,
+    want_package: &str,
+    ctx: &Ctx,
+) -> Result<PathBuf, ProviderError> {
+    let cache = source_cache_dir(ctx.store_dir, remote);
+    if cache.is_dir() {
+        return Ok(cache);
+    }
+    if ctx.offline {
+        return Err(ProviderError::CoreBuild(format!(
+            "offline mode has no cached checkout for `{}`",
+            remote.label
+        )));
+    }
+
+    match try_sparse_member_fetch(remote, want_package, &cache) {
+        // Only the addressed member's subtree was materialized.
+        SparseOutcome::Materialized(repo) => Ok(repo),
+        // Not a monorepo (or the package isn't a subtree member): full clone.
+        SparseOutcome::NotMonorepo => fetch_remote_repo(remote, ctx),
+        // A transitive in-repo dep points outside the workspace index: hard error.
+        SparseOutcome::DepOutside(err) => Err(err),
+        // Monorepo detected but the sparse mechanics failed: fall back to a full
+        // clone; if that also fails the source is unreachable → E1232.
+        SparseOutcome::SparseFailed => fetch_remote_repo(remote, ctx).map_err(|_| {
+            ProviderError::MonorepoFetch(format!(
+                "sparse subtree checkout and full-clone fallback both failed for `{}`",
+                remote.label
+            ))
+        }),
+    }
+}
+
+/// The result of attempting an index-first sparse member fetch.
+enum SparseOutcome {
+    /// The member subtree (+ in-repo deps) was checked out at this path.
+    Materialized(PathBuf),
+    /// The source is not a monorepo member layout — caller should full-clone.
+    NotMonorepo,
+    /// A transitive in-repo dep resolves inside the repo but is not a workspace
+    /// member (E1233).
+    DepOutside(ProviderError),
+    /// A monorepo was detected but the sparse git mechanics failed.
+    SparseFailed,
+}
+
+/// Fetch only the `want_package` member's subtree from a remote monorepo using a
+/// partial clone (`--filter=blob:none`) + cone `git sparse-checkout`. Reads the
+/// repo's object tree with `git ls-tree`/`git show` (no full checkout) to build
+/// the member index, walks the member's `pkg.jet` for in-repo deps, then checks
+/// out just those subtrees. This is the generalization of the peek-only
+/// `remote_has_pack_jet` probe into a real materializing fetch.
+fn try_sparse_member_fetch(
+    remote: &RemoteSource,
+    want_package: &str,
+    cache: &Path,
+) -> SparseOutcome {
+    if Command::new("git").arg("--version").output().is_err() {
+        // No git at all: let the full-clone path produce the "need git" error.
+        return SparseOutcome::NotMonorepo;
+    }
+    let tmp = std::env::temp_dir().join(format!(
+        "jetpack-sparse-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    if std::fs::create_dir_all(&tmp).is_err() {
+        return SparseOutcome::SparseFailed;
+    }
+    let _guard = TmpDirGuard(tmp.clone());
+
+    let git_ok = |args: &[&str]| -> bool {
+        Command::new("git")
+            .arg("-C")
+            .arg(&tmp)
+            .args(args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    let git_out = |args: &[&str]| -> Option<String> {
+        let o = Command::new("git").arg("-C").arg(&tmp).args(args).output().ok()?;
+        if o.status.success() {
+            Some(String::from_utf8_lossy(&o.stdout).into_owned())
+        } else {
+            None
+        }
+    };
+
+    let rev = remote.rev.as_deref().unwrap_or("HEAD");
+    if !(git_ok(&["init", "--quiet"]) && git_ok(&["remote", "add", "origin", &remote.url])) {
+        return SparseOutcome::SparseFailed;
+    }
+    if !git_ok(&[
+        "fetch",
+        "--quiet",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        "origin",
+        rev,
+    ]) {
+        return SparseOutcome::SparseFailed;
+    }
+
+    // List every tracked path (trees are present under blob:none; blobs are
+    // lazily fetched only when `git show`/checkout touches them).
+    let Some(listing) = git_out(&["ls-tree", "-r", "--name-only", "FETCH_HEAD"]) else {
+        return SparseOutcome::SparseFailed;
+    };
+    let member_dirs = member_dirs_from_listing(&listing);
+    // Map the requested package to a subtree member by directory basename.
+    let Some(target) = member_dirs
+        .iter()
+        .find(|d| dir_basename(d) == want_package)
+        .cloned()
+    else {
+        // The package is not a subtree member (single-package repo, or a
+        // differently-shaped layout): not our monorepo fast path.
+        return SparseOutcome::NotMonorepo;
+    };
+
+    // Walk the member's `pkg.jet` for in-repo dependencies, resolving each
+    // against the member index. An in-repo path dep that names a directory in
+    // the repo which is not a member is E1233.
+    let mut wanted: Vec<String> = vec![target.clone()];
+    let all_dirs = all_tree_dirs(&listing);
+    if let Some(pkg_src) = git_out(&["show", &format!("FETCH_HEAD:{target}/pkg.jet")]) {
+        if let Ok(manifest) = PackageManifest::parse(&pkg_src) {
+            for dep in &manifest.deps {
+                match classify_in_repo_dep(dep, &target, &member_dirs, &all_dirs) {
+                    InRepoDep::Member(path) => {
+                        if !wanted.contains(&path) {
+                            wanted.push(path);
+                        }
+                    }
+                    InRepoDep::OutsideWorkspace(path) => {
+                        return SparseOutcome::DepOutside(ProviderError::MemberOutsideWorkspace(
+                            format!(
+                                "package `{want_package}` depends on in-repo `{path}`, which is \
+                                 not a workspace member of `{}`",
+                                remote.label
+                            ),
+                        ));
+                    }
+                    InRepoDep::External => {}
+                }
+            }
+        }
+    }
+
+    // Materialize exactly the wanted subtrees (cone mode also keeps root files,
+    // so the repo-root `pkg.jet`/`workspace.jet` are available for discovery).
+    if !git_ok(&["sparse-checkout", "init", "--cone"]) {
+        return SparseOutcome::SparseFailed;
+    }
+    let mut set_args: Vec<&str> = vec!["sparse-checkout", "set"];
+    set_args.extend(wanted.iter().map(|s| s.as_str()));
+    if !git_ok(&set_args) {
+        return SparseOutcome::SparseFailed;
+    }
+    if !git_ok(&["checkout", "--quiet", "FETCH_HEAD"]) {
+        return SparseOutcome::SparseFailed;
+    }
+
+    // Publish into the source cache. Rename can cross the temp/cache boundary; a
+    // copy fallback covers a cross-filesystem rename failure.
+    if let Some(parent) = cache.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if std::fs::rename(&tmp, cache).is_err() {
+        if copy_tree(&tmp, cache).is_err() {
+            return SparseOutcome::SparseFailed;
+        }
+    }
+    SparseOutcome::Materialized(cache.to_path_buf())
+}
+
+/// A temp dir removed on drop, so a sparse fetch that returns early never leaks.
+struct TmpDirGuard(PathBuf);
+impl Drop for TmpDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The directories that contain a `pkg.jet` (workspace members, `find()`
+/// semantics), from a `git ls-tree -r --name-only` listing. Root-level `pkg.jet`
+/// (the repo manifest) is not a member subtree.
+fn member_dirs_from_listing(listing: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in listing.lines() {
+        let line = line.trim();
+        if let Some(dir) = line.strip_suffix("/pkg.jet") {
+            if !dir.is_empty() && !out.contains(&dir.to_string()) {
+                out.push(dir.to_string());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Every directory that appears in the tree listing (for in-repo dep checks).
+fn all_tree_dirs(listing: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in listing.lines() {
+        let mut cur = std::path::Path::new(line.trim());
+        while let Some(parent) = cur.parent() {
+            let p = parent.to_string_lossy().to_string();
+            if !p.is_empty() && !out.contains(&p) {
+                out.push(p);
+            }
+            cur = parent;
+        }
+    }
+    out
+}
+
+/// The last path segment of a `/`-separated member directory.
+fn dir_basename(dir: &str) -> &str {
+    dir.rsplit('/').next().unwrap_or(dir)
+}
+
+/// How an in-repo-shaped dependency resolves against the workspace member index.
+enum InRepoDep {
+    /// Resolves to a workspace member subtree at this path.
+    Member(String),
+    /// Resolves to a directory inside the repo that is not a member (E1233).
+    OutsideWorkspace(String),
+    /// Not an in-repo dependency (registry/git/nixpkgs/clib/external path).
+    External,
+}
+
+/// Classify a member's dependency for sparse-subtree scoping. Only `path@…`
+/// deps that resolve *inside the repo* are relevant; everything else is fetched
+/// by its own provider and does not widen the sparse checkout.
+fn classify_in_repo_dep(
+    dep: &PackageManifest::Dep,
+    member_dir: &str,
+    member_dirs: &[String],
+    all_dirs: &[String],
+) -> InRepoDep {
+    // A bare dep alias that matches a member name is an in-repo dep.
+    if let Some(m) = member_dirs.iter().find(|d| dir_basename(d) == dep.name) {
+        return InRepoDep::Member(m.clone());
+    }
+    if let PackageManifest::DepSource::Provider {
+        provider: Source::Path,
+        target,
+    } = &dep.source
+    {
+        let resolved = join_repo_relative(member_dir, target);
+        if let Some(resolved) = resolved {
+            if member_dirs.contains(&resolved) {
+                return InRepoDep::Member(resolved);
+            }
+            if all_dirs.contains(&resolved) {
+                // A real directory inside the repo, but not a package member.
+                return InRepoDep::OutsideWorkspace(resolved);
+            }
+        }
+    }
+    InRepoDep::External
+}
+
+/// Resolve a `path@<target>` relative to a member directory, staying inside the
+/// repo. Returns `None` when the path escapes the repo root (an external local
+/// dep, not our concern for sparse scoping).
+fn join_repo_relative(member_dir: &str, target: &str) -> Option<String> {
+    let mut parts: Vec<&str> = member_dir.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in target.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if parts.pop().is_none() {
+                    return None; // escaped above the repo root
+                }
+            }
+            other => parts.push(other),
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join("/"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -789,6 +1227,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
 
     let bin = format!("{}/bin", out.trim_end_matches('/'));
     let name = spec.short_name().to_string();
+    let envelope = super::Envelope::Envelope::for_output(out, &spec.raw, "nix");
     Ok(Realized {
         version: nix_store_version(out, &name),
         name,
@@ -796,6 +1235,8 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         out: out.to_string(),
         bin,
         rlib: String::new(),
+        envelope,
+        source_state: SourceState::Substituted,
     })
 }
 
@@ -1295,6 +1736,304 @@ mod tests {
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
         assert!(std::path::Path::new(&r.bin).join("hello").is_file());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    // ── Slice C: index-first sparse monorepo fetch (D-MONOREF1) ──
+
+    #[test]
+    fn sparse_fetch_materializes_only_addressed_member() {
+        use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
+        let base = unique_dir("jpk-sparse-one");
+        let repo = base.join("mono");
+        let store = base.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        if !init_git_repo(
+            &repo,
+            &[
+                (
+                    "workspace.jet",
+                    "module workspace { members: find(\"./packages\") }\n",
+                ),
+                (
+                    "packages/hello/pkg.jet",
+                    "payload: { name: \"hello\", version: \"0.1.0\" }\n",
+                ),
+                ("packages/hello/hello.jet", "module hello { }\n"),
+                ("packages/hello/bin/hello", "#!/bin/sh\necho hi\n"),
+                (
+                    "packages/world/pkg.jet",
+                    "payload: { name: \"world\", version: \"0.1.0\" }\n",
+                ),
+                ("packages/world/world.jet", "module world { }\n"),
+            ],
+        ) {
+            eprintln!("note: skipping sparse fetch test (git not found)");
+            return;
+        }
+        let upstream = format!("file://{}", repo.to_string_lossy());
+        let table =
+            SourceTable::from_decls([("mine".to_string(), upstream.clone(), ProviderKind::Core)]);
+        let spec = classify_in("mine:hello", &table).unwrap();
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: false,
+        };
+        let r = realize(&spec, &table, &ctx).unwrap();
+        assert_eq!(r.name, "hello");
+
+        // The source-cache checkout has ONLY the addressed member's subtree.
+        let remote = parse_remote_source(&upstream).unwrap();
+        let cache = source_cache_dir(&store, &remote);
+        assert!(
+            cache.join("packages/hello/pkg.jet").is_file(),
+            "addressed member must be checked out: {}",
+            cache.display()
+        );
+        assert!(
+            !cache.join("packages/world").exists(),
+            "unaddressed member `world` must NOT be materialized (sparse): {}",
+            cache.display()
+        );
+        // Root files are always present in cone mode.
+        assert!(cache.join("workspace.jet").is_file());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn sparse_fetch_includes_in_repo_dependency() {
+        use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
+        let base = unique_dir("jpk-sparse-dep");
+        let repo = base.join("mono");
+        let store = base.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        if !init_git_repo(
+            &repo,
+            &[
+                (
+                    "workspace.jet",
+                    "module workspace { members: find(\"./packages\") }\n",
+                ),
+                // `app` depends on the in-repo `logging` member via a path ref
+                // whose alias (`log`) differs from the member name — exercises
+                // path-target resolution, not just name matching.
+                (
+                    "packages/app/pkg.jet",
+                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { log: path@../logging }\n",
+                ),
+                ("packages/app/app.jet", "module app { }\n"),
+                (
+                    "packages/logging/pkg.jet",
+                    "payload: { name: \"logging\", version: \"0.1.0\" }\n",
+                ),
+                ("packages/logging/logging.jet", "module logging { }\n"),
+                (
+                    "packages/unrelated/pkg.jet",
+                    "payload: { name: \"unrelated\", version: \"0.1.0\" }\n",
+                ),
+                ("packages/unrelated/unrelated.jet", "module unrelated { }\n"),
+            ],
+        ) {
+            eprintln!("note: skipping sparse dep test (git not found)");
+            return;
+        }
+        let upstream = format!("file://{}", repo.to_string_lossy());
+        let table =
+            SourceTable::from_decls([("mine".to_string(), upstream.clone(), ProviderKind::Core)]);
+        let spec = classify_in("mine:app", &table).unwrap();
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: false,
+        };
+        realize(&spec, &table, &ctx).unwrap();
+
+        let remote = parse_remote_source(&upstream).unwrap();
+        let cache = source_cache_dir(&store, &remote);
+        assert!(cache.join("packages/app/pkg.jet").is_file(), "app subtree");
+        assert!(
+            cache.join("packages/logging/pkg.jet").is_file(),
+            "in-repo dependency `logging` must be pulled into the sparse checkout: {}",
+            cache.display()
+        );
+        assert!(
+            !cache.join("packages/unrelated").exists(),
+            "an unrelated member must stay out of the sparse checkout: {}",
+            cache.display()
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn in_repo_dep_outside_workspace_is_e1233() {
+        use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
+        let base = unique_dir("jpk-e1233");
+        let repo = base.join("mono");
+        let store = base.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        if !init_git_repo(
+            &repo,
+            &[
+                (
+                    "workspace.jet",
+                    "module workspace { members: find(\"./packages\") }\n",
+                ),
+                // `app` depends on `packages/ghost`, a real repo directory that
+                // is NOT a workspace member (no pkg.jet of its own).
+                (
+                    "packages/app/pkg.jet",
+                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { ghost: path@../ghost }\n",
+                ),
+                ("packages/app/app.jet", "module app { }\n"),
+                ("packages/ghost/notes.txt", "not a package\n"),
+            ],
+        ) {
+            eprintln!("note: skipping E1233 test (git not found)");
+            return;
+        }
+        let upstream = format!("file://{}", repo.to_string_lossy());
+        let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
+        let spec = classify_in("mine:app", &table).unwrap();
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: false,
+        };
+        match realize(&spec, &table, &ctx) {
+            Err(e) => assert_eq!(e.code(), Some("E1233"), "expected E1233, got {e:?}"),
+            Ok(r) => panic!("expected E1233, but realize succeeded: {r:?}"),
+        }
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn core_build_writes_envelope() {
+        // T0 (D-JPK-CACHE1=A): realizing a first-party library package produces
+        // a hangar object whose record carries the full A4 envelope
+        // (output_hash, platform, signature slot, provenance) — not just a
+        // fingerprint. The envelope round-trips through the store record.
+        use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
+        use super::super::Store;
+        let base = unique_dir("jpk-envelope");
+        let repo = base.join("jet-pkgs");
+        let store = base.join("hangar");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(
+            repo.join("pkg.jet"),
+            "payload: { name: \"p\", version: \"0.1.0\" }\npackages: { mathlib: library }\n",
+        )
+        .unwrap();
+        let lib = repo.join("lib/mathlib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join("mathlib.jet"), "module mathlib { }\n").unwrap();
+
+        let upstream = format!("path:{}", repo.to_string_lossy());
+        let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
+        let spec = classify_in("mine:mathlib", &table).unwrap();
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: false,
+        };
+        let r = realize(&spec, &table, &ctx).unwrap();
+        // The realized output carries a complete envelope.
+        assert!(!r.envelope.is_empty(), "envelope must be populated: {r:?}");
+        assert!(
+            r.envelope.output_hash.starts_with("sha256-"),
+            "output_hash must be a content hash: {:?}",
+            r.envelope
+        );
+        assert!(!r.envelope.platform.is_empty(), "platform must be set");
+        assert!(
+            r.envelope.provenance.contains("mine:mathlib"),
+            "provenance names the source ref: {:?}",
+            r.envelope
+        );
+        assert!(
+            r.envelope.signature.is_empty(),
+            "signature slot stays empty until package signing (#13)"
+        );
+
+        // Persisting and re-reading the record keeps the envelope intact.
+        let roots = Store::Roots {
+            root: base.clone(),
+            dev_mode: true,
+        };
+        let entry = Store::record(
+            &roots,
+            &r.name,
+            &r.version,
+            &r.reference,
+            &r.out,
+            &r.bin,
+            &r.rlib,
+            &r.envelope,
+        )
+        .unwrap();
+        assert_eq!(entry.envelope, r.envelope);
+        let listed = Store::list(&roots);
+        let found = listed.iter().find(|e| e.id == entry.id).unwrap();
+        assert_eq!(found.envelope.output_hash, r.envelope.output_hash);
+        assert_eq!(found.envelope.platform, r.envelope.platform);
+        assert_eq!(found.envelope.provenance, r.envelope.provenance);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn bridge_build_uses_pinned_toolchain() {
+        // T2 (D-JPK-BUILDTOOL1=A): a bridge build execs the *pinned* toolchain's
+        // cargo, not host cargo. A fixture toolchain stands in for #179's hangar
+        // object; its cargo shim emits a deterministic rlib, so the output hash
+        // is stable across builds regardless of host cargo. Two fresh builds
+        // (no cache hit) produce byte-identical output — proof the pinned tool
+        // ran, not whatever host cargo is on PATH.
+        use super::super::Toolchain::Toolchain;
+        use std::collections::HashMap;
+        use std::os::unix::fs::PermissionsExt;
+        let base = unique_dir("jpk-bridge");
+        let tc_dir = base.join("toolchain");
+        std::fs::create_dir_all(&tc_dir).unwrap();
+        let cargo = tc_dir.join("cargo");
+        std::fs::write(
+            &cargo,
+            "#!/bin/sh\nmkdir -p \"$CARGO_TARGET_DIR/release\"\n\
+             printf 'PINNED-RLIB-BYTES' > \"$CARGO_TARGET_DIR/release/libmath.rlib\"\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tc = Toolchain {
+            cargo: cargo.clone(),
+            id: "toolchain-test".to_string(),
+            version: "9.9.9".to_string(),
+            pinned: true,
+            ring_artifacts: HashMap::new(),
+        };
+
+        let hangar = base.join("hangar");
+        std::fs::create_dir_all(&hangar).unwrap();
+
+        let build_once = |tag: &str| -> Vec<u8> {
+            let pkg = base.join(tag);
+            std::fs::create_dir_all(&pkg).unwrap();
+            std::fs::write(pkg.join("Cargo.toml"), "[package]\nname=\"math\"\n").unwrap();
+            let rlib = build_rlib_from_cargo(&pkg, &hangar, &tc).expect("pinned build produced rlib");
+            let bytes = std::fs::read(&rlib).unwrap();
+            // The rlib lands inside the object, and the scratch is swept.
+            assert!(rlib.starts_with(pkg.to_string_lossy().as_ref()));
+            assert!(
+                !hangar.join(BUILD_SCRATCH_DIR).join(tag).exists(),
+                "build scratch must be swept after the build"
+            );
+            bytes
+        };
+
+        let a = build_once("pkg-a");
+        let b = build_once("pkg-b");
+        assert_eq!(a, b"PINNED-RLIB-BYTES", "the pinned toolchain's cargo ran");
+        assert_eq!(a, b, "output is stable across builds with the pinned toolchain");
         std::fs::remove_dir_all(&base).ok();
     }
 

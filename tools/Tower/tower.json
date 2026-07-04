@@ -2,7 +2,7 @@
   "meta": {
     "version": 3,
     "currentEpoch": "e3",
-    "nextNum": 188,
+    "nextNum": 189,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -231,13 +231,18 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "tools/Tower/docs/plans/epoch-4/signed-package-cache.md",
       "blockedBy": [
         "c96"
       ],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Independently re-verified (orchestrator): the E0432 unresolved-import diagnostic shown mid-session was a stale snapshot (per this project's known \"diagnostics right after a build agent are stale\" gotcha) — a real nix develop -c cargo build --workspace is clean. Targeted tests confirmed: tests/pkg.rs 73/73 (was 71 before this card, +3 new -1 retired = net +2, matches), tests/diagnostics_coverage.rs 6/6, Publish::Index unit tests 5/5. Grepped Source/Publish/Index.rs, Registry.rs, CmdSupply.rs for \"unsafe\" substring — none found (golden.rs guard respected). Full nix develop -c cargo test --workspace run to completion, exit code 0, zero FAILED/error lines. Part A (real git-registry push, JSONL index, version immutability E1234, unreachable-registry E1235) and Part B (envelope schema — correctly recognized as already delivered by today's A4 work, not duplicated) both confirmed real and tested. Registry-dep source-download wiring honestly left for the Epoch-6 gated protocol, not guessed. Closing: phase -> done."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -266,6 +271,10 @@
         {
           "at": "2026-06-26",
           "text": "[epoch restructure 2026-06-26] - → e5. Owner restructure: E3 = every major feature; E4 = Jai metaprogramming; E5 = jetpack/jetos; E6 = CI & documentation (deferred until features are set)."
+        },
+        {
+          "at": "2026-07-03",
+          "text": "[implemented — agent, 2026-07-03] Part A + Part B complete; full suite green (nix develop -c cargo test, exit 0). PART A (git-registry push): new Source/Publish/Index.rs — JSONL sparse index, hand-rolled JSON, no serde (I6): IndexEntry.to_jsonl/parse_line, index_entry_path, read_entries, find_entry, write_index_entry (append), mark_yanked (in-place flip, never delete), non_yanked_entries. Registry.rs gained resolve_publish_registry (JET_REGISTRY_URL override), index_repo_path (JET_REGISTRY_CACHE_DIR | ~/.jet/registry-index/<name>), ensure_index_clone (git clone / pull --ff-only), push_index (config identity + add + commit + push; nothing-to-commit is idempotent), find_published, resolve_from_index, plus e1234/e1235. CmdSupply.rs run_publish now clones/pulls the index -> immutability check (E1234) -> write JSONL line -> commit+push; run_yank now flips the yanked flag in the index and pushes. Both old stubs removed: the .jet/yank local-marker and every 'upload pending c56' message. Index content_hash/fingerprint reuse the LockedPackage fields (lock if present, else tree_hash + compute_fingerprint). PART B (envelope schema): ALREADY SATISFIED by the A4 envelope work that landed earlier today. LockedPackage carries the four frozen fields as Lock::LockEnvelope{output_hash, platform, signature, provenance} on pkg.envelope — all optional, full round-trip, covered by a4_envelope_tests. Adding the plan-drafted flat Option fields would duplicate this and violate I8, so they were NOT added; the existing envelope IS the frozen shape. signature slot stays empty until card #13 (package-signing) fills it — same field, one mechanism. DIAGNOSTICS: the plan's suggested E1226/E1227 were STALE (claimed today by D-JPK-FILENAME2 and D-JPK-DISPATCH1). Used the free gap: E1234 (version immutability, D-VERSION1) + E1235 (registry index unreachable). Both added to both diagnostics.md tables (summary ~503, full ~1247); explain pages auto-derive from diagnostics.md; diagnostics_coverage is green. TESTS: Source/Publish/Index.rs unit tests (5): jsonl_roundtrips, write_appends_one_line_per_version, find_entry_matches_exact_version, mark_yanked_flips_in_place_never_deletes, mark_yanked_missing_version_is_false. tests/pkg.rs integration (scratch bare git repo as registry): cli_publish_pushes_index_and_enforces_immutability_e1234, cli_yank_flips_index_entry, cli_publish_unreachable_registry_e1235. Existing dirty-tree --force test repointed at a bogus local registry so its post-gate push fails fast (no network). Old cli_yank_creates_local_marker retired (local-marker behavior removed). HONEST SCOPE NOTE: fetch-side E1207 (registry-dependency source download) left in place. The sparse index line carries no source locator, so building a registry dep end-to-end needs the Epoch-6 output-hash HTTP substitution protocol, explicitly deferred by D-JPK-CACHE1=A. resolve_from_index reader is implemented + tested (yank filtering) but not wired into the live build path (that would require inventing an un-ratified source-URL scheme). All section 6 exit criteria met except that E6-gated fetch path. No bare 'unsafe' substring introduced (golden.rs guard)."
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -673,7 +682,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "tools/Tower/docs/plans/epoch-4/package-signing.md",
       "blockedBy": [
@@ -681,6 +690,16 @@
         "c56"
       ],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Independently re-verified (orchestrator): the E0433/E0432/arity diagnostics shown mid-session were a stale mid-wiring snapshot — real nix develop -c cargo build --workspace is clean. Confirmed zero Cargo.toml changes anywhere (git diff --name-only | grep cargo.toml is empty) — ed25519-dalek usage stays 100% inside the hidden FFI bridge crate as designed. Targeted tests: tests/pkg.rs 79/79 (was 73 after #3, +6 new signing tests, matches exactly), tests/diagnostics_coverage.rs 6/6, tests/cli.rs 49/49 (incl. new keygen/key-backup completions). All named new tests individually confirmed ok: sign_verify_roundtrip_and_tamper_e1246, require_signed_unsigned_entry_e1247, keygen_refuses_existing_key_e1248, key_rotation_warns_not_errors, cli_publish_signs_index_and_auto_keygens, cli_publish_no_sign_leaves_signature_empty. Full nix develop -c cargo test --workspace run to completion, exit code 0, zero FAILED/error lines. Auto-keygen-on-first-publish, TOFU pinning, signature verification, require_signed enforcement, and jet keygen/jet key backup all confirmed real and tested. Closing: phase -> done."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "SHIPPED (ready→verify). Full end-to-end tier-A Ed25519 signing on top of #3's git-registry index. Files: NEW Source/Publish/Sign.rs (keygen/sign/verify via hidden crypto-bridge helper + std-only hex/base64, JET_KEYS_DIR override, E1248); crates/jet-driver/src/FFI.rs (build_bridge now emits src/bin/jet-crypto-helper.rs when needs_crypto + returns FfiLink.helper_bin_path; fast-path re-checks the bin exists); crates/jet-foundation/src/AST.rs (FfiLink.helper_bin_path); crates/jet-driver/src/Prelude/Crypto.rs (jet_crypto_keygen_impl, reuses existing sign/verify impls); Source/Publish/Index.rs (IndexEntry.public_key + signature, backward-compat parse, pinned_public_key); Source/Publish/Registry.rs (verify_index_entry + resolve_and_verify: verify-against-TOFU-pin, rotation=codeless warning, require_signed enforce; E1246/E1247); Source/CmdSupply.rs (run_publish auto-keygen+sign+--no-sign+TOFU-pin attach; run_keygen; run_key_backup — product copy verbatim from plan §2); Source/main.rs (keygen/key dispatch); Source/CLI.rs (2 CommandSpecs); crates/jet-foundation/src/Syntax.rs (KEYGEN/KEY/KEY_VERB_BACKUP/PUBLISH_FLAG_NO_SIGN consts, I7); docs/spec/diagnostics.md (E1246/E1247/E1248 in both tables). Diagnostic codes: plan's E1228-30 were long taken (highest live was E1245) → used E1246 (sig verify failed), E1247 (require_signed unsigned), E1248 (keygen refused). Tests (tests/pkg.rs, all green): cli_publish_signs_index_and_auto_keygens, cli_publish_no_sign_leaves_signature_empty, sign_verify_roundtrip_and_tamper_e1246, require_signed_unsigned_entry_e1247, key_rotation_warns_not_errors, keygen_refuses_existing_key_e1248 + extended #3's immutability/yank tests with JET_KEYS_DIR (auto-sign path); Index.rs unit pin_is_first_nonempty_public_key; Sign.rs unit hex/base64/env-override. Blessed tests/cli/{completions_*,man}.txt for the 2 new verbs. §7 exit criteria ALL met: keygen/key backup work with 0600/0644 perms; publish auto-keygens+signs, honors --no-sign; fetch verify unconditional on presence, require_signed per-registry off by default; TOFU pin recorded+checked, rotation warns; ZERO new Cargo.toml entries anywhere (ed25519-dalek stays 100% inside the hidden bridge crate — verified `git diff --name-only | grep Cargo.toml` empty); 3 E-codes in diagnostics.md + coverage-satisfying assertions. `cargo build` clean, full `cargo test` green."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -3470,11 +3489,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "tools/Tower/docs/plans/epoch-4/cas-build-cache.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Independently re-verified with EXTRA scrutiny (orchestrator) given this card touches the core compile pipeline (I2/I3): nix develop -c cargo build --workspace clean. Targeted tests confirmed exactly: tests/build_cache_normalization.rs 10/10 (whitespace/comment/rename/reorder/profile/version-sensitive + 4 extra discrimination guards), tests/build_cache_race.rs 1/1 (8-concurrent-process integrity check), crates/jet-foundation lib CanonicalAST:: 3/3.\n\nWent beyond targeted tests given the risk here — manual end-to-end smoke of the real jet binary, not just the test suite: (1) nix develop -c ./target/debug/jet run hello.jet twice — first run showed the front-end effects summary, SECOND run (cache hit) correctly skipped it and still printed \"hello, world\" — confirms the short-circuit works for real, not just in unit tests. (2) edited the source (changed the printed string) and re-ran — correctly re-ran the full pipeline (front-end summary reappeared) and printed the NEW string, confirming edit/rename-sensitivity holds in practice. (3) jet build produced a working binary. (4) manually reproduced the exact race scenario from the plan: 3 concurrent jet run processes, all named main.jet in different directories with different content, launched simultaneously via nix develop's shell — each process's stdout correctly matched its own source with zero cross-contamination, confirming the cache-poisoning race fix holds under a real concurrent run, not just the automated 8-process regression test.\n\nFull nix develop -c cargo test --workspace run to completion, exit code 0, zero FAILED/error lines. The I2/I3 soundness argument (cache hit = replay of a previously-validated exact whole-program AST + toolchain version + manifest bytes + profile, never a validation bypass; embed_file/embed_bytes correctly declines caching rather than risk external-state staleness) was reviewed and holds — no gap found on the orchestrator's independent read either. This was the last card in the owner's stated jetpack sequence for this session (#99 -> #176 -> #90 -> #3 -> #13 -> #179 -> #85). Closing: phase -> done."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -3504,6 +3528,11 @@
           "at": "2026-07-02",
           "by": "agent",
           "text": "Found and reproduced a real cache-poisoning race in the current build cache (Source/BuildCache.rs + Source/CmdCompile.rs build()): cache_key() correctly SHA256-hashes the generated rust_code+profile, but the binary is compiled to a SHARED non-unique path (bin_path(file), e.g. build/main, keyed by source stem only) BEFORE store_cached(key, &bin) copies it into the content-addressed slot. Two jet processes compiling different sources with the same stem concurrently (e.g. two run/test invocations both producing build/main) can race: process A computes hash_A from its own rust_code, but by the time it calls store_cached, process B has already overwritten build/main with its binary, so hash_A permanently maps to B's binary in the shared ~/.cache/jet/build/ cache. Repro: many concurrent/rapid jet run invocations during Epoch 3 syntax-wave work; tests/cli.rs simple_exec_runs_without_a_manifest started failing (build/main.rs correct, cached binary under the correct hash printed wrong output). Fix for this card: compile to a unique per-process temp path before the content-addressed copy, so store_cached never races on a shared path. Cleared ~/.cache/jet/build/ as an immediate workaround; the poisoning will recur without the root-cause fix."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Implemented both parts.\n\nPART 1 (race fix, section 0): BuildCache::store_cached (Source/BuildCache.rs) is now atomic -- writes to dir/bin.tmp.<pid> then fs::rename into dir/bin. CmdCompile.rs::build() no longer compiles onto the shared build/<stem> path directly: it now allocates a private per-process working dir build/.work.<bin_name>.<pid>/ holding the generated .rs, the rustc output binary, AND (discovered while writing the regression test) rustc's own crate-name-derived intermediate .rcgu.o object files, which also collided across concurrent same-stem builds and are now isolated the same way (rustc invoked with an explicit --crate-name pinned to the file stem, since the private .rs filename is not a valid crate identifier). store_cached is called against the private binary (safe: only races other processes computing the identical content-addressed key), then the private binary is fs::rename'd onto the shared build/<stem> display path (last-writer-wins on that convenience path is fine; it was never a content identity). Regression test tests/build_cache_race.rs::concurrent_distinct_sources_sharing_a_stem_do_not_poison_the_cache spawns 8 concurrent jet-run processes on distinct main.jet sources (different literal output) sharing a cwd and a JET_CACHE_DIR, then re-runs each source from its own isolated cwd against the same cache and asserts each cache hit returns exactly that source's own binary. This reproduces and pins the exact scenario the plan described (previously broke tests/cli.rs::simple_exec_runs_without_a_manifest under concurrent Epoch 3 work) and fails without the fix (verified: reproduced the crate-name and .rcgu.o collisions live before fixing them).\n\nPART 2 (normalization, sections 1-3, D-BUILDNORM1=A): new crates/jet-foundation/src/CanonicalAST.rs -- canonical_bytes(bundle: &ProgramBundle) serializes the WHOLE pre-sema bundle (entry file plus every module the loader resolved via imports, not just the entry) using each module's Debug-derived rendering of (pub_file, web_target_ceiling, html_path, imports, items) with a custom strip_spans() pass that removes every 'Span { start: N, end: M }' substring while leaving string/char literal contents (including ones that text-mimic a Span rendering) untouched -- verified by a dedicated unit test. Confirmed via recon (subagent read of AST.rs) that NO AST node stores comments or doc-comments (parser drops them entirely), so whitespace/comment insensitivity falls out for free from parsing + span-stripping; confirmed no HashMap/HashSet appears anywhere in the serialized item/import subtree (only in bundle-level resolved-state fields deliberately excluded, e.g. used_core/import_targets/web_partitions/dep_roots), so Debug rendering is deterministic. ast_cache_key(bundle, profile_tag, jet_version) = SHA256(canonical_bytes + 0 + profile_tag + 0 + jet_version) -- SHA-256 via the existing SHA256::sha256_hex, matching Lock::LockEnvelope::output_hash's algorithm (D-JPK-CACHE1=A interlock: same mechanism, not wired together yet, deferred to Epoch 6 as the plan directs). CanonicalAST re-exported through the full seam chain (jet-foundation -> jet-lexer/jet-parser -> jet-sema -> jet-codegen -> jet-driver -> Source/lib.rs) so Source/CmdCompile.rs can call jet::CanonicalAST::ast_cache_key.\n\nCmdCompile.rs: new native_cache_key(file, profile_tag, mode_tag) loads the program pre-sema via Loader::load_entry_with_overlay (confirmed via recon this runs lex+parse+import-resolution only, no Sema::check_bundle), returns None (never cache) if any module's source contains embed_file/embed_bytes (external-file-bytes-not-in-AST gap, closed conservatively rather than papered over) or if the file fails to parse; folds in a SHA-256 of the enclosing pkg.jet's raw bytes (manifest_fingerprint) plus Manifest::COMPILER_VERSION as the toolchain/policy salt, so an effect-budget (D-EFFBUDGET1) tightening in pkg.jet or a compiler version bump invalidates old entries rather than being masked by an unchanged AST. jet run (mode_tag=='run', no --emit-rust) now short-circuits the ENTIRE front end on a cache hit -- sema and codegen never run, only the pre-sema parse inside the key computation -- and directly execs the cached binary. jet build deliberately keeps running its full front end even on a cache hit (only rustc is skipped, as before) because tests/pkg.rs asserts the unconditional per-build 'effects:' stderr summary and the capability summary on jet build stdout; confirmed via recon no jet-run test snapshots that stderr line, so the deeper run-side short-circuit is test-safe. jet test/doctest/bench/dev/debug builds keep their existing cache behavior (test gets its own mode_tag-scoped AST key so a test-harness binary can never be served for jet run; dev/doctest/bench/debug pass cache_key=None -- interactive/one-shot, still race-safe via build()'s private workdir). The old BuildCache::cache_key(source, profile_tag) signature is untouched and still used by BuildCache.rs's own unit tests; nothing else referenced it (checked via grep) so no call site needed updating.\n\nSOUNDNESS ARGUMENT (I2/I3), verified end to end: a cache hit means (a) this exact whole-program AST -- entry plus every imported module, span/comment-stripped, identifier/order-sensitive -- (b) under this exact toolchain version and (c) this exact pkg.jet manifest bytes and (d) this exact build profile, was already parsed, type-checked, codegen'd, rustc-compiled to success, and (for jet run) executed at least once before. Skipping sema+codegen on a hit therefore replays a previously-validated result; it can never let unchecked code through, because storage only happens after a full successful pipeline run, and any input that could change sema's outcome for byte-identical AST bytes (imports -- closed by whole-bundle hashing; toolchain/codegen version -- closed by the version salt; manifest-driven policy like effect budgets -- closed by the manifest-fingerprint salt; embedded external file bytes -- closed by unconditionally declining to cache embed_file/embed_bytes programs) is either folded into the AST, folded into the salt, or excluded from caching outright. No gap found that required stopping; the one real external-state hazard (embed_file/embed_bytes) is handled by declining to cache rather than by hashing file bytes into the key, since Sema's own comptime_inputs tracking is only available post-sema and re-deriving it pre-sema was unnecessary when simple exclusion is sound and cheap.\n\nTESTS: crates/jet-foundation/src/CanonicalAST.rs #[cfg(test)] mod tests (3: strip_spans_removes_span_renderings, strip_spans_keeps_span_lookalike_inside_string_literal, strip_spans_keeps_char_literal_with_quote); tests/build_cache_normalization.rs (10: whitespace_insensitive, comment_insensitive, rename_sensitive, reorder_sensitive, profile_sensitive, version_sensitive, operator_sensitive, literal_sensitive, string_literal_content_sensitive, stable_across_reloads -- covers all six named properties plus extra discrimination guards); tests/build_cache_race.rs (1: concurrent_distinct_sources_sharing_a_stem_do_not_poison_the_cache, 8 concurrent processes). All new tests green; smoke-verified manually outside the suite too (jet run cache-miss then cache-hit shows front-end skip via -v; jet build cache-hit still prints its effects/capabilities summary).\n\nFULL SUITE: nix develop -c cargo test --no-fail-fast run twice independently, exit 0 both times, 70/70 test binaries 'test result: ok', 0 FAILED, 1058 individual tests passed total (a one-off engine_dispatch::json_flag_forwarded_verbatim_to_engine failure on an earlier concurrent run reproduced as a PATH/binary-copy flake under full-suite parallelism -- passed alone and on both full clean reruns, unrelated to this card's files).\n\nEXIT CRITERIA: all checked -- race fixed (store_cached atomic + build() private workdir + rename-publish); key is pre-sema canonical AST, not post-codegen Rust, with sema/codegen skipped entirely on a jet-run hit; toolchain-version salt folded in; all six normalization properties tested and passing; naming/algorithm (SHA-256, output_hash-shaped) consistent with D-JPK-CACHE1's Lock::LockEnvelope::output_hash; full suite green including the new concurrent-process regression test.\n\nFiles touched: Source/BuildCache.rs, Source/CmdCompile.rs, Source/CmdDevTools.rs (two build() call sites updated for the new cache_key param), crates/jet-foundation/src/CanonicalAST.rs (new), crates/jet-foundation/src/lib.rs, crates/jet-lexer/src/lib.rs, crates/jet-parser/src/lib.rs, crates/jet-sema/src/lib.rs, crates/jet-codegen/src/lib.rs, crates/jet-driver/src/lib.rs, Source/lib.rs (re-export chain), tests/build_cache_normalization.rs (new), tests/build_cache_race.rs (new).\n\nSetting phase to verify per protocol (never done by the implementing agent)."
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
@@ -3666,11 +3695,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "tools/Tower/docs/plans/epoch-4/workspace-continuation.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Independently re-verified (orchestrator): nix develop -c cargo build --workspace clean; targeted tests confirmed matching the agent's exact claim (tests/workspace.rs 18/18, tests/jetpack.rs 35/35, crates/jet-driver lib Jetpack:: 257/257 incl. the 3 new sparse-fetch tests). Full nix develop -c cargo test --workspace run to completion, exit code 0, zero FAILED/error lines. All 4 slices (A comptime globals in members:, B bare/path addressing E1230/E1231, C index-first git sparse-checkout E1232/E1233, D example+docs) confirmed real and tested. Closing: phase -> done."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "All four slices A-D landed; full `nix develop -c cargo test` green (authoritative run, no failures — two transient flakes seen mid-run were environmental: engine_dispatch build-contention and a self-inflicted /tmp/nix-shell cleanup race; both pass in isolation). Slice A (crates/jet-driver/src/Jetpack/WorkspaceFile.rs + WorkspaceLock.rs): `members:` now evaluates against top-level `fn`s and `comptime`/`const` bindings (source-order globals), general path uses evaluate_with_imports_opts_collecting so Tier-1 `@embed`/`fetch` inputs are recorded onto WorkspacePlan.comptime_inputs and folded into `.jet/lock` (dedup). Tests: WorkspaceFile members_references_sibling_comptime_const/members_composes_comptime_const_with_string_ops/members_calls_top_level_fn, WorkspaceLock comptime_inputs_round_trip_through_lock. Slice B (RefSpec.rs + Output.rs + CLI.rs): WorkspaceIndex + classify_with_workspace (colon→dot→path→bare, index consulted only when non-empty so non-monorepo bare refs still get the missing-source message); RefError::AmbiguousMember=E1230 / UnknownMember=E1231 with RefError::code() + Levenshtein did-you-mean; Theme::error_coded renders `error[Exxxx]:`; cwd_workspace_index() wires the discovered workspace into `jetpack run`. Slice C (Provider.rs): index-first remote resolution — try_sparse_member_fetch generalizes the remote_has_pack_jet probe into a real `--filter=blob:none` + cone `git sparse-checkout` that materializes ONLY the addressed member subtree + its in-repo deps (walked from the member pkg.jet), full-clone fallback preserved; ProviderError::MonorepoFetch=E1232 / MemberOutsideWorkspace=E1233. Slice D: committed example examples/features/packages/monorepo/ (workspace.jet find() + hello/ranker members, golden-ignored, enforced by committed_monorepo_example_indexes_and_addresses_members); docs — diagnostics.md E1230-E1233 registry+detailed rows, syntax-decisions.md S52 marks D-MONOREF1 addressing + index-first sparse fetch implemented. Diagnostic codes used: E1230/E1231/E1232/E1233 (free gap E1230-E1235; E1236+ taken by #99/#176 as warned). Test counts: workspace 18/18, jetpack 35/35, pkg 71/71, ring_layer 9/9, jet-driver lib Jetpack:: 257/257 (RefSpec 23, Provider 23 incl. 3 sparse tests, WorkspaceFile+WorkspaceLock), diagnostics_coverage 6/6. Deviation from plan: string `+` concat is not in the comptime subset (E0956) so Slice A tests use `{…}` interpolation instead — cosmetic, globals/funcs wiring is the point. Phase → verify (independent pass to confirm)."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -4094,11 +4133,21 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "tools/Tower/docs/plans/epoch-4/package-build-from-source.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Independently re-verified (orchestrator, not trusting the implementing agent's own report): nix develop -c cargo build --workspace clean; targeted tests green (tests/jetpack.rs 35/35, tests/build_sandbox.rs 4/4, tests/ring_shipping.rs 2/2, tests/diagnostics_coverage.rs 6/6); fixed 4 non_snake_case warnings in tests/build_sandbox.rs (test fn names had uppercase E-codes, e.g. sandbox_denies_ambient_network_E1236 -> ..._e1236) and rebuilt clean after. Full nix develop -c cargo test --workspace run to completion, exit code 0 (all test binaries green, no failures) — confirms the agent's claimed 1447/0. All 5 slices (T0 envelope, T1 sandbox/BuildRecipe, T2 pinned toolchain, T3 ring shipping resolution seam, T4 jetpack build/vendor/audit surface) verified real and working, diagnostics E1236-E1238/E1240/E1241 registered with docs/spec/diagnostics.md entries and snapshot coverage. Closing: phase -> done."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "IMPLEMENTED all 5 slices T0-T4; full `cargo test --workspace` green (1447 passed, 0 failed). T0 A4 envelope: new Jetpack/Envelope.rs (output_hash/platform/signature-slot/provenance), threaded through Realized+StoreEntry+meta.json+Store::record; build-cache moved to hangar-scoped crash-swept scratch (BuildScratch), rlib now lands inside the object; `jetpack hangar du` verb added. Test: core_build_writes_envelope + jet_hangar_du_counts_source_built_objects. T1 sandbox: new Jetpack/Recipe.rs (BuildRecipe: Fetch/Exec/Install; validate+run enforce network/output/tool confinement; FetchRecord+RunReport effects; U19 trust marker). Diags E1236/E1237/E1238. Tests: build_denies_ambient_network, build_output_confined, locked_fetch_roundtrips (+offline+trust+validate) & tests/build_sandbox.rs. T2 pinned toolchain: new Jetpack/Toolchain.rs (resolve fixture object > host dev cargo; ring_artifacts); build_rlib_from_cargo now execs the resolved toolchain's cargo not bare host cargo. Diag E1240. Test: bridge_build_uses_pinned_toolchain (stable output hash via pinned shim). T3 ring shipping: Syntax::is_ring_module_staged flipped from const-false to real query (staged_ring_artifact reads active toolchain object's ring/<name>); Loader::resolve_ring_module{Staged|Embedded} + E1241. Test: tests/ring_shipping.rs ring_module_realizes_from_hangar. T4 surface: `jetpack build` reports per-package built|cached|substituted (SourceState on Realized, cache-hit detection); new `jetpack vendor` (hash-pinned sources) + `jetpack audit` (reads provenance, executes nothing). Tests: jet_build_reports_source_states, jet_vendor_writes_pinned_sources, jet_audit_reads_without_exec. Diagnostics E1236-E1238/E1240/E1241 in docs/spec/diagnostics.md (registry+detailed) — diagnostics_coverage green. DEVIATIONS: (1) plan's E1239/E1240 shifted to E1240/E1241 because E1239 is already taken (workspace-dup diag); E1236-E1238 as planned. (2) T3 codegen link-injection of a real prebuilt ring rlib rides #179's real toolchain object — the resolution seam is done+tested; fixtures aren't linkable rlibs so a fake link would be dishonest. (3) remote-URL fetch transport is caller-injected (compiler stays zero-external-crate I6); file:// + sha256 cache is the tested offline-reproducible path. (4) no examples/features .jet example — the .jet golden harness runs programs, not CLI verbs; jetpack CLI features are spec'd by tests/jetpack.rs as all jetpack verbs are. Phase → verify for an independent confirmation pass."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -5298,6 +5347,21 @@
       "plan": "jit-cranelift — M4 functional parity with AOT: (1) wire `dev_iteration` through CraneliftBackend by default (D-JIT2; done 2026-06-30); (2) expand CLIF lowering + host runtime for tasks/channels/spawn (scheduler), then structs/enums/collections/Core per `tir_covers`; (3) align `jit_covers` gate with `tir_covers` (try-compile, never silent interpreter fallback for AOT-covered programs); (4) three-way differential battery on full `examples/features/*.jet` set; (5) `jet dev` on `160_scheduler_spawn.jet` and task programs without E2201. Exit: byte-identical stdout vs AOT for every tir-covered example, or named tested gap only.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "P0 FIXED + verified independently (build clean, cargo test --test dev 30/30 green incl. new tests, full cargo test --workspace green except one pre-existing unrelated failure fixed in passing — tests/ui/incomparable_eq.fixed.jet used struct Bag, now a reserved builtin name; renamed to Basket, confirmed via git-stash that this predates all JIT work). The bug: crates/jet-jit host trap fns (Collections.rs trap_index/list_get/list_set/list_slice, lib.rs jet_trap_overflow, Concurrency.rs x2) called std::process::exit(70) directly — correct for jet run's own subprocess, fatal for jet dev, which runs JIT-compiled native code IN-PROCESS inside the resident watch server: any ordinary runtime panic (overflow, list/slice OOB, a couple concurrency panics) killed the whole dev server instead of reporting and continuing. Confirmed unsound to fix via panic!()+catch_unwind (checked cranelift-jit 0.112.3 source: no unwind tables emitted for JIT frames — unwinding through them is UB, ruled out categorically per I1). Real fix: JitRuntime.trapped flag + LowerCtx::emit_trap_check, called after every host call that can trap AND after every jet-fn-to-jet-fn call (so traps propagate transitively through callees) — branches to the function epilogue with a dummy return, never unwinds. resident_invoke checks the flag after main returns, converts it to the SAME E0953 diagnostic voice the tier-0 interpreter already uses (parity, not a new code), and resets per-run heap state (lists/strings/structs/channels/senders/tasks/task_controls) so the next hot-reload iteration in the same process starts clean. New regression test tests/dev.rs::cranelift_trap_then_hot_swap_continues proves trap-then-continue in one resident process.\n\nAlso added the permanent test this bug was actually caught by, and the real card-125 exit gate going forward: tests/dev.rs::dev_default_matches_compiled_binary — exercises the DEFAULT jet dev backend (CraneliftBackend+fallback, what the CLI actually runs), not the forced-interpreter-only path the older c77 battery uses. Current true state (this test's own count): 116 ran (default==compiled) / 133 boundary-asserted / 249 total.\n\nCategorized the 133 remaining boundary stems — roughly 36 are genuinely correct, working-as-intended boundaries: clock/sleep reads (4), file/env/process ambient effects (8), Tier-2 #Impure-gated (2, already E3410 as designed), FFI/#Unsafe/C-library (7), deliberate E0953 panics (5), and unwidened concurrency spawn/channel examples that need a real scheduler (the ones NOT already jit-covered — 6, plus 5 net/http siblings in the same boat, 11 total lumped with concurrency). The remaining ~97 are real, not-yet-attempted comptime-interpreter coverage gaps, clustering into distinct follow-on subsystems: HOF/bare-fn-value calling (6, likely small — HOF dispatch exists for methods per batch2 but not bare fn values/lambda params), labeled break/continue (1), tuple literals (1), variadics spread (1), typed CLI entry fn run(args:T) (2, flagged before as regression-prone), struct/enum Debug-interpolation (2), move-binding ^ interpretation (4), writeback ~ interpretation (7), field-assignment/self-mutation (2), collection types+methods Deque/Set/.view/.filter_map/.take/HLL (7), arena/gc .new() constructors (5), serde encoders CSV/TOML/YAML/JSON-decode (9, large subsystem), text BigInt/Decimal/dates (4, large subsystem), crypto comptime primitives (4, large subsystem), io comptime helpers archive/compress/db/log/path/scope_guard/live-terminal (10), reactive/UI comptime stack signal/layout/backends (11, large subsystem), plus ~16 miscellaneous singles (?? loop control, #Transact, yield/generators, Reader/Cursor, Vec3/SIMD, sized-int casts, Sql, measurement, Bag, resident persist, par_map).\n\nStatus: staying in building, NOT done — do not close on the old alternate-exit-clause misreading again. Real remaining work is the ~97-item follow-on list above; several are properly-scoped subsystems in their own right (serde, text/bigint-decimal, crypto, reactive/UI), not a quick pass. Owner asked to move to epoch 4 next in this session; picking that up now. Next agent picking this back up: start with the small tractable clusters (HOF bare-fn calling, labeled loops, tuples, CLI entry, Debug-interpolation, move/writeback interpretation) before the big subsystems."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Trap-safety fix (flag+branch-to-epilogue in LowerCtx, crates/jet-jit) in progress via a dedicated sub-agent session; session hit an API limit mid-edit, resumed from transcript. Build was broken at cutover (E0425 unresolved reset_run_heap/jit_panic_diag in lib.rs, ~204-line diff so far, only lib.rs touched — Collections.rs/Concurrency.rs trap sites from the brief still need checking). Not yet verified end-to-end. Do not consider this fixed until a follow-up log confirms cargo build + cargo test --test dev green (incl. dev_default_matches_compiled_binary, three-way battery, hot_swap) and a real trap-then-continue check."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "New permanent test added: dev_default_matches_compiled_binary (tests/dev.rs) — the actual card-125 exit gate, since it exercises the DEFAULT jet dev backend (CraneliftBackend wrapping InterpreterBackend, use_interpreter:false) end-to-end vs the compiled AOT binary, across the full example corpus. Prior batteries either forced interpreter-only (interpreter_matches_compiled_binary, a different invariant) or only checked jit-covered examples that already had goldens (cranelift_three_way_differential_battery) — neither exercised the real default path broadly. Immediately found a P0 safety bug: several jit-jit host trap fns (crates/jet-jit/src/Collections.rs trap_index/list_get/list_set/list_slice; crates/jet-jit/src/lib.rs jet_trap_overflow; crates/jet-jit/src/Concurrency.rs x2) call std::process::exit(70) directly — correct for jet run/the AOT binary (its own process) but fatal for jet dev: since CraneliftBackend runs JIT-compiled native code IN-PROCESS inside the resident watch server, ANY runtime trap (int overflow, list index/slice OOB, a couple concurrency panics) kills the entire jet dev process instead of reporting the panic and continuing the watch loop the way the tier-0 interpreter already does (confirmed: collections/list_bounds.jet, a bounds-panic demo, crashes the whole test process under the default backend though it cleanly reports E0953 under forced-interpreter mode). Checked cranelift-jit 0.112.3 source: it emits no unwind tables, so panic!()+catch_unwind across JIT-compiled frames is unsound (confirmed no unwind info support) — ruled out. Correct fix is an explicit trapped-flag + branch-to-epilogue in the CLIF lowering (LowerCtx) after every call site that can trap (host calls: list_get/list_set/list_slice/checked-arith/concurrency; and every jet-fn-to-jet-fn call, since traps must propagate transitively through callees) — mechanical but touches ~15+ call sites in crates/jet-jit/src/lib.rs plus Collections.rs/Concurrency.rs. Handing to a focused implementation pass next; this blocks real card-125 closure since it is reachable on ordinary jit-covered programs, not an edge case. Once fixed, re-run dev_default_matches_compiled_binary across the full 249-example corpus to get the true remaining gap list (a forced-interpreter-only dump showed 139 boundary hits, but a default-backend dump before the crash suggested most of those are already covered by the JIT/interpreter mixed-fallback and the true default-mode gap set is much smaller — collections/basics HOF+labeled-loop+tuple+CLI-entry+collection-method items were the ones seen so far)."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -7311,11 +7375,21 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "tools/Tower/docs/plans/epoch-4/vision.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Full nix develop -c cargo test --workspace completed, exit code 0, zero FAILED/error lines in the log. No regressions from this pass's Phase A/U15 diff. Confirmed independently."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Independently re-verified (orchestrator) the Phase A + U15 fleets slice this pass shipped: nix develop -c cargo build --workspace clean; targeted tests green (tests/fleet.rs 8/8, tests/jetpack.rs 35/35, tests/diagnostics_coverage.rs 6/6, crates/jet-driver Lock::a4_envelope_tests 6/6). Full nix develop -c cargo test --workspace kicked off to confirm no regressions from this large a diff; will log result once it completes. Confirms the agent's own report: Phase A (A1-A3 pre-existing verified, A4 lock envelope+toolchain schema newly closed) and Phase B U15 fleets (parser->modeval->CLI jet push, diagnostics E1242-E1245) are real and tested. Correctly NOT touched: Phase D (owner-gated). Correctly flagged, not guessed: E09xx codes in the plan collide with already-shipped unrelated diagnostics; fleet reallocated to E1242-E1245 (E12xx jetpack range) — this is internal code allocation, not owner-facing syntax, no ballot needed, but implementation.md's code list should be corrected by whoever picks up the next slice. Remaining Phase B (U11 script deps, U14 OCI images, U19 env/dev/trust), most of Phase B+ (U20 user-facing adapter surface, U21, U26, U27), and all of Phase C (U12 services, U13 secrets, U16 nix bridge) are NOT YET ATTEMPTED — this card stays in building, next agent picks up at U11 or U19 (U19 gates U12/U13/U16 per the README's own dependency edges, so doing it before Phase C would unblock more)."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -7374,6 +7448,11 @@
           "at": "2026-07-02",
           "by": "agent",
           "text": "Plan written: tools/Tower/docs/plans/epoch-5/implementation.md. Five follow-up gates raised as ballots: D-JPK-SECRETCRYPTO1 (cipher backend), D-JPK-OCITOOL1 (OCI build/push engine), D-JPK-FILENAME2 (confirm pack.jet reversal vs keep shipped pkg.jet), D-JPK-MODBODY1 (canonical module body form), D-JPK-DISPATCH1 (in-process vs git-style engine dispatch scope). Non-cipher/non-OCI scaffolding is buildable regardless of outcomes."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "[handoff 2026-07-03, agent] PHASE A COMPLETE + Phase B U15 (fleets) COMPLETE end-to-end; full workspace suite green.\n\nPHASE A (foundation) — all four slices done:\n- A1 process dispatch (D-JPK-DISPATCH1=B): already shipped by prior session — Source/EngineDispatch.rs + Source/Bin/Jetpack.rs; E1227 skew / E1228 missing; tests/engine_dispatch.rs (7 tests). Verified.\n- A2 pkg.jet filename canon (D-JPK-FILENAME2=B): already shipped — PAYLOAD_FILE=pkg.jet; E1226 retired-name teaching in Loader.rs (pack.jet/payload.jet/jet.toml). Verified.\n- A3 module role-declaration form (D-JPK-MODBODY1=A): already shipped — role_module_decl parses module env.dev/system.x/image.x; E1229 old-contribution teaching. Verified.\n- A4 hangar envelope + lock schema (D-JPK-CACHE1=A / D-JPK-TOOLCHAIN1=A): store/Realized envelope shipped by card #99. THIS PASS finished the LOCK half: added LockEnvelope (output_hash/platform/signature/provenance) + LockedToolchain + toolchains:Vec on LockFile in crates/jet-driver/src/Lock.rs; write/parse round-trip incl [[toolchain]] block; record_envelope() backfill helper (mirrors record_inferred_layer); updated all 10 LockFile/LockedPackage literals (Fetch.rs, Publish/mod.rs, CmdCompile.rs, WorkspaceLock.rs, tests/pkg.rs, tests/ring_layer.rs). Tests: 6 new in Lock.rs a4_envelope_tests (lock_roundtrips_envelope, filled_signature, legacy_none, toolchain_record, record_envelope_backfills, coexists_with_effects). NOTE: cross-flow backfill of the realized envelope into .jet/lock during a real jet build is NOT yet wired (helper exists + unit-tested); store meta.json remains the authoritative per-object envelope. Schema is frozen+round-tripping (A4 exit met).\n\nPHASE B — U15 FLEETS complete end-to-end (D-JPK-FLEET1=A); parse/capture/cross-check now, ssh rollout gated on Phase D:\n- foundation: Syntax.rs NS_FLEET/TYPE_FLEET/FLEET_FIELD_HOSTS; JETPACK_VERBS+=push.\n- AST.rs: Namespace::Fleet, ContribValue::Fleet, FleetLit/FleetField/FleetFieldValue/HostEntry (override captured as Option<Span>).\n- parser Modules.rs: fleet arm in role_module_decl + old-form contribution(); fleet_lit/fleet_field/fleet_hosts/skip_balanced_brace_span; host value = system.<name>[.{overrides}]; mod.rs fleet_host_not_system/fleet_unterminated_override (E0003 family). E0960 msg extended to list fleet (snapshot re-blessed).\n- modeval: Types.rs FleetPlan/HostPlan wired into EvaluatedModule+EnvPlan; Eval.rs fleet arm+namespace_type; System.rs evaluate_fleet (captures hosts, slices override text); Source.rs collects fleets + cross-checks each host system ref (E1242); Diagnostics.rs fleet_unknown_system/fleet_unknown_field/fleet_missing_hosts.\n- CLI: cmd_push in Jetpack/CLI.rs (loads env, evaluate_env cross-checks, honest E1243 gated notice listing validated hosts, exit 2); jet push routed via EngineDispatch in Source/main.rs (known/owns_flags/dispatch arm).\n- diagnostics: E1242 fleet-unknown-system, E1243 push-gated, E1244 fleet-unknown-field, E1245 fleet-missing-hosts — all in docs/spec/diagnostics.md (index + detail tables).\n- examples/tests: tests/fixtures/jetpack-typed/fleet.jet (committed I5 spec); tests/fleet.rs (8 tests: 3 modeval-code + valid capture + committed fixture + 3 jetpack-push process incl E1243/E1242/unknown-fleet); 5 modeval unit tests in ModuleEval/mod.rs. diagnostics_coverage green (all 4 codes covered).\n\nDIAGNOSTIC-CODE COLLISION (raise if it matters): the implementation.md plan assigned E0990-E0995 (image), E0993-E0994 (fleet), E0984-E0988 (services/secrets) — but those E09xx codes are ALREADY USED by parser teaching diagnostics (E0984-E0994 taken). They CANNOT be reused (I4 uniqueness). Reallocated fleet codes into the E12xx jetpack range (E1242-E1245). Image/service/secret/nix diagnostics, when built, will likewise need fresh E12xx codes, NOT the plan-listed E09xx. This is an internal code allocation, not owner-facing syntax — no ballot needed, but the plan text should be corrected.\n\nNOT ATTEMPTED THIS PASS (next slices, clearly separated):\n- Phase B U11 inline script deps (use pkg#ver, jet lock/init, E1230/L02xx) — not started.\n- Phase B U14 images (OCI/ISO): existing ImagePlan is jetos ISO tier (from:system); the U14 Phase-B OCI-container axis (kind:.Oci, from:packages.x, expose, env_vars, native OCI layer/tar/gzip/sha256 builder) is NOT built. Needs fresh E12xx codes (plan E0990-E0992 collide).\n- Phase B U19 env/dev split + trust gate (E1231/E1232, trust store) — not started.\n- Phase B+ U20 adapters (Pkg.adapt/Recipe.* user-facing surface on #99 substrate; D-JPK-ADAPTNAME1=A ratified), U21 channels, U22 jet clean/hangar contract, U23 no-nix errors, U25 platform CI, U26 discovery, U27 build-dbg, U28 no-daemon, U29 offline sweep — NOT attempted. (U24 envelope schema is satisfied by A4.)\n- Phase C (U12 services, U13 secrets, U16 nix bridge) — not started.\n- Phase D (jetos) — correctly untouched (owner-gated).\n\nVERIFICATION: nix develop -c cargo test --workspace GREEN (full run, no failures; one engine_dispatch flake under parallelism confirmed pre-existing env/order sensitivity — passes isolated + on clean rerun). Files touched: Lock.rs, Fetch.rs, Publish/mod.rs, CmdCompile.rs, Syntax.rs, AST.rs, parser Modules.rs + mod.rs, Jetpack/ModuleEval/{Types,Eval,System,Source,Diagnostics,mod}.rs, Jetpack/CLI.rs, WorkspaceLock.rs, Source/main.rs, docs/spec/diagnostics.md, tests/{fleet.rs,pkg.rs,ring_layer.rs}, tests/fixtures/jetpack-typed/fleet.jet, tests/ui/module_unknown_namespace.stderr. NO stubs; no git checkout/restore used."
         }
       ],
       "created": "2026-07-01T00:00:00.000Z",
@@ -7483,11 +7562,21 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "tools/Tower/docs/plans/epoch-4/toolchain-as-dependency.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Independently re-verified (orchestrator): nix develop -c cargo build --workspace clean. Targeted tests confirmed matching the agent's exact claim: tests/toolchain_pin.rs 6/6, tests/diagnostics_coverage.rs 6/6, crates/jet-driver lib JetPin:: 15/15 (all named tests present: identity_block_parses_across_unknown_fields, toolchain_pin_locks_exact, mismatched_jet_realizes_and_execs_pin, jet_toolchain_reports_pin, jet_update_jet_moves_lock, jet_init_pins_running_channel, etc). Full nix develop -c cargo test --workspace run to completion, exit code 0, zero FAILED/error lines. New JetPin module correctly kept distinct from the pre-existing bridge Toolchain.rs (card #99, different concept - Rust build toolchain vs jet-language-version pin) - confirmed no symbol/naming collision. Reconciled a real pre-existing collision the plan didn't foresee (jet: field was already an E1208 range-constraint gate; split by form, range stays E1208, channel drives the new pin - one field one meaning per form, I8 held). All 4 slices (T1 frozen identity pre-parse, T2 channel+lock resolution, T3 realize+re-exec with loop guard, T4 verbs) confirmed real and tested. Closing: phase -> done."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "IMPLEMENTED all 4 slices, full suite green (cargo test, 0 failed). New module crates/jet-driver/src/Jetpack/JetPin.rs (name chosen to avoid collision with the pre-existing bridge-build Toolchain.rs / D-JPK-BUILDTOOL1; jet pin uses `jet-<ver>-<fp>` object ids, bridge uses `toolchain-<ver>`, so lock records + selectors never mix). T1: identity_preparse frozen-forward reader (payload name/version/jet, brace-matched, tolerant of unknown fields/blocks) + classify_channel; frozen grammar documented in docs/spec/spec.md. T2: reused Lock::LockedToolchain, ADDED a `channel` field + Lock::record_toolchain (load-or-create, upsert by jet- id); resolve_channel deterministic (X.Y→X.Y.0). T3: decide() native-first (in-channel jet runs natively, plain `jet run` never writes a lock into the tree), mismatch → realize_jet_binary via TOOLCHAIN_OBJECT_ENV hangar boundary (never source-builds; miss=E1251) → re-exec through EngineDispatch-style Command with JET_TOOLCHAIN_EXEC guard (new Syntax const). T4: `jet toolchain`/`jet update jet [<ch>]`/`jet init` wired in Source/main.rs + registered in Source/CLI.rs COMMANDS; build/run/test/check guard maybe_dispatch_pinned_toolchain(). Reconciled the `jet:` field's dual meaning: range forms (>=x) stay the legacy E1208 compat gate (Manifest::is_range_constraint / JetPin::is_range_pin skip them), channel forms drive the pin — one field, one meaning per form. Diagnostics E1249 bad-toolchain-pin / E1250 toolchain-channel-in-ci / E1251 toolchain-unavailable / E1252 init-clobber added to docs/spec/diagnostics.md (registry+detail, auto-explain); reused E1227 engine-version-skew. NOTE plan's E1233-E1235 were STALE (taken by other cards today) — actual codes are E1249-E1252. Tests: JetPin unit 15 (identity_block_parses_across_unknown_fields, toolchain_pin_locks_exact, mismatched_jet_realizes_and_execs_pin, jet_toolchain_reports_pin, jet_update_jet_moves_lock, jet_init_pins_running_channel, +9), Lock a4 6 (toolchain roundtrip carries channel), integration tests/toolchain_pin.rs 6 (E1249/E1250/E1251/E1252 + init/update roundtrip + in-channel-native-no-lock). Example examples/features/packages/toolchain_pin/ (pkg.jet jet:1.0 + main.jet) runs native under golden (expected 'built by the pinned toolchain'). Blessed tests/cli/{completions_*,man}.txt for the 2 new verbs. Exit checklist: all 8 boxes met. ready→verify (owner verifies)."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -7783,9 +7872,9 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "tools/Tower/docs/plans/memory-v5-migration.md",
       "blockedBy": [],
       "workOrder": null,
       "log": [
@@ -7823,6 +7912,47 @@
           "at": "2026-07-03",
           "by": "agent",
           "text": "Owner happy with v5. Syntax audit vs live examples: proposal + gallery re-spelled in current ratified Jet (fn run, String, [T]/[K,V] + [:], value()/null, ok/err/??/?, ::/:=, typed lambdas, take(x) spawn captures, files API). Gallery artifact redeployed. Jetpack confirmed independent of D-MEM1 (manifest/provisioning layer; no sema-surface contact)."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "owner",
+          "text": "RATIFIED D-MEM1 = A (humanized borrow checker: bare=read, &=write, ^=take; second-class borrows; view values; Shared/Pool; teaching diagnostics)."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Migration plan written (deliverable #2): tools/Tower/docs/plans/memory-v5-migration.md. Card phase -> ready. Supersedes on implementation: D-CAP8 elevation/freeze + api:explicit, D-REF-SHORTHAND1/2, L0201, ~ glyph, &-as-share, -> &T borrow returns."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Greenfield rule applied to migration plan: former spellings (~, -> &T, &T fields, #Ref, api:, .clone()) are not in the v5 grammar/stdlib — ordinary unknown-syntax failures, zero compat or teaching diagnostics referencing them. Also pinned the ^-for-named-bindings rule: temporaries (copy x, literals, call results) pass without ^."
+        }
+      ]
+    },
+    {
+      "id": "cv5syntaxdecrees",
+      "num": 188,
+      "title": "v5 companion syntax decrees (owner-ratified 2026-07-03)",
+      "body": "Six owner decrees issued during memory-model v5 review; ratified directly, no ballot needed. Greenfield rule: pre-release spellings leave zero trace — old forms are simply not part of the grammar/stdlib and fail as ordinary unknown syntax; no diagnostics reference them. GREENFIELD RULE (owner 2026-07-03): pre-release spellings leave zero trace — no compat shims, no diagnostics mentioning former forms; old spellings simply are not in the grammar/stdlib and fail as ordinary unknown syntax. (1) D-EMPTYLIT1: empty collection literal is [] for list/map/set alike, type-directed; [:] is not part of the grammar. (2) D-OPT-SPELL1: option constructors are Val(x) / None; value(x) and null do not exist; pattern tests are `== Val(n)`. (3) D-LAMBDA-INFER1: bare lambda params legal wherever the type is inferable (m => m.hp > 0); typed form stays for ambiguity. (4) D-TUPLE-DESTRUCT1: tuple-destructuring binding (a, b) := f(); tasks.channel() returns (Sender<T>, Receiver<T>). (5) D-FILES-WRITE1: core.files is THE file module (no core.fs; users may alias); handle method is .write. (6) D-STR-AFTER1: String gains .after(sep) (+ .before family, exact set minted at impl). Implementation: parser/sema/stdlib + examples + fmt round-trip + ui/golden snapshots + syntax-decisions.md rows + Syntax.rs I7 entries where new tokens. Independent of D-MEM1 sequencing.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": null,
+      "log": [
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Minted from owner decrees in v5 review session. Proposal + gallery re-spelled to the decreed forms."
+        },
+        {
+          "at": "2026-07-03",
+          "by": "agent",
+          "text": "Owner: greenfield rule — greenfield: former spellings are simply absent from the grammar and fail as ordinary unknown syntax; no diagnostic mentions them. Card body, decree texts, and migration plan scrubbed accordingly."
         }
       ]
     }
@@ -19873,8 +20003,148 @@
         }
       ],
       "rec": "A",
-      "status": "open",
-      "group": "ownership"
+      "status": "ratified",
+      "group": "ownership",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03"
+    },
+    {
+      "id": "D-EMPTYLIT1",
+      "cardId": "cv5syntaxdecrees",
+      "title": "Empty collection literal is [] for all collections",
+      "gist": "One empty literal, type-directed: lists, maps, sets all construct empty from []. No map-specific spelling exists.",
+      "explainer": "One empty literal, type-directed: lists, maps, sets all construct empty from []. No map-specific spelling exists.",
+      "story": "",
+      "inWild": "counts: [String, Int] := []\nnames: [String] := []",
+      "detail": "Owner decree during memory-model v5 review, 2026-07-03. Ratified directly in session; no ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Empty collection literal is [] for all collections",
+          "detail": "One empty literal, type-directed: lists, maps, sets all construct empty from []. No map-specific spelling exists.",
+          "code": "counts: [String, Int] := []\nnames: [String] := []"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03",
+      "group": "syntax"
+    },
+    {
+      "id": "D-OPT-SPELL1",
+      "cardId": "cv5syntaxdecrees",
+      "title": "Option constructors: Val(x) / None",
+      "gist": "Option constructors are Val(x) / None. Pattern tests follow: if find_even(9) == Val(n). No other spellings exist.",
+      "explainer": "Option constructors are Val(x) / None. Pattern tests follow: if find_even(9) == Val(n). No other spellings exist.",
+      "story": "",
+      "inWild": "fn find_even(limit: Int) -> (Int?) { ... return Val(i) ... return None }\nif find_even(9) == Val(n) { print(n) }",
+      "detail": "Owner decree during memory-model v5 review, 2026-07-03. Ratified directly in session; no ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Option constructors: Val(x) / None",
+          "detail": "Option constructors are Val(x) / None. Pattern tests follow: if find_even(9) == Val(n). No other spellings exist.",
+          "code": "fn find_even(limit: Int) -> (Int?) { ... return Val(i) ... return None }\nif find_even(9) == Val(n) { print(n) }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03",
+      "group": "syntax"
+    },
+    {
+      "id": "D-LAMBDA-INFER1",
+      "cardId": "cv5syntaxdecrees",
+      "title": "Bare lambda params when type is inferable",
+      "gist": "m => m.hp > 0 is legal wherever the parameter type is inferable from context; the typed form (m: Player) => ... remains for ambiguous sites.",
+      "explainer": "m => m.hp > 0 is legal wherever the parameter type is inferable from context; the typed form (m: Player) => ... remains for ambiguous sites.",
+      "story": "",
+      "inWild": "party.members.filter(m => m.hp > 0)",
+      "detail": "Owner decree during memory-model v5 review, 2026-07-03. Ratified directly in session; no ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Bare lambda params when type is inferable",
+          "detail": "m => m.hp > 0 is legal wherever the parameter type is inferable from context; the typed form (m: Player) => ... remains for ambiguous sites.",
+          "code": "party.members.filter(m => m.hp > 0)"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03",
+      "group": "syntax"
+    },
+    {
+      "id": "D-TUPLE-DESTRUCT1",
+      "cardId": "cv5syntaxdecrees",
+      "title": "Tuple-destructuring bindings; channel() returns a pair",
+      "gist": "(a, b) := f() destructures tuple returns. tasks.channel() is reshaped to return (Sender<T>, Receiver<T>) so channels bind as (tx, rx).",
+      "explainer": "(a, b) := f() destructures tuple returns. tasks.channel() is reshaped to return (Sender<T>, Receiver<T>) so channels bind as (tx, rx).",
+      "story": "",
+      "inWild": "(tx, rx) := tasks.channel<Job>()",
+      "detail": "Owner decree during memory-model v5 review, 2026-07-03. Ratified directly in session; no ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tuple-destructuring bindings; channel() returns a pair",
+          "detail": "(a, b) := f() destructures tuple returns. tasks.channel() is reshaped to return (Sender<T>, Receiver<T>) so channels bind as (tx, rx).",
+          "code": "(tx, rx) := tasks.channel<Job>()"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03",
+      "group": "syntax"
+    },
+    {
+      "id": "D-FILES-WRITE1",
+      "cardId": "cv5syntaxdecrees",
+      "title": "core.files is the file module; handle method is .write",
+      "gist": "core.files is the one file module (users may `use core.files as fs` to shorten). The handle write method is .write.",
+      "explainer": "core.files is the one file module (users may `use core.files as fs` to shorten). The handle write method is .write.",
+      "story": "",
+      "inWild": "use core.files as files\nsave :: files.create(\"save.txt\")?\nsave.write(\"{data}\")?",
+      "detail": "Owner decree during memory-model v5 review, 2026-07-03. Ratified directly in session; no ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "core.files is the file module; handle method is .write",
+          "detail": "core.files is the one file module (users may `use core.files as fs` to shorten). The handle write method is .write.",
+          "code": "use core.files as files\nsave :: files.create(\"save.txt\")?\nsave.write(\"{data}\")?"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03",
+      "group": "syntax"
+    },
+    {
+      "id": "D-STR-AFTER1",
+      "cardId": "cv5syntaxdecrees",
+      "title": "String slicing ergonomics: .after(sep) family",
+      "gist": "String gains .after(sep) (and .before family; exact set minted at implementation) returning zero-copy view values.",
+      "explainer": "String gains .after(sep) (and .before family; exact set minted at implementation) returning zero-copy view values.",
+      "story": "",
+      "inWild": "fn domain(email: String) -> String { return email.after(\"@\") }",
+      "detail": "Owner decree during memory-model v5 review, 2026-07-03. Ratified directly in session; no ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "String slicing ergonomics: .after(sep) family",
+          "detail": "String gains .after(sep) (and .before family; exact set minted at implementation) returning zero-copy view values.",
+          "code": "fn domain(email: String) -> String { return email.after(\"@\") }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-03",
+      "group": "syntax"
     }
   ],
   "binder": [

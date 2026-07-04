@@ -57,6 +57,62 @@ fn jet_cmd(args: &[&str], cwd: &Path, store_dir: &Path) -> std::process::Output 
         .expect("jet binary should run")
 }
 
+/// Run the jet binary with an explicit set of env vars (used to point
+/// `jet publish`/`jet yank` at a scratch registry via `JET_REGISTRY_URL` and
+/// `JET_REGISTRY_CACHE_DIR`).
+fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = Command::new(jet_bin());
+    cmd.args(args).current_dir(cwd);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    cmd.output().expect("jet binary should run")
+}
+
+/// Init an empty bare git repo standing in for a registry index. Returns its
+/// `file://` URL.
+fn bare_registry(dir: &Path) -> String {
+    Command::new("git")
+        .args(["init", "--bare", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    format!("file://{}", dir.to_str().unwrap())
+}
+
+/// Read `index/<name>/<name>.jsonl` out of a bare registry via `git show`.
+fn read_index_file(bare: &Path, name: &str) -> Option<String> {
+    let spec = format!("HEAD:index/{name}/{name}.jsonl");
+    let out = Command::new("git")
+        .args(["--git-dir", bare.to_str().unwrap(), "show", &spec])
+        .output()
+        .unwrap();
+    if out.status.success() {
+        Some(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        None
+    }
+}
+
+/// Write a minimal project and commit it (clean tree) so `jet publish` clears
+/// the dirty-tree gate (E2605).
+fn init_clean_project(dir: &Path, name: &str, version: &str) {
+    write(dir, "pkg.jet", &min_manifest(name, version));
+    write(dir, "main.jet", "fn run() { print(\"hi\"); }\n");
+    for args in &[
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "test@jet.test"],
+        vec!["config", "user.name", "Jet Test"],
+        vec!["add", "."],
+        vec!["commit", "-m", "init"],
+    ] {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+    }
+}
+
 /// Run `f` with JET_STORE_DIR set to `store_dir`, serializing concurrent calls.
 fn with_store<T, F: FnOnce() -> T>(store_dir: &Path, f: F) -> T {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -711,7 +767,7 @@ fn lock_file_content_hash_roundtrip() {
         effects: vec![],
 
         effect_grants: vec![],
-    };
+        envelope: None,    };
     let lock = LockFile {
         version: 1,
         packages: vec![pkg],
@@ -721,7 +777,7 @@ fn lock_file_content_hash_roundtrip() {
             path: "packages/hello".into(),
         }],
         comptime_inputs: vec![],
-    };
+        toolchains: Vec::new(),    };
     let serialized = jet::Lock::write(&lock);
     assert!(
         serialized.contains("content-hash = \"sha256-deadbeef\""),
@@ -1627,11 +1683,11 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             effects: vec![],
 
             effect_grants: vec![],
-        }],
+            envelope: None,        }],
         root_dependencies: vec![name.into()],
         workspace_members: vec![],
         comptime_inputs: Vec::new(),
-    }
+        toolchains: Vec::new(),    }
 }
 
 #[test]
@@ -1729,7 +1785,7 @@ fn e1217_missing_locked_revision() {
         root_dependencies: vec![],
         workspace_members: vec![],
         comptime_inputs: Vec::new(),
-    };
+        toolchains: Vec::new(),    };
     let err = verify_all_manifest_deps_locked(&mf, &empty_lock)
         .expect_err("missing locked revision must fail");
     assert_eq!(err.code, "E1217");
@@ -1881,9 +1937,21 @@ fn cli_publish_refuses_dirty_git_tree() {
         "jet publish must cite E2605 for a dirty tree:\n{stderr}"
     );
 
-    // With --force it must emit a warning but succeed (past the dirty gate).
-    // The build may fail (no Rust toolchain in test), so only check the dirty warning.
-    let out_force = jet_cmd(&["publish", "--force"], &tmp, &store);
+    // With --force it must emit a warning and get past the dirty gate. The
+    // uncommitted warning is printed before any registry push, so pointing the
+    // registry at a bogus local path (push then fails fast, no network) does not
+    // affect these assertions.
+    let cache = tmp.join("cache");
+    let bogus = format!("file://{}", tmp.join("nonexistent.git").to_str().unwrap());
+    let out_force = jet_cmd_env(
+        &["publish", "--force"],
+        &tmp,
+        &[
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_REGISTRY_URL", bogus.as_str()),
+            ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+        ],
+    );
     let stderr_force = String::from_utf8_lossy(&out_force.stderr);
     assert!(
         stderr_force.contains("warning") && stderr_force.contains("uncommitted"),
@@ -1898,62 +1966,160 @@ fn cli_publish_refuses_dirty_git_tree() {
 // ─────────────────────────────────────────────
 
 #[test]
-fn cli_yank_creates_local_marker() {
-    // D-VERSION1=A: `jet yank <version>` must write a local yank marker file
-    // to `.jet/yank/<name>-<version>.yank` and print a c56 note about upload.
+fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
+    // c56 (D-JPK-CACHE1=A / D-VERSION1=A): `jet publish` writes a JSONL line to
+    // the git registry index and pushes it; republishing the same version is
+    // refused with E1234 (version immutability).
     if !jet_bin().is_file() {
-        eprintln!("note: skipping cli_yank_creates_local_marker (run `cargo build` first)");
+        eprintln!("note: skipping cli_publish_pushes_index (run `cargo build` first)");
+        return;
+    }
+    if !have_git() {
+        eprintln!("note: skipping cli_publish_pushes_index (git not found)");
         return;
     }
 
-    let tmp = tmp_dir("yank_marker");
+    let tmp = tmp_dir("pub_push");
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("cache");
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
+    let keys = tmp.join("keys");
+    init_clean_project(&proj, "textkit", "1.2.0");
 
-    write(&tmp, "pkg.jet", &min_manifest("mypkg", "2.0.0"));
+    let envs = &[
+        ("JET_REGISTRY_URL", url.as_str()),
+        ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_KEYS_DIR", keys.to_str().unwrap()),
+    ];
 
-    let out = jet_cmd(
-        &["yank", "1.5.0", "--message", "regression in parser"],
-        &tmp,
-        &store,
-    );
+    let out = jet_cmd_env(&["publish"], &proj, envs);
     assert!(
         out.status.success(),
-        "jet yank should exit 0:\n{}",
+        "publish should succeed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let index = read_index_file(&bare, "textkit").expect("index file must exist in registry");
+    assert!(index.contains("\"name\":\"textkit\""), "index line:\n{index}");
+    assert!(index.contains("\"version\":\"1.2.0\""), "index line:\n{index}");
+    assert!(index.contains("\"yanked\":false"), "index line:\n{index}");
+
+    // Republish the same version → E1234 immutability.
+    let out2 = jet_cmd_env(&["publish"], &proj, envs);
     assert!(
-        stdout.contains("mypkg") && stdout.contains("1.5.0"),
-        "yank stdout must name pkg/version:\n{stdout}"
+        !out2.status.success(),
+        "republishing an existing version must fail"
     );
+    let stderr2 = String::from_utf8_lossy(&out2.stderr);
+    assert!(stderr2.contains("E1234"), "republish must cite E1234:\n{stderr2}");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_yank_flips_index_entry() {
+    // c56 (D-VERSION1=A): `jet yank <version>` flips the `yanked` flag on the
+    // version's index line in place — it never deletes the line.
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_yank_flips_index_entry (run `cargo build` first)");
+        return;
+    }
+    if !have_git() {
+        eprintln!("note: skipping cli_yank_flips_index_entry (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("yank_flip");
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("cache");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let keys = tmp.join("keys");
+    init_clean_project(&proj, "mypkg", "2.0.0");
+
+    let envs = &[
+        ("JET_REGISTRY_URL", url.as_str()),
+        ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_KEYS_DIR", keys.to_str().unwrap()),
+    ];
+
+    let pubd = jet_cmd_env(&["publish"], &proj, envs);
     assert!(
-        stdout.contains("c56"),
-        "yank must mention c56 upload gate:\n{stdout}"
+        pubd.status.success(),
+        "publish should succeed:\n{}",
+        String::from_utf8_lossy(&pubd.stderr)
     );
 
-    // Marker file must exist.
-    let marker = tmp.join(".jet/yank/mypkg-1.5.0.yank");
+    let yanked = jet_cmd_env(&["yank", "2.0.0", "--message", "regression"], &proj, envs);
     assert!(
-        marker.is_file(),
-        "yank marker file must be written at {}",
-        marker.display()
+        yanked.status.success(),
+        "yank should succeed:\n{}",
+        String::from_utf8_lossy(&yanked.stderr)
     );
 
-    let content = fs::read_to_string(&marker).unwrap();
-    assert!(
-        content.contains("package = \"mypkg\""),
-        "marker must record package name"
+    let index = read_index_file(&bare, "mypkg").expect("index file must exist");
+    // The line is flipped, not removed — still exactly one line for 2.0.0.
+    assert_eq!(
+        index
+            .lines()
+            .filter(|l| l.contains("\"version\":\"2.0.0\""))
+            .count(),
+        1,
+        "yank must not delete the line:\n{index}"
     );
     assert!(
-        content.contains("version = \"1.5.0\""),
-        "marker must record version"
+        index.contains("\"yanked\":true"),
+        "version must be flipped to yanked:\n{index}"
     );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_publish_unreachable_registry_e1235() {
+    // c56: an unreachable registry index makes `jet publish` fail with E1235 —
+    // a clean diagnostic, never a raw git stack trace.
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_publish_unreachable_registry (run `cargo build` first)");
+        return;
+    }
+    if !have_git() {
+        eprintln!("note: skipping cli_publish_unreachable_registry (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("pub_unreach");
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let cache = tmp.join("cache");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    init_clean_project(&proj, "lonely", "0.1.0");
+
+    // A local path with no repo → git clone fails immediately, no network.
+    let bogus = format!("file://{}", tmp.join("nonexistent.git").to_str().unwrap());
+    let envs = &[
+        ("JET_REGISTRY_URL", bogus.as_str()),
+        ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+        ("JET_STORE_DIR", store.to_str().unwrap()),
+    ];
+
+    let out = jet_cmd_env(&["publish"], &proj, envs);
     assert!(
-        content.contains("regression in parser"),
-        "marker must record reason"
+        !out.status.success(),
+        "publish to an unreachable registry must fail"
     );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1235"), "must cite E1235:\n{stderr}");
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -2156,4 +2322,267 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
         diags.is_empty(),
         "expected same-package type/field access to pass, got {diags:?}"
     );
+}
+
+// ─────────────────────────────────────────────
+// c146 (D-PKGSIGN1): package signing tier A — Ed25519
+// ─────────────────────────────────────────────
+
+static KEYS_LOCK: Mutex<()> = Mutex::new(());
+
+fn have_cargo() -> bool {
+    Command::new("cargo").arg("--version").output().is_ok()
+}
+
+/// Run `f` with JET_KEYS_DIR pointed at `dir`, serialized against concurrent
+/// env mutation (same shape as `with_store`).
+fn with_keys<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
+    let _guard = KEYS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let prev = std::env::var("JET_KEYS_DIR").ok();
+    std::env::set_var("JET_KEYS_DIR", dir);
+    let result = f();
+    match prev {
+        Some(v) => std::env::set_var("JET_KEYS_DIR", v),
+        None => std::env::remove_var("JET_KEYS_DIR"),
+    }
+    result
+}
+
+fn signed_entry(
+    name: &str,
+    version: &str,
+    content_hash: &str,
+    public_key: &str,
+    signature: &str,
+) -> jet::Publish::IndexEntry {
+    jet::Publish::IndexEntry {
+        name: name.to_string(),
+        version: version.to_string(),
+        content_hash: content_hash.to_string(),
+        fingerprint: "sha256-fp".to_string(),
+        yanked: false,
+        public_key: public_key.to_string(),
+        signature: signature.to_string(),
+    }
+}
+
+#[test]
+fn cli_publish_signs_index_and_auto_keygens() {
+    // c146: `jet publish` auto-generates a key on first use, signs by default,
+    // and pins the public key + signature into the index line.
+    if !jet_bin().is_file() || !have_git() || !have_cargo() {
+        eprintln!("note: skipping cli_publish_signs (need built binary, git, cargo)");
+        return;
+    }
+
+    let tmp = tmp_dir("pub_sign");
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("cache");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let keys = tmp.join("keys");
+    init_clean_project(&proj, "signedkit", "1.0.0");
+
+    let envs = &[
+        ("JET_REGISTRY_URL", url.as_str()),
+        ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_KEYS_DIR", keys.to_str().unwrap()),
+    ];
+
+    let out = jet_cmd_env(&["publish"], &proj, envs);
+    assert!(
+        out.status.success(),
+        "signed publish should succeed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let index = read_index_file(&bare, "signedkit").expect("index file must exist");
+    assert!(
+        index.contains("\"public_key\":\"") && !index.contains("\"public_key\":\"\""),
+        "the first published version must pin a non-empty public key:\n{index}"
+    );
+    assert!(
+        index.contains("\"signature\":\"") && !index.contains("\"signature\":\"\""),
+        "a default publish must carry a non-empty signature:\n{index}"
+    );
+    // Auto-keygen wrote the key files at the documented paths.
+    assert!(
+        keys.join("jet.ed25519").is_file(),
+        "auto-keygen must write the secret seed"
+    );
+    assert!(
+        keys.join("jet.ed25519.pub").is_file(),
+        "auto-keygen must write the public key file"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_publish_no_sign_leaves_signature_empty() {
+    // c146: `--no-sign` opts out; tier-B checksum (content_hash) still present.
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!("note: skipping cli_publish_no_sign (need built binary, git)");
+        return;
+    }
+
+    let tmp = tmp_dir("pub_nosign");
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("cache");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let keys = tmp.join("keys");
+    init_clean_project(&proj, "plainkit", "1.0.0");
+
+    let envs = &[
+        ("JET_REGISTRY_URL", url.as_str()),
+        ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_KEYS_DIR", keys.to_str().unwrap()),
+    ];
+
+    let out = jet_cmd_env(&["publish", "--no-sign"], &proj, envs);
+    assert!(
+        out.status.success(),
+        "--no-sign publish should succeed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let index = read_index_file(&bare, "plainkit").expect("index file must exist");
+    assert!(
+        index.contains("\"signature\":\"\""),
+        "--no-sign must leave the signature empty:\n{index}"
+    );
+    // No key was generated (no signing happened).
+    assert!(
+        !keys.join("jet.ed25519").is_file(),
+        "--no-sign must not auto-generate a key"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn sign_verify_roundtrip_and_tamper_e1246() {
+    // c146: a signed entry verifies clean; tampering the content_hash makes the
+    // signature fail verification (E1246 — never silently accept tampered bytes).
+    if !have_cargo() {
+        eprintln!("note: skipping sign_verify_roundtrip (cargo not found)");
+        return;
+    }
+    let tmp = tmp_dir("sign_verify");
+    let keys = tmp.join("keys");
+
+    with_keys(&keys, || {
+        let (seed_a, _pub_path, pub_a) =
+            jet::Publish::Sign::keygen("jet", false).expect("keygen should succeed");
+        let content_hash = "sha256-0011223344556677";
+        let sig = jet::Publish::Sign::sign(&seed_a, content_hash).expect("sign should succeed");
+
+        let good = signed_entry("textkit", "1.0.0", content_hash, &pub_a, &sig);
+        let all = vec![good.clone()];
+        jet::Publish::verify_index_entry(&all, &good, false, "jet")
+            .expect("an untampered signature must verify");
+
+        // Direct Sign::verify roundtrip too.
+        assert!(
+            jet::Publish::Sign::verify(&pub_a, content_hash, &sig).unwrap(),
+            "Sign::verify must accept a genuine signature"
+        );
+
+        // Tamper the content hash → signature no longer matches → E1246.
+        let mut bad = good.clone();
+        bad.content_hash = "sha256-TAMPEREDdeadbeef".to_string();
+        let all_bad = vec![bad.clone()];
+        let err = jet::Publish::verify_index_entry(&all_bad, &bad, false, "jet")
+            .expect_err("a tampered content hash must fail verification");
+        assert_eq!(err.code, "E1246", "tamper must cite E1246");
+    });
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn require_signed_unsigned_entry_e1247() {
+    // c146: a registry with require_signed = true refuses an entry with no
+    // signature (E1247). No crypto needed — the check precedes verification.
+    let unsigned = signed_entry("corpkit", "1.0.0", "sha256-abc", "", "");
+    let all = vec![unsigned.clone()];
+    let err = jet::Publish::verify_index_entry(&all, &unsigned, true, "corp")
+        .expect_err("require_signed + no signature must error");
+    assert_eq!(err.code, "E1247", "must cite E1247");
+
+    // With require_signed = false the same unsigned entry is allowed.
+    jet::Publish::verify_index_entry(&all, &unsigned, false, "corp")
+        .expect("an unsigned entry is fine when the registry doesn't require signing");
+}
+
+#[test]
+fn key_rotation_warns_not_errors() {
+    // c146: a version that declares a different public key than the pin is a
+    // legitimate key rotation — a warning, never a hard error. The signature
+    // still verifies against the pinned key (the real signer).
+    if !have_cargo() {
+        eprintln!("note: skipping key_rotation (cargo not found)");
+        return;
+    }
+    let tmp = tmp_dir("key_rotate");
+    let keys = tmp.join("keys");
+
+    with_keys(&keys, || {
+        let (seed_a, _pa, pub_a) = jet::Publish::Sign::keygen("jet", false).unwrap();
+        let (_seed_b, _pb, pub_b) = jet::Publish::Sign::keygen("other", false).unwrap();
+        assert_ne!(pub_a, pub_b, "the two keys must differ");
+
+        let ch1 = "sha256-v1v1v1";
+        let ch2 = "sha256-v2v2v2";
+        let sig1 = jet::Publish::Sign::sign(&seed_a, ch1).unwrap();
+        // v2 is really signed by A, but its line declares key B (simulating a
+        // hand-rewritten rotation record).
+        let sig2 = jet::Publish::Sign::sign(&seed_a, ch2).unwrap();
+
+        let v1 = signed_entry("textkit", "1.0.0", ch1, &pub_a, &sig1);
+        let v2 = signed_entry("textkit", "2.0.0", ch2, &pub_b, &sig2);
+        let all = vec![v1, v2.clone()];
+
+        // pin = pub_a (first). v2's signature (by A) verifies against the pin;
+        // its declared key (B) differs → a warning, not an error.
+        let warnings = jet::Publish::verify_index_entry(&all, &v2, false, "jet")
+            .expect("key rotation must warn, not error");
+        assert!(
+            !warnings.is_empty() && warnings[0].contains("rotation"),
+            "rotation must produce a key-rotation warning, got {warnings:?}"
+        );
+    });
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn keygen_refuses_existing_key_e1248() {
+    // c146: `jet keygen` refuses to overwrite an existing key without --force.
+    if !have_cargo() {
+        eprintln!("note: skipping keygen_refuses_existing_key (cargo not found)");
+        return;
+    }
+    let tmp = tmp_dir("keygen_refuse");
+    let keys = tmp.join("keys");
+
+    with_keys(&keys, || {
+        jet::Publish::Sign::keygen("jet", false).expect("first keygen should succeed");
+        let err = jet::Publish::Sign::keygen("jet", false)
+            .expect_err("a second keygen without --force must refuse");
+        assert_eq!(err.code, "E1248", "must cite E1248");
+        // --force overwrites.
+        jet::Publish::Sign::keygen("jet", true).expect("--force keygen must overwrite");
+    });
+
+    let _ = fs::remove_dir_all(&tmp);
 }

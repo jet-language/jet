@@ -255,6 +255,15 @@ pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnosti
     let Some(constraint) = &manifest.package.jet_constraint else {
         return Ok(());
     };
+    // D-JPK-TOOLCHAIN1=A (#179): the `jet:` field is a toolchain *pin* — a
+    // channel ref (`0.4`, `0.4.2`, `main`). A channel-form value is owned by
+    // the version-dispatch path (`Jetpack::JetPin`: E1249 for a malformed pin,
+    // realize + re-exec or E1251 for a mismatch), NOT by this compatibility
+    // gate. Only an explicit range/operator constraint (`>=x`, `^x`, `*`) keeps
+    // the legacy E1208 "minimum toolchain" semantics.
+    if !is_range_constraint(constraint) {
+        return Ok(());
+    }
     if !satisfies_constraint(COMPILER_VERSION, constraint) {
         return Err(Diagnostic::error(
             "E1208",
@@ -271,6 +280,16 @@ pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnosti
         ));
     }
     Ok(())
+}
+
+/// A `jet:` value is a legacy range constraint (E1208 gate) when it leads with
+/// a comparison/wildcard operator; otherwise it is a D-JPK-TOOLCHAIN1 channel
+/// pin, handled by the version-dispatch path.
+fn is_range_constraint(value: &str) -> bool {
+    matches!(
+        value.trim().bytes().next(),
+        Some(b'>') | Some(b'<') | Some(b'=') | Some(b'^') | Some(b'~') | Some(b'*')
+    )
 }
 
 fn satisfies_constraint(version: &str, constraint: &str) -> bool {

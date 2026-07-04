@@ -92,17 +92,18 @@ impl<'a> Parser<'a> {
             _ if ns_word == Syntax::NS_ENV => Namespace::Env,
             _ if ns_word == Syntax::NS_SYSTEM => Namespace::System,
             _ if ns_word == Syntax::NS_IMAGE => Namespace::Image,
+            _ if ns_word == Syntax::NS_FLEET => Namespace::Fleet,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
                     format!("`{}` is not a module namespace", ns_word),
                     format!(
-                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), or `{}` (a disk image)",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE
+                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), or `{}` (a host fleet)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
                     ),
                     format!(
-                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE
+                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
                     ),
                     Some(ns_span),
                 ));
@@ -120,6 +121,7 @@ impl<'a> Parser<'a> {
         let mut env_fields: Vec<(String, Span, Expr)> = Vec::new();
         let mut system_fields: Vec<crate::AST::SystemField> = Vec::new();
         let mut image_fields: Vec<crate::AST::ImageField> = Vec::new();
+        let mut fleet_fields: Vec<crate::AST::FleetField> = Vec::new();
         let body_start = self.peek().span.start;
 
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -162,6 +164,12 @@ impl<'a> Parser<'a> {
                             self.bump();
                         }
                     }
+                    Namespace::Fleet => {
+                        fleet_fields.push(self.fleet_field()?);
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        }
+                    }
                 },
             }
         }
@@ -187,6 +195,11 @@ impl<'a> Parser<'a> {
             Namespace::Image => crate::AST::ContribValue::Image(crate::AST::ImageLit {
                 explicit_type: None,
                 fields: image_fields,
+                span: body_span,
+            }),
+            Namespace::Fleet => crate::AST::ContribValue::Fleet(crate::AST::FleetLit {
+                explicit_type: None,
+                fields: fleet_fields,
                 span: body_span,
             }),
         };
@@ -729,17 +742,18 @@ impl<'a> Parser<'a> {
             Syntax::NS_ENV => Namespace::Env,
             Syntax::NS_SYSTEM => Namespace::System,
             Syntax::NS_IMAGE => Namespace::Image,
+            Syntax::NS_FLEET => Namespace::Fleet,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
                     format!("`{}` is not a module namespace", ns_name),
                     format!(
-                        "a module contributes to exactly three reserved namespaces: `{}` (a dev environment), `{}` (a whole machine), and `{}` (a disk image)",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE
+                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), and `{}` (a host fleet)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
                     ),
                     format!(
-                        "begin the contribution with `{}`, `{}`, or `{}`",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE
+                        "begin the contribution with `{}`, `{}`, `{}`, or `{}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
                     ),
                     Some(ns_span),
                 ));
@@ -758,6 +772,7 @@ impl<'a> Parser<'a> {
             Namespace::Env => crate::AST::ContribValue::Expr(self.expr()?),
             Namespace::System => crate::AST::ContribValue::System(self.system_lit()?),
             Namespace::Image => crate::AST::ContribValue::Image(self.image_lit()?),
+            Namespace::Fleet => crate::AST::ContribValue::Fleet(self.fleet_lit()?),
         };
         let end = value.span().end;
         if matches!(self.peek().kind, TokKind::Comma) {
@@ -1017,5 +1032,130 @@ impl<'a> Parser<'a> {
             value,
             span: Span::new(name_span.start, end),
         })
+    }
+
+    /// U15: parse a `Fleet { … }` or bare `{ … }` record.
+    fn fleet_lit(&mut self) -> Result<crate::AST::FleetLit, Diagnostic> {
+        let start = self.peek().span.start;
+        let explicit_type = self.opt_record_type(Syntax::TYPE_FLEET)?;
+        self.expect(TokKind::LBrace, "to open a `Fleet` record")?;
+        let mut fields = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            fields.push(self.fleet_field()?);
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RBrace, "to close a `Fleet` record")?;
+        Ok(crate::AST::FleetLit {
+            explicit_type,
+            fields,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// U15: one field inside a `Fleet { … }` record. The known field is `hosts:`;
+    /// anything else is captured as an expression so modeval reports it.
+    fn fleet_field(&mut self) -> Result<crate::AST::FleetField, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for a `Fleet` field name")?;
+        self.expect(TokKind::Colon, "after a `Fleet` field name")?;
+        let value = if name == Syntax::FLEET_FIELD_HOSTS {
+            crate::AST::FleetFieldValue::Hosts(self.fleet_hosts()?)
+        } else {
+            crate::AST::FleetFieldValue::Other(self.expr()?)
+        };
+        let end = match &value {
+            crate::AST::FleetFieldValue::Hosts(hs) => {
+                hs.last().map(|h| h.span.end).unwrap_or(name_span.end)
+            }
+            crate::AST::FleetFieldValue::Other(e) => e.span().end,
+        };
+        Ok(crate::AST::FleetField {
+            name,
+            name_span,
+            value,
+            span: Span::new(name_span.start, end),
+        })
+    }
+
+    /// U15: `hosts: { <host>: system.<name>[.{ overrides }], … }`.
+    fn fleet_hosts(&mut self) -> Result<Vec<crate::AST::HostEntry>, Diagnostic> {
+        self.expect(TokKind::LBrace, "to open the `hosts` map")?;
+        let mut out = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            // S84: host names may be kebab-case.
+            let (host, host_span) = self.expect_dashed_name("for a host name")?;
+            self.expect(TokKind::Colon, "after a host name")?;
+            // `system.<name>` — the `system` keyword then the referenced name.
+            let (kw, kw_span) = self.expect_ident("for `system`, e.g. `system.web`")?;
+            if kw != Syntax::NS_SYSTEM {
+                return Err(fleet_host_not_system(kw_span));
+            }
+            self.expect(TokKind::Dot, "after `system`")?;
+            let (sys, sys_span) = self.expect_dashed_name("for the system name")?;
+            // Optional `.{ overrides }` copy-with-update tail — captured as a span.
+            let mut overrides = None;
+            let mut end = sys_span.end;
+            if matches!(self.peek().kind, TokKind::Dot)
+                && matches!(self.peek2().kind, TokKind::LBrace)
+            {
+                self.bump(); // consume `.`
+                let ov = self.skip_balanced_brace_span()?;
+                end = ov.end;
+                overrides = Some(ov);
+            }
+            out.push(crate::AST::HostEntry {
+                name: host,
+                name_span: host_span,
+                system: sys,
+                system_span: Span::new(kw_span.start, sys_span.end),
+                overrides,
+                span: Span::new(host_span.start, end),
+            });
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the `hosts` map")?;
+        Ok(out)
+    }
+
+    /// Consume a balanced `{ … }` block (the parser is positioned on the opening
+    /// `{`) and return its full source span. Used to capture a host's `.{ … }`
+    /// override text without semantically parsing it (U15 capture-only).
+    fn skip_balanced_brace_span(&mut self) -> Result<Span, Diagnostic> {
+        let open_span = self.peek().span;
+        let start = open_span.start;
+        self.expect(TokKind::LBrace, "to open the override record")?;
+        let mut end = open_span.end;
+        let mut depth = 1u32;
+        while depth > 0 {
+            match &self.peek().kind {
+                TokKind::Eof => {
+                    return Err(fleet_unterminated_override(Span::new(start, end)));
+                }
+                TokKind::LBrace => {
+                    depth += 1;
+                    end = self.bump().span.end;
+                }
+                TokKind::RBrace => {
+                    depth -= 1;
+                    end = self.bump().span.end;
+                }
+                _ => {
+                    end = self.bump().span.end;
+                }
+            }
+        }
+        Ok(Span::new(start, end))
     }
 }

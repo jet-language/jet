@@ -12,19 +12,23 @@
 pub mod CLI;
 pub mod Components;
 pub mod EffectBudget;
+pub mod Envelope;
 pub mod EnvFile;
 pub mod JSON;
 pub mod JetOS;
+pub mod JetPin;
 pub mod ManifestTOML;
 pub mod Merge;
 pub mod ModuleEval;
 pub mod Output;
 pub mod PackageManifest;
 pub mod Provider;
+pub mod Recipe;
 pub mod RefSpec;
 pub mod Shell;
 pub mod Store;
 pub mod TOML;
+pub mod Toolchain;
 pub mod WorkspaceFile;
 pub mod WorkspaceLock;
 

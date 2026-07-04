@@ -135,6 +135,54 @@ pub(crate) fn run_compile_cmd(
         report_problems(mode, file, &src, &[diag]);
         exit(ExitCodes::USAGE);
     }
+    // D-BUILDNORM1=A (Tower #85): compute the content-cache key from the
+    // program's canonical *pre-sema* AST, up front. `mode_tag` keeps the three
+    // native codegen shapes (plain, `--freestanding`, `--allow-impure`) in
+    // separate key spaces. `None` for web/cross builds (they never cache) or an
+    // `embed_file` build (external bytes not in the AST) or a parse failure.
+    let profile_tag = profile.cache_tag();
+    let mode_tag = if freestanding {
+        "freestanding"
+    } else if allow_impure {
+        "impure"
+    } else {
+        "run"
+    };
+    let native_key = if !is_web && cross_target.is_none() && (cmd == "build" || cmd == "run") {
+        native_cache_key(file, &profile_tag, mode_tag)
+    } else {
+        None
+    };
+
+    // `jet run` short-circuits the whole front end (only the parse inside the
+    // key computation ran) when this exact program is already in the content
+    // cache. A hit means this program was type-checked, codegen'd, compiled and
+    // run once before under this toolchain + profile + manifest — replaying its
+    // binary replays a validated result, it never bypasses a check (I2/I3). The
+    // toolchain-version + `pkg.jet` salts guarantee a compiler or policy change
+    // invalidates the entry, so effect-budget enforcement can't be masked.
+    // `jet build` deliberately stays on the full path below so its effect +
+    // capability summaries always print; it still skips rustc via `native_key`.
+    if cmd == "run" && mode_tag == "run" && !emit_rust {
+        if let Some(ref key) = native_key {
+            let out = bin_path(file);
+            if jet::BuildCache::try_copy_cached(key, &out) {
+                if verbose {
+                    eprintln!("[build] cache hit -> reused cached binary (front end skipped)");
+                }
+                let mut run_cmd = Command::new(&out);
+                for arg in program_args {
+                    run_cmd.arg(arg.as_str());
+                }
+                let status = run_cmd.status().unwrap_or_else(|e| {
+                    eprintln!("error: couldn't run the built program: {}", e);
+                    exit(ExitCodes::USER_ERROR);
+                });
+                exit(status.code().unwrap_or(ExitCodes::OK));
+            }
+        }
+    }
+
     let compile_result = if is_web {
         jet::compile_web(file)
     } else if freestanding {
@@ -253,6 +301,7 @@ pub(crate) fn run_compile_cmd(
                 cross_target,
                 web_out.as_ref(),
                 mode,
+                native_key.clone(),
             );
             if is_web {
                 println!("built: build/app.wasm + build/app.js");
@@ -291,6 +340,7 @@ pub(crate) fn run_compile_cmd(
                 cross_target,
                 web_out.as_ref(),
                 mode,
+                native_key.clone(),
             );
             if cross_target.is_some() {
                 eprintln!("note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)");
@@ -363,6 +413,10 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
         None,
         None,
         mode,
+        // `jet dev` is an interactive live-reload loop (entry-swapped codegen);
+        // not worth a content-cache entry. Still race-safe via `build`'s
+        // per-process temp path.
+        None,
     );
     // `devserver.app()` support: hand the running `dev()` program the
     // canonical absolute path of the file `jet dev` was pointed at, so "the
@@ -423,7 +477,7 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
-    });
+        toolchains: Vec::new(),    });
 
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);
     let out = bin.with_extension("spdx");
@@ -609,6 +663,14 @@ fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
         None,
         None,
         mode,
+        // `jet test` caches on the same canonical-AST key, but in its own mode
+        // space (the test-harness binary must never be served for a `jet run`);
+        // `--coverage` instrumentation is a distinct binary again.
+        native_cache_key(
+            shown.as_ref(),
+            &BuildProfile::Default.cache_tag(),
+            if coverage { "testcov" } else { "test" },
+        ),
     );
     // D-COV1: run with `JET_COV_OUT` pointing at a temp file; the harness writes
     // the executed-line set there, which we diff against the coverable functions.
@@ -685,6 +747,8 @@ fn run_doctests(shown: &str, src: &str, mode: OutputMode) -> bool {
             None,
             None,
             mode,
+            // Doctest binaries are one-shot synthetic programs; not cached.
+            None,
         );
         let out = match Command::new(&bin).output() {
             Ok(o) => o,
@@ -814,6 +878,58 @@ fn bin_path(file: &str) -> PathBuf {
 
 fn test_bin_path(path: &Path) -> PathBuf {
     PathBuf::from("build").join(format!("test_{}", stem(&path.to_string_lossy())))
+}
+
+/// D-BUILDNORM1=A (Tower #85): SHA-256 of the enclosing `pkg.jet`'s bytes, or
+/// empty when the file has no project manifest. Folded into the cache-key salt
+/// so a manifest edit — including a tightened `effects:` budget or a changed
+/// build profile — invalidates old cache entries. That is what keeps skipping
+/// the pipeline on a cache hit sound: a policy the manifest enforces (effect
+/// budgets, D-EFFBUDGET1) can never be masked by an unchanged program AST,
+/// because changing the manifest changes the key.
+fn manifest_fingerprint(file: &str) -> String {
+    let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
+    if let Some(root) = jet::Loader::find_manifest_root(search_from) {
+        let pack = root.join(jet::Syntax::PAYLOAD_FILE);
+        if let Ok(raw) = fs::read_to_string(&pack) {
+            return jet::SHA256::sha256_hex(raw.as_bytes());
+        }
+    }
+    String::new()
+}
+
+/// D-BUILDNORM1=A (Tower #85): the content-cache key for building `file` under
+/// `mode_tag` (`"run"`, `"test"`, `"testcov"`, `"bench"`, `"dev"`, …), computed
+/// from the *pre-sema* canonical AST of the whole program (entry + every module
+/// the loader resolved). Returns `None` when:
+///
+/// - the program can't be loaded/parsed — the caller falls through to the
+///   normal compile, which reports the real diagnostic; or
+/// - the program uses `embed_file`/`embed_bytes` — its output depends on
+///   external file bytes not captured by the AST, so it must never be served
+///   from (or stored into) a content cache keyed on the AST alone. Detected by a
+///   conservative source-substring scan: a false positive only forgoes caching
+///   for that build (a safe perf cost), never serves a stale binary.
+///
+/// `mode_tag` keeps binaries built from the same AST under different pipelines in
+/// separate key spaces (a `jet test` harness binary can never be served for a
+/// `jet run`). The toolchain version and `pkg.jet` fingerprint ride the salt.
+fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
+    let bundle = jet::Loader::load_entry_with_overlay(file, None, false).ok()?;
+    let uses_embed = bundle.modules.iter().any(|m| {
+        m.source.contains(jet::Syntax::BUILTIN_EMBED_FILE)
+            || m.source.contains(jet::Syntax::BUILTIN_EMBED_BYTES)
+    });
+    if uses_embed {
+        return None;
+    }
+    let salt = format!(
+        "{}\u{1}{}\u{1}{}",
+        jet::Manifest::COMPILER_VERSION,
+        manifest_fingerprint(file),
+        mode_tag,
+    );
+    Some(jet::CanonicalAST::ast_cache_key(&bundle, profile_tag, &salt))
 }
 
 /// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
@@ -1008,6 +1124,13 @@ pub(crate) fn build(
     cross_target: Option<&str>,
     web: Option<&jet::Codegen::WebArtifacts>,
     mode: OutputMode,
+    // D-BUILDNORM1=A (Tower #85): the content-addressed cache key, computed by
+    // the caller from the *pre-sema* canonical AST bytes (+ profile + toolchain
+    // salt). `None` when this build must not be cached (e.g. an `embed_file`
+    // build, whose output depends on external file bytes not captured by the
+    // AST, or a caller that couldn't parse a bundle). `build` still applies its
+    // own `use_cache` gate (FFI/C-link/cross builds never cache) on top of this.
+    cache_key: Option<String>,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
@@ -1061,16 +1184,15 @@ pub(crate) fn build(
 
     // Cross-compiled or freestanding builds bypass the host binary cache
     // (the binary is not executable on this host, and the target triple
-    // affects codegen choices that aren't captured by the source hash).
-    let use_cache = ffi.is_none() && clinks.is_empty() && cross_target.is_none();
-    // D-BUILDPROFILE1: cache key incorporates the profile tag so different
-    // profiles never share a cached binary.
-    let profile_tag = profile.cache_tag();
-    let cache_key = if use_cache {
-        Some(jet::BuildCache::cache_key(rust_code, &profile_tag))
-    } else {
-        None
-    };
+    // affects codegen choices that aren't captured by the source hash), as do
+    // FFI- and C-linked builds (link inputs aren't in the AST key) and builds
+    // the caller marked un-cacheable by passing `cache_key = None` (embed_file).
+    let use_cache =
+        ffi.is_none() && clinks.is_empty() && cross_target.is_none() && cache_key.is_some();
+    // D-BUILDNORM1=A: the key is the caller's pre-sema canonical-AST key
+    // (D-BUILDPROFILE1's profile tag is already folded into it). Kept only when
+    // this build is cacheable.
+    let cache_key = if use_cache { cache_key } else { None };
     if let Some(ref key) = cache_key {
         if jet::BuildCache::try_copy_cached(key, &bin) {
             step("cache hit -> reused cached binary".to_string());
@@ -1109,7 +1231,44 @@ pub(crate) fn build(
     let config = profile.config();
     config.apply_env(&mut cmd);
     config.apply_rustc(&mut cmd, ffi_present);
-    cmd.arg(&rs_path).arg("-o").arg(&bin);
+    // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
+    // path, never straight onto the shared `build/<stem>` display path. Two
+    // concurrent `jet` processes compiling different source that happens to
+    // share a file stem would otherwise race — process A could `store_cached`
+    // its hash against process B's freshly-overwritten `build/<stem>`, mapping
+    // A's key to B's binary in the shared content cache. `process::id()`
+    // disambiguates the processes; we `store_cached` from this private path
+    // (safe — only ever racing another process computing the *same* key, i.e.
+    // the same content) and only then rename into the shared display path.
+    let bin_name = bin
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("out")
+        .to_string();
+    // Private per-process working directory: rustc writes the output binary,
+    // the generated `.rs`, AND all its intermediate codegen-unit object files
+    // (`*.rcgu.o`) here. Two concurrent builds that share a file stem would
+    // otherwise collide in the shared `build/` dir — on the binary, on the
+    // source file mid-compile, and on the crate-name-derived intermediates —
+    // corrupting each other's compile and (per §0) the shared content cache.
+    // The results are published to the shared display paths only after a clean
+    // compile; `store_cached` reads from this private path.
+    let work = PathBuf::from("build").join(format!(".work.{}.{}", bin_name, std::process::id()));
+    if let Err(e) = fs::create_dir_all(&work) {
+        eprintln!("error: couldn't create the build work dir: {}", e);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let tmp_bin = work.join(&bin_name);
+    let tmp_rs = work.join(format!("{}.rs", stem(file)));
+    if let Err(e) = fs::write(&tmp_rs, rust_code) {
+        eprintln!("error: couldn't write {}: {}", tmp_rs.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    }
+    // Pin the crate name to the file stem — the name rustc used to infer from
+    // `build/<stem>.rs` — so the private working-dir source name doesn't leak
+    // into codegen.
+    cmd.arg("--crate-name").arg(stem(file));
+    cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
     if let Some(link) = ffi {
         cmd.arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
@@ -1136,6 +1295,9 @@ pub(crate) fn build(
     };
 
     if !out.status.success() {
+        // Preserve the shared `build/<stem>.rs` artifact (written above) for the
+        // ICE bug report, but drop this process's private working dir.
+        let _ = fs::remove_dir_all(&work);
         let stderr = String::from_utf8_lossy(&out.stderr);
         // I2: a *missing C library* is a user/system problem, not generated-code
         // rejection. Detect a linker "cannot find -l<name>" and print a clean
@@ -1160,17 +1322,35 @@ pub(crate) fn build(
 
     step(format!("link       -> {}", bin.display()));
 
+    // Store into the content cache *from the private path* first, so the cache
+    // entry is written from exactly the binary this process just built — never
+    // a copy that a racing process may have already overwritten on the shared
+    // display path (Tower #85 §0). `store_cached` is itself write-tmp-then-rename.
+    if let Some(key) = cache_key {
+        jet::BuildCache::store_cached(&key, &tmp_bin);
+        step("cache store -> saved binary for next time".to_string());
+    }
+    // Then publish the private binary onto the shared, human-readable display
+    // path (`build/<stem>`) that `jet run`/`jet build` hand back. A same-dir
+    // rename is atomic; last writer wins the convenience slot, which was never
+    // a content identity. Fall back to copy if rename crosses a filesystem.
+    if fs::rename(&tmp_bin, &bin).is_err() {
+        if let Err(e) = fs::copy(&tmp_bin, &bin) {
+            let _ = fs::remove_file(&tmp_bin);
+            eprintln!("error: couldn't finish writing {}: {}", bin.display(), e);
+            exit(ExitCodes::USER_ERROR);
+        }
+        let _ = fs::remove_file(&tmp_bin);
+    }
+    // Drop the private working dir (generated `.rs` + rustc intermediates).
+    let _ = fs::remove_dir_all(&work);
+
     // c121: report final binary size when timing is requested. The dashboard
     // tool captures this `binary_bytes=` line from build stderr.
     if jet::PhaseTiming::enabled() {
         if let Ok(meta) = std::fs::metadata(&bin) {
             eprintln!("jet-timing binary_bytes={}", meta.len());
         }
-    }
-
-    if let Some(key) = cache_key {
-        jet::BuildCache::store_cached(&key, &bin);
-        step("cache store -> saved binary for next time".to_string());
     }
 }
 
@@ -1214,6 +1394,8 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
         None,
         None,
         mode,
+        // `jet debug` builds carry a line-map and launch interactively; not cached.
+        None,
     );
     // `build()` always writes the generated Rust to `build/<stem>.rs` (the
     // debug binary path is the only caller-chosen path) — lldb's `-f` flag

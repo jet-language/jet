@@ -90,6 +90,22 @@ impl Theme {
         }
         eprintln!();
     }
+
+    /// A coded error block: `error[E1230]: <headline>`, matching the compiler's
+    /// `error[Exxxx]:` house style so `jet explain <code>` has a referent.
+    pub fn error_coded(&self, code: &str, headline: &str, why: &str, fix: &str) {
+        eprintln!();
+        eprintln!(
+            "  {} {}",
+            self.red(&format!("error[{code}]:")),
+            self.bold(headline)
+        );
+        eprintln!("    {}", why);
+        if !fix.is_empty() {
+            eprintln!("    {} {}", self.gray("fix:"), fix);
+        }
+        eprintln!();
+    }
 }
 
 /// Render a ref-classification failure as a friendly diagnostic.
@@ -133,5 +149,31 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
              member list. Either this name isn't a member, or there are multiple matches.",
             "use `source:package` or `source.package` to be explicit.",
         ),
+        // E1230: a bare/path ref matched more than one workspace member.
+        RefError::AmbiguousMember { query, candidates } => theme.error_coded(
+            "E1230",
+            &format!("`{query}` matches more than one workspace member"),
+            &format!(
+                "A bare or path-form ref resolves against the workspace member index, and \
+                 this one matches several members: {}.",
+                candidates.join(", ")
+            ),
+            "address one member by its path (e.g. `packages/logging`), or use `source:package`.",
+        ),
+        // E1231: a bare/path ref matched no workspace member.
+        RefError::UnknownMember { query, suggestions } => {
+            let did_you_mean = if suggestions.is_empty() {
+                "check `workspace.jet` — that name isn't in the member index.".to_string()
+            } else {
+                format!("did you mean: {}?", suggestions.join(", "))
+            };
+            theme.error_coded(
+                "E1231",
+                &format!("`{query}` is not a workspace member"),
+                "A bare or path-form ref (no `source:` prefix) must name a member listed in the \
+                 workspace index (`workspace.jet` `members:`).",
+                &did_you_mean,
+            )
+        }
     }
 }

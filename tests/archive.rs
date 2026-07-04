@@ -201,6 +201,7 @@ fn core_provider_compiles_ring_package_to_rlib() {
         &r.out,
         &r.bin,
         &r.rlib,
+        &r.envelope,
     )
     .expect("recording ring package in hangar must succeed");
 

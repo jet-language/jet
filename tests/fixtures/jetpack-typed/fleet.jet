@@ -1,0 +1,24 @@
+// fleet.jet — the typed fleet surface (U15, D-JPK-FLEET1=A), the executable spec
+// for `Fleet` field-checking, host capture, and system cross-check.
+//
+// A fleet is a deployment target: a map of named hosts, each to a `System` ref
+// with optional copy-with-update overrides (`system.<name>.{ … }`). Written as a
+// role-declaration module — `module fleet.<name> { hosts: { … } }` — the same
+// canonical form as `module system.<name>` and `module image.<name>` (A3).
+//
+// Parse/capture/cross-check happen now: every host must reference a `System` that
+// some contribution defines (else E1242). The ssh/closure rollout that `jet push`
+// performs is gated on single-host jetos realization (Phase D); until then
+// `jet push <fleet>` validates the fleet and reports E1243 rather than faking a
+// deploy.
+module system.web {
+    target: linux.x64,
+    packages: [default.[nginx, ripgrep]],
+}
+module fleet.prod {
+    hosts: {
+        web1: system.web.{ region: "us-east" },
+        web2: system.web.{ region: "eu-west" },
+        web3: system.web,
+    }
+}

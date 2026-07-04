@@ -289,16 +289,30 @@ pub fn build_bridge(
     let rlib = target.join(format!("lib{}.rlib", crate_name));
     let deps_dir = target.join("deps");
 
+    // c146: when the bridge carries crypto, it also emits a `jet-crypto-helper`
+    // binary (a thin stdin wrapper around `jet_crypto_*_impl`) that `jet`'s own
+    // publish/keygen path shells out to. Its path is fixed by the bin target name.
+    let helper_bin = if needs_crypto {
+        Some(target.join("jet-crypto-helper"))
+    } else {
+        None
+    };
+    // The build is only "cached and ready" when the rlib exists AND — if a helper
+    // is expected — the helper binary exists too (a bridge cached before c146
+    // landed would have the rlib but no helper, so fall through to rebuild).
+    let helper_ready = helper_bin.as_ref().map(|p| p.is_file()).unwrap_or(true);
+
     // Fast path (cache hit): the key is content-derived from the exact
     // extern-rust signature / dep set, so an rlib already sitting at this
     // path is a valid build for this call — reuse it without touching
     // `cargo` or rewriting the cached sources. No lock needed: we don't
     // write anything.
-    if rlib.is_file() {
+    if rlib.is_file() && helper_ready {
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
             deps_dir,
+            helper_bin_path: helper_bin,
         });
     }
 
@@ -326,11 +340,12 @@ pub fn build_bridge(
 
     // Re-check under the lock: whoever held it may have just finished
     // building this exact key while we were waiting.
-    if rlib.is_file() {
+    if rlib.is_file() && helper_ready {
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
             deps_dir,
+            helper_bin_path: helper_bin,
         });
     }
 
@@ -355,6 +370,18 @@ pub fn build_bridge(
         ),
     )
     .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
+
+    // c146: emit the crypto helper binary alongside the lib when crypto is in play.
+    if needs_crypto {
+        let bin_dir = src_dir.join("bin");
+        fs::create_dir_all(&bin_dir)
+            .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
+        fs::write(
+            bin_dir.join("jet-crypto-helper.rs"),
+            emit_crypto_helper_bin(&crate_name),
+        )
+        .map_err(|e| tool_error(&format!("couldn't write the crypto helper: {}", e)))?;
+    }
 
     let out = Command::new("cargo")
         .arg("build")
@@ -419,11 +446,107 @@ pub fn build_bridge(
             rlib.display()
         )));
     }
+    if let Some(bin) = &helper_bin {
+        if !bin.is_file() {
+            return Err(tool_error(&format!(
+                "FFI build finished but the crypto helper `{}` is missing",
+                bin.display()
+            )));
+        }
+    }
     Ok(FfiLink {
         crate_name,
         rlib_path: rlib,
         deps_dir,
+        helper_bin_path: helper_bin,
     })
+}
+
+/// The crypto helper binary source (c146). A thin stdin-protocol wrapper around
+/// the crate's own `jet_crypto_*_impl` functions (which is the *only* code that
+/// touches `ed25519-dalek`, D-DEP-CRYPTO1). `jet` shells out to this exactly as
+/// it already shells out to `cargo`/`rustc`, keeping the compiler crate itself
+/// zero-dependency (I6). Protocol (one command line on stdin, hex-encoded args):
+///   `keygen`                          → stdout `<seed_hex> <pub_hex>`
+///   `sign <seed_hex> <msg_hex>`       → stdout `<sig_hex>`         (exit 0)
+///   `verify <pub_hex> <msg_hex> <sig_hex>` → exit 0 valid / 2 invalid / 1 error
+fn emit_crypto_helper_bin(crate_name: &str) -> String {
+    format!(
+        r#"// Auto-generated Ed25519 signing helper (card c146) — do not edit.
+#![allow(warnings)]
+use std::io::Read;
+use std::process::exit;
+
+fn hex_encode(bytes: &[u8]) -> String {{
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {{
+        s.push_str(&format!("{{:02x}}", b));
+    }}
+    s
+}}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {{
+    let s = s.trim();
+    if s.len() % 2 != 0 {{
+        return Err("odd-length hex".to_string());
+    }}
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {{
+        let hi = (bytes[i] as char).to_digit(16).ok_or("bad hex digit")?;
+        let lo = (bytes[i + 1] as char).to_digit(16).ok_or("bad hex digit")?;
+        out.push(((hi << 4) | lo) as u8);
+        i += 2;
+    }}
+    Ok(out)
+}}
+
+fn fail(msg: &str) -> ! {{
+    eprintln!("error: {{}}", msg);
+    exit(1);
+}}
+
+fn main() {{
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {{
+        fail("couldn't read stdin");
+    }}
+    let mut parts = input.split_whitespace();
+    let cmd = parts.next().unwrap_or("");
+    match cmd {{
+        "keygen" => {{
+            let (seed, public) = {crate_name}::jet_crypto_keygen_impl();
+            println!("{{}} {{}}", hex_encode(&seed), hex_encode(&public));
+        }}
+        "sign" => {{
+            let seed = parts.next().unwrap_or_else(|| fail("sign: missing key"));
+            let msg = parts.next().unwrap_or_else(|| fail("sign: missing message"));
+            let seed = hex_decode(seed).unwrap_or_else(|e| fail(&e));
+            let msg = hex_decode(msg).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_crypto_sign_impl(&seed, &msg) {{
+                Ok(sig) => println!("{{}}", hex_encode(&sig)),
+                Err(e) => fail(&e),
+            }}
+        }}
+        "verify" => {{
+            let pk = parts.next().unwrap_or_else(|| fail("verify: missing public key"));
+            let msg = parts.next().unwrap_or_else(|| fail("verify: missing message"));
+            let sig = parts.next().unwrap_or_else(|| fail("verify: missing signature"));
+            let pk = hex_decode(pk).unwrap_or_else(|e| fail(&e));
+            let msg = hex_decode(msg).unwrap_or_else(|e| fail(&e));
+            let sig = hex_decode(sig).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_crypto_verify_impl(&pk, &msg, &sig) {{
+                Ok(()) => exit(0),
+                Err(_) => exit(2),
+            }}
+        }}
+        other => fail(&format!("unknown command `{{}}`", other)),
+    }}
+}}
+"#,
+        crate_name = crate_name
+    )
 }
 
 /// Cross-process lock guarding the slow path (rewrite + `cargo build`) of the

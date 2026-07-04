@@ -1473,6 +1473,62 @@ backward-compatibility guarantee, the deprecation window (L2001 → E2002), the
 migration authority (only `jet fix` + edition upgrade, D-REL5), and the
 generated-code license statement — lives in docs/spec/release-policy.md.
 
+## Toolchain as a dependency — the `jet:` pin (D-JPK-TOOLCHAIN1=A, #179, U30)
+
+A `pkg.jet` pins **which Jet compiler** builds the project with a `jet:` field
+in `payload`, whose value is a **channel ref** (D-JPK-CHANNEL1 semantics):
+
+```jet
+payload: {
+    name:    "wordstats",
+    version: "0.3.1",
+    jet:     0.4,          // track the 0.4 series
+}
+```
+
+Accepted forms: a `MAJOR.MINOR` series (`0.4`), a `MAJOR.MINOR.PATCH` exact
+(`0.4.2`), or a named channel (`main`). A range/operator form (`>=1.0.0`) is
+**not** a pin — it is the legacy compatibility constraint (E1208) and stays a
+minimum-version gate; a channel-form pin is owned by version dispatch instead
+(E1249 rejects a malformed pin). Absent `jet:` = unpinned: the running `jet`
+builds it with no fetch (rung-0/1 stays frictionless).
+
+The channel resolves to an exact version recorded in the `.jet/lock`
+`[[toolchain]]` block (channel + version + envelope). The channel re-resolves
+only on `jet update jet` and first realization; every other run reads the lock.
+A running `jet` in the pinned channel builds the project natively. A `jet` from
+a different series **realizes the pinned compiler as a prebuilt hangar object**
+(D-JPK-CACHE1 substitution) and **re-execs into it** (D-JPK-DISPATCH1) — never a
+source build of the compiler; a platform cache miss is E1251, never a silent
+wrong `jet`. A `JET_TOOLCHAIN_EXEC=<version>` env marker guards the re-exec so
+the pinned child runs natively without looping. Under `--offline`/CI an unlocked
+channel is E1250 (run `jet update jet`, commit the lock). Verbs: `jet toolchain`
+(read-only pin/version/status), `jet update jet [<channel>]` (the only place the
+pin moves), `jet init` (writes a `jet:` pin for the running channel by default).
+
+This is a *different* toolchain from the Rust/native **build** toolchain that
+compiles a user's `extern rust` bridge crates (D-JPK-BUILDTOOL1, E1240): that
+one builds bridge dependencies; this one pins the Jet compiler itself.
+
+### Frozen-forward identity block
+
+The `payload:` block's `name`, `version`, and `jet` fields form the project's
+**identity block**, read by a dedicated pre-parse (`Jetpack::JetPin::
+identity_preparse`) *before* the full manifest parse. Its grammar is
+**contract-frozen** and must never be narrowed, so version dispatch can never be
+wedged by later manifest evolution (the Go `go.mod` contract):
+
+- The reader finds the top-level `payload: { … }` block by brace matching
+  (strings skipped), then extracts `name:`, `version:`, and `jet:` as simple
+  `key: value` entries at the block's top level, unquoted and trimmed.
+- Any other top-level key, any unknown nested block inside or outside `payload`,
+  and any surrounding syntax the running `jet` doesn't recognise is tolerated
+  and skipped — it never blocks the identity read.
+
+Guarantee: **every past and future `jet` can read the identity block of any
+`pkg.jet`.** New manifest features may only *add* fields/blocks the identity
+reader ignores; the three identity fields keep this exact `key: value` shape.
+
 ## Typed entry-signature CLI parsing (D-CLIFLAG1, c7cliflag)
 
 The entry function's typed parameter IS the CLI spec — no separate flag

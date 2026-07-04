@@ -152,6 +152,70 @@ fn dot_form_not_classified_when_source_is_unknown() {
 }
 
 // ──────────────────────────────────────────────
+// Slice B: bare/path addressing against the workspace index
+// (D-MONOREF1=A; E1230 ambiguous member, E1231 unknown member)
+// ──────────────────────────────────────────────
+
+#[test]
+fn bare_and_path_form_resolve_workspace_members() {
+    use jet::Jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
+    let index = WorkspaceIndex::from_members([
+        ("logging".to_string(), "./infra/logging".to_string()),
+        ("ranker".to_string(), "packages/ranker".to_string()),
+    ]);
+    // Bare name → unique member.
+    let r = classify_with_workspace("logging", &SourceTable::empty(), &index).unwrap();
+    assert_eq!(r.source, Source::Path);
+    assert_eq!(r.package, "infra/logging");
+    // Path form → member by relative path.
+    let r2 = classify_with_workspace("packages/ranker", &SourceTable::empty(), &index).unwrap();
+    assert_eq!(r2.package, "packages/ranker");
+}
+
+#[test]
+fn unknown_workspace_member_is_e1231() {
+    use jet::Jetpack::RefSpec::{classify_with_workspace, SourceTable, WorkspaceIndex};
+    let index =
+        WorkspaceIndex::from_members([("logging".to_string(), "infra/logging".to_string())]);
+    let err = classify_with_workspace("loggger", &SourceTable::empty(), &index)
+        .expect_err("unknown member must fail");
+    assert_eq!(err.code(), Some("E1231"), "expected E1231, got {err:?}");
+}
+
+#[test]
+fn ambiguous_workspace_member_is_e1230() {
+    use jet::Jetpack::RefSpec::{classify_with_workspace, SourceTable, WorkspaceIndex};
+    let index = WorkspaceIndex::from_members([
+        ("logging".to_string(), "infra/logging".to_string()),
+        ("logging".to_string(), "apps/logging".to_string()),
+    ]);
+    let err = classify_with_workspace("logging", &SourceTable::empty(), &index)
+        .expect_err("ambiguous bare member must fail");
+    assert_eq!(err.code(), Some("E1230"), "expected E1230, got {err:?}");
+}
+
+// ──────────────────────────────────────────────
+// Slice C: monorepo fetch diagnostics (E1232 fetch failure, E1233 dep outside)
+// ──────────────────────────────────────────────
+
+#[test]
+fn monorepo_fetch_errors_carry_registered_codes() {
+    use jet::Jetpack::Provider::ProviderError;
+    // E1232: sparse subtree checkout + full-clone fallback both failed.
+    assert_eq!(
+        ProviderError::MonorepoFetch("boom".to_string()).code(),
+        Some("E1232")
+    );
+    // E1233: an in-repo dep names a package outside the workspace index. This is
+    // also driven end-to-end by `in_repo_dep_outside_workspace_is_e1233` in the
+    // Provider unit tests (a real sparse fetch against a local git repo).
+    assert_eq!(
+        ProviderError::MemberOutsideWorkspace("ghost".to_string()).code(),
+        Some("E1233")
+    );
+}
+
+// ──────────────────────────────────────────────
 // I5: workspace.jet with find() discovers committed-style members
 // ──────────────────────────────────────────────
 
@@ -184,6 +248,45 @@ fn workspace_find_example_evaluates() {
     assert_eq!(names.len(), 2, "expected 2 members, got {names:?}");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ──────────────────────────────────────────────
+// I5: the committed monorepo example evaluates and addresses its members
+// (examples/features/packages/monorepo)
+// ──────────────────────────────────────────────
+
+#[test]
+fn committed_monorepo_example_indexes_and_addresses_members() {
+    use jet::Jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/packages/monorepo");
+    let src = std::fs::read_to_string(dir.join("workspace.jet"))
+        .expect("committed monorepo example must have a workspace.jet");
+
+    // The `find("./packages")` index discovers both members.
+    let plan = WorkspaceFile::evaluate(&src, &dir).expect("example workspace must evaluate clean");
+    let mut names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["hello", "ranker"], "members: {:?}", plan.members);
+
+    // Build the queryable index and address members two ways (Slice B).
+    let index =
+        WorkspaceIndex::from_members(plan.members.iter().map(|m| (m.name.clone(), m.path.clone())));
+    // Bare form.
+    let hello = classify_with_workspace("hello", &SourceTable::empty(), &index)
+        .expect("bare `hello` must resolve");
+    assert_eq!(hello.source, Source::Path);
+    assert!(hello.package.ends_with("hello"), "got {}", hello.package);
+    // Path form — the stored relative path of the ranker member.
+    let ranker_path = plan
+        .members
+        .iter()
+        .find(|m| m.name == "ranker")
+        .map(|m| m.path.trim_start_matches("./").to_string())
+        .unwrap();
+    let ranker = classify_with_workspace(&ranker_path, &SourceTable::empty(), &index)
+        .expect("path form must resolve");
+    assert!(ranker.package.ends_with("ranker"), "got {}", ranker.package);
 }
 
 // ──────────────────────────────────────────────

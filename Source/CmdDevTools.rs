@@ -861,6 +861,8 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
         None,
         None,
         mode,
+        // Benchmark build; not content-cached (race-safe via `build`'s temp path).
+        None,
     );
 
     let warmups = 5u32;
@@ -933,6 +935,8 @@ fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
         None,
         None,
         mode,
+        // Benchmark build; not content-cached (race-safe via `build`'s temp path).
+        None,
     );
     let out = Command::new(&bin).output().unwrap_or_else(|e| {
         eprintln!("bench: couldn't run `{}`: {}", bin.display(), e);

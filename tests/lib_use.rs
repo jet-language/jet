@@ -79,6 +79,7 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::StoreEnt
         &r.out,
         &r.bin,
         &r.rlib,
+        &r.envelope,
     )
     .expect("records into hangar")
 }

@@ -42,9 +42,10 @@ fn git_dirty_files(root: &std::path::Path) -> Option<Vec<String>> {
 /// D-PKGS4 (amended): must run `jet build` + `jet test` locally first.
 /// Submits only when both pass (`--force` overrides with a warning).
 /// Also checks that a non-major version bump does not break public API (E2601).
-/// In v1 the actual registry upload is not implemented (D-PKGS1 deferred ops);
-/// this command validates and reports — what you'd get before pushing to git.
-pub(crate) fn run_publish(force: bool, mode: OutputMode) {
+/// After the gate passes it pushes an index entry to the git registry (card c56):
+/// clone/pull the sparse index, append the version line, commit, push. Version
+/// immutability (D-VERSION1) is enforced here (E1234).
+pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
@@ -270,12 +271,198 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
         }
     }
 
-    // Registry upload is deferred (D-PKGS1: hosted registry is ops, not v1).
     println!("\nok: `{}` v{} passes the pre-publish gate.", name, version);
-    println!(
-        "note: registry upload not yet implemented (D-PKGS1 deferred). \
-         Commit your package to a git registry and point dependents at it."
-    );
+
+    // c56 (D-JPK-CACHE1=A / D-VERSION1=A): push the index entry to the git
+    // registry. The registry is a git repo — publishing is: clone/pull the
+    // sparse index, append the version line, commit, push.
+    let registry = jet::Publish::resolve_publish_registry();
+    println!("publishing to registry index `{}` ...", registry.url);
+
+    let repo = match jet::Publish::ensure_index_clone(&registry) {
+        Ok(r) => r,
+        Err(d) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+
+    // Version immutability (D-VERSION1): refuse to overwrite a published,
+    // non-yanked version. This is the enforcement point the decision promised
+    // but couldn't land without a real push target.
+    if let Some(existing) = jet::Publish::find_published(&repo, name, version) {
+        if !existing.yanked {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(
+                    jet::Syntax::PAYLOAD_FILE,
+                    "",
+                    &[jet::Publish::e1234(name, version)]
+                )
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+
+    let (content_hash, fingerprint) = publish_index_hashes(&root, name);
+
+    // c146 (D-PKGSIGN1): tier-A author signing. Auto-keygen silently on first
+    // publish, then sign the content hash; `--no-sign` opts out (tier-B checksum
+    // still applies unconditionally). The public key is TOFU-pinned into the
+    // index on the FIRST published version of a package and never rewritten.
+    let (public_key, signature) = if no_sign {
+        println!("  signing: skipped (--no-sign); tier-B checksum still applies.");
+        (String::new(), String::new())
+    } else {
+        let reg = &registry.name;
+        if !jet::Publish::Sign::key_exists(reg) {
+            match jet::Publish::Sign::keygen(reg, false) {
+                Ok((seed_path, _pub_path, pub_hex)) => {
+                    println!("  signing: generated a new key for registry `{}`.", reg);
+                    println!("    public key: {}", pub_hex);
+                    println!(
+                        "    `jet key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
+                        seed_path.display()
+                    );
+                }
+                Err(d) => {
+                    eprint!(
+                        "{}",
+                        jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+                    );
+                    exit(ExitCodes::USER_ERROR);
+                }
+            }
+        }
+        let (seed_path, _pub_path) = jet::Publish::Sign::key_paths(reg);
+        let sig = match jet::Publish::Sign::sign(&seed_path, &content_hash) {
+            Ok(s) => s,
+            Err(d) => {
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+        // TOFU: record the public key only if this package has none pinned yet.
+        let already_pinned =
+            jet::Publish::Index::pinned_public_key(&jet::Publish::Index::read_entries(&repo, name))
+                .is_some();
+        let pub_field = if already_pinned {
+            String::new()
+        } else {
+            jet::Publish::Sign::read_public_key(reg).unwrap_or_default()
+        };
+        println!("  signing: signed content hash with the `{}` key.", reg);
+        (pub_field, sig)
+    };
+
+    let entry = jet::Publish::IndexEntry {
+        name: name.clone(),
+        version: version.clone(),
+        content_hash,
+        fingerprint,
+        yanked: false,
+        public_key,
+        signature,
+    };
+    if let Err(e) = jet::Publish::Index::write_index_entry(&repo, &entry) {
+        eprintln!("error: couldn't write the registry index entry: {}", e);
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Err(d) =
+        jet::Publish::push_index(&registry, &repo, &format!("publish {} {}", name, version))
+    {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    println!("ok: published `{}` v{} to {}", name, version, registry.url);
+}
+
+/// Source hash + plan fingerprint for the index entry. Reuses the lock's
+/// recorded values (the exact `LockedPackage` fields) when a lock exists; falls
+/// back to hashing the source tree so `jet publish` works before a first
+/// `jet fetch`.
+fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) {
+    if let Some(lock) = jet::Lock::load(root) {
+        if let Some(pkg) = lock
+            .packages
+            .iter()
+            .find(|p| p.name == name || matches!(p.source, jet::Lock::LockSource::Root))
+        {
+            if !pkg.fingerprint.is_empty() {
+                return (pkg.content_hash.clone().unwrap_or_default(), pkg.fingerprint.clone());
+            }
+        }
+    }
+    let tree_hash = jet::SHA256::tree_hash(root);
+    let fingerprint = jet::Lock::compute_fingerprint(&tree_hash, &[], "");
+    (tree_hash, fingerprint)
+}
+
+/// `jet keygen [--registry <name>] [--force]` — create the Ed25519 signing key
+/// used to sign published packages (c146, D-PKGSIGN1). Refuses to overwrite an
+/// existing key without `--force` (E1248).
+pub(crate) fn run_keygen(registry: Option<&str>, force: bool) {
+    let reg = registry.unwrap_or(jet::Publish::Sign::DEFAULT_REGISTRY);
+    match jet::Publish::Sign::keygen(reg, force) {
+        Ok((seed_path, pub_path, pub_hex)) => {
+            println!("created a signing key for registry `{}`.", reg);
+            println!("  public key:  {}", pub_hex);
+            println!("  secret key:  {}", seed_path.display());
+            println!("  public file: {}", pub_path.display());
+            println!(
+                "`jet key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
+                seed_path.display()
+            );
+        }
+        Err(d) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+/// `jet key backup [<dest>] [--registry <name>]` — copy the secret signing key
+/// to `<dest>` (default `./jet-signing-key.backup`) so the publisher can store
+/// it somewhere safe (c146, D-PKGSIGN1). The backup is not encrypted — it is the
+/// user's own copy to protect.
+pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
+    let reg = registry.unwrap_or(jet::Publish::Sign::DEFAULT_REGISTRY);
+    let (seed_path, _pub_path) = jet::Publish::Sign::key_paths(reg);
+    if !seed_path.is_file() {
+        eprintln!(
+            "error: no signing key for registry `{}` — run `jet keygen` first.",
+            reg
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+    let dest = dest
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("./jet-signing-key.backup"));
+    match fs::copy(&seed_path, &dest) {
+        Ok(_) => {
+            println!("backed up the `{}` signing key to {}", reg, dest.display());
+            println!(
+                "warning: store this file somewhere safe (e.g. a password manager). Anyone who has it can publish signed updates as you."
+            );
+        }
+        Err(e) => {
+            eprintln!("error: couldn't copy the signing key to {}: {}", dest.display(), e);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
 }
 
 /// `jet vendor [--vendor-dir <path>]` — copy all resolved dependencies into a
@@ -482,9 +669,8 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
 /// `jet yank <version> [--message <reason>]` — mark a published version as yanked.
 ///
 /// D-VERSION1=A (version immutability): a published version can't be re-published;
-/// `jet yank` marks it yanked (doesn't delete). Until the hosted registry exists
-/// (board card c56), this records a local yank marker in `.jet/yank/` and reports
-/// a clear "upload pending c56" note.
+/// `jet yank` flips its `yanked` flag in the registry index in place (never
+/// deletes the line), then commits and pushes (card c56).
 pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let version = match version {
         Some(v) if !v.is_empty() => v,
@@ -528,45 +714,50 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
 
     let name = &mf.package.name;
 
-    // Write a local yank marker to `.jet/yank/<name>-<version>.yank`.
-    // The content records the reason and timestamp for audit purposes.
-    let yank_dir = root.join(".jet").join("yank");
-    if let Err(e) = fs::create_dir_all(&yank_dir) {
-        eprintln!("error: couldn't create .jet/yank/: {}", e);
+    // c56 (D-VERSION1=A): a yank flips the `yanked` flag on the version's line
+    // in the registry index — the line is never deleted, so the version number
+    // stays taken (immutable) but drops out of new resolution.
+    let registry = jet::Publish::resolve_publish_registry();
+    let repo = match jet::Publish::ensure_index_clone(&registry) {
+        Ok(r) => r,
+        Err(d) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+
+    match jet::Publish::Index::mark_yanked(&repo, name, version) {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!(
+                "error: `{}` v{} is not published in the registry index — nothing to yank.",
+                name, version
+            );
+            eprintln!(" Fix: publish the version first, or check the version number.");
+            exit(ExitCodes::USER_ERROR);
+        }
+        Err(e) => {
+            eprintln!("error: couldn't update the registry index: {}", e);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+
+    if let Err(d) =
+        jet::Publish::push_index(&registry, &repo, &format!("yank {} {}", name, version))
+    {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
+        );
         exit(ExitCodes::USER_ERROR);
     }
 
-    let marker_name = format!("{}-{}.yank", name, version);
-    let marker_path = yank_dir.join(&marker_name);
-
-    // Use a Unix-epoch timestamp so the marker is portable and machine-readable.
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let reason = message.unwrap_or("no reason given");
-    let marker_content = format!(
-        "package = \"{}\"\nversion = \"{}\"\nyank_time = {}\nreason = \"{}\"\n",
-        name,
-        version,
-        ts,
-        reason.replace('"', "\\\"")
-    );
-
-    if let Err(e) = fs::write(&marker_path, &marker_content) {
-        eprintln!("error: couldn't write yank marker: {}", e);
-        exit(ExitCodes::USER_ERROR);
-    }
-
-    println!("ok: yank marker recorded for `{}` v{}.", name, version);
+    println!("ok: yanked `{}` v{} in {}", name, version, registry.url);
     if let Some(msg) = message {
         println!("  reason: {}", msg);
     }
-    println!("  marker: .jet/yank/{}", marker_name);
-    println!(
-        "note: registry yank upload not yet implemented (c56 — no registry service exists).\n\
-         commit the .jet/yank/ directory to record the intent; a future `jet publish` run\n\
-         will sync yank records to the registry when c56 is complete."
-    );
+    println!("  the version stays reserved (immutable); it is hidden from new resolution.");
 }

@@ -1285,9 +1285,13 @@ pub const JETPACK_VERBS: &[&str] = &[
     "enter",
     "build",
     "list",
+    "hangar",
+    "vendor",
+    "audit",
     "clean",
     "add",
     "remove",
+    "push",
     OS_SUBCOMMAND,
 ];
 
@@ -1365,10 +1369,21 @@ pub const NS_IMAGE: &str = "image";
 /// (resolver rides board card c156).
 pub const NS_WORKSPACE: &str = "workspace";
 
+/// U15 (D-JPK-FLEET1=A, ratified 2026-07-02): a fleet is a map of named hosts to
+/// `System` refs — `module fleet.<name> { hosts: { web1: system.<sys>.{ … } } }`.
+/// Distinct from `workspace` (the monorepo index): a fleet is a deployment target.
+/// Parse/capture/cross-check now; ssh realization rides single-host jetos (Phase D).
+pub const NS_FLEET: &str = "fleet";
+
 /// U3 (ratified 2026-06-16): the type matching each reserved namespace.
 pub const TYPE_ENV: &str = "Env";
 pub const TYPE_SYSTEM: &str = "System";
 pub const TYPE_IMAGE: &str = "Image";
+/// U15: the type name of a `fleet.<name>` contribution record.
+pub const TYPE_FLEET: &str = "Fleet";
+
+/// U15: a `Fleet`'s one required field — the `hosts:` map.
+pub const FLEET_FIELD_HOSTS: &str = "hosts";
 
 /// U12 (ratified 2026-06-16): the element type of a `System`'s `services:` map.
 /// `Service` is not a top-level namespace (it never appears as `service.<name>:`);
@@ -1431,6 +1446,15 @@ pub const OS_SUBCOMMAND: &str = "os";
 pub const OS_VERB_SWITCH: &str = "switch";
 pub const OS_VERB_BUILD: &str = "build";
 pub const OS_VERBS: &[&str] = &[OS_VERB_SWITCH, OS_VERB_BUILD];
+
+/// c146 (D-PKGSIGN1, ratified): package-signing CLI verbs (I7). `jet keygen`
+/// creates the Ed25519 author key; `jet key backup` copies the secret key out
+/// for safekeeping. `jet publish` signs by default and takes `--no-sign`.
+pub const KEYGEN_SUBCOMMAND: &str = "keygen";
+pub const KEY_SUBCOMMAND: &str = "key";
+pub const KEY_VERB_BACKUP: &str = "backup";
+pub const KEY_VERBS: &[&str] = &[KEY_VERB_BACKUP];
+pub const PUBLISH_FLAG_NO_SIGN: &str = "--no-sign";
 
 /// U16 (ratified 2026-06-16): the `@host` selector in a `jetpack os` target
 /// `[<config-path>]@<host>`. Reuses jet's `@` source-selector convention.
@@ -2391,9 +2415,36 @@ pub fn is_ring_module(name: &str) -> bool {
     )
 }
 
-/// E2-M9: ring modules not yet available (always false now; kept for API stability).
-pub fn is_ring_module_staged(_name: &str) -> bool {
-    false
+/// The env var that names the active realized toolchain object directory
+/// (D-JPK-TOOLCHAIN1 / #179). Tests set it to a fixture; #179's realizer points
+/// it at the hangar object. The object carries prebuilt ring artifacts under
+/// `<dir>/ring/<name>` (D-JPK-RINGSHIP1=C).
+pub const TOOLCHAIN_OBJECT_ENV: &str = "JET_TOOLCHAIN_FIXTURE";
+
+/// D-JPK-TOOLCHAIN1=A (#179): re-exec guard marker. Before `jet` execs a
+/// version-pinned toolchain, it sets this env var to the pinned version. The
+/// child, seeing its own version match the marker, runs natively and never
+/// re-realizes or re-execs — this breaks the exec loop and lets the pinned
+/// toolchain run the program directly.
+pub const TOOLCHAIN_EXEC_MARKER_ENV: &str = "JET_TOOLCHAIN_EXEC";
+
+/// D-JPK-RINGSHIP1=C: is this ring lib present as a realized hangar object for
+/// the active toolchain? True when the active toolchain object carries a
+/// prebuilt artifact for `name` on this platform; false otherwise (the loader
+/// then falls back to the compiler-embedded template — rung-0 magic preserved).
+pub fn is_ring_module_staged(name: &str) -> bool {
+    staged_ring_artifact(name).is_some()
+}
+
+/// The prebuilt ring artifact path for `name` in the active toolchain object, or
+/// `None` when there is no active object or it carries no artifact for `name`.
+pub fn staged_ring_artifact(name: &str) -> Option<std::path::PathBuf> {
+    if !is_ring_module(name) {
+        return None;
+    }
+    let dir = std::env::var_os(TOOLCHAIN_OBJECT_ENV)?;
+    let artifact = std::path::Path::new(&dir).join("ring").join(name);
+    artifact.exists().then_some(artifact)
 }
 
 pub fn is_legacy_std_import(name: &str) -> bool {

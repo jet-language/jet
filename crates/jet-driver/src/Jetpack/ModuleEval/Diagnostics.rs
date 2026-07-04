@@ -192,6 +192,50 @@ pub(super) fn image_from_unknown_system(image: &str, system: &str, known: &[Stri
     )
 }
 
+/// E1244: an unknown field on a `Fleet` record (U15). The one known field is
+/// `hosts`.
+pub(super) fn fleet_unknown_field(field: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1244",
+        format!("`{field}` isn't a field of `Fleet`"),
+        "U15: a `Fleet` has one field — `hosts`, a map of host names to `System` refs".to_string(),
+        format!("remove `{field}`; a fleet is written `fleet.<name> {{ hosts: {{ … }} }}`"),
+        Some(span),
+    )
+}
+
+/// E1245: a `Fleet` with no `hosts:` field (U15).
+pub(super) fn fleet_missing_hosts(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1245",
+        "this `Fleet` has no `hosts`".to_string(),
+        "U15: a fleet deploys a map of named hosts, each to a `System` ref".to_string(),
+        "add `hosts: { web1: system.<name> }`".to_string(),
+        Some(span),
+    )
+}
+
+/// E1242: a fleet host references a system that no contribution defines (U15).
+pub(super) fn fleet_unknown_system(
+    fleet: &str,
+    host: &str,
+    system: &str,
+    known: &[String],
+) -> Diagnostic {
+    let hint = if known.is_empty() {
+        "no `system.<name>:` contribution is defined".to_string()
+    } else {
+        format!("known systems: {}", known.join(", "))
+    };
+    Diagnostic::error(
+        "E1242",
+        format!("the fleet `{fleet}` host `{host}` names an unknown system `{system}`"),
+        "U15: each `hosts:` entry maps a host to a `System` defined by some module contribution; the host deploys that system's closure".to_string(),
+        format!("define `system.{system}: {{ … }}`, or point the host at an existing system ({hint})"),
+        None,
+    )
+}
+
 /// Wrap a merge conflict (§6) as a user-facing diagnostic (I4).
 pub fn merge_error_to_diagnostic(err: &MergeError) -> Diagnostic {
     match err {

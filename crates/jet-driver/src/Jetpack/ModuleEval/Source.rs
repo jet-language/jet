@@ -14,10 +14,10 @@ use super::super::Merge;
 use super::super::RefSpec::{self, ProviderKind, SourceTable};
 use super::Diagnostics::{
     bad_import_directive, bad_source_ref, discovered_module_imports, find_dir_missing,
-    image_from_unknown_system, merge_error_to_diagnostic,
+    fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
 };
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
-use super::Types::{EnvPlan, ImagePlan, SystemPlan};
+use super::Types::{EnvPlan, FleetPlan, ImagePlan, SystemPlan};
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
@@ -72,9 +72,11 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     // order), then cross-check each image's `from:` against the known systems.
     let mut systems: Vec<SystemPlan> = Vec::new();
     let mut images: Vec<ImagePlan> = Vec::new();
+    let mut fleets: Vec<FleetPlan> = Vec::new();
     for module in &modules {
         systems.extend(module.systems.iter().cloned());
         images.extend(module.images.iter().cloned());
+        fleets.extend(module.fleets.iter().cloned());
     }
     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
     for image in &images {
@@ -84,6 +86,19 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
                 &image.from,
                 &system_names,
             ));
+        }
+    }
+    // U15: every fleet host must reference a known system (E1242).
+    for fleet in &fleets {
+        for host in &fleet.hosts {
+            if !system_names.contains(&host.system) {
+                return Err(fleet_unknown_system(
+                    &fleet.name,
+                    &host.name,
+                    &host.system,
+                    &system_names,
+                ));
+            }
         }
     }
 
@@ -117,6 +132,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         prompt,
         systems,
         images,
+        fleets,
     })
 }
 

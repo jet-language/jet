@@ -45,6 +45,38 @@ pub struct LockedPackage {
     /// D-EFFBUDGET1: effect names granted to this dependency via `pkg.jet`'s
     /// `grants: { … }` block — recorded so an audited exception is a diff.
     pub effect_grants: Vec<String>,
+    /// D-JPK-CACHE1=A (U24/A4): the realized-output envelope — the same field
+    /// set carried on the hangar object (`Jetpack::Envelope`), frozen into the
+    /// lock schema now so binary-cache substitution can be driven straight off
+    /// the lock. `None` for a package that has not been realized yet or an
+    /// older lock that predates the field (round-trips unchanged).
+    pub envelope: Option<LockEnvelope>,
+}
+
+/// D-JPK-CACHE1=A (U24/A4): the lock-serialized form of a realized object's
+/// [`crate::Jetpack::Envelope::Envelope`]. Same four fields — not a second
+/// envelope model, just its on-disk shape in `.jet/lock`. `signature` stays
+/// empty until package signing (card #13) fills it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LockEnvelope {
+    pub output_hash: String,
+    pub platform: String,
+    pub signature: String,
+    pub provenance: String,
+}
+
+/// D-JPK-TOOLCHAIN1=A (A4): a pinned toolchain is an ordinary hangar object,
+/// so it rides the same envelope fields. Recorded in its own `[[toolchain]]`
+/// lock block so a build's toolchain identity enters output provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedToolchain {
+    pub id: String,
+    /// D-JPK-TOOLCHAIN1=A (#179): the `jet:` channel ref the pin was resolved
+    /// from (`0.4`, `main`, …). The channel resolves to `version` only on
+    /// `jet update jet` / first realize; every other run reads `version`.
+    pub channel: String,
+    pub version: String,
+    pub envelope: LockEnvelope,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +108,8 @@ pub struct LockFile {
     /// relative path and the sha256 of the file bytes. Verifying builds can
     /// detect embedded files that changed since the last clean build.
     pub comptime_inputs: Vec<ComptimeInput>,
+    /// D-JPK-TOOLCHAIN1=A (A4): pinned toolchain objects, envelope-carrying.
+    pub toolchains: Vec<LockedToolchain>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +186,25 @@ pub fn write(lock: &LockFile) -> String {
                 .collect();
             out.push_str(&format!("effect-grants = [{}]\n", grants.join(", ")));
         }
+
+        // D-JPK-CACHE1=A (A4): realized-output envelope. Emitted only once the
+        // package has been realized; `signature` is written only when filled
+        // (empty slot stays implicit) so the schema is frozen but the file
+        // stays terse.
+        if let Some(env) = &pkg.envelope {
+            write_envelope(&mut out, env);
+        }
+    }
+
+    for tc in &lock.toolchains {
+        out.push('\n');
+        out.push_str("[[toolchain]]\n");
+        out.push_str(&format!("id = \"{}\"\n", escape_str(&tc.id)));
+        if !tc.channel.is_empty() {
+            out.push_str(&format!("channel = \"{}\"\n", escape_str(&tc.channel)));
+        }
+        out.push_str(&format!("version = \"{}\"\n", escape_str(&tc.version)));
+        write_envelope(&mut out, &tc.envelope);
     }
 
     out.push('\n');
@@ -189,6 +242,19 @@ fn escape_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// D-JPK-CACHE1=A (A4): serialize the envelope field set (shared by
+/// `[[package]]` and `[[toolchain]]` blocks). `output-hash`/`platform`/
+/// `provenance` are always emitted for a realized object (the frozen schema);
+/// `signature` only when the slot is filled.
+fn write_envelope(out: &mut String, env: &LockEnvelope) {
+    out.push_str(&format!("output-hash = \"{}\"\n", escape_str(&env.output_hash)));
+    out.push_str(&format!("platform = \"{}\"\n", escape_str(&env.platform)));
+    if !env.signature.is_empty() {
+        out.push_str(&format!("signature = \"{}\"\n", escape_str(&env.signature)));
+    }
+    out.push_str(&format!("provenance = \"{}\"\n", escape_str(&env.provenance)));
+}
+
 // ──────────────────────────────────────────────
 // Parsing
 // ──────────────────────────────────────────────
@@ -199,9 +265,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut root_deps: Vec<String> = Vec::new();
     let mut workspace_members: Vec<LockedWorkspaceMember> = Vec::new();
     let mut comptime_inputs: Vec<ComptimeInput> = Vec::new();
+    let mut toolchains: Vec<LockedToolchain> = Vec::new();
     let mut current_pkg: Option<PartialPkg> = None;
     let mut current_ci: Option<PartialCi> = None;
     let mut current_workspace_member: Option<PartialWorkspaceMember> = None;
+    let mut current_toolchain: Option<PartialToolchain> = None;
     let mut in_root = false;
 
     for line in raw.lines() {
@@ -209,78 +277,35 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if line == "[[comptime_inputs]]" {
-            if let Some(wm) = current_workspace_member.take() {
-                if let Some(m) = wm.finish() {
-                    workspace_members.push(m);
-                }
-            }
-            if let Some(ci) = current_ci.take() {
-                if let Some(c) = ci.finish() {
-                    comptime_inputs.push(c);
-                }
-            }
-            if let Some(p) = current_pkg.take() {
-                packages.push(p.finish()?);
-            }
-            current_ci = Some(PartialCi::default());
-            in_root = false;
-            continue;
-        }
-        if line == "[[package]]" {
-            if let Some(wm) = current_workspace_member.take() {
-                if let Some(m) = wm.finish() {
-                    workspace_members.push(m);
-                }
-            }
-            if let Some(ci) = current_ci.take() {
-                if let Some(c) = ci.finish() {
-                    comptime_inputs.push(c);
-                }
-            }
-            if let Some(p) = current_pkg.take() {
-                packages.push(p.finish()?);
-            }
-            current_pkg = Some(PartialPkg::default());
-            in_root = false;
-            continue;
-        }
-        if line == "[[workspace_member]]" {
-            if let Some(ci) = current_ci.take() {
-                if let Some(c) = ci.finish() {
-                    comptime_inputs.push(c);
-                }
-            }
-            if let Some(p) = current_pkg.take() {
-                packages.push(p.finish()?);
-            }
-            if let Some(wm) = current_workspace_member.take() {
-                if let Some(m) = wm.finish() {
-                    workspace_members.push(m);
-                }
-            }
-            current_workspace_member = Some(PartialWorkspaceMember::default());
-            in_root = false;
-            continue;
-        }
-        if line == "[root]" {
-            if let Some(ci) = current_ci.take() {
-                if let Some(c) = ci.finish() {
-                    comptime_inputs.push(c);
-                }
-            }
-            if let Some(wm) = current_workspace_member.take() {
-                if let Some(m) = wm.finish() {
-                    workspace_members.push(m);
-                }
-            }
-            if let Some(p) = current_pkg.take() {
-                packages.push(p.finish()?);
-            }
-            in_root = true;
-            continue;
-        }
         if line.starts_with('[') {
+            // Any section header closes the section currently being built.
+            if let Some(ci) = current_ci.take() {
+                if let Some(c) = ci.finish() {
+                    comptime_inputs.push(c);
+                }
+            }
+            if let Some(wm) = current_workspace_member.take() {
+                if let Some(m) = wm.finish() {
+                    workspace_members.push(m);
+                }
+            }
+            if let Some(p) = current_pkg.take() {
+                packages.push(p.finish()?);
+            }
+            if let Some(t) = current_toolchain.take() {
+                toolchains.push(t.finish());
+            }
+            in_root = false;
+            match line {
+                "[[comptime_inputs]]" => current_ci = Some(PartialCi::default()),
+                "[[package]]" => current_pkg = Some(PartialPkg::default()),
+                "[[workspace_member]]" => {
+                    current_workspace_member = Some(PartialWorkspaceMember::default())
+                }
+                "[[toolchain]]" => current_toolchain = Some(PartialToolchain::default()),
+                "[root]" => in_root = true,
+                _ => {}
+            }
             continue;
         }
 
@@ -289,7 +314,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             None => continue,
         };
 
-        if key == "version" && current_pkg.is_none() && !in_root {
+        if key == "version"
+            && current_pkg.is_none()
+            && current_toolchain.is_none()
+            && !in_root
+        {
             version = val.trim_matches('"').parse().ok();
             continue;
         }
@@ -317,6 +346,19 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             }
             continue;
         }
+        if let Some(ref mut tc) = current_toolchain {
+            match key {
+                "id" => tc.id = Some(val.trim_matches('"').to_string()),
+                "channel" => tc.channel = Some(val.trim_matches('"').to_string()),
+                "version" => tc.version = Some(val.trim_matches('"').to_string()),
+                "output-hash" => tc.envelope.output_hash = val.trim_matches('"').to_string(),
+                "platform" => tc.envelope.platform = val.trim_matches('"').to_string(),
+                "signature" => tc.envelope.signature = val.trim_matches('"').to_string(),
+                "provenance" => tc.envelope.provenance = val.trim_matches('"').to_string(),
+                _ => {}
+            }
+            continue;
+        }
         if let Some(ref mut pkg) = current_pkg {
             match key {
                 "name" => pkg.name = Some(val.trim_matches('"').to_string()),
@@ -336,6 +378,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 }
                 "effects" => pkg.effects = parse_string_array(val),
                 "effect-grants" => pkg.effect_grants = parse_string_array(val),
+                // D-JPK-CACHE1=A (A4): realized-output envelope. Seeing any of
+                // these marks the package as realized (envelope becomes Some).
+                "output-hash" => pkg.envelope_mut().output_hash = val.trim_matches('"').to_string(),
+                "platform" => pkg.envelope_mut().platform = val.trim_matches('"').to_string(),
+                "signature" => pkg.envelope_mut().signature = val.trim_matches('"').to_string(),
+                "provenance" => pkg.envelope_mut().provenance = val.trim_matches('"').to_string(),
                 _ => {}
             }
         }
@@ -353,6 +401,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     if let Some(p) = current_pkg {
         packages.push(p.finish()?);
     }
+    if let Some(t) = current_toolchain {
+        toolchains.push(t.finish());
+    }
 
     Ok(LockFile {
         version: version.unwrap_or(0),
@@ -360,6 +411,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         root_dependencies: root_deps,
         workspace_members,
         comptime_inputs,
+        toolchains,
     })
 }
 
@@ -417,9 +469,15 @@ struct PartialPkg {
     inferred_layer: Option<crate::Syntax::RuntimeLayer>,
     effects: Vec<String>,
     effect_grants: Vec<String>,
+    envelope: Option<LockEnvelope>,
 }
 
 impl PartialPkg {
+    /// Lazily create the envelope on first envelope key seen.
+    fn envelope_mut(&mut self) -> &mut LockEnvelope {
+        self.envelope.get_or_insert_with(LockEnvelope::default)
+    }
+
     fn finish(self) -> Result<LockedPackage, String> {
         let name = self.name.ok_or("missing name")?;
         let version = self.version.ok_or("missing version")?;
@@ -438,7 +496,27 @@ impl PartialPkg {
             inferred_layer: self.inferred_layer,
             effects: self.effects,
             effect_grants: self.effect_grants,
+            envelope: self.envelope,
         })
+    }
+}
+
+#[derive(Default)]
+struct PartialToolchain {
+    id: Option<String>,
+    channel: Option<String>,
+    version: Option<String>,
+    envelope: LockEnvelope,
+}
+
+impl PartialToolchain {
+    fn finish(self) -> LockedToolchain {
+        LockedToolchain {
+            id: self.id.unwrap_or_default(),
+            channel: self.channel.unwrap_or_default(),
+            version: self.version.unwrap_or_default(),
+            envelope: self.envelope,
+        }
     }
 }
 
@@ -532,6 +610,60 @@ pub fn record_inferred_layer(
         return;
     };
     pkg.inferred_layer = Some(layer);
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// D-JPK-CACHE1=A (A4): stamp a realized package's output envelope into the
+/// lock after it is built, so cache substitution can be driven off the lock
+/// (the same field set the hangar object's `meta.json` already carries). A
+/// no-op if the lock or the named package is absent, mirroring
+/// [`record_inferred_layer`].
+pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEnvelope) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let Ok(raw) = std::fs::read_to_string(&lock_path) else {
+        return;
+    };
+    let Ok(mut lock) = parse(&raw) else {
+        return;
+    };
+    let Some(pkg) = lock.packages.iter_mut().find(|p| p.name == package_name) else {
+        return;
+    };
+    pkg.envelope = Some(envelope);
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// D-JPK-TOOLCHAIN1=A (#179): record (or replace) the project's pinned `jet`
+/// toolchain in the lock's `[[toolchain]]` block, keyed by channel. Unlike
+/// [`record_envelope`] this creates a minimal lock when none exists yet, since
+/// `jet update jet` / `jet init` may run before any dependency lock is written.
+/// The pin is upserted by channel so re-running `jet update jet <ch>` replaces
+/// the same series in place rather than accumulating stale entries.
+pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+        });
+    // A project has exactly one `jet` self-toolchain pin (its object id is
+    // `jet-<version>-<fp>`), kept distinct from any bridge build-toolchain
+    // entry (`toolchain-<version>`). Replace the existing jet pin in place so
+    // moving channels never accumulates stale pins.
+    if let Some(existing) = lock.toolchains.iter_mut().find(|t| t.id.starts_with("jet-")) {
+        *existing = tc;
+    } else {
+        lock.toolchains.push(tc);
+    }
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let _ = std::fs::write(lock_path, write(&lock));
 }
 
@@ -724,5 +856,156 @@ pub fn dep_source(dep_name: &str, spec: &DepSpec) -> LockSource {
             selector: git_selector_str(selector),
         },
         DepSpec::Registry(_) => LockSource::Path(format!("registry:{}", dep_name)),
+    }
+}
+
+// ──────────────────────────────────────────────
+// Tests — A4 envelope + toolchain lock schema (D-JPK-CACHE1=A / D-JPK-TOOLCHAIN1=A)
+// ──────────────────────────────────────────────
+
+#[cfg(test)]
+mod a4_envelope_tests {
+    use super::*;
+
+    fn env(hash: &str, plat: &str, sig: &str, prov: &str) -> LockEnvelope {
+        LockEnvelope {
+            output_hash: hash.to_string(),
+            platform: plat.to_string(),
+            signature: sig.to_string(),
+            provenance: prov.to_string(),
+        }
+    }
+
+    fn pkg_with(name: &str, envelope: Option<LockEnvelope>) -> LockedPackage {
+        LockedPackage {
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            source: LockSource::Root,
+            locked: None,
+            fingerprint: "sha256-abc".to_string(),
+            content_hash: None,
+            dependencies: Vec::new(),
+            layer: None,
+            inferred_layer: None,
+            effects: Vec::new(),
+            effect_grants: Vec::new(),
+            envelope,
+        }
+    }
+
+    fn base_lock(packages: Vec<LockedPackage>, toolchains: Vec<LockedToolchain>) -> LockFile {
+        LockFile {
+            version: LOCK_VERSION,
+            packages,
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains,
+        }
+    }
+
+    /// A realized package's envelope round-trips through write→parse unchanged,
+    /// with the empty signature slot staying empty (frozen but implicit).
+    #[test]
+    fn lock_roundtrips_envelope() {
+        let e = env(
+            "sha256-deadbeef",
+            "x86_64-linux",
+            "", // signature slot empty until card #13
+            "mine:hello via core-source",
+        );
+        let lock = base_lock(vec![pkg_with("hello", Some(e.clone()))], Vec::new());
+        let text = write(&lock);
+        assert!(text.contains("output-hash = \"sha256-deadbeef\""));
+        assert!(text.contains("platform = \"x86_64-linux\""));
+        assert!(text.contains("provenance = \"mine:hello via core-source\""));
+        assert!(
+            !text.contains("signature ="),
+            "empty signature slot stays implicit in the file"
+        );
+        let back = parse(&text).expect("parse");
+        assert_eq!(back.packages[0].envelope, Some(e));
+    }
+
+    /// A filled signature slot round-trips explicitly (forward-compat for #13).
+    #[test]
+    fn lock_roundtrips_filled_signature() {
+        let e = env("sha256-aa", "aarch64-macos", "ed25519:sigbytes", "ref via nix");
+        let lock = base_lock(vec![pkg_with("p", Some(e.clone()))], Vec::new());
+        let back = parse(&write(&lock)).expect("parse");
+        assert_eq!(back.packages[0].envelope, Some(e));
+    }
+
+    /// A legacy lock with no envelope lines parses to `None` and round-trips
+    /// unchanged — no forced migration (the reason CACHE1 was frozen early).
+    #[test]
+    fn legacy_lock_without_envelope_roundtrips_none() {
+        let lock = base_lock(vec![pkg_with("old", None)], Vec::new());
+        let text = write(&lock);
+        assert!(!text.contains("output-hash"));
+        let back = parse(&text).expect("parse");
+        assert_eq!(back.packages[0].envelope, None);
+    }
+
+    /// A `[[toolchain]]` block — a toolchain is an ordinary hangar object, so it
+    /// carries the same envelope — round-trips through write→parse.
+    #[test]
+    fn lock_roundtrips_toolchain_record() {
+        let tc = LockedToolchain {
+            id: "toolchain-1.79.0".to_string(),
+            channel: "1.79".to_string(),
+            version: "1.79.0".to_string(),
+            envelope: env("sha256-tc", "x86_64-linux", "", "rust-1.79.0 via toolchain"),
+        };
+        let lock = base_lock(vec![pkg_with("hello", None)], vec![tc.clone()]);
+        let text = write(&lock);
+        assert!(text.contains("[[toolchain]]"));
+        assert!(text.contains("id = \"toolchain-1.79.0\""));
+        assert!(text.contains("channel = \"1.79\""));
+        let back = parse(&text).expect("parse");
+        assert_eq!(back.toolchains, vec![tc]);
+        // The toolchain's `version` key must not be mistaken for the lockfile version.
+        assert_eq!(back.version, LOCK_VERSION);
+    }
+
+    /// `record_envelope` backfills a realized object's envelope into an
+    /// existing on-disk lock, leaving other packages untouched.
+    #[test]
+    fn record_envelope_backfills_lock_on_disk() {
+        let dir = std::env::temp_dir().join(format!(
+            "a4-record-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join(".jet")).unwrap();
+        let lock = base_lock(
+            vec![pkg_with("hello", None), pkg_with("other", None)],
+            Vec::new(),
+        );
+        std::fs::write(dir.join(Syntax::UNIFIED_LOCK_FILE), write(&lock)).unwrap();
+
+        let e = env("sha256-real", "x86_64-linux", "", "hello via core-source");
+        record_envelope(&dir, "hello", e.clone());
+
+        let reloaded = load(&dir).expect("reload");
+        let hello = reloaded.packages.iter().find(|p| p.name == "hello").unwrap();
+        let other = reloaded.packages.iter().find(|p| p.name == "other").unwrap();
+        assert_eq!(hello.envelope, Some(e));
+        assert_eq!(other.envelope, None, "other packages untouched");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Envelope + toolchain coexist with the older per-package fields (effects,
+    /// content-hash) without cross-contamination.
+    #[test]
+    fn envelope_coexists_with_effects_and_content_hash() {
+        let mut p = pkg_with("p", Some(env("sha256-x", "x86_64-linux", "", "r via core-source")));
+        p.content_hash = Some("sha256-tree".to_string());
+        p.effects = vec!["Net".to_string(), "Fs".to_string()];
+        let lock = base_lock(vec![p.clone()], Vec::new());
+        let back = parse(&write(&lock)).expect("parse");
+        assert_eq!(back.packages[0], p);
     }
 }

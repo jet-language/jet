@@ -44,7 +44,7 @@ use CmdPkg::{
 };
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
-use CmdSupply::{run_audit, run_publish, run_sbom, run_vendor, run_yank};
+use CmdSupply::{run_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank};
 
 /// How diagnostics should be presented this run, resolved once from flags +
 /// environment and threaded through the diagnostic-printing helpers.
@@ -667,8 +667,11 @@ fn main() {
                 | "dev"
                 | "serve"
                 | "debug"
+                | "push"
                 | "publish"
                 | "yank"
+                | "keygen"
+                | "key"
                 | "vendor"
                 | "audit"
                 | "sbom"
@@ -727,6 +730,14 @@ fn main() {
         unknown_subcommand(cmd);
     }
 
+    // D-JPK-TOOLCHAIN1=A (#179): a version-pinned project hands off to its
+    // pinned `jet` toolchain before any manifest-driven verb runs. A running
+    // `jet` in the pinned channel runs natively; a genuine version mismatch
+    // realizes the pinned prebuilt (never a source build) and re-execs into it.
+    if matches!(cmd, "run" | "build" | "test" | "check") {
+        maybe_dispatch_pinned_toolchain(&raw);
+    }
+
     // Validate flags against the registry; an unknown/half-typed flag is E2102.
     // Skipped for commands that own a bespoke flag vocabulary or forward flags
     // downstream (so their flags aren't measured against the global set).
@@ -735,6 +746,7 @@ fn main() {
         "env"
             | "dev"
             | "serve"
+            | "push"
             | "add"
             | "remove"
             | "bind"
@@ -744,6 +756,8 @@ fn main() {
             | "fetch"
             | "publish"
             | "yank"
+            | "keygen"
+            | "key"
             | "vendor"
             | "audit"
             | "sbom"
@@ -795,17 +809,55 @@ fn main() {
             return;
         }
         "update" => {
+            // D-JPK-TOOLCHAIN1=A (#179): `jet update jet [<channel>]` moves the
+            // toolchain pin; anything else refreshes moving dependency selectors.
+            if args.get(1).map(|s| s.as_str()) == Some("jet") {
+                run_update_jet(args.get(2).map(|s| s.as_str()));
+            }
             let dep = args.get(1).map(|s| s.as_str());
             run_update(dep);
             return;
         }
+        "toolchain" => run_toolchain(),
+        "init" => run_init(),
         "gc" => {
             run_gc();
             return;
         }
         "publish" => {
             let force = raw.iter().any(|a| a == "--force");
-            run_publish(force, mode);
+            // c146 (D-PKGSIGN1): sign by default; --no-sign opts out.
+            let no_sign = raw.iter().any(|a| a == "--no-sign");
+            run_publish(force, no_sign, mode);
+            return;
+        }
+        "keygen" => {
+            // c146: `jet keygen [--registry <name>] [--force]`.
+            let registry = flag_value(&raw, "--registry");
+            let force = raw.iter().any(|a| a == "--force");
+            run_keygen(registry, force);
+            return;
+        }
+        "key" => {
+            // c146: `jet key backup [<dest>] [--registry <name>]`.
+            match args.get(1).map(|s| s.as_str()) {
+                Some("backup") => {
+                    let registry = flag_value(&raw, "--registry");
+                    let dest = args.get(2).map(|s| s.as_str());
+                    run_key_backup(dest, registry);
+                }
+                Some(other) => {
+                    eprintln!(
+                        "error: unknown `jet key` subcommand `{}` — did you mean `jet key backup`?",
+                        other
+                    );
+                    exit(ExitCodes::USER_ERROR);
+                }
+                None => {
+                    eprintln!("error: `jet key` needs a subcommand — try `jet key backup`.");
+                    exit(ExitCodes::USER_ERROR);
+                }
+            }
             return;
         }
         "yank" => {
@@ -885,6 +937,16 @@ fn main() {
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "env",
                 &fwd,
+            ));
+        }
+        "push" => {
+            // U15: `jet push <fleet>` deploys a fleet. D-JPK-DISPATCH1=B: execs
+            // the `jetpack` engine binary, forwarding `push <fleet>` verbatim.
+            // Realization is gated (Phase D) — jetpack returns an honest E1243.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "push",
+                &raw,
             ));
         }
         "repl" => {
@@ -1396,6 +1458,107 @@ pub(crate) fn report_problems(
             "{}",
             jet::Explain::pointer_line(first.code, mode.color_stderr())
         );
+    }
+}
+
+/// Render a `jet`-owned toolchain diagnostic (E1249–E1252) in the standard
+/// teaching voice (docs/spec/diagnostics.md), matching the engine-dispatch
+/// diagnostics. These carry no source span, so the full linked renderer isn't
+/// used.
+fn print_toolchain_diag(d: &jet::Diagnostics::Diagnostic) {
+    eprintln!("Error [{}]: {}", d.code, d.what);
+    eprintln!(" Why: {}", d.why);
+    eprintln!(" Fix: {}", d.fix);
+}
+
+/// D-JPK-TOOLCHAIN1=A (#179): hand off to the project's pinned `jet` toolchain
+/// when the running compiler doesn't satisfy the pin. Returns normally when the
+/// running `jet` should run the verb itself (unpinned, in-channel, or already
+/// the exec'd pinned child).
+fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
+    use jet::Jetpack::JetPin::{decide, handoff_line, PinDecision};
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let Some(root) = jet::Loader::find_manifest_root(&cwd) else {
+        return;
+    };
+    // `--offline`/`--locked` forbid resolving an unlocked channel (E1250).
+    let offline = raw.iter().any(|a| a == "--offline" || a == "--locked");
+    let running = env!("CARGO_PKG_VERSION");
+    match decide(&root, running, offline) {
+        PinDecision::RunNative => {}
+        PinDecision::Report(d) => {
+            print_toolchain_diag(&d);
+            exit(ExitCodes::USER_ERROR);
+        }
+        PinDecision::ReExec {
+            binary,
+            channel,
+            version,
+        } => {
+            eprintln!("{}", handoff_line(&channel, &version, running));
+            let status = Command::new(&binary)
+                .args(raw.iter().map(|s| s.as_str()))
+                .env(jet::Syntax::TOOLCHAIN_EXEC_MARKER_ENV, &version)
+                .status()
+                .unwrap_or_else(|e| {
+                    eprintln!("error: couldn't exec the pinned toolchain `{}`: {}", binary.display(), e);
+                    exit(ExitCodes::USER_ERROR);
+                });
+            exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
+        }
+    }
+}
+
+/// `jet toolchain` — print the project's pin, locked version, object id, and
+/// realized state (read-only, D-JPK-TOOLCHAIN1=A #179).
+fn run_toolchain() -> ! {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = require_manifest_root(
+        &cwd,
+        "error: `jet toolchain` needs a project — no `pkg.jet` found here or above",
+    );
+    print!("{}", jet::Jetpack::JetPin::report_pin(&root));
+    exit(ExitCodes::OK);
+}
+
+/// `jet init` — write a `pkg.jet` here, pinning the running toolchain's channel
+/// (D-JPK-TOOLCHAIN1=A #179, U11 lift).
+fn run_init() -> ! {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let name = cwd
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("app")
+        .to_string();
+    match jet::Jetpack::JetPin::write_init(&cwd, &name, env!("CARGO_PKG_VERSION")) {
+        Ok(msg) => {
+            println!("{msg}");
+            exit(ExitCodes::OK);
+        }
+        Err(d) => {
+            print_toolchain_diag(&d);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+/// `jet update jet [<channel>]` — move the toolchain pin (D-JPK-TOOLCHAIN1=A
+/// #179). The only place the pin moves.
+fn run_update_jet(channel: Option<&str>) -> ! {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = require_manifest_root(
+        &cwd,
+        "error: `jet update jet` needs a project — no `pkg.jet` found here or above",
+    );
+    match jet::Jetpack::JetPin::move_pin(&root, channel, env!("CARGO_PKG_VERSION")) {
+        Ok(msg) => {
+            println!("{msg}");
+            exit(ExitCodes::OK);
+        }
+        Err(d) => {
+            print_toolchain_diag(&d);
+            exit(ExitCodes::USER_ERROR);
+        }
     }
 }
 

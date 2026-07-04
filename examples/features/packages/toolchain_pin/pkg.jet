@@ -1,0 +1,16 @@
+// D-JPK-TOOLCHAIN1=A (#179, U30): the toolchain is a dependency. The `jet:`
+// field pins WHICH Jet compiler builds this project — a channel ref, resolved
+// to an exact version in `.jet/lock`. A `jet` in the pinned channel builds it
+// natively (as here); a `jet` from a different series realizes the pinned
+// compiler as a prebuilt hangar object and re-execs into it (never a source
+// build). This is a different concept from a Rust `extern rust` build
+// toolchain (D-JPK-BUILDTOOL1).
+payload: {
+    name:    "toolchain_pin_demo",
+    version: "0.1.0",
+    edition: "2026",
+    // Pin the toolchain to a channel. `jet init` writes this line by default,
+    // so a project is reproducible from birth. `jet toolchain` shows the pin
+    // and its locked exact version; `jet update jet <channel>` moves it.
+    jet:     1.0,
+}

@@ -113,6 +113,9 @@ pub struct StoreEntry {
     /// from its Cargo.toml by the core provider (D-BFS1). Empty for executable
     /// packages and for library packages that are consumed as staged source only.
     pub rlib: String,
+    /// D-JPK-CACHE1=A: the A4 envelope — output hash, platform, signature slot,
+    /// provenance. Empty for records written before the envelope existed.
+    pub envelope: super::Envelope::Envelope,
 }
 
 impl StoreEntry {
@@ -124,6 +127,10 @@ impl StoreEntry {
             ("out", &self.out),
             ("bin", &self.bin),
             ("rlib", &self.rlib),
+            ("output_hash", &self.envelope.output_hash),
+            ("platform", &self.envelope.platform),
+            ("signature", &self.envelope.signature),
+            ("provenance", &self.envelope.provenance),
         ])
     }
 }
@@ -152,6 +159,7 @@ pub fn record(
     out: &str,
     bin: &str,
     rlib: &str,
+    envelope: &super::Envelope::Envelope,
 ) -> std::io::Result<StoreEntry> {
     let id = entry_id(name, version, reference, out);
     let entry = StoreEntry {
@@ -162,6 +170,7 @@ pub fn record(
         out: out.to_string(),
         bin: bin.to_string(),
         rlib: rlib.to_string(),
+        envelope: envelope.clone(),
     };
     let dir = roots.hangar_dir().join(&id);
     fs::create_dir_all(&dir)?;
@@ -196,11 +205,69 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
                 bin: b,
                 // Older records predate the rlib field; treat as no compiled artifact.
                 rlib: get("rlib").unwrap_or_default(),
+                // Older records predate the envelope; empty envelope is the default.
+                envelope: super::Envelope::Envelope {
+                    output_hash: get("output_hash").unwrap_or_default(),
+                    platform: get("platform").unwrap_or_default(),
+                    signature: get("signature").unwrap_or_default(),
+                    provenance: get("provenance").unwrap_or_default(),
+                },
             });
         }
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
+}
+
+/// One line of `jet hangar du` output: a realized object, its on-disk size, and
+/// whether it was built from source (vs substituted/nix).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuEntry {
+    pub id: String,
+    pub name: String,
+    pub bytes: u64,
+    /// True when the A4 provenance shows a first-party source build.
+    pub source_built: bool,
+}
+
+/// D-JPK-GC1 / U22: honest per-object disk usage. Sizes each realized object's
+/// output tree (source-built objects live under the hangar; nix outputs live in
+/// `/nix/store` and size 0 here since Jetpack doesn't own those bytes). A
+/// source-built object is counted honestly, envelope and all.
+pub fn du(roots: &Roots) -> Vec<DuEntry> {
+    list(roots)
+        .into_iter()
+        .map(|e| {
+            let bytes = dir_size(std::path::Path::new(&e.out));
+            let source_built = e.envelope.provenance.contains("core-");
+            DuEntry {
+                id: e.id,
+                name: e.name,
+                bytes,
+                source_built,
+            }
+        })
+        .collect()
+}
+
+/// Total bytes on disk of a directory tree (0 if it isn't a local dir, e.g. a
+/// `/nix/store` path Jetpack references but does not own).
+fn dir_size(path: &std::path::Path) -> u64 {
+    if !path.is_dir() {
+        return 0;
+    }
+    let mut total = 0u64;
+    if let Ok(rd) = fs::read_dir(path) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if p.is_dir() {
+                total += dir_size(&p);
+            } else if let Ok(meta) = p.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
 }
 
 /// Remove every recorded store entry; returns how many were removed.
@@ -246,6 +313,7 @@ mod tests {
             "/nix/store/x",
             "/nix/store/x/bin",
             "",
+            &super::super::Envelope::Envelope::default(),
         )
         .unwrap();
         // Name-and-version first, fingerprint last (D-PM1).
@@ -266,6 +334,7 @@ mod tests {
             "/nix/store/a",
             "/nix/store/a/bin",
             "",
+            &super::super::Envelope::Envelope::default(),
         )
         .unwrap();
         record(
@@ -276,6 +345,7 @@ mod tests {
             "/nix/store/b",
             "/nix/store/b/bin",
             "",
+            &super::super::Envelope::Envelope::default(),
         )
         .unwrap();
         assert_eq!(clean(&roots).unwrap(), 2);

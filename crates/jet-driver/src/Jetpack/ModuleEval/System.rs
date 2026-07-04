@@ -9,14 +9,18 @@ use std::path::Path;
 use crate::Comptime;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{Func, ImageFieldValue, ImageLit, ServiceEntry, SystemFieldValue, SystemLit};
+use crate::AST::{
+    FleetFieldValue, FleetLit, Func, ImageFieldValue, ImageLit, ServiceEntry, SystemFieldValue,
+    SystemLit,
+};
 
 use super::Diagnostics::{
-    image_bad_format, image_missing_from, image_restated_field, missing_system_target,
-    service_enable_not_bool, service_missing_enable, unknown_platform, unknown_record_field,
+    fleet_missing_hosts, fleet_unknown_field, image_bad_format, image_missing_from,
+    image_restated_field, missing_system_target, service_enable_not_bool, service_missing_enable,
+    unknown_platform, unknown_record_field,
 };
 use super::Eval::{check_build_io, extract_packages};
-use super::Types::{ImagePlan, OptionPlan, ServicePlan, SystemPlan};
+use super::Types::{FleetPlan, HostPlan, ImagePlan, OptionPlan, ServicePlan, SystemPlan};
 
 /// U11/U12/U13/U18: field-check a `system.<name>: { … }` record and capture it as
 /// a `SystemPlan`. Validates that every field is one of the four known `System`
@@ -144,6 +148,44 @@ pub(super) fn evaluate_image(path: &str, lit: &ImageLit) -> Result<ImagePlan, Di
         from,
         format: format.unwrap_or_else(|| Syntax::IMAGE_FORMAT_ISO.to_string()),
         target,
+    })
+}
+
+/// U15: field-check a `fleet.<name>: { hosts: { … } }` record and capture it as
+/// a `FleetPlan`. The one known field is `hosts:`; each host references a
+/// `System` (cross-checked against the known systems at plan assembly, E1242).
+/// Override records are captured verbatim (sliced from `src`), not applied.
+pub(super) fn evaluate_fleet(
+    path: &str,
+    lit: &FleetLit,
+    src: &str,
+) -> Result<FleetPlan, Diagnostic> {
+    let mut hosts: Option<Vec<HostPlan>> = None;
+    for field in &lit.fields {
+        match &field.value {
+            FleetFieldValue::Hosts(entries) => {
+                let mut captured = Vec::new();
+                for e in entries {
+                    let overrides = e
+                        .overrides
+                        .map(|span| src[span.start..span.end].trim().to_string());
+                    captured.push(HostPlan {
+                        name: e.name.clone(),
+                        system: e.system.clone(),
+                        overrides,
+                    });
+                }
+                hosts = Some(captured);
+            }
+            FleetFieldValue::Other(_) => {
+                return Err(fleet_unknown_field(&field.name, field.name_span));
+            }
+        }
+    }
+    let hosts = hosts.ok_or_else(|| fleet_missing_hosts(lit.span))?;
+    Ok(FleetPlan {
+        name: path.to_string(),
+        hosts,
     })
 }
 

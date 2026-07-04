@@ -78,9 +78,13 @@ pub fn main(args: Vec<String>) -> i32 {
         "enter" => cmd_enter(&theme, &parsed),
         "build" => cmd_build(&theme, &parsed),
         "list" => cmd_list(&theme),
+        "hangar" => cmd_hangar(&theme, &parsed),
+        "vendor" => cmd_vendor(&theme, &parsed),
+        "audit" => cmd_audit(&theme),
         "clean" => cmd_clean(&theme),
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
+        "push" => cmd_push(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
@@ -184,11 +188,33 @@ fn cwd_table() -> RefSpec::SourceTable {
     table
 }
 
+/// The workspace member index for the current directory (Slice B). Evaluated
+/// from `workspace.jet` when present (discovery-by-declaration), else read from
+/// the `.jet/lock` mirror, else empty. Lets bare (`logging`) and path-form
+/// (`packages/logging`) refs resolve against workspace members.
+fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
+    let dir = std::env::current_dir().unwrap_or_default();
+    let plan = match WorkspaceFile::load(&dir) {
+        Some(Ok(plan)) => Some(plan),
+        // A malformed `workspace.jet` is surfaced by project-scoped commands;
+        // for ref classification we fall back to the lock mirror.
+        Some(Err(_)) => WorkspaceLock::load(&dir),
+        None => WorkspaceLock::load(&dir),
+    };
+    match plan {
+        Some(plan) => RefSpec::WorkspaceIndex::from_members(
+            plan.members.into_iter().map(|m| (m.name, m.path)),
+        ),
+        None => RefSpec::WorkspaceIndex::empty(),
+    }
+}
+
 /// Classify an explicit CLI ref, accepting any named source declared in the
-/// current project's env file so `jetpack run stable:ripgrep` works there.
-/// Prints the diagnostic on failure.
+/// current project's env file so `jetpack run stable:ripgrep` works there, and
+/// any workspace member so `jetpack run logging` / `jetpack run packages/logging`
+/// resolve in a monorepo (Slice B, D-MONOREF1=A). Prints the diagnostic on failure.
 fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::RefSpec, RefError> {
-    RefSpec::classify_in(raw, &cwd_table()).map_err(|e| {
+    RefSpec::classify_with_workspace(raw, &cwd_table(), &cwd_workspace_index()).map_err(|e| {
         Output::ref_error(theme, &e);
         e
     })
@@ -202,7 +228,7 @@ fn realize_ref(
     flags: &Flags,
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
-) -> Option<Store::StoreEntry> {
+) -> Option<(Store::StoreEntry, Provider::SourceState)> {
     theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
     // The provider writes store/source-cache records under the hangar (U2). The
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
@@ -237,8 +263,14 @@ fn realize_ref(
     };
     match Provider::realize(spec, table, &ctx) {
         Ok(r) => {
-            theme.ok(&format!("{} ready", theme.bold(&r.name)));
+            // T4 (D-JPK-CACHE1): report how the package was satisfied.
+            theme.ok(&format!(
+                "{} {}",
+                theme.bold(&r.name),
+                r.source_state.label()
+            ));
             theme.detail(&theme.gray(&r.out));
+            let state = r.source_state;
             match Store::record(
                 roots,
                 &r.name,
@@ -247,8 +279,9 @@ fn realize_ref(
                 &r.out,
                 &r.bin,
                 &r.rlib,
+                &r.envelope,
             ) {
-                Ok(entry) => Some(entry),
+                Ok(entry) => Some((entry, state)),
                 Err(e) => {
                     theme.error(
                         "could not record the package",
@@ -297,6 +330,20 @@ pub(super) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             "couldn't build that Jet package",
             reason,
             "check the package name and that its source repo has an env.jet.",
+        ),
+        // E1232: sparse subtree fetch + full-clone fallback both failed.
+        ProviderError::MonorepoFetch(reason) => theme.error_coded(
+            "E1232",
+            "couldn't fetch that monorepo source",
+            reason,
+            "check the source URL and revision, and that the network/provider is reachable.",
+        ),
+        // E1233: an in-repo dependency is outside the source's workspace index.
+        ProviderError::MemberOutsideWorkspace(reason) => theme.error_coded(
+            "E1233",
+            "an in-repo dependency is outside the workspace",
+            reason,
+            "add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `source:package` ref.",
         ),
     }
 }
@@ -473,7 +520,7 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> O
     let mut bin_dirs = Vec::new();
     let mut realized_refs = Vec::new();
     for spec in &plan.refs {
-        let entry = realize_ref(theme, roots, flags, &plan.table, spec)?;
+        let (entry, _state) = realize_ref(theme, roots, flags, &plan.table, spec)?;
         // A `library` package realizes with an empty `bin` (U10) — it stages
         // source for import and contributes nothing to PATH.
         if !entry.bin.is_empty() {
@@ -538,6 +585,7 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                     } else {
                         1
                     }
+                    // (workspace members: state is printed per-package by realize_ref)
                 }
             };
         }
@@ -555,13 +603,26 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     };
 
     let mut ok = true;
+    let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
     for spec in &refs {
-        if realize_ref(theme, &roots, &parsed.flags, &table, spec).is_none() {
-            ok = false;
+        match realize_ref(theme, &roots, &parsed.flags, &table, spec) {
+            Some((_entry, state)) => match state {
+                Provider::SourceState::Built => built += 1,
+                Provider::SourceState::Cached => cached += 1,
+                Provider::SourceState::Substituted => substituted += 1,
+            },
+            None => ok = false,
         }
     }
     if ok {
-        theme.status(&format!("built {} package(s).", refs.len()));
+        // T4: per-run source-state summary (mirrors the D-JPK-CACHE1 example).
+        theme.status(&format!(
+            "built {} package(s): {} built, {} cached, {} substituted",
+            refs.len(),
+            built,
+            cached,
+            substituted
+        ));
         0
     } else {
         1
@@ -585,6 +646,183 @@ fn cmd_list(theme: &Theme) -> i32 {
         ));
     }
     0
+}
+
+/// `jetpack hangar du` — honest per-object disk usage (U22 / D-JPK-GC1).
+/// Source-built objects are counted like any other, so `du` never hides them.
+fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
+    let sub = parsed.positional.first().map(String::as_str);
+    match sub {
+        Some("du") | None => {
+            let roots = Store::resolve();
+            let entries = Store::du(&roots);
+            if entries.is_empty() {
+                theme.status("hangar is empty.");
+                return 0;
+            }
+            let mut total = 0u64;
+            let mut built = 0usize;
+            for e in &entries {
+                total += e.bytes;
+                if e.source_built {
+                    built += 1;
+                }
+                let tag = if e.source_built { " (built)" } else { "" };
+                theme.detail(&format!(
+                    "{:>10}  {}{}",
+                    human_bytes(e.bytes),
+                    theme.bold(&e.id),
+                    theme.gray(tag)
+                ));
+            }
+            theme.status(&format!(
+                "{} object(s), {} built from source, {} total",
+                entries.len(),
+                built,
+                human_bytes(total)
+            ));
+            0
+        }
+        Some(other) => {
+            theme.error(
+                &format!("`hangar {other}` is not a hangar command"),
+                "the hangar subcommand is `du` (honest disk usage).",
+                "run `jetpack hangar du`.",
+            );
+            2
+        }
+    }
+}
+
+/// Render a byte count as a short human string (B/K/M/G).
+fn human_bytes(n: u64) -> String {
+    const UNITS: &[&str] = &["B", "K", "M", "G"];
+    let mut v = n as f64;
+    let mut u = 0;
+    while v >= 1024.0 && u + 1 < UNITS.len() {
+        v /= 1024.0;
+        u += 1;
+    }
+    if u == 0 {
+        format!("{} {}", n, UNITS[0])
+    } else {
+        format!("{:.1} {}", v, UNITS[u])
+    }
+}
+
+/// `jetpack vendor [<dir>]` — write vendored + hash-pinned sources for every
+/// source-built hangar object (D-BFS1 / T4). Each object's realized tree is
+/// copied into `<dir>/<name>/` and a `<dir>/<name>.sha256` records the A4 output
+/// hash, so a later build is reproducible offline from pinned sources.
+fn cmd_vendor(theme: &Theme, parsed: &Parsed) -> i32 {
+    let roots = Store::resolve();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let vendor_dir = match parsed.positional.first() {
+        Some(p) => {
+            let p = PathBuf::from(p);
+            if p.is_absolute() {
+                p
+            } else {
+                cwd.join(p)
+            }
+        }
+        None => cwd.join("vendor"),
+    };
+    let built: Vec<_> = Store::list(&roots)
+        .into_iter()
+        .filter(|e| e.envelope.provenance.contains("core-"))
+        .collect();
+    if built.is_empty() {
+        theme.status("nothing to vendor: no source-built packages in the hangar.");
+        return 0;
+    }
+    if std::fs::create_dir_all(&vendor_dir).is_err() {
+        theme.error(
+            "could not create the vendor directory",
+            &vendor_dir.display().to_string(),
+            "check write permissions here.",
+        );
+        return 1;
+    }
+    let mut count = 0;
+    for e in &built {
+        let dest = vendor_dir.join(&e.name);
+        let _ = std::fs::remove_dir_all(&dest);
+        if copy_dir(std::path::Path::new(&e.out), &dest).is_err() {
+            theme.error(
+                "could not vendor a package",
+                &format!("copying {} failed", e.out),
+                "check disk space and permissions.",
+            );
+            return 1;
+        }
+        // Hash-pin: the A4 output hash is the reproducibility anchor.
+        let pin = vendor_dir.join(format!("{}.sha256", e.name));
+        let _ = std::fs::write(&pin, format!("{}\n", e.envelope.output_hash));
+        theme.detail(&format!(
+            "vendored {} ({})",
+            theme.bold(&e.name),
+            theme.gray(&e.envelope.output_hash)
+        ));
+        count += 1;
+    }
+    theme.status(&format!(
+        "vendored {count} source-built package(s) with pinned hashes."
+    ));
+    0
+}
+
+/// `jetpack audit` — read the build provenance of every realized object
+/// (D-BUILDSCOPE1 audit contract, T4): source ref + recipe id, output hash,
+/// platform, and locked source hash. **Executes nothing** — a pure read of the
+/// hangar records, so it is safe to run against untrusted builds.
+fn cmd_audit(theme: &Theme) -> i32 {
+    let roots = Store::resolve();
+    let entries = Store::list(&roots);
+    if entries.is_empty() {
+        theme.status("audit: hangar is empty, nothing to read.");
+        return 0;
+    }
+    theme.status(&format!(
+        "audit: {} realized object(s) (read-only, no build ran):",
+        entries.len()
+    ));
+    for e in &entries {
+        theme.detail(&format!("{}", theme.bold(&e.id)));
+        theme.detail(&format!(
+            "  provenance: {}",
+            if e.envelope.provenance.is_empty() {
+                "<none recorded>"
+            } else {
+                &e.envelope.provenance
+            }
+        ));
+        theme.detail(&format!("  output-hash: {}", theme.gray(&e.envelope.output_hash)));
+        theme.detail(&format!("  platform:    {}", theme.gray(&e.envelope.platform)));
+    }
+    0
+}
+
+/// Recursively copy a directory tree (std-only, preserves Unix modes).
+fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&from)?.permissions().mode();
+                std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// `jetpack clean` — drop unused store records.
@@ -742,6 +980,78 @@ fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
+/// `jetpack push <fleet>` (U15) — deploy a fleet's hosts. Parses and
+/// cross-checks the fleet now (each host references a known `System`, E1242);
+/// the ssh/closure rollout is gated on single-host jetos realization (Phase D),
+/// so a valid fleet gets an honest E1243 gated notice rather than a fake deploy.
+fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
+    let dir = std::env::current_dir().unwrap_or_default();
+    let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
+        theme.error(
+            "no fleet here",
+            &format!("there is no {} declaring any `fleet.<name>`.", Syntax::ENV_FILE),
+            "declare `module fleet.<name> { hosts: { … } }`, then `jet push <name>`.",
+        );
+        return 2;
+    };
+    // evaluate_env parses, discovers imports, and cross-checks every fleet host
+    // against the known systems (E1242) — a bad host fails here.
+    let plan = match ModuleEval::evaluate_env(&src, &dir) {
+        Ok(p) => p,
+        Err(d) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(Syntax::ENV_FILE, &src, std::slice::from_ref(&d))
+            );
+            return 2;
+        }
+    };
+
+    let available: Vec<String> = plan.fleets.iter().map(|f| f.name.clone()).collect();
+    let Some(name) = parsed.positional.first() else {
+        theme.error(
+            "push which fleet?",
+            &if available.is_empty() {
+                format!("no `fleet.<name>` is declared in {}.", Syntax::ENV_FILE)
+            } else {
+                format!("declared fleets: {}.", available.join(", "))
+            },
+            "name a fleet: `jet push <fleet>`.",
+        );
+        return 2;
+    };
+
+    let Some(fleet) = plan.fleets.iter().find(|f| &f.name == name) else {
+        theme.error(
+            &format!("no fleet `{name}`"),
+            &if available.is_empty() {
+                format!("no `fleet.<name>` is declared in {}.", Syntax::ENV_FILE)
+            } else {
+                format!("declared fleets: {}.", available.join(", "))
+            },
+            "declare `module fleet.<name> { hosts: { … } }`, or push an existing fleet.",
+        );
+        return 2;
+    };
+
+    // The fleet is valid and fully captured. Deployment is gated (Phase D).
+    let host_list = fleet
+        .hosts
+        .iter()
+        .map(|h| format!("{} → system.{}", h.name, h.system))
+        .collect::<Vec<_>>()
+        .join(", ");
+    theme.error(
+        &format!("[E1243] fleet `{name}` is validated, but `jet push` is not available yet"),
+        &format!(
+            "the fleet's {} host(s) ({host_list}) parse and cross-check clean, but rolling a fleet out over ssh needs single-host jetos realization, which is gated (Phase D, owner greenlight required).",
+            fleet.hosts.len()
+        ),
+        "track the jetos realization tier; until it lands, `jet push` captures and validates fleets without deploying them.",
+    );
+    2
+}
+
 /// `jetpack os <verb> [<config-path>]@<host>` (U15/U16) — the jetos tier: whole
 /// machine management as a subcommand group, not a separate binary. `<verb>` is
 /// the first positional (`switch`/`build`); the target is the second.
@@ -769,6 +1079,9 @@ usage:
   {bin} enter -- cmd                   run a command in the project shell, then exit
   {bin} build [<source>:<package>]     realize a package/environment, don't enter
   {bin} list                           show realized packages
+  {bin} hangar du                      honest per-object hangar disk usage
+  {bin} vendor [<dir>]                 write vendored + hash-pinned sources
+  {bin} audit                          read build provenance (runs nothing)
   {bin} clean                          drop unused store records
   {bin} add    <source>:<package>      add a package to ./{pack}
   {bin} add    <Component>             copy a starter component into ./components
