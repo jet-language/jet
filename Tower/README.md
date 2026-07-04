@@ -76,9 +76,9 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 
 - **SSE** — the UI updates over `/api/stream` the instant anything changes;
   passive updates never disturb reading, typing, or an open ballot.
-- **Auth** — non-localhost requests need the token auto-generated into
-  `.tower/config.json` (`auth.token`); open `http://host:7878/?key=<token>`
-  once per device (cookie persists). Localhost (agents, CLIs) is exempt.
+- **Auth (opt-in)** — set `"auth": {"token": "…"}` in `.tower/config.json` to
+  require a key from non-localhost devices (`/?key=<token>` once per device;
+  localhost always exempt). Without it the board is open to your LAN/tailnet.
 - **PWA + push** — installable app; the ◍ notify button subscribes the
   device to payload-less web push (new ballot / agent message / verify).
 - **Batched agent wake** — ratifications and greenlights within

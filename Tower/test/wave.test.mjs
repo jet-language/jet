@@ -10,8 +10,8 @@ import { serve } from '../app/server.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'tower-wave-'));
 writeJSON(join(dir, 'tower.json'), empty('Wave'));
-// fast batch window + a declared agent so notifications have a target
-writeJSON(join(dir, 'config.json'), { project: 'Wave', notifyBatchSeconds: 0.15, agents: [{ name: 'a1', kind: 'claude' }] });
+// fast batch window + a declared agent + opt-in auth token
+writeJSON(join(dir, 'config.json'), { project: 'Wave', notifyBatchSeconds: 0.15, agents: [{ name: 'a1', kind: 'claude' }], auth: { token: 'test-token-123456' } });
 const store = openStore(dir);
 const PORT = 7957;
 const server = serve(store, PORT, false);
@@ -23,9 +23,9 @@ const post = async (p, b, raw = false) => {
   return { status: r.status, json: await r.json().catch(() => null) };
 };
 
-test('auth provisioning: token + vapid persisted to config', () => {
-  assert.ok(store.config.auth?.token?.length > 10);
+test('provisioning: vapid keys generated; auth stays opt-in (no auto token)', () => {
   assert.ok(store.config.push?.publicKey?.length > 40);
+  assert.equal(store.config.auth.token, 'test-token-123456', 'configured token respected, none invented');
 });
 
 test('undo: revert last write, conflict-guarded', async () => {

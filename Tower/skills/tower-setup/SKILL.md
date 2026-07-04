@@ -57,9 +57,10 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 
 ## Remote access, push, git linking
 
-- First `tower serve` generates `auth.token` (non-localhost requests need it:
-  open `http://<host>:<port>/?key=<token>` once per device) and VAPID push
-  keys. The owner enables push per-device with the **◍ notify** button.
+- First `tower serve` generates VAPID push keys; the owner enables push
+  per-device with **◍ notify**. Auth is OPT-IN: set `"auth": {"token": "…"}`
+  in config.json to require a key from non-localhost devices (unlock screen
+  asks once per device; localhost always exempt).
 - `tower githook` installs a post-commit hook so commits mentioning `#12`
   append to that card's log — install it once per repo.
 - `notifyBatchSeconds` (default 90) controls how ratification/greenlight

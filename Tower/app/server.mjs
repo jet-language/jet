@@ -243,17 +243,15 @@ async function serveStatic(req, res) {
 }
 
 export function serve(store, port = 7878, open = false) {
-  // one-time provisioning: auth token + VAPID keys, persisted to config.json
-  if (!store.config.auth?.token) {
-    store.config.auth = { token: randomBytes(18).toString('base64url') };
-    saveConfig(store.dataDir, { auth: store.config.auth });
-  }
+  // one-time provisioning: VAPID push keys. Auth is OPT-IN: set
+  //   "auth": { "token": "…" }
+  // in config.json to require a key from non-localhost devices.
   if (!store.config.push?.publicKey) {
     const v = generateVapid();
     store.config.push = { publicKey: v.publicKey, privateJwk: v.privateJwk, subscriptions: store.config.push?.subscriptions || [] };
     saveConfig(store.dataDir, { push: store.config.push });
   }
-  const token = store.config.auth.token;
+  const token = store.config.auth?.token || null;
   const filesDir = join(store.dataDir, 'files');
 
   const server = createServer(async (req, res) => {
@@ -396,7 +394,7 @@ export function serve(store, port = 7878, open = false) {
   });
   server.listen(port, () => {
     const url = `http://localhost:${port}`;
-    console.log(`\n  ▲ Tower — ${store.config.project} — ${url}\n    data: ${store.file}\n    remote access: http://<host>:${port}/?key=${token}\n`);
+    console.log(`\n  ▲ Tower — ${store.config.project} — ${url}\n    data: ${store.file}${token ? `\n    remote access: http://<host>:${port}/?key=${token}` : ''}\n`);
     if (open) import('node:child_process').then(({ spawn }) => {
       const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
       spawn(cmd, [url], { stdio: 'ignore', detached: true }).unref();
