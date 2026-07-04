@@ -116,7 +116,7 @@ before continuing.
 | E0053 | parse | *retired by D-S14-PAUSE* (was: bare `pure` teaching) |
 | E0054 | parse | *retired by D-S14-PAUSE* (was: bare `todo` teaching) |
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
-| E0056 | parse | teaching: `mut` capability keyword → `~` sigil (D-CAP7) |
+| E0056 | parse | teaching: `mut` capability keyword → `&` sigil (D-MEM1) |
 | E0057 | parse | *retired by D-S14-PAUSE* (was: `take` keyword teaching) |
 | E0058 | parse | *retired by D-S14-PAUSE* (was: `view` keyword teaching) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
@@ -195,10 +195,10 @@ before continuing.
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S -> …)` — a dead-end state (D-STATE-DECL, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
-| E0202 | sema  | `mut` (`~`) required at call site — write access not granted |
+| E0202 | sema  | `mut` (`&`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |
 | E0204 | sema  | same value used while `mut` is active in one call |
-| E0205 | sema  | `self.field = v` without write access (`~`) on the receiver (D-MUTSELF1) |
+| E0205 | sema  | `self.field = v` without write access (`&`) on the receiver (D-MUTSELF1) |
 | E0206 | sema  | `view` return can't point at this value   |
 | E0207 | sema  | a stored-reference (`&T`) field's owner is ambiguous — 2+ in-scope values could own it (D-REF-SHORTHAND1) |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
@@ -394,7 +394,7 @@ before continuing.
 | E0909 | sema  | generic instantiation too deep |
 | E0910 | sema  | `@PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
-| E0912 | sema  | a frozen public capability signature drifted: a param a caller could pass by read now demands `~`/`^`/`&` in an `api: stable`/`api: explicit` library (c129, D-CAP8) |
+| E0912 | sema  | a frozen public capability signature drifted: a param a caller could pass by read now demands `&`/`^` in an `api: stable`/`api: explicit` library (c129, D-CAP8) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
 | E0914 | sema  | unknown interpolation selector after `@` (D-DISPLAYDBG2) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
@@ -1095,7 +1095,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
-| E0161 | `{what}` | Increment and decrement edit the binding or field in place (D-INCR1). | Declare with `:=` or mark the parameter `~` if the function should change it. |
+| E0161 | `{what}` | Increment and decrement edit the binding or field in place (D-INCR1). | Declare with `:=` or mark the parameter `&` if the function should change it. |
 | E0162 | `` `++`/`--` is not defined for {type} ``. | Increment and decrement work on integer types only (D-INCR1). | On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding. |
 | E0163 | increment and decrement can't target an indexed slot. | Write the full update: `map[key] = map[key] + 1` (D-INCR1). | Use `+= 1` on a name, or assign through `=` with the whole right-hand side. |
 | E0154 | after `{from} ->` expected `{expected}`, found `{to}`. | Protocol messages (D-PROTO2): each line must be `client -> server: Msg(…)` or `server -> client: Msg(…)` — other endpoint pairs are not part of the ratified spelling. | Write `client -> server: …` or `server -> client: …`. |
@@ -1440,13 +1440,13 @@ literal's body (a separate closure, not inline text of the function).
 A `library { api: stable }` (or `api: explicit`) target freezes each public
 function's *resolved* capability signature into a durable contract
 (`.jet/cache/api/<package>.api`, written by `jet publish`). D-CAP8 says a later
-read → `~`/`^`/`&` change is a breaking change, **not a silent flip** — so the
+read → `&`/`^` change is a breaking change, **not a silent flip** — so the
 next build diffs the resolved signature against the frozen one and fires E0912 on
 any drift.
 
 | What | Why | Fix |
 |------|-----|-----|
-| The public capability signature of `{fn}` changed since `{package}` froze it at version `{version}` (shows `was:`/`now:`). | An `api: stable`/`api: explicit` library freezes each public function's resolved capabilities. A param callers could pass by read now demands a stronger capability (`~` edit / `^` take / `&` share), which silently breaks every caller. | If the new capability is intended, this is a breaking change — bump the major version and re-run `jet publish` to re-freeze the contract. Otherwise restore the original signature of `{fn}` (or annotate the published api so the freeze records the new capability deliberately). |
+| The public capability signature of `{fn}` changed since `{package}` froze it at version `{version}` (shows `was:`/`now:`). | An `api: stable`/`api: explicit` library freezes each public function's resolved capabilities. A param callers could pass by read now demands a stronger capability (`&` write / `^` take), which silently breaks every caller. | If the new capability is intended, this is a breaking change — bump the major version and re-run `jet publish` to re-freeze the contract. Otherwise restore the original signature of `{fn}` (or annotate the published api so the freeze records the new capability deliberately). |
 
 ## Process for a new diagnostic
 

@@ -35,13 +35,13 @@ impl Counter.Rollback {
     fn snapshot(self) -> CounterSnap {
         return CounterSnap.{ value: self.value, ops: self.ops }
     }
-    fn restore(~self, snap: ^CounterSnap) {
+    fn restore(&self, snap: ^CounterSnap) {
         self.value = snap.value
         self.ops = snap.ops
     }
 }
 enum Fail { Bad }
-fn bump(c: ~Counter) -> Int ? Fail {
+fn bump(c: &Counter) -> Int ? Fail {
     #Transact {
         c.value += 1
         c.ops += 1
@@ -51,7 +51,7 @@ fn bump(c: ~Counter) -> Int ? Fail {
 }
 fn run() {
     c := Counter.{ value: 10, ops: 0 }
-    _ :: bump(~c) ?? 0
+    _ :: bump(&c) ?? 0
     print(c.value)
     print(c.ops)
 }
@@ -82,13 +82,13 @@ impl Counter.Rollback {
     fn snapshot(self) -> CounterSnap {
         return CounterSnap.{ value: self.value, ops: self.ops }
     }
-    fn restore(~self, snap: ^CounterSnap) {
+    fn restore(&self, snap: ^CounterSnap) {
         self.value = snap.value
         self.ops = snap.ops
     }
 }
 enum Fail { Bad }
-fn bump(c: ~Counter) -> Int ? Fail {
+fn bump(c: &Counter) -> Int ? Fail {
     #Transact {
         c.value += 1
         c.ops += 1
@@ -97,7 +97,7 @@ fn bump(c: ~Counter) -> Int ? Fail {
 }
 fn run() {
     c := Counter.{ value: 10, ops: 0 }
-    _ :: bump(~c) ?? 0
+    _ :: bump(&c) ?? 0
     print(c.value)
     print(c.ops)
 }
@@ -122,12 +122,12 @@ impl Counter.Rollback {
     fn snapshot(self) -> CounterSnap {
         return CounterSnap.{ value: self.value }
     }
-    fn restore(~self, snap: ^CounterSnap) {
+    fn restore(&self, snap: ^CounterSnap) {
         self.value = snap.value
     }
 }
 enum Fail { Bad }
-fn bump(c: ~Counter) -> Int ? Fail {
+fn bump(c: &Counter) -> Int ? Fail {
     #Transact {
         c.value += 1
         return err(Fail.Bad)
@@ -136,7 +136,7 @@ fn bump(c: ~Counter) -> Int ? Fail {
 }
 fn run() {
     c := Counter.{ value: 0 }
-    _ :: bump(~c) ?? 0
+    _ :: bump(&c) ?? 0
     print(c.value)
 }
 "#;

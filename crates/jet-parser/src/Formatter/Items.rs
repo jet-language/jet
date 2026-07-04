@@ -172,7 +172,7 @@ impl<'a> Fmt<'a> {
                     f.write(" -> ");
                     // D-CAP7: a borrowed trait-method return renders the `&` sigil.
                     if m.is_view_return {
-                        f.write(Syntax::SIGIL_VIEW);
+                        f.write(Syntax::SIGIL_WRITE);
                     }
                     f.fmt_return_type(ret);
                 }
@@ -222,7 +222,7 @@ impl<'a> Fmt<'a> {
         if let Some(ret) = &ef.return_type {
             self.write(" -> ");
             if ef.is_view_return {
-                self.write(Syntax::SIGIL_VIEW);
+                self.write(Syntax::SIGIL_WRITE);
             }
             self.fmt_return_type(ret);
         }
@@ -532,7 +532,7 @@ impl<'a> Fmt<'a> {
         if let Some(ret) = &f.return_type {
             self.write(" -> ");
             if f.is_view_return {
-                self.write(Syntax::SIGIL_VIEW);
+                self.write(Syntax::SIGIL_WRITE);
             }
             self.fmt_return_type(ret);
         }
@@ -542,11 +542,11 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_param(&mut self, p: &Param) {
-        // D-CAP7: capability is a sigil, never a word. The sigil rides the type
-        // (`name: ~Type`), or `self` for a receiver (`~self`). `Read`/`Infer` are
+        // D-MEM1: capability is a sigil, never a word. The sigil rides the type
+        // (`name: &Type`), or `self` for a receiver (`&self`). `Read`/`Infer` are
         // unmarked; `Share`/`Raw` aren't produced on parameters yet.
         let sigil = match p.convention {
-            AccessConvention::Write => Some(Syntax::SIGIL_MUTATE),
+            AccessConvention::Write => Some(Syntax::SIGIL_WRITE),
             AccessConvention::Move => Some(Syntax::SIGIL_MOVE),
             AccessConvention::Read
             | AccessConvention::Infer
@@ -555,7 +555,7 @@ impl<'a> Fmt<'a> {
         };
         let is_self_receiver = p.name == Syntax::KW_SELF && p.ty.name().is_empty();
         if is_self_receiver {
-            // `~self` / `^self`: the sigil attaches to `self`, no type printed.
+            // `&self` / `^self`: the sigil attaches to `self`, no type printed.
             if let Some(s) = sigil {
                 self.write(s);
             }

@@ -871,15 +871,15 @@ impl<'a> Fmt<'a> {
             if i > 0 {
                 self.write(", ");
             }
-            // D-CAP7: the call-site capability is a sigil that attaches to the
-            // argument with no space (`~x`, `^x`, `&x`). The parser reads it
+            // D-MEM1: the call-site capability is a sigil that attaches to the
+            // argument with no space (`^x`, `&x`). The parser reads it
             // before the label, so fmt emits it in that order to round-trip.
             // `Read`/`Infer` are unmarked; `Raw` (`*`) is handled apart.
             match arg.convention {
                 AccessConvention::Read | AccessConvention::Infer | AccessConvention::Raw => {}
-                AccessConvention::Write => self.write(Syntax::SIGIL_MUTATE),
+                AccessConvention::Write => self.write(Syntax::SIGIL_WRITE),
                 AccessConvention::Move => self.write(Syntax::SIGIL_MOVE),
-                AccessConvention::Share => self.write(Syntax::SIGIL_VIEW),
+                AccessConvention::Share => self.write(Syntax::SIGIL_WRITE),
             }
             // D-VARIADIC1: `f(...xs)` call spread — the parser reads this
             // between the access-convention sigil and the optional label

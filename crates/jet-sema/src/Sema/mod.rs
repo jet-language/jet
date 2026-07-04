@@ -3,7 +3,7 @@
 //! impossible for the generated Rust to fail to compile (invariant I2).
 //!
 //! M1: type inference, mutability, definite-return analysis.
-//! M2: ownership — moves, call-site `~`/`^`,
+//! M2: ownership — moves, call-site `&`/`^`,
 //! view returns, use-after-move, and borrow rules that keep generated Rust
 //! sound without surfacing Rust concepts to users.
 

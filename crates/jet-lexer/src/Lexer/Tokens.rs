@@ -109,7 +109,10 @@ pub enum TokKind {
     Amp,
     Pipe,
     Caret,
-    /// D-CAP7: `~` write/edit capability sigil (prefix). Position-disambiguated.
+    /// D-MEM1: `~` is not part of the v5 grammar (was the D-CAP7 write sigil,
+    /// superseded by `&`). Still lexed — for `TildeTilde` longest-match and so a
+    /// lone `~` fails as an ordinary unrecognized-token syntax error rather than
+    /// panicking the lexer — but the parser has no arm for it.
     Tilde,
     /// S83: `~~` trait-attach (spec-only; lexed but not yet parsed). Longest-match
     /// before `~`.

@@ -729,7 +729,7 @@ fn run() {
 fn transact_auto_snapshot_mutated_value() {
     let src = r#"
 enum Fail { Bad }
-fn transfer(from: ~Int, to: ~Int, amount: Int) -> Int ? Fail {
+fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
     #Transact(tx) {
         from -= amount;
         to += amount;
@@ -742,7 +742,7 @@ fn transfer(from: ~Int, to: ~Int, amount: Int) -> Int ? Fail {
 fn run() {
     a: Int := 100
     b: Int := 0
-    n :: transfer(~a, ~b, 40) ?? (-1)
+    n :: transfer(&a, &b, 40) ?? (-1)
     print("{n}")
 }
 "#;
@@ -770,14 +770,14 @@ fn run() {
 fn transact_auto_snapshot_unsafe_only_in_prelude() {
     let src = r#"
 enum Fail { Bad }
-fn bump(x: ~Int) -> Int ? Fail {
+fn bump(x: &Int) -> Int ? Fail {
     #Transact(tx) {
         x += 1;
         return err(Fail.Bad);
     }
     return ok(0);
 }
-fn run() { a: Int := 0; n :: bump(~a) ?? (-1); print("{n}"); }
+fn run() { a: Int := 0; n :: bump(&a) ?? (-1); print("{n}"); }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     // The only `unsafe` is inside `mod jet_txn { … }`. Strip it and assert none remain.

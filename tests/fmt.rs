@@ -1160,6 +1160,50 @@ fn run() {
 }
 
 #[test]
+fn fmt_write_sigil_d_mem1_stability() {
+    // D-MEM1 (S1): `&T` is the write sigil (param + call-site mirror), `&self`
+    // is the write receiver, `^T`/`^self` (take/move) are unchanged, and plain
+    // `T`/`self` (read) carries no sigil. Must all survive fmt unchanged.
+    let src = "\
+struct Player {
+    hp: Int
+}
+
+impl Player {
+    fn show(self) -> Int { return self.hp }
+
+    fn heal(&self, amount: Int) { self.hp = self.hp + amount }
+}
+
+fn damage(p: &Player, amount: Int) {
+    p.hp = p.hp - amount
+}
+
+fn archive(p: ^Player) -> Int {
+    return p.hp
+}
+
+fn run() {
+    p := Player.{hp: 100}
+    damage(&p, 10)
+    p.heal(5)
+    print(archive(^p))
+}
+";
+    assert_fmt_keeps(
+        src,
+        &[
+            "fn heal(&self, amount: Int)",
+            "fn damage(p: &Player, amount: Int)",
+            "fn archive(p: ^Player) -> Int",
+            "damage(&p, 10)",
+            "archive(^p)",
+        ],
+        "D-MEM1 write sigil",
+    );
+}
+
+#[test]
 fn fmt_loop_label_d_looplabel2_stability() {
     // D-LOOPLABEL2=A: `outer@ loop { break outer@ }` must survive fmt unchanged.
     let src = "\

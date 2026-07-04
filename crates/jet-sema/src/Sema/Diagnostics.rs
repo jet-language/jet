@@ -66,7 +66,7 @@ pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
         "while something is being changed, nobody else may be looking at it".to_string(),
         format!(
             "pass `{}{}` only once, or copy first with `{}.clone()`",
-            Syntax::SIGIL_MUTATE,
+            Syntax::SIGIL_WRITE,
             name,
             name
         ),

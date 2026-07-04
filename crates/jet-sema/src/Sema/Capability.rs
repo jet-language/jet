@@ -3,8 +3,8 @@
 //! starts as `Infer` and elevates by what the body does to it:
 //!
 //! - a field/index assignment rooted at the param (`p.hp = …`)      → `Write`
-//! - the param passed as a `~`/`^`/`&` argument (`os.close(^file)`)  → that capability
-//! - calling a `~self`/`^self`/`&self` method on a param             → that capability
+//! - the param passed as a `&`/`^` argument (`os.close(^file)`)  → that capability
+//! - calling a `&self`/`^self` method on a param             → that capability
 //! - otherwise                                                       → `Read`
 //!
 //! Elevation takes the strongest signal by the lattice `Read < Share < Write <
@@ -295,7 +295,7 @@ fn scan_if(
     }
 }
 
-/// Walk an expression, elevating any param passed as a `~`/`^`/`&` argument and
+/// Walk an expression, elevating any param passed as a `&`/`^` argument and
 /// recursing into nested sub-expressions. Also elevates params whose type has a
 /// mutating-receiver method called on them (D-CAP8 receiver-method signal).
 /// Leaf/uninteresting forms are skipped (the `_` arm).
@@ -368,7 +368,7 @@ fn scan_expr(
     }
 }
 
-/// A call argument carrying an explicit `~`/`^`/`&` capability elevates the param
+/// A call argument carrying an explicit `&`/`^` capability elevates the param
 /// it is rooted at; then recurse into the argument expression.
 fn scan_arg(
     a: &crate::AST::CallArg,

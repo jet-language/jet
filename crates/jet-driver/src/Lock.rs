@@ -733,7 +733,7 @@ pub fn e1217(dep_name: &str) -> Diagnostic {
 /// `dep_fingerprints` is the sorted list of direct dep fingerprints.
 /// `cap_digest` (c129) is the package's frozen public-capability contract
 /// (`Publish::ApiFreeze::project_capability_digest`); folding it in means a
-/// public capability change (read → `~`/`^`/`&`) shifts the pin even when the
+/// public capability change (read → `&`/`^`) shifts the pin even when the
 /// source tree hash would otherwise match. Empty for a package with no frozen
 /// `api: stable|explicit` surface — the fingerprint is then unchanged from the
 /// pre-c129 form (tree + deps only), so existing locks stay stable.

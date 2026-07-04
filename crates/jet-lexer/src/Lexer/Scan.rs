@@ -158,9 +158,11 @@ impl<'a> Lexer<'a> {
                 '%' => toks.push(simple(self, TokKind::Percent, 1)),
                 '^' if next == '=' => toks.push(simple(self, TokKind::CaretEq, 2)),
                 '^' => toks.push(simple(self, TokKind::Caret, 1)),
-                // D-CAP7: `~` is the write/edit capability sigil (prefix). `~` was
-                // previously unlexed. `~~` (S83 trait-attach) is lexed (longest-match
-                // before `~`) but not yet parsed; Phase 2 wires it.
+                // D-MEM1: `~` is retired (was the D-CAP7 write sigil; `&` now
+                // carries that meaning). Still lexed as `Tilde` so it fails as an
+                // ordinary syntax error, not a lexer panic. `~~` (S83 trait-attach)
+                // is lexed (longest-match before `~`) but not yet parsed; Phase 2
+                // wires it.
                 '~' if next == '~' => toks.push(simple(self, TokKind::TildeTilde, 2)),
                 '~' => toks.push(simple(self, TokKind::Tilde, 1)),
                 '&' if next == '&' => toks.push(simple(self, TokKind::AndAnd, 2)),

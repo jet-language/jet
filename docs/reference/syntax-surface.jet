@@ -523,23 +523,22 @@ fn with_fs() {
 // LOW-LEVEL / UNSAFE TIER  (#Unsafe, *T, p.*)
 // ============================================================================
 // `use core.mem` is the discovery gate (S58). `#Unsafe("reason")` is the audit
-// gate; the reason IS the review artifact (D-UNSAFE2). Sigils per D-CAP7/D-CAP9.
+// gate; the reason IS the review artifact (D-UNSAFE2). Sigils per D-MEM1/D-CAP9.
 
 use core.mem
 
-// Access-capability sigils ride the type (D-CAP7): `~T` edit, `^T` take/move,
-// `&T` share/escape, bare `T` read/infer. Call site & receivers mirror them.
-fn damage(p: ~Player, amount: Int) {           // ~  = exclusive write
+// Access-capability sigils ride the type (D-MEM1): `&T` write, `^T` take/move,
+// bare `T` read (the default; no sigil). Call site & receivers mirror them.
+fn damage(p: &Player, amount: Int) {           // &  = exclusive write
     p.hp = p.hp - amount
 }
 fn consume(item: ^Item) { }                    // ^ = ownership moved/consumed
-fn cache(tex: &Texture) { }                    // & = may escape/be retained
 struct P {
-    fn edit(~self) { }                         // receiver sigils
+    fn edit(&self) { }                         // receiver sigils
     fn destroy(^self) { }
 }
 fn call_sites(player: Player, file: File) {
-    damage(~player, 10)
+    damage(&player, 10)
     consume(^item)
 }
 

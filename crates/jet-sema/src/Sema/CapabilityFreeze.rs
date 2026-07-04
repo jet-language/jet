@@ -9,8 +9,8 @@
 //! This pass runs after `Capability::resolve_capabilities`. For each frozen
 //! snapshot it finds, it diffs the current resolved signature of every public
 //! function against the frozen one. A param that was frozen as read (no sigil) but
-//! now resolves to `~`/`^`/`&` — or any other sigil change — is a **breaking
-//! change** to the public contract (D-CAP8: "a later read → `~`/`^`/`&` drift is a
+//! now resolves to `&`/`^` — or any other sigil change — is a **breaking
+//! change** to the public contract (D-CAP8: "a later read → `&`/`^` drift is a
 //! breaking-change error, not a silent flip"). That is **E0912**.
 //!
 //! The freeze gate lives on the write side: a `.api` snapshot exists only because
@@ -114,7 +114,7 @@ fn e0912_drift(
         format!(
             "an `api: stable`/`api: explicit` library freezes each public function's resolved \
              capabilities into its contract. A param that callers could pass by read now demands \
-             a stronger capability (`~` edit / `^` take / `&` share), which silently breaks every \
+             a stronger capability (`&` write / `^` take), which silently breaks every \
              caller.\n   | was: {}\n   | now: {}",
             frozen_sig, current_sig,
         ),
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn read_to_write_drift_is_e0912() {
-        // Frozen as read (no sigil); now resolves to ~ (write). Breaking.
+        // Frozen as read (no sigil); now resolves to & (write). Breaking.
         let items = [pub_fn(
             "scale",
             vec![param(

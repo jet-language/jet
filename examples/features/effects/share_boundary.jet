@@ -1,11 +1,13 @@
-// D-CAP7: &T share — read-access at a boundary; caller keeps ownership.
+// D-MEM1: plain T — read-access at a boundary; caller keeps ownership. The
+// pre-v5 explicit `&T` share sigil is gone (D-MEM1 repurposed `&` for write);
+// unmarked already means exactly this, so no sigil is needed at all.
 struct Config {
     width: Int
     height: Int
     label: String
 }
 
-// &Config = shared read; caller retains ownership
+// Config = shared read; caller retains ownership
 fn describe(c: Config) {
     print("{c.label}: {c.width}x{c.height}")
 }
@@ -16,8 +18,8 @@ fn area(c: Config) -> Int {
 
 fn run() {
     cfg := Config.{width: 1920, height: 1080, label: "display"}
-    describe(&cfg)  // share for read
-    a := area(&cfg)  // share again — caller still owns cfg
+    describe(cfg)  // plain read
+    a := area(cfg)  // read again — caller still owns cfg
     print("area: {a}")
     print(cfg.label)  // cfg is still valid
 }

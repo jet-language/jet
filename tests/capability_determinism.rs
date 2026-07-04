@@ -8,7 +8,7 @@
 
 /// Source with several inferred-capability params: write, read, and move.
 ///
-/// - `heal(p: Player)` — body assigns `p.hp`, infers Write (~Player)
+/// - `heal(p: Player)` — body assigns `p.hp`, infers Write (&Player)
 /// - `name_of(p: Player)` — body only reads, infers Read
 /// - `drain(t: Token)` — body passes `^t` to consume (^Token), infers Move
 ///
@@ -36,7 +36,7 @@ fn drain(t: Token) {
 
 fn run() {
     p := Player.{ hp: 90, name: "Aria" }
-    heal(~p)
+    heal(&p)
     print(name_of(p))
     tok := Token.{ id: 7 }
     drain(^tok)
@@ -63,8 +63,8 @@ fn inference_is_deterministic() {
 }
 
 /// Unmarked param that is field-assigned (`p.hp = …`) must infer Write.
-/// The call site uses `~p`; if inference resolved to Read the checker would
-/// reject the `~` at the call site (E0205).
+/// The call site uses `&p`; if inference resolved to Read the checker would
+/// reject the `&` at the call site (E0205).
 #[test]
 fn unmarked_mutated_param_infers_write() {
     let src = r#"
@@ -76,12 +76,12 @@ fn heal(p: Player) {
 
 fn run() {
     p := Player.{ hp: 100 }
-    heal(~p)
+    heal(&p)
     print(p.hp)
 }
 "#;
-    let out = jet::compile(src).expect("heal with ~p should compile");
-    // The inferred ~Player should produce a mutable reference in the output.
+    let out = jet::compile(src).expect("heal with &p should compile");
+    // The inferred &Player should produce a mutable reference in the output.
     assert!(
         out.rust.contains("&mut user_Player") || out.rust.contains("mut p:"),
         "expected write/mut in generated Rust: {}",
@@ -90,7 +90,7 @@ fn run() {
 }
 
 /// Unmarked param that is only read must infer Read (plain borrow / copy).
-/// A bare call without `~` or `^` must compile cleanly.
+/// A bare call without `&` or `^` must compile cleanly.
 #[test]
 fn unmarked_read_param_stays_read() {
     let src = r#"

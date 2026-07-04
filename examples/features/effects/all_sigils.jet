@@ -1,5 +1,5 @@
-// D-CAP7: all four capabilities in one program.
-// plain T = read; ~T = write; ^T = take/move; &T = share.
+// D-MEM1: both capabilities (plus plain read) in one program.
+// plain T = read; &T = write; ^T = take/move.
 struct Account {
     owner: String
     balance: Int
@@ -10,13 +10,13 @@ fn check(a: Account) -> Bool {
     return a.balance > 0
 }
 
-// &Account = shared read at a call boundary
+// plain Account = shared read at a call boundary — no sigil needed
 fn print_balance(a: Account) {
     print("{a.owner}: {a.balance}")
 }
 
-// ~Account = edit in place
-fn deposit(a: ~Account, amount: Int) {
+// &Account = edit in place
+fn deposit(a: &Account, amount: Int) {
     a.balance = a.balance + amount
 }
 
@@ -28,9 +28,9 @@ fn close(a: ^Account) -> String {
 fn run() {
     acc := Account.{owner: "Alice", balance: 100}
     print(check(acc))  // plain read
-    print_balance(&acc)  // & share
-    deposit(~acc, 50)  // ~ write
-    print_balance(&acc)  // & share again
+    print_balance(acc)  // plain read
+    deposit(&acc, 50)  // & write
+    print_balance(acc)  // plain read again
     log := close(^acc)  // ^ take; acc consumed
     print(log)
 }

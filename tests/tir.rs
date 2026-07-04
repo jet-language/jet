@@ -756,7 +756,7 @@ fn mut_self_method_body() {
 struct Acc {
     total: Int
 
-    fn doubled(~self) -> Int {
+    fn doubled(&self) -> Int {
         return (self.total + self.total)
     }
 }
@@ -2637,7 +2637,7 @@ fn calc() -> Int {
     d :: math.clamp(15, 0, 10)
     io.eprint(\"trace: {a} {b} {c} {d}\")
     xs := [1, 2, 3]
-    random.shuffle(~xs)
+    random.shuffle(&xs)
     p :: random.pick(xs)
     return ((((a + b) + c) + d) + (p ?? 0))
 }
@@ -3372,7 +3372,7 @@ fn free_call_arg_conventions() {
 fn show(msg: String) {
     print(msg)
 }
-fn bump(n: ~Int) {
+fn bump(n: &Int) {
     n += 1
 }
 fn archive(name: ^String) -> String {
@@ -3380,7 +3380,7 @@ fn archive(name: ^String) -> String {
 }
 fn run() {
     score: Int := 41
-    bump(~score)
+    bump(&score)
     print(score)
 greeting: String :: \"hello\"
     show(greeting)
@@ -3728,7 +3728,7 @@ fn borrow_field_clone() {
     let src = "\
 struct Ledger {
     rows: [Int]
-    fn put_back(~self, s: [Int]) {
+    fn put_back(&self, s: [Int]) {
         self.rows = s
     }
 }
@@ -3757,10 +3757,10 @@ fn mut_self_field_assign() {
     let src = "\
 struct Counter {
     n: Int
-    fn bump(~self) {
+    fn bump(&self) {
         self.n = self.n + 1
     }
-    fn add(~self, k: Int) {
+    fn add(&self, k: Int) {
         self.n += k
     }
 }
@@ -3787,7 +3787,7 @@ fn mut_self_whole_reassignment() {
     let src = "\
 struct Counter {
     n: Int
-    fn reset(~self) {
+    fn reset(&self) {
         self = Counter.{ n: 0 }
     }
 }
@@ -3812,13 +3812,13 @@ fn mut_self_trait_method_field_assign() {
     }
     let src = "\
 trait Bumpable {
-    fn bump(~self)
+    fn bump(&self)
 }
 struct Counter {
     n: Int
 }
 impl Counter.Bumpable {
-    fn bump(~self) {
+    fn bump(&self) {
         self.n = self.n + 1
     }
 }

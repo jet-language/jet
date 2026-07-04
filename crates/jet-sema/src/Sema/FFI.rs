@@ -52,7 +52,7 @@ pub(crate) fn check_extern_fn(
     }
     for p in &ef.params {
         // D-CAP8: `Infer` (unmarked) is by-value, like `Read` — both are fine at the
-        // boundary; only an explicit `~`/`^`/`&` marker is rejected.
+        // boundary; only an explicit `&`/`^` marker is rejected.
         if !matches!(
             p.convention,
             AccessConvention::Read | AccessConvention::Infer
@@ -63,7 +63,7 @@ pub(crate) fn check_extern_fn(
                     p.name,
                     access_keyword(p.convention)
                 ),
-                "foreign functions take owned copies — `~`, `^`, and `&` aren't allowed here",
+                "foreign functions take owned copies — `&` and `^` aren't allowed here",
                 "remove the capability sigil and pass by value",
                 p.name_span,
             ));
@@ -238,7 +238,7 @@ pub(crate) fn check_c_module(
                         p.name,
                         access_keyword(p.convention)
                     ),
-                    "C functions take values by copy — `~`, `^`, and `&` aren't allowed here",
+                    "C functions take values by copy — `&` and `^` aren't allowed here",
                     "remove the capability sigil and pass by value",
                     p.name_span,
                 ));
@@ -269,9 +269,9 @@ pub(crate) fn access_keyword(c: AccessConvention) -> &'static str {
     match c {
         AccessConvention::Read => "read",
         AccessConvention::Infer => "read", // unmarked defaults to read pre-resolution
-        AccessConvention::Write => Syntax::SIGIL_MUTATE,
+        AccessConvention::Write => Syntax::SIGIL_WRITE,
         AccessConvention::Move => Syntax::SIGIL_MOVE,
-        AccessConvention::Share => Syntax::SIGIL_VIEW,
+        AccessConvention::Share => Syntax::SIGIL_WRITE,
         AccessConvention::Raw => "raw",
     }
 }

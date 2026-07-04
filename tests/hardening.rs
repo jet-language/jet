@@ -196,7 +196,7 @@ fn mut_self_method_requires_var_receiver() {
 struct Crate {
     n: Int
 
-    fn poke(~self) {
+    fn poke(&self) {
         x :: self.n
         print(x)
     }
@@ -290,7 +290,7 @@ fn statement_can_start_with_self() {
 struct Crate {
     items: List<Int>
 
-    fn add(~self, n: Int) {
+    fn add(&self, n: Int) {
         self.items.push(n)
     }
 }
@@ -374,13 +374,13 @@ struct S {
     n: Int
 }
 
-fn bump(n: ~Int) {
+fn bump(n: &Int) {
     n = n + 1
 }
 
 fn run() {
     s :: S.{ n: 1 }
-    bump(~s.n)
+    bump(&s.n)
 }
 "#,
         "E0202",

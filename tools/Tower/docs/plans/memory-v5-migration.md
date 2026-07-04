@@ -32,7 +32,7 @@ use-after-`^`, exclusivity conflicts) and for foreign-language guesses
 
 ## Stages
 
-**S1 — Glyph flip (foundation + parser + formatter).**
+**S1 — Glyph flip (foundation + parser + formatter). DONE (2026-07-04).**
 `&` becomes the write sigil (rename `SIGIL_VIEW` → `SIGIL_WRITE`, decision row
 D-MEM1, I7). `~` is removed from the grammar entirely — it fails as ordinary
 unknown syntax, no special-case message. `^` unchanged. Call sites mirror

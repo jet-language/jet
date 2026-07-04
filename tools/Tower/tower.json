@@ -7892,12 +7892,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "tools/Tower/docs/plans/memory-v5-migration.md",
       "blockedBy": [],
       "workOrder": null,
       "log": [
+        {
+          "at": "2026-07-04",
+          "by": "agent",
+          "text": "Stage S1 (glyph flip) shipped + independently re-verified (orchestrator, twice). & is now the write sigil (was ~, deleted from grammar entirely, ordinary syntax error), ^ unchanged, &self/^self receivers fall out automatically (D-MUTSELF1 check is semantic on AccessConvention::Write, no textual dependency). E0056 repointed at &. Found + fixed a real gap not in the plan's stale audit: today's & was actually a third AccessConvention::Share (tier-2 escape marker, D-CAP10), distinct from Read - confirmed via grep that Share was already treated identically to Read everywhere (never wired further), so dropping its surface spelling to unmarked is behavior-preserving, not invented - matches D-MEM1's ratified text of exactly two sigils. Share/Raw enum variants kept (dead until a future tier), not deleted. ~70 files touched across parser/sema/codegen/formatter, 16 examples, 25 tests, docs. Deliberately deferred to later stages: -> &T returns/&T fields/#Ref (S3), AccessConvention::Infer/elevation/freeze/L0201 (S2), .clone() mentions (S4), spec.md memory chapter rewrite (S8). Full nix develop -c cargo test --workspace: 0 failed except the known pre-existing c9webdevfn404. Note: the implementing agent twice self-reported '8 jet-codegen pre-existing failures from D-OPT-SPELL1' that did NOT reproduce on independent full-suite re-verification (also not seen on the decree-4/6 checkpoint) - likely a stale/interleaved local test artifact in the agent's own session, not a real repo state; treating the clean orchestrator-run full suite as ground truth each time. Ready for S2 (sema enforcement)."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -7948,7 +7953,8 @@
           "by": "agent",
           "text": "Greenfield rule applied to migration plan: former spellings (~, -> &T, &T fields, #Ref, api:, .clone()) are not in the v5 grammar/stdlib — ordinary unknown-syntax failures, zero compat or teaching diagnostics referencing them. Also pinned the ^-for-named-bindings rule: temporaries (copy x, literals, call results) pass without ^."
         }
-      ]
+      ],
+      "updated": "2026-07-04"
     },
     {
       "id": "cv5syntaxdecrees",

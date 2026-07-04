@@ -1,4 +1,4 @@
-// D-CAP7: asset pipeline — normalize edits in place (~), encode consumes (^).
+// D-MEM1: asset pipeline — normalize edits in place (&), encode consumes (^).
 struct Image {
     width: Int
     height: Int
@@ -7,14 +7,14 @@ struct Image {
 }
 
 // normalize: edit in place — caller keeps ownership
-fn normalize(img: ~Image) {
+fn normalize(img: &Image) {
     img.gamma = 2.2
     img.format = "sRGB"
     print("normalized: {img.format} gamma={img.gamma}")
 }
 
 // resize: edit width/height in place
-fn resize(img: ~Image, w: Int, h: Int) {
+fn resize(img: &Image, w: Int, h: Int) {
     img.width = w
     img.height = h
     print("resized to {img.width}x{img.height}")
@@ -27,8 +27,8 @@ fn encode(img: ^Image) -> String {
 
 fn run() {
     img := Image.{width: 3840, height: 2160, format: "raw", gamma: 1.0}
-    normalize(~img)  // ~ write: img is edited, caller keeps it
-    resize(~img, 1920, 1080)
+    normalize(&img)  // & write: img is edited, caller keeps it
+    resize(&img, 1920, 1080)
     result := encode(^img)  // ^ take: img is consumed here
     print(result)
 }

@@ -32,17 +32,17 @@ use core.time as time;
     );
 }
 
-/// A `@Pure fn` drawing randomness through an injected `~Rng` param compiles.
+/// A `@Pure fn` drawing randomness through an injected `&Rng` param compiles.
 #[test]
 fn pure_fn_injected_rng_ok() {
     let src = r#"
 use core.random as random;
-@Pure fn draw(rng: ~Rng) -> Int {
+@Pure fn draw(rng: &Rng) -> Int {
     return rng.int(1, 6)
 }
 fn run() {
     r := random.rng(7)
-    print("{draw(~r)}")
+    print("{draw(&r)}")
 }
 "#;
     let res = jet::compile(src);
@@ -202,7 +202,7 @@ fn run() {
 
 // ── D-DET-CAPAPI (ratified 2026-06-25): widened Clock / Rng surface ────────────
 //
-// Additive to the minimal set: `rng.bool()` / `rng.pick(list)` / `rng.shuffle(~list)`,
+// Additive to the minimal set: `rng.bool()` / `rng.pick(list)` / `rng.shuffle(&list)`,
 // the absolute `clock.advance(to_ms)`, the `Duration`-based `clock.wait(d)`, and
 // the `Duration` value (`time.ms`/`time.secs`, `duration.millis()`). All stay
 // pure-callable through the injected, seeded handles.
@@ -212,17 +212,17 @@ fn run() {
 fn pure_fn_widened_rng_ok() {
     let src = r#"
 use core.random as random;
-@Pure fn draws(rng: ~Rng) -> Bool {
+@Pure fn draws(rng: &Rng) -> Bool {
     flip := rng.bool()
     xs := [1, 2, 3]
     chosen := rng.pick(xs) ?? 0
     deck := [9, 8, 7]
-    rng.shuffle(~deck)
+    rng.shuffle(&deck)
     return flip || chosen == 0
 }
 fn run() {
     r := random.rng(7)
-    print("{draws(~r)}")
+    print("{draws(&r)}")
 }
 "#;
     let res = jet::compile(src);
@@ -238,13 +238,13 @@ fn run() {
 fn rng_pick_returns_element_option() {
     let src = r#"
 use core.random as random;
-@Pure fn choose(rng: ~Rng) -> String {
+@Pure fn choose(rng: &Rng) -> String {
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
 }
 fn run() {
     r := random.rng(1)
-    print("{choose(~r)}")
+    print("{choose(&r)}")
 }
 "#;
     let res = jet::compile(src);
@@ -255,7 +255,7 @@ fn run() {
     );
 }
 
-/// Every `Rng` draw advances the stream, so a non-`~` receiver is rejected (E0202).
+/// Every `Rng` draw advances the stream, so a non-`&` receiver is rejected (E0202).
 #[test]
 fn rng_bool_needs_mut_receiver() {
     let src = r#"
@@ -267,7 +267,7 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "rng.bool() on a non-`~` rng must fail");
+    assert!(res.is_err(), "rng.bool() on a non-`&` rng must fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
@@ -276,7 +276,7 @@ fn run() {
     );
 }
 
-/// `rng.shuffle(deck)` without `~` on the list arg is rejected (E0202).
+/// `rng.shuffle(deck)` without `&` on the list arg is rejected (E0202).
 #[test]
 fn rng_shuffle_needs_mut_list_arg() {
     let src = r#"
@@ -291,7 +291,7 @@ fn run() {
     let res = jet::compile(src);
     assert!(
         res.is_err(),
-        "rng.shuffle without `~` on the list must fail"
+        "rng.shuffle without `&` on the list must fail"
     );
     let diags = res.unwrap_err();
     assert!(
@@ -306,14 +306,14 @@ fn run() {
 fn pure_fn_widened_clock_ok() {
     let src = r#"
 use core.time as time;
-@Pure fn drive_clock(clock: ~Clock) -> Int {
+@Pure fn drive_clock(clock: &Clock) -> Int {
     base := clock.advance(5000)
     span := time.secs(1)
     return base + clock.wait(span)
 }
 fn run() {
     c := time.clock(0)
-    print("{drive_clock(~c)}")
+    print("{drive_clock(&c)}")
 }
 "#;
     let res = jet::compile(src);
@@ -324,7 +324,7 @@ fn run() {
     );
 }
 
-/// `clock.advance`/`clock.wait` move the clock, so a non-`~` receiver fails (E0202).
+/// `clock.advance`/`clock.wait` move the clock, so a non-`&` receiver fails (E0202).
 #[test]
 fn clock_advance_needs_mut_receiver() {
     let src = r#"
@@ -336,7 +336,7 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "clock.advance() on a non-`~` clock must fail");
+    assert!(res.is_err(), "clock.advance() on a non-`&` clock must fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E0202"),

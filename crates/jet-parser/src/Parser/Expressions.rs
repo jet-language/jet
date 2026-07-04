@@ -2820,15 +2820,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-CAP7: consume a leading capability sigil `~`/`^`/`&` → Write/Move/Share.
-    /// Returns `None` when no sigil is present. Position-disambiguated: infix `^`
-    /// (xor) and `&` (BitAnd) are parsed inside expressions and never reach the
-    /// start of a parameter/argument or a type. `*` (raw) is D-CAP9, handled apart.
+    /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. `~` is
+    /// not part of the v5 grammar (no arm here — an unrecognized `~` falls
+    /// through and fails wherever the caller expects next, as an ordinary
+    /// syntax error). Returns `None` when no sigil is present.
+    /// Position-disambiguated: infix `^` (xor) and `&` (BitAnd) are parsed
+    /// inside expressions and never reach the start of a parameter/argument or
+    /// a type. `*` (raw) is D-CAP9, handled apart.
     pub(super) fn parse_capability_sigil(&mut self) -> Option<AccessConvention> {
         let cap = match self.peek().kind {
-            TokKind::Tilde => AccessConvention::Write,
+            TokKind::Amp => AccessConvention::Write,
             TokKind::Caret => AccessConvention::Move,
-            TokKind::Amp => AccessConvention::Share,
             _ => return None,
         };
         self.bump();
@@ -2836,7 +2838,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_access_prefix(&mut self) -> AccessConvention {
-        // D-CAP7 sigils take precedence over the (migrating) keyword forms.
+        // D-MEM1 sigils take precedence over the retired keyword forms.
         if let Some(cap) = self.parse_capability_sigil() {
             return cap;
         }
@@ -2865,7 +2867,7 @@ impl<'a> Parser<'a> {
                         "E0018",
                         format!(
                             "changeable access is written `{}`, not `{}`",
-                            Syntax::SIGIL_MUTATE,
+                            Syntax::SIGIL_WRITE,
                             Syntax::FOREIGN_WRITE
                         ),
                         "Jet has exactly one spelling for each thing, so all code reads the same"
@@ -2873,7 +2875,7 @@ impl<'a> Parser<'a> {
                         format!(
                             "replace `{}` with `{}`",
                             Syntax::FOREIGN_WRITE,
-                            Syntax::SIGIL_MUTATE
+                            Syntax::SIGIL_WRITE
                         ),
                         Some(span),
                     ));
@@ -2883,10 +2885,10 @@ impl<'a> Parser<'a> {
             }
         }
         match self.peek().kind {
-            // D-CAP7: `mut` is retired in favor of `~`. Teach + recover as Write.
+            // D-MEM1: `mut` is retired in favor of `&`. Teach + recover as Write.
             TokKind::KwMutate => {
                 let span = self.bump().span;
-                self.push_cap_keyword_teach("E0056", Syntax::KW_MUTATE, Syntax::SIGIL_MUTATE, span);
+                self.push_cap_keyword_teach("E0056", Syntax::KW_MUTATE, Syntax::SIGIL_WRITE, span);
                 AccessConvention::Write
             }
             TokKind::KwMove => {
@@ -2901,7 +2903,7 @@ impl<'a> Parser<'a> {
                     // here is unmarked, so it infers (D-CAP8).
                     AccessConvention::Infer
                 } else {
-                    // D-CAP7: `take` is retired in favor of `^`. Teach + recover as Move.
+                    // D-MEM1: `take` is retired in favor of `^`. Teach + recover as Move.
                     let span = self.bump().span;
                     self.push_cap_keyword_teach("E0057", Syntax::KW_MOVE, Syntax::SIGIL_MOVE, span);
                     AccessConvention::Move
@@ -2913,8 +2915,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-CAP7: the `mut`/`take`/`view` capability words are retired in favor of
-    /// the `~`/`^`/`&` sigils. Recognized only to fire this teaching error
+    /// D-MEM1: the `mut`/`take`/`view` capability words are retired in favor of
+    /// the `&`/`^` sigils. Recognized only to fire this teaching error
     /// (E0056/E0057/E0058), which then recovers as if the sigil were written
     /// (S14 idiom — see `is_teaching_parse_diag`).
     pub(super) fn push_cap_keyword_teach(

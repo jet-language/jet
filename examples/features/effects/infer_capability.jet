@@ -1,12 +1,12 @@
 // D-CAP8: unmarked parameters infer their access capability from the body.
-// `bump` writes to its unmarked `c`, so the compiler infers `~Counter` — the
+// `bump` writes to its unmarked `c`, so the compiler infers `&Counter` — the
 // beginner writes ordinary code and the compiler resolves safe access. The call
-// site still names the capability (`~c`), so mutation stays visible.
+// site still names the capability (`&c`), so mutation stays visible.
 struct Counter {
     value: Int
 }
 
-// `c` is unmarked, but the body mutates it → resolved to `~Counter`.
+// `c` is unmarked, but the body mutates it → resolved to `&Counter`.
 fn bump(c: Counter, by: Int) {
     c.value = c.value + by
 }
@@ -18,7 +18,7 @@ fn value_of(c: Counter) -> Int {
 
 fn run() {
     c := Counter.{value: 0}
-    bump(~c, 5)
-    bump(~c, 3)
+    bump(&c, 5)
+    bump(&c, 3)
     print(value_of(c))
 }

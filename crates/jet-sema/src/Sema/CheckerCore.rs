@@ -647,7 +647,7 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "mark the parameter `{}: {}{}` if the function should change it",
                                     name,
-                                    Syntax::SIGIL_MUTATE,
+                                    Syntax::SIGIL_WRITE,
                                     info.ty.name()
                                 )
                             } else {
@@ -663,7 +663,7 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "only `{}` bindings (and `{}` parameters) can be changed",
                                     Syntax::SIGIL_BIND_MUT,
-                                    Syntax::SIGIL_MUTATE
+                                    Syntax::SIGIL_WRITE
                                 ),
                                 fix,
                                 Some(name_span),
@@ -760,7 +760,7 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0202",
                                             format!(
-                                                "cannot write to `{}` — it does not have edit access (`~`)",
+                                                "cannot write to `{}` — it does not have edit access (`&`)",
                                                 root
                                             ),
                                             "assigning into a collection edits it; the binding must be declared mutable".to_string(),
@@ -851,7 +851,7 @@ impl<'a> Checker<'a> {
                                             "`{}` can be read with `[ ]` but not written — it has no `IndexMut` impl",
                                             n
                                         ),
-                                        "bracket assignment needs `impl Type.IndexMut { fn set(~self, k, v) }`"
+                                        "bracket assignment needs `impl Type.IndexMut { fn set(&self, k, v) }`"
                                             .to_string(),
                                         format!(
                                             "use `.set(key, value)` instead, or add `impl {n}.IndexMut`"
@@ -897,7 +897,7 @@ impl<'a> Checker<'a> {
                                             self.diags.push(Diagnostic::error(
                                                 "E0202",
                                                 format!(
-                                                    "cannot write to `{}` — it does not have edit access (`~`)",
+                                                    "cannot write to `{}` — it does not have edit access (`&`)",
                                                     root
                                                 ),
                                                 "assigning through `[ ]` edits the value; the binding must be declared mutable"
@@ -1036,24 +1036,24 @@ impl<'a> Checker<'a> {
                                     let is_self = root == Syntax::KW_SELF;
                                     let what = if is_self {
                                         format!(
-                                            "cannot edit `{}` — `{}` has read access only; write access (`~`) is required",
+                                            "cannot edit `{}` — `{}` has read access only; write access (`&`) is required",
                                             field,
                                             Syntax::KW_SELF
                                         )
                                     } else {
-                                        format!("cannot edit `{}` — `{}` does not have write access (`~`)", field, root)
+                                        format!("cannot edit `{}` — `{}` does not have write access (`&`)", field, root)
                                     };
                                     let fix = if is_self {
                                         format!(
                                             "write the receiver as `{}{}` to grant write access",
-                                            Syntax::SIGIL_MUTATE,
+                                            Syntax::SIGIL_WRITE,
                                             Syntax::KW_SELF
                                         )
                                     } else if info.param_conv.is_some() {
                                         format!(
                                             "mark the parameter `{}: {}{}` to grant write access",
                                             root,
-                                            Syntax::SIGIL_MUTATE,
+                                            Syntax::SIGIL_WRITE,
                                             info.ty.name()
                                         )
                                     } else {
@@ -1066,7 +1066,7 @@ impl<'a> Checker<'a> {
                                     self.diags.push(Diagnostic::error(
                                         "E0205",
                                         what,
-                                        "editing a field requires write access (`~`) on the owning place".to_string(),
+                                        "editing a field requires write access (`&`) on the owning place".to_string(),
                                         fix,
                                         Some(*span),
                                     ));
@@ -3637,7 +3637,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "mark the parameter `{}: {}{}` if the function should change it",
                             name,
-                            Syntax::SIGIL_MUTATE,
+                            Syntax::SIGIL_WRITE,
                             info.ty.name()
                         )
                     } else {
@@ -3653,7 +3653,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "only `{}` bindings (and `{}` parameters) can use `++`/`--`",
                             Syntax::SIGIL_BIND_MUT,
-                            Syntax::SIGIL_MUTATE
+                            Syntax::SIGIL_WRITE
                         ),
                         fix,
                         Some(name_span),
@@ -3694,20 +3694,20 @@ impl<'a> Checker<'a> {
                             let is_self = root == Syntax::KW_SELF;
                             let what = if is_self {
                                 format!(
-                                    "cannot edit `{}` — `{}` has read access only; write access (`~`) is required",
+                                    "cannot edit `{}` — `{}` has read access only; write access (`&`) is required",
                                     field,
                                     Syntax::KW_SELF
                                 )
                             } else {
                                 format!(
-                                    "cannot edit `{}` — `{}` does not have write access (`~`)",
+                                    "cannot edit `{}` — `{}` does not have write access (`&`)",
                                     field, root
                                 )
                             };
                             let fix = if is_self {
                                 format!(
                                     "write the receiver as `{}{}` to grant write access",
-                                    Syntax::SIGIL_MUTATE,
+                                    Syntax::SIGIL_WRITE,
                                     Syntax::KW_SELF
                                 )
                             } else {

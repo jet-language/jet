@@ -2999,7 +2999,7 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwView => {
                 let span = self.bump().span;
-                self.push_cap_keyword_teach("E0058", Syntax::KW_VIEW, Syntax::SIGIL_VIEW, span);
+                self.push_cap_keyword_teach("E0058", Syntax::KW_VIEW, Syntax::SIGIL_WRITE, span);
                 true
             }
             _ => false,
@@ -3019,8 +3019,8 @@ impl<'a> Parser<'a> {
             TokKind::Colon
         ) {
             self.bump();
-            // D-CAP7: the capability sigil rides the type side — `name: ~T`/`^T`/`&T`.
-            // (Receivers carry it on `self` instead: `~self`, parsed above.)
+            // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
+            // (Receivers carry it on `self` instead: `&self`, parsed above.)
             if let Some(type_cap) = self.parse_capability_sigil() {
                 // A real pre-name marker (not the unmarked `Infer` default) plus a
                 // type-side sigil is two markers (E0029).
@@ -3029,7 +3029,7 @@ impl<'a> Parser<'a> {
                         "E0029",
                         format!("`{}` has two capability markers", name),
                         "a parameter's access capability is written once — on the type \
-                         (`name: ~Type`), or on `self` for a receiver"
+                         (`name: &Type`), or on `self` for a receiver"
                             .to_string(),
                         "keep the sigil on the type and remove the other".to_string(),
                         Some(name_span),

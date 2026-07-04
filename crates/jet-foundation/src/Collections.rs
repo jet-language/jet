@@ -483,7 +483,7 @@ fn clock_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 ///
 /// D-DET-CAPAPI widens the surface to mirror the ambient `random.*` set:
 /// `rng.bool()` draws a coin; `rng.pick(list)` returns a uniform `T?`;
-/// `rng.shuffle(~list)` shuffles in place (Fisher–Yates). `pick`/`shuffle` are
+/// `rng.shuffle(&list)` shuffles in place (Fisher–Yates). `pick`/`shuffle` are
 /// generic, so their element-aware return types are resolved in the checker
 /// dispatch (Source/Sema/CheckerInfer/calls.rs) — the placeholders here keep the
 /// codegen totality path (lower.rs) honest.
@@ -634,8 +634,8 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             )
         }
         // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
-        // `rng` draw advances the PRNG stream — these need an edit-access (`~`)
-        // receiver. `clock.now()` / `duration.millis()` are pure reads (no `~`).
+        // `rng` draw advances the PRNG stream — these need an edit-access (`&`)
+        // receiver. `clock.now()` / `duration.millis()` are pure reads (no `&`).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => {
             matches!(method, "tick" | "advance" | "wait")
         }

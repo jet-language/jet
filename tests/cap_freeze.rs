@@ -120,7 +120,7 @@ fn snapshot_freezes_resolved_sigils_round_trip() {
         1,
         "private fns are not part of the contract"
     );
-    assert_eq!(snap.funcs[0].signature, "fn scale(v: ~Vec3)");
+    assert_eq!(snap.funcs[0].signature, "fn scale(v: &Vec3)");
 
     let text = snap.write();
     let parsed = ApiFreeze::ApiSnapshot::parse(&text).expect("round trips");
@@ -183,7 +183,7 @@ fn fingerprint_folds_in_capability_digest() {
     let fp_write = jet::Lock::compute_fingerprint("sha256-tree", &[], &write_digest);
     assert_ne!(
         fp_read, fp_write,
-        "a read → ~ capability change must shift the package pin"
+        "a read → & capability change must shift the package pin"
     );
 }
 
@@ -198,7 +198,7 @@ pub fn scale(v: Vec3, factor: Float) {
 
 fn run() {
     p := Vec3.{ x: 1.0, y: 2.0, z: 3.0 }
-    scale(~p, 2.0)
+    scale(&p, 2.0)
     print("{p.x}")
 }
 "#;
@@ -243,11 +243,11 @@ const FROZEN_SCALE_READ: &str =
 #[test]
 fn read_to_write_drift_against_frozen_is_e0912() {
     // Frozen contract has `scale(v: Vec3)` (read); the source now mutates `v`,
-    // so D-CAP8 resolves it to `~Vec3` — a breaking drift.
+    // so D-CAP8 resolves it to `&Vec3` — a breaking drift.
     let codes = compile_with_frozen(FROZEN_SCALE_READ, DRIFT_SRC);
     assert!(
         codes.iter().any(|c| c == "E0912"),
-        "expected E0912 for read → ~ drift, got {:?}",
+        "expected E0912 for read → & drift, got {:?}",
         codes
     );
 }

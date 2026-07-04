@@ -697,7 +697,7 @@ impl TraitRegistry {
             is_pure: false,
             declared_effects: None,
         };
-        // restore(~self, snap: ^Snapshot)
+        // restore(&self, snap: ^Snapshot)
         let restore_sig = TraitMethodSig {
             name: "restore".to_string(),
             name_span: dummy,

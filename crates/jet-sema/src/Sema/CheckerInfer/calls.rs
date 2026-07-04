@@ -449,14 +449,14 @@ impl<'a> Checker<'a> {
                                 ),
                                 format!(
                                     "declare the enclosing method with `{}{}`",
-                                    Syntax::SIGIL_MUTATE,
+                                    Syntax::SIGIL_WRITE,
                                     Syntax::KW_SELF
                                 ),
                             )
                         } else {
                             (
                                 format!(
-                                    "cannot write to `{}` — it does not have edit access (`~`); required before calling `.{}()`",
+                                    "cannot write to `{}` — it does not have edit access (`&`); required before calling `.{}()`",
                                     root,
                                     method
                                 ),
@@ -466,7 +466,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             what,
-                            "this method edits the collection in place; write access (`~`) is required".to_string(),
+                            "this method edits the collection in place; write access (`&`) is required".to_string(),
                             fix,
                             Some(rspan),
                         ));
@@ -631,9 +631,9 @@ impl<'a> Checker<'a> {
     }
 
     /// D-DET-CAPAPI: the generic `Rng` draws — `rng.pick(list) -> T?` (uniform
-    /// choice; null on empty) and `rng.shuffle(~list)` (in-place Fisher–Yates).
-    /// Both advance the stream, so the `rng` receiver must have edit access (`~`);
-    /// `shuffle` edits its list in place, so the list arg must be `~` too. Mirrors
+    /// choice; null on empty) and `rng.shuffle(&list)` (in-place Fisher–Yates).
+    /// Both advance the stream, so the `rng` receiver must have edit access (`&`);
+    /// `shuffle` edits its list in place, so the list arg must be `&` too. Mirrors
     /// the ambient `random.pick`/`random.shuffle` (CheckerCoreLib).
     /// D-HOLE1: `Option.lift2(f, a, b)` — lifts a two-argument function into
     /// `Option`: `f(a, b)` when both are present, `null` if either is absent. `f`'s
@@ -782,7 +782,7 @@ impl<'a> Checker<'a> {
         args: &mut [crate::AST::CallArg],
         span: Span,
     ) -> Option<Type> {
-        // The receiver must be a `~Rng` (every draw advances the stream).
+        // The receiver must be a `&Rng` (every draw advances the stream).
         if let Some(root) = expr_root_ident(receiver) {
             let root = root.to_string();
             if let Some(info) = self.lookup(&root) {
@@ -790,11 +790,11 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         format!(
-                            "cannot draw from `{}` — it does not have edit access (`~`); required before calling `.{}()`",
+                            "cannot draw from `{}` — it does not have edit access (`&`); required before calling `.{}()`",
                             root, method
                         ),
-                        "every `Rng` draw advances the stream, so the receiver needs write access (`~`)".to_string(),
-                        format!("declare `{} {} ...` (or pass the rng as `~{}`)", root, Syntax::SIGIL_BIND_MUT, root),
+                        "every `Rng` draw advances the stream, so the receiver needs write access (`&`)".to_string(),
+                        format!("declare `{} {} ...` (or pass the rng as `&{}`)", root, Syntax::SIGIL_BIND_MUT, root),
                         Some(receiver.span()),
                     ));
                 }
@@ -817,13 +817,13 @@ impl<'a> Checker<'a> {
                 None
             };
         }
-        // `shuffle` edits the list in place — the list arg needs `~`.
+        // `shuffle` edits the list in place — the list arg needs `&`.
         if method == "shuffle" && args[0].convention != AccessConvention::Write {
             self.diags.push(Diagnostic::error(
                 "E0202",
                 "`shuffle` edits its list in place".to_string(),
-                "write access (`~`) is required; the list must be passed with `~`".to_string(),
-                "write `rng.shuffle(~items)`".to_string(),
+                "write access (`&`) is required; the list must be passed with `&`".to_string(),
+                "write `rng.shuffle(&items)`".to_string(),
                 Some(args[0].span),
             ));
         }
@@ -1916,7 +1916,7 @@ impl<'a> Checker<'a> {
         // Set `recv_type_out` so codegen routes the call to the handle-method op
         // (TIR shape (h)) rather than failing the typed-IR subset check.
         if let Type::Named(handle_ty) = &recv_ty {
-            // D-DET-CAPAPI: `rng.pick(list)` / `rng.shuffle(~list)` are GENERIC — the
+            // D-DET-CAPAPI: `rng.pick(list)` / `rng.shuffle(&list)` are GENERIC — the
             // element type comes from the `[T]` arg, mirroring the ambient
             // `random.pick`/`random.shuffle`. Resolve element-aware here (the
             // `builtin_method_return` table only carries Int placeholders).
@@ -2421,14 +2421,14 @@ impl<'a> Checker<'a> {
                                 ),
                                 format!(
                                     "declare the enclosing method with `{}{}`",
-                                    Syntax::SIGIL_MUTATE,
+                                    Syntax::SIGIL_WRITE,
                                     Syntax::KW_SELF
                                 ),
                             )
                         } else {
                             (
                                 format!(
-                                    "cannot write to `{}` — it does not have edit access (`~`); required before calling `.{}()`",
+                                    "cannot write to `{}` — it does not have edit access (`&`); required before calling `.{}()`",
                                     root,
                                     method
                                 ),
@@ -2438,7 +2438,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             what,
-                            "this method edits the value it's called on; write access (`~`) is required".to_string(),
+                            "this method edits the value it's called on; write access (`&`) is required".to_string(),
                             fix,
                             Some(span),
                         ));
@@ -3404,14 +3404,14 @@ impl<'a> Checker<'a> {
                     "E0202",
                     format!(
                         "`{}` needs a plain named binding after it",
-                        Syntax::SIGIL_MUTATE
+                        Syntax::SIGIL_WRITE
                     ),
-                    "write access (`~`) can only be granted to a named binding, not an expression"
+                    "write access (`&`) can only be granted to a named binding, not an expression"
                         .to_string(),
                     format!(
                         "bind the value first: `x {} ...` then pass `{}x`",
                         Syntax::SIGIL_BIND_MUT,
-                        Syntax::SIGIL_MUTATE
+                        Syntax::SIGIL_WRITE
                     ),
                     Some(arg.span),
                 ));
@@ -3554,17 +3554,17 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             format!(
-                                "parameter `{}` requires write access (`~`) at the call site",
+                                "parameter `{}` requires write access (`&`) at the call site",
                                 name
                             ),
                             format!(
-                                "`{}` needs to edit (`~`) this value; passing it without `{}` grants only read access",
+                                "`{}` needs to edit (`&`) this value; passing it without `{}` grants only read access",
                                 call.name,
-                                Syntax::SIGIL_MUTATE
+                                Syntax::SIGIL_WRITE
                             ),
                             format!(
                                 "write `{}{}` when calling `{}`",
-                                Syntax::SIGIL_MUTATE,
+                                Syntax::SIGIL_WRITE,
                                 name,
                                 call.name
                             ),

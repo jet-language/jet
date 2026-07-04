@@ -125,19 +125,16 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
     TYPE_F64,
 ];
 
-/// D-CAP7 (ratified): capability sigils. These SUPERSEDE the word spellings of
-/// S10 (`mut`/`take`/`view`). The keyword forms below are retired — recognized
-/// only to fire the E0056/E0057/E0058 teaching errors that point at the sigil.
-///
-/// `~T` = write (edit in place), `^T` = move (consume), `&T` = share (borrow).
-/// `copy` stays a verb (no sigil — D-CAP7 closed the set at these three sigils
-/// plus `copy`).
-pub const SIGIL_MUTATE: &str = "~";
+/// D-MEM1 (ratified, supersedes D-CAP7): memory model v5 sigils. Two sigils
+/// plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive write,
+/// `^T` = move (consume). `~` is not part of the v5 grammar — it fails as an
+/// ordinary unknown-token syntax error, no special-case message. `copy` stays
+/// a verb (no sigil — D-CAP2).
 pub const SIGIL_MOVE: &str = "^";
-pub const SIGIL_VIEW: &str = "&";
+pub const SIGIL_WRITE: &str = "&";
 
-/// S10 (M2) → D-CAP7: the retired write keyword. Recognized only for the E0056
-/// teaching error that points at the `~` sigil.
+/// S10 (M2) → D-MEM1: the retired write keyword. Recognized only for the E0056
+/// teaching error that points at the `&` sigil.
 pub const KW_MUTATE: &str = "mut";
 
 /// S10 (M2) → D-CAP7: the retired move keyword. Recognized only for the E0057
@@ -145,8 +142,9 @@ pub const KW_MUTATE: &str = "mut";
 /// name in dot position; `take(names)` stays the lambda capture prefix.)
 pub const KW_MOVE: &str = "take";
 
-/// S10 (M2) → D-CAP7: the retired share/borrow keyword. Recognized only for the
-/// E0058 teaching error that points at the `&` sigil.
+/// S10 (M2) → D-MEM1: the retired share/borrow keyword. Recognized only for the
+/// E0058 teaching error at a view-return marker (`-> &T`, S3-scoped for
+/// deletion; the `&` glyph itself is unaffected by this teach).
 pub const KW_VIEW: &str = "view";
 
 /// S10 (ratified M2, tier 2): field annotation — a stored reference.
@@ -427,7 +425,7 @@ pub const CLOCK_TYPE: &str = "Clock";
 /// (`rng.int(lo, hi)` / `rng.float()`) — reproducible from the caller's seed
 /// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
 /// D-DET-CAPAPI (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
-/// / `shuffle(~list)`, mirroring the ambient `random.*` set.
+/// / `shuffle(&list)`, mirroring the ambient `random.*` set.
 pub const RNG_TYPE: &str = "Rng";
 
 /// D-DET-CAPAPI (ratified 2026-06-25): the deterministic `Duration` value type.
@@ -1984,8 +1982,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_REMOVE,
     KW_CHANGE,
     KW_VIA,
-    // Ownership / borrow keywords (S10, M2). D-CAP7 retired KW_MUTATE/KW_MOVE/
-    // KW_VIEW in favor of the `~`/`^`/`&` sigils — they live only as teaching
+    // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE/
+    // KW_VIEW in favor of the `&`/`^` sigils — they live only as teaching
     // errors (E0056/E0057/E0058) now, so they are NOT in the keyword list.
     KW_STORED,
     KW_SELF,

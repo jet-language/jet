@@ -12,15 +12,15 @@ use core.time as time
 use core.random as random
 
 // Pure: reads time + randomness only through the injected capabilities.
-// `clock` is read-only (`now`); `rng` advances its stream, so it is `~Rng`.
-@Pure fn roll_at(clock: Clock, rng: ~Rng) -> String {
+// `clock` is read-only (`now`); `rng` advances its stream, so it is `&Rng`.
+@Pure fn roll_at(clock: Clock, rng: &Rng) -> String {
     ts :: clock.now()
     die :: rng.int(1, 6)
     return "t={ts} rolled {die}"
 }
 
 // Pure: same injected caps, deterministic stream — call it twice, get two draws.
-@Pure fn two_rolls(rng: ~Rng) -> String {
+@Pure fn two_rolls(rng: &Rng) -> String {
     a :: rng.int(1, 6)
     b :: rng.int(1, 6)
     return "{a} then {b}"
@@ -28,7 +28,7 @@ use core.random as random
 
 // D-DET-CAPAPI: the widened `Rng` surface — a coin and a uniform choice — read
 // through the same injected, seeded handle, so still pure + reproducible.
-@Pure fn coin_and_card(rng: ~Rng) -> String {
+@Pure fn coin_and_card(rng: &Rng) -> String {
     flip :: rng.bool()
     cards := ["A", "K", "Q", "J"]
     drawn := rng.pick(cards) ?? "none"
@@ -38,13 +38,13 @@ use core.random as random
 fn run() {
     clock := time.clock(1000)
     rng := random.rng(42)
-    print(roll_at(clock, ~rng))
-    print(two_rolls(~rng))
-    print(coin_and_card(~rng))
+    print(roll_at(clock, &rng))
+    print(two_rolls(&rng))
+    print(coin_and_card(&rng))
     // D-DET-CAPAPI: in-place deterministic shuffle (Fisher–Yates) — the list arg
-    // needs `~`, the rng receiver needs `~` (every draw advances the stream).
+    // needs `&`, the rng receiver needs `&` (every draw advances the stream).
     deck := [1, 2, 3, 4, 5]
-    rng.shuffle(~deck)
+    rng.shuffle(&deck)
     print("deck={deck}")
     // D-DET-CAPAPI: the widened clock — absolute `advance`, and a `Duration`-based
     // `wait`. `time.ms`/`time.secs` mint a deterministic `Duration` (pure value).

@@ -5,7 +5,7 @@
 //! D-CAP8 already resolves every unmarked `Infer` parameter to a concrete
 //! capability (`Read`/`Write`/`Move`/`Share`) from body usage, in memory, during
 //! sema. c129 *persists* that resolved signature so it survives across builds and
-//! a later read → `~`/`^`/`&` drift can be caught as a breaking change (E0912),
+//! a later read → `&`/`^` drift can be caught as a breaking change (E0912),
 //! rather than silently flipping the public contract.
 //!
 //! Format (std-only, lockfile-style — no serde, I6):
@@ -14,12 +14,12 @@
 //! api_version = 1
 //! package = mathkit
 //! published_version = 1.2.0
-//! fn scale(v: ~Vec3, factor: Float)
+//! fn scale(v: &Vec3, factor: Float)
 //! fn length(v: Vec3) -> Float
 //! ```
 //!
 //! Each `fn` line is the canonical capability signature: every public function's
-//! parameter list carries the frozen D-CAP7 sigil (`~`/`^`/`&`/`*`; plain read
+//! parameter list carries the frozen D-MEM1 sigil (`&`/`^`/`*`; plain read
 //! emits none) plus the return type. The struct/enum/trait surface is diffed
 //! separately by the SemVer API check (`Publish::diff_public_api`); this snapshot
 //! is the *capability* contract specifically.
@@ -37,8 +37,8 @@ pub const API_SNAPSHOT_VERSION: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FrozenFn {
     pub name: String,
-    /// The canonical capability signature, e.g. `fn scale(v: ~Vec3, factor: Float)`.
-    /// Carries the resolved D-CAP7 sigils that the caller must honour.
+    /// The canonical capability signature, e.g. `fn scale(v: &Vec3, factor: Float)`.
+    /// Carries the resolved D-MEM1 sigils that the caller must honour.
     pub signature: String,
 }
 
@@ -234,7 +234,7 @@ pub fn load_all_snapshots(project_root: &Path) -> Vec<ApiSnapshot> {
 
 /// The combined capability digest of every frozen API in a project, sorted by
 /// package then signature. Folded into the package fingerprint (`Lock`) so a
-/// public capability change (read → `~`/`^`/`&`) shifts the lock hash even when
+/// public capability change (read → `&`/`^`) shifts the lock hash even when
 /// the source tree hash otherwise matches. Empty when nothing is frozen.
 pub fn project_capability_digest(project_root: &Path) -> String {
     let snaps = load_all_snapshots(project_root);
@@ -314,7 +314,7 @@ mod tests {
             ],
             None,
         );
-        assert_eq!(fn_signature(&f), "fn scale(v: ~Vec3, factor: Float)");
+        assert_eq!(fn_signature(&f), "fn scale(v: &Vec3, factor: Float)");
     }
 
     #[test]
@@ -406,11 +406,11 @@ mod tests {
 
     #[test]
     fn parse_known_text() {
-        let text = "api_version = 1\npackage = mk\npublished_version = 0.1.0\nfn f(x: ~Int)\n";
+        let text = "api_version = 1\npackage = mk\npublished_version = 0.1.0\nfn f(x: &Int)\n";
         let snap = ApiSnapshot::parse(text).unwrap();
         assert_eq!(snap.package, "mk");
         assert_eq!(snap.funcs.len(), 1);
         assert_eq!(snap.funcs[0].name, "f");
-        assert_eq!(snap.funcs[0].signature, "fn f(x: ~Int)");
+        assert_eq!(snap.funcs[0].signature, "fn f(x: &Int)");
     }
 }

@@ -260,7 +260,7 @@ pub(crate) fn lower_view_return(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt 
 ///     lambdas escape the enclosing transaction's effect check).
 /// Each root is recorded once, in first-seen order. v1 covers assignment targets,
 /// the clearly-analyzable, fully-correct case; mutation reached *only* through a
-/// `~self` method call (no assignment) or a deep alias is the documented deferred
+/// `&self` method call (no assignment) or a deep alias is the documented deferred
 /// corner (D-TXN-ROLLBACK). This is a syntactic over-approximation filtered by the
 /// caller to roots in scope at block entry.
 fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
@@ -334,7 +334,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             // mutations up into the enclosing block.
             Stmt::Transact { .. } => {}
             // Other statements (Expr/Val/Return/Break/…) introduce no assignment
-            // targets we snapshot at block entry. (A `~self` mutating method call
+            // targets we snapshot at block entry. (A `&self` mutating method call
             // hides inside `Stmt::Expr` — the documented deferred corner.)
             _ => {}
         }

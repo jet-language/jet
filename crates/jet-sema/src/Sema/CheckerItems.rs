@@ -204,13 +204,13 @@ impl<'a> Checker<'a> {
                         "E0202",
                         format!(
                             "`{}` needs a plain named binding after it",
-                            Syntax::SIGIL_MUTATE
+                            Syntax::SIGIL_WRITE
                         ),
-                        "write access (`~`) can only be granted to a named binding, not an expression".to_string(),
+                        "write access (`&`) can only be granted to a named binding, not an expression".to_string(),
                         format!(
                             "bind the value first: `x {} ...` then pass `{}x`",
                             Syntax::SIGIL_BIND_MUT,
-                            Syntax::SIGIL_MUTATE
+                            Syntax::SIGIL_WRITE
                         ),
                         Some(arg.span),
                     ));
@@ -283,16 +283,16 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0202",
                                 format!(
-                                    "parameter `{}` requires write access (`~`) at the call site",
+                                    "parameter `{}` requires write access (`&`) at the call site",
                                     name
                                 ),
                                 format!(
-                                    "`{method}` needs to edit (`~`) this value; passing it without `{}` grants only read access",
-                                    Syntax::SIGIL_MUTATE
+                                    "`{method}` needs to edit (`&`) this value; passing it without `{}` grants only read access",
+                                    Syntax::SIGIL_WRITE
                                 ),
                                 format!(
                                     "write `{}{}` when calling `{method}`",
-                                    Syntax::SIGIL_MUTATE,
+                                    Syntax::SIGIL_WRITE,
                                     name
                                 ),
                                 Some(*nspan),

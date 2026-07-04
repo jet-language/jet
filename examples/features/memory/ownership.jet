@@ -1,10 +1,11 @@
-// Ownership (M2 / D-CAP7): default shared access, `~` to change, `^` to move,
-// `.clone()` to copy, and `&` to hand back a borrow.
+// Ownership (M2 / D-MEM1): unmarked is read by default, `&` to write/change,
+// `^` to move, `.clone()` to copy. `headline`'s `-> &String` borrow-return is
+// a separate, still-live form (second-class borrows land in migration S3).
 fn show(msg: String) {
     print(msg)
 }
 
-fn bump(n: ~Int) {
+fn bump(n: &Int) {
     n += 1
 }
 
@@ -18,7 +19,7 @@ fn headline(text: String) -> &String {
 
 fn run() {
     score: Int := 41
-    bump(~score)
+    bump(&score)
     print(score)
     greeting: String :: "hello"
     show(greeting)

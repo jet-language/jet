@@ -23,7 +23,7 @@ msg: String :: "hello"
 #[test]
 fn mutate_required_at_call_site() {
     let src = r#"
-fn touch(n: ~Int) {
+fn touch(n: &Int) {
     print(n)
 }
 
@@ -186,13 +186,13 @@ fn run() {
 #[test]
 fn same_call_mut_and_read_is_error() {
     let src = r#"
-fn both(a: ~Int, b: Int) {
+fn both(a: &Int, b: Int) {
     print(b)
 }
 
 fn run() {
     x: Int := 1
-    both(~x, x)
+    both(&x, x)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");

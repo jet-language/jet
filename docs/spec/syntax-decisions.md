@@ -711,7 +711,7 @@ param elevates by usage; at a `library { api: explicit }` boundary the
 resolved capability freezes; later drift is E0912, never a silent flip.
 
 **D-MEM1 — Memory model v5, "the borrow checker, humanized"** *(ratified
-2026-07-03, unbuilt — card #187; plan
+2026-07-03, migration in progress — card #187; plan
 tools/Tower/docs/plans/memory-v5-migration.md)*: supersedes the D-CAP7
 spelling assignments and D-CAP8 when the migration lands. Three sigils:
 unmarked = read (enforced — no elevation, no freeze; no `api:` manifest field),
@@ -723,8 +723,10 @@ E0207/E0427 deleted); string/list slices are counted view values. L0201
 deleted — moves of named bindings are always written `^`; temporaries pass
 freely; `copy x` (D-CAP2) is the one copy spelling. Named escape hatches
 `Shared<T>`, `Pool<T>`/`Id<T>`; module `policy` floors (`no_alloc` first).
-Until the migration lands, the shipped D-CAP7/D-CAP8 behavior above remains
-the live surface.
+**S1 shipped (2026-07-04)**: `&` is the write sigil, `~` is gone from the
+grammar, call sites/receivers/formatter speak v5 spelling. Unmarked-param
+behavior (infer + freeze/elevate, D-CAP8) is UNCHANGED until S2 lands — S2–S9
+remain unbuilt.
 
 **D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower

@@ -559,12 +559,12 @@ fn fingerprint_changes_with_deps() {
 }
 
 // c129: the frozen capability contract is part of the pin — changing a public
-// param's resolved capability (read → ~/^/&) must shift the fingerprint even when
+// param's resolved capability (read → &/^) must shift the fingerprint even when
 // the source tree hash and deps are identical.
 #[test]
 fn fingerprint_changes_with_capability_digest() {
     let fp_read = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "pkg\nfn scale(v: Vec3)");
-    let fp_write = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "pkg\nfn scale(v: ~Vec3)");
+    let fp_write = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "pkg\nfn scale(v: &Vec3)");
     assert_ne!(
         fp_read, fp_write,
         "fingerprint must change when a public capability changes"
@@ -1507,15 +1507,15 @@ fn semver_break_e2601() {
 
 #[test]
 fn capability_sigil_frozen_in_public_api() {
-    // c129 (D-CAP7/D-CAP8): the resolved capability sigil is part of a pub fn's
-    // published signature, and a read -> write drift is a breaking change.
+    // c129 (D-MEM1, was D-CAP7/D-CAP8): the resolved capability sigil is part of
+    // a pub fn's published signature, and a read -> write drift is a breaking change.
     use jet::Publish::{diff_public_api, extract_public_api};
 
     let dir = tmp_dir("cap_api_freeze");
 
     let write_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: ~Account, amount: Int) -> Int {
+pub fn deposit(a: &Account, amount: Int) -> Int {
     a.balance = a.balance + amount
     return a.balance
 }
@@ -1528,7 +1528,7 @@ pub fn deposit(a: ~Account, amount: Int) -> Int {
         .find(|i| i.name == "deposit")
         .expect("deposit must be in the public API");
     assert!(
-        deposit.signature.contains("a: ~"),
+        deposit.signature.contains("a: &"),
         "the write sigil must be frozen onto the param type in the published signature, got `{}`",
         deposit.signature
     );
