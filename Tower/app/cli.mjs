@@ -54,7 +54,7 @@ function cmdInit({ flags }) {
   const cfg = { project: name };
   if (!existsSync(join(dir, 'config.json'))) writeJSON(join(dir, 'config.json'), cfg);
   const gi = join(dir, '.gitignore');
-  if (!existsSync(gi)) writeFileSync(gi, 'backups/\n*.lock/\n');
+  if (!existsSync(gi)) writeFileSync(gi, 'backups/\n*.lock/\nfiles/\nserver.log\n');
   console.log(`initialized Tower for "${name}" at ${dir}`);
   console.log('next: tower epoch add e1 --name "First epoch" && tower serve --open');
 }
@@ -349,6 +349,7 @@ function cmdImport({ pos, flags }) {
   const s = migrate(old, { project: flags.name || 'Project' });
   writeJSON(file, s);
   if (!existsSync(join(dir, 'config.json'))) writeJSON(join(dir, 'config.json'), { project: s.meta.project });
+  if (!existsSync(join(dir, '.gitignore'))) writeFileSync(join(dir, '.gitignore'), 'backups/\n*.lock/\nfiles/\nserver.log\n');
   console.log(`imported ${s.cards.length} cards, ${s.decisions.length} decisions, ${s.questions.length} questions, ${s.ideas.length} ideas → ${file}`);
 }
 
