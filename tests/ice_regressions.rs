@@ -12,6 +12,11 @@
 //!      list indexing; the binding must keep its `Map` type.
 //! B4 — `for k, v in recv.field { … }` parsed `recv.field { … }` as a struct
 //!      literal instead of a loop body.
+//! B5 — `buf[i] = x` on a fixed-size `[T#N]` array left `IndexKind` at its
+//!      `Unknown` default (sema's write-side match only knew `List`/`Map`/
+//!      `User`, unlike the read-side `infer_index`); the TIR subset gate
+//!      excludes any `Unknown`-kind index assign, so codegen (TIR is the
+//!      only path, R7) panicked with an I2 ICE instead of emitting code.
 
 use std::fs;
 use std::process::Command;
@@ -120,6 +125,70 @@ fn run() {
         print(k)
         print(v)
     }
+}
+"#,
+    );
+}
+
+#[test]
+fn b5_fixed_array_index_assign() {
+    assert_compiles(
+        "b5_fixed_array_index_assign",
+        r#"
+fn run() {
+    buf: [Int#3] := [1, 2, 3]
+    i := 1
+    buf[i] = 99
+    print(buf[0])
+    print(buf[1])
+    print(buf[2])
+}
+"#,
+    );
+}
+
+/// D-EPPAYLOAD1: an OWNED LOCAL moved into an enum-payload construction, then
+/// read again afterward, used to move it for real in the generated Rust
+/// (`user_Wrapped::user_Value(user_s)`) with no jet-level diagnostic — the
+/// later `print("{s}")` reached rustc as a raw, unreported E0382. Sema now
+/// auto-clones an owning-position bare ident that is still live after the
+/// construction (the same rule `clone_borrowed_struct_field_value` already
+/// applied to a *borrowed-param* struct field, now widened to owned locals
+/// and threaded through enum-payload construction too).
+#[test]
+fn b6_enum_payload_clones_owned_local_still_live() {
+    assert_compiles(
+        "b6_enum_payload_owned_local",
+        r#"
+enum Wrapped {
+    Value(String)
+}
+fn run() {
+    s: String := "hi"
+    w := Wrapped.Value(s)
+    print("{s}")
+    print(w == Wrapped.Value("hi"))
+}
+"#,
+    );
+}
+
+/// The analogous STRUCT-FIELD case: an owned local moved into a struct
+/// literal field, then read again — the exact same gap, now closed by the
+/// same widened `clone_borrowed_struct_field_value` check.
+#[test]
+fn b7_struct_field_clones_owned_local_still_live() {
+    assert_compiles(
+        "b7_struct_field_owned_local",
+        r#"
+struct Holder {
+    payload: String
+}
+fn run() {
+    s: String := "hi"
+    h := Holder.{ payload: s }
+    print("{s}")
+    print(h.payload)
 }
 "#,
     );

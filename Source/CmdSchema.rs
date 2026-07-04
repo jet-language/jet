@@ -109,7 +109,17 @@ fn pending_breaks(root: &std::path::Path) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(bundle) = jet::Loader::load_entry_with_overlay(&entry_str, None, true) {
         for module in &bundle.modules {
-            let diags = jet::Sema::check_schema_migrations(&module.items, &bundle.project_root);
+            // D-MIGRATE1 (I2 fix, bug #185): this advisory command runs before
+            // a full `jet build` (no populated trait registry is available
+            // here), so an empty `TraitRegistry` stands in. The Decode-only
+            // "add"-op guard this enables (an added field must itself satisfy
+            // `Decode`) then trusts every named type — a false negative here
+            // only means `pending_breaks` under-reports; `jet build`'s own
+            // call (`Bundle.rs`, with the real populated registry) is the
+            // authoritative check and always runs before codegen.
+            let reg = jet::Traits::TraitRegistry::default();
+            let diags =
+                jet::Sema::check_schema_migrations(&module.items, &bundle.project_root, &reg);
             if diags.is_empty() {
                 continue;
             }

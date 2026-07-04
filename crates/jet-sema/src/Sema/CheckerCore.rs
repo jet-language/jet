@@ -705,7 +705,16 @@ impl<'a> Checker<'a> {
                         let idx_ty = self.infer(index);
                         match &base_ty {
                             Some(Type::Map { .. }) => *kind = IndexKind::Map,
-                            Some(Type::List(_)) => *kind = IndexKind::List,
+                            // S76/D-FIXARR1: `buf[i] = v` on a fixed-size `[T#N]` indexes
+                            // exactly like a growable `[T]` — same gate as `infer_index`'s
+                            // read-side `Type::FixedList` arm. Missing this left `kind` at
+                            // its `IndexKind::Unknown` default, which the TIR subset gate
+                            // (`stmt_in_subset`) reads as "sema did not resolve it" and
+                            // excludes the whole function — an I2 ICE since TIR is the
+                            // only codegen path (R7).
+                            Some(Type::List(_)) | Some(Type::FixedList { .. }) => {
+                                *kind = IndexKind::List
+                            }
                             Some(Type::Named(n)) if self.trait_reg.index_types.contains_key(n) => {
                                 *kind = IndexKind::User(n.clone());
                             }
@@ -737,7 +746,10 @@ impl<'a> Checker<'a> {
                         }
                         // Writing through `[ ]` changes the owner: the root
                         // name must be changeable and not under a `for` borrow.
-                        if matches!(base_ty, Some(Type::Map { .. }) | Some(Type::List(_))) {
+                        if matches!(
+                            base_ty,
+                            Some(Type::Map { .. }) | Some(Type::List(_)) | Some(Type::FixedList { .. })
+                        ) {
                             if let Some(root) = expr_root_ident(base) {
                                 let root = root.to_string();
                                 if self.iter_borrowed.contains(&root) {

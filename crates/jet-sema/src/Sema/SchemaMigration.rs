@@ -27,6 +27,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Schema::load_snapshot;
+use crate::Traits::TraitRegistry;
 use crate::AST::{
     AccessConvention, Expr, Func, Item, LambdaBody, MigrationOp, Param, ProgramBundle, Stmt, Type,
 };
@@ -262,10 +263,23 @@ enum DeclaredOp {
     },
 }
 
+/// True when `s` derives `Decode` but NOT `Encode` — a struct that only ever
+/// deserializes (reads published data back), never serializes. Guards the
+/// `add` op check: an added field on a Decode-only record must itself satisfy
+/// Decode (see the call site in `check_schema_migrations`).
+fn is_decode_only(s: &crate::AST::StructDef) -> bool {
+    s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+        && !s.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
+}
+
 /// Run the schema migration diff pass over the items in a single module.
 /// `project_root` is the root of the Jet project (the dir containing `.jet/`).
 /// Returns any E0910 diagnostics.
-pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagnostic> {
+pub fn check_schema_migrations(
+    items: &[Item],
+    project_root: &Path,
+    reg: &TraitRegistry,
+) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     // Collect declared migration ops keyed by type name.
@@ -368,6 +382,23 @@ pub fn check_schema_migrations(items: &[Item], project_root: &Path) -> Vec<Diagn
                         // The declared `add f: T` type must match the struct field's type.
                         if new_ty != ty {
                             diags.push(e0910_add_type_mismatch(&s.name, field, ty, new_ty, span));
+                        } else if is_decode_only(s) {
+                            // Currently unreachable in any shape codegen/parsing can
+                            // produce today (a Decode-only `@PublishedSchema` struct
+                            // with an `add` op is not yet a shipped combination), but
+                            // guard it explicitly rather than let a future shape emit
+                            // rejected Rust (I2): a Decode-only record only ever
+                            // DEserializes, so the field it adds must itself satisfy
+                            // Decode — Encode-only would build a `decode` impl that
+                            // calls a nonexistent (or half-built) decoder for the
+                            // field's type.
+                            if let Some(added_field) = s.fields.iter().find(|f| f.name == *field) {
+                                if !super::CheckerCoreLib::is_decodable_ty(&added_field.ty, reg) {
+                                    diags.push(e0910_add_field_not_decodable(
+                                        &s.name, field, new_ty, span,
+                                    ));
+                                }
+                            }
                         }
                     } else {
                         diags.push(e0910_op_unknown_field(&s.name, field, "add", span));
@@ -648,6 +679,26 @@ fn e0910_add_type_mismatch(
     )
 }
 
+/// E0910: an `add f: T` op on a Decode-only `@PublishedSchema` record names a
+/// type `T` that doesn't itself satisfy `Decode`. A Decode-only record only
+/// ever deserializes; a field it can't decode would make the generated
+/// `decode` impl call a decoder that doesn't exist for `T`.
+fn e0910_add_field_not_decodable(type_name: &str, field: &str, ty: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0910",
+        format!(
+            "the `add {}: {}` migration on `{}` needs `{}` to support `Decode`",
+            field, ty, type_name, ty
+        ),
+        format!(
+            "`{}` derives `Decode` but not `Encode` — it only ever reads data back, so every field, including one added by a migration, must itself be decodable",
+            type_name
+        ),
+        format!("derive `Decode` on `{}`, or give `{}` a decodable type", ty, field),
+        Some(span),
+    )
+}
+
 /// E0910: an `add`/`remove`/`change` op names a field that's in neither shape.
 fn e0910_op_unknown_field(type_name: &str, field: &str, verb: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -731,6 +782,17 @@ mod tests {
     /// Run the diff with a snapshot written into a temp dir pointed at by the
     /// env override. Returns the diagnostic codes produced.
     fn run_with_snapshot(snapshot: &str, items: &[Item]) -> Vec<&'static str> {
+        run_with_snapshot_and_registry(snapshot, items, &TraitRegistry::default())
+    }
+
+    /// Same as `run_with_snapshot`, but with a caller-supplied `TraitRegistry` —
+    /// needed to exercise the Decode/Encode-aware `add`-op guard, which reads
+    /// `reg.local_types`/`implements_trait`.
+    fn run_with_snapshot_and_registry(
+        snapshot: &str,
+        items: &[Item],
+        reg: &TraitRegistry,
+    ) -> Vec<&'static str> {
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!(
             "jet_schema_unit_{}_{}",
@@ -747,7 +809,7 @@ mod tests {
             .trim();
         std::fs::write(dir.join(format!("{}.snapshot", type_name)), snapshot).unwrap();
         std::env::set_var("JET_SCHEMA_CACHE_DIR", &dir);
-        let diags = check_schema_migrations(items, std::path::Path::new("."));
+        let diags = check_schema_migrations(items, std::path::Path::new("."), reg);
         std::env::remove_var("JET_SCHEMA_CACHE_DIR");
         std::fs::remove_dir_all(&dir).ok();
         diags.iter().map(|d| d.code).collect()
@@ -829,6 +891,45 @@ mod tests {
         assert!(run_with_snapshot(SNAP_ONE, &items).is_empty());
     }
 
+    /// D-MIGRATE1 (I2 guard, bug #185/4): a Decode-only `@PublishedSchema` struct
+    /// (derives `Decode`, not `Encode`) adds a field whose type is registered as
+    /// local but does NOT implement `Decode` — currently unreachable in any
+    /// shape parsing/codegen produce today, but guarded explicitly so a future
+    /// shape can't silently emit rejected Rust (I2) instead of an E0910.
+    #[test]
+    fn add_op_on_decode_only_struct_needs_decodable_field_type() {
+        let mut s = match published_struct(
+            "Rec",
+            vec![
+                field("name", Type::String),
+                field("payload", Type::Named("EncodeOnlyType".to_string())),
+            ],
+        ) {
+            Item::Struct(s) => s,
+            _ => unreachable!(),
+        };
+        s.derives = vec![(crate::Generics::DECODE.to_string(), zero())];
+        let items = [
+            Item::Struct(s),
+            migration(
+                "Rec",
+                vec![MigrationOp::Add {
+                    field: "payload".into(),
+                    field_span: zero(),
+                    ty: Type::Named("EncodeOnlyType".to_string()),
+                    ty_span: zero(),
+                    default: crate::AST::Expr::Bool(false, zero()),
+                    default_span: zero(),
+                    default_fn: None,
+                }],
+            ),
+        ];
+        // A registry where `EncodeOnlyType` is local but never implements Decode.
+        let mut reg = TraitRegistry::default();
+        reg.local_types.insert("EncodeOnlyType".to_string());
+        assert_eq!(run_with_snapshot_and_registry(SNAP_ONE, &items, &reg), vec!["E0910"]);
+    }
+
     #[test]
     fn type_change_without_op_is_e0910() {
         // `name` goes String -> Int with no change op.
@@ -906,7 +1007,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("JET_SCHEMA_CACHE_DIR", &dir);
         let items = [published_struct("Brand", vec![field("x", Type::Int)])];
-        let diags = check_schema_migrations(&items, std::path::Path::new("."));
+        let reg = TraitRegistry::default();
+        let diags = check_schema_migrations(&items, std::path::Path::new("."), &reg);
         std::env::remove_var("JET_SCHEMA_CACHE_DIR");
         std::fs::remove_dir_all(&dir).ok();
         assert!(diags.is_empty());

@@ -795,29 +795,46 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Rewrite a struct-literal field VALUE that is a bare borrowed-in-env non-`Copy`
-    /// ident into a `.clone()` MethodCall. A `read`/`mut` param is `&T`/`&mut T`, so
-    /// using it directly as the (owning) field value would emit `(*user_n)` →
-    /// rustc E0507 ("cannot move out of `*user_n`"). This mirrors `field_read_to_clone`
-    /// (which clones an owning *field read*) for the bare-ident case. Owned locals,
+    /// Rewrite a struct-literal (or enum-payload, via the same call from
+    /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into a
+    /// `.clone()` MethodCall, when leaving it a move would either (a) not
+    /// type-check (a borrowed param) or (b) silently move an OWNED LOCAL that
+    /// is still read later — both would otherwise reach rustc as a raw,
+    /// unreported E0507/E0382 (I2). Two cases:
+    ///   - a `read`/`mut` param is `&T`/`&mut T`, so using it directly as the
+    ///     (owning) field value would emit `(*user_n)` → rustc E0507. Always
+    ///     cloned (this mirrors `field_read_to_clone`'s owning-field-read
+    ///     rewrite for the bare-ident case).
+    ///   - an OWNED local (no param convention) moves for real in the
+    ///     generated Rust; if a later statement in the same/enclosing block
+    ///     still reads it, that would be rustc E0382 ("use after move") with
+    ///     no jet-level diagnostic ever raised — clone it instead, matching
+    ///     the same "auto-clone at an owning slot" rule `check_take_arg_ownership`
+    ///     already applies to a plain function-call argument. An owned local
+    ///     that is NOT read again keeps moving (no wasted clone; unchanged
+    ///     from prior behavior).
     /// `take` params, `Copy` types, and non-ident values are left untouched (no clone).
     /// A type-VAR param (`a: T`) is emitted BY VALUE in codegen (`is_type_param` →
     /// `Move`/no deref, Items.rs), not by reference, so it must NOT be cloned even though
     /// its convention reads as `Read` — cloning would diverge from the AST path.
     fn clone_borrowed_struct_field_value(&mut self, expr: &mut Expr) {
         let should_clone = match expr {
-            Expr::Ident(name, _) => self.lookup(name).is_some_and(|info| {
-                // A type-var-typed param is by-value (codegen's `is_type_param`), never
-                // borrowed — exclude it (matches the AST path's owned move).
-                let is_type_var = matches!(&info.ty,
-                    Type::Named(n) if self.type_param_scope.iter().any(|p| &p.name == n));
-                !type_is_copy(&info.ty)
-                    && !is_type_var
-                    && matches!(
-                        info.param_conv,
-                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
-                    )
-            }),
+            Expr::Ident(name, _) => {
+                let name = name.clone();
+                self.lookup(&name).is_some_and(|info| {
+                    // A type-var-typed param is by-value (codegen's `is_type_param`), never
+                    // borrowed — exclude it (matches the AST path's owned move).
+                    let is_type_var = matches!(&info.ty,
+                        Type::Named(n) if self.type_param_scope.iter().any(|p| &p.name == n));
+                    if type_is_copy(&info.ty) || is_type_var {
+                        return false;
+                    }
+                    match info.param_conv {
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write) => true,
+                        _ => self.is_name_live_after(&name),
+                    }
+                })
+            }
             _ => false,
         };
         if should_clone {
@@ -935,6 +952,12 @@ impl<'a> Checker<'a> {
                     if let Some(et) = self.infer(e) {
                         self.check_type_assignable(expected, &et, e.span());
                     }
+                    // D-EPPAYLOAD1 (I2 fix): same owning-position clone-insertion
+                    // as a struct-lit field value — see `clone_borrowed_struct_field_value`.
+                    // An enum payload is an owning slot exactly like a struct field;
+                    // without this, an owned local moved here and read afterward
+                    // reached rustc as a raw, unreported E0382.
+                    self.clone_borrowed_struct_field_value(e);
                 } else if let Some(EnumLitArg::Named { label, .. }) = args.first() {
                     self.diags.push(Diagnostic::error(
                         "E0303",
@@ -974,6 +997,8 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                             let et = self.infer(expr);
+                            // D-EPPAYLOAD1 (I2 fix): see the positional-payload call above.
+                            self.clone_borrowed_struct_field_value(expr);
                             if let Some(f) = fields.iter().find(|f| f.name == *label) {
                                 if let Some(et) = et {
                                     self.check_type_assignable(&f.ty, &et, expr.span());

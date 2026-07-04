@@ -4561,7 +4561,7 @@ fn apply_serde_ok(
     }
 }
 
-fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
+pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     match ty {
         Type::Int
         | Type::Float
@@ -4588,7 +4588,7 @@ fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     }
 }
 
-fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
+pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     match ty {
         Type::Int
         | Type::Float

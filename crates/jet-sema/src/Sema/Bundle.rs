@@ -1083,7 +1083,11 @@ pub(crate) fn check_bundle_opts(
         // `Cli` is visible on `s.derives`).
         diags.extend(validate_cli_items(&module.items, &st.trait_reg));
         // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
-        diags.extend(check_schema_migrations(&module.items, &bundle.project_root));
+        diags.extend(check_schema_migrations(
+            &module.items,
+            &bundle.project_root,
+            &st.trait_reg,
+        ));
         // c129 (D-CAP4/D-CAP6/D-CAP8): capability-freeze drift pass (E0912). Runs
         // after `Capability::resolve_capabilities` (above) so it diffs the resolved
         // signature against the frozen `.api` contract. No-op without a frozen

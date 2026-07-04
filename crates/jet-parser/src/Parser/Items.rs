@@ -3961,6 +3961,18 @@ impl<'a> Parser<'a> {
     fn attach_type_markers(markers: Vec<Marker>, item: Item) -> Item {
         match item {
             Item::Struct(mut s) => {
+                // D-MIGRATE1 (I2/E0910 fix): `PublishedSchema` appearing inside an
+                // item-level `@[…]` bracket LIST (e.g. `@[PublishedSchema, Codable]
+                // struct …`) previously only got recorded in `type_markers` — the
+                // dedicated `is_published_schema`/`published_schema_span` fields
+                // (which `SchemaMigration.rs`'s E0910 check guards on) were only ever
+                // set by the single-prefix `@PublishedSchema struct …` form
+                // (`published_schema_struct_def`). A schema published this way
+                // silently skipped E0910 migration validation. Mirror that form here.
+                if let Some(m) = markers.iter().find(|m| m.name == Syntax::ATTR_PUBLISHED_SCHEMA) {
+                    s.is_published_schema = true;
+                    s.published_schema_span = Some(m.span);
+                }
                 s.type_markers = markers.clone();
                 s.serde_markers = Self::split_type_markers(markers, &mut s.derives);
                 Item::Struct(s)
