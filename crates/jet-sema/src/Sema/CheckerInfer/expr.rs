@@ -29,17 +29,12 @@ impl<'a> Checker<'a> {
         if !borrowed {
             if let Some(t) = &ty {
                 if !type_is_copy(t) && field_read_to_clone(e, self.registry, self.imports) {
+                    // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
+                    // explicitly — one mechanism for "duplicate this value",
+                    // whether the compiler inserts it or the user spells it.
                     let span = e.span();
                     let old = std::mem::replace(e, Expr::Absent(span));
-                    *e = Expr::MethodCall {
-                        receiver: Box::new(old),
-                        method: "clone".to_string(),
-                        method_span: span,
-                        type_args: Vec::new(),
-                        args: Vec::new(),
-                        recv_type: None,
-                        resolved_ret: None,
-                    };
+                    *e = Expr::Copy(Box::new(old), span);
                 }
             }
         }
@@ -391,8 +386,8 @@ impl<'a> Checker<'a> {
                         "after a value moves somewhere else, the old name no longer holds it"
                             .to_string(),
                         format!(
-                            "give away a copy instead (`{}.clone()`) where it moved",
-                            name
+                            "give away a copy instead (`{} {}`) where it moved",
+                            Syntax::KW_COPY, name
                         ),
                         Some(*span),
                     ));
@@ -604,6 +599,30 @@ impl<'a> Checker<'a> {
                 }
                 let inner_t = self.infer(inner)?;
                 Some(crate::Sema::ptr_type(inner_t))
+            }
+            Expr::Copy(inner, span) => {
+                // D-CAP2 (D-MEM1/S4): `copy x` explicitly duplicates `x` into a
+                // fresh, independent value — a temporary, so it never needs `^`
+                // and never trips E0209 regardless of what `inner` is. Suppress
+                // `infer`'s automatic owning-field-read `.clone()` wrap: this
+                // expression already IS that clone, and wrapping again would
+                // double-clone in the generated Rust.
+                self.borrow_ctx = true;
+                let inner_t = self.infer(inner)?;
+                if !type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry, self.structs) {
+                    self.diags.push(Diagnostic::error(
+                        "E0211",
+                        format!("`{}` can't be copied", inner_t.show()),
+                        "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet".to_string(),
+                        format!(
+                            "move it instead (`{}name` if this is its last use), or change the type so every part can be copied",
+                            Syntax::SIGIL_MOVE
+                        ),
+                        Some(*span),
+                    ));
+                    return None;
+                }
+                Some(inner_t)
             }
             Expr::PtrFromAddr {
                 alias,
@@ -1609,9 +1628,6 @@ impl<'a> Checker<'a> {
         member: &str,
         span: Span,
     ) -> Option<Type> {
-        if member == "clone" {
-            return self.infer(inner);
-        }
         if let Expr::Ident(root, _) = &**inner {
             if root == Syntax::FOREIGN_OS && member == "environ" {
                 self.diags.push(Diagnostic::error(

@@ -62,12 +62,12 @@ fn button_view(b: Button) -> View {
 }
 
 // The kit's composition primitive: a Container just holds other components'
-// View output. `children.clone()` routes around a pre-existing codegen bug
+// View output. `copy children` routes around a pre-existing codegen bug
 // (I2 ICE, filed as a follow-up) where forwarding a parameter unmodified into
 // an enum dot-variant field moves out of a shared reference instead of
 // cloning it — see crates/jet-driver/src/Jetpack/components/Container.jet.
 fn container(children: [View]) -> View {
-    return .Box.{children: children.clone()}
+    return .Box.{children: copy children}
 }
 
 fn flatten(v: View) -> [String] {

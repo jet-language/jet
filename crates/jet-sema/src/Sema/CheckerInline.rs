@@ -347,7 +347,9 @@ impl<'a> InlineAlwaysScan<'a> {
                 }
             }
             Expr::UnitLit { .. } => {}
-            Expr::Deref(inner, _) | Expr::RawOf(inner, _) => self.scan_expr(inner),
+            Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _) => {
+                self.scan_expr(inner)
+            }
             Expr::Field(inner, _, _) => self.scan_expr(inner),
             Expr::OptField { base, .. } => self.scan_expr(base),
             Expr::StructLit { fields, .. } => {

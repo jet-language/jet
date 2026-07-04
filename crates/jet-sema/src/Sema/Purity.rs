@@ -419,7 +419,10 @@ fn check_pure_expr_with_path(
         Expr::Slice {
             base, start, end, ..
         } => rec!(base).or_else(|| rec!(start)).or_else(|| rec!(end)),
-        Expr::Field(inner, _, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _) => rec!(inner),
+        Expr::Field(inner, _, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _) => rec!(inner),
         Expr::OptField { base, .. } => rec!(base),
         Expr::If {
             cond,
@@ -923,7 +926,10 @@ fn walk_expr_for_calls(
                 walk_expr_for_calls(end, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             }
         }
-        Expr::Field(inner, _, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _) => {
+        Expr::Field(inner, _, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _) => {
             walk_expr_for_calls(inner, root_fn, funcs_sig, ast_funcs, path, visited, diags);
         }
         Expr::OptField { base, .. } => {

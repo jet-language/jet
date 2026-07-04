@@ -159,6 +159,7 @@ pub(crate) fn walk_expr_for_const_refs(
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Field(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken)
         }
@@ -308,7 +309,8 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _) => expr_refs_name(inner, name),
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _) => expr_refs_name(inner, name),
         Expr::Binary(_, l, r, _) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::CompareChain { operands, .. } => operands.iter().any(|e| expr_refs_name(e, name)),
         Expr::Call(c) => c.args.iter().any(|a| expr_refs_name(&a.expr, name)),

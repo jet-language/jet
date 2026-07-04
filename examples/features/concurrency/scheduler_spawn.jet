@@ -4,9 +4,9 @@ use core.tasks as tasks
 fn run() {
     (sender, ch) :: tasks.channel<Int>()
     loop i in 1..1000 {
-        copy :: sender.clone()
-        copy_2 :: sender.clone()
-        h :: tasks.spawn(take(copy) () => copy.send(1))
+        dup :: copy sender
+        dup2 :: copy sender
+        h :: tasks.spawn(take(dup) () => dup.send(1))
         h.join()
     }
     total: Int := 0

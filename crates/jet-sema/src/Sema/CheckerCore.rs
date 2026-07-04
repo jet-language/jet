@@ -1267,10 +1267,11 @@ impl<'a> Checker<'a> {
                                         "this function has read access only and does not own the value"
                                             .to_string(),
                                         format!(
-                                            "return a copy: `return {}.clone();` — or take ownership with `{}: {}{}`. \
+                                            "return a copy: `return {} {};` — or take ownership with `{}: {}{}`. \
                                              There's no borrow-return in v1 — to share the value without a full \
                                              copy, store an owned field, or reach for `Shared<T>`/`Id<T>` (coming soon) \
                                              once a real program needs shared ownership",
+                                            Syntax::KW_COPY,
                                             n,
                                             n,
                                             Syntax::SIGIL_MOVE,
@@ -2897,17 +2898,11 @@ impl<'a> Checker<'a> {
                     if matches!(info.param_conv, Some(AccessConvention::Read))
                         && is_cloneable(&info.ty, self.registry, self.structs)
                     {
+                        // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to —
+                        // one mechanism for "duplicate this value".
                         let span = *nspan;
                         let old = std::mem::replace(&mut b.init, Expr::Absent(span));
-                        b.init = Expr::MethodCall {
-                            receiver: Box::new(old),
-                            method: "clone".to_string(),
-                            method_span: span,
-                            type_args: Vec::new(),
-                            args: Vec::new(),
-                            recv_type: None,
-                            resolved_ret: None,
-                        };
+                        b.init = Expr::Copy(Box::new(old), span);
                     } else if matches!(
                         info.param_conv,
                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
@@ -2918,13 +2913,14 @@ impl<'a> Checker<'a> {
                             "this function has read access only and does not own the value"
                                 .to_string(),
                             format!(
-                                "copy it instead: `{} {} {}.clone()`",
+                                "copy it instead: `{} {} {} {}`",
                                 b.name,
                                 if b.mutable {
                                     Syntax::SIGIL_BIND_MUT
                                 } else {
                                     Syntax::SIGIL_BIND_IMMUT
                                 },
+                                Syntax::KW_COPY,
                                 n
                             ),
                             Some(*nspan),

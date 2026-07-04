@@ -103,8 +103,8 @@ impl<'a> Checker<'a> {
                 name, arena, arena
             ),
             format!(
-                "keep `{}` inside the `{}` region, or copy what you need out with `.clone()` before it leaves",
-                name, arena
+                "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
+                name, arena, Syntax::KW_COPY
             ),
             Some(span),
         ));
@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
                     "E0121",
                     format!("`{}` is given away inside a loop that may run again", name),
                     "after a value is given away it's gone, but the next time around the loop would need it again".to_string(),
-                    format!("give away a copy instead: `{}.clone()`", name),
+                    format!("give away a copy instead: `{} {}`", Syntax::KW_COPY, name),
                     Some(span),
                 ));
                 return;
@@ -759,20 +759,21 @@ impl<'a> Checker<'a> {
     /// cloneable carve-out is now a hard error (E0209, was `L0201`). `what`/
     /// `why` are call-site-specific; this builds the shared, liveness-aware
     /// fix menu: `^name` when this call is `name`'s last use (safe to move),
-    /// or `.clone()`/reorder when `name` is still used afterward (moving now
-    /// would break that later use). `.clone()` is the mechanism that actually
-    /// parses today; `copy name` (D-CAP2) is the eventual spelling once S4 lands.
+    /// or `copy name` (D-CAP2, D-MEM1/S4)/reorder when `name` is still used
+    /// afterward (moving now would break that later use).
     pub(crate) fn e0209_implicit_clone(&self, what: String, why: String, name: &str, span: Span) -> Diagnostic {
         let fix = if self.is_name_live_after(name) {
             format!(
-                "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{name}.clone()` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",
+                "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{} {name}` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",
                 Syntax::SIGIL_MOVE,
+                Syntax::KW_COPY,
                 Syntax::SIGIL_MOVE,
             )
         } else {
             format!(
-                "write `{}{name}` to move it — this is `{name}`'s last use — or `{name}.clone()` to keep a copy",
+                "write `{}{name}` to move it — this is `{name}`'s last use — or `{} {name}` to keep a copy",
                 Syntax::SIGIL_MOVE,
+                Syntax::KW_COPY,
             )
         };
         Diagnostic::error("E0209", what, why, fix, Some(span))

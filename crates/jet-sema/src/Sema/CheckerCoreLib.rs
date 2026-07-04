@@ -1994,13 +1994,14 @@ impl<'a> Checker<'a> {
                     // D-MEM1/S2 (was D-L0201 lint): a hard error now, regardless
                     // of liveness — no clone is ever silent. Unlike a Move-param
                     // user function, this is a fixed std read-only signature —
-                    // `^` is never accepted here (E0203), so `.clone()` is the
-                    // only fix, not a liveness-dependent move/reorder menu.
+                    // `^` is never accepted here (E0203), so `copy name` (D-CAP2,
+                    // D-MEM1/S4) is the only fix, not a liveness-dependent
+                    // move/reorder menu.
                     self.diags.push(Diagnostic::error(
                         "E0209",
                         format!("implicit clone of `{}`", name),
                         format!("`{}` stores its own copy of this value", call_name),
-                        format!("write `{}.clone()` to copy explicitly", name),
+                        format!("write `{} {}` to copy explicitly", Syntax::KW_COPY, name),
                         Some(ispan),
                     ));
                 }

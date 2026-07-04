@@ -1193,10 +1193,10 @@ fn calc(a: Float) -> Float {
     return (f + c)
 }
 fn make_path(a: String, b: String) -> String {
-    return path.join(a.clone(), b.clone())
+    return path.join(copy a, copy b)
 }
 fn hash(s: String) -> String {
-    return crypto.sha256(s.clone())
+    return crypto.sha256(copy s)
 }
 fn run() {
     print(calc(16.0))
@@ -1226,7 +1226,7 @@ fn core_fs_read_with_fallback() {
     let src = "\
 use core.fs as fs
 fn read_or(p: String) -> String {
-    return (fs.read(p.clone()) ?? \"missing\")
+    return (fs.read(copy p) ?? \"missing\")
 }
 fn run() {
     print(read_or(\"/no/such/file/at/all/xyzzy\"))
@@ -1654,7 +1654,7 @@ fn handle_methods_file_writer() {
 use core.files as files
 use core.fs as fs
 fn write_file(path: String, text: String) -> Int {{
-    w := files.create(path.clone()) ?? return 0
+    w := files.create(copy path) ?? return 0
     _r :: w.write_line(text)
     _f :: w.flush()
     return 1
@@ -2418,9 +2418,9 @@ fn empty_stack<T>() -> Stack<T> {
     return Stack<T>.{items: []}
 }
 fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
-    copy := s
-    copy.items.push(item)
-    return copy
+    dup := s
+    dup.items.push(item)
+    return dup
 }
 fn run() {
 p: Pair<Int> :: make_pair(1, 2)
@@ -2726,7 +2726,7 @@ fn channel_send_receive() {
 use core.tasks as tasks
 fn run() {
 (s1, ch) :: tasks.channel<Int>()
-    s2 :: s1.clone()
+    s2 :: copy s1
     t1 :: tasks.spawn(take(s1) () => {
         s1.send(30)
     })
@@ -2981,7 +2981,7 @@ fn run() {
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
 /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).user_x`;
-/// destructure `(a, b) :: p.clone()` → the borrow-temp + per-field `.clone()` form;
+/// destructure `(a, b) :: copy p` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
 fn named_tuples() {
@@ -2996,7 +2996,7 @@ fn run() {
     p :: (x: 1, y: 2)
     q :: (y: 3, x: 4)
     same_shape :: (p == q)
-    (a, b) :: p.clone()
+    (a, b) :: copy p
     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
     pair :: bounds()
     print(\"{pair.min} {pair.max}\")
@@ -3546,7 +3546,7 @@ use core.io as io
 fn collect() -> [String] {
     out: [String] := []
     loop true {
-        line :: io.input(\"> \") ?? return out.clone()
+        line :: io.input(\"> \") ?? return copy out
         if line == \"\" {
             break
         }

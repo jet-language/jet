@@ -2669,6 +2669,11 @@ pub enum Expr {
     /// only inside an `#Unsafe` region/fn (E0208). Lowers to `&x as *const _`
     /// inside the gated region.
     RawOf(Box<Expr>, Span),
+    /// D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb. Produces a fresh,
+    /// independent value from `x` (a temporary; never needs `^`, never trips
+    /// E0209). Legal on any expression, most useful on a named binding.
+    /// Lowers to Rust `x.clone()` (E0211 if the type isn't cloneable).
+    Copy(Box<Expr>, Span),
     /// Field access: `v.field`.
     Field(Box<Expr>, String, Span),
     /// S71 (D-SG6): `base?.field` optional chaining. Yields a `T?` and
@@ -2860,6 +2865,7 @@ impl Expr {
             | Expr::Binary(_, _, _, s)
             | Expr::Deref(_, s)
             | Expr::RawOf(_, s)
+            | Expr::Copy(_, s)
             | Expr::Field(_, _, s)
             | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }

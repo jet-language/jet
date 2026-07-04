@@ -66,11 +66,20 @@ diagnostics suggesting owned field / `Shared<T>` / `Id<T>` — forward-looking
 guidance, no mention of former spellings. `ownership.jet` and `ref_field.jet`
 rewritten to the v5 surface (their diffs are the acceptance test).
 
-**S4 — `copy` verb.**
+**S4 — `copy` verb. DONE (2026-07-04).**
 D-CAP2 keyword form lands (`copy x`); it is the one copy spelling in the
 release surface — `.clone()` does not exist there (one way to mean it, I8).
 Rule: `^` marks giving away a *named binding*; temporaries (`copy x`, literals,
 call results) pass without `^` — nothing survives to be used-after.
+`Expr::Copy` is a real prefix-verb AST node (parser/formatter/codegen), and is
+also the sole lowering target the compiler's own internal duplication
+rewrites (val-binding-from-read-param, owning struct-field reads) now
+build — one mechanism, whether the user writes it or the compiler inserts
+it. `.clone()` is not a callable Jet method: `infer_method_call` no longer
+special-cases `clone`, so it falls through to the ordinary "no such method"
+path. A non-cloneable type under `copy x` is E0211 (new code); a scalar is
+legal but redundant (already `Copy`, no error). Every E0121/E0201/E0209/etc.
+fix-it that used to suggest `.clone()` now suggests `copy name`.
 
 **S5 — View values (stdlib).**
 `String` slicing ops (`split`, `trim`, `after`/`before` — shares D-STR-AFTER1

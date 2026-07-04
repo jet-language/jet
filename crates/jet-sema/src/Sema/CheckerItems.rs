@@ -764,8 +764,9 @@ impl<'a> Checker<'a> {
     }
 
     /// Rewrite a struct-literal (or enum-payload, via the same call from
-    /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into a
-    /// `.clone()` MethodCall, when leaving it a move would either (a) not
+    /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into an
+    /// `Expr::Copy` node (D-CAP2 — the same node `copy x` desugars to), when
+    /// leaving it a move would either (a) not
     /// type-check (a borrowed param) or (b) silently move an OWNED LOCAL that
     /// is still read later — both would otherwise reach rustc as a raw,
     /// unreported E0507/E0382 (I2). Two cases:
@@ -806,17 +807,11 @@ impl<'a> Checker<'a> {
             _ => false,
         };
         if should_clone {
+            // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to — one
+            // mechanism for "duplicate this value".
             let span = expr.span();
             let old = std::mem::replace(expr, Expr::Absent(span));
-            *expr = Expr::MethodCall {
-                receiver: Box::new(old),
-                method: "clone".to_string(),
-                method_span: span,
-                type_args: Vec::new(),
-                args: Vec::new(),
-                recv_type: None,
-                resolved_ret: None,
-            };
+            *expr = Expr::Copy(Box::new(old), span);
         }
     }
 

@@ -382,6 +382,7 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Field(inner, _, _) => expr_mut_arg(inner),
         Expr::Binary(_, l, r, _) => expr_mut_arg(l).or_else(|| expr_mut_arg(r)),
         Expr::Index { base, index, .. } => expr_mut_arg(base).or_else(|| expr_mut_arg(index)),
@@ -524,6 +525,7 @@ fn expr_struct_interp(e: &Expr, locals: &std::collections::HashSet<String>) -> O
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Field(inner, _, _) => expr_struct_interp(inner, locals),
         Expr::Binary(_, l, r, _) => {
             expr_struct_interp(l, locals).or_else(|| expr_struct_interp(r, locals))

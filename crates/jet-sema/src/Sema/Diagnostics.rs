@@ -65,9 +65,10 @@ pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
         ),
         "while something is being changed, nobody else may be looking at it".to_string(),
         format!(
-            "pass `{}{}` only once, or copy first with `{}.clone()`",
+            "pass `{}{}` only once, or copy first with `{} {}`",
             Syntax::SIGIL_WRITE,
             name,
+            Syntax::KW_COPY,
             name
         ),
         Some(span),
@@ -83,8 +84,8 @@ pub(crate) fn aliasing_mut_after_read(name: &str, span: Span) -> Diagnostic {
         ),
         "while something is being looked at, nobody else may be changing it".to_string(),
         format!(
-            "drop the extra use of `{}`, or copy first with `{} .clone()`",
-            name, name
+            "drop the extra use of `{}`, or copy first with `{} {}`",
+            name, Syntax::KW_COPY, name
         ),
         Some(span),
     )

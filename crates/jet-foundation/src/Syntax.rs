@@ -133,6 +133,12 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
 
+/// D-CAP2 (ratified, part of D-MEM1/S4): the one copy spelling — `copy x`
+/// produces an owned, independent value. A temporary (no named binding
+/// survives to be used-after), so it never needs `^` and never trips E0209.
+/// `.clone()` is not user-typable Jet syntax (I8 — one way to mean it).
+pub const KW_COPY: &str = "copy";
+
 /// S10 (M2) → D-MEM1: the retired write keyword. Recognized only for the E0056
 /// teaching error that points at the `&` sigil.
 pub const KW_MUTATE: &str = "mut";

@@ -48,7 +48,7 @@ use core.reactive as reactive
 // (2) moving a function into a module changes how native codegen handles an
 // unmodified struct-field forward, producing a real rustc rejection (I2 P0 —
 // `return StatCard.{ ..., color: color, ... }` inside a module wants a
-// `.clone()` that the identical code at file scope never needed). Both are
+// copy that the identical code at file scope never needed). Both are
 // reported, not fixed here (out of scope for this pass) — so this file keeps
 // the original, verified-working per-function `#Js` tags below instead.
 // Truncating divide-by-16, computed via range comparison + subtraction
@@ -97,7 +97,7 @@ fn stat_line(label: String, value: String) -> View {
 }
 
 fn dashboard_view(cards: [View]) -> View {
-    return .Box.{children: cards.clone()}
+    return .Box.{children: copy cards}
 }
 
 fn flatten(v: View) -> [String] {

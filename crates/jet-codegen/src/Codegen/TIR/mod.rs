@@ -1075,8 +1075,12 @@ pub enum TExprKind {
         line: usize,
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
-    /// or borrowed value. The AST path emits `(recv).clone()` unconditionally; the
-    /// TIR carries the lowered receiver and the result type (the receiver's type).
+    /// or borrowed value. Also the lowering target for `Expr::Copy` — D-CAP2
+    /// (D-MEM1/S4) `copy x`, the one user-typable copy verb — so the compiler's
+    /// own internal duplication rewrites and the explicit `copy x` a user writes
+    /// share one TIR node (I8). The AST path emits `(recv).clone()`
+    /// unconditionally; the TIR carries the lowered receiver and the result type
+    /// (the receiver's type).
     Clone(Box<TExpr>),
     /// c109 Phase 6: a user-defined instance method call `recv.method(args)` on a
     /// covered struct/enum. All dispatch facts are resolved at lowering (totality):

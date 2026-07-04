@@ -2922,6 +2922,19 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::RawOf(Box::new(operand)),
             }
         }
+        // D-CAP2 (D-MEM1/S4): `copy x` — a fresh, independent value. Result
+        // type is `x`'s own type (sema already proved it cloneable, E0211).
+        // Reuses the existing `TExprKind::Clone` node (c109 Phase 6's
+        // sema-inserted-clone lowering target) — one TIR shape whether the
+        // compiler inserted the clone or the user wrote `copy` (I8).
+        Expr::Copy(inner, _) => {
+            let operand = lower_expr(inner, cx, env);
+            let ty = operand.ty.clone();
+            TExpr {
+                ty,
+                kind: TExprKind::Clone(Box::new(operand)),
+            }
+        }
         Expr::Binary(op, l, r, span) => {
             let lhs = lower_expr(l, cx, env);
             let rhs = lower_expr(r, cx, env);
@@ -4887,16 +4900,10 @@ pub(crate) fn lower_method_call(
             };
         }
     }
-    // The sema-inserted `.clone()`: emit `(recv).clone()`, result is the receiver's
-    // type (a clone preserves it). Mirrors `emit_method_call`'s `clone` early return.
-    if method == "clone" {
-        let recv = lower_expr(receiver, cx, env);
-        let ty = recv.ty.clone();
-        return TExpr {
-            ty,
-            kind: TExprKind::Clone(Box::new(recv)),
-        };
-    }
+    // D-CAP2 (D-MEM1/S4): a user-written `.clone()` MethodCall no longer reaches
+    // here — sema never constructs one (unrecognized method, E0102/E0311), and
+    // the compiler's own duplication rewrites build `Expr::Copy` instead (its
+    // own `lower_expr` arm), which lowers straight to `TExprKind::Clone`.
     // c109 Phase 23: `.raw()` on a distinct type → `({recv}).0`. The receiver's resolved
     // type names the distinct; its base type (from `cx.distinct_types`) is the total
     // result type. Mirrors `emit_method_call`'s `METHOD_DISTINCT_RAW` early return.

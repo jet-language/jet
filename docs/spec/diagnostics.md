@@ -201,6 +201,7 @@ before continuing.
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
 | E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
+| E0211 | sema  | `copy x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-CAP2/D-MEM1/S4) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (U11, D-JPK-SCRIPTDEP1) |
 | L0204 | jet   | a `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16) |

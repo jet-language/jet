@@ -328,6 +328,7 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
         | Expr::Field(inner, _, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Tainted(inner, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)

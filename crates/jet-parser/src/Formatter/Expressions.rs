@@ -399,6 +399,12 @@ impl<'a> Fmt<'a> {
                 self.write("*");
                 self.fmt_expr(inner, Prec::Unary);
             }
+            // D-CAP2 (D-MEM1/S4): prefix `copy x` — the one copy verb.
+            Expr::Copy(inner, _) => {
+                self.write(Syntax::KW_COPY);
+                self.write(" ");
+                self.fmt_expr(inner, Prec::Unary);
+            }
             Expr::Field(base, field, span) => {
                 self.fmt_expr(base, Prec::Postfix);
                 // S69 (D-SG3): keep an author-placed break before `.field`.

@@ -1204,6 +1204,39 @@ fn run() {
 }
 
 #[test]
+fn fmt_copy_verb_d_cap2_stability() {
+    // D-CAP2 (D-MEM1/S4): `copy x` is a prefix-verb expression — must survive
+    // fmt unchanged in binding position, call-arg position, and on a field.
+    let src = "\
+struct Ticket {
+    id: Int
+    label: String
+}
+
+fn archive(t: ^Ticket) -> String {
+    return t.label
+}
+
+fn run() {
+    name: String :: \"vault\"
+    saved :: copy name
+    t :: Ticket.{id: 1, label: \"root\"}
+    print(archive(copy t))
+    print(copy t.label)
+}
+";
+    assert_fmt_keeps(
+        src,
+        &[
+            "saved :: copy name",
+            "print(archive(copy t))",
+            "print(copy t.label)",
+        ],
+        "D-CAP2 copy verb",
+    );
+}
+
+#[test]
 fn fmt_loop_label_d_looplabel2_stability() {
     // D-LOOPLABEL2=A: `outer@ loop { break outer@ }` must survive fmt unchanged.
     let src = "\

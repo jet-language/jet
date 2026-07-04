@@ -197,7 +197,8 @@ fn rewrite_self_field_refs(expr: &mut Expr, names: &HashSet<String>) {
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _) => rewrite_self_field_refs(inner, names),
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _) => rewrite_self_field_refs(inner, names),
         Expr::Binary(_, l, r, _) => {
             rewrite_self_field_refs(l, names);
             rewrite_self_field_refs(r, names);

@@ -549,9 +549,9 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..1000 {
-        copy :: sender.clone()
-        tasks.spawn(take(copy) () => {
-            copy.send(1)
+        dup :: copy sender
+        tasks.spawn(take(dup) () => {
+            dup.send(1)
         })
     }
     total: Int := 0
@@ -588,9 +588,9 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..10000 {
-        copy :: sender.clone()
-        tasks.spawn(take(copy) () => {
-            copy.send(1)
+        dup :: copy sender
+        tasks.spawn(take(dup) () => {
+            dup.send(1)
         })
     }
     total: Int := 0
@@ -628,9 +628,9 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..100000 {
-        copy :: sender.clone()
-        tasks.spawn(take(copy) () => {
-            copy.send(1)
+        dup :: copy sender
+        tasks.spawn(take(dup) () => {
+            dup.send(1)
         })
     }
     total: Int := 0

@@ -850,7 +850,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         AST::Expr::Unary(_, inner, _) | AST::Expr::IncDec { operand: inner, .. } => {
             collect_expr(inner, mp, ctx)
         }
-        AST::Expr::Deref(inner, _) | AST::Expr::RawOf(inner, _) => collect_expr(inner, mp, ctx),
+        AST::Expr::Deref(inner, _) | AST::Expr::RawOf(inner, _) | AST::Expr::Copy(inner, _) => {
+            collect_expr(inner, mp, ctx)
+        }
         AST::Expr::Index { base, index, .. } => {
             collect_expr(base, mp, ctx);
             collect_expr(index, mp, ctx);

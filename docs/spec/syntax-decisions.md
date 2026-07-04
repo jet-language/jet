@@ -731,7 +731,15 @@ unmarked param is a hard error (fix-it: add `&`, or `^`/copy it); L0201 is
 gone (E0209 hard error, no silent clone ever); `CapabilityFreeze`/E0912 are
 gone and the `api:` manifest field no longer exists (ordinary unknown-field
 error) — `ApiFreeze`'s snapshot mechanism remains, now unconditional pub-fn
-semver diffing (E1218/E2601), not a capability-tier freeze. S3–S9 remain
+semver diffing (E1218/E2601), not a capability-tier freeze. **S3 shipped
+(2026-07-04)**: `-> &T` returns and `&T` fields are gone from the grammar
+(ordinary syntax errors); `#Ref`/E0207/E0427 deleted outright. **S4 shipped
+(2026-07-04)**: `copy x` (D-CAP2) is the one copy verb — a real prefix-verb
+expression (`Expr::Copy`), parses on any expression, formatter round-trips
+it. `.clone()` is not user-typable Jet syntax — `clone` falls through to the
+ordinary "no such method" path (I8). `copy x` on a non-cloneable type is
+E0211; on a scalar it's legal but redundant (already `Copy`). Every fix-it
+that used to suggest `.clone()` now suggests `copy name`. S5–S9 remain
 unbuilt.
 
 **D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
@@ -754,7 +762,7 @@ borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 *(ratified/implemented 2026-07-04)*: `tasks.channel<T>()` returns
 `(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
 `.sender()` method. Destructure with the existing S74 tuple form:
-`(tx, rx) := tasks.channel<T>()`; a second sender is `tx.clone()`. A
+`(tx, rx) := tasks.channel<T>()`; a second sender is `copy tx`. A
 `Receiver<T>` is what `g.select().recv(rx)` takes.
 
 ### Effects & safety

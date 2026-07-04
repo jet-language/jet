@@ -239,8 +239,8 @@ impl<'a> Checker<'a> {
                             ),
                             "tasks run concurrently; a `var` binding can't be shared between tasks".to_string(),
                             format!(
-                                "give the task its own copy (`{}.clone()`) or hand it over with `take({})`",
-                                name, name
+                                "give the task its own copy (`{} {}`) or hand it over with `take({})`",
+                                Syntax::KW_COPY, name, name
                             ),
                             Some(lam.span),
                         ));
@@ -299,8 +299,8 @@ impl<'a> Checker<'a> {
                         "a stored lambda owns its captures — clonable values are copied silently"
                             .to_string(),
                         format!(
-                            "use `take({}) (…) => …` to move `{}`, or `.clone()` at the call site to copy on purpose",
-                            name, name
+                            "use `take({}) (…) => …` to move `{}`, or `{} {}` at the call site to copy on purpose",
+                            name, name, Syntax::KW_COPY, name
                         ),
                         Some(lam.span),
                     ));
@@ -934,10 +934,9 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        if method == "clone" {
-            self.borrow_ctx = true;
-            return self.infer(receiver);
-        }
+        // D-CAP2 (D-MEM1/S4): `.clone()` is not user-typable Jet syntax — `clone`
+        // falls through to the ordinary "no such method" path below like any
+        // other unrecognized name (I8: `copy x` is the one copy spelling).
         self.lint_allocation_hints(method, span);
         // D-DIST3 (ratified 2026-06-20): `.raw()` unwraps a distinct type.
         if method == crate::Syntax::METHOD_DISTINCT_RAW {
@@ -2470,7 +2469,8 @@ impl<'a> Checker<'a> {
                             ),
                             "this function has read access only and does not own the value".to_string(),
                             format!(
-                                "call it on a copy: `{}.clone().{}(...)` — or take ownership with `{}: {}{}`",
+                                "call it on a copy: `({} {}).{}(...)` — or take ownership with `{}: {}{}`",
+                                Syntax::KW_COPY,
                                 n,
                                 method,
                                 n,

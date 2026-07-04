@@ -1054,7 +1054,7 @@ hooks; scheduler-enforced pause/cancel semantics land with the M:N runtime work.
 
 `tasks.channel<T>() -> (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
-tasks.channel<T>()`. A second sender is `tx.clone()` — there's no combined
+tasks.channel<T>()`. A second sender is `copy tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (`take` semantics for non-copy values), and `receiver.receive() -> T or
 Closed` blocks until a value arrives or all senders are gone. Channel payloads

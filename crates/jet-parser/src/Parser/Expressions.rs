@@ -653,6 +653,15 @@ impl<'a> Parser<'a> {
                 let full = Span::new(span.start, inner.span().end);
                 Ok(Expr::RawOf(Box::new(inner), full))
             }
+            // D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb, a prefix-verb
+            // expression form. Legal on any expression; most useful on a named
+            // binding. `.clone()` is not user-typable Jet syntax (I8).
+            TokKind::KwCopy => {
+                let span = self.bump().span;
+                let inner = self.expr_unary(allow_struct_lit)?;
+                let full = Span::new(span.start, inner.span().end);
+                Ok(Expr::Copy(Box::new(inner), full))
+            }
             // D-DOTCTOR1: `.{ … }` inferred struct literal (type from context).
             // A leading `.` immediately followed by `{` is unambiguous — it is not
             // valid as a field access (no receiver) or any other production.
@@ -2948,6 +2957,7 @@ impl<'a> Parser<'a> {
                 | TokKind::LParen
                 | TokKind::Minus
                 | TokKind::Bang
+                | TokKind::KwCopy
         )
     }
 

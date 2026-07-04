@@ -571,6 +571,7 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
@@ -2229,6 +2230,7 @@ pub(crate) fn collect_core_expr(
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)

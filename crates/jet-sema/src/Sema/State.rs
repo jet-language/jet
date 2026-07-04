@@ -525,6 +525,7 @@ impl<'a> StateCtx<'a> {
             | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
+            | Expr::Copy(inner, _)
             | Expr::Field(inner, _, _)
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
