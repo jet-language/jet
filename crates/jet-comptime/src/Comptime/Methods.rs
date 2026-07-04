@@ -212,6 +212,20 @@ impl<'a> Interp<'a> {
             }
             return Err(unsupported("`emit` argument must be a string", span));
         }
+        // c139/HOF: `f(x)` where `f` is a local binding (a lambda param, or a
+        // `let f = someLambdaOrFn` variable) rather than a top-level `fn`
+        // name — every bare-name call, whatever the callee resolves to,
+        // parses as `Expr::Call` (the parser can't tell values from function
+        // names apart), so this is where a stored closure value gets called.
+        // Checked before the top-level-function lookup: a local binding
+        // shadows a same-named top-level function, same as any other name.
+        if let Some(f @ CtValue::Closure(_)) = scope.get(name).cloned() {
+            let mut vals = Vec::with_capacity(args.len());
+            for a in args {
+                vals.push(self.eval(&a.expr, scope)?);
+            }
+            return self.call_closure(&f, vals, span);
+        }
         // A user function: bind params, run the body in a fresh frame.
         let func = match self.funcs.get(name).copied() {
             Some(f) => f,
@@ -347,7 +361,7 @@ impl<'a> Interp<'a> {
     /// named `fn`. The frame starts from the closure's captured scope (so it
     /// still sees the bindings visible where it was created) with the params
     /// bound over that.
-    fn call_closure(
+    pub(super) fn call_closure(
         &mut self,
         f: &CtValue,
         args: Vec<CtValue>,

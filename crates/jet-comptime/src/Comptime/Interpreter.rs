@@ -40,7 +40,47 @@ pub(super) enum Flow {
     Normal,
     Break,
     Continue,
+    /// D-LABEL1: `break @name` — bubbles up through enclosing loops until one
+    /// whose own `@name` label matches, where it becomes an ordinary `Break`.
+    BreakLabel(String),
+    /// D-LABEL1: `continue @name` — same bubbling as `BreakLabel`, becomes an
+    /// ordinary `Continue` at the matching loop.
+    ContinueLabel(String),
     Return(CtValue),
+}
+
+/// What a loop body's [`Flow`] result means to the loop wrapping it, given
+/// that loop's own `@name` label (if any). D-LABEL1: an unlabeled `break`/
+/// `continue` always applies to its innermost loop (`Break`/`Continue`); a
+/// labeled one only stops here if the name matches this loop's label —
+/// otherwise it keeps bubbling outward unchanged (`Bubble`).
+enum LoopStep {
+    Break,
+    Continue,
+    Return(CtValue),
+    Bubble(Flow),
+}
+
+fn loop_step(flow: Flow, label: Option<&str>) -> LoopStep {
+    match flow {
+        Flow::Break => LoopStep::Break,
+        Flow::Continue | Flow::Normal => LoopStep::Continue,
+        Flow::Return(v) => LoopStep::Return(v),
+        Flow::BreakLabel(name) => {
+            if label == Some(name.as_str()) {
+                LoopStep::Break
+            } else {
+                LoopStep::Bubble(Flow::BreakLabel(name))
+            }
+        }
+        Flow::ContinueLabel(name) => {
+            if label == Some(name.as_str()) {
+                LoopStep::Continue
+            } else {
+                LoopStep::Bubble(Flow::ContinueLabel(name))
+            }
+        }
+    }
 }
 
 /// Where a [`Interp`] running in whole-program "dev" mode sends program
@@ -260,11 +300,31 @@ impl<'a> Interp<'a> {
                     scope.insert(e.name.clone(), v);
                 }
             }
-            BindPattern::Tuple { span, .. } => {
-                return Err(comptime_panic(
-                    "tuple destructuring isn't supported in comptime yet",
-                    *span,
-                ));
+            // S73/D-SG7: `val (a, b) = p` binds named tuple fields in
+            // canonical (sorted-by-name) order — a tuple value's fields are
+            // always stored in that order (see `Expr::TupleLit` in `eval`),
+            // so a straight positional zip lines up correctly.
+            BindPattern::Tuple { elems, span } => {
+                let CtValue::Struct { fields: vals, .. } = value else {
+                    return Err(comptime_panic(
+                        "this value isn't a tuple, so it can't be destructured with `( )`",
+                        *span,
+                    ));
+                };
+                if vals.len() != elems.len() {
+                    return Err(comptime_panic(
+                        &format!(
+                            "this pattern needs exactly {} member{}, but the tuple has {}",
+                            elems.len(),
+                            if elems.len() == 1 { "" } else { "s" },
+                            vals.len()
+                        ),
+                        *span,
+                    ));
+                }
+                for (e, (_, v)) in elems.iter().zip(vals) {
+                    scope.insert(e.name.clone(), v);
+                }
             }
         }
         Ok(())
@@ -318,18 +378,20 @@ impl<'a> Interp<'a> {
             }
             Stmt::If(ifs) => self.exec_if(ifs, scope),
             Stmt::While {
-                cond, body, span, ..
+                cond, body, span, label,
             } => {
+                let label = label.as_ref().map(|(n, _)| n.as_str());
                 loop {
                     self.burn(*span)?;
                     let c = self.eval(cond, scope)?;
                     if !as_bool(&c, cond.span())? {
                         break;
                     }
-                    match self.exec_block(body, scope)? {
-                        Flow::Break => break,
-                        Flow::Continue | Flow::Normal => {}
-                        ret @ Flow::Return(_) => return Ok(ret),
+                    match loop_step(self.exec_block(body, scope)?, label) {
+                        LoopStep::Break => break,
+                        LoopStep::Continue => {}
+                        LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                        LoopStep::Bubble(f) => return Ok(f),
                     }
                 }
                 Ok(Flow::Normal)
@@ -340,8 +402,17 @@ impl<'a> Interp<'a> {
                 kind,
                 body,
                 span,
+                label,
                 ..
-            } => self.exec_for(var, var2.as_ref(), kind, body, *span, scope),
+            } => self.exec_for(
+                var,
+                var2.as_ref(),
+                kind,
+                body,
+                *span,
+                label.as_ref().map(|(n, _)| n.as_str()),
+                scope,
+            ),
             Stmt::Switch {
                 subject,
                 arms,
@@ -369,13 +440,15 @@ impl<'a> Interp<'a> {
             }
             Stmt::Break(_) => Ok(Flow::Break),
             Stmt::Continue(_) => Ok(Flow::Continue),
-            Stmt::Loop { body, span, .. } => {
+            Stmt::Loop { body, span, label } => {
+                let label = label.as_ref().map(|(n, _)| n.as_str());
                 loop {
                     self.burn(*span)?;
-                    match self.exec_block(body, scope)? {
-                        Flow::Break => break,
-                        Flow::Continue | Flow::Normal => {}
-                        ret @ Flow::Return(_) => return Ok(ret),
+                    match loop_step(self.exec_block(body, scope)?, label) {
+                        LoopStep::Break => break,
+                        LoopStep::Continue => {}
+                        LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                        LoopStep::Bubble(f) => return Ok(f),
                     }
                 }
                 Ok(Flow::Normal)
@@ -387,8 +460,9 @@ impl<'a> Interp<'a> {
                 step,
                 body,
                 span,
-                ..
+                label,
             } => {
+                let label = label.as_ref().map(|(n, _)| n.as_str());
                 let v = self.eval(&init.init, scope)?;
                 scope.insert(init.name.clone(), v);
                 loop {
@@ -397,10 +471,11 @@ impl<'a> Interp<'a> {
                     if !as_bool(&c, cond.span())? {
                         break;
                     }
-                    match self.exec_block(body, scope)? {
-                        Flow::Break => break,
-                        Flow::Continue | Flow::Normal => {}
-                        ret @ Flow::Return(_) => return Ok(ret),
+                    match loop_step(self.exec_block(body, scope)?, label) {
+                        LoopStep::Break => break,
+                        LoopStep::Continue => {}
+                        LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                        LoopStep::Bubble(f) => return Ok(f),
                     }
                     self.exec_stmt(step, scope)?;
                 }
@@ -462,12 +537,11 @@ impl<'a> Interp<'a> {
             // only suspends the sema determinism check. The interpreter just runs
             // its body (the suspension is a no-op at comptime, which is already pure).
             Stmt::AssumeDet { body, .. } => self.exec_block(body, scope),
-            // D-LABEL1: labeled `break @name`/`continue @name` need the compiled
-            // backend's multi-level loop control; the interpreter declines them
-            // honestly (like `@unsafe`) rather than approximate them.
-            Stmt::BreakLabel(_, span) | Stmt::ContinueLabel(_, span) => {
-                Err(unsupported("a labeled `break`/`continue`", *span))
-            }
+            // D-LABEL1: labeled `break @name`/`continue @name` — bubble a
+            // named Flow signal outward; the matching labeled loop (found by
+            // `loop_step`) turns it into an ordinary Break/Continue.
+            Stmt::BreakLabel(name, _) => Ok(Flow::BreakLabel(name.clone())),
+            Stmt::ContinueLabel(name, _) => Ok(Flow::ContinueLabel(name.clone())),
             // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }`
             // already ran (and was purity/fuel-checked) at sema time; it is
             // build-time-only and erases from the compiled program (I3). The
@@ -526,6 +600,7 @@ impl<'a> Interp<'a> {
         kind: &crate::AST::ForKind,
         body: &[Stmt],
         span: Span,
+        label: Option<&str>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         match kind {
@@ -542,10 +617,11 @@ impl<'a> Interp<'a> {
                 while i <= b {
                     self.burn(span)?;
                     scope.insert(var.to_string(), CtValue::Int(i));
-                    match self.exec_block(body, scope)? {
-                        Flow::Break => break,
-                        Flow::Continue | Flow::Normal => {}
-                        ret @ Flow::Return(_) => return Ok(ret),
+                    match loop_step(self.exec_block(body, scope)?, label) {
+                        LoopStep::Break => break,
+                        LoopStep::Continue => {}
+                        LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                        LoopStep::Bubble(f) => return Ok(f),
                     }
                     i += stride;
                 }
@@ -558,10 +634,11 @@ impl<'a> Interp<'a> {
                         for item in items {
                             self.burn(span)?;
                             scope.insert(var.to_string(), item);
-                            match self.exec_block(body, scope)? {
-                                Flow::Break => break,
-                                Flow::Continue | Flow::Normal => {}
-                                ret @ Flow::Return(_) => return Ok(ret),
+                            match loop_step(self.exec_block(body, scope)?, label) {
+                                LoopStep::Break => break,
+                                LoopStep::Continue => {}
+                                LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                                LoopStep::Bubble(f) => return Ok(f),
                             }
                         }
                         Ok(Flow::Normal)
@@ -570,10 +647,11 @@ impl<'a> Interp<'a> {
                         for byte in bs {
                             self.burn(span)?;
                             scope.insert(var.to_string(), CtValue::Int(byte as i64));
-                            match self.exec_block(body, scope)? {
-                                Flow::Break => break,
-                                Flow::Continue | Flow::Normal => {}
-                                ret @ Flow::Return(_) => return Ok(ret),
+                            match loop_step(self.exec_block(body, scope)?, label) {
+                                LoopStep::Break => break,
+                                LoopStep::Continue => {}
+                                LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                                LoopStep::Bubble(f) => return Ok(f),
                             }
                         }
                         Ok(Flow::Normal)
@@ -587,10 +665,11 @@ impl<'a> Interp<'a> {
                             } else {
                                 scope.insert(var.to_string(), k.to_value());
                             }
-                            match self.exec_block(body, scope)? {
-                                Flow::Break => break,
-                                Flow::Continue | Flow::Normal => {}
-                                ret @ Flow::Return(_) => return Ok(ret),
+                            match loop_step(self.exec_block(body, scope)?, label) {
+                                LoopStep::Break => break,
+                                LoopStep::Continue => {}
+                                LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                                LoopStep::Bubble(f) => return Ok(f),
                             }
                         }
                         Ok(Flow::Normal)
@@ -600,10 +679,11 @@ impl<'a> Interp<'a> {
                         for ch in s.chars() {
                             self.burn(span)?;
                             scope.insert(var.to_string(), CtValue::Char(ch));
-                            match self.exec_block(body, scope)? {
-                                Flow::Break => break,
-                                Flow::Continue | Flow::Normal => {}
-                                ret @ Flow::Return(_) => return Ok(ret),
+                            match loop_step(self.exec_block(body, scope)?, label) {
+                                LoopStep::Break => break,
+                                LoopStep::Continue => {}
+                                LoopStep::Return(v) => return Ok(Flow::Return(v)),
+                                LoopStep::Bubble(f) => return Ok(f),
                             }
                         }
                         Ok(Flow::Normal)
@@ -787,6 +867,7 @@ impl<'a> Interp<'a> {
                 .get(name)
                 .or_else(|| self.globals.get(name))
                 .cloned()
+                .or_else(|| self.funcs.get(name.as_str()).map(|f| fn_value(name, f, *span)))
                 .ok_or_else(|| unsupported(&format!("the name `{}`", name), *span)),
             Expr::Unary(op, inner, span) => {
                 let v = self.eval(inner, scope)?;
@@ -891,7 +972,32 @@ impl<'a> Interp<'a> {
                     fields: out,
                 })
             }
-            Expr::TupleLit(_, span, _) => Err(unsupported("tuple literals in comptime", *span)),
+            // S73/D-SG7: a named tuple literal. Evaluate each member in
+            // written order (side effects, if any, run left to right), then
+            // canonicalize into sorted-by-name order — the same order sema
+            // gives `Type::Tuple` (`canonicalize_tuple_fields`) and codegen's
+            // `JetTup_*` struct — so field access, equality, and `(a, b) ::`
+            // destructuring all agree with the compiled build regardless of
+            // the order the literal was written in.
+            Expr::TupleLit(fields, _, _) => {
+                let mut out = Vec::with_capacity(fields.len());
+                for (name, expr) in fields {
+                    out.push((name.clone(), self.eval(expr, scope)?));
+                }
+                let canonical = crate::AST::canonicalize_tuple_fields(out);
+                let type_name = format!(
+                    "({})",
+                    canonical
+                        .iter()
+                        .map(|(n, _)| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                Ok(CtValue::Struct {
+                    type_name,
+                    fields: canonical,
+                })
+            }
             Expr::EnumLit {
                 type_name,
                 variant,
@@ -939,9 +1045,26 @@ impl<'a> Interp<'a> {
             }
             // D-TAINT1: the value-fact tag is erased; evaluate the inner value.
             Expr::Tainted(inner, _) => self.eval(inner, scope),
+            // `copy expr`: a value-semantics marker sema/codegen use to make
+            // an explicit clone visible at the call site. The tree-walker
+            // already hands every value around as an owned `CtValue` clone
+            // (no aliasing), so `copy` is a plain pass-through here too.
+            Expr::Copy(inner, _) => self.eval(inner, scope),
             Expr::Present(inner, _) => Ok(CtValue::Some(Box::new(self.eval(inner, scope)?))),
             Expr::Absent(_) => Ok(CtValue::None(Type::Int)),
             Expr::Call(call) => self.eval_call(&call.name, call.name_span, &call.args, scope),
+            // c139/HOF: calling an already-evaluated value — `f(x)(y)`, or a
+            // callee produced by anything other than a bare name (a stored
+            // closure reached through a bare `Ident` still parses as
+            // `Expr::Call`, handled above; this is the postfix-chain shape).
+            Expr::CallValue { callee, args, span } => {
+                let f = self.eval(callee, scope)?;
+                let mut vals = Vec::with_capacity(args.len());
+                for a in args {
+                    vals.push(self.eval(&a.expr, scope)?);
+                }
+                self.call_closure(&f, vals, *span)
+            }
             Expr::MethodCall {
                 receiver,
                 method,
@@ -1327,6 +1450,55 @@ impl<'a> Interp<'a> {
 }
 
 // --- value helpers --------------------------------------------------------
+
+/// c139/HOF bare-fn-value: a top-level function name used as a value (bound
+/// to a variable, passed to a higher-order method, called through a stored
+/// variable) has no dedicated `CtValue` — wrap it in a synthetic
+/// single-expression closure that just forwards to the real function by
+/// name. Every existing closure-calling path (`call_closure`,
+/// `.map`/`.filter`/`.each`/…, `Expr::CallValue`) then picks it up unchanged,
+/// with no new `CtValue` variant needed.
+fn fn_value(name: &str, func: &Func, span: Span) -> CtValue {
+    let params: Vec<crate::AST::LambdaParam> = func
+        .params
+        .iter()
+        .map(|p| crate::AST::LambdaParam {
+            name: p.name.clone(),
+            name_span: p.name_span,
+            ty: None,
+            ty_span: None,
+        })
+        .collect();
+    let args: Vec<crate::AST::CallArg> = func
+        .params
+        .iter()
+        .map(|p| crate::AST::CallArg {
+            convention: crate::AST::AccessConvention::Read,
+            expr: Expr::Ident(p.name.clone(), p.name_span),
+            span: p.name_span,
+            flags: crate::AST::CallArgFlags::default(),
+            label: None,
+            spread: false,
+        })
+        .collect();
+    let body = crate::AST::LambdaBody::Expr(Box::new(Expr::Call(crate::AST::Call {
+        name: name.to_string(),
+        name_span: span,
+        args,
+        range_checked: false,
+    })));
+    let lambda = crate::AST::Lambda {
+        take_names: Vec::new(),
+        params,
+        body,
+        span,
+        meta: crate::AST::LambdaMeta::default(),
+    };
+    CtValue::Closure(std::sync::Arc::new(crate::AST::ClosureData {
+        lambda,
+        captured: HashMap::new(),
+    }))
+}
 
 fn list_get(xs: &[CtValue], i: i64, span: Span) -> Result<CtValue, Diagnostic> {
     if i < 0 || i as usize >= xs.len() {

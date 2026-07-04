@@ -175,12 +175,13 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                     if let Some(b) = scan_stmts_for_unsafe(&f.body) {
                         return Some(b);
                     }
-                    // c77 (Q2 hard rule): a call passing a `mut`/`^move`
-                    // argument asks for writeback / ownership-move binding the
-                    // scalar-by-value tree-walker doesn't faithfully reproduce
-                    // (e.g. field access on a moved struct param), so its output
+                    // c77 (Q2 hard rule): a call passing a `&` (write) argument
+                    // asks for writeback the scalar-by-value tree-walker
+                    // doesn't perform (the callee's frame is discarded, never
+                    // written back to the caller's binding), so its output
                     // could diverge from the compiled build. Stop honestly at
-                    // the boundary rather than risk a silent miscompile.
+                    // the boundary rather than risk a silent miscompile. (A
+                    // `^` move argument is fine — see `expr_mut_arg`.)
                     if let Some(b) = scan_stmts_for_mut_arg(&f.body) {
                         return Some(b);
                     }
@@ -318,32 +319,30 @@ fn scan_if_for_mut_arg(ifs: &crate::AST::IfStmt) -> Option<Boundary> {
     }
 }
 
-/// Does this expression (or a subexpression) pass a `mut`/`^move` argument
-/// *bound to a named variable* to a call? Those are the conventions whose
-/// caller-side binding (writeback for `mut`, ownership-move for `^`) the
-/// scalar-by-value tree-walker doesn't reproduce; moving a literal is fine.
+/// Does this expression (or a subexpression) pass a `&` (write/edit) argument
+/// *bound to a named variable* to a call? The scalar-by-value tree-walker
+/// runs the callee in its own frame and never writes a mutated parameter
+/// back into the caller's binding, so this would silently diverge from the
+/// compiled build's real writeback. Stop honestly at the boundary instead.
+///
+/// A `^` (move) argument on a named variable is NOT a boundary: sema's move
+/// checker (`CheckerOwnership`) already forbids reading `name` again on any
+/// path after `^name` is passed, so the interpreter evaluating it exactly
+/// like an ordinary read — same value, same one use — can never be observed
+/// to differ from the compiled build's real ownership transfer.
 fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
     use crate::AST::AccessConvention;
-    let boundary = |conv: AccessConvention, span: Span| {
-        let feature = match conv {
-            AccessConvention::Write => {
-                "passes a `&` argument to a function (writeback isn't interpreted yet)"
-            }
-            _ => "passes a moved (`^`) variable to a function (move binding isn't interpreted yet)",
-        };
+    let boundary = |span: Span| {
         Some(Boundary {
-            feature: feature.to_string(),
+            feature: "passes a `&` argument to a function (writeback isn't interpreted yet)"
+                .to_string(),
             span: Some(span),
         })
     };
-    // A call arg is a boundary when it is `mut`/`^` on a named variable.
+    // A call arg is a boundary when it is `&` on a named variable.
     let arg_boundary = |a: &crate::AST::CallArg| -> Option<Boundary> {
-        if matches!(
-            a.convention,
-            AccessConvention::Write | AccessConvention::Move
-        ) && matches!(a.expr, Expr::Ident(..))
-        {
-            return boundary(a.convention.clone(), a.span);
+        if matches!(a.convention, AccessConvention::Write) && matches!(a.expr, Expr::Ident(..)) {
+            return boundary(a.span);
         }
         expr_mut_arg(&a.expr)
     };
