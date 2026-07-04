@@ -122,6 +122,10 @@ pub fn load_entry_with_overlay(
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
     let mut layer_ceiling = None;
+    // U11 (D-JPK-SCRIPTDEP1=A): L0203 lints for inline `use pkg#version;`
+    // deps found in the manifest-less branch below, merged into
+    // `parse_teaching` once that's declared.
+    let mut inline_dep_lints: Vec<Diagnostic> = Vec::new();
     let (project_root, pkg_dep_dirs, pkg_resolution) = if let Some(manifest_dir) =
         find_manifest_root(&entry_dir)
     {
@@ -210,13 +214,44 @@ pub fn load_entry_with_overlay(
         }
     } else {
         // R9: no manifest — single-file mode, project root is the entry dir.
-        (entry_dir, HashMap::new(), PkgResolution::default())
+        //
+        // U11 (D-JPK-SCRIPTDEP1=A): a manifest-less entry may open with
+        // inline `use pkg#version;` deps. Parse just the entry file to
+        // collect them (load_file below reparses it as part of the normal
+        // module-graph walk — a small duplicate parse keeps this pass
+        // self-contained) and resolve each one up front, so the ordinary
+        // `Module` import resolution (`resolve_module_import`) finds them in
+        // `realized_libs` exactly like a hangar-realized `library` (U17).
+        let mut resolution = PkgResolution::default();
+        let raw = fs::read_to_string(&entry_abs).unwrap_or_default();
+        let (toks, lex_diags) = crate::Lexer::lex(&raw);
+        if lex_diags.is_empty() {
+            if let Ok(prog) = crate::Parser::parse(&toks) {
+                for dep in crate::Jetpack::ScriptDeps::collect(&prog) {
+                    if !crate::Jetpack::ScriptDeps::is_pinned(&dep.selector) {
+                        inline_dep_lints.push(crate::Jetpack::ScriptDeps::l0203_unpinned(&dep));
+                    }
+                    match crate::Jetpack::ScriptDeps::resolve(&dep, &entry_dir) {
+                        Ok(resolved) => {
+                            resolution
+                                .realized_libs
+                                .entry(resolved.name.clone())
+                                .or_insert(resolved.dir);
+                        }
+                        Err(reason) => {
+                            return Err(vec![crate::Jetpack::ScriptDeps::e1253(&dep, &reason)]);
+                        }
+                    }
+                }
+            }
+        }
+        (entry_dir, HashMap::new(), resolution)
     };
 
     let mut modules = Vec::new();
     let mut path_to_idx: HashMap<PathBuf, usize> = HashMap::new();
     let mut stack: Vec<PathBuf> = Vec::new();
-    let mut parse_teaching = Vec::new();
+    let mut parse_teaching = inline_dep_lints;
 
     load_file(
         &entry_abs,
@@ -677,6 +712,7 @@ fn load_file(
             span: cm.span,
             is_pub: false,
             is_package_pub: false,
+            inline_version: None,
         };
         modules[module_idx].imports.push(synthetic);
     }

@@ -25,6 +25,8 @@ pub mod PackageManifest;
 pub mod Provider;
 pub mod Recipe;
 pub mod RefSpec;
+pub mod ScriptDeps;
+pub mod ScriptLock;
 pub mod Shell;
 pub mod Store;
 pub mod TOML;

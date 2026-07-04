@@ -819,7 +819,16 @@ fn main() {
             return;
         }
         "toolchain" => run_toolchain(),
-        "init" => run_init(),
+        // U11 (D-JPK-SCRIPTDEP1=A): `jet init <script.jet>` lifts that
+        // script's inline `use pkg#version;` deps into the freshly written
+        // `pkg.jet`; bare `jet init` is unchanged.
+        "init" => run_init(args.get(1).map(|s| s.as_str())),
+        // U11: `jet lock <script.jet>` resolves its inline deps and writes
+        // `<script.jet>.lock`.
+        "lock" => {
+            run_lock(args.get(1).map(|s| s.as_str()), mode);
+            return;
+        }
         "gc" => {
             run_gc();
             return;
@@ -1523,7 +1532,14 @@ fn run_toolchain() -> ! {
 
 /// `jet init` — write a `pkg.jet` here, pinning the running toolchain's channel
 /// (D-JPK-TOOLCHAIN1=A #179, U11 lift).
-fn run_init() -> ! {
+/// `jet init [<script.jet>]` — U11 (D-JPK-SCRIPTDEP1=A): when a manifest-less
+/// script is named, its inline `use pkg#version;` refs are lifted into the
+/// freshly written `pkg.jet`'s `deps: {}` block (rung 0 → rung 1, per
+/// tools/Tower/docs/plans/epoch-4/vision.md). Lifting is best-effort: a lex/
+/// parse problem in the script is silently skipped here (`jet check`/`jet
+/// run` on the script itself is where that's diagnosed) so `jet init` never
+/// fails just because the *lift* half had nothing to do.
+fn run_init(script: Option<&str>) -> ! {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let name = cwd
         .file_name()
@@ -1532,11 +1548,134 @@ fn run_init() -> ! {
         .to_string();
     match jet::Jetpack::JetPin::write_init(&cwd, &name, env!("CARGO_PKG_VERSION")) {
         Ok(msg) => {
+            if let Some(script) = script {
+                lift_inline_deps_into_manifest(&cwd, script);
+            }
             println!("{msg}");
             exit(ExitCodes::OK);
         }
         Err(d) => {
             print_toolchain_diag(&d);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+/// U11: fold `script`'s inline deps into `<cwd>/pkg.jet`'s `deps: {}` block
+/// (just written by `write_init`), preserving comments/formatting via the
+/// same comment-preserving editor `jet add` uses.
+fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
+    let script_path = resolve_source_path(script);
+    let Ok(src) = fs::read_to_string(&script_path) else {
+        return;
+    };
+    let (toks, lex_diags) = jet::Lexer::lex(&src);
+    if !lex_diags.is_empty() {
+        return;
+    }
+    let Ok(prog) = jet::Parser::parse(&toks) else {
+        return;
+    };
+    let deps = jet::Jetpack::ScriptDeps::collect(&prog);
+    if deps.is_empty() {
+        return;
+    }
+    let manifest_path = cwd.join(jet::Syntax::PAYLOAD_FILE);
+    let Ok(mut raw) = fs::read_to_string(&manifest_path) else {
+        return;
+    };
+    for dep in &deps {
+        raw = jet::Manifest::add_dependency(
+            &raw,
+            &dep.name,
+            &jet::Manifest::DepSpec::Registry(dep.selector.clone()),
+        );
+    }
+    if fs::write(&manifest_path, raw).is_ok() {
+        println!(
+            "lifted {} inline dependenc{} into {}",
+            deps.len(),
+            if deps.len() == 1 { "y" } else { "ies" },
+            jet::Syntax::PAYLOAD_FILE
+        );
+    }
+}
+
+/// `jet lock <script.jet>` — U11: resolve a manifest-less script's inline
+/// `use pkg#version;` deps and write the `<script.jet>.lock` sidecar,
+/// keyed by the script's own content hash (edit the script, the lock goes
+/// stale — the same "locks by file-content hash" contract `jet run` uses).
+fn run_lock(script: Option<&str>, mode: OutputMode) {
+    let Some(raw_arg) = script else {
+        eprintln!("error: `jet lock` needs a script path, e.g. `jet lock stats.jet`");
+        exit(ExitCodes::USER_ERROR);
+    };
+    let file = resolve_source_path(raw_arg);
+    let script_path = Path::new(&file);
+    let script_dir = script_path.parent().unwrap_or(Path::new("."));
+
+    if jet::Loader::find_manifest_root(script_dir).is_some() {
+        eprintln!(
+            "error: `{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
+            jet::Syntax::PAYLOAD_FILE
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let src = match fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: couldn't read `{file}`: {e}");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let (toks, lex_diags) = jet::Lexer::lex(&src);
+    if !lex_diags.is_empty() {
+        report_problems(mode, &file, &src, &lex_diags);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let prog = match jet::Parser::parse(&toks) {
+        Ok(p) => p,
+        Err(diags) => {
+            report_problems(mode, &file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+
+    let deps = jet::Jetpack::ScriptDeps::collect(&prog);
+    let mut locked = Vec::new();
+    for dep in &deps {
+        match jet::Jetpack::ScriptDeps::resolve(dep, script_dir) {
+            Ok(r) => locked.push(jet::Jetpack::ScriptLock::LockedInlineDep {
+                name: r.name,
+                selector: r.selector,
+                resolved: r.resolved_version,
+                content_hash: r.content_hash,
+            }),
+            Err(reason) => {
+                let d = jet::Jetpack::ScriptDeps::e1253(dep, &reason);
+                report_problems(mode, &file, &src, &[d]);
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    }
+
+    let script_hash = jet::Jetpack::ScriptDeps::file_hash(script_path).unwrap_or_default();
+    let lock = jet::Jetpack::ScriptLock::ScriptLockFile {
+        version: jet::Jetpack::ScriptLock::SCRIPT_LOCK_VERSION,
+        script_hash,
+        deps: locked,
+    };
+    match jet::Jetpack::ScriptLock::write(script_path, &lock) {
+        Ok(()) => {
+            println!(
+                "wrote {}",
+                jet::Jetpack::ScriptLock::sidecar_path(script_path).display()
+            );
+            exit(ExitCodes::OK);
+        }
+        Err(e) => {
+            eprintln!("error: couldn't write the lock sidecar: {e}");
             exit(ExitCodes::USER_ERROR);
         }
     }

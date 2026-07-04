@@ -72,9 +72,14 @@ pub fn compile_bundle_path_opts_dbg(
     if timing {
         timer.lap("sema");
     }
+    // U11 (D-JPK-SCRIPTDEP1=A) and any other loader-time teaching diagnostic
+    // (`bundle.parse_teaching`) ride the same errors/lints split as sema's —
+    // `check_file` already does this for `jet check`/LSP; `jet run`/`build`
+    // was dropping them on the floor (parse_teaching had no active producer
+    // before U11's L0203, so the gap went unnoticed).
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for d in diags {
+    for d in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(diags) {
         match d.severity {
             Severity::Error => errors.push(d),
             Severity::Lint => lints.push(d),
@@ -353,9 +358,11 @@ pub fn compile_bundle_path_with_entry(
     swap_entry_point(&mut bundle, entry_fn);
     let mode = crate::Sema::CompileMode::Run;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    // U11 (D-JPK-SCRIPTDEP1=A): see the matching comment in
+    // `compile_bundle_path_opts_dbg` — `parse_teaching` rides along here too.
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for d in diags {
+    for d in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(diags) {
         match d.severity {
             Severity::Error => errors.push(d),
             Severity::Lint => lints.push(d),

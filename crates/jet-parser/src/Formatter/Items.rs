@@ -929,6 +929,11 @@ impl<'a> Fmt<'a> {
             }
             ImportKind::Module(name, _) => {
                 self.write(name);
+                // U11 (D-JPK-SCRIPTDEP1=A): `use pkg#version;` inline dep.
+                if let Some(v) = &imp.inline_version {
+                    self.write("#");
+                    self.write(&v.text);
+                }
                 let default_alias = name.rsplit('.').next().unwrap_or(name.as_str());
                 // A dotted `use a.b` with no `as` parses as an *unqualified*
                 // item import (`b` from `a`), not a module import. So for a

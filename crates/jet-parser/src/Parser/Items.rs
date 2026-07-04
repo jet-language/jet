@@ -39,6 +39,7 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end),
                     is_pub: false,
                     is_package_pub: false,
+                    inline_version: None,
                 })
             }
             TokKind::Ident(_) => {
@@ -98,6 +99,7 @@ impl<'a> Parser<'a> {
                                 span: Span::new(start.start, end),
                                 is_pub: false,
                                 is_package_pub: false,
+                                inline_version: None,
                             })
                         }
                         TokKind::Star => {
@@ -137,6 +139,7 @@ impl<'a> Parser<'a> {
                                     span: Span::new(start.start, end),
                                     is_pub: false,
                                     is_package_pub: false,
+                                    inline_version: None,
                                 })
                             } else {
                                 // use core.fs as fs — Module path with dots
@@ -161,6 +164,16 @@ impl<'a> Parser<'a> {
                             Some(self.peek().span),
                         ));
                     }
+                    // U11 (D-JPK-SCRIPTDEP1=A): `use pkg#version;` — an inline
+                    // script dependency. Only the bare (no-dot) module-name
+                    // form takes a version; `use core.fs#1.0;` is nonsensical
+                    // and isn't accepted here (the stray `#` falls through to
+                    // a normal "expected `;`" parse error).
+                    let inline_version = if matches!(self.peek().kind, TokKind::Hash) {
+                        Some(self.inline_version()?)
+                    } else {
+                        None
+                    };
                     let (alias, alias_span) = if matches!(
                         &self.peek().kind,
                         TokKind::Ident(n) if n == Syntax::KW_AS
@@ -180,6 +193,7 @@ impl<'a> Parser<'a> {
                         span: Span::new(start.start, end),
                         is_pub: false,
                         is_package_pub: false,
+                        inline_version,
                     })
                 }
             }
@@ -258,6 +272,60 @@ impl<'a> Parser<'a> {
             span: Span::new(start.start, end),
             is_pub: false,
             is_package_pub: false,
+            // A dotted module path (`use core.fs;`) never takes U11's `#version`
+            // — that's the single-segment `pkg` form only.
+            inline_version: None,
+        })
+    }
+
+    /// U11 (D-JPK-SCRIPTDEP1=A): parse `#<version>` on `use pkg#version;` — a
+    /// dotted numeric selector (`1`, `1.4`, `1.4.2`, …). `#` is already
+    /// `TokKind::Hash` (the same token `#Marker`/`[T#N]` use); the selector
+    /// itself isn't its own lexer token, so it's rebuilt segment-by-segment
+    /// from the `Int`/`Float` tokens the number lexer already produced
+    /// (`1.4.2` lexes as `Float(1.4)`, `Dot`, `Int(2)`). One known edge case:
+    /// a two-segment run with a trailing zero (`1.10`) collapses through
+    /// `f64` to the same bits as `1.1` — indistinguishable once lexed. Real
+    /// versions rarely hinge on that, so it's an accepted limitation rather
+    /// than new lexer machinery.
+    fn inline_version(&mut self) -> Result<crate::AST::InlineVersion, Diagnostic> {
+        let hash_span = self.bump().span; // consume `#`
+        let mut text = String::new();
+        let mut end;
+        match self.peek().kind.clone() {
+            TokKind::Int(n) => {
+                text.push_str(&n.to_string());
+                end = self.bump().span.end;
+            }
+            TokKind::Float(f) => {
+                text.push_str(&format_version_segment(f));
+                end = self.bump().span.end;
+            }
+            _ => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "expected a version number after `#`".to_string(),
+                    "`use pkg#version;` (U11) pins an inline script dependency to a version."
+                        .to_string(),
+                    "write digits after `#`, e.g. `use textkit#1.4;` or `use textkit#1.4.2;`"
+                        .to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        }
+        while matches!(self.peek().kind, TokKind::Dot) && matches!(self.peek2().kind, TokKind::Int(_))
+        {
+            self.bump(); // `.`
+            let TokKind::Int(n) = self.peek().kind else {
+                unreachable!("guarded by the match above")
+            };
+            text.push('.');
+            text.push_str(&n.to_string());
+            end = self.bump().span.end;
+        }
+        Ok(crate::AST::InlineVersion {
+            text,
+            span: Span::new(hash_span.start, end),
         })
     }
 
@@ -5628,5 +5696,22 @@ impl<'a> Parser<'a> {
             body,
             span: Span::new(start, end),
         })
+    }
+}
+
+/// U11: render one `Float`-lexed version segment (`major.minor`, e.g. `1.4`,
+/// `1.0`) back to text. The lexer only ever produces this token from
+/// `digits '.' digits`, so it always has a decimal point — but
+/// `f64::to_string()` drops it for a whole-number float (`1.0.to_string()`
+/// is `"1"`), which would silently turn `use pkg#1.0;` into `1` (a different,
+/// wrong version). Force the point back on; the one still-documented edge
+/// case is a trailing zero merged into the fraction (`1.10` vs `1.1` are
+/// indistinguishable once lexed — see `Parser::inline_version`).
+fn format_version_segment(f: f64) -> String {
+    let s = f.to_string();
+    if s.contains('.') {
+        s
+    } else {
+        format!("{s}.0")
     }
 }

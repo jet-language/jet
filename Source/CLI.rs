@@ -140,7 +140,12 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "init",
-        summary: "create a pkg.jet here, pinning the running jet's channel",
+        summary: "create a pkg.jet here, pinning the running jet's channel (add <script.jet> to lift its inline deps)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "lock",
+        summary: "resolve a manifest-less script's inline `use pkg#version;` deps and write its .lock sidecar (D-JPK-SCRIPTDEP1)",
         headline: false,
     },
     CommandSpec {

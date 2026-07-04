@@ -1686,6 +1686,44 @@ bare form) exits 0 — absence of facts is not a failure.
 mechanism (effects, layout, derive expansion) is one row, never a new
 subcommand or a new flag (I8).
 
+## Inline script dependencies — `use pkg#version` (D-JPK-SCRIPTDEP1=A, U11)
+
+A bare `.jet` script — no `pkg.jet` — may open with an inline dependency
+instead of a manifest:
+
+```jet
+// stats.jet
+use textkit#1.4
+
+fn run() {
+    print(textkit.wrap(input(), width: 72))
+}
+```
+
+`pkg#version` is the `#` directive plane's version-selector form
+(D-MARKER-FAMILY1); the version is a dotted numeric selector (`1.4`, `1.4.2`),
+never a range operator. Only a single-segment module name takes one — `use
+core.fs#1.0` is nonsensical and isn't accepted.
+
+`jet run stats.jet` collects every inline ref from the entry file, resolves
+each, and wires the resolved directory into module search exactly like a
+hangar-realized `library` (U17) — the rest of import resolution is
+unchanged. Resolution is a local directory lookup only (no network, no
+code execution): a script's own `.jet/inline-deps/<name>/<version>/` copy
+(the `.jet/` managed-folder convention), or a version matching one there by
+dotted prefix (`1.4` matches `1.4.2`). Consuming the public Jet package
+registry by name isn't wired yet (E1207/M12.2 — publishing today writes only
+the sparse index line, never a fetchable source tree); an inline ref that
+resolves nowhere is E1253.
+
+A loose selector (`1.4` rather than an exact `1.4.2`) is fine to write —
+rung 0 stays magic — but is L0203: nothing pins it until `jet lock stats.jet`
+writes a `stats.jet.lock` sidecar (`script_hash` + each dep's resolved
+version and content hash, keyed by the script's own file-content hash so an
+edit goes stale). `jet init stats.jet` lifts the inline refs into a freshly
+written `pkg.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
+(vision.md's ladder) without discarding what it already declared.
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged

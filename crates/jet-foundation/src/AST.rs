@@ -449,6 +449,22 @@ pub struct ImportDecl {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) use …` — package-scoped re-export.
     pub is_package_pub: bool,
+    /// U11 (D-JPK-SCRIPTDEP1=A): the `#version` selector on `use pkg#version;` —
+    /// an inline script dependency. Only ever `Some` for a single-segment
+    /// `ImportKind::Module` (no dotted path); a manifest-less entry file's
+    /// `Loader` pass resolves these (crate::Jetpack::ScriptDeps). `None` for
+    /// every ordinary import, and ignored (kept for round-trip only) once a
+    /// project has a `pkg.jet` — deps then come from the manifest.
+    pub inline_version: Option<InlineVersion>,
+}
+
+/// The `#version` payload of `use pkg#version;` (U11). `text` is the exact
+/// selector as written (e.g. `"1.4"`, `"1.4.2"`) — never renormalized, so
+/// `jet fmt` round-trips it byte-for-byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineVersion {
+    pub text: String,
+    pub span: Span,
 }
 
 impl ImportDecl {

@@ -1852,3 +1852,25 @@ fn fmt_preserves_web_partition_markers() {
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "web partition marker fmt must be idempotent");
 }
+
+#[test]
+fn fmt_preserves_inline_dep_version() {
+    // U11 (D-JPK-SCRIPTDEP1=A): `use pkg#version;` — the version selector
+    // must round-trip (fmt_import only re-emits it if
+    // `ImportDecl::inline_version` survives the parse → fmt path). Imports
+    // don't render a trailing `;` (same as an ordinary `use core.mem`
+    // import — the canonical form drops the optional semicolon), so the
+    // no-semicolon spelling is what's already stable.
+    let src = "use textkit#1.4.2\n\nfn run() {\n    print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "inline dep version (3-part)");
+
+    // A loose two-part selector (the common rung-0 spelling) round-trips too.
+    let loose = "use textkit#1.4\n\nfn run() {\n    print(\"hi\")\n}\n";
+    assert_fmt_stable(loose, "inline dep version (loose)");
+
+    // The written-with-semicolon spelling still parses and fmt drops the
+    // redundant `;`, same as it does for every other `use` import.
+    let with_semi = "use textkit#1.4.2;\n\nfn run() {\n    print(\"hi\")\n}\n";
+    let out = jet::format_source(with_semi).expect("fmt should accept a trailing `;`");
+    assert_eq!(out, src, "fmt should canonicalize away the optional `;`");
+}
