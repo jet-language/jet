@@ -541,9 +541,15 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     let project_dir = std::env::current_dir().unwrap_or_default();
 
     // U16: a project's own `env.*` always wins; the foreign-flake fallback
-    // only kicks in when it declares none, or when `--flake` forces it.
+    // only kicks in when it declares none, or when `--flake` forces it. An
+    // explicit `-p` request is an active signal of intent and must never be
+    // silently discarded by the passive auto-detect fallback — only
+    // `--flake` (an equally explicit signal) can still force the foreign
+    // shell over ad-hoc packages.
     let foreign = foreign_flake_path(&project_dir);
-    if parsed.flags.flake || (foreign.is_some() && !project_declares_env(&project_dir)) {
+    let auto_detect_wants_foreign =
+        foreign.is_some() && !project_declares_env(&project_dir) && parsed.flags.packages.is_empty();
+    if parsed.flags.flake || auto_detect_wants_foreign {
         let Some(flake_path) = foreign else {
             theme.error(
                 "no foreign flake here",
@@ -696,17 +702,33 @@ fn enter_foreign_flake(theme: &Theme, project_dir: &Path, flake_path: &Path, par
     if parsed.flags.pure {
         args.push(Syntax::ENV_FLAG_PURE.to_string());
     }
-    if let Some(inner) = &parsed.command {
-        if !inner.is_empty() {
-            args.push("--command".to_string());
-            args.extend(inner.iter().cloned());
+    // A foreign flake's devShell is a real Nix shell underneath, but it must
+    // never be indistinguishable from a bare `nix develop` — brand the
+    // interactive case the same way the native path does (Shell::enter),
+    // so `jet env` always looks like `jet env`. A one-off `-- cmd` is
+    // non-interactive and needs no prompt.
+    let branded = if parsed.command.as_ref().is_none_or(|c| c.is_empty()) {
+        let b = Shell::branded_shell(ShellKind::detect(), Syntax::JETPACK_PROMPT_LABEL);
+        args.push("--command".to_string());
+        args.extend(b.command_tail.clone());
+        Some(b)
+    } else {
+        args.push("--command".to_string());
+        args.extend(parsed.command.clone().unwrap_or_default());
+        None
+    };
+    let mut cmd = std::process::Command::new("nix");
+    cmd.arg("develop").args(&args);
+    if let Some(b) = &branded {
+        for (k, v) in &b.env_vars {
+            cmd.env(k, v);
         }
     }
-    match std::process::Command::new("nix")
-        .arg("develop")
-        .args(&args)
-        .status()
-    {
+    let result = cmd.status();
+    if let Some(b) = &branded {
+        b.cleanup();
+    }
+    match result {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {
             theme.error(

@@ -85,13 +85,24 @@ fn dev_root() -> PathBuf {
     home.join(".local").join("state").join("jet")
 }
 
-/// True if `dir` exists and is writable, or can be created.
+/// True if `dir`'s store subdir exists (or can be created) AND is actually
+/// writable by this process. `create_dir_all` alone is not a sufficient probe:
+/// it no-ops successfully on a directory that already exists, even one owned
+/// by another user with no write access for us (e.g. a root-owned `/etc/jet`
+/// left over from a prior install) — so a real write probe is required after
+/// the directory is confirmed to exist.
 fn can_write(dir: &std::path::Path) -> bool {
-    if dir.exists() {
-        // Probe by trying to create the store subdir.
-        fs::create_dir_all(dir.join(HANGAR_SUBDIR)).is_ok()
-    } else {
-        fs::create_dir_all(dir.join(HANGAR_SUBDIR)).is_ok()
+    let hangar = dir.join(HANGAR_SUBDIR);
+    if fs::create_dir_all(&hangar).is_err() {
+        return false;
+    }
+    let probe = hangar.join(format!(".jetpack-write-probe-{}", std::process::id()));
+    match fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
     }
 }
 

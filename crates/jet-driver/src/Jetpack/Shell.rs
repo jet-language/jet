@@ -130,6 +130,74 @@ pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
     code
 }
 
+/// The branded interactive-shell command a caller with its own outer process
+/// (e.g. `nix develop`'s foreign-flake fallback) can append after its own
+/// `--command` flag, so a shell entered through a path other than
+/// [`enter`] still gets the unmistakable jetpack prompt rather than
+/// silently inheriting the user's plain shell prompt. `env_vars` must be set
+/// on the OUTER command (e.g. `nix develop`'s `Command`) so they reach the
+/// inner shell; `cleanup` must be called once the caller's blocking
+/// `.status()` call returns, mirroring how [`enter`] keeps its own scratch
+/// files alive for exactly the child's lifetime.
+pub struct BrandedShell {
+    pub command_tail: Vec<String>,
+    pub env_vars: Vec<(String, String)>,
+    cleanup_file: Option<PathBuf>,
+    cleanup_dir: Option<PathBuf>,
+}
+
+impl BrandedShell {
+    pub fn cleanup(&self) {
+        if let Some(p) = &self.cleanup_file {
+            let _ = std::fs::remove_file(p);
+        }
+        if let Some(p) = &self.cleanup_dir {
+            let _ = std::fs::remove_dir_all(p);
+        }
+    }
+}
+
+/// Build a [`BrandedShell`] for `kind`, labeling the prompt with `label`.
+pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
+    match kind {
+        ShellKind::Bash => {
+            let rc = write_temp("jetpack-bashrc", &bash_rc(label));
+            BrandedShell {
+                command_tail: vec![
+                    "bash".to_string(),
+                    "--rcfile".to_string(),
+                    rc.display().to_string(),
+                    "-i".to_string(),
+                ],
+                env_vars: Vec::new(),
+                cleanup_file: Some(rc),
+                cleanup_dir: None,
+            }
+        }
+        ShellKind::Zsh => {
+            let dir = write_temp_dir("jetpack-zdotdir");
+            std::fs::write(dir.join(".zshrc"), zsh_rc(label)).ok();
+            BrandedShell {
+                command_tail: vec!["zsh".to_string(), "-i".to_string()],
+                env_vars: vec![("ZDOTDIR".to_string(), dir.display().to_string())],
+                cleanup_file: None,
+                cleanup_dir: Some(dir),
+            }
+        }
+        ShellKind::Fish => BrandedShell {
+            command_tail: vec![
+                "fish".to_string(),
+                "-C".to_string(),
+                fish_init(label),
+                "-i".to_string(),
+            ],
+            env_vars: Vec::new(),
+            cleanup_file: None,
+            cleanup_dir: None,
+        },
+    }
+}
+
 // ── prompt / rc generation ───────────────────────────────────────────────
 
 fn bash_rc(label: &str) -> String {
