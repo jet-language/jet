@@ -53,13 +53,43 @@ function toast(text, err = false) {
 const UNDOABLE = { 'card/delete': 'Card deleted', 'clearance': 'Decision recorded', 'clearance/batch': 'Decisions recorded', 'card/activate': 'Greenlit', 'idea/delete': 'Idea dismissed', 'milestone/delete': 'Milestone deleted' };
 
 const api = async (route, payload) => {
-  const r = await fetch('/api/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
+  let r;
+  try {
+    r = await fetch('/api/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
+  } catch {
+    toast('server unreachable — action NOT saved', true);
+    throw new Error('offline');
+  }
+  if (r.status === 401) { showUnlock(); throw new Error('unauthorized'); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.ok === false) { toast(j.message || `request failed: ${route}`, true); throw new Error(j.message || route); }
   if (j.state) applyState(j.state, { own: true });
   if (UNDOABLE[route] && j.state) undoToast(UNDOABLE[route], j.state.meta.rev);
   return j.result;
 };
+
+// Auth expired / never set on this device → full-screen unlock, never a
+// silent failure.
+let unlockShown = false;
+function showUnlock() {
+  if (unlockShown) return;
+  unlockShown = true;
+  const box = el(`<div class="unlock" role="dialog" aria-label="Unlock">
+      <div class="unlock__card">
+        <div class="unlock__mark">TOWER<b>.</b></div>
+        <div class="unlock__t">This device isn't unlocked — actions are being rejected.<br>Paste the access key (<code>auth.token</code> in <code>.tower/config.json</code>).</div>
+        <input class="unlock__in" placeholder="access key" autocomplete="off">
+        <button class="btn btn--red" id="unlock-go">Unlock</button>
+      </div></div>`);
+  document.body.appendChild(box);
+  const go = () => {
+    const k = $('.unlock__in', box).value.trim();
+    if (k) location.href = '/?key=' + encodeURIComponent(k) + location.hash;
+  };
+  $('#unlock-go', box).addEventListener('click', go);
+  $('.unlock__in', box).addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  $('.unlock__in', box).focus();
+}
 
 // ---- live state: SSE first, gentle polling as fallback -----------------------
 // The page must NEVER yank the DOM out from under the owner: passive updates
@@ -80,6 +110,12 @@ function uiBusy() {
 
 function applyState(next, { own = false } = {}) {
   if (!next) return;
+  // server was upgraded/restarted under us → reload for fresh UI code, but
+  // only when the owner isn't mid-anything
+  if (S?.boot && next.boot && S.boot !== next.boot) {
+    if (!uiBusy()) return location.reload();
+    pending = next; S = { ...next, boot: S.boot }; return;
+  }
   const changed = !S || next.meta.rev !== S.meta.rev;
   if (own) { S = next; renderPreservingScroll(); return; }
   if (!changed) { S = next; renderBeacon(); return; }          // nothing new — cheap refresh only
@@ -125,7 +161,11 @@ function scheduleFallbackPoll() {
 }
 
 async function refresh() {
-  try { applyState(await (await fetch('/api/state')).json()); } catch { /* offline */ }
+  try {
+    const r = await fetch('/api/state');
+    if (r.status === 401) return showUnlock();
+    applyState(await r.json());
+  } catch { /* offline */ }
 }
 async function refreshRoster() {
   try { ROSTER = await (await fetch('/api/agents')).json(); } catch { ROSTER = []; }
@@ -494,8 +534,16 @@ function threadPane(name, thread) {
   const send = async (launch = false) => {
     const text = ta.value.trim(); if (!text) return;
     ta.value = '';
-    if (launch) { await api('agent/launch', { agent: name, text }); toast(`started ${name} — reply lands in this thread`); }
-    else { await api('message/send', { from: 'owner', to: name, text }); }
+    try {
+      if (launch) { await api('agent/launch', { agent: name, text }); toast(`started ${name} — reply lands in this thread`); }
+      else { await api('message/send', { from: 'owner', to: name, text }); }
+    } catch (e) {
+      // never eat the owner's words: restore the draft + show it in-thread
+      ta.value = text;
+      const log = $('.thread__log', pane);
+      log?.appendChild(el(`<div class="thread__fail">✕ not sent — ${esc(e.message || 'failed')}. Your draft is back in the box.</div>`));
+      if (log) log.scrollTop = log.scrollHeight;
+    }
   };
   $('[data-send]', pane).addEventListener('click', () => send(false));
   $('[data-launch]', pane)?.addEventListener('click', () => send(true));

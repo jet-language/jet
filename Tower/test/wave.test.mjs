@@ -96,3 +96,23 @@ test('SSE stream delivers state on mutation', async () => {
   reader.cancel();
   assert.ok(buf.includes('sse check'), 'mutation broadcast arrived over SSE');
 });
+
+// Non-localhost enforcement: reach the same server via the machine's real IP.
+test('auth: remote requests 401 without key, unlock page for browsers, boot in state', async (t) => {
+  const { networkInterfaces } = await import('node:os');
+  const ip = Object.values(networkInterfaces()).flat().find(i => i && !i.internal && i.family === 'IPv4')?.address;
+  if (!ip) return t.skip('no external interface');
+  const base = `http://${ip}:${PORT}`;
+  const r1 = await fetch(`${base}/api/state`);
+  assert.equal(r1.status, 401);
+  const r2 = await fetch(`${base}/`, { headers: { accept: 'text/html' } });
+  assert.equal(r2.status, 401);
+  assert.match(await r2.text(), /Unlock/);
+  const r3 = await fetch(`${base}/api/state`, { headers: { authorization: `Bearer ${store.config.auth.token}` } });
+  assert.equal(r3.status, 200);
+  const s = await r3.json();
+  assert.ok(s.boot?.length > 4, 'boot id present');
+  const r4 = await fetch(`${base}/?key=${store.config.auth.token}`, { redirect: 'manual' });
+  assert.equal(r4.status, 302);
+  assert.match(r4.headers.get('set-cookie') || '', /tower=/);
+});

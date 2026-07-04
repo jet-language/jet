@@ -1,7 +1,7 @@
 // Tower service worker: static-shell cache + payload-less push.
 // A push carries no body; we fetch fresh state and compose the notification
 // locally, so nothing sensitive transits the push service.
-const SHELL = 'tower-shell-v2';
+const SHELL = 'tower-shell-v3';
 const ASSETS = ['/', '/tower.css', '/tower.js', '/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {

@@ -71,10 +71,14 @@ function agentRoster(store) {
 }
 
 // ---- SSE live stream --------------------------------------------------------
+// BOOT identifies this server process; clients reload (when idle) if it
+// changes, so a server upgrade never leaves stale UI code running.
+const BOOT = randomBytes(6).toString('base64url');
+const projected = (store) => ({ ...store.project(), boot: BOOT });
 const sseClients = new Set();
 function broadcast(store) {
   if (!sseClients.size) return;
-  const data = `data: ${JSON.stringify(store.project())}\n\n`;
+  const data = `data: ${JSON.stringify(projected(store))}\n\n`;
   for (const res of [...sseClients]) { try { res.write(`event: state\n${data}`); } catch { sseClients.delete(res); } }
 }
 
@@ -191,26 +195,38 @@ const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409
 
 // ---- auth ----------------------------------------------------------------------
 const PUBLIC = new Set(['/manifest.webmanifest', '/sw.js', '/icon.svg']);
+const COOKIE = (token) => `tower=${token}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`;
 function isLocal(req) {
   const a = req.socket.remoteAddress || '';
   return a === '127.0.0.1' || a === '::1' || a.startsWith('::ffff:127.');
 }
+// A locked-out navigation gets a real unlock page, never raw JSON.
+const UNLOCK_HTML = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tower — unlock</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#060608;color:#f4f3f5;font:15px/1.5 system-ui">
+<form method="GET" action="/" style="display:grid;gap:12px;width:min(340px,90vw);text-align:center">
+<div style="font:700 22px/1 sans-serif;letter-spacing:.06em">TOWER<span style="color:#ff2e4d">.</span></div>
+<div style="color:#9d9ca8;font-size:13px">This device isn't unlocked. Paste the access key<br>(<code>auth.token</code> in <code>.tower/config.json</code>).</div>
+<input name="key" autofocus placeholder="access key" style="padding:11px;border-radius:8px;border:1px solid #343444;background:#0e0e12;color:#f4f3f5;text-align:center">
+<button style="padding:11px;border-radius:8px;border:0;background:#b3122d;color:#fff;font-weight:600;cursor:pointer">Unlock</button>
+</form></body>`;
 function authed(req, res, token, url) {
   if (!token || isLocal(req) || PUBLIC.has(url.pathname)) return true;
   const key = url.searchParams.get('key');
   if (key === token) {
     // first visit with ?key= → set cookie, redirect to clean URL
-    res.writeHead(302, {
-      'set-cookie': `tower=${token}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`,
-      location: url.pathname + url.hash,
-    });
+    res.writeHead(302, { 'set-cookie': COOKIE(token), location: url.pathname + url.hash });
     res.end();
     return 'redirected';
   }
   const cookie = /(?:^|;\s*)tower=([^;]+)/.exec(req.headers.cookie || '')?.[1];
   const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
   if (cookie === token || bearer === token) return true;
-  send(res, 401, { error: 'E_AUTH', message: 'unauthorized — open the board with ?key=<token> (see .tower/config.json auth.token)' });
+  if (req.method === 'GET' && !url.pathname.startsWith('/api/') && (req.headers.accept || '').includes('text/html')) {
+    res.writeHead(401, { 'content-type': 'text/html' });
+    res.end(UNLOCK_HTML);
+    return false;
+  }
+  send(res, 401, { error: 'E_AUTH', message: 'unauthorized — unlock this device with the access key (auth.token in .tower/config.json)' });
   return false;
 }
 
@@ -247,7 +263,7 @@ export function serve(store, port = 7878, open = false) {
       if (ok !== true) return;
 
       // ---- reads ----
-      if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, store.project());
+      if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, projected(store));
       if (req.method === 'GET' && url.pathname === '/api/agents') return send(res, 200, agentRoster(store));
       if (req.method === 'GET' && url.pathname === '/api/push/key') return send(res, 200, { key: store.config.push.publicKey, subscribed: store.config.push.subscriptions.length });
       if (req.method === 'GET' && url.pathname === '/api/events') {
@@ -332,7 +348,7 @@ export function serve(store, port = 7878, open = false) {
         store.mutate((s) => db.sendMessage(s, { from: 'owner', to: p.agent, text: p.text, cardId: p.cardId }));
         launch(store, p.agent, kind, cmd, String(p.text));
         broadcast(store);
-        return send(res, 200, { ok: true, state: store.project() });
+        return send(res, 200, { ok: true, state: projected(store) });
       }
       if (req.method === 'POST' && url.pathname === '/api/undo') {
         const p = await jsonBody(req);
@@ -343,7 +359,7 @@ export function serve(store, port = 7878, open = false) {
         if (!prev) return send(res, 500, { error: 'E_INTERNAL', message: 'backup unreadable' });
         store.restore(prev, { expectRev: p.expectRev });
         broadcast(store);
-        return send(res, 200, { ok: true, state: store.project() });
+        return send(res, 200, { ok: true, state: projected(store) });
       }
       if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
         const name = url.pathname.slice(5);
@@ -361,7 +377,7 @@ export function serve(store, port = 7878, open = false) {
         if (name === 'card/activate') queueNotify(store, 'cards', { num: result.num });
         if (name === 'decision/add' || name === 'question/add') pushOwner(store, name);
         broadcast(store);
-        return send(res, 200, { ok: true, result, state: store.project() });
+        return send(res, 200, { ok: true, result, state: projected(store) });
       }
       if (req.method === 'GET') return serveStatic(req, res);
       res.writeHead(405); res.end();
