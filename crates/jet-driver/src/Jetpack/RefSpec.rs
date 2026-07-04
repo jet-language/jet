@@ -149,6 +149,17 @@ impl SourceTable {
             self.named.entry(name).or_insert(entry);
         }
     }
+
+    /// One `name=upstream@provider` line per declared source, in name order
+    /// (the `BTreeMap` is already sorted). U19: folded into the trust-gate's
+    /// env-definition hash, so re-pointing a named source (even with an
+    /// unchanged package list) counts as a change and re-prompts.
+    pub fn trust_lines(&self) -> Vec<String> {
+        self.named
+            .iter()
+            .map(|(name, e)| format!("{name}={}@{:?}", e.upstream, e.via))
+            .collect()
+    }
 }
 
 /// A classified ref. `package` is the part after the first `:` — an attr name

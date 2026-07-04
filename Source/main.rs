@@ -752,6 +752,7 @@ fn main() {
             | "bind"
             | "lsp"
             | "store"
+            | "config"
             | "update"
             | "fetch"
             | "publish"
@@ -958,6 +959,16 @@ fn main() {
                 &raw,
             ));
         }
+        "config" => {
+            // U19: `jet config trust add/list/remove` manages the env/dev
+            // trust store. D-JPK-DISPATCH1=B: dispatched to jetpack, which
+            // owns the trust store (`~/.jet/trust`) alongside env realization.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "config",
+                &raw,
+            ));
+        }
         "repl" => {
             // E2-M18: interactive REPL (D-REPL1=A, D-REPL3=A).
             let project = raw
@@ -975,6 +986,26 @@ fn main() {
             exit(ExitCodes::USER_ERROR);
         }
         "dev" => {
+            // U19 (project-level `jetpack dev`, card c9jetpackgates): bare
+            // `jet dev` with no file argument is a DIFFERENT command from the
+            // file-scoped watch loop below — it realizes the project's
+            // declared env, trust-gates entry, waits for services (U12
+            // no-op today), then runs `fn dev()`/`fn run()`. D-JPK-DISPATCH1=B:
+            // dispatched to the jetpack engine exactly like `env`/`push`,
+            // never linked in-process, so the file-scoped loop keeps working
+            // even with jetpack deleted.
+            if args.get(1).is_none() {
+                let mut fwd = raw.clone();
+                if let Some(pos) = fwd.iter().position(|a| a == "dev") {
+                    fwd.remove(pos);
+                }
+                fwd.insert(0, "dev".to_string());
+                exit(EngineDispatch::dispatch(
+                    jet::Syntax::JETPACK_BINARY_NAME,
+                    "dev",
+                    &fwd,
+                ));
+            }
             // E2-M4 (D-DEV4): the watch/interpret loop. Re-check and re-run the
             // entry file on every save, streaming output, for sub-200ms
             // feedback. The interpreter is a dev convenience only — `jet build`/

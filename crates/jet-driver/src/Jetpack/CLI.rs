@@ -10,6 +10,7 @@ use super::Provider::{self, ProviderError};
 use super::RefSpec::{self, ProviderKind};
 use super::Shell::{self, Env, ShellKind};
 use super::Store::{self, Roots};
+use super::Trust;
 use super::{EnvFile, ModuleEval, RefSpec::RefError, WorkspaceFile, WorkspaceLock};
 use crate::Syntax;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,9 @@ struct Flags {
     no_color: bool,
     fixtures: Option<PathBuf>,
     offline: bool,
+    /// U19: one-shot bypass of the env/dev trust gate (`--trust`). Never
+    /// persists a grant — unlike accepting the interactive prompt.
+    trust: bool,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -34,6 +38,7 @@ fn parse_args(args: &[String]) -> Parsed {
         no_color: false,
         fixtures: None,
         offline: false,
+        trust: false,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -47,6 +52,7 @@ fn parse_args(args: &[String]) -> Parsed {
         match a.as_str() {
             "--no-color" => flags.no_color = true,
             "--offline" => flags.offline = true,
+            a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             "--fixtures" => {
                 i += 1;
                 if let Some(dir) = args.get(i) {
@@ -76,6 +82,8 @@ pub fn main(args: Vec<String>) -> i32 {
     match verb.as_str() {
         "run" => cmd_run(&theme, &parsed),
         "enter" => cmd_enter(&theme, &parsed),
+        v if v == Syntax::DEV_SUBCOMMAND => cmd_dev(&theme, &parsed),
+        v if v == Syntax::CONFIG_SUBCOMMAND => cmd_config(&theme, &parsed),
         "build" => cmd_build(&theme, &parsed),
         "list" => cmd_list(&theme),
         "hangar" => cmd_hangar(&theme, &parsed),
@@ -504,6 +512,22 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
+
+    // U19: `jet env` never runs a project function (the invariant this card
+    // confirms), but it DOES realize the project's own declared packages —
+    // first entry to a repo whose env is trust-sensitive gates on it.
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    if let Err(code) = Trust::gate(
+        theme,
+        &Trust::store_path(),
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+
     let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
         return 1;
     };
@@ -511,6 +535,217 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     match &parsed.command {
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
         _ => Shell::enter(theme, &env, ShellKind::detect()),
+    }
+}
+
+/// `jetpack dev` — U19 project-level dev (distinct from the already-shipped
+/// `jet dev <file.jet>` file-watch interpreter loop, D-DEV4, which this never
+/// touches). Realizes the project's declared env — today `load_project_plan`
+/// already merges every `env.*` contribution into one plan, which is
+/// `env(base + env.dev)` for the common case of a project that only declares
+/// `module env.dev { … }` — gates on trust, waits for services (U12 is
+/// unimplemented; see `wait_for_services_ready`), then runs the project's
+/// `fn dev()` or falls back to `fn run()` by re-invoking `jet dev <entry>`
+/// inside the composed env. Running Jet source is the compiler's job, never
+/// jetpack's (D-JPK-DISPATCH1) — this shells out to the sibling `jet` binary
+/// exactly the way `-- cmd` already shells out to an arbitrary command.
+fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
+    let roots = Store::resolve();
+    if roots.dev_mode {
+        theme.detail(&theme.gray(&format!(
+            "dev mode: using {} (no write access to {})",
+            roots.root.display(),
+            "/etc/jet"
+        )));
+    }
+
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let entry = find_project_entry(&project_dir);
+    if !has_dev_or_run_entry(&entry) {
+        theme.error_coded(
+            "E1254",
+            "this project has no `jet dev` entry",
+            &format!(
+                "`jet dev` runs the entry file's top-level `fn dev()` if it defines one, else \
+                 `fn run()` (U19); `{}` defines neither",
+                entry.display()
+            ),
+            "add `fn dev() { … }` (a custom dev command) or `fn run() { … }` (the default) to the entry file.",
+        );
+        return 2;
+    }
+
+    let plan = match load_project_plan(theme) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+
+    if let Err(code) = Trust::gate(
+        theme,
+        &Trust::store_path(),
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        parsed.flags.trust,
+    ) {
+        return code;
+    }
+
+    let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
+        return 1;
+    };
+
+    if let Err(code) = wait_for_services_ready(&env) {
+        return code;
+    }
+
+    theme.status(&format!("running {}", theme.bold(&entry.display().to_string())));
+    let mut cmd = vec![
+        find_jet_binary(),
+        Syntax::DEV_SUBCOMMAND.to_string(),
+        entry.to_string_lossy().into_owned(),
+    ];
+    // Any leftover positional token (e.g. `--watch=off`) is a flag `jet dev
+    // <file>` itself understands — bare `jetpack dev` takes no file argument
+    // of its own, so everything here is pass-through.
+    cmd.extend(parsed.positional.iter().cloned());
+    Shell::run_command(&env, &cmd)
+}
+
+/// U12 (supervised services) is unimplemented — this is a deliberate no-op,
+/// not a fake "waiting for services…" message. It takes the composed `Env` so
+/// the day U12 ships, this gains a real health-check loop against the
+/// project's `services:` and gates on it right here — the one call site
+/// `jetpack dev` already runs before starting the project — with no change
+/// needed at the call site itself.
+fn wait_for_services_ready(_env: &Env) -> Result<(), i32> {
+    Ok(())
+}
+
+/// The sibling `jet` binary next to the running `jetpack` process, falling
+/// back to a bare PATH lookup. Mirrors `Source/EngineDispatch.rs`'s
+/// same-directory-then-PATH search in the other direction; jetpack never
+/// links the compiler in-process (D-JPK-DISPATCH1), so this is the one place
+/// it hands off to it.
+fn find_jet_binary() -> String {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let name = if cfg!(windows) { "jet.exe" } else { "jet" };
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
+    Syntax::BINARY_NAME.to_string()
+}
+
+/// The project's entry file for the bare (no-file) `jetpack dev`: `.jet/main.jet`
+/// if present, else `main.jet` — the same convention `jet run`/`jet build` use
+/// for a bare project (`Source/main.rs`'s `find_project_entry`). Duplicated by
+/// hand rather than shared: jetpack and jet are separate binaries by design
+/// (D-JPK-DISPATCH1), so deleting either still leaves the other's own commands
+/// working.
+fn find_project_entry(project_dir: &Path) -> PathBuf {
+    let dot_jet = project_dir
+        .join(Syntax::SOURCE_ROOT_DIR)
+        .join(format!("main.{}", Syntax::FILE_EXT));
+    if dot_jet.is_file() {
+        return dot_jet;
+    }
+    project_dir.join(format!("main.{}", Syntax::FILE_EXT))
+}
+
+/// Whether `file` defines a top-level `fn dev()` or `fn run()` (U19's
+/// dev-with-fallback rule, E1254 otherwise). A parse failure just means "no"
+/// here — the real diagnostics surface a moment later when the compiler
+/// actually loads the file.
+fn has_dev_or_run_entry(file: &Path) -> bool {
+    let Ok(src) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    let (toks, diags) = crate::Lexer::lex(&src);
+    if !diags.is_empty() {
+        return false;
+    }
+    let Ok(prog) = crate::Parser::parse(&toks) else {
+        return false;
+    };
+    prog.items.iter().any(|i| {
+        matches!(i, crate::AST::Item::Func(f) if f.name == "dev" || f.name == "run")
+    })
+}
+
+/// `jetpack config trust add/list/remove` (U19) — durable glob/prefix patterns
+/// that pre-authorize matching projects with no per-hash prompt at all.
+fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
+    let group = parsed.positional.first().map(String::as_str);
+    if group != Some(Syntax::CONFIG_VERB_TRUST) {
+        theme.error(
+            &format!("`jetpack config {}` isn't a command", group.unwrap_or("")),
+            "today `jetpack config` only manages the env/dev trust store.",
+            "try `jetpack config trust add <pattern>`, `list`, or `remove <pattern>`.",
+        );
+        return 2;
+    }
+    let store = Trust::store_path();
+    match parsed.positional.get(1).map(String::as_str) {
+        Some(v) if v == Syntax::CONFIG_TRUST_VERB_ADD => {
+            let Some(pattern) = parsed.positional.get(2) else {
+                theme.error(
+                    "`jetpack config trust add` needs a pattern",
+                    "a pattern pre-authorizes matching projects by path prefix/glob.",
+                    "try `jetpack config trust add ~/work/*`.",
+                );
+                return 2;
+            };
+            let added = Trust::add_pattern(&store, pattern);
+            theme.status(&if added {
+                format!("trusted: {pattern}")
+            } else {
+                format!("already trusted: {pattern}")
+            });
+            0
+        }
+        Some(v) if v == Syntax::CONFIG_TRUST_VERB_LIST => {
+            let entries = Trust::list_entries(&store);
+            if entries.is_empty() {
+                theme.status("no trust entries yet.");
+            } else {
+                for e in entries {
+                    theme.detail(&e);
+                }
+            }
+            0
+        }
+        Some(v) if v == Syntax::CONFIG_TRUST_VERB_REMOVE => {
+            let Some(pattern) = parsed.positional.get(2) else {
+                theme.error(
+                    "`jetpack config trust remove` needs a pattern",
+                    "removes a previously trusted path pattern.",
+                    "try `jetpack config trust remove ~/work/*`.",
+                );
+                return 2;
+            };
+            let removed = Trust::remove_pattern(&store, pattern);
+            theme.status(&if removed {
+                format!("removed: {pattern}")
+            } else {
+                format!("not found: {pattern}")
+            });
+            0
+        }
+        _ => {
+            theme.error(
+                "`jetpack config trust` needs a verb",
+                &format!(
+                    "the trust verbs are: {}.",
+                    Syntax::CONFIG_TRUST_VERBS.join(", ")
+                ),
+                "try `add <pattern>`, `list`, or `remove <pattern>`.",
+            );
+            2
+        }
     }
 }
 

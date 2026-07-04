@@ -31,6 +31,7 @@ pub mod Shell;
 pub mod Store;
 pub mod TOML;
 pub mod Toolchain;
+pub mod Trust;
 pub mod WorkspaceFile;
 pub mod WorkspaceLock;
 

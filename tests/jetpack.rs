@@ -364,11 +364,15 @@ fn jetpack_enter_runs_command_in_project_env() {
     // never takes an explicit ref, it always composes the env declared by the
     // project `env.jet`. The `-- cmd` form runs a one-off command in the
     // realized env, which is how we prove `enter` put the package on PATH.
-    let (_base, proj, root) = core_hello_project("enter");
+    let (base, proj, root) = core_hello_project("enter");
     let output = jetpack()
-        .args(["enter", "--no-color", "--", "hello"])
+        // U19: `enter` trust-gates a project that declares packages; `--trust`
+        // is the one-shot bypass so this test can assert on PATH composition
+        // without exercising the interactive prompt.
+        .args(["enter", "--no-color", "--trust", "--", "hello"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
         .env("PATH", "/usr/bin:/bin") // no nix on PATH
         .output()
         .unwrap();
@@ -390,11 +394,13 @@ fn jet_env_delegates_to_jetpack_enter() {
     // forwarding flags and the trailing `-- cmd`. (`jet dev` is now reserved for
     // the E2-M4 watch/interpret loop.) Running through the `jet` binary must
     // reach the same composed env.
-    let (_base, proj, root) = core_hello_project("jet-env");
+    let (base, proj, root) = core_hello_project("jet-env");
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["env", "--no-color", "--", "hello"])
+        // U19: same trust gate reached through `jet env`; `--trust` bypasses.
+        .args(["env", "--no-color", "--trust", "--", "hello"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
         .env("PATH", "/usr/bin:/bin") // no nix on PATH
         .output()
         .unwrap();

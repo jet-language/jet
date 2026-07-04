@@ -1,0 +1,269 @@
+//! U19 env/dev split + trust gate (D-JPK-DEVCOMPOSE1=D, card c9jetpackgates).
+//!
+//! Covers:
+//!   * `jet env` (`jetpack enter`) never runs a project function (regression);
+//!   * project-level `jet dev` (bare, no file — distinct from the shipped
+//!     `jet dev <file.jet>` watch loop) runs `fn dev()` after the U12 no-op
+//!     service wait;
+//!   * `jet dev` with neither `fn dev()` nor `fn run()` is E1254;
+//!   * a trust-sensitive env hitting a non-interactive path with no grant is
+//!     a clean E1255, never a hang;
+//!   * `--trust` bypasses; `jetpack config trust add` pre-authorizes.
+
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+
+/// A throwaway directory under the system temp dir, removed on drop.
+struct Scratch {
+    path: PathBuf,
+}
+
+impl Scratch {
+    fn new(tag: &str) -> Scratch {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "jpk-trust-it-{tag}-{nanos}-{:?}",
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        Scratch { path }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn jetpack() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+}
+
+fn example_fixtures() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures")
+}
+
+/// A project with no declared packages — never trust-sensitive, so these
+/// tests exercise env/dev composition and entry-fn resolution without the
+/// trust gate in the way.
+fn write_packageless_project(dir: &std::path::Path, main_src: &str) {
+    fs::write(dir.join("env.jet"), "module env.dev { }\n").unwrap();
+    fs::write(dir.join("main.jet"), main_src).unwrap();
+}
+
+/// A project that declares one real (fixture-realizable) package — trust
+/// sensitive.
+fn write_package_project(dir: &std::path::Path, main_src: &str) {
+    fs::write(
+        dir.join("env.jet"),
+        "module env.dev { packages: [nixpkgs.fastfetch] }\n",
+    )
+    .unwrap();
+    fs::write(dir.join("main.jet"), main_src).unwrap();
+}
+
+/// `jetpack enter` (`jet env`) realizes the declared env and drops into a
+/// shell / runs a one-off command — it must NEVER run a project's own
+/// `fn run()`/`fn dev()` (U19's env/dev split). Regression test: the world's
+/// only way to notice a project function ran is grep the marker it prints.
+#[test]
+fn env_enter_runs_no_project_function() {
+    let proj = Scratch::new("enter-no-fn");
+    let root = Scratch::new("enter-no-fn-root");
+    let home = Scratch::new("enter-no-fn-home");
+    write_packageless_project(
+        &proj.path,
+        "fn run() { print(\"SHOULD-NOT-RUN\"); }\n",
+    );
+    let out = jetpack()
+        .args(["enter", "--no-color", "--", "echo", "entered"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("entered"), "stdout: {stdout}");
+    assert!(
+        !stdout.contains("SHOULD-NOT-RUN"),
+        "env entry must never run a project function: {stdout}"
+    );
+}
+
+/// Bare `jetpack dev` (no file — the project-level U19 command, distinct from
+/// the already-shipped `jet dev <file.jet>` watch loop) finds the project's
+/// `main.jet`, waits for services (U12 no-op today), and runs its `fn dev()`.
+#[test]
+fn project_dev_runs_fn_dev_after_service_wait() {
+    let proj = Scratch::new("dev-runs-fn-dev");
+    let root = Scratch::new("dev-runs-fn-dev-root");
+    let home = Scratch::new("dev-runs-fn-dev-home");
+    write_packageless_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    let out = jetpack()
+        .args(["dev", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("DEV-RAN"), "stdout: {stdout}");
+}
+
+/// A project with neither `fn dev()` nor `fn run()` in its entry file is a
+/// clean E1254, not a confusing compiler error further down the line.
+#[test]
+fn dev_no_entry_is_e1254() {
+    let proj = Scratch::new("dev-no-entry");
+    let root = Scratch::new("dev-no-entry-root");
+    let home = Scratch::new("dev-no-entry-home");
+    write_packageless_project(&proj.path, "fn other() { print(\"nope\"); }\n");
+    let out = jetpack()
+        .args(["dev", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1254"), "stderr: {stderr}");
+}
+
+/// A trust-sensitive env (it declares a package) hitting a non-interactive
+/// path (the test harness's stdin is not a TTY) with no `--trust` and no
+/// prior grant is a clean E1255 — never a hung prompt. The trust gate runs
+/// before package realization, so this needs no fixtures.
+#[test]
+fn dev_untrusted_non_interactive_is_e1255() {
+    let proj = Scratch::new("dev-untrusted");
+    let root = Scratch::new("dev-untrusted-root");
+    let home = Scratch::new("dev-untrusted-home");
+    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    let out = jetpack()
+        .args(["dev", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1255"), "stderr: {stderr}");
+    // Never got as far as running the project.
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
+}
+
+/// `--trust` is the one-shot bypass: same untrusted project, but the run
+/// proceeds all the way through realization to `fn dev()`.
+#[test]
+fn dev_trust_flag_bypasses() {
+    let proj = Scratch::new("dev-trust-flag");
+    let root = Scratch::new("dev-trust-flag-root");
+    let home = Scratch::new("dev-trust-flag-home");
+    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    let out = jetpack()
+        .args(["dev", "--no-color", "--offline", "--trust"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_FIXTURES", example_fixtures())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("DEV-RAN"), "stdout: {stdout}");
+    // `--trust` is one-shot: it must not have persisted a grant.
+    let trust_file = home.path.join(".jet").join("trust");
+    assert!(
+        !trust_file.exists(),
+        "`--trust` must never persist a grant"
+    );
+}
+
+/// `jetpack config trust add <pattern>` pre-authorizes matching projects with
+/// no per-run flag and no prompt.
+#[test]
+fn dev_pattern_trust_preauthorizes() {
+    let proj = Scratch::new("dev-pattern-trust");
+    let root = Scratch::new("dev-pattern-trust-root");
+    let home = Scratch::new("dev-pattern-trust-home");
+    write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+
+    let pattern = format!("{}*", proj.path.display());
+    let add_out = jetpack()
+        .args(["config", "trust", "add", &pattern, "--no-color"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        add_out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&add_out.stderr)
+    );
+
+    let out = jetpack()
+        .args(["dev", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_FIXTURES", example_fixtures())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("DEV-RAN"), "stdout: {stdout}");
+}
+
+/// `jetpack config trust list`/`remove` round-trip.
+#[test]
+fn config_trust_list_and_remove() {
+    let home = Scratch::new("config-trust-list");
+    let pattern = "/some/project/*";
+    jetpack()
+        .args(["config", "trust", "add", pattern, "--no-color"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    let list_out = jetpack()
+        .args(["config", "trust", "list", "--no-color"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(list_out.status.success());
+    let stderr = String::from_utf8_lossy(&list_out.stderr);
+    assert!(stderr.contains(pattern), "stderr: {stderr}");
+
+    let remove_out = jetpack()
+        .args(["config", "trust", "remove", pattern, "--no-color"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(remove_out.status.success());
+    let trust_file = home.path.join(".jet").join("trust");
+    let contents = fs::read_to_string(&trust_file).unwrap_or_default();
+    assert!(!contents.contains(pattern), "contents: {contents}");
+}

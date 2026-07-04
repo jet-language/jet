@@ -1293,7 +1293,41 @@ pub const JETPACK_VERBS: &[&str] = &[
     "remove",
     "push",
     OS_SUBCOMMAND,
+    DEV_SUBCOMMAND,
+    CONFIG_SUBCOMMAND,
 ];
+
+/// U19 (D-JPK-DEVCOMPOSE1=D, card c9jetpackgates): the project-level `jetpack
+/// dev` engine verb — distinct from the already-shipped `jet dev <file.jet>`
+/// interpreter/hot-reload loop (D-DEV4). Bare `jet dev` (no file argument)
+/// dispatches here: realize `env(base + env.dev)`, gate on trust, wait for
+/// services (U12 no-op today), then run the project's `fn dev()` or fall back
+/// to `fn run()`.
+pub const DEV_SUBCOMMAND: &str = "dev";
+
+/// U19: `jetpack config <verb>` — today only `trust` pattern management.
+pub const CONFIG_SUBCOMMAND: &str = "config";
+pub const CONFIG_VERB_TRUST: &str = "trust";
+pub const CONFIG_TRUST_VERB_ADD: &str = "add";
+pub const CONFIG_TRUST_VERB_LIST: &str = "list";
+pub const CONFIG_TRUST_VERB_REMOVE: &str = "remove";
+pub const CONFIG_TRUST_VERBS: &[&str] = &[
+    CONFIG_TRUST_VERB_ADD,
+    CONFIG_TRUST_VERB_LIST,
+    CONFIG_TRUST_VERB_REMOVE,
+];
+
+/// U19: the one-shot bypass flag for the env/dev trust gate — never persists
+/// a grant (unlike accepting the interactive prompt, which does).
+pub const TRUST_BYPASS_FLAG: &str = "--trust";
+
+/// U19: the env/dev trust store, `~/.jet/trust` (home-scoped: a user's trust
+/// decisions follow them across projects, unlike the project-local `.jet/`
+/// managed folder). Plain newline-separated `hash:`/`pattern:` lines, mirroring
+/// the plain-text convention `Jetpack::Recipe`'s adapter trust marker already
+/// uses. Lives under the same default dir as `~/.jet/config.jet`
+/// (`CONFIG_DEFAULT_DIR`).
+pub const TRUST_FILE: &str = "trust";
 
 /// D-JPK-DISPATCH1=B (A1, card c9jetpackgates): `jet` execs the engine
 /// binary (`jetpack`, later `jetos`) for every engine verb instead of linking

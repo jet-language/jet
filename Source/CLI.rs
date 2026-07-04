@@ -154,6 +154,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "config",
+        summary: "manage jet configuration (`config trust add/list/remove`, U19)",
+        headline: false,
+    },
+    CommandSpec {
         name: "gc",
         summary: "remove unreferenced store entries",
         headline: false,
