@@ -9,20 +9,16 @@ use std::path::PathBuf;
 /// The access capability of a parameter / argument / receiver (D-MEM1, was
 /// D-CAP7/8/9/10).
 ///
-/// Surface sigils map here: `T`→`Infer`, `&T`→`Write`, `^T`→`Move`, `*T`→`Raw`.
-/// Inference (D-CAP8=C, still live until S2) resolves `Infer` to one of the
-/// concrete capabilities from body usage before codegen; the parser still
-/// seeds unmarked params as `Read` until the constraint solver lands (the seam
-/// is `parse_access_prefix`). `Raw` is only produced by the `*` sigil inside
-/// `#Unsafe` and never inferred in safe code. `Share` has no surface sigil as
-/// of D-MEM1 (the `&` glyph moved to `Write`) — it is unreachable from parsing
-/// and kept only for the out-of-scope tier-2 storable-borrow future (see
-/// migration plan's "Out of scope" section); nothing currently produces it.
+/// Surface sigils map here: unmarked `T`→`Read`, `&T`→`Write`, `^T`→`Move`,
+/// `*T`→`Raw`. S2 ("signatures can't lie"): an unmarked param is decided as
+/// `Read` at parse time, period — no body-usage inference, no elevation.
+/// `Raw` is only produced by the `*` sigil inside `#Unsafe` and never inferred
+/// in safe code. `Share` has no surface sigil as of D-MEM1 (the `&` glyph
+/// moved to `Write`) — it is unreachable from parsing and kept only for the
+/// out-of-scope tier-2 storable-borrow future (see migration plan's "Out of
+/// scope" section); nothing currently produces it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessConvention {
-    /// Unmarked `T`: capability inferred from body usage (D-CAP8). Resolves to
-    /// one of the concrete variants below; treated as `Read` until resolved.
-    Infer,
     /// Shared read borrow (`&T` in Rust; scalars pass by value).
     Read,
     /// `&T`: exclusive write/edit access (mutable borrow, `&mut T`). D-MEM1 —
@@ -41,12 +37,12 @@ pub enum AccessConvention {
 
 impl AccessConvention {
     /// The D-MEM1 prefix sigil for this resolved capability, as it appears on a
-    /// public type (`&T`/`^T`/`*T`). Read — the unmarked default — and the
-    /// not-yet-resolved `Infer` emit no sigil. Used by the published-API surface
-    /// (c129) so the frozen signature carries the sigil the caller must honour.
+    /// public type (`&T`/`^T`/`*T`). Read — the unmarked default — emits no
+    /// sigil. Used by the published-API surface so the snapshot carries the
+    /// sigil the caller must honour.
     pub fn sigil(self) -> &'static str {
         match self {
-            AccessConvention::Read | AccessConvention::Infer => "",
+            AccessConvention::Read => "",
             AccessConvention::Write => "&",
             AccessConvention::Move => "^",
             AccessConvention::Share => "&",

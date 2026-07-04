@@ -2009,6 +2009,19 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     assert!(index.contains("\"version\":\"1.2.0\""), "index line:\n{index}");
     assert!(index.contains("\"yanked\":false"), "index line:\n{index}");
 
+    // S2/D-MEM1: `jet publish` now unconditionally snapshots the public-fn
+    // surface to `.jet/cache/api/<pkg>.api` — a committed, durable interface
+    // contract (not a build artifact). Commit it so the tree is clean again
+    // before the republish attempt below (matching real usage: generate,
+    // review, commit).
+    for cmd_args in &[vec!["add", "."], vec!["commit", "-m", "snapshot api"]] {
+        Command::new("git")
+            .args(cmd_args)
+            .current_dir(&proj)
+            .output()
+            .unwrap();
+    }
+
     // Republish the same version → E1234 immutability.
     let out2 = jet_cmd_env(&["publish"], &proj, envs);
     assert!(

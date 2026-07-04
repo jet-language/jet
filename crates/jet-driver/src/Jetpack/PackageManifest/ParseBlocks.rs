@@ -3,8 +3,8 @@
 
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
 use super::{
-    ApiMode, BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry,
-    PackageMeta, Target,
+    BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry, PackageMeta,
+    Target,
 };
 use crate::Jetpack::RefSpec;
 use crate::Syntax;
@@ -153,7 +153,7 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
         // targets inferred from the module's `fn run` (D-ILE1); `name: <target>`
         // is the single-target shorthand (D-TGT3); `name: { targets: [ … ] }` lists
         // them.
-        let (name, targets, api) = match entry.split_once(':') {
+        let (name, targets) = match entry.split_once(':') {
             Some((k, v)) => {
                 let name = k.trim().to_string();
                 let value = v.trim();
@@ -162,25 +162,24 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
                         .trim_end()
                         .strip_suffix('}')
                         .unwrap_or(inner.trim_end());
-                    let (targets, api) = parse_package_entry_block(&name, inner)?;
-                    (name, targets, api)
+                    let targets = parse_package_entry_block(&name, inner)?;
+                    (name, targets)
                 } else {
-                    let (target, api) = parse_target(&name, value)?;
-                    (name, vec![target], api)
+                    let target = parse_target(&name, value)?;
+                    (name, vec![target])
                 }
             }
-            None => (entry.to_string(), Vec::new(), ApiMode::Inferred),
+            None => (entry.to_string(), Vec::new()),
         };
-        packages.push(PackageEntry { name, targets, api });
+        packages.push(PackageEntry { name, targets });
     }
     Ok(packages)
 }
 
 /// Parse one target keyword and validate its optional config block
-/// (`executable { entry: "…" }`; D-TGT3/D-TGT4/D-CAP4). The keyword must be a
-/// shipped target; the block may carry only `entry:`/`name:`/`api:`, and `api:`
-/// must be `stable`/`explicit`.
-fn parse_target(name: &str, value: &str) -> Result<(Target, ApiMode), ManifestError> {
+/// (`executable { entry: "…" }`; D-TGT3/D-TGT4). The keyword must be a shipped
+/// target; the block may carry only `entry:`/`name:`.
+fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
     let (keyword, block) = match value.split_once('{') {
         Some((kw, rest)) => {
             let body = rest.trim_end().strip_suffix('}').unwrap_or(rest.trim_end());
@@ -209,64 +208,34 @@ fn parse_target(name: &str, value: &str) -> Result<(Target, ApiMode), ManifestEr
             });
         }
     };
-    let api = match block {
-        Some(body) => validate_target_block(name, body)?,
-        None => ApiMode::Inferred,
-    };
-    // D-CAP5: only library targets emit capability metadata; `api:` on a non-library
-    // target is meaningless and is ignored (never frozen).
-    let api = if kind == Target::Library {
-        api
-    } else {
-        ApiMode::Inferred
-    };
-    Ok((kind, api))
+    if let Some(body) = block {
+        validate_target_block(name, body)?;
+    }
+    Ok(kind)
 }
 
-/// A target block (`{ entry: …, name: …, api: … }`) accepts only those three
-/// fields, and `api:` only `stable`/`explicit` (D-TGT3/D-TGT4/D-CAP4).
-fn validate_target_block(name: &str, body: &str) -> Result<ApiMode, ManifestError> {
-    let mut api = ApiMode::Inferred;
-    for (key, value) in key_value_entries(body) {
+/// A target block (`{ entry: …, name: … }`) accepts only those two fields
+/// (D-TGT3/D-TGT4). `api:` (was D-CAP4) is retired by D-MEM1/S2 — it hits the
+/// same unknown-field error as any other typo'd key.
+fn validate_target_block(name: &str, body: &str) -> Result<(), ManifestError> {
+    for (key, _value) in key_value_entries(body) {
         if key == Syntax::TARGET_FIELD_ENTRY || key == Syntax::TARGET_FIELD_NAME {
             // entry/name are free-form strings consumed by the build pipeline.
-        } else if key == Syntax::TARGET_FIELD_API {
-            let v = unquote(&value);
-            api = if v == Syntax::API_MODE_STABLE {
-                ApiMode::Stable
-            } else if v == Syntax::API_MODE_EXPLICIT {
-                ApiMode::Explicit
-            } else {
-                return Err(ManifestError::BadTargetField {
-                    name: name.to_string(),
-                    detail: format!(
-                        "`{}` must be `{}` or `{}`, not `{}`",
-                        Syntax::TARGET_FIELD_API,
-                        Syntax::API_MODE_STABLE,
-                        Syntax::API_MODE_EXPLICIT,
-                        v,
-                    ),
-                });
-            };
         } else {
             return Err(ManifestError::BadTargetField {
                 name: name.to_string(),
                 detail: format!(
-                    "unknown target field `{key}` (allowed: `{}`, `{}`, `{}`)",
+                    "unknown target field `{key}` (allowed: `{}`, `{}`)",
                     Syntax::TARGET_FIELD_ENTRY,
                     Syntax::TARGET_FIELD_NAME,
-                    Syntax::TARGET_FIELD_API,
                 ),
             });
         }
     }
-    Ok(api)
+    Ok(())
 }
 
-fn parse_package_entry_block(
-    name: &str,
-    body: &str,
-) -> Result<(Vec<Target>, ApiMode), ManifestError> {
+fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, ManifestError> {
     for (key, value) in key_value_entries(body) {
         if key == Syntax::PACKAGE_FIELD_KIND_REMOVED {
             // D-TGT1: `kind:` was removed in favor of `targets:`.
@@ -280,7 +249,7 @@ fn parse_package_entry_block(
     }
     // No `targets:` field — kind is inferred at realize time (D-ILE1). Other
     // fields (version/bin) are accepted and ignored for now.
-    Ok((Vec::new(), ApiMode::Inferred))
+    Ok(Vec::new())
 }
 
 /// D-BUILDPROFILE1: parse the `build: { … }` body. Each entry is either:
@@ -487,25 +456,19 @@ fn parse_string_list(value: &str) -> Result<Vec<String>, ()> {
     Ok(out)
 }
 
-/// Parse a `[ library, executable { entry: "…" }, … ]` target list. The package's
-/// `api:` mode is the mode of its `library` target (D-CAP4/D-CAP5).
-fn parse_targets_list(name: &str, value: &str) -> Result<(Vec<Target>, ApiMode), ManifestError> {
+/// Parse a `[ library, executable { entry: "…" }, … ]` target list.
+fn parse_targets_list(name: &str, value: &str) -> Result<Vec<Target>, ManifestError> {
     let inner = value
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(value);
     let mut targets = Vec::new();
-    let mut api = ApiMode::Inferred;
     for entry in top_level_commas(inner) {
         let entry = entry.trim();
         if entry.is_empty() {
             continue;
         }
-        let (target, mode) = parse_target(name, entry)?;
-        if mode.freezes() {
-            api = mode;
-        }
-        targets.push(target);
+        targets.push(parse_target(name, entry)?);
     }
-    Ok((targets, api))
+    Ok(targets)
 }

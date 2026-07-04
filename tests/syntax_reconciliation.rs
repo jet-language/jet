@@ -94,8 +94,5 @@ fn files(path: &Path) -> Vec<PathBuf> {
 
 fn should_skip(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    s.contains("/target/")
-        || s.contains("_retired_")
-        || s.ends_with(".published.snapshot")
-        || s.ends_with(".frozen.api")
+    s.contains("/target/") || s.contains("_retired_") || s.ends_with(".published.snapshot")
 }

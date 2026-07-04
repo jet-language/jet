@@ -489,12 +489,9 @@ fn e1216(_file: &str, detail: &str) -> Diagnostic {
         format!("`{}` has an invalid target field", Syntax::PAYLOAD_FILE),
         detail.to_string(),
         format!(
-            "a target block accepts `{}: \"…\"`, `{}: \"…\"`, and `{}: {}|{}`",
+            "a target block accepts `{}: \"…\"` and `{}: \"…\"`",
             Syntax::TARGET_FIELD_ENTRY,
             Syntax::TARGET_FIELD_NAME,
-            Syntax::TARGET_FIELD_API,
-            Syntax::API_MODE_STABLE,
-            Syntax::API_MODE_EXPLICIT,
         ),
         None,
     )

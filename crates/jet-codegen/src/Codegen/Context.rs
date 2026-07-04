@@ -777,12 +777,11 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
         || matches!(ty, Type::TraitObject(_))
     {
         return match convention {
-            // D-CAP8/9: `Infer` defaults to a read borrow until the solver resolves it;
-            // `Share`/`Raw` aren't produced yet (specialized when their phases land).
-            AccessConvention::Read
-            | AccessConvention::Infer
-            | AccessConvention::Share
-            | AccessConvention::Raw => format!("&{base}"),
+            // D-CAP9: `Share`/`Raw` aren't produced yet (specialized when their
+            // phases land); both follow `Read`.
+            AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
+                format!("&{base}")
+            }
             AccessConvention::Write => format!("&mut {base}"),
             AccessConvention::Move => base,
         };
@@ -797,19 +796,15 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
         return base;
     }
     match convention {
-        // D-CAP8/9: Infer/Share/Raw follow Read until their phases specialize them.
-        AccessConvention::Read
-        | AccessConvention::Infer
-        | AccessConvention::Share
-        | AccessConvention::Raw
+        // D-CAP9: Share/Raw follow Read until their phases specialize them.
+        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw
             if ty.is_scalar() =>
         {
             base
         }
-        AccessConvention::Read
-        | AccessConvention::Infer
-        | AccessConvention::Share
-        | AccessConvention::Raw => format!("&{}", base),
+        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
+            format!("&{}", base)
+        }
         AccessConvention::Write => format!("&mut {}", base),
         AccessConvention::Move => base,
     }

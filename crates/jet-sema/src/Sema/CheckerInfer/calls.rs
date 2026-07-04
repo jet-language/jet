@@ -3492,30 +3492,15 @@ impl<'a> Checker<'a> {
                     if let Expr::Ident(name, span) = &arg.expr {
                         if is_cloneable(param_ty, self.registry, self.structs) {
                             arg.flags.implicit_clone = true;
-                            // D-L0201: only warn when the value is dead after
-                            // this call (a wasteful clone).
-                            if !self.is_name_live_after(name) {
-                                self.diags.push(Diagnostic::lint(
-                                    "L0201",
-                                    format!(
-                                        "implicit clone of `{}`; write `{}{}` to transfer ownership or `.clone()` to silence this warning",
-                                        name,
-                                        Syntax::SIGIL_MOVE,
-                                        name
-                                    ),
-                                    format!(
-                                        "`{}` expects to take ownership of this value",
-                                        call.name
-                                    ),
-                                    format!(
-                                        "write `{}{}` to move, or `{}.clone()` to copy explicitly",
-                                        Syntax::SIGIL_MOVE,
-                                        name,
-                                        name
-                                    ),
-                                    Some(*span),
-                                ));
-                            }
+                            // D-MEM1/S2 (was D-L0201 lint): a hard error now,
+                            // regardless of liveness — no clone is ever silent.
+                            let diag = self.e0209_implicit_clone(
+                                format!("implicit clone of `{}`", name),
+                                format!("`{}` expects to take ownership of this value", call.name),
+                                name,
+                                *span,
+                            );
+                            self.diags.push(diag);
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0201",

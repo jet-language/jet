@@ -780,14 +780,14 @@ pub(crate) struct Checker<'a> {
     /// typos are caught) but all other diagnostics are suppressed and the arm
     /// is never lowered to codegen.
     in_dropped_comptime_arm: bool,
-    /// D-L0201: liveness gate — pointer to the statements that follow the
+    /// E0209 liveness gate (was D-L0201) — pointer to the statements that follow the
     /// currently-executing statement in the innermost block, plus the count.
     /// Set by `check_block` before each call to `check_stmt`.
     /// Safety: valid for the duration of `check_stmt` — the slice lives in
     /// the `Program` AST which outlives the checker.
     stmt_tail_ptr: *const crate::AST::Stmt,
     stmt_tail_len: usize,
-    /// D-L0201: stack of enclosing block tails, from outermost to innermost.
+    /// E0209 liveness gate (was D-L0201): stack of enclosing block tails, from outermost to innermost.
     /// Each entry is the (ptr, len) of the tail saved before entering a nested
     /// block, so `is_name_live_after` can walk up through all enclosing scopes.
     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
@@ -813,8 +813,6 @@ pub(crate) struct Checker<'a> {
 
 pub mod ApiFreeze;
 mod Bundle;
-mod Capability;
-mod CapabilityFreeze;
 mod Captures;
 mod CheckerCli;
 mod CheckerCore;
@@ -882,8 +880,6 @@ pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub use Registration::{check, check_with_mode, effect_key};
 pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.
-pub use Capability::resolve_capabilities;
-pub use CapabilityFreeze::check_capability_freeze;
 pub use SchemaMigration::{check_schema_migrations, desugar_migrations};
 
 /// D-REACTCORE1: free variable reads in a statement block (for reactive-scope capture cloning).

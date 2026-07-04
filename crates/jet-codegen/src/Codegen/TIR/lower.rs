@@ -740,19 +740,13 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
 /// dereferenced; `Mutate` is `&mut T` (deref'd); `Move`/scalar-`Read` is by value.
 pub(crate) fn param_place(rust_name: &str, p: &Param) -> String {
     let deref = match p.convention {
-        // D-CAP8/9: Infer/Share/Raw follow Read until their phases specialize them.
-        AccessConvention::Read
-        | AccessConvention::Infer
-        | AccessConvention::Share
-        | AccessConvention::Raw
+        // D-CAP9: Share/Raw follow Read until their phases specialize them.
+        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw
             if p.ty.is_scalar() =>
         {
             false
         }
-        AccessConvention::Read
-        | AccessConvention::Infer
-        | AccessConvention::Share
-        | AccessConvention::Raw => true,
+        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => true,
         AccessConvention::Write => true,
         AccessConvention::Move => false,
     };
@@ -4510,11 +4504,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let sig = cx.sigs.get(name);
             let borrow = matches!(
                 sig.and_then(|ps| ps.first()),
-                // D-CAP8/9: Infer/Share borrow like Read (see lower_one_call_arg).
-                Some((
-                    AccessConvention::Read | AccessConvention::Infer | AccessConvention::Share,
-                    t,
-                )) if !t.is_scalar()
+                // D-CAP9: Share borrows like Read (see lower_one_call_arg).
+                Some((AccessConvention::Read | AccessConvention::Share, t)) if !t.is_scalar()
             );
             let calls: Vec<TExpr> = items
                 .iter()
@@ -6485,9 +6476,9 @@ pub(crate) fn lower_one_call_arg(
     // NOT borrowed (the AST `match conv` skips it), so the fn-coerce form stands alone.
     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
     let (borrow, mut_borrow) = match &conv {
-        // D-CAP8/9: Infer (pre-resolution default) and Share borrow like Read (`&(…)`)
-        // until their phases specialize them; Raw (never produced yet) stays by-value.
-        Some((AccessConvention::Read | AccessConvention::Infer | AccessConvention::Share, t))
+        // D-CAP9: Share borrows like Read (`&(…)`) until its phase specializes
+        // it; Raw (never produced yet) stays by-value.
+        Some((AccessConvention::Read | AccessConvention::Share, t))
             if !t.is_scalar() && !matches!(t, Type::Fn { .. }) =>
         {
             (true, false)

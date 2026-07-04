@@ -75,7 +75,7 @@ fn declared_bound_matching_body_ok() {
     let src = r#"
 use core.fs as fs
 fn load(path: String) #(Fs) -> String {
-    return fs.read(path) ?? "";
+    return fs.read(path.clone()) ?? "";
 }
 fn run() { print(load("x")); }
 "#;
@@ -126,7 +126,7 @@ fn wider_bound_than_body_ok() {
     let src = r#"
 use core.fs as fs
 fn load(path: String) #(Fs, Net) -> String {
-    return fs.read(path) ?? "";
+    return fs.read(path.clone()) ?? "";
 }
 fn run() { print(load("x")); }
 "#;
@@ -894,7 +894,7 @@ use core.fs as fs
 fn invoke(p: String, act: #(Io) fn(String)) {
     act(p);
 }
-fn read_it(p: String) { x :: fs.read(p) ?? ""; print("{x}"); }
+fn read_it(p: String) { x :: fs.read(p.clone()) ?? ""; print("{x}"); }
 fn run() { invoke("f.txt", read_it); }
 "#;
     assert_eq!(

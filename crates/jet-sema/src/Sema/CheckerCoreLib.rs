@@ -1846,7 +1846,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(want) = expected.get(i) {
-                self.expect_core_arg(variant, i, want, arg);
+                self.expect_core_arg_consuming(variant, i, want, arg);
             } else {
                 self.infer(&mut arg.expr);
             }
@@ -1912,7 +1912,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(want) = expected.get(i) {
-                self.expect_core_arg(variant, i, want, arg);
+                self.expect_core_arg_consuming(variant, i, want, arg);
             } else {
                 self.infer(&mut arg.expr);
             }
@@ -1926,6 +1926,34 @@ impl<'a> Checker<'a> {
         idx: usize,
         param_ty: &Type,
         arg: &mut crate::AST::CallArg,
+    ) {
+        self.expect_core_arg_impl(call_name, idx, param_ty, arg, false);
+    }
+
+    /// Same elaboration as `expect_core_arg`, but for the handful of std
+    /// constructors that genuinely store the argument as their own payload
+    /// (`Json.Text`/`DbValue.Text` own their `String`, etc. — see
+    /// `check_core_json_lit` / `check_core_dbvalue_lit`). Only these call
+    /// sites may trip the implicit-clone E0209 below; an ordinary read-only
+    /// stdlib call (e.g. `fs.read(path)`) must not, even though its param
+    /// type is also String/List/Map (D-MEM1/S2 false-positive fix).
+    pub(crate) fn expect_core_arg_consuming(
+        &mut self,
+        call_name: &str,
+        idx: usize,
+        param_ty: &Type,
+        arg: &mut crate::AST::CallArg,
+    ) {
+        self.expect_core_arg_impl(call_name, idx, param_ty, arg, true);
+    }
+
+    fn expect_core_arg_impl(
+        &mut self,
+        call_name: &str,
+        idx: usize,
+        param_ty: &Type,
+        arg: &mut crate::AST::CallArg,
+        consumes: bool,
     ) {
         if matches!(arg.convention, AccessConvention::Move)
             && !matches!(param_ty, Type::Named(n) if n == "Unit")
@@ -1971,7 +1999,8 @@ impl<'a> Checker<'a> {
         // owns its `String`) consumes the argument. When the value is read from
         // a borrowed binding (a `view` parameter), moving it out would not
         // compile — insert a clone, exactly as a consuming `fn` call does (B1).
-        if matches!(arg.convention, AccessConvention::Read)
+        if consumes
+            && matches!(arg.convention, AccessConvention::Read)
             && matches!(param_ty, Type::String | Type::List(_) | Type::Map { .. })
         {
             if let Expr::Ident(name, ispan) = &arg.expr {
@@ -1979,23 +2008,18 @@ impl<'a> Checker<'a> {
                 let ispan = *ispan;
                 if self.is_borrowed_binding(&name) {
                     arg.flags.implicit_clone = true;
-                    // D-L0201: only warn when the value is dead after
-                    // this call (a wasteful clone).
-                    if !self.is_name_live_after(&name) {
-                        self.diags.push(Diagnostic::lint(
-                            "L0201",
-                            format!(
-                                "implicit clone of `{}`; this value is borrowed, so it is copied",
-                                name
-                            ),
-                            format!("`{}` stores its own copy of this value", call_name),
-                            format!(
-                                "write `{} .clone()` to copy explicitly and silence this warning",
-                                name
-                            ),
-                            Some(ispan),
-                        ));
-                    }
+                    // D-MEM1/S2 (was D-L0201 lint): a hard error now, regardless
+                    // of liveness — no clone is ever silent. Unlike a Move-param
+                    // user function, this is a fixed std read-only signature —
+                    // `^` is never accepted here (E0203), so `.clone()` is the
+                    // only fix, not a liveness-dependent move/reorder menu.
+                    self.diags.push(Diagnostic::error(
+                        "E0209",
+                        format!("implicit clone of `{}`", name),
+                        format!("`{}` stores its own copy of this value", call_name),
+                        format!("write `{}.clone()` to copy explicitly", name),
+                        Some(ispan),
+                    ));
                 }
             }
         }

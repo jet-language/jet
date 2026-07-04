@@ -720,10 +720,6 @@ pub(crate) fn check_bundle_opts(
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
-    // D-CAP8 (= C): resolve unmarked (`Infer`) parameter capabilities from body usage
-    // before registration/checking/codegen — they then see resolved conventions, never
-    // `Infer`. Deterministic; mutates the AST param conventions in place.
-    super::Capability::resolve_capabilities(bundle);
     let mut states: Vec<ModuleState> = bundle
         .modules
         .iter()
@@ -1088,11 +1084,6 @@ pub(crate) fn check_bundle_opts(
             &bundle.project_root,
             &st.trait_reg,
         ));
-        // c129 (D-CAP4/D-CAP6/D-CAP8): capability-freeze drift pass (E0912). Runs
-        // after `Capability::resolve_capabilities` (above) so it diffs the resolved
-        // signature against the frozen `.api` contract. No-op without a frozen
-        // snapshot (inferred-default library / first release).
-        diags.extend(check_capability_freeze(&module.items, &bundle.project_root));
     }
 
     // S62 E2401: delegation validation — check field exists and implements trait.

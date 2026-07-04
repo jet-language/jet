@@ -16,7 +16,7 @@ fn run() {
     tasks.spawn(take(sender) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         addr :: listener.local_addr()
-        sender.send(addr)
+        sender.send(addr.clone())
         stream :: listener.accept() ?? panic("accept failed")
         _req_raw :: stream.read() ?? panic("read failed")
         req :: HttpRequest.{method: "GET", path: "/", body: "", headers: []}

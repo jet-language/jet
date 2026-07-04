@@ -1,7 +1,9 @@
 //! Tests for M2 ownership / borrow transpiler rules (SAFETY DEFAULTS).
 
+/// D-MEM1/S2: no clone is ever silent (I8) — the former lint (`L0201`) is now
+/// a hard error (`E0209`), regardless of liveness.
 #[test]
-fn implicit_clone_is_lint_not_error() {
+fn implicit_clone_is_error_not_lint() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -12,12 +14,40 @@ msg: String :: "hello"
     consume(msg)
 }
 "#;
-    let out = jet::compile(src).expect("should compile");
+    let diags = jet::compile(src).expect_err("should error");
     assert!(
-        out.lints.iter().any(|d| d.code == "L0201"),
-        "expected L0201 implicit clone lint"
+        diags.iter().any(|d| d.code == "E0209"),
+        "expected E0209 implicit-clone hard error"
     );
-    assert!(out.rust.contains(".clone()"));
+}
+
+/// D-MEM1/S2 ("signatures can't lie"): an unmarked param is always `Read` —
+/// no body-usage elevation. A body write through it is a hard error (E0205)
+/// with a fix-it naming the `&` sigil, same as a non-`&self` receiver.
+#[test]
+fn body_write_to_unmarked_param_is_error() {
+    let src = r#"
+struct Counter {
+    n: Int
+}
+fn bump(c: Counter) {
+    c.n = c.n + 1
+}
+fn run() {
+    c: Counter :: Counter.{ n: 0 }
+    bump(c)
+}
+"#;
+    let diags = jet::compile(src).expect_err("should error");
+    let d = diags
+        .iter()
+        .find(|d| d.code == "E0205")
+        .expect("expected E0205: body write to an unmarked (Read) param");
+    assert!(
+        d.fix.contains("&Counter"),
+        "fix should point at adding `&` to the param, got: {}",
+        d.fix
+    );
 }
 
 #[test]
@@ -199,10 +229,11 @@ fn run() {
     assert!(diags.iter().any(|d| d.code == "E0204"));
 }
 
-/// D-L0201 liveness gate: when the value is still used after the call
-/// the clone is necessary and L0201 must be silent.
+/// E0209 liveness gate (was D-L0201): when the value is still used after the
+/// call, `^` would break that later use — E0209 still fires (hard error), but
+/// the fix menu offers `.clone()`/reorder instead of `^`.
 #[test]
-fn implicit_clone_silent_when_value_live_after_call() {
+fn implicit_clone_errors_with_reorder_menu_when_live_after_call() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -214,19 +245,22 @@ msg: String :: "hello"
     print(msg)
 }
 "#;
-    let out = jet::compile(src).expect("should compile");
+    let diags = jet::compile(src).expect_err("should error");
+    let d = diags
+        .iter()
+        .find(|d| d.code == "E0209")
+        .expect("expected E0209 implicit-clone hard error");
     assert!(
-        out.lints.iter().all(|d| d.code != "L0201"),
-        "L0201 must be silent when value is still used after the call"
+        d.fix.contains("reorder"),
+        "live-after fix menu should suggest reordering, got: {}",
+        d.fix
     );
-    // The clone is still generated (it's necessary), just no warning.
-    assert!(out.rust.contains(".clone()"), "clone must still be emitted");
 }
 
-/// D-L0201 liveness gate: when the value IS dead after the call,
-/// L0201 still fires (the clone is wasteful, `move` would be better).
+/// E0209 liveness gate (was D-L0201): when the value IS dead after the call,
+/// `^` is safe (this is its last use) — the fix menu leads with `^`.
 #[test]
-fn implicit_clone_fires_when_value_dead_after_call() {
+fn implicit_clone_errors_with_move_menu_when_dead_after_call() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -237,10 +271,15 @@ msg: String :: "hello"
     consume(msg)
 }
 "#;
-    let out = jet::compile(src).expect("should compile");
+    let diags = jet::compile(src).expect_err("should error");
+    let d = diags
+        .iter()
+        .find(|d| d.code == "E0209")
+        .expect("expected E0209 implicit-clone hard error");
     assert!(
-        out.lints.iter().any(|d| d.code == "L0201"),
-        "L0201 must fire when value is dead after the call"
+        d.fix.contains("^msg"),
+        "dead-after fix menu should lead with `^msg`, got: {}",
+        d.fix
     );
 }
 
@@ -256,13 +295,14 @@ x: Int :: 1
     assert!(diags.iter().any(|d| d.code == "E0208"));
 }
 
-/// D-L0201 liveness gate: clone inside a nested `if` block must NOT fire L0201
-/// when the value is used in the enclosing block after the `if`.
-/// Previously `is_name_live_after` only checked the current block's tail and
-/// missed uses in enclosing scopes — a false-fire that would advise `move msg`
-/// but the move would cause use-after-move on the `print(msg)` below.
+/// E0209 liveness gate (was D-L0201): a clone inside a nested `if` block gets
+/// the reorder/copy menu (not the `^`-leads menu) when the value is used in
+/// the enclosing block after the `if`. `is_name_live_after` checks the
+/// current block's tail AND all enclosing scopes — missing enclosing scopes
+/// would wrongly advise `^msg` here, which would use-after-move the
+/// `print(msg)` below.
 #[test]
-fn implicit_clone_silent_when_live_in_enclosing_block() {
+fn implicit_clone_uses_reorder_menu_when_live_in_enclosing_block() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -278,18 +318,23 @@ msg: String :: "hello"
     print(msg)
 }
 "#;
-    let out = jet::compile(src).expect("should compile");
+    let diags = jet::compile(src).expect_err("should error");
+    let d = diags
+        .iter()
+        .find(|d| d.code == "E0209")
+        .expect("expected E0209 implicit-clone hard error");
     assert!(
-        out.lints.iter().all(|d| d.code != "L0201"),
-        "L0201 must be silent when value is used in the enclosing block after the if"
+        d.fix.contains("reorder"),
+        "live-in-enclosing-block fix menu should suggest reordering, got: {}",
+        d.fix
     );
-    assert!(out.rust.contains(".clone()"), "clone must still be emitted");
 }
 
-/// D-L0201 liveness gate: clone inside a nested block where the value is
-/// genuinely dead everywhere after (enclosing block included) still fires.
+/// E0209 liveness gate (was D-L0201): a clone inside a nested block where the
+/// value is genuinely dead everywhere after (enclosing block included) gets
+/// the `^`-leads menu.
 #[test]
-fn implicit_clone_fires_when_dead_in_all_enclosing_blocks() {
+fn implicit_clone_uses_move_menu_when_dead_in_all_enclosing_blocks() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -304,9 +349,14 @@ msg: String :: "hello"
     }
 }
 "#;
-    let out = jet::compile(src).expect("should compile");
+    let diags = jet::compile(src).expect_err("should error");
+    let d = diags
+        .iter()
+        .find(|d| d.code == "E0209")
+        .expect("expected E0209 implicit-clone hard error");
     assert!(
-        out.lints.iter().any(|d| d.code == "L0201"),
-        "L0201 must fire when value is dead on all paths after the nested block"
+        d.fix.contains("^msg"),
+        "dead-in-all-enclosing-blocks fix menu should lead with `^msg`, got: {}",
+        d.fix
     );
 }

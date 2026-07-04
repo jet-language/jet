@@ -146,30 +146,6 @@ pub enum Target {
     Benchmark,
 }
 
-/// The capability-API mode of a library target (D-CAP4/D-CAP6). Default is
-/// `Inferred` (no `api:` field) — capabilities are inferred and never frozen.
-/// `Stable` and `Explicit` both freeze the resolved public capability signature
-/// into durable interface metadata (c129); the difference is documentation
-/// strictness, not freeze behaviour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ApiMode {
-    /// No `api:` field — inference only, signatures never frozen (D-CAP6 default).
-    #[default]
-    Inferred,
-    /// `api: stable` — record resolved capability signatures and flag breaks.
-    Stable,
-    /// `api: explicit` — same freeze, plus hand-written annotations expected.
-    Explicit,
-}
-
-impl ApiMode {
-    /// `true` when this mode freezes the public capability signature into durable
-    /// interface metadata (c129) — i.e. anything but the inferred default.
-    pub fn freezes(self) -> bool {
-        matches!(self, ApiMode::Stable | ApiMode::Explicit)
-    }
-}
-
 /// One entry in the `packages: { … }` block (U10 + D-TGT1). `targets` is empty when
 /// the manifest declares none (D-ILE1) — the kind is then inferred from the module's
 /// `fn run` at realize time.
@@ -177,9 +153,6 @@ impl ApiMode {
 pub struct PackageEntry {
     pub name: String,
     pub targets: Vec<Target>,
-    /// The `api:` mode of this package's `library` target (D-CAP4). `Inferred`
-    /// when no library target sets `api:`. Drives the c129 capability freeze.
-    pub api: ApiMode,
 }
 
 /// Where a dependency resolves from.
@@ -511,11 +484,11 @@ packages: {
 
     #[test]
     fn target_block_accepts_known_fields() {
-        // D-TGT3/D-TGT4/D-CAP4: entry/name/api are valid target-block fields.
+        // D-TGT3/D-TGT4: entry/name are valid target-block fields.
         let src = r#"
 payload: { name: "x", version: "1" }
 packages: {
-    app: { targets: [executable { name: "app", entry: "src/cli.jet" }, library { api: stable }] },
+    app: { targets: [executable { name: "app", entry: "src/cli.jet" }, library] },
 }
 "#;
         let m = parse(src).unwrap();
@@ -539,14 +512,15 @@ packages: {
     }
 
     #[test]
-    fn target_block_bad_api_mode_errors() {
-        // D-CAP4: api: only stable/explicit.
+    fn target_block_api_field_is_unknown_field_error() {
+        // D-MEM1/S2 greenfield: `api:` (was D-CAP4) ceases to exist — an
+        // ordinary unknown-field error, exactly like any other typo'd key.
         let src =
-            "payload: { name: \"x\", version: \"1\" }\npackages: { app: { targets: [library { api: zonk }] } }";
+            "payload: { name: \"x\", version: \"1\" }\npackages: { app: { targets: [library { api: stable }] } }";
         let err = parse(src).unwrap_err();
         assert!(
             matches!(err, ManifestError::BadTargetField { ref name, ref detail }
-                if name == "app" && detail.contains("zonk")),
+                if name == "app" && detail.contains("api")),
             "{err:?}"
         );
     }

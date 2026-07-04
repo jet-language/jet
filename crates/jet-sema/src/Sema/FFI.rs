@@ -51,12 +51,9 @@ pub(crate) fn check_extern_fn(
         ok = false;
     }
     for p in &ef.params {
-        // D-CAP8: `Infer` (unmarked) is by-value, like `Read` — both are fine at the
-        // boundary; only an explicit `&`/`^` marker is rejected.
-        if !matches!(
-            p.convention,
-            AccessConvention::Read | AccessConvention::Infer
-        ) {
+        // D-MEM1: unmarked (`Read`) is by-value and fine at the boundary; only
+        // an explicit `&`/`^` marker is rejected.
+        if !matches!(p.convention, AccessConvention::Read) {
             diags.push(ffi_type_error(
                 &format!(
                     "`{}` can't use `{}` at the FFI boundary",
@@ -227,11 +224,8 @@ pub(crate) fn check_c_module(
             ok = false;
         }
         for p in &ef.params {
-            // D-CAP8: `Infer` (unmarked) is by-value like `Read`; only explicit markers reject.
-            if !matches!(
-                p.convention,
-                AccessConvention::Read | AccessConvention::Infer
-            ) {
+            // D-MEM1: unmarked (`Read`) is by-value; only explicit markers reject.
+            if !matches!(p.convention, AccessConvention::Read) {
                 diags.push(ffi_type_error(
                     &format!(
                         "`{}` can't use `{}` at the C boundary",
@@ -268,7 +262,6 @@ pub(crate) fn check_c_module(
 pub(crate) fn access_keyword(c: AccessConvention) -> &'static str {
     match c {
         AccessConvention::Read => "read",
-        AccessConvention::Infer => "read", // unmarked defaults to read pre-resolution
         AccessConvention::Write => Syntax::SIGIL_WRITE,
         AccessConvention::Move => Syntax::SIGIL_MOVE,
         AccessConvention::Share => Syntax::SIGIL_WRITE,

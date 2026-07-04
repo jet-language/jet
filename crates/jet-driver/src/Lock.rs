@@ -731,12 +731,11 @@ pub fn e1217(dep_name: &str) -> Diagnostic {
 /// Compute the plan fingerprint for a package.
 /// `tree_hash` is the sha256 hash of the source tree (from `SHA256::tree_hash`).
 /// `dep_fingerprints` is the sorted list of direct dep fingerprints.
-/// `cap_digest` (c129) is the package's frozen public-capability contract
-/// (`Publish::ApiFreeze::project_capability_digest`); folding it in means a
-/// public capability change (read → `&`/`^`) shifts the pin even when the
-/// source tree hash would otherwise match. Empty for a package with no frozen
-/// `api: stable|explicit` surface — the fingerprint is then unchanged from the
-/// pre-c129 form (tree + deps only), so existing locks stay stable.
+/// `cap_digest` (S2/D-MEM1, was c129) is the package's snapshotted public-fn
+/// surface (`Publish::ApiFreeze::project_capability_digest`); folding it in
+/// means a public signature change shifts the pin even when the source tree
+/// hash would otherwise match. Empty for a package with no snapshot yet (first
+/// publish) — the fingerprint is then unchanged from the tree+deps-only form.
 pub fn compute_fingerprint(tree_hash: &str, dep_fingerprints: &[&str], cap_digest: &str) -> String {
     let mut data = tree_hash.as_bytes().to_vec();
     data.push(0);

@@ -724,9 +724,15 @@ deleted — moves of named bindings are always written `^`; temporaries pass
 freely; `copy x` (D-CAP2) is the one copy spelling. Named escape hatches
 `Shared<T>`, `Pool<T>`/`Id<T>`; module `policy` floors (`no_alloc` first).
 **S1 shipped (2026-07-04)**: `&` is the write sigil, `~` is gone from the
-grammar, call sites/receivers/formatter speak v5 spelling. Unmarked-param
-behavior (infer + freeze/elevate, D-CAP8) is UNCHANGED until S2 lands — S2–S9
-remain unbuilt.
+grammar, call sites/receivers/formatter speak v5 spelling. **S2 shipped
+(2026-07-04)**: unmarked param is `Read`, decided at parse time — `Infer` and
+body-usage elevation are gone; a body write or an escape/consume of an
+unmarked param is a hard error (fix-it: add `&`, or `^`/copy it); L0201 is
+gone (E0209 hard error, no silent clone ever); `CapabilityFreeze`/E0912 are
+gone and the `api:` manifest field no longer exists (ordinary unknown-field
+error) — `ApiFreeze`'s snapshot mechanism remains, now unconditional pub-fn
+semver diffing (E1218/E2601), not a capability-tier freeze. S3–S9 remain
+unbuilt.
 
 **D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
@@ -1085,8 +1091,11 @@ hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
 no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
 **D-PLUGIN-EXPORT1 (=A)**: a `plugin` target's exported surface is the `pub`
 items of its entry module, named by the manifest `export:` field and frozen
-via the existing D-CAP4 `api: stable` machinery; the `.wit` world is
-generated from those signatures — no new in-source keyword (I8).
+via the existing D-CAP4 `api: stable` machinery [STALE: D-CAP4's `api:`
+field/freeze machinery is retired by D-MEM1/S2 — `plugin` is still reserved
+(unbuilt), so re-ground this on the S2 pub-metadata semver snapshot before
+building it]; the `.wit` world is generated from those signatures — no new
+in-source keyword (I8).
 **D-PLUGIN-VERSION1 (=A)**: plugin load-time compatibility is structural —
 the D-CAP4 freeze of the exported interface is the contract; a plugin
 rebuilt with an unchanged interface still loads; mismatch is a clean E-code

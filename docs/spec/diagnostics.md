@@ -202,8 +202,8 @@ before continuing.
 | E0206 | sema  | `view` return can't point at this value   |
 | E0207 | sema  | a stored-reference (`&T`) field's owner is ambiguous — 2+ in-scope values could own it (D-REF-SHORTHAND1) |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
+| E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
-| L0201 | sema  | implicit `.clone()` at call site — fired only when the value is dead after the call (D-L0201 liveness gate) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (U11, D-JPK-SCRIPTDEP1) |
 | L0204 | jet   | a `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16) |
@@ -394,7 +394,6 @@ before continuing.
 | E0909 | sema  | generic instantiation too deep |
 | E0910 | sema  | `@PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
-| E0912 | sema  | a frozen public capability signature drifted: a param a caller could pass by read now demands `&`/`^` in an `api: stable`/`api: explicit` library (c129, D-CAP8) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
 | E0914 | sema  | unknown interpolation selector after `@` (D-DISPLAYDBG2) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
@@ -1434,19 +1433,6 @@ literal's body (a separate closure, not inline text of the function).
 | What | Why | Fix |
 |------|-----|-----|
 | a function can't be both `@Inline` and `@InlineAlways`. | `@Inline` is a soft hint the compiler may ignore; `@InlineAlways` is a checked promise it must honor or reject — one declaration can't carry both meanings. | Keep one: `@Inline` to suggest inlining, `@InlineAlways` to require it. |
-
-### E0912 — Frozen capability signature drift (c129)
-
-A `library { api: stable }` (or `api: explicit`) target freezes each public
-function's *resolved* capability signature into a durable contract
-(`.jet/cache/api/<package>.api`, written by `jet publish`). D-CAP8 says a later
-read → `&`/`^` change is a breaking change, **not a silent flip** — so the
-next build diffs the resolved signature against the frozen one and fires E0912 on
-any drift.
-
-| What | Why | Fix |
-|------|-----|-----|
-| The public capability signature of `{fn}` changed since `{package}` froze it at version `{version}` (shows `was:`/`now:`). | An `api: stable`/`api: explicit` library freezes each public function's resolved capabilities. A param callers could pass by read now demands a stronger capability (`&` write / `^` take), which silently breaks every caller. | If the new capability is intended, this is a breaking change — bump the major version and re-run `jet publish` to re-freeze the contract. Otherwise restore the original signature of `{fn}` (or annotate the published api so the freeze records the new capability deliberately). |
 
 ## Process for a new diagnostic
 

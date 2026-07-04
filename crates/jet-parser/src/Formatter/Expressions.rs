@@ -874,9 +874,9 @@ impl<'a> Fmt<'a> {
             // D-MEM1: the call-site capability is a sigil that attaches to the
             // argument with no space (`^x`, `&x`). The parser reads it
             // before the label, so fmt emits it in that order to round-trip.
-            // `Read`/`Infer` are unmarked; `Raw` (`*`) is handled apart.
+            // `Read` is unmarked; `Raw` (`*`) is handled apart.
             match arg.convention {
-                AccessConvention::Read | AccessConvention::Infer | AccessConvention::Raw => {}
+                AccessConvention::Read | AccessConvention::Raw => {}
                 AccessConvention::Write => self.write(Syntax::SIGIL_WRITE),
                 AccessConvention::Move => self.write(Syntax::SIGIL_MOVE),
                 AccessConvention::Share => self.write(Syntax::SIGIL_WRITE),

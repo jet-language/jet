@@ -1193,10 +1193,10 @@ fn calc(a: Float) -> Float {
     return (f + c)
 }
 fn make_path(a: String, b: String) -> String {
-    return path.join(a, b)
+    return path.join(a.clone(), b.clone())
 }
 fn hash(s: String) -> String {
-    return crypto.sha256(s)
+    return crypto.sha256(s.clone())
 }
 fn run() {
     print(calc(16.0))
@@ -1226,7 +1226,7 @@ fn core_fs_read_with_fallback() {
     let src = "\
 use core.fs as fs
 fn read_or(p: String) -> String {
-    return (fs.read(p) ?? \"missing\")
+    return (fs.read(p.clone()) ?? \"missing\")
 }
 fn run() {
     print(read_or(\"/no/such/file/at/all/xyzzy\"))
@@ -1654,7 +1654,7 @@ fn handle_methods_file_writer() {
 use core.files as files
 use core.fs as fs
 fn write_file(path: String, text: String) -> Int {{
-    w := files.create(path) ?? return 0
+    w := files.create(path.clone()) ?? return 0
     _r :: w.write_line(text)
     _f :: w.flush()
     return 1

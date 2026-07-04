@@ -850,29 +850,16 @@ fn inlay_hint_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
 
-    let (diags, bundle, facts) = server.check_with_bundle(doc);
+    let (_diags, bundle, facts) = server.check_with_bundle(doc);
 
     // Build type-annotation hints from the symbol DB.
-    let mut hints: Vec<InlayHint> = match bundle {
+    let hints: Vec<InlayHint> = match bundle {
         Some(b) => {
             let db = build_symbol_db(&b, &facts);
             db.inlay_hints_for(&doc.path).into_iter().cloned().collect()
         }
         None => Vec::new(),
     };
-
-    // D-LSP8: add clone-site hints for L0201 diagnostics.
-    for d in &diags {
-        if d.code == "L0201" {
-            if let Some(span) = d.span {
-                hints.push(InlayHint {
-                    span,
-                    module_path: doc.path.clone(),
-                    label: ".clone()".to_string(),
-                });
-            }
-        }
-    }
 
     let hint_refs: Vec<&InlayHint> = hints.iter().collect();
     let json = format_inlay_hints(&hint_refs, &doc.text);

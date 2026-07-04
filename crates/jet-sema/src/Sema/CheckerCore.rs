@@ -495,10 +495,10 @@ impl<'a> Checker<'a> {
         if new_scope {
             self.push_scope();
         }
-        // D-L0201 liveness gate: before checking each statement, record the
-        // tail of the current block (statements that follow it).  The lint
-        // helper `is_name_live_after` reads this to decide whether the cloned
-        // value is dead at this point.  We push the previous frame onto the
+        // E0209 liveness gate (was D-L0201): before checking each statement,
+        // record the tail of the current block (statements that follow it).
+        // The helper `is_name_live_after` reads this to word the E0209 fix
+        // menu (move vs. copy/reorder). We push the previous frame onto the
         // liveness_frames stack so `is_name_live_after` can walk enclosing
         // scopes; on exit we pop and restore.
         let saved_ptr = self.stmt_tail_ptr;
@@ -525,11 +525,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// D-L0201 liveness gate: returns `true` when `name` is referenced in any
-    /// statement that follows the current statement in the innermost block.
-    /// When true the implicit clone is *necessary* — suppressing L0201 is safe.
-    /// When false we can't prove liveness from this frame, so the clone may be
-    /// wasteful and L0201 fires.
+    /// E0209 liveness gate (was D-L0201): returns `true` when `name` is
+    /// referenced in any statement that follows the current statement in the
+    /// innermost block. E0209 fires either way now (no clone is ever silent),
+    /// but this decides its fix menu: live-after means `^` would break that
+    /// later use, so the menu offers copy/reorder; dead-after means `^` is
+    /// safe (this is the value's last use).
     ///
     /// Checks the current block's tail AND all enclosing block tails pushed
     /// by `check_block`, so a clone inside a nested `if` body is not flagged

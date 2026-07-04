@@ -1604,18 +1604,13 @@ pub const PACKAGE_FIELD_TARGETS: &str = "targets";
 /// only to emit a migration teaching error pointing at `targets:`.
 pub const PACKAGE_FIELD_KIND_REMOVED: &str = "kind";
 
-/// D-TGT3/D-TGT4/D-CAP4 (ratified 2026-06-21): fields a target block may carry —
-/// `entry:` (D-TGT4 entry module), `name:` (output/bin name), `api:` (D-CAP4
-/// capability mode). Parsed when present; behavior lands with the realize pipeline.
+/// D-TGT3/D-TGT4 (ratified 2026-06-21): fields a target block may carry —
+/// `entry:` (D-TGT4 entry module), `name:` (output/bin name). Parsed when
+/// present; behavior lands with the realize pipeline. `api:` (D-CAP4) is
+/// retired by D-MEM1/S2 — a target block carrying it hits the ordinary
+/// unknown-field error like any other typo'd key.
 pub const TARGET_FIELD_ENTRY: &str = "entry";
 pub const TARGET_FIELD_NAME: &str = "name";
-pub const TARGET_FIELD_API: &str = "api";
-
-/// D-CAP4/D-CAP6 (ratified 2026-06-21): library capability-API modes. Default is
-/// inference (no `api:`); `stable` records signatures + flags breaks, `explicit`
-/// requires hand-written capability annotations on every `pub` signature.
-pub const API_MODE_STABLE: &str = "stable";
-pub const API_MODE_EXPLICIT: &str = "explicit";
 
 /// D-CAP1 (ratified 2026-06-21): the four-capability vocabulary —
 /// `view`/`edit`/`take`/`share`. `view` and `take` are ratified ownership keywords
@@ -1848,11 +1843,12 @@ pub const DBG_QUIT: &str = "quit"; // D-DBG3 (alias `q`): end the session (E2204
 /// `<project_root>/.jet/cache/schema/<TypeName>.snapshot`.
 pub const SCHEMA_CACHE_SUBDIR: &str = "cache/schema"; // D-MIGRATE1
 
-/// c129 (D-CAP4/D-CAP6/D-CAP8): subdirectory under the project `.jet/` managed
-/// folder where frozen public-API capability snapshots are stored. Full path is
-/// `<project_root>/.jet/cache/api/<package>.api`. Written at `jet publish` time
-/// for an `api: stable|explicit` library target; read by the sema drift pass
-/// (E0912). Committed — it is a durable interface contract, not a build artifact.
+/// S2/D-MEM1 (was c129/D-CAP4/D-CAP6/D-CAP8): subdirectory under the project
+/// `.jet/` managed folder where public-fn signature snapshots are stored.
+/// Full path is `<project_root>/.jet/cache/api/<package>.api`. Written at
+/// `jet publish` time, unconditionally, for every library target; read by the
+/// local pre-publish SemVer gate (E1218). Committed — it is a durable
+/// interface contract, not a build artifact.
 pub const API_CACHE_SUBDIR: &str = "cache/api";
 
 /// D-DETACH1 (ratified; D-DETACH1 = A): consumes a Task handle without joining

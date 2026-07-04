@@ -1,12 +1,10 @@
-//! c129 (D-CAP4/D-CAP6/D-CAP8 — ratified): freeze the resolved public-capability
-//! signature of a `library { api: stable | explicit }` target into durable
-//! interface metadata.
-//!
-//! D-CAP8 already resolves every unmarked `Infer` parameter to a concrete
-//! capability (`Read`/`Write`/`Move`/`Share`) from body usage, in memory, during
-//! sema. c129 *persists* that resolved signature so it survives across builds and
-//! a later read → `&`/`^` drift can be caught as a breaking change (E0912),
-//! rather than silently flipping the public contract.
+//! S2/D-MEM1 (was c129/D-CAP4/D-CAP6/D-CAP8): snapshot a library target's
+//! public-fn surface into durable interface metadata, unconditionally on
+//! every publish — pub-metadata semver diffing (feeds E1218/E2601). The
+//! former `api: stable|explicit` opt-in gate and the capability-tier
+//! freeze/drift check (E0912, elevation-based) are retired: a param's sigil
+//! is decided at parse time and never drifts silently, so there is nothing
+//! left to freeze at that tier — only an ordinary public-signature diff.
 //!
 //! Format (std-only, lockfile-style — no serde, I6):
 //!
@@ -18,11 +16,11 @@
 //! fn length(v: Vec3) -> Float
 //! ```
 //!
-//! Each `fn` line is the canonical capability signature: every public function's
-//! parameter list carries the frozen D-MEM1 sigil (`&`/`^`/`*`; plain read
-//! emits none) plus the return type. The struct/enum/trait surface is diffed
-//! separately by the SemVer API check (`Publish::diff_public_api`); this snapshot
-//! is the *capability* contract specifically.
+//! Each `fn` line is the canonical signature: every public function's
+//! parameter list carries its D-MEM1 sigil (`&`/`^`/`*`; plain read emits
+//! none) plus the return type. The struct/enum/trait surface is diffed
+//! separately by the SemVer API check (`Publish::diff_public_api`); this
+//! snapshot is the *function-signature* surface specifically.
 //!
 //! Lives at `.jet/cache/api/<package>.api` (committed, durable contract — the same
 //! discipline as the D-MIGRATE1 `@PublishedSchema` snapshot).

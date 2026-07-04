@@ -40,14 +40,23 @@ unknown syntax, no special-case message. `^` unchanged. Call sites mirror
 emits the v5 glyphs + fmt STABILITY test (round-trip rule). E0056–E0058
 foreign-guess errors (`mut`/`take`/`view`) re-pointed at the v5 sigils.
 
-**S2 — Signatures can't lie (sema).**
+**S2 — Signatures can't lie (sema). DONE (2026-07-04).**
 Unmarked param = Read, enforced: a body write is an error with a fix-it (add
-`&` at param + call sites); escape/consume is an error with `^`/`copy` menu.
-`AccessConvention::Infer` deleted. Elevation deleted; `CapabilityFreeze`/
-`ApiFreeze` reduced to pub-metadata semver diffing (E0912 deleted; the `api:`
-manifest field ceases to exist — unknown-field error like any other). L0201
-deleted: a Move param receiving a non-`^` named argument is a hard error
-(menu: `copy x` / `^x` / reorder) — no silent clones remain.
+`&` at param + call sites) — free once elevation was cut, since E0111/E0205
+already gate on `info.mutable` and only ever saw `true` for an unmarked param
+via elevation. `AccessConvention::Infer` deleted (enum variant gone, every
+match arm exhaustive without it); `Capability.rs` (the elevation pass) deleted
+outright, no fallback. `CapabilityFreeze.rs` (E0912) deleted outright; the
+`api:` manifest field (`ApiMode`) no longer exists — an ordinary unknown-field
+error (E1216) like any other typo'd key. `ApiFreeze.rs`'s snapshot mechanism
+remains — it now backs pub-metadata semver diffing unconditionally on every
+publish (E1218/E2601), no `api:` opt-in gate. L0201 deleted: passing a named
+binding to a Move param without `^` (or a std constructor consuming a
+borrowed binding) is now E0209, a hard error regardless of liveness — no
+silent clone ever. Fix menu: `^name` when this is `name`'s last use;
+`name.clone()` (today's actual clone spelling — `copy name` per D-CAP2 isn't
+parseable until S4) or reorder to make this the last use, when `name` is
+still live after.
 
 **S3 — Second-class borrows (deletions).**
 `-> &T` return types and `&T` struct fields are simply not in the v5 grammar
