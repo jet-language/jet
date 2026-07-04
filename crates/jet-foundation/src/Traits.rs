@@ -446,13 +446,7 @@ impl TraitRegistry {
                             .iter()
                             .map(|p| (p.convention, p.ty.clone()))
                             .collect();
-                        if !sig_matches_trait(
-                            &params,
-                            &m.return_type,
-                            m.is_view_return,
-                            sig,
-                            &assoc,
-                        ) {
+                        if !sig_matches_trait(&params, &m.return_type, sig, &assoc) {
                             diags.push(e0907(trait_name, &m.name, m.name_span));
                         }
                     }
@@ -691,7 +685,6 @@ impl TraitRegistry {
                 variadic_bound_list: None,
             }],
             return_type: Some(Type::Named("Snapshot".to_string())),
-            is_view_return: false,
             span: dummy,
             default_body: None,
             is_pure: false,
@@ -724,7 +717,6 @@ impl TraitRegistry {
                 },
             ],
             return_type: None,
-            is_view_return: false,
             span: dummy,
             default_body: None,
             is_pure: false,
@@ -780,7 +772,6 @@ impl TraitRegistry {
                     variadic_bound_list: None,
                 }],
                 return_type: Some(Type::Option(Box::new(Type::Named("Item".to_string())))),
-                is_view_return: false,
                 span: dummy,
                 default_body: None,
                 is_pure: false,
@@ -814,7 +805,6 @@ impl TraitRegistry {
                     variadic_bound_list: None,
                 }],
                 return_type: Some(Type::Named("Iter".to_string())),
-                is_view_return: false,
                 span: dummy,
                 default_body: None,
                 is_pure: false,
@@ -860,7 +850,6 @@ impl TraitRegistry {
                     },
                 ],
                 return_type: Some(Type::Option(Box::new(Type::Named("Value".to_string())))),
-                is_view_return: false,
                 span: dummy,
                 default_body: None,
                 is_pure: false,
@@ -916,7 +905,6 @@ impl TraitRegistry {
                     },
                 ],
                 return_type: None,
-                is_view_return: false,
                 span: dummy,
                 default_body: None,
                 is_pure: false,
@@ -962,7 +950,6 @@ impl TraitRegistry {
                 variadic_bound_list: None,
             }],
             return_type: ret,
-            is_view_return: false,
             span: dummy,
             default_body: None,
             is_pure: false,
@@ -983,10 +970,7 @@ impl TraitRegistry {
 }
 
 fn struct_auto_derive_ok(s: &StructDef) -> bool {
-    !s.fields.is_empty()
-        && s.fields
-            .iter()
-            .all(|f| !f.is_stored_ref && field_auto_ok(&f.ty, &s.name))
+    !s.fields.is_empty() && s.fields.iter().all(|f| field_auto_ok(&f.ty, &s.name))
 }
 
 fn enum_auto_derive_ok(e: &EnumDef) -> bool {
@@ -1076,21 +1060,10 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
         out.push_str(&format!("    type {name};\n"));
     }
     for m in &t.methods {
-        // Thread is_view_return into the declared return type so the trait
-        // declaration renders `-> &T`, matching the impl side's
-        // rust_return_type(cx, t, is_view). Without this the trait decl emits
-        // `-> T` while the impl emits `-> &T` → rustc E0053.
         let ret = m
             .return_type
             .as_ref()
-            .map(|t| {
-                let base = rust_type_name_assoc(t, &assoc);
-                if m.is_view_return {
-                    format!("&{base}")
-                } else {
-                    base
-                }
-            })
+            .map(|t| rust_type_name_assoc(t, &assoc))
             .unwrap_or_else(|| "()".to_string());
         let params: Vec<String> = m
             .params

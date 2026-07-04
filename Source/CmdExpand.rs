@@ -6,14 +6,13 @@
 //! comes straight off the checked `ProgramBundle` (`Func::is_inline` /
 //! `is_inline_always` — present on a bundle that compiled at all means the
 //! `@InlineAlways` promise already held, E0917/E0918/E0919 would have fired
-//! otherwise) or off `SemIndexEffectFacts::refs`, the same side-table
-//! `jet semindex`/`jet impact` are built from.
+//! otherwise).
 
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet::AST::{Item, ProgramBundle};
-use jet::Sema::{RefOwnerHow, SemIndexEffectFacts};
+use jet::Sema::SemIndexEffectFacts;
 use jet::ExitCodes;
 
 /// One registered lens: name, one-line description for `--facts <unknown>`
@@ -28,18 +27,11 @@ struct Lens {
     render: fn(&ProgramBundle, &SemIndexEffectFacts) -> Vec<String>,
 }
 
-const LENSES: &[Lens] = &[
-    Lens {
-        name: "inline",
-        summary: "@Inline / @InlineAlways contracts (D-METHODMACRO1)",
-        render: render_inline,
-    },
-    Lens {
-        name: "refs",
-        summary: "resolved owners for &T stored-ref fields (D-REF-SHORTHAND1)",
-        render: render_refs,
-    },
-];
+const LENSES: &[Lens] = &[Lens {
+    name: "inline",
+    summary: "@Inline / @InlineAlways contracts (D-METHODMACRO1)",
+    render: render_inline,
+}];
 
 pub(crate) fn run_expand(args: &[String], _json: bool) {
     let mut lens_name: Option<String> = None;
@@ -65,7 +57,7 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
     let Some(path) = positional.first().copied() else {
         eprintln!("error: `jet expand` needs an entry file");
         eprintln!(" Fix: jet expand examples/features/basics/hello.jet");
-        eprintln!(" Fix: jet expand --facts refs examples/features/basics/hello.jet");
+        eprintln!(" Fix: jet expand --facts inline examples/features/basics/hello.jet");
         exit(ExitCodes::USER_ERROR);
     };
 
@@ -222,28 +214,6 @@ fn collect_inline_facts(items: &[Item], owner_type: Option<&str>) -> Vec<InlineR
         }
     }
     out
-}
-
-/// D-REF-SHORTHAND1: every `&T` stored-ref field's resolved owner, read
-/// straight off `SemIndexEffectFacts::refs` (recorded by
-/// `CheckerOwnership::check_stored_ref_fields` — never recomputed here).
-fn render_refs(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
-    let mut rows: Vec<_> = facts.refs.iter().collect();
-    rows.sort_by_key(|r| (r.module_idx, r.span.start));
-    rows.into_iter()
-        .map(|r| {
-            let module = &bundle.modules[r.module_idx];
-            let (line, col) = jet::Diagnostics::span_line_col(&module.source, r.span.start);
-            let how = match r.how {
-                RefOwnerHow::Labeled => format!("labeled #Ref({})", r.owner),
-                RefOwnerHow::Inferred => "inferred — sole candidate".to_string(),
-            };
-            format!(
-                "{}:{}:{}   {}.{}   owner: {}   ({})",
-                module.display, line, col, r.struct_name, r.field, r.owner, how
-            )
-        })
-        .collect()
 }
 
 fn absolutize(path: &str) -> PathBuf {

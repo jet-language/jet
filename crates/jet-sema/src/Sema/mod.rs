@@ -20,7 +20,6 @@ pub use crate::AST::FuncSig;
 pub(crate) struct MethodSig {
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
-    is_view_return: bool,
     is_static: bool,
     self_conv: Option<AccessConvention>,
     /// D-NARG1 (S61): parameter names and default-value presence, parallel to
@@ -39,7 +38,7 @@ pub(crate) enum TypeDef {
     Struct {
         #[allow(dead_code)] // stored for future duplicate-name diagnostics
         name_span: Span,
-        fields: Vec<(String, Span, Type, bool, bool)>,
+        fields: Vec<(String, Span, Type, bool)>,
         methods: HashMap<String, MethodSig>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
         /// Values of this type must be consumed exactly once (E0140/E0141) and
@@ -94,8 +93,6 @@ pub(crate) enum TypeDef {
 
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
-    /// D-REFSTRUCT1: struct field → owner label for `#Ref(label)` fields.
-    ref_field_labels: HashMap<String, HashMap<String, String>>,
     /// D-FIELDPOL1: struct name → computed field name → (span, declared
     /// type). A computed field never appears in `TypeDef::Struct::fields`
     /// (it's not a stored field, and is never required/allowed in a struct
@@ -109,14 +106,7 @@ impl TypeRegistry {
         self.types.contains_key(name)
     }
 
-    pub(crate) fn ref_field_label(&self, struct_name: &str, field_name: &str) -> Option<&str> {
-        self.ref_field_labels
-            .get(struct_name)?
-            .get(field_name)
-            .map(|s| s.as_str())
-    }
-
-    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool, bool)]> {
+    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool)]> {
         match self.types.get(name) {
             Some(TypeDef::Struct { fields, .. }) => Some(fields.as_slice()),
             _ => None,
@@ -316,7 +306,6 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             .map(|p| (p.convention, p.ty.clone()))
             .collect(),
         return_type: f.return_type.clone(),
-        is_view_return: f.is_view_return,
         is_static: self_param.is_none(),
         self_conv: self_param.map(|p| p.convention),
         param_info: non_self_params
@@ -364,7 +353,6 @@ fn func_to_sig(f: &Func) -> FuncSig {
         param_variadic,
         variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: f.return_type.clone(),
-        is_view_return: f.is_view_return,
         is_extern: false,
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
@@ -392,7 +380,6 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: ef.return_type.clone(),
-        is_view_return: ef.is_view_return,
         is_extern: true,
         is_unsafe: false,
         is_pure: false,      // extern functions are always considered impure
@@ -549,7 +536,6 @@ pub(crate) struct ListViewInfo {
 
 #[derive(Debug, Clone)]
 pub(crate) enum SendProblemKind {
-    RefField,
     ClosureNeedsTake,
     ClosureCaptures,
     TraitValue(String),
@@ -602,7 +588,7 @@ pub(crate) struct ModuleState {
     field_pub: HashMap<(String, String), bool>,
     field_pkg_pub: HashMap<(String, String), bool>,
     registry: TypeRegistry,
-    structs: HashMap<String, Vec<(Option<String>, Type)>>,
+    structs: HashMap<String, Vec<Type>>,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
     core_imports: HashMap<String, String>,
@@ -627,7 +613,7 @@ pub(crate) struct ModuleState {
 pub(crate) struct Checker<'a> {
     funcs: &'a HashMap<String, FuncSig>,
     registry: &'a TypeRegistry,
-    structs: &'a HashMap<String, Vec<(Option<String>, Type)>>,
+    structs: &'a HashMap<String, Vec<Type>>,
     consts: &'a HashMap<String, Type>,
     modules: Option<&'a [ModuleState]>,
     module_idx: usize,
@@ -705,8 +691,6 @@ pub(crate) struct Checker<'a> {
     /// context — suppresses E2712 for `$name` comptime splice expressions.
     in_comptime: bool,
     ret: Option<Type>,
-    /// `-> view T` on this function (borrowed return).
-    view_return: bool,
     fn_name: String,
     /// Context type for bare `null` (E0308).
     expected_type: Option<Type>,
@@ -804,11 +788,6 @@ pub(crate) struct Checker<'a> {
     /// `global_addr_taken` parameter) so `@InlineAlways` (E0918) can be
     /// checked once every function has run through here.
     inline_addr_taken: HashSet<String>,
-    /// D-EXPANDCLI1 (card #183): resolved `&T` stored-ref owners recorded by
-    /// `check_stored_ref_fields` while checking this function's body — rolled
-    /// into the whole-program `SemIndexEffectFacts::refs` accumulator once the
-    /// body check finishes (see `check_func_body_bundle`).
-    ref_facts: Vec<Facts::RefFact>,
 }
 
 pub mod ApiFreeze;
@@ -827,7 +806,6 @@ mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod Diagnostics;
 mod Effects;
-mod Facts;
 mod FFI;
 pub mod HotSwap;
 mod OsTarget;
@@ -872,9 +850,6 @@ pub use Effects::SemIndexEffectFacts;
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
 pub use Effects::{effect_covers, effect_root, parse_effect_name, Effect, EffectSet};
-// D-EXPANDCLI1 (card #183): `jet expand --facts refs` reads these off
-// `SemIndexEffectFacts::refs`.
-pub use Facts::{RefFact, RefOwnerHow};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub use Registration::{check, check_with_mode, effect_key};

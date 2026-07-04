@@ -8,11 +8,11 @@
         "dec-group:syntax",
         "dec-group:runtime",
         "dec-group:other",
-        "epoch:e8",
-        "epoch:e6",
-        "epoch:e5",
+        "board-sidequests",
         "epoch:e7",
-        "board-sidequests"
+        "epoch:e8",
+        "epoch:e5",
+        "epoch:e6"
       ]
     }
   },
@@ -7898,6 +7898,11 @@
       "blockedBy": [],
       "workOrder": null,
       "log": [
+        {
+          "at": "2026-07-04",
+          "by": "agent",
+          "text": "Stage S3 (second-class borrows) shipped + independently re-verified (orchestrator, 5th consecutive clean run). -> &T return grammar and &T stored-ref fields deleted entirely (parser + full sema/codegen plumbing: is_view_return field, CheckerOwnership's stored-ref-field checks, TStmt::ViewReturn/ViewWrap codegen, struct lifetime-param emission - all removed, not just parser acceptance, matching the greenfield zero-trace rule and S2's precedent of full deletion over dead flags). #Ref marker, E0207, E0427 deleted outright (Facts.rs module removed). Forward guidance: no dedicated 'stored a reference in a field' diagnostic existed (auto-clone was silent) - real match was E0120 ('returned as-is without move'), whose fix-it now names Shared<T>/Id<T> ('coming soon') + owned-field pattern as the v5 answer; text-only rewrite, no new diagnostic code needed. ownership.jet rewritten to not need a borrow return; ref_field.jet rewritten to owned fields + doc comment forward-referencing Shared<T>/Id<T>. Collateral: deleted tests/ref_soundness_fuzz.rs (whole premise was these 2 features) + ~30 ui fixtures, deleted examples/features/memory/{zerocopy,ref_owner}.jet (zerocopy's premise was -> &T, no v5 replacement exists yet - S5 territory, flagged not silently dropped), deleted `jet expand --facts refs` (was solely for #Ref). Rewrote 4 sendability ui fixtures onto a different still-alive vehicle (untaken-closure-capture / View<T> capture) since their old vehicle (stored-ref field) was deleted but the diagnostic codes (E1102/E1106) still fire on other inputs - correctly treated as I4 fixture-vehicle-swap, not code deletion. Caught+fixed its own mistake: E0337 had two triggers under one code, first pass deleted the fixture for both by accident, caught by diagnostics_coverage.rs, restored the other trigger's fixture. Full nix develop -c cargo test --workspace: 0 failed except the known pre-existing c9webdevfn404. (Recurring note: the implementing agent again self-reported 8 phantom jet-codegen None-variant failures as pre-existing - this is now the 5th consecutive agent across S1/S2/decree-4-6/S3 to claim this exact failure, and the 5th consecutive independent orchestrator full-suite run to NOT reproduce it; treating as a parallel-test-execution artifact specific to agents' own --no-fail-fast runs, not a real repo bug - worth a dedicated look if it ever reproduces for the orchestrator.) Ready for S4 (copy verb)."
+        },
         {
           "at": "2026-07-04",
           "by": "agent",
@@ -20421,24 +20426,6 @@
       "status": "tagged",
       "created": "2026-07-01T13:31:05.264Z",
       "cardId": "cadotscope"
-    },
-    {
-      "id": "b1x22fm",
-      "text": "Reconsider syntax for better cohesion, consistency, readability, ergonomics (physical & scriptual)",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-07-01T13:33:27.875Z"
-    },
-    {
-      "id": "b2zrzhr",
-      "text": "Have a native equivalent of nob: https://github.com/tsoding/nob.h",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-07-01T13:54:37.790Z"
     },
     {
       "id": "b3t8vl5",

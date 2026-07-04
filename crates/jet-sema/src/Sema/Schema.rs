@@ -319,8 +319,6 @@ mod tests {
                 Field {
                     is_pub: false,
                     is_package_pub: false,
-                    is_stored_ref: false,
-                    stored_ref_label: None,
                     name: "label".to_string(),
                     name_span: zero,
                     ty: Type::String,
@@ -332,8 +330,6 @@ mod tests {
                 Field {
                     is_pub: false,
                     is_package_pub: false,
-                    is_stored_ref: false,
-                    stored_ref_label: None,
                     name: "count".to_string(),
                     name_span: zero,
                     ty: Type::Int,

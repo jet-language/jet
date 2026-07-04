@@ -2194,33 +2194,6 @@ fn run() {
     assert_eq!(stdout, "5\n1\n10\n7\n");
 }
 
-/// c109 Phase 17: a `-> &T` function returns a borrow. The signature renders `&T`
-/// and the body's `return field.name` lowers via `emit_view_return` to `&((*field)).name`
-/// (a field read of an owned param, address taken). A `view` ident param returns the bare
-/// borrow.
-#[test]
-fn view_return_fn() {
-    if !have_rustc() {
-        return;
-    }
-    let src = "\
-struct Rec {
-    name: String
-    value: String
-}
-fn name_of(rec: Rec) -> &String {
-    return rec.name
-}
-fn run() {
-    r :: Rec.{ name: \"alpha\", value: \"beta\" }
-    print(\"{name_of(r)}\")
-}
-";
-    let (code, stdout) = build_and_run("tir_view_return_fn", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "alpha\n");
-}
-
 /// c109 Phase 17: a PRELUDE struct (HttpResponse/HttpRequest) constructed via a struct
 /// literal. The `is_prelude_struct` emit branch renders a `Jet…` Rust head with PLAIN
 /// (unmangled) fields, and HttpRequest injects a `params: BTreeMap::new()` field. The
@@ -3679,41 +3652,6 @@ shapes: [Shape] :: [Circle.{radius: 1.0}, Square.{side: 2.0}]
     assert_eq!(code, 0);
     // circle/square areas via dynamic dispatch; largest([3,1,4,1,5]) = 5; scores[0].points = 10.
     assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
-}
-
-/// c109 (view-trait fix): a `view`-returning TRAIT method `fn label(self) -> &String`
-/// implemented in an `impl Dog.Named` block. This was a latent I2 hole on BOTH paths:
-/// `emit_trait_def` rendered the trait DECLARATION's return as `-> String` (ignoring
-/// `is_view_return`) while the impl emitted `-> &String`, so rustc rejected the generated
-/// Rust with E0053 ("incompatible type for trait"). The fix threads `is_view_return` into
-/// the declared return type so the trait says `-> &String` to match the impl. The method
-/// now compiles AND routes through the TIR (the gate's view-trait exclusion is dropped; the
-/// borrow shape is the existing total `TStmt::ViewReturn.{ wrap }` from Phase 17).
-#[test]
-fn view_returning_trait_method() {
-    if !have_rustc() {
-        return;
-    }
-    let src = "\
-trait Named {
-    fn label(self) -> &String
-}
-struct Dog {
-    name: String
-}
-impl Dog.Named {
-    fn label(self) -> &String {
-        return self.name
-    }
-}
-fn run() {
-    d :: Dog.{ name: \"Rex\" }
-    print(d.label())
-}
-";
-    let (code, stdout) = build_and_run("tir_view_trait_method", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "Rex\n");
 }
 
 /// c150: assigning a Read-convention (borrowed) non-Copy parameter into a struct

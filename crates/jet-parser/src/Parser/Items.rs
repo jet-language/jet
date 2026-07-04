@@ -1526,10 +1526,8 @@ impl<'a> Parser<'a> {
         self.validate_variadic_params(&params);
 
         let mut return_type = None;
-        let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
             self.bump();
-            is_view_return = self.parse_view_return_marker();
             let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
@@ -1547,7 +1545,6 @@ impl<'a> Parser<'a> {
             name_span,
             params,
             return_type,
-            is_view_return,
             rust_path,
             rust_path_span,
             span: Span::new(fn_start, end),
@@ -2812,10 +2809,8 @@ impl<'a> Parser<'a> {
         let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
 
         let mut return_type = None;
-        let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
             self.bump();
-            is_view_return = self.parse_view_return_marker();
             let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
@@ -2843,7 +2838,6 @@ impl<'a> Parser<'a> {
                 type_params,
                 params,
                 return_type,
-                is_view_return,
                 is_unsafe,
                 is_pure,
                 is_sanitizer,
@@ -2874,7 +2868,6 @@ impl<'a> Parser<'a> {
             type_params,
             params,
             return_type,
-            is_view_return,
             is_unsafe,
             is_pure,
             is_sanitizer,
@@ -2985,25 +2978,6 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RParen, "to close the effect list")?;
         Ok((Some(effects), None))
-    }
-
-    /// D-CAP7: the view-return marker after `->`. `&T` is the sigil spelling
-    /// (`fn name_of(...) -> &String`). The retired `view` keyword still lexes,
-    /// so route it to the E0058 teaching error and recover as a view return
-    /// (S14 idiom). Returns true when a view-return marker was consumed.
-    fn parse_view_return_marker(&mut self) -> bool {
-        match self.peek().kind {
-            TokKind::Amp => {
-                self.bump();
-                true
-            }
-            TokKind::KwView => {
-                let span = self.bump().span;
-                self.push_cap_keyword_teach("E0058", Syntax::KW_VIEW, Syntax::SIGIL_WRITE, span);
-                true
-            }
-            _ => false,
-        }
     }
 
     fn param(&mut self) -> Result<Param, Diagnostic> {
@@ -4245,10 +4219,8 @@ impl<'a> Parser<'a> {
         // D-EFF3: optional `#(Gpu)` effect bound between params and the arrow.
         let declared_effects = self.parse_opt_effect_annotation()?;
         let mut return_type = None;
-        let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
             self.bump();
-            is_view_return = self.parse_view_return_marker();
             let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
@@ -4269,7 +4241,6 @@ impl<'a> Parser<'a> {
             name_span,
             params,
             return_type,
-            is_view_return,
             span: Span::new(start.start, end),
             default_body,
             is_pure,
@@ -4343,100 +4314,9 @@ impl<'a> Parser<'a> {
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-        // D-REF-SHORTHAND1/2: a stored-reference field spells its type `&T`. An
-        // optional `#Ref(label)` prefix names the owner when inference is
-        // ambiguous. The label is recorded here but only *validates* against a
-        // `&T` type below — a `#Ref(...)` on a plain (non-`&`) type is the
-        // retired `#Ref(owner) name: T` form (E0427).
-        let mut explicit_label: Option<String> = None;
-        let mut ref_prefix_span: Option<Span> = None;
-        if matches!(self.peek().kind, TokKind::Hash) {
-            let hash_start = self.peek().span.start;
-            self.bump();
-            let (attr_name, attr_name_span) = self.expect_ident("after `#`")?;
-            if attr_name == Syntax::ATTR_REF {
-                self.expect(TokKind::LParen, "after `#Ref`")?;
-                let (label, _label_span) = self.expect_ident("inside `#Ref(…)`")?;
-                let rparen_span = self.peek().span;
-                self.expect(TokKind::RParen, "to close `#Ref(…)`")?;
-                explicit_label = Some(label);
-                ref_prefix_span = Some(Span::new(hash_start, rparen_span.end));
-            } else {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    format!("`#{}` isn't a known attribute on a field", attr_name),
-                    "only `#Ref(owner)` names the owner of a stored-reference field".to_string(),
-                    format!("write `#{}(owner) field: &Type`", Syntax::ATTR_REF),
-                    Some(Span::new(hash_start, attr_name_span.end)),
-                ));
-            }
-        }
-        // Retired S10 `ref[label]` / `ref` spelling (D-REFSTRUCT1).
-        if matches!(self.peek().kind, TokKind::KwStored) {
-            let start = self.peek().span;
-            self.bump();
-            let mut end = start.end;
-            let mut label_hint = String::new();
-            if matches!(self.peek().kind, TokKind::LBracket) {
-                self.bump();
-                if let Ok((label, ls)) = self.expect_ident("inside retired `ref[…]`") {
-                    label_hint = label;
-                    end = ls.end;
-                }
-                if matches!(self.peek().kind, TokKind::RBracket) {
-                    end = self.bump().span.end;
-                }
-            }
-            let fix = if label_hint.is_empty() {
-                "write the field type as `&Type`".to_string()
-            } else {
-                format!(
-                    "write `#{}({label_hint}) name: &Type` instead of `ref[{label_hint}]`",
-                    Syntax::ATTR_REF
-                )
-            };
-            return Err(Diagnostic::error(
-                "E0060",
-                "stored reference fields spell the type `&T` now".to_string(),
-                "the old `ref[label]` field keyword was replaced by the `&T` field type"
-                    .to_string(),
-                fix,
-                Some(Span::new(start.start, end)),
-            ));
-        }
         let (name, name_span) = self.expect_ident("for a field name")?;
         self.expect(TokKind::Colon, "after a field name")?;
-        // D-REF-SHORTHAND1: a leading `&` on the field type marks a stored
-        // reference. The referent type `T` is kept unwrapped in `ty`; codegen
-        // wraps it back as `&'lifetime T`.
-        let saw_amp = matches!(self.peek().kind, TokKind::Amp);
-        if saw_amp {
-            self.bump();
-        }
         let (ty, ty_span) = self.type_()?;
-        let (is_stored_ref, stored_ref_label) = if saw_amp {
-            (true, explicit_label)
-        } else if let Some(prefix_span) = ref_prefix_span {
-            // D-REF-SHORTHAND1: retired `#Ref(owner) name: T` (plain type, no
-            // `&`). The `&` now carries the "stored reference" fact; the label
-            // only disambiguates the owner.
-            let label = explicit_label.as_deref().unwrap_or("owner");
-            return Err(Diagnostic::error(
-                "E0427",
-                "a stored-reference field needs `&` on its type".to_string(),
-                "`#Ref(owner)` only names the owner — the `&` on the type is what makes the field store a reference (D-REF-SHORTHAND1)"
-                    .to_string(),
-                format!(
-                    "write `#{}({label}) {name}: &{ty}` (add the `&`), or drop `#{}({label})` and write `{name}: &{ty}`",
-                    Syntax::ATTR_REF,
-                    Syntax::ATTR_REF,
-                    ty = ty.name()
-                ),
-                Some(Span::new(prefix_span.start, ty_span.end)),
-            ));
-        } else {
-            (false, None)
-        };
         // D-FIELDPOL1: `name: T => expr` — a computed field. `expr` is a
         // single expression (no block); sibling field names inside it are
         // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
@@ -4450,8 +4330,6 @@ impl<'a> Parser<'a> {
         Ok(Field {
             is_pub,
             is_package_pub,
-            is_stored_ref,
-            stored_ref_label,
             name,
             name_span,
             ty,

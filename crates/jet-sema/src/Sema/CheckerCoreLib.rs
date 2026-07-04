@@ -862,11 +862,6 @@ impl<'a> Checker<'a> {
                 self.lambda_escapes = true;
                 self.is_task_spawn = true;
                 let lam_ty = self.infer(&mut args[0].expr);
-                let view_return_span = match &args[0].expr {
-                    Expr::Lambda(lam) => lambda_body_view_return_span(self, &lam.body),
-                    expr if self.is_view_call(expr) => Some(expr.span()),
-                    _ => None,
-                };
                 self.lambda_escapes = saved_esc;
                 self.is_task_spawn = saved_task;
                 // Extract the return type from the closure's function type.
@@ -902,19 +897,7 @@ impl<'a> Checker<'a> {
                     }
                     None => Type::Named("Unit".to_string()),
                 };
-                if let Some(span) = view_return_span {
-                    self.report_unsendable(
-                        "task result",
-                        &t,
-                        SendabilityProblem {
-                            root: None,
-                            path: Vec::new(),
-                            kind: SendProblemKind::ViewBorrow,
-                        },
-                        SendCrossing::TaskResult,
-                        span,
-                    );
-                } else if let Some(problem) = self.sendability_problem(&t, false) {
+                if let Some(problem) = self.sendability_problem(&t, false) {
                     self.report_unsendable(
                         "task result",
                         &t,

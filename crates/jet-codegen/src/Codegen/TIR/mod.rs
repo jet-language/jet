@@ -263,10 +263,6 @@ pub struct TFunc {
     pub params: Vec<(String, Type, AccessConvention)>,
     /// Resolved return type, or `None` for a unit-returning function.
     pub ret: Option<Type>,
-    /// c109 Phase 17: the function returns `-> view T` (a borrow). Drives
-    /// `rust_return_type(cx, ret, is_view)` so the signature renders `&T`, and the body's
-    /// returns lowered via `lower_view_return` (`TStmt::ViewReturn`).
-    pub is_view: bool,
     /// c109 Phase 17: the rendered Rust generic clause (`<T: Clone>` / `<T, U>` / empty),
     /// resolved at lowering via `Generics::rust_type_param_list(&f.type_params, …)` exactly
     /// as `emit_func` does (with the `rust_extra_clone_bounds` every type param carries).
@@ -336,18 +332,6 @@ pub enum TFuncKind {
         fwd: String,
         has_return: bool,
     },
-}
-
-/// c109 Phase 17: how a `-> view T` return wraps its value, resolved at lowering from
-/// the AST node shape (`emit_view_return`, Source/Codegen/Statement.rs):
-///  - `Addr` — prefix `&` (an owned place whose address is taken: a non-deref ident, a
-///    const, or a field read `&(<place>)`);
-///  - `Bare` — emit the value as-is (an already-borrowed ident reads `name`, the deref'd
-///    place stripped at lowering, OR a non-ident/field expr that `emit_view_return` passes
-///    straight to `emit_expr`).
-pub enum ViewWrap {
-    Addr,
-    Bare,
 }
 
 /// c109 Phase 22: the method-call-collection iteration form on a `loop x in <coll>`,
@@ -490,15 +474,6 @@ pub enum TStmt {
         clone_value: bool,
     },
     Return(Option<TExpr>),
-    /// c109 Phase 17: a `return <e>` from a `-> view T` function (a borrow). Reproduces
-    /// `emit_view_return` (Source/Codegen/Statement.rs) byte-for-byte: the returned value
-    /// is the lowered expression `value`, wrapped per `wrap` (resolved at lowering from the
-    /// AST node shape) — `&value` for a place that needs its address taken, the bare deref'd
-    /// place for an already-borrowed ident, or `value` unwrapped. `emit` reads `wrap` only.
-    ViewReturn {
-        value: TExpr,
-        wrap: ViewWrap,
-    },
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
@@ -2241,30 +2216,6 @@ mod tests {
         tir_covers_method(f, type_name, &cx)
     }
 
-    /// Coverage of a TRAIT method implemented in a top-level `impl Type: Trait`
-    /// block — routes through `tir_covers_trait_method` (the trait-impl gate).
-    fn covers_trait_method(src: &str, type_name: &str, method: &str) -> bool {
-        let (toks, lex_diags) = crate::Lexer::lex(src);
-        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
-        let prog = crate::Parser::parse(&toks).expect("parse failed");
-        let cx = build_cx(&prog, src, "test.jet");
-        let methods: &[Func] = prog
-            .items
-            .iter()
-            .find_map(|i| match i {
-                Item::Impl(im) if im.type_name == type_name && im.trait_name.is_some() => {
-                    Some(im.methods.as_slice())
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no `impl {type_name}: Trait` block"));
-        let f = methods
-            .iter()
-            .find(|m| m.name == method)
-            .unwrap_or_else(|| panic!("no trait method {type_name}.{method}"));
-        tir_covers_trait_method(f, type_name, &cx)
-    }
-
     #[test]
     fn covers_simple_arithmetic_fn() {
         assert!(covers(
@@ -3827,29 +3778,6 @@ fn takes_shapes(xs: [Shape]) {
 }
 ";
         assert!(covers(src, "takes_shapes"));
-    }
-
-    #[test]
-    fn covers_view_returning_trait_method() {
-        // c109 (view-trait fix): a `view`-returning trait method `fn label(self) ->
-        // view String` is now COVERED. It was excluded while `emit_trait_def` rendered
-        // the trait DECLARATION return as `-> String` (ignoring `is_view_return`) against
-        // the impl's `-> &String` → rustc E0053; that's now fixed, so the gate admits it.
-        // The borrow shape is the existing total `TStmt::ViewReturn { wrap }` (Phase 17).
-        let src = "\
-trait Named {
-    fn label(self) -> &String
-}
-struct Dog {
-    name: String
-}
-impl Dog.Named {
-    fn label(self) -> &String {
-        return self.name
-    }
-}
-";
-        assert!(covers_trait_method(src, "Dog", "label"));
     }
 
     #[test]

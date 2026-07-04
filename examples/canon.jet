@@ -126,19 +126,6 @@ fn show_uninit() -> Int {
     return n
 }
 
-// --- stored references: `field: &T` + `#Ref(label)` ----------------------
-// Two candidate owners share the referent type, so each field names its
-// owner explicitly (D-REF-SHORTHAND1/2).
-struct Excerpt {
-    #Ref(source) text: &String
-    #Ref(kind) meta: &String
-}
-
-fn describe_excerpt(source: String, kind: String) -> String {
-    e :: Excerpt.{text: source, meta: kind}
-    return "{e.text} {e.meta}"
-}
-
 // --- inline contracts: `@Inline` / `@InlineAlways` ------------------------
 // D-METHODMACRO1=A: `@Inline` is a soft hint; `@InlineAlways` is a checked
 // promise the compiler proves or refuses to build.
@@ -308,9 +295,6 @@ fn run() {
     print("loop_sum: {sum}")
     // low-level: uninit sentinel
     print("uninit: {show_uninit()}")
-    // stored references: #Ref(label)
-    ref_desc :: describe_excerpt("hello", "greeting")
-    print("ref: {ref_desc}")
     // inline contracts
     print("inline: {square(4)} {twice(5)}")
     // typed CLI args struct (constructed by hand, not run as the entry point)

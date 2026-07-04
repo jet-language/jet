@@ -170,10 +170,6 @@ impl<'a> Fmt<'a> {
                 }
                 if let Some(ret) = &m.return_type {
                     f.write(" -> ");
-                    // D-CAP7: a borrowed trait-method return renders the `&` sigil.
-                    if m.is_view_return {
-                        f.write(Syntax::SIGIL_WRITE);
-                    }
                     f.fmt_return_type(ret);
                 }
                 // D-LIB2: a trait method may carry a default body.
@@ -221,9 +217,6 @@ impl<'a> Fmt<'a> {
         self.write(")");
         if let Some(ret) = &ef.return_type {
             self.write(" -> ");
-            if ef.is_view_return {
-                self.write(Syntax::SIGIL_WRITE);
-            }
             self.fmt_return_type(ret);
         }
         self.write(" = \"");
@@ -531,9 +524,6 @@ impl<'a> Fmt<'a> {
         }
         if let Some(ret) = &f.return_type {
             self.write(" -> ");
-            if f.is_view_return {
-                self.write(Syntax::SIGIL_WRITE);
-            }
             self.fmt_return_type(ret);
         }
         self.write(" {");
@@ -1017,25 +1007,9 @@ impl<'a> Fmt<'a> {
         self.fmt_field_marker_group(&contract_markers, Syntax::CONTRACT_PREFIX);
         self.fmt_field_marker_group(&directive_markers, Syntax::ATTR_PREFIX);
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
-        // D-REF-SHORTHAND1/2: a stored-reference field spells its type `&T`; an
-        // explicit `#Ref(label)` prefix survives only when the owner was named
-        // to disambiguate (inference leaves `stored_ref_label` `None`).
-        if field.is_stored_ref {
-            if let Some(label) = &field.stored_ref_label {
-                self.write("#");
-                self.write(crate::Syntax::ATTR_REF);
-                self.write("(");
-                self.write(label);
-                self.write(") ");
-            }
-            self.write(&field.name);
-            self.write(": &");
-            self.fmt_type(&field.ty);
-        } else {
-            self.write(&field.name);
-            self.write(": ");
-            self.fmt_type(&field.ty);
-        }
+        self.write(&field.name);
+        self.write(": ");
+        self.fmt_type(&field.ty);
         // D-FIELDPOL1: `name: T => expr` — a computed field.
         if let Some(expr) = &field.computed {
             self.write(" => ");

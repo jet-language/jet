@@ -48,57 +48,16 @@ fn emit_gc_trace_impl(s: &StructDef, out: &mut String) {
     ));
 }
 
-fn struct_lifetimes(fields: &[Field]) -> Vec<String> {
-    let mut labels: Vec<String> = Vec::new();
-    for f in fields {
-        if !f.is_stored_ref {
-            continue;
-        }
-        let label = f
-            .stored_ref_label
-            .clone()
-            .unwrap_or_else(|| "src".to_string());
-        if !labels.contains(&label) {
-            labels.push(label);
-        }
-    }
-    labels
-}
-
 pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
-    let lifetimes = struct_lifetimes(&s.fields);
     let clone_extra = if !s.type_params.is_empty() && cx.cloneable.contains(&s.name) {
         Generics::rust_extra_clone_bounds(&s.type_params)
     } else {
         HashMap::new()
     };
-    let gen = if s.type_params.is_empty() {
+    let type_params = if s.type_params.is_empty() {
         String::new()
     } else {
         Generics::rust_type_param_list(&s.type_params, &clone_extra)
-    };
-    let lt_params = if lifetimes.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<{}>",
-            lifetimes
-                .iter()
-                .map(|l| format!("'{}", l))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    let type_params = if gen.is_empty() {
-        lt_params.clone()
-    } else if lt_params.is_empty() {
-        gen
-    } else {
-        format!(
-            "<{}, {}>",
-            &gen[1..gen.len() - 1],
-            &lt_params[1..lt_params.len() - 1]
-        )
     };
     let has_fn_field = s.fields.iter().any(|f| matches!(f.ty, Type::Fn { .. }));
     let mut derives: Vec<&str> = Vec::new();
@@ -156,15 +115,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     // `s.methods`, so it's emitted below via the normal `emit_type_impl`
     // method-emission path — nothing extra to do here but skip it as a field.
     for f in s.fields.iter().filter(|f| f.computed.is_none()) {
-        let field_ty = if f.is_stored_ref {
-            let label = f
-                .stored_ref_label
-                .clone()
-                .unwrap_or_else(|| "src".to_string());
-            format!("&'{} {}", label, cx.rust_type(&f.ty))
-        } else {
-            cx.struct_field_rust(s, &f.name, &f.ty)
-        };
+        let field_ty = cx.struct_field_rust(s, &f.name, &f.ty);
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
@@ -229,7 +180,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 tp_plain,
             ));
         }
-    } else if lifetimes.is_empty() {
+    } else {
         let show_body = if has_fn_field {
             format!("\"{} {{ ... }}\".to_string()", s.name)
         } else {
@@ -252,18 +203,6 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 user_type_rust(&s.name),
             ));
         }
-    } else {
-        let lt = lifetimes
-            .iter()
-            .map(|l| format!("'{}", l))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!(
-            "impl<{}> JetShow for {}<{}> {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
-            lt,
-            user_type_rust(&s.name),
-            lt
-        ));
     }
     emit_struct_serde(cx, s, out);
     emit_struct_cli(cx, s, out);
@@ -281,14 +220,8 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
 /// is serialization-transparent (D-SOA2D): `JetShow`/`user_Encode`/`user_Decode`
 /// render the gathered AoS form, byte-identical to a `Vec<S>`.
 fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
-    // Stored-ref fields cannot be columnar (a column is owned storage); sema's
-    // whole-struct rule plus the value-field assumption holds for the v1 surface.
-    // D-FIELDPOL1: a computed field is never a stored column either.
-    let fields: Vec<&Field> = s
-        .fields
-        .iter()
-        .filter(|f| !f.is_stored_ref && f.computed.is_none())
-        .collect();
+    // D-FIELDPOL1: a computed field is never a stored column.
+    let fields: Vec<&Field> = s.fields.iter().filter(|f| f.computed.is_none()).collect();
     let name = &s.name;
     let cn = format!("user_{name}_columns");
 
@@ -1822,7 +1755,7 @@ fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut Strin
             .return_type
             .clone()
             .unwrap_or(crate::AST::Type::Named("Unit".to_string()));
-        let ret_annot = TIR::rust_return_type(cx, &ret_ty, f.is_view_return);
+        let ret_annot = TIR::rust_return_type(cx, &ret_ty);
         out.push_str(&format!("    let __jet_result = (|| -> {ret_annot} {{\n"));
         out.push_str(body_only);
         out.push_str("    })();\n");

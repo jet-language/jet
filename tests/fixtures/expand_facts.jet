@@ -1,8 +1,6 @@
-// D-EXPANDCLI1 (card #183) CLI test fixture: exercises both `jet expand`
-// floor lenses in one program — `inline` (D-METHODMACRO1 @Inline /
-// @InlineAlways contracts: one hint, one checked promise, one on a method)
-// and `refs` (D-REF-SHORTHAND1 resolved &T stored-ref owners: one inferred
-// sole-candidate, two explicitly `#Ref(label)`ed).
+// D-EXPANDCLI1 (card #183) CLI test fixture: exercises the `jet expand`
+// `inline` lens (D-METHODMACRO1 @Inline / @InlineAlways contracts: one
+// checked promise, one hint on a method).
 struct Meters {
     value: Int
 
@@ -11,33 +9,11 @@ struct Meters {
     }
 }
 
-struct TokenView {
-    text: &String
-}
-
-struct Span {
-    #Ref(source) text: &String
-    #Ref(kind) meta: &String
-}
-
 @Inline fn square(x: Int) -> Int {
     return x * x
-}
-
-fn show(source: String) {
-    t: TokenView :: TokenView.{text: source}
-    print(t.text)
-}
-
-fn describe(source: String, kind: String) {
-    s: Span :: Span.{text: source, meta: kind}
-    print(s.text)
-    print(s.meta)
 }
 
 fn run() {
     m :: Meters.{value: 7}
     print("{square(4)} {m.plus(3)}")
-    show("hello")
-    describe("hi", "greeting")
 }

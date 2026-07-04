@@ -2366,8 +2366,8 @@ impl<'a> Checker<'a> {
             }
         };
         if let Some(fields) = self.registry.struct_fields(&type_name) {
-            if let Some((_, _, field_ty, _, _)) =
-                fields.iter().find(|(fname, _, _, _, _)| fname == method)
+            if let Some((_, _, field_ty, _)) =
+                fields.iter().find(|(fname, _, _, _)| fname == method)
             {
                 if matches!(field_ty, Type::Fn { .. }) {
                     *recv_type_out = Some(type_name.clone());

@@ -358,7 +358,6 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         type_params: vec![],
         params: vec![self_param],
         return_type: Some(f.ty.clone()),
-        is_view_return: false,
         is_unsafe: false,
         is_pure: false,
         is_reactive: false,

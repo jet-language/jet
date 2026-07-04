@@ -1,23 +1,23 @@
-Error [E1102]: `h` can't cross into a task because `Holder` isn't sendable
-  --> tests/ui/task_detach_unsound.jet:8:22
+Error [E1102]: `greet` can't cross into a task because `fn()` isn't sendable
+  --> tests/ui/task_detach_unsound.jet:6:22
     |
-  8 |     t :: tasks.spawn(() => h)
-    |                      ^^^^^^^
- Why: `Holder` contains `name`, which is a `ref` field; tasks and channels move owned values between threads
+  6 |     t :: tasks.spawn(() => greet)
+    |                      ^^^^^^^^^^^
+ Why: a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or remove the shared-view field before spawning
 
-Error [E1102]: this task returns `Holder`, which isn't sendable
-  --> tests/ui/task_detach_unsound.jet:8:22
+Error [E1102]: this task returns `fn()`, which isn't sendable
+  --> tests/ui/task_detach_unsound.jet:6:22
     |
-  8 |     t :: tasks.spawn(() => h)
-    |                      ^^^^^^^
- Why: `Holder` contains `name`, which is a `ref` field; tasks and channels move owned values between threads
+  6 |     t :: tasks.spawn(() => greet)
+    |                      ^^^^^^^^^^^
+ Why: a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or remove the shared-view field before spawning
 
 Error [E1103]: can't detach task `t` — it captured a value that can't cross a thread boundary
-  --> tests/ui/task_detach_unsound.jet:9:7
+  --> tests/ui/task_detach_unsound.jet:7:7
     |
-  9 |     t.detach()
+  7 |     t.detach()
     |       ^^^^^^
  Why: a detached task runs unsupervised; it must only hold values it owns cleanly
  Fix: fix the E1102 error at the spawn site first, then `.detach()` is safe

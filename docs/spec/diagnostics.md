@@ -118,7 +118,6 @@ before continuing.
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
 | E0056 | parse | teaching: `mut` capability keyword → `&` sigil (D-MEM1) |
 | E0057 | parse | *retired by D-S14-PAUSE* (was: `take` keyword teaching) |
-| E0058 | parse | *retired by D-S14-PAUSE* (was: `view` keyword teaching) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | parse | teaching: a contract marker written with `#` → write it with `@` (D-MARKER-FAMILY1, D-MARKERMOVE1/2/3) |
@@ -199,8 +198,6 @@ before continuing.
 | E0203 | sema  | `take` on a non-consuming parameter       |
 | E0204 | sema  | same value used while `mut` is active in one call |
 | E0205 | sema  | `self.field = v` without write access (`&`) on the receiver (D-MUTSELF1) |
-| E0206 | sema  | `view` return can't point at this value   |
-| E0207 | sema  | a stored-reference (`&T`) field's owner is ambiguous — 2+ in-scope values could own it (D-REF-SHORTHAND1) |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
 | E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
@@ -241,7 +238,7 @@ before continuing.
 | E0334 | sema  | a trailing `{ }` block argument's slot isn't a zero-parameter function (D-TRAILBLOCK1) |
 | E0335 | parse | a second trailing block, or a trailing block on a non-call (D-TRAILBLOCK1) |
 | E0336 | sema  | `@[Patchable]` on a generic struct (D-PATCH1) |
-| E0337 | sema  | `@[Patchable]` struct has a stored-reference or function-typed field (D-PATCH1) |
+| E0337 | sema  | `@[Patchable]` struct has a function-typed field (D-PATCH1) |
 | E0338 | sema  | a cycle among computed-field formulas, including self-reference (D-FIELDPOL1) |
 | E0339 | sema  | a computed field given in a struct literal or assigned to directly (D-FIELDPOL1) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
@@ -271,7 +268,6 @@ before continuing.
 | E0423 | sema  | `:= uninit` binding's type is not plain data (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
 | E0424 | sema  | `:= uninit` used without `use core.mem` (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name: Type := uninit` (D-UNINIT-SENTINEL1) |
-| E0427 | parse | teaching: retired `#Ref(owner) name: T` field form → `name: &T` (the `&` on the type is the stored-reference marker; D-REF-SHORTHAND1) |
 | E0501 | sema  | empty `[]` needs a context type           |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -465,13 +461,8 @@ before continuing.
 | E1110 | sema  | `.task { … }` outside a `taskgroup` scope, or on the wrong handle (D-TASKSCOPE1) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
-| E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
-| E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
-| E2303 | sema  | `ref`/`view` crosses a task/channel boundary (E2-M5; emitted as E1102) |
-| E2304 | sema  | an indexed or sliced piece can't be handed back as a `view` (E2-M5) |
-| L2301 | sema  | this return borrows; here is its source (advisory, E2-M5) |
+| E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
 | E2305 | sema  | a `View<T>` (`.view(...)`) escapes the scope of the list it borrows from (D-DYNARRAY1) |
-| E2306 | sema  | `#Ref(label)` on a `&T` field names no in-scope value of the referent type (D-REF-SHORTHAND2) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -710,29 +701,22 @@ CLI.
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 
-## Tier-2 reference diagnostics (E2-M5, S10 `view`/`ref`)
+## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`)
 
-These harden the ownership checker around borrowed returns and stored
-references. They never mention lifetimes; they speak in Jet words — *what
-owns this* and *how long can this view live*. E2301/E2302 supplement the
-tier-1 reference codes (E0206 bare-local `view` return, E0207 ambiguous
-`&T`-field owner, E2306 an unknown `#Ref(label)`); they do not replace them. E2303 is the reference-specific
-name for the task/channel rule — that situation is **reported once, as
-E1102** (a `view`/`ref` value is unsendable); E2303 exists so `jet explain
-E2303` points there and the soundness matrix has a named cell. E2305
-(D-DYNARRAY1) is the same *owner-outlives* reasoning applied to a
-`list.view(a..b)` window instead of a `-> view` return or a `ref` field —
-see `View<T>` in spec.md's "M2 — ownership" section.
+D-MEM1/S3 deleted `-> &T` borrow returns and stored-reference (`&T`) fields
+outright — there is no first-class borrow to store or return in v1. What's
+left of this tier is the still-live `View<T>` zero-copy window
+(`list.view(a..b)`, D-DYNARRAY1): it never mentions lifetimes, speaking in
+Jet words instead — *what owns this* and *how long can this view live*.
+E2303 is the reference-specific name for the task/channel rule — that
+situation is **reported once, as E1102** (a `View<T>` value is unsendable);
+E2303 exists so `jet explain E2303` points there and the soundness matrix
+has a named cell.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2301 | A `-> view` function returns a view into a field of a value this function owns. | The owning local is made inside the call and freed when it returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at. | Return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it. |
-| E2302 | A `ref` field is filled from a value that won't outlive the struct. | A `ref` field stores a view, not its own copy, so its source must outlive the struct; a local or a fresh literal lives only as long as the call. | Store an owned value (drop `ref` so the struct keeps its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning. |
-| E2303 | A `view` or a `ref`-holding struct crosses a `tasks.spawn` or `Sender.send` boundary. | A shared view (`&`) points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, remove the shared-view field before crossing, or rebuild the value as an owned copy. |
-| E2304 | A `-> view` function returns an indexed or sliced piece of a value (e.g. `text[0..2]` or `items[i]`). | Indexing or slicing builds a fresh, owned piece — there's no longer-lived value for a view to point at, so the piece would vanish the moment the function returns. A `view` into a whole *field* of a parameter is fine (the caller still owns the field); only the freshly-cut piece is the problem. | Return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it. |
-| L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
+| E2303 | A `View<T>` crosses a `tasks.spawn` or `Sender.send` boundary. | A view (`View<T>`) points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy before crossing. |
 | E2305 | A `View<T>` (`list.view(a..b)`) escapes the scope of the list it borrows from — returned from a function that owns the list, rebound to another local, or stored in a struct field. | `.view(a..b)` is a zero-copy window into the list's own backing storage, not a copy; if the list is made and freed inside this function (or scope), a window into it would outlive what owns it — there'd be nothing left to look at. | Return/store an owned copy instead (`list[a..b]` for a copying slice, or `.map(...)` the window into an owned list), or accept the list as a parameter so the caller keeps owning it. |
-| E2306 | A `#Ref(label)` on a `&T` field names a value that isn't in scope, or whose type isn't the referent type — so it can't be the owner the reference points into. | `#Ref(label)` disambiguates *which* in-scope value a stored reference borrows; the label must name one of the candidate owners (a parameter, local, or const whose type is the referent). A name with no matching candidate can't resolve. | Name one of the listed candidate owners, or bring a value of the referent type into scope for the field to borrow. |
 
 ## Library authoring diagnostics (E2-M6)
 
@@ -936,7 +920,6 @@ error (E0426) pointing at the new spelling — see D-UNINIT-SENTINEL1's fixture,
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
 | E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the initializer, not the declaration — it now reads `` `name: Type := uninit` ``. | Write `` `{name}: <Type> := uninit` ``. |
-| E0427 | A stored-reference field needs `&` on its type. | `#Ref(owner)` only *names* the owner; the `&` on the type is what makes a field store a reference rather than its own copy (D-REF-SHORTHAND1). A `#Ref(...)` with a plain (non-`&`) type is the retired spelling. | Add the `&`: `` `name: &T` `` (owner inferred), or keep the label to disambiguate: `` `#Ref(owner) name: &T` ``. |
 
 ## Low-level tier diagnostics (E2-M13, S58)
 

@@ -598,7 +598,6 @@ fn registered_unimplemented_codes_are_expected() {
         "E3002", // E2-M12 error propagation trace — runtime
         "E3005", // D-PREPOST1 @Pre/@Post contract failure — runtime (jet_contract_fail in generated code), not a compile Diagnostic
         "E3208", // emitted via eprintln! in CmdDevTools.rs
-        "L2301", // E2-M5 advisory — staged
         "L2501", // reserved (path-normalisation issue noted in spec)
         "L2701", // E2-M9 — staged
         "L2801", // E2-M10 — staged

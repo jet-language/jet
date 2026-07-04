@@ -912,7 +912,7 @@ fn jit_covers_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<Stri
     if !matches!(tir.kind, TFuncKind::TopLevel | TFuncKind::Method { .. }) {
         return Some("not top-level".into());
     }
-    if !tir.generics.is_empty() || tir.is_view || tir.is_unsafe || tir.is_reactive {
+    if !tir.generics.is_empty() || tir.is_unsafe || tir.is_reactive {
         return Some("func attrs unsupported".into());
     }
     if !tir.params.iter().all(|(_, ty, _)| jit_value_type(ty)) {

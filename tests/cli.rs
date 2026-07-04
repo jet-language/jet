@@ -881,8 +881,8 @@ build: { staging: Build.{ optimize: basic } }
 
 // ── D-EXPANDCLI1 (card #183): `jet expand` transparency command ────
 
-/// Fixture exercising both floor lenses: an `@Inline` fn, an `@InlineAlways`
-/// method, one inferred `&T` stored-ref owner, and two explicitly labeled ones.
+/// Fixture exercising the `inline` lens: an `@Inline` fn and an
+/// `@InlineAlways` method.
 fn expand_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_facts.jet")
 }
@@ -909,25 +909,6 @@ fn expand_inline_golden() {
     );
     let s = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
     check_snapshot("expand_inline.txt", &s);
-}
-
-#[test]
-fn expand_refs_golden() {
-    let p = expand_fixture();
-    let out = Command::new(jet())
-        .args(["expand", "--facts", "refs"])
-        .arg(&p)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "expand --facts refs should exit 0:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let s = scrub_fixture(&String::from_utf8_lossy(&out.stdout), &p);
-    check_snapshot("expand_refs.txt", &s);
 }
 
 #[test]

@@ -1,5 +1,4 @@
 use super::*;
-use crate::Diagnostics::Span;
 use crate::Syntax;
 use crate::AST::{
     ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, LValue, LambdaBody, OrFallback, Pattern, Stmt,
@@ -540,99 +539,6 @@ pub(crate) fn lambda_collect_captures(
     match body {
         LambdaBody::Expr(e) => expr_collect_captures(e, &bound, read, mut_cap),
         LambdaBody::Block(stmts) => block_collect_captures(stmts, &mut bound, read, mut_cap),
-    }
-}
-
-pub(crate) fn lambda_body_view_return_span(
-    checker: &Checker<'_>,
-    body: &LambdaBody,
-) -> Option<Span> {
-    match body {
-        LambdaBody::Expr(e) => checker.is_view_call(e).then(|| e.span()),
-        LambdaBody::Block(stmts) => {
-            for stmt in stmts {
-                if let Some(span) = stmt_view_return_span(checker, stmt) {
-                    return Some(span);
-                }
-            }
-            for stmt in stmts.iter().rev() {
-                if let Stmt::Expr(e) = stmt {
-                    return checker.is_view_call(e).then(|| e.span());
-                }
-            }
-            None
-        }
-    }
-}
-
-pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Option<Span> {
-    match stmt {
-        Stmt::Return(Some(e), _) if checker.is_view_call(e) => Some(e.span()),
-        Stmt::If(i) => {
-            for stmt in &i.then_body {
-                if let Some(span) = stmt_view_return_span(checker, stmt) {
-                    return Some(span);
-                }
-            }
-            i.else_branch
-                .as_ref()
-                .and_then(|branch| else_view_return_span(checker, branch))
-        }
-        Stmt::While { body, .. }
-        | Stmt::Loop { body, .. }
-        | Stmt::Unsafe { body, .. }
-        | Stmt::Impure { body, .. }
-        | Stmt::Reactive { body, .. }
-        | Stmt::SuppressMustUse { body, .. }
-        | Stmt::Region { body, .. }
-        | Stmt::TaskGroup { body, .. }
-        | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
-        | Stmt::Transact { body, .. }
-        | Stmt::AssumeDet { body, .. } => body
-            .iter()
-            .find_map(|stmt| stmt_view_return_span(checker, stmt)),
-        Stmt::For { body, .. } => body
-            .iter()
-            .find_map(|stmt| stmt_view_return_span(checker, stmt)),
-        Stmt::Switch {
-            arms, else_body, ..
-        }
-        | Stmt::ComptimeSwitch {
-            arms, else_body, ..
-        } => arms
-            .iter()
-            .find_map(|arm| {
-                arm.body
-                    .iter()
-                    .find_map(|stmt| stmt_view_return_span(checker, stmt))
-            })
-            .or_else(|| {
-                else_body.as_ref().and_then(|body| {
-                    body.iter()
-                        .find_map(|stmt| stmt_view_return_span(checker, stmt))
-                })
-            }),
-        _ => None,
-    }
-}
-
-pub(crate) fn else_view_return_span(checker: &Checker<'_>, branch: &ElseBranch) -> Option<Span> {
-    match branch {
-        ElseBranch::Else(stmts) => stmts
-            .iter()
-            .find_map(|stmt| stmt_view_return_span(checker, stmt)),
-        ElseBranch::ElseIf(i) => {
-            for stmt in &i.then_body {
-                if let Some(span) = stmt_view_return_span(checker, stmt) {
-                    return Some(span);
-                }
-            }
-            i.else_branch
-                .as_ref()
-                .and_then(|branch| else_view_return_span(checker, branch))
-        }
     }
 }
 

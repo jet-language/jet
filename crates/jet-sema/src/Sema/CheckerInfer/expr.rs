@@ -19,26 +19,14 @@ impl<'a> Checker<'a> {
     /// Infer and check an expression. Returns None when a problem was
     /// already reported (avoids error cascades).
     ///
-    /// This wrapper owns two rules that depend on *where* the expression
-    /// appears (`borrow_ctx`):
-    ///  - a struct-field read in owning position is rewritten to `.clone()`
-    ///    so the generated Rust never moves a field out of its struct;
-    ///  - a `-> view` call result may only be read in place (borrow
-    ///    positions); storing or giving it away is E0206.
+    /// This wrapper owns the rule that depends on *where* the expression
+    /// appears (`borrow_ctx`): a struct-field read in owning position is
+    /// rewritten to `.clone()` so the generated Rust never moves a field out
+    /// of its struct.
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
         let borrowed = std::mem::take(&mut self.borrow_ctx);
         let ty = self.infer_inner(e);
         if !borrowed {
-            if self.is_view_call(e) {
-                self.diags.push(Diagnostic::error(
-                    "E0206",
-                    "this borrowed view can only be read where it is".to_string(),
-                    "a `view` result points into someone else's value, so it can't be stored or given away".to_string(),
-                    "read it in place (print it, compare a field, call a method on it), or call a function that returns an owned value".to_string(),
-                    Some(e.span()),
-                ));
-                return None;
-            }
             if let Some(t) = &ty {
                 if !type_is_copy(t) && field_read_to_clone(e, self.registry, self.imports) {
                     let span = e.span();
@@ -58,36 +46,6 @@ impl<'a> Checker<'a> {
         ty
     }
 
-    /// Whether `e` is a call to something declared `-> view T` (its Rust
-    /// value is a reference).
-    pub(crate) fn is_view_call(&self, e: &Expr) -> bool {
-        match e {
-            Expr::Call(c) => self.funcs.get(&c.name).is_some_and(|s| s.is_view_return),
-            Expr::MethodCall {
-                recv_type: Some(t),
-                method,
-                ..
-            } => self
-                .registry
-                .method(t, method)
-                .is_some_and(|m| m.is_view_return),
-            Expr::MethodCall {
-                receiver, method, ..
-            } => {
-                // Cross-file call through an import alias.
-                if let Expr::Ident(alias, _) = receiver.as_ref() {
-                    if let (Some(&idx), Some(mods)) = (self.imports.get(alias), self.modules) {
-                        return mods[idx]
-                            .funcs
-                            .get(method)
-                            .is_some_and(|s| s.is_view_return);
-                    }
-                }
-                false
-            }
-            _ => false,
-        }
-    }
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
@@ -1752,11 +1710,8 @@ impl<'a> Checker<'a> {
             }
             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, type_name) {
-                    for (fname, _, fty, is_ref, _) in fields {
+                    for (fname, _, fty, _) in fields {
                         if fname == member {
-                            if *is_ref {
-                                return None;
-                            }
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, type_name, member)
                             {
@@ -1798,11 +1753,8 @@ impl<'a> Checker<'a> {
             if let Some(owner_mod) = self.struct_owner_module(name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, name) {
                     let subst = self.struct_subst(name, args);
-                    for (fname, _, fty, is_ref, _) in fields {
+                    for (fname, _, fty, _) in fields {
                         if fname == member {
-                            if *is_ref {
-                                return None;
-                            }
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, name, member)
                             {

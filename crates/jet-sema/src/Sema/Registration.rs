@@ -494,13 +494,12 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     let mut tests: HashMap<String, Span> = HashMap::new();
     let mut registry = TypeRegistry {
         types: HashMap::new(),
-        ref_field_labels: HashMap::new(),
         computed_fields: HashMap::new(),
     };
     let mut consts: HashMap<String, Type> = HashMap::new();
     let mut trait_reg = TraitRegistry::default();
-    // Legacy M2 struct map for ref-field checks and cloneable helper.
-    let mut struct_fields_legacy: HashMap<String, Vec<(Option<String>, Type)>> = HashMap::new();
+    // Legacy M2 struct field-type map, kept for the cloneable helper.
+    let mut struct_fields_legacy: HashMap<String, Vec<Type>> = HashMap::new();
 
     // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field` rewrite +
     // synthesized getter methods, before anything else sees the struct.
@@ -771,8 +770,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         if let Item::Impl(i) = item {
             if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
                 if let Some(fields) = registry.struct_fields(&i.type_name) {
-                    if let Some((_, _, field_ty, _, _)) =
-                        fields.iter().find(|(n, _, _, _, _)| n == field_name)
+                    if let Some((_, _, field_ty, _)) =
+                        fields.iter().find(|(n, _, _, _)| n == field_name)
                     {
                         let field_type_name = field_ty.name();
                         if !trait_reg.implements_trait(&field_type_name, trait_name) {
@@ -1045,7 +1044,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     type_params: Vec::new(),
                     params: Vec::new(),
                     return_type: None,
-                    is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
                     is_reactive: false,
@@ -1703,7 +1701,7 @@ pub(crate) fn register_const(
 pub(crate) fn register_struct(
     s: &StructDef,
     registry: &mut TypeRegistry,
-    legacy: &mut HashMap<String, Vec<(Option<String>, Type)>>,
+    legacy: &mut HashMap<String, Vec<Type>>,
     diags: &mut Vec<Diagnostic>,
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
@@ -1746,13 +1744,7 @@ pub(crate) fn register_struct(
         if f.computed.is_some() {
             computed_fields.insert(f.name.clone(), (f.name_span, f.ty.clone()));
         } else {
-            fields.push((
-                f.name.clone(),
-                f.name_span,
-                f.ty.clone(),
-                f.is_stored_ref,
-                f.is_pub,
-            ));
+            fields.push((f.name.clone(), f.name_span, f.ty.clone(), f.is_pub));
         }
         if f.ty.is_float()
             && is_money_like_name(&f.name)
@@ -1785,27 +1777,9 @@ pub(crate) fn register_struct(
     if !computed_fields.is_empty() {
         registry.computed_fields.insert(s.name.clone(), computed_fields);
     }
-    // D-REF-SHORTHAND1/2: record only *explicit* `#Ref(label)` owners. An
-    // unlabeled `&T` field leaves no entry — its owner is inferred at each
-    // construction site (`check_stored_ref_fields`), so a missing entry here
-    // means "infer," not "default to `src`."
-    let mut labels = HashMap::new();
-    for f in &s.fields {
-        if f.is_stored_ref {
-            if let Some(label) = &f.stored_ref_label {
-                labels.insert(f.name.clone(), label.clone());
-            }
-        }
-    }
-    if !labels.is_empty() {
-        registry.ref_field_labels.insert(s.name.clone(), labels);
-    }
     legacy.insert(
         s.name.clone(),
-        s.fields
-            .iter()
-            .map(|f| (f.stored_ref_label.clone(), f.ty.clone()))
-            .collect(),
+        s.fields.iter().map(|f| f.ty.clone()).collect(),
     );
     // D-REPRC1: `#layout(c)` structs may not contain growable fields.
     if s.layout == Some(crate::AST::StructLayout::C) {
@@ -1829,10 +1803,6 @@ pub(crate) fn register_struct(
             }
         }
     }
-    // D-REF-SHORTHAND1: multiple unlabeled `&T` fields are no longer an error
-    // at the *definition* — a struct only becomes ambiguous when it is built
-    // and two or more in-scope values could own a borrow (E0207 fires there,
-    // in `check_stored_ref_fields`).
 }
 
 pub(crate) fn register_enum(
@@ -2066,7 +2036,7 @@ pub(crate) fn check_func_body(
     f: &mut Func,
     funcs: &HashMap<String, FuncSig>,
     registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<(Option<String>, Type)>>,
+    structs: &HashMap<String, Vec<Type>>,
     consts: &HashMap<String, Type>,
     trait_reg: &TraitRegistry,
     owner_type: Option<&str>,
@@ -2123,7 +2093,6 @@ pub(crate) fn check_func_body(
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
-        view_return: f.is_view_return,
         fn_name: f.name.clone(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
@@ -2157,7 +2126,6 @@ pub(crate) fn check_func_body(
         taskgroup_stack: Vec::new(),
         in_taskgroup_spawn: false,
         inline_addr_taken: HashSet::new(),
-        ref_facts: Vec::new(),
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
@@ -2215,7 +2183,7 @@ pub(crate) fn check_error_conv_body(
     ec: &mut crate::AST::ErrorConvDef,
     funcs: &HashMap<String, FuncSig>,
     registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<(Option<String>, Type)>>,
+    structs: &HashMap<String, Vec<Type>>,
     consts: &HashMap<String, Type>,
     trait_reg: &TraitRegistry,
     ct_funcs: &HashMap<String, Func>,
@@ -2246,7 +2214,6 @@ pub(crate) fn check_error_conv_body(
             variadic_bound_list: None,
         }],
         return_type: Some(Type::Named(ec.to_ty.clone())),
-        is_view_return: false,
         is_unsafe: false,
         is_pure: false,
         is_reactive: false,
@@ -2568,7 +2535,6 @@ pub(crate) fn synthesize_delegation_method(
         type_params: vec![],
         params,
         return_type: sig.return_type.clone(),
-        is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
         is_reactive: false,
@@ -2625,7 +2591,6 @@ pub(crate) fn synthesize_default_method(
         type_params: vec![],
         params,
         return_type: sig.return_type.clone(),
-        is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
         is_reactive: false,

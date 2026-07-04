@@ -160,7 +160,6 @@ fn run() {
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    is_view_return: f.is_view_return,
                     is_extern: false,
                     is_unsafe: f.is_unsafe,
                     is_pure: f.is_pure,
@@ -236,7 +235,6 @@ fn run() {
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    is_view_return: f.is_view_return,
                     is_extern: false,
                     is_unsafe: f.is_unsafe,
                     is_pure: f.is_pure,
@@ -304,7 +302,6 @@ fn run() {
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    is_view_return: f.is_view_return,
                     is_extern: false,
                     is_unsafe: f.is_unsafe,
                     is_pure: f.is_pure,

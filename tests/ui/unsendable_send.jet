@@ -1,13 +1,8 @@
 use core.tasks
-struct Logger {
-    sink: &String
-}
-struct Config {
-    logger: Logger
-    id: Int
-}
 fn run() {
-(sender, ch) :: tasks.channel<Config>()
-    cfg :: Config.{logger: Logger.{}, id: 1}
-    sender.send(^cfg)
+    greet :: () => { print("hi") }
+    // E1102 fires: a closure captured without `take` can't cross a channel
+    // send either — the same rule as a spawned task.
+    (sender, ch) :: tasks.channel<fn()>()
+    sender.send(greet)
 }

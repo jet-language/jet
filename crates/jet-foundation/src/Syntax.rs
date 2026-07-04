@@ -142,13 +142,12 @@ pub const KW_MUTATE: &str = "mut";
 /// name in dot position; `take(names)` stays the lambda capture prefix.)
 pub const KW_MOVE: &str = "take";
 
-/// S10 (M2) → D-MEM1: the retired share/borrow keyword. Recognized only for the
-/// E0058 teaching error at a view-return marker (`-> &T`, S3-scoped for
-/// deletion; the `&` glyph itself is unaffected by this teach).
+/// D-DYNARRAY1: reserved so `.view(a..b)` reads as a keyword-shaped method
+/// name (carve-out in `expect_field_name`, same shape as `take`/`KwMove`).
+/// D-MEM1/S3: no longer doubles as the view-return teaching keyword — `-> &T`
+/// return types are deleted from the grammar outright, so this token has no
+/// other job.
 pub const KW_VIEW: &str = "view";
-
-/// S10 (ratified M2, tier 2): field annotation — a stored reference.
-pub const KW_STORED: &str = "ref";
 
 /// M2: struct definition keyword (construction spelling: S29).
 pub const KW_STRUCT: &str = "struct";
@@ -303,14 +302,6 @@ pub const ATTR_UNINIT: &str = "Uninit";
 /// the lexer emits it as a plain `Ident`, and only the parser's initializer
 /// position recognizes it.
 pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL1
-
-/// D-REF-SHORTHAND1/2 (ratified 2026-07-02): a stored-reference field spells
-/// its type `&T`; the owner is inferred from the single in-scope value of the
-/// referent type. `#Ref(owner) field: &T` only *disambiguates* the owner when
-/// several candidates exist (E0207). Stays on the `#` directive plane, never
-/// `@Ref` (D-REF-SHORTHAND2). The retired `#Ref(owner) field: T` form (plain
-/// type, no `&`) is E0427. No `use core.mem` gate.
-pub const ATTR_REF: &str = "Ref";
 
 /// D-OPTGC1 (ratified 2026-06-26): opt-in traced GC library module.
 pub const CORE_GC_MODULE: &str = "core.gc";
@@ -1978,10 +1969,12 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_REMOVE,
     KW_CHANGE,
     KW_VIA,
-    // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE/
-    // KW_VIEW in favor of the `&`/`^` sigils — they live only as teaching
-    // errors (E0056/E0057/E0058) now, so they are NOT in the keyword list.
-    KW_STORED,
+    // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE
+    // in favor of the `&`/`^` sigils — they live only as teaching errors
+    // (E0056/E0057) now, so they are NOT in the keyword list. The retired
+    // `ref[label]` field spelling (once taught via KW_STORED) is gone
+    // outright with stored-reference fields (D-MEM1/S3) — `ref` is an
+    // ordinary identifier again.
     KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1, D-CTEFFECT1)
     KW_UNSAFE,
@@ -2250,7 +2243,9 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     // ATTR_UNINIT intentionally absent (D-UNINIT-SENTINEL1): `#Uninit` is
     // retired outright, not merely on the wrong plane, so `@Uninit` isn't
     // taught "add `#`" — it falls through to an ordinary unknown-marker error.
-    ATTR_REF,
+    // ATTR_REF intentionally absent (D-MEM1/S3): stored-reference fields are
+    // deleted outright — `#Ref` falls through to an ordinary unknown-marker
+    // error, same treatment as ATTR_UNINIT above.
     ATTR_UNIT_FAMILY,
     ATTR_SINGLE_USE,
     ATTR_LAYOUT,

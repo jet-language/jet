@@ -30,8 +30,6 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
-    /// D-REFSTRUCT1: struct field → `#Ref(owner)` label (for borrow lowering).
-    pub(crate) ref_field_labels: HashMap<String, HashMap<String, String>>,
     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
     /// variant name -> owning enum type (for pattern lowering)
     pub(crate) variant_owner: HashMap<String, String>,
@@ -810,13 +808,8 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
     }
 }
 
-pub(crate) fn rust_return_type(cx: &Cx, ty: &Type, is_view: bool) -> String {
-    let base = cx.rust_type(ty);
-    if is_view {
-        format!("&{}", base)
-    } else {
-        base
-    }
+pub(crate) fn rust_return_type(cx: &Cx, ty: &Type) -> String {
+    cx.rust_type(ty)
 }
 
 pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
@@ -882,7 +875,6 @@ pub(crate) fn build_cx_items(
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
-        ref_field_labels: HashMap::new(),
         enum_variants: HashMap::new(),
         variant_owner: HashMap::new(),
         boxed_edges: HashSet::new(),
@@ -991,7 +983,6 @@ pub(crate) fn build_cx_items(
                     s.name.clone(),
                     s.fields
                         .iter()
-                        .filter(|f| !f.is_stored_ref)
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect(),
                 );
@@ -1005,20 +996,6 @@ pub(crate) fn build_cx_items(
                     .collect();
                 if !computed.is_empty() {
                     cx.computed_fields.insert(s.name.clone(), computed);
-                }
-                let mut labels = HashMap::new();
-                for f in &s.fields {
-                    if f.is_stored_ref {
-                        labels.insert(
-                            f.name.clone(),
-                            f.stored_ref_label
-                                .clone()
-                                .unwrap_or_else(|| "src".to_string()),
-                        );
-                    }
-                }
-                if !labels.is_empty() {
-                    cx.ref_field_labels.insert(s.name.clone(), labels);
                 }
                 // c148: record the declared type params so multi-char names are
                 // recognized everywhere (struct_is_generic, field_type_cloneable, …).
@@ -1431,7 +1408,7 @@ pub(crate) fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -
     let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
-        .all(|f| !f.is_stored_ref && field_type_cloneable(&f.ty, types, &param_names))
+        .all(|f| field_type_cloneable(&f.ty, types, &param_names))
 }
 
 pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
@@ -1481,7 +1458,7 @@ pub(crate) fn type_is_comparable_struct(s: &StructDef, types: &HashSet<String>) 
     let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
-        .all(|f| !f.is_stored_ref && field_type_comparable(&f.ty, types, &param_names))
+        .all(|f| field_type_comparable(&f.ty, types, &param_names))
 }
 
 pub(crate) fn type_is_comparable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
@@ -1538,7 +1515,7 @@ pub(crate) fn type_is_hashable_struct(s: &StructDef, types: &HashSet<String>) ->
     let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
-        .all(|f| !f.is_stored_ref && field_type_hashable(&f.ty, types, &param_names))
+        .all(|f| field_type_hashable(&f.ty, types, &param_names))
 }
 
 pub(crate) fn type_is_hashable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
@@ -1587,9 +1564,6 @@ pub(crate) fn field_type_hashable(
 fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {
     let mut boxed = HashSet::new();
     for f in &s.fields {
-        if f.is_stored_ref {
-            continue;
-        }
         walk_type_edge(
             &s.name,
             &f.name,

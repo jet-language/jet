@@ -84,7 +84,7 @@ fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
     if a.params.len() != b.params.len() {
         return false;
     }
-    if a.return_type != b.return_type || a.is_view_return != b.is_view_return {
+    if a.return_type != b.return_type {
         return false;
     }
     a.params

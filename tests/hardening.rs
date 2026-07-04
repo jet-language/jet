@@ -172,24 +172,6 @@ fn run() {
 }
 
 #[test]
-fn view_result_cannot_be_stored() {
-    expect_error(
-        r#"
-fn pick(items: List<String>) -> &List<String> {
-    return items
-}
-
-fn run() {
-    xs :: ["a", "b"]
-    ys :: pick(xs)
-    print(ys.len())
-}
-"#,
-        "E0206",
-    );
-}
-
-#[test]
 fn mut_self_method_requires_var_receiver() {
     expect_error(
         r#"

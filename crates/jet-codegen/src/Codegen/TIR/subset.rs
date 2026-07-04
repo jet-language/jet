@@ -45,11 +45,6 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     if f.params.iter().any(|p| p.name == Syntax::KW_SELF) {
         return false;
     }
-    // c109 Phase 17: a `-> view T` function returns a borrow. The body's returns lower
-    // via `lower_view_return` (`TStmt::ViewReturn`), reproducing `emit_view_return`
-    // byte-for-byte. The returned value is an in-subset `Ident`/`Field` (sema's E2301/
-    // E2304 reject index/slice and a non-owning local, so only those shapes reach codegen);
-    // `stmt_in_subset` validates every return is in-subset. No special exclusion needed.
     // Params must be scalars, String, or a covered value type. c109 Phase 23: a
     // DEFAULT parameter value (`h: Int = w`, S61/D-NARG-D2) is covered — sema fills
     // omitted trailing args at every CALL SITE (`CheckerItems::default-value filling`,
@@ -121,9 +116,6 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     if !f.type_params.is_empty() {
         return false;
     }
-    // c109 Phase 17: a `view`-returning method returns a borrow, lowered via
-    // `lower_view_return` (`TStmt::ViewReturn`) — covered (the body's returns are
-    // validated in-subset below, and `emit_view_return` is reproduced byte-for-byte).
     // The owning type must be a covered struct or enum (the receiver place and
     // every `self.field` read then emit exactly as `emit_method` produces them).
     let owner_ty = Type::Named(type_name.to_string());
@@ -185,15 +177,6 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
     // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).
-    //
-    // c109 (this phase): a `view`-returning trait method is NOW COVERED. The latent
-    // AST-path I2 hole it depended on is fixed — `emit_trait_def` (Source/Traits.rs) now
-    // threads `m.is_view_return` into the declared return type, so the trait says
-    // `-> &String` to match the impl's `-> &String` (was E0053). The borrow shape is
-    // the existing total `TStmt::ViewReturn { wrap }` Phase 17 used for inherent/free
-    // view methods: `lower_trait_method` sets `env.view_return = f.is_view_return` and
-    // `TFunc.is_view`, so lowering routes returns through `lower_view_return` and the
-    // emit renders `-> &T`.
     // c109 Phase 23: a `@Pure` trait method is covered (purity is sema-only; erased).
     if !f.type_params.is_empty() {
         return false;

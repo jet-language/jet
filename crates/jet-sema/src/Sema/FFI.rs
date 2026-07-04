@@ -41,15 +41,6 @@ pub(crate) fn check_extern_fn(
     diags: &mut Vec<Diagnostic>,
 ) -> bool {
     let mut ok = true;
-    if ef.is_view_return {
-        diags.push(ffi_type_error(
-            "a `&` return can't cross into Rust",
-            "foreign functions must return owned values — nothing borrowed across the boundary",
-            "return the value directly, or wrap it in a `List` or `String`",
-            ef.name_span,
-        ));
-        ok = false;
-    }
     for p in &ef.params {
         // D-MEM1: unmarked (`Read`) is by-value and fine at the boundary; only
         // an explicit `&`/`^` marker is rejected.
@@ -121,7 +112,7 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
     match registry.types.get(name) {
         Some(TypeDef::Struct { fields, .. }) => fields
             .iter()
-            .all(|(_, _, ty, _, _)| is_c_abi_type(ty, registry)),
+            .all(|(_, _, ty, _)| is_c_abi_type(ty, registry)),
         Some(TypeDef::Enum { variants, .. }) => {
             variants.values().all(|(_, payload)| match payload {
                 VariantPayload::Unit => true,
@@ -219,10 +210,6 @@ pub(crate) fn check_c_module(
 ) -> bool {
     let mut ok = true;
     for ef in &cm.functions {
-        if ef.is_view_return {
-            diags.push(e3203(&Type::Named("view".to_string()), ef.name_span));
-            ok = false;
-        }
         for p in &ef.params {
             // D-MEM1: unmarked (`Read`) is by-value; only explicit markers reject.
             if !matches!(p.convention, AccessConvention::Read) {
@@ -301,7 +288,7 @@ pub(crate) fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
     match registry.types.get(name) {
         Some(TypeDef::Struct { fields, .. }) => fields
             .iter()
-            .all(|(_, _, ty, _, _)| is_ffi_type(ty, registry)),
+            .all(|(_, _, ty, _)| is_ffi_type(ty, registry)),
         Some(TypeDef::Enum { variants, .. }) => {
             variants.values().all(|(_, payload)| match payload {
                 VariantPayload::Unit => true,

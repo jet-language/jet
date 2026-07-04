@@ -14,66 +14,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-fn struct_lit_field_root<'a>(e: &'a Expr) -> Option<&'a str> {
-    match e {
-        Expr::MethodCall {
-            receiver, method, ..
-        } if method == "clone" => struct_lit_field_root(receiver),
-        Expr::Ident(n, _) => Some(n),
-        Expr::Field(inner, _, _) => struct_lit_field_root(inner),
-        Expr::Index { base, .. } | Expr::Slice { base, .. } => struct_lit_field_root(base),
-        _ => None,
-    }
-}
-
-/// D-REF-SHORTHAND1: a stored-reference (`&T`) field borrows its owner rather
-/// than moving/cloning it. Sema (`check_stored_ref_fields`) has already proved
-/// the fill is a borrow of a value that outlives the struct, so codegen simply
-/// borrows the fill's own root — the owner's name was inferred in sema and
-/// never needs to be re-derived here. `ref_field_labels` is consulted only for
-/// membership (is this field a stored reference?).
-fn lower_struct_lit_field(
-    type_name: &str,
-    field_name: &str,
-    fe: &Expr,
-    cx: &Cx,
-    env: &mut LowerEnv,
-) -> TExpr {
-    let is_stored_ref = cx
-        .ref_field_labels
-        .get(type_name)
-        .is_some_and(|m| m.contains_key(field_name));
-    if is_stored_ref {
-        if let Some(root) = struct_lit_field_root(fe) {
-            if env.locals.contains_key(root) {
-                let ty = env.ty_of(root).unwrap_or(Type::String);
-                let place = match fe {
-                    Expr::Ident(_, _) => env.rust_name_of(root),
-                    Expr::Field(inner, field, _) => {
-                        let base = lower_expr(inner, cx, env);
-                        format!("&({}).{}", emit_tir_expr(&base, cx), mangle(field))
-                    }
-                    Expr::MethodCall {
-                        receiver, method, ..
-                    } if method == "clone" => match receiver.as_ref() {
-                        Expr::Field(inner, field, _) => {
-                            let base = lower_expr(inner, cx, env);
-                            format!("&({}).{}", emit_tir_expr(&base, cx), mangle(field))
-                        }
-                        _ => env.rust_name_of(root),
-                    },
-                    _ => env.rust_name_of(root),
-                };
-                return TExpr {
-                    ty,
-                    kind: TExprKind::Local(place),
-                };
-            }
-        }
-    }
-    lower_expr(fe, cx, env)
-}
-
 /// Per-function lowering environment: a local name -> (Rust place string, type).
 /// Built from params, extended by `let` bindings. The "place" already accounts
 /// for parameter deref, so `Local` emission needs no further resolution.
@@ -105,13 +45,6 @@ pub(crate) struct LowerEnv {
     /// across leaky branches via `clone_env`, and DEEP-COPIED via `fork_panic` at the
     /// non-leaky boundaries. It is updated in lock-step with `locals` through `bind`.
     panic_locals: Rc<RefCell<HashMap<String, (String, Option<Type>)>>>,
-    /// c109 Phase 17: the enclosing function returns `-> view T` (a borrow). When set,
-    /// a `return <e>` lowers via the view-return shape (`emit_view_return`): an `Ident`
-    /// becomes `&name`/`name` (deref) / `&<const>`, a field read `&(<place>)`, anything
-    /// else a plain expr — resolved at lowering into a `TStmt::ViewReturn`. The AST path
-    /// reads this off `view_return` threaded through `emit_stmts`; the TIR carries it on
-    /// the env so the `Return` lowering reproduces it byte-for-byte.
-    view_return: bool,
     /// D-FIELDPOL1: the owning struct name when lowering an inherent/trait
     /// method (`None` for a free function). `self`'s own env type is
     /// deliberately `None` (see `bind` above), so a `self.field` read can't
@@ -128,7 +61,6 @@ impl LowerEnv {
             locals: HashMap::new(),
             fn_name,
             panic_locals: Rc::new(RefCell::new(HashMap::new())),
-            view_return: false,
             self_owner: None,
         }
     }
@@ -172,19 +104,6 @@ impl LowerEnv {
     }
 }
 
-/// c109 Phase 17: lower a `return <e>` from a `-> view T` function, reproducing
-/// `emit_view_return` (Source/Codegen/Statement.rs) byte-for-byte. The view-return
-/// subset only admits an `Ident` (a parameter/const borrowed back) or a `Field` read
-/// (`field.name` — a borrow into a field of an owned root); sema's E2301/E2304 reject
-/// index/slice and a non-owning local, so those never reach here.
-///  - an `Ident` resolving to a deref'd slot (`(*name)`) returns the BARE borrow `name`
-///    (the deref stripped) — `ViewWrap::Bare` over a `Local(rust_name)`;
-///  - an `Ident` resolving to a non-deref slot returns `&name` — `ViewWrap::Addr`;
-///  - an `Ident` that is a const returns `&<const>` — `ViewWrap::Addr` over the inlined
-///    const value (the same `Local` path the AST takes via `cx.consts`);
-///  - an `Ident` not in scope returns `place_of(name)` with no `&` — `ViewWrap::Bare`;
-///  - a `Field` read returns `&(<place>)` — `ViewWrap::Addr` over the lowered field;
-///  - anything else passes straight to `emit_expr` — `ViewWrap::Bare`.
 /// D-DOTSCOPE1: fold a `.timeout(<dur>)` argument (a bare unit literal, sema-
 /// validated) to a nanosecond budget. Falls back to 0 on the impossible shape.
 fn timeout_nanos(args: &[Expr]) -> u64 {
@@ -204,51 +123,6 @@ fn timeout_nanos(args: &[Expr]) -> u64 {
         }
     }
     0
-}
-
-pub(crate) fn lower_view_return(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt {
-    match e {
-        Expr::Ident(name, _) => {
-            // A comptime const inlines at the use site (the AST reads `cx.consts`); take
-            // its address. Lower as a normal expr (which inlines the const) wrapped in `&`.
-            if cx.consts.contains_key(name) {
-                return TStmt::ViewReturn {
-                    value: lower_expr(e, cx, env),
-                    wrap: ViewWrap::Addr,
-                };
-            }
-            match env.locals.get(name) {
-                Some((place, ty)) if place.starts_with("(*") && place.ends_with(')') => {
-                    // Deref'd (by-reference) slot: return the bare borrow `name`.
-                    let bare = place[2..place.len() - 1].to_string();
-                    TStmt::ViewReturn {
-                        value: TExpr {
-                            ty: ty.clone().unwrap_or(Type::Int),
-                            kind: TExprKind::Local(bare),
-                        },
-                        wrap: ViewWrap::Bare,
-                    }
-                }
-                Some(_) => TStmt::ViewReturn {
-                    value: lower_expr(e, cx, env),
-                    wrap: ViewWrap::Addr,
-                },
-                // Not in env: `place_of` returns the mangled name with no `&` (Bare).
-                None => TStmt::ViewReturn {
-                    value: lower_expr(e, cx, env),
-                    wrap: ViewWrap::Bare,
-                },
-            }
-        }
-        Expr::Field(..) => TStmt::ViewReturn {
-            value: lower_expr(e, cx, env),
-            wrap: ViewWrap::Addr,
-        },
-        _ => TStmt::ViewReturn {
-            value: lower_expr(e, cx, env),
-            wrap: ViewWrap::Bare,
-        },
-    }
 }
 
 /// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere
@@ -360,7 +234,6 @@ pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
 
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
-    env.view_return = f.is_view_return;
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
@@ -387,7 +260,6 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         name: f.name.clone(),
         params,
         ret: f.return_type.clone(),
-        is_view: f.is_view_return,
         generics: render_generics(&f.type_params),
         is_main: false,
         line: cov_line(cx, f.name_span.start),
@@ -526,7 +398,6 @@ pub(crate) fn param_place_generic(
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.self_owner = Some(type_name.to_string());
-    env.view_return = f.is_view_return;
     let mut params = Vec::new();
     let mut self_conv: Option<AccessConvention> = None;
     let mut is_static = true;
@@ -565,7 +436,6 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             .return_type
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
-        is_view: f.is_view_return,
         // A method's generic params live on the enclosing `impl<T> user_<T>` block (the
         // caller opened it); `emit_method` renders no per-method clause.
         generics: String::new(),
@@ -594,7 +464,6 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
 pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.self_owner = Some(type_name.to_string());
-    env.view_return = f.is_view_return;
     let mut params = Vec::new();
     let mut self_conv = AccessConvention::Read;
     for p in &f.params {
@@ -629,7 +498,6 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             .return_type
             .as_ref()
             .map(|t| resolve_self_ty(t, type_name)),
-        is_view: f.is_view_return,
         generics: String::new(),
         is_main: false,
         line: cov_line(cx, f.name_span.start),
@@ -668,7 +536,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
     let ret = f
         .return_type
         .as_ref()
-        .map(|t| rust_return_type(cx, t, f.is_view_return))
+        .map(|t| rust_return_type(cx, t))
         .unwrap_or_default();
     let ret_clause = if ret.is_empty() {
         String::new()
@@ -715,7 +583,6 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         params: Vec::new(),
         ret: f.return_type.clone(),
         // The signature is fully pre-rendered (`sig`); `is_view`/`generics` are unused for delegation.
-        is_view: f.is_view_return,
         generics: String::new(),
         is_main: false,
         line: cov_line(cx, f.name_span.start),
@@ -1150,7 +1017,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 }
             }
         },
-        Stmt::Return(Some(e), _) if env.view_return => lower_view_return(e, cx, env),
         Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_expr(e, cx, env))),
         Stmt::Return(None, _) => TStmt::Return(None),
         // D-STREAMYIELD1: `yield e` inside a generator's spawned thread — send on
@@ -2715,7 +2581,6 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::clone(&env.panic_locals),
-        view_return: env.view_return,
         self_owner: env.self_owner.clone(),
     }
 }
@@ -2730,7 +2595,6 @@ pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::new(RefCell::new(env.panic_locals.borrow().clone())),
-        view_return: env.view_return,
         self_owner: env.self_owner.clone(),
     }
 }
@@ -3806,7 +3670,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .map(|(fname, fty)| {
                         let m = mangle(fname);
                         let te = if let Some(fe) = provided.get(fname.as_str()) {
-                            let inner = lower_struct_lit_field(type_name, fname, fe, cx, env);
+                            let inner = lower_expr(fe, cx, env);
                             TExpr {
                                 ty: fty.clone(),
                                 kind: TExprKind::Present(Box::new(inner)),
@@ -3837,7 +3701,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|(n, _, fe)| {
                     let boxed = cx.boxed_edges.contains(&(type_name.clone(), n.clone()));
-                    let value = lower_struct_lit_field(type_name, n, fe, cx, env);
+                    let value = lower_expr(fe, cx, env);
                     (mangle(n), value, boxed)
                 })
                 .collect();

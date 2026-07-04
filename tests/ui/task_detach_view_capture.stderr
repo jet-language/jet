@@ -1,15 +1,15 @@
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_detach_view_capture.jet:6:28
+  --> tests/ui/task_detach_view_capture.jet:8:22
     |
-  6 |     t :: tasks.spawn(() => peek("hello"))
-    |                            ^^^^
+  8 |     t :: tasks.spawn(() => peek([1, 2, 3]))
+    |                      ^^^^^^^^^^
  Why: `&` results are shared views, not owned values; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or remove the shared-view field before spawning
 
 Error [E1106]: can't detach task `t` — it captured a `view` borrow that may not live long enough
-  --> tests/ui/task_detach_view_capture.jet:7:7
+  --> tests/ui/task_detach_view_capture.jet:9:7
     |
-  7 |     t.detach()
+  9 |     t.detach()
     |       ^^^^^^
  Why: a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle
  Fix: pass an owned `copy` or `share` to the task instead of a `view`

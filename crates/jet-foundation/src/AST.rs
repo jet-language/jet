@@ -1217,7 +1217,6 @@ pub struct TraitMethodSig {
     pub name_span: Span,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
-    pub is_view_return: bool,
     pub span: Span,
     /// D-LIB2: optional default body for a trait method.
     pub default_body: Option<Vec<Stmt>>,
@@ -1260,7 +1259,6 @@ pub struct ExternFn {
     pub name_span: Span,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
-    pub is_view_return: bool,
     pub rust_path: String,
     pub rust_path_span: Span,
     pub span: Span,
@@ -1306,7 +1304,6 @@ pub struct Func {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
-    pub is_view_return: bool,
     /// S58 (E2-M13): `@unsafe` on the line before `fn` — a whole-function
     /// contract. Calling such a function requires an enclosing `@unsafe`
     /// block (else E3103).
@@ -1722,8 +1719,6 @@ pub struct Field {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) fieldname: T`.
     pub is_package_pub: bool,
-    pub is_stored_ref: bool,
-    pub stored_ref_label: Option<String>,
     pub name: String,
     pub name_span: Span,
     pub ty: Type,
@@ -2913,7 +2908,6 @@ impl Func {
 pub struct FuncSig {
     pub params: Vec<(AccessConvention, Type)>,
     pub return_type: Option<Type>,
-    pub is_view_return: bool,
     /// S50: declared in `extern rust`, implemented by the FFI bridge.
     pub is_extern: bool,
     /// S58 (E2-M13): `@unsafe fn` — calling it requires an enclosing `@unsafe`

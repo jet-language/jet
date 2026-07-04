@@ -151,8 +151,6 @@ mod tests {
         Field {
             is_pub,
             is_package_pub: false,
-            is_stored_ref: false,
-            stored_ref_label: None,
             name: name.to_string(),
             name_span: span(),
             ty: Type::Named(ty.to_string()),
@@ -173,7 +171,6 @@ mod tests {
             type_params: Vec::new(),
             params: Vec::new(),
             return_type: Some(Type::Named("String".to_string())),
-            is_view_return: false,
             is_unsafe: false,
             is_pure: false,
             is_sanitizer: false,

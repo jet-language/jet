@@ -235,9 +235,6 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 },
                 |ctx| {
                     collect_stmts(&f.body, mp, module, ctx);
-                    if f.is_view_return {
-                        collect_view_return_hints(&f.body, mp, ctx);
-                    }
                 },
             );
         }
@@ -541,69 +538,6 @@ fn hover_for_fn(f: &AST::Func) -> String {
 fn collect_stmts(stmts: &[AST::Stmt], mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
     for stmt in stmts {
         collect_stmt(stmt, mp, module, ctx);
-    }
-}
-
-/// L2301 (E2-M5, D-REF3): walk a `-> view` function body and, at every
-/// `return`, push an advisory inlay hint naming the source the returned view
-/// borrows (the parameter or `param.field` it points into) plus a reminder
-/// that the borrow lives only as long as that source. On by default — no
-/// diagnostic, just a hint, so it never blocks compilation.
-fn collect_view_return_hints(stmts: &[AST::Stmt], mp: &str, ctx: &mut WalkCtx<'_>) {
-    for stmt in stmts {
-        match stmt {
-            AST::Stmt::Return(Some(e), _) => {
-                if let Some(src) = view_return_source(e) {
-                    ctx.db.inlay.push(InlayHint {
-                        span: e.span(),
-                        module_path: mp.to_string(),
-                        label: format!(" borrows `{}` — lives as long as it does", src),
-                    });
-                }
-            }
-            AST::Stmt::If(if_stmt) => collect_view_return_hints_if(if_stmt, mp, ctx),
-            AST::Stmt::While { body, .. }
-            | AST::Stmt::For { body, .. }
-            | AST::Stmt::Caps { body, .. }
-            | AST::Stmt::Grant { body, .. }
-            | AST::Stmt::Region { body, .. }
-            | AST::Stmt::TaskGroup { body, .. }
-            | AST::Stmt::Layout { body, .. }
-            | AST::Stmt::Transact { body, .. }
-            | AST::Stmt::AssumeDet { body, .. }
-            | AST::Stmt::CountedLoop { body, .. }
-            | AST::Stmt::Loop { body, .. } => collect_view_return_hints(body, mp, ctx),
-            AST::Stmt::Switch {
-                arms, else_body, ..
-            } => {
-                for arm in arms {
-                    collect_view_return_hints(&arm.body, mp, ctx);
-                }
-                if let Some(eb) = else_body {
-                    collect_view_return_hints(eb, mp, ctx);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn collect_view_return_hints_if(if_stmt: &AST::IfStmt, mp: &str, ctx: &mut WalkCtx<'_>) {
-    collect_view_return_hints(&if_stmt.then_body, mp, ctx);
-    match &if_stmt.else_branch {
-        Some(AST::ElseBranch::ElseIf(inner)) => collect_view_return_hints_if(inner, mp, ctx),
-        Some(AST::ElseBranch::Else(body)) => collect_view_return_hints(body, mp, ctx),
-        None => {}
-    }
-}
-
-/// Name the source a returned `view` borrows: the root identifier of an
-/// `Ident` or `Field` path. `None` for shapes that don't read into a name.
-fn view_return_source(e: &AST::Expr) -> Option<String> {
-    match e {
-        AST::Expr::Ident(name, _) => Some(name.clone()),
-        AST::Expr::Field(base, _, _) => view_return_source(base),
-        _ => None,
     }
 }
 

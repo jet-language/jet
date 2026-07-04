@@ -188,7 +188,6 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
 pub fn sig_matches_trait(
     params: &[(crate::AST::AccessConvention, Type)],
     ret: &Option<Type>,
-    is_view: bool,
     expected: &TraitMethodSig,
     assoc: &HashMap<String, Type>,
 ) -> bool {
@@ -206,7 +205,7 @@ pub fn sig_matches_trait(
         }
     }
     match (&ret, &expected.return_type) {
-        (None, None) => !is_view && !expected.is_view_return,
+        (None, None) => true,
         (Some(r), Some(er)) => {
             types_equal_modulo_self(&substitute_type(r, assoc), &substitute_type(er, assoc))
         }

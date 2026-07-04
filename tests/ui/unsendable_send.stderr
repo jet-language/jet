@@ -1,7 +1,7 @@
-Error [E1102]: `cfg` can't be sent because `Config` isn't sendable
-  --> tests/ui/unsendable_send.jet:12:18
+Error [E1102]: `greet` can't be sent because `fn()` isn't sendable
+  --> tests/ui/unsendable_send.jet:7:17
     |
- 12 |     sender.send(^cfg)
-    |                  ^^^
- Why: `Config` contains `logger`, which holds a `ref` field at `logger.sink`; tasks and channels move owned values between threads
+  7 |     sender.send(greet)
+    |                 ^^^^^
+ Why: a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary; tasks and channels move owned values between threads
  Fix: send plain owned data instead, or rebuild the value without shared-view fields before calling `.send()`

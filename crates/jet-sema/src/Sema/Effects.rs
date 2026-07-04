@@ -369,18 +369,10 @@ pub struct EffectSummary {
 
 /// D-SEMINDEX1: per-function effect summaries and the solved transitive sets,
 /// captured during `check_bundle` for the public semantic-index API.
-///
-/// D-EXPANDCLI1 (card #183): also carries the `refs` facts `jet expand
-/// --facts refs` prints — same "capture it once, during the ordinary check
-/// pass" shape as the effect summaries above (I8: one source of truth, no
-/// second analysis pass for the CLI).
 #[derive(Debug, Clone, Default)]
 pub struct SemIndexEffectFacts {
     pub summaries: HashMap<String, EffectSummary>,
     pub solved: HashMap<String, EffectSet>,
-    /// D-REF-SHORTHAND1: resolved owners for every `&T` stored-ref field at
-    /// every struct-construction site sema checked successfully.
-    pub refs: Vec<super::Facts::RefFact>,
 }
 
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed

@@ -1214,18 +1214,10 @@ impl<'a> Checker<'a> {
                     (Some(e), Some(rt)) => {
                         let saved_expected = self.expected_type.clone();
                         self.expected_type = Some(rt.clone());
-                        // In a `-> view` function the returned value stays a
-                        // borrow, so a view call may flow straight through.
-                        // Spawned task returns are checked separately by
-                        // E1102, which avoids a generic E0206 cascade.
-                        self.borrow_ctx = self.view_return || self.is_task_spawn;
+                        // Spawned task returns are checked separately by E1102.
+                        self.borrow_ctx = self.is_task_spawn;
                         let et = self.infer(e);
                         self.expected_type = saved_expected;
-                        // E2302 (E2-M5): a `ref`-field struct built right here in
-                        // a `return` is a construction site too — guard it like a
-                        // `val` binding so a dangling stored ref never reaches
-                        // codegen (which has no lifetime to lower it with).
-                        self.check_stored_ref_fields(e);
                         // D-ALLOC2: E0631 — returning an arena `view` would let
                         // it outlive the arena (the arena drops at scope end).
                         if let Expr::Ident(n, nspan) = &*e {
@@ -1238,9 +1230,7 @@ impl<'a> Checker<'a> {
                         // shapes: an already-bound view name (`return window`),
                         // and a fresh `.view(...)` call made right in the
                         // `return` (`return incidents.view(0..2)`) — the latter
-                        // needs `view_call_source` directly, the same way a
-                        // `return` builds a `#Ref` struct literal on the spot
-                        // (`check_stored_ref_fields`, called just above).
+                        // needs `view_call_source` directly.
                         if let Expr::Ident(n, nspan) = &*e {
                             if self.is_list_view(n) {
                                 self.report_list_view_escape(n, "be returned", *nspan);
@@ -1260,8 +1250,7 @@ impl<'a> Checker<'a> {
                                     Type::Named(tn)
                                         if crate::Generics::is_type_var_name(tn)
                                             || self.type_param_scope.iter().any(|p| &p.name == tn));
-                                if !self.view_return
-                                    && !info.ty.is_scalar()
+                                if !info.ty.is_scalar()
                                     && !is_type_var_param
                                     && matches!(
                                         info.param_conv,
@@ -1278,7 +1267,10 @@ impl<'a> Checker<'a> {
                                         "this function has read access only and does not own the value"
                                             .to_string(),
                                         format!(
-                                            "return a copy: `return {}.clone();` — or take ownership with `{}: {}{}`",
+                                            "return a copy: `return {}.clone();` — or take ownership with `{}: {}{}`. \
+                                             There's no borrow-return in v1 — to share the value without a full \
+                                             copy, store an owned field, or reach for `Shared<T>`/`Id<T>` (coming soon) \
+                                             once a real program needs shared ownership",
                                             n,
                                             n,
                                             Syntax::SIGIL_MOVE,
@@ -1287,54 +1279,6 @@ impl<'a> Checker<'a> {
                                         Some(*nspan),
                                     ));
                                 }
-                            }
-                        }
-                        if self.view_return && !self.expr_ok_for_view_return(e) {
-                            // E2301 (tier-2 references, E2-M5): a `view` return that
-                            // points into a *field of a local* names the owner that
-                            // dies at the closing brace ("what owns this?"). The bare
-                            // local case stays E0206. Only one diagnostic fires.
-                            if matches!(e, Expr::Index { .. } | Expr::Slice { .. })
-                                && self.view_return_local_owner(e).is_none()
-                            {
-                                // E2304 (E2-M5 zero-copy cell): an index/slice
-                                // *into a parameter* the caller owns would be a
-                                // sound borrow on paper, but the list/string
-                                // helpers copy into a fresh value, so the view
-                                // would point at a temporary. Reject in Jet
-                                // words rather than let rustc choke (I2).
-                                self.diags.push(Diagnostic::error(
-                                    "E2304",
-                                    "an indexed or sliced piece can't be handed back as a view"
-                                        .to_string(),
-                                    "indexing or slicing builds a fresh, owned piece, so there's no longer-lived value for a view to point at — the piece would vanish the moment this function returns"
-                                        .to_string(),
-                                    "return the piece owned (drop the `&`; the caller keeps its own copy), or hand back a whole field with `&` and let the caller index it"
-                                        .to_string(),
-                                    Some(e.span()),
-                                ));
-                            } else if let Some(owner) = self.view_return_local_owner(e) {
-                                self.diags.push(Diagnostic::error(
-                                    "E2301",
-                                    format!(
-                                        "this view points into `{}`, which this function owns",
-                                        owner
-                                    ),
-                                    format!(
-                                        "`{}` is made here and freed when the function returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at",
-                                        owner
-                                    ),
-                                    "return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it".to_string(),
-                                    Some(e.span()),
-                                ));
-                            } else {
-                                self.diags.push(Diagnostic::error(
-                                    "E0206",
-                                    "this value can't be handed back as a shared view".to_string(),
-                                    "a `&` return may only point at a parameter, a whole-number or yes/no name, or a const — not at fresh text you just made here".to_string(),
-                                    "return a parameter or const, copy with `.clone()` into an owned return type, or change `-> &` to `->`".to_string(),
-                                    Some(e.span()),
-                                ));
                             }
                         }
                         self.note_move_if_direct_ident(e);
@@ -3029,12 +2973,6 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
-
-        // E2302 (tier-2 references, E2-M5): a `ref` field stored from a value
-        // that won't outlive the struct would dangle ("how long can this view
-        // live?"). Inspected here at the binding site, read-only — the struct
-        // literal itself is elaborated by check_struct_lit.
-        self.check_stored_ref_fields(&b.init);
 
         if let Expr::Lambda(lam) = &b.init {
             if lam.meta.escapes {

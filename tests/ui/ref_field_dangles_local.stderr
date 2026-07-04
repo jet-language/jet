@@ -1,7 +1,0 @@
-Error [E2302]: the stored-reference field `name` would point at something that dies first
-  --> tests/ui/ref_field_dangles_local.jet:6:22
-    |
-  6 | h: Holder :: Holder.{name: local}
-    |                      ^^^^
- Why: a `&T` field stores a reference, not its own copy, so its source has to outlive the struct — but the local `local` doesn't live long enough to promise that here
- Fix: store an owned value (drop the `&` so the struct keeps its own copy), or fill the field from a parameter the caller keeps owning

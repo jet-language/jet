@@ -736,7 +736,6 @@ pub(crate) fn check_bundle_opts(
             field_pkg_pub: HashMap::new(),
             registry: TypeRegistry {
                 types: HashMap::new(),
-                ref_field_labels: HashMap::new(),
                 computed_fields: HashMap::new(),
             },
             structs: HashMap::new(),
@@ -1094,8 +1093,8 @@ pub(crate) fn check_bundle_opts(
             if let Item::Impl(i) = item {
                 if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
                     if let Some(fields) = st.registry.struct_fields(&i.type_name) {
-                        if let Some((_, _, field_ty, _, _)) =
-                            fields.iter().find(|(n, _, _, _, _)| n == field_name)
+                        if let Some((_, _, field_ty, _)) =
+                            fields.iter().find(|(n, _, _, _)| n == field_name)
                         {
                             let field_type_name = field_ty.name();
                             if !st.trait_reg.implements_trait(&field_type_name, trait_name) {
@@ -1627,9 +1626,6 @@ pub(crate) fn check_bundle_opts(
     // `@InlineAlways` address-taken pass (E0918) runs after the loop, once
     // this set is complete across the whole bundle.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
-    // D-EXPANDCLI1 (card #183): resolved `&T` stored-ref owner facts,
-    // accumulated across every module for `jet expand --facts refs`.
-    let mut ref_facts: Vec<Facts::RefFact> = Vec::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         diags.extend(check_module_bodies(
             module,
@@ -1641,7 +1637,6 @@ pub(crate) fn check_bundle_opts(
             &mut effect_summaries,
             &mut embed_inputs,
             &mut global_addr_taken,
-            &mut ref_facts,
         ));
     }
     bundle.comptime_inputs = embed_inputs;
@@ -1733,7 +1728,6 @@ pub(crate) fn check_bundle_opts(
         super::Effects::SemIndexEffectFacts {
             summaries: effect_summaries,
             solved,
-            refs: ref_facts,
         },
     )
 }
@@ -2365,7 +2359,6 @@ pub(crate) fn check_module_bodies(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
-    ref_facts_out: &mut Vec<Facts::RefFact>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -2392,7 +2385,6 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
-                    ref_facts_out,
                 ));
             }
             Item::Struct(s) => {
@@ -2411,7 +2403,6 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
-                        ref_facts_out,
                     ));
                 }
             }
@@ -2431,7 +2422,6 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
-                        ref_facts_out,
                     ));
                 }
             }
@@ -2451,7 +2441,6 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
-                        ref_facts_out,
                     ));
                 }
             }
@@ -2474,7 +2463,6 @@ pub(crate) fn check_module_bodies(
                     type_params: Vec::new(),
                     params: t.params.clone(),
                     return_type: None,
-                    is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
                     is_reactive: false,
@@ -2507,7 +2495,6 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
-                    ref_facts_out,
                 ));
                 t.body = synthetic.body;
             }
@@ -2524,7 +2511,6 @@ pub(crate) fn check_module_bodies(
                     type_params: Vec::new(),
                     params: Vec::new(),
                     return_type: None,
-                    is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
                     is_reactive: false,
@@ -2557,7 +2543,6 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
-                    ref_facts_out,
                 ));
                 b.body = synthetic.body;
             }
@@ -2582,7 +2567,6 @@ pub(crate) fn check_module_bodies(
                                 summaries,
                                 embed_inputs_out,
                                 global_addr_taken,
-                                ref_facts_out,
                             ));
                         }
                     }
@@ -2625,7 +2609,6 @@ pub(crate) fn check_func_body_bundle(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
-    ref_facts_out: &mut Vec<Facts::RefFact>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -2666,7 +2649,6 @@ pub(crate) fn check_func_body_bundle(
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
-        view_return: f.is_view_return,
         fn_name: f.name.clone(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
@@ -2700,7 +2682,6 @@ pub(crate) fn check_func_body_bundle(
         taskgroup_stack: Vec::new(),
         in_taskgroup_spawn: false,
         inline_addr_taken: HashSet::new(),
-        ref_facts: Vec::new(),
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
@@ -2717,7 +2698,6 @@ pub(crate) fn check_func_body_bundle(
     global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
     // into the whole-bundle accumulator for `jet expand --facts refs`.
-    ref_facts_out.extend(std::mem::take(&mut ck.ref_facts));
     // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
     embed_inputs_out.extend(std::mem::take(&mut ck.ct_embed_inputs));
     // D-EFF1: record this function's effect summary for the whole-program fixpoint.

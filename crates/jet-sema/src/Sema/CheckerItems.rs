@@ -365,7 +365,7 @@ impl<'a> Checker<'a> {
         &self,
         owner_mod: usize,
         type_name: &str,
-    ) -> Option<&[(String, Span, Type, bool, bool)]> {
+    ) -> Option<&[(String, Span, Type, bool)]> {
         if owner_mod == self.module_idx {
             self.registry.struct_fields(type_name)
         } else {
@@ -600,7 +600,7 @@ impl<'a> Checker<'a> {
         if owner_mod != self.module_idx && !self.type_is_pub_in(owner_mod, type_name) {
             self.diags.push(private_item(type_name, span));
         }
-        let def_fields: Vec<(String, Span, Type, bool, bool)> = self
+        let def_fields: Vec<(String, Span, Type, bool)> = self
             .struct_fields_of(owner_mod, type_name)
             .map(|fields| fields.to_vec())
             .unwrap_or_default();
@@ -626,7 +626,7 @@ impl<'a> Checker<'a> {
             .is_some_and(|base| super::patch_type_name(base) == type_name)
             && def_fields
                 .iter()
-                .all(|(_, _, ty, _, _)| matches!(ty, Type::Option(_)));
+                .all(|(_, _, ty, _)| matches!(ty, Type::Option(_)));
         let mut provided = HashMap::new();
         for (name, name_span, expr) in fields.iter_mut() {
             if provided.insert(name.clone(), ()).is_some() {
@@ -644,14 +644,7 @@ impl<'a> Checker<'a> {
             let field_def = def_fields.iter().find(|(n, ..)| n == name);
             let saved_expected = self.expected_type.clone();
             let saved_esc = self.lambda_escapes;
-            // D-REF-SHORTHAND1: a stored-reference (`&T`) field is always filled
-            // by borrowing its owner, never by cloning — suppress the auto
-            // `.clone()` whenever the fill has a borrowable root (an in-scope
-            // value). The owner is inferred at construction, so this no longer
-            // depends on an explicit `#Ref` label matching the fill.
-            let skip_clone = field_def.is_some_and(|(_, _, _, is_ref, _)| *is_ref)
-                && super::CheckerOwnership::ref_field_init_root(expr).is_some();
-            if let Some((_, _, fty, _, _)) = field_def {
+            if let Some((_, _, fty, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 self.expected_type = if is_patch_lit {
                     inst.unwrap_option().cloned()
@@ -662,22 +655,13 @@ impl<'a> Checker<'a> {
             if matches!(expr, Expr::Lambda(_)) {
                 self.lambda_escapes = true;
             }
-            // A `#Ref(owner)` fill from `owner` (or `owner.field`) is a borrow slot;
-            // suppress `field_read_to_clone` during infer so we don't wrap `.clone()`.
-            let saved_borrow = self.borrow_ctx;
-            if skip_clone {
-                self.borrow_ctx = true;
-            }
             let et = self.infer(expr);
-            self.borrow_ctx = saved_borrow;
             self.expected_type = saved_expected;
             self.lambda_escapes = saved_esc;
-            if !skip_clone {
-                // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
-                // non-`Copy` ident (a `read`/`mut` param → `&T`/`&mut T`) can't be moved
-                // into the field — codegen would emit `(*user_n)` → rustc E0507.
-                self.clone_borrowed_struct_field_value(expr);
-            }
+            // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
+            // non-`Copy` ident (a `read`/`mut` param → `&T`/`&mut T`) can't be moved
+            // into the field — codegen would emit `(*user_n)` → rustc E0507.
+            self.clone_borrowed_struct_field_value(expr);
             // D-ALLOC2: E0631 — storing an arena `view` in a struct field would
             // let the struct (which can outlive the region) keep a dangling
             // borrow into the arena.
@@ -691,7 +675,7 @@ impl<'a> Checker<'a> {
                     self.report_list_view_escape(vname, "be stored in a struct field", *vspan);
                 }
             }
-            if let Some((_, _, fty, _, _)) = field_def {
+            if let Some((_, _, fty, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 if let Some(et) = et {
                     if is_patch_lit {
@@ -736,7 +720,7 @@ impl<'a> Checker<'a> {
         }
         let missing: Vec<_> = def_fields
             .iter()
-            .filter(|(n, _, _, is_ref, _)| !*is_ref && !provided.contains_key(n))
+            .filter(|(n, _, _, _)| !provided.contains_key(n))
             .map(|(n, ..)| n.clone())
             .collect();
         if !missing.is_empty() && !is_patch_lit {

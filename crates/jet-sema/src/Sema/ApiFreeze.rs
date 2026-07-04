@@ -280,7 +280,6 @@ mod tests {
             type_params: vec![],
             params,
             return_type: ret,
-            is_view_return: false,
             is_unsafe: false,
             is_pure: false,
             is_reactive: false,

@@ -167,7 +167,7 @@ pub(crate) fn if_definitely_returns(ifs: &IfStmt) -> bool {
 pub(crate) fn is_cloneable(
     ty: &Type,
     registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<(Option<String>, Type)>>,
+    structs: &HashMap<String, Vec<Type>>,
 ) -> bool {
     let mut visiting = HashSet::new();
     is_cloneable_rec(ty, registry, structs, &mut visiting)
@@ -181,7 +181,7 @@ pub(crate) fn is_cloneable(
 fn is_cloneable_rec(
     ty: &Type,
     registry: &TypeRegistry,
-    structs: &HashMap<String, Vec<(Option<String>, Type)>>,
+    structs: &HashMap<String, Vec<Type>>,
     visiting: &mut HashSet<String>,
 ) -> bool {
     match ty {
@@ -206,11 +206,9 @@ fn is_cloneable_rec(
             }
             let result = registry.contains(name)
                 && match registry.types.get(name) {
-                    Some(TypeDef::Struct { fields, .. }) => {
-                        fields.iter().all(|(_, _, fty, is_ref, _)| {
-                            !*is_ref && is_cloneable_rec(fty, registry, structs, visiting)
-                        })
-                    }
+                    Some(TypeDef::Struct { fields, .. }) => fields
+                        .iter()
+                        .all(|(_, _, fty, _)| is_cloneable_rec(fty, registry, structs, visiting)),
                     Some(TypeDef::Enum { variants, .. }) => {
                         variants.values().all(|(_, p)| match p {
                             VariantPayload::Unit => true,
@@ -591,8 +589,8 @@ pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<S
     match ty {
         Type::Named(name) => match registry.types.get(name) {
             Some(TypeDef::Struct { fields, .. }) => {
-                fields.iter().find_map(|(fname, _, fty, is_ref, _)| {
-                    if *is_ref || !types_comparable(fty, registry) {
+                fields.iter().find_map(|(fname, _, fty, _)| {
+                    if !types_comparable(fty, registry) {
                         Some(fname.clone())
                     } else {
                         None
@@ -685,19 +683,6 @@ pub(crate) fn prepend_send_path(
 
 pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> String {
     match &problem.kind {
-        SendProblemKind::RefField => {
-            let root = problem.root.as_deref().unwrap_or("this value");
-            match problem.path.as_slice() {
-                [] => format!("`{}` holds a `ref` field", root),
-                [field] => format!("`{}` contains `{}`, which is a `ref` field", root, field),
-                [first, ..] => format!(
-                    "`{}` contains `{}`, which holds a `ref` field at `{}`",
-                    root,
-                    first,
-                    problem.path.join(".")
-                ),
-            }
-        }
         SendProblemKind::ClosureNeedsTake => {
             if let (Some(root), false) = (problem.root.as_deref(), problem.path.is_empty()) {
                 format!(

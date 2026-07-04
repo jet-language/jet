@@ -43,8 +43,6 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
                 name_span: f.name_span,
                 ty: Type::Option(Box::new(f.ty.clone())),
                 ty_span: f.ty_span,
-                is_stored_ref: false,
-                stored_ref_label: None,
                 is_pub: f.is_pub,
                 is_package_pub: f.is_package_pub,
                 serde_markers: Vec::new(),
@@ -89,19 +87,6 @@ fn validate_patchable_struct(s: &StructDef) -> Option<Diagnostic> {
         ));
     }
     for f in &s.fields {
-        if f.is_stored_ref {
-            return Some(Diagnostic::error(
-                "E0337",
-                format!(
-                    "`@[Patchable]` struct `{}` field `{}` is a stored reference",
-                    s.name, f.name
-                ),
-                "patches hold optional owned values — a patch can't express a borrowed field"
-                    .to_string(),
-                "use an owned field type, or drop `@[Patchable]`".to_string(),
-                Some(f.name_span),
-            ));
-        }
         if matches!(f.ty, Type::Fn { .. }) {
             return Some(Diagnostic::error(
                 "E0337",
@@ -143,7 +128,6 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                         (AccessConvention::Move, patch_ty.clone()),
                     ],
                     return_type: Some(base_ty.clone()),
-                    is_view_return: false,
                     is_static: false,
                     self_conv: Some(AccessConvention::Read),
                     param_info: vec![("patch".to_string(), false)],
@@ -159,7 +143,6 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                         (AccessConvention::Move, base_ty),
                     ],
                     return_type: Some(patch_ty.clone()),
-                    is_view_return: false,
                     is_static: true,
                     self_conv: None,
                     param_info: vec![
@@ -180,7 +163,6 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                         (AccessConvention::Move, patch_ty),
                     ],
                     return_type: Some(Type::Named(patch)),
-                    is_view_return: false,
                     is_static: false,
                     self_conv: Some(AccessConvention::Read),
                     param_info: vec![("other".to_string(), false)],

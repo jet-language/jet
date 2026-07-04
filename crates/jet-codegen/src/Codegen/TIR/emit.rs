@@ -29,7 +29,7 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
 /// Byte-identical to `emit_func`'s output.
 pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     let ret_clause = match &tir.ret {
-        Some(t) => format!(" -> {}", rust_return_type(cx, t, tir.is_view)),
+        Some(t) => format!(" -> {}", rust_return_type(cx, t)),
         None => String::new(),
     };
     let params = tir
@@ -128,7 +128,7 @@ pub(crate) fn emit_tir_method(
     let indent = 1;
     let pad = "    ".repeat(indent);
     let ret_clause = match &tir.ret {
-        Some(t) => format!(" -> {}", rust_return_type(cx, t, tir.is_view)),
+        Some(t) => format!(" -> {}", rust_return_type(cx, t)),
         None => String::new(),
     };
     let mut params: Vec<String> = Vec::new();
@@ -199,7 +199,7 @@ pub(crate) fn emit_tir_trait_method(
         // `emit_trait_method` computes `ret = rust_return_type(...)` then, if non-empty,
         // ` -> ret`. A unit return yields the empty clause.
         Some(t) => {
-            let ret = rust_return_type(cx, t, tir.is_view);
+            let ret = rust_return_type(cx, t);
             if ret.is_empty() {
                 String::new()
             } else {
@@ -382,14 +382,6 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         }
         TStmt::Return(None) => {
             out.push_str(&format!("{}return;\n", pad));
-        }
-        TStmt::ViewReturn { value, wrap } => {
-            let v = emit_tir_expr(value, cx);
-            let rendered = match wrap {
-                ViewWrap::Addr => format!("&{}", v),
-                ViewWrap::Bare => v,
-            };
-            out.push_str(&format!("{}return {};\n", pad, rendered));
         }
         TStmt::ExprStmt(e) => {
             out.push_str(&format!("{}{};\n", pad, emit_tir_expr(e, cx)));

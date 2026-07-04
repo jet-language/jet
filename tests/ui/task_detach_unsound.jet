@@ -1,13 +1,11 @@
 use core.tasks
-struct Holder {
-    name: &String
-}
-fn forward(h: Holder) {
-    // E1102 fires: `h` (a ref-holding struct) can't cross task boundary.
+fn forward(greet: fn()) {
+    // E1102 fires twice: `greet` is captured without `take`, and the task's
+    // result is itself the same un-sendable closure.
     // E1103 fires at `.detach()`: the task has a sendability problem.
-    t :: tasks.spawn(() => h)
+    t :: tasks.spawn(() => greet)
     t.detach()
 }
 fn run() {
-    print(0)
+    forward(() => { print(0) })
 }

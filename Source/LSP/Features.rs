@@ -294,7 +294,6 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwMutate
         | TokKind::KwMove
         | TokKind::KwView
-        | TokKind::KwStored
         | TokKind::KwSelf
         | TokKind::KwNull
         | TokKind::KwOk
