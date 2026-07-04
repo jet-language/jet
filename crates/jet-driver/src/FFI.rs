@@ -107,6 +107,12 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
             || u == "core.crypto.expert"
             || u.starts_with("core.crypto.expert::")
     });
+    // D-DEP-WASM1=A (c81): `core.plugin` — the sandboxed WASM Component Model
+    // plugin loader (`Plugin.load`/`.call`).
+    let needs_plugin = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "jet.plugin" || u.starts_with("jet.plugin::"));
     if entries.is_empty()
         && !needs_regex
         && !needs_archive
@@ -114,6 +120,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         && !needs_http_client
         && !needs_crypto
         && !needs_compress
+        && !needs_plugin
     {
         return Ok(None);
     }
@@ -126,6 +133,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         needs_http_client,
         needs_crypto,
         needs_compress,
+        needs_plugin,
     )
     .map(Some)
 }
@@ -166,6 +174,10 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
         "{ version = \"0.31\", features = [\"bundled\"] }",
     ),
     ("ureq", "{ version = \"2\", features = [\"tls\"] }"),
+    (
+        "wasmtime",
+        "{ version = \"26\", features = [\"component-model\"] }",
+    ),
 ];
 
 /// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
@@ -192,6 +204,16 @@ pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "2");
 /// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
+
+/// The `wasmtime` crate version that backs `core.plugin` (D-DEP-WASM1=A, c81).
+/// Lives only here — never in the compiler's Cargo.toml (I6). Reuses the
+/// already-approved Cranelift backend internally (D-JITDEP1).
+pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "26");
+
+/// Hand-written plugin-loader runtime emitted into the bridge crate when
+/// `core.plugin` is used. This is the only place the `wasmtime` crate is
+/// touched.
+const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
 
 /// The `flate2` crate version that backs `core.compress.gzip` (D-CODECS1).
 /// Same crate as `core.archive`'s gzip; `core.compress` must also work standalone,
@@ -220,6 +242,7 @@ pub fn build_bridge(
     needs_http_client: bool,
     needs_crypto: bool,
     needs_compress: bool,
+    needs_plugin: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
@@ -272,6 +295,12 @@ pub fn build_bridge(
             COMPRESS_ZSTD_CRATE_SPEC.1.to_string(),
         );
     }
+    if needs_plugin {
+        deps.insert(
+            WASMTIME_CRATE_SPEC.0.to_string(),
+            WASMTIME_CRATE_SPEC.1.to_string(),
+        );
+    }
     let key = cache_key_full(
         entries,
         &deps,
@@ -281,6 +310,7 @@ pub fn build_bridge(
         needs_http_client,
         needs_crypto,
         needs_compress,
+        needs_plugin,
     );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
@@ -367,6 +397,7 @@ pub fn build_bridge(
             needs_http_client,
             needs_crypto,
             needs_compress,
+            needs_plugin,
         ),
     )
     .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
@@ -637,6 +668,7 @@ fn cache_key_full(
     needs_http_client: bool,
     needs_crypto: bool,
     needs_compress: bool,
+    needs_plugin: bool,
 ) -> u64 {
     let mut h = DefaultHasher::new();
     // Only perturb the key when a ring module is actually needed, so programs
@@ -659,6 +691,9 @@ fn cache_key_full(
     }
     if needs_compress {
         needs_compress.hash(&mut h);
+    }
+    if needs_plugin {
+        needs_plugin.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -762,6 +797,7 @@ fn emit_wrapper_lib(
     needs_http_client: bool,
     needs_crypto: bool,
     needs_compress: bool,
+    needs_plugin: bool,
 ) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
@@ -796,6 +832,11 @@ fn emit_wrapper_lib(
         // D-CODECS1: the compress runtime is the only place the standalone
         // `core.compress.gzip` / `core.compress.zstd` codec paths are touched.
         out.push_str(COMPRESS_RUNTIME);
+        out.push('\n');
+    }
+    if needs_plugin {
+        // D-DEP-WASM1=A: the plugin runtime is the only place `wasmtime` is touched.
+        out.push_str(PLUGIN_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();

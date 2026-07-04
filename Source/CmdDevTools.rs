@@ -859,6 +859,7 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
         false,
         None,
         None,
+        None,
         mode,
         // Benchmark build; not content-cached (race-safe via `build`'s temp path).
         None,
@@ -931,6 +932,7 @@ fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
         ffi_link.as_ref(),
         &[],
         false,
+        None,
         None,
         None,
         mode,

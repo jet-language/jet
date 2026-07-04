@@ -1,0 +1,27 @@
+// c81 / D-PLUGIN1=B / D-DEP-WASM1=A: `target: plugin` — a host program loads
+// a sandboxed WASM Component Model plugin and calls its exported functions.
+// `plugin_src/` builds `mathkit.wasm` (see its pkg.jet for the rebuild
+// command); this file is the HOST, an ordinary native Jet program. Loading
+// and calling the plugin never needs `#Unsafe` (I1) — the sandbox itself is
+// the safety boundary (the wasmtime host registers zero host imports, so a
+// plugin that tried to touch the filesystem/network would simply fail to
+// instantiate, not silently succeed).
+use core.plugin as plugin
+
+fn run() {
+    mathkit :: plugin.load("examples/features/packages/plugin_mathkit/mathkit.wasm")
+
+    area :: mathkit.call("scale", [6.0, 7.0]) ?? panic("scale failed")
+    print("scale(6, 7) = {area}")
+
+    diag :: mathkit.call("hypot", [3.0, 4.0]) ?? panic("hypot failed")
+    print("hypot(3, 4) = {diag}")
+
+    divisor :: mathkit.call_int("gcd", [48, 18]) ?? panic("gcd failed")
+    print("gcd(48, 18) = {divisor}")
+
+    // Calling an export the plugin doesn't have is a clean `Err`, never a
+    // crash (I2) — the sandboxed loader always reports, never traps the host.
+    missing :: mathkit.call("nope", [1.0]) ?? -1.0
+    print("calling a missing export fails cleanly, fallback = {missing}")
+}

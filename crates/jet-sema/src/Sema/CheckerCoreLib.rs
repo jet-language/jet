@@ -2099,6 +2099,69 @@ pub fn db_connection_method_return_ty(method: &str) -> Option<Type> {
     }
 }
 
+impl<'a> Checker<'a> {
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `(name: String, args: [T]) -> T ?
+    /// String` argument elaboration shared by `.call`/`.call_int` — a plugin
+    /// export name plus a homogeneous scalar argument list. v1 supports
+    /// exactly two scalar shapes (`Float` via `.call`, `Int` via `.call_int`);
+    /// see `Prelude/Plugin.rs` for why Bool/Text aren't wired yet.
+    fn check_plugin_call_args(
+        &mut self,
+        name: &str,
+        arg_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) {
+        if args.len() != 2 {
+            self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return;
+        }
+        let list_ty = Type::List(Box::new(arg_ty.clone()));
+        self.expect_core_arg(name, 0, &Type::String, &mut args[0]);
+        self.expect_core_arg(name, 1, &list_ty, &mut args[1]);
+    }
+
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): instance methods on a `Plugin` handle
+    /// (produced by `core.plugin`'s `load`). `call`/`call_int` are fallible
+    /// (`? String`, naming a missing export or a param/type mismatch against
+    /// the plugin's actual `.wit` signature) — the sandboxed loader never
+    /// crashes the host program, it reports (I2).
+    pub(crate) fn check_plugin_method(
+        &mut self,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Option<Type>> {
+        match method {
+            "call" => {
+                self.check_plugin_call_args("call", &Type::Float, args, span);
+                self.record_effect(Effect::Exec.name());
+                Some(Some(result_ty(Type::Float, Type::String)))
+            }
+            "call_int" => {
+                self.check_plugin_call_args("call_int", &Type::Int, args, span);
+                self.record_effect(Effect::Exec.name());
+                Some(Some(result_ty(Type::Int, Type::String)))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// D-DEP-WASM1=A: the resolved return type of a covered `Plugin` method, read
+/// from `check_plugin_method`'s authoritative match — a pure lookup for
+/// codegen's TIR totality bookkeeping (mirrors `db_connection_method_return_ty`).
+pub fn plugin_method_return_ty(method: &str) -> Option<Type> {
+    match method {
+        "call" => Some(result_ty(Type::Float, Type::String)),
+        "call_int" => Some(result_ty(Type::Int, Type::String)),
+        _ => None,
+    }
+}
+
 /// D-MUSTUSE1 (c18iwxqx): built-in handle types whose bare statement result must
 /// not be silently ignored (E0419). `scope.guard` returns `ScopeGuard` — bind it
 /// or cleanup runs at end of the statement, not scope exit. `TransactionGuard` is
@@ -3918,6 +3981,16 @@ pub fn core_fixed_sig(
             Some(Type::Named("DbConnection".to_string())),
         )),
         ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DbConnection".to_string())))),
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `core.plugin` — sandboxed WASM
+        // Component Model plugin loader (wasmtime, runtime-side only, I6).
+        // `load` is the only module-level entry point; it PRODUCES a `Plugin`
+        // handle (mirrors `jet.db`'s `open` producing a `DbConnection`). The
+        // actual calls (`.call`/`.call_int`) are instance methods dispatched by
+        // the receiver's `Plugin` type (see `check_plugin_method` below).
+        ("jet.plugin", "load") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("Plugin".to_string())),
+        )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
         // returns `[Byte] ? String` (invalid input → Err).
         ("core.encoding.hex", "encode") => {
@@ -4395,6 +4468,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
         // `rollback` are `DbConnection` instance methods, not module items.
         "jet.db" => &["open", "open_memory"],
+        // D-DEP-WASM1=A: sandboxed WASM plugin loader ring package.
+        "jet.plugin" => &["load"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         // D-SIGNAL1: "computed" is the canonical alias for "derived".
         "jet.reactive" => &["signal", "derived", "computed", "effect"],

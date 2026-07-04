@@ -95,6 +95,12 @@
             nodejs_22
             nixfmt
             ripgrep
+            # D-DEP-WASM1=A (c81): `jet build --target=plugin` lifts the
+            # rustc-built wasm32-unknown-unknown core module into a WASM
+            # Component using `wasm-tools component embed`/`new` — an external
+            # CLI tool (I6: shelled out to, like cargo/rustc, never linked
+            # into the compiler).
+            wasm-tools
             tree-sitter
             emscripten
             lldb

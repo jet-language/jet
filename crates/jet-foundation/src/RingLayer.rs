@@ -88,7 +88,10 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         "core.fs" | "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
         | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
-        | "core.compress.gzip" | "core.compress.zstd" | "jet.db" => RuntimeLayer::Std,
+        | "core.compress.gzip" | "core.compress.zstd" | "jet.db"
+        // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime — same OS-facing
+        // posture as jet.db's embedded rusqlite.
+        | "jet.plugin" => RuntimeLayer::Std,
 
         // Unknown modules default to std so new OS-facing modules stay conservative.
         other if Syntax::is_known_core_module(other) => RuntimeLayer::Std,

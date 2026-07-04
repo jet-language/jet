@@ -867,7 +867,7 @@ pub use Effects::SemIndexEffectFacts;
 // D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
-pub use Effects::{effect_covers, effect_root, parse_effect_name, Effect, EffectSet};
+pub use Effects::{effect_covers, effect_root, parse_effect_name, show_set, Effect, EffectSet};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub use Registration::{check, check_with_mode, effect_key};

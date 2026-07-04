@@ -299,6 +299,10 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.process" => Effect::Exec,
         "core.io" => Effect::Io,
         "jet.db" | "jet.sql" => Effect::Db,
+        // D-DEP-WASM1=A (c81): loading a sandboxed plugin executes foreign
+        // code, even though the sandbox makes it memory-safe — same bucket as
+        // `core.process` (an effects-budget `deny: [Exec]` also denies plugins).
+        "core.plugin" | "jet.plugin" => Effect::Exec,
         "jet.log" => Effect::Log,
         "core.ui" => Effect::Browser,
         _ => return None,

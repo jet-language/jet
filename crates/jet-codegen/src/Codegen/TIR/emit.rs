@@ -2654,6 +2654,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::DbValueText => format!("({}).text()", recv),
                 THandleOp::DbValueBool => format!("({}).bool()", recv),
                 THandleOp::DbValueIsNull => format!("({}).is_null()", recv),
+                // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin.call`/`.call_int` —
+                // a homogeneous scalar call across the sandboxed Component
+                // Model boundary, wire-encoded exactly like `DbQuery` above
+                // (args encoded, result decoded; see `Prelude/Plugin.rs` and
+                // `jet_std::jet_plugin_{encode_args_float,decode_result_float}`
+                // in `Prelude/CoreLib.rs`).
+                THandleOp::PluginCall => format!(
+                    "{root}jet_std::jet_plugin_decode_result_float(&{ffi}::jet_plugin_call(({recv}).handle, &({}), &{root}jet_std::jet_plugin_encode_args_float(&({}))))",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::PluginCallInt => format!(
+                    "{root}jet_std::jet_plugin_decode_result_int(&{ffi}::jet_plugin_call(({recv}).handle, &({}), &{root}jet_std::jet_plugin_encode_args_int(&({}))))",
+                    a(0),
+                    a(1)
+                ),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -3580,6 +3596,21 @@ pub(crate) fn emit_tir_core_call(
                 "{}JetDbConnection {{ handle: {}() }}",
                 cx.root_prefix,
                 regex_fn("jet_db_open_memory")
+            )
+        }
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin — sandboxed WASM
+        // Component Model loader via the FFI bridge crate (wasmtime,
+        // runtime-side only, I6). `load` is the only module-level entry
+        // point; it wraps the bridge's wire-encoded handle in the Jet-visible
+        // `Plugin` handle (`JetPlugin`), so `.call`/`.call_int` dispatch by
+        // receiver TYPE as instance methods (`THandleOp::PluginCall{,Int}`
+        // in the `HandleMethod` arm below), not a second module-call surface.
+        ("jet.plugin", "load") => {
+            format!(
+                "{root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }}",
+                regex_fn("jet_plugin_load"),
+                arg(0),
+                root = cx.root_prefix,
             )
         }
         // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.

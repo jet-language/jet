@@ -1581,6 +1581,18 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): method calls on a `Plugin` handle
+        // — same bespoke-block shape as `DbConnection` above (`.call`/
+        // `.call_int` need `(name: String, args: [T])` elaboration, not the
+        // generic `file_handle_method_return` table).
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == "Plugin" {
+                if let Some(ret) = self.check_plugin_method(method, args, span) {
+                    *recv_type_out = Some(handle_ty.clone());
+                    return ret;
+                }
+            }
+        }
         // E2-M7: method calls on streaming file handles (D-IO2).
         if let Type::Named(handle_ty) = &recv_ty {
             if let Some(ret) =

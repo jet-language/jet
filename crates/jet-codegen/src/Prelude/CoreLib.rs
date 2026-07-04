@@ -682,6 +682,96 @@ mod jet_std {
         Err(DbError { message: msg.to_string() })
     }
 
+    // ── D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin wire helpers ────────────
+    // `Plugin.call`/`.call_int` cross the sandboxed Component Model boundary as
+    // plain wire text — the always-compiled prelude here and the hidden FFI
+    // bridge crate (`Prelude/Plugin.rs`, `jet_plugin_call`) are built
+    // independently and share no Rust types, only this tagged-length text
+    // (same house style as `jet_db_encode_params`/`jet_db_decode_query_result`
+    // above; `pluginw_`-prefixed so nothing here collides with `db_*`).
+    fn pluginw_encode_tagged(tag: char, payload: &str) -> String {
+        format!("{tag}{}:{payload}", payload.len())
+    }
+
+    fn pluginw_read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
+        let tag = *bytes.get(*pos)? as char;
+        *pos += 1;
+        let len_start = *pos;
+        while *bytes.get(*pos)? != b':' {
+            *pos += 1;
+        }
+        let len: usize = std::str::from_utf8(&bytes[len_start..*pos]).ok()?.parse().ok()?;
+        *pos += 1; // skip ':'
+        let payload = std::str::from_utf8(bytes.get(*pos..*pos + len)?).ok()?.to_string();
+        *pos += len;
+        Some((tag, payload))
+    }
+
+    /// Encode a `[Float]` argument list for `plugin.call(name, args)`.
+    pub fn jet_plugin_encode_args_float(args: &Vec<f64>) -> String {
+        let mut out = String::new();
+        out.push_str(&args.len().to_string());
+        out.push(':');
+        for a in args {
+            out.push_str(&pluginw_encode_tagged('F', &a.to_string()));
+        }
+        out
+    }
+
+    /// Encode an `[Int]` argument list for `plugin.call_int(name, args)`.
+    pub fn jet_plugin_encode_args_int(args: &Vec<i64>) -> String {
+        let mut out = String::new();
+        out.push_str(&args.len().to_string());
+        out.push(':');
+        for a in args {
+            out.push_str(&pluginw_encode_tagged('I', &a.to_string()));
+        }
+        out
+    }
+
+    /// Decode the `"O:<handle>"`/`"E:<message>"` wire produced by
+    /// `jet_plugin_load`. Returns the handle, or `0` (the invalid-handle
+    /// sentinel, mirroring `jet_db_open`'s style) when the load failed — every
+    /// later `.call`/`.call_int` on handle `0` reports "no plugin loaded for
+    /// this handle" rather than ever panicking (I2).
+    pub fn jet_plugin_load_handle(wire: &str) -> u64 {
+        wire.strip_prefix("O:")
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+
+    /// Decode the `"O:F<len>:<val>"`/`"E:<message>"` wire produced by
+    /// `jet_plugin_call` for a `.call` (Float) invocation.
+    pub fn jet_plugin_decode_result_float(wire: &str) -> Result<f64, String> {
+        let Some(body) = wire.strip_prefix("O:") else {
+            return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
+        };
+        let bytes = body.as_bytes();
+        let mut pos = 0usize;
+        match pluginw_read_tagged(bytes, &mut pos) {
+            Some((_, payload)) => payload
+                .parse::<f64>()
+                .map_err(|_| "plugin returned a malformed Float result".to_string()),
+            None => Err("plugin returned a malformed result".to_string()),
+        }
+    }
+
+    /// Decode the `"O:I<len>:<val>"`/`"E:<message>"` wire produced by
+    /// `jet_plugin_call` for a `.call_int` (Int) invocation.
+    pub fn jet_plugin_decode_result_int(wire: &str) -> Result<i64, String> {
+        let Some(body) = wire.strip_prefix("O:") else {
+            return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
+        };
+        let bytes = body.as_bytes();
+        let mut pos = 0usize;
+        match pluginw_read_tagged(bytes, &mut pos) {
+            Some((_, payload)) => payload
+                .parse::<i64>()
+                .map_err(|_| "plugin returned a malformed Int result".to_string()),
+            None => Err("plugin returned a malformed result".to_string()),
+        }
+    }
+
     // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
     // The one tree every format adapter speaks. The built-in `@[Codable]` derive
     // (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
@@ -2967,6 +3057,17 @@ struct JetFileWriter {
 // use, instead of exposing the bare `u64` to Jet code.
 #[derive(Clone, Copy, Debug)]
 struct JetDbConnection {
+    handle: u64,
+}
+
+// ── core.plugin sandboxed WASM handle (D-DEP-WASM1=A / D-PLUGIN1=B, c81) ─────
+// The real wasmtime `Store`/`Instance` live in the FFI bridge crate's
+// thread-local handle map (wasmtime types can't cross into this
+// always-compiled prelude — I6). `JetPlugin` is a thin, `Copy` handle wrapper,
+// same shape as `JetDbConnection`, so `.call`/`.call_int` dispatch by receiver
+// TYPE (`Plugin`) instead of exposing the bare `u64` to Jet code.
+#[derive(Clone, Copy, Debug)]
+struct JetPlugin {
     handle: u64,
 }
 

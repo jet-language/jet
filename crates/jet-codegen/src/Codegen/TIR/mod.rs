@@ -2039,6 +2039,13 @@ pub enum THandleOp {
     DbValueText,
     DbValueBool,
     DbValueIsNull,
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call(name, args)` →
+    /// `Result<Float, String>`, a homogeneous `[Float]` call across the
+    /// sandboxed Component Model boundary (wire-encoded, see `Prelude/Plugin.rs`).
+    PluginCall,
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call_int(name, args)` →
+    /// `Result<Int, String>`, the `[Int]` sibling of `PluginCall`.
+    PluginCallInt,
     /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor →
     /// `{root}jet_reader_over(&(recv))` → `JetReader`. `recv` is the `[U8]`
     /// argument (same "arg becomes the recv slot" shape as `PathFrom`).

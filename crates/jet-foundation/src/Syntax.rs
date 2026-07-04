@@ -1572,10 +1572,11 @@ pub const MANIFEST_BLOCK_PAYLOAD: &str = "payload";
 pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
 
 /// D-TGT1/D-TGT2 (ratified 2026-06-21): a package's build targets, replacing the
-/// removed `kind:` (U10). The five shipped targets — `library` is imported for its
+/// removed `kind:` (U10). The six shipped targets — `library` is imported for its
 /// code, `executable` installs a binary on PATH, `test`/`example` build their own
-/// artifacts, `benchmark` (c80, D-TGT2) points `jet bench` at the package entry.
-/// Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
+/// artifacts, `benchmark` (c80, D-TGT2) points `jet bench` at the package entry,
+/// `plugin` (c81, D-PLUGIN1/D-DEP-WASM1) builds a sandboxed WASM Component Model
+/// module. Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
 /// `{ targets: [ … ] }` list.
 pub const TARGET_LIBRARY: &str = "library";
 pub const TARGET_EXECUTABLE: &str = "executable";
@@ -1585,11 +1586,19 @@ pub const TARGET_EXAMPLE: &str = "example";
 /// target that routes `jet bench` at the package entry — same engine as `#Bench`/
 /// `jet bench file.jet`, now addressable from a `packages:` declaration.
 pub const TARGET_BENCHMARK: &str = "benchmark";
+/// D-PLUGIN1=B / D-DEP-WASM1=A (ratified 2026-06-25; backend shipped c81): a
+/// package built as `plugin` compiles to a sandboxed `wasm32` Component Model
+/// module (wasmtime host, typed `.wit` contract) instead of a native binary.
+/// Safe by default — no `#Unsafe` gate (I1 holds by construction: the sandbox
+/// is the safety boundary). Its exported surface is named by the `export:`
+/// target field (`TARGET_FIELD_EXPORT`, D-PLUGIN-EXPORT1).
+pub const TARGET_PLUGIN: &str = "plugin";
 
 /// D-TGT2 (ratified 2026-06-21): target keywords reserved for a future increment —
 /// recognized but rejected (no backend yet) until their tooling lands.
-/// `benchmark` shipped (c80); only `plugin` remains reserved (c81/D-DEP-WASM1).
-pub const TARGET_RESERVED: &[&str] = &["plugin"];
+/// `benchmark` shipped (c80); `plugin` shipped (c81). Empty until the next
+/// reserved target is proposed.
+pub const TARGET_RESERVED: &[&str] = &[];
 
 /// D-TGT1 (ratified 2026-06-21): the per-package field listing build targets —
 /// `app: { targets: [library, executable { entry: "src/cli.jet" }] }`. A bare
@@ -1608,6 +1617,10 @@ pub const PACKAGE_FIELD_KIND_REMOVED: &str = "kind";
 /// unknown-field error like any other typo'd key.
 pub const TARGET_FIELD_ENTRY: &str = "entry";
 pub const TARGET_FIELD_NAME: &str = "name";
+/// D-PLUGIN-EXPORT1=A (ratified 2026-06-25): names a `plugin` target's exported
+/// surface (the `.wit` world name). Only meaningful on `plugin { export: "…" }`;
+/// defaults to the package name when omitted.
+pub const TARGET_FIELD_EXPORT: &str = "export";
 
 /// D-CAP1 (ratified 2026-06-21): the four-capability vocabulary —
 /// `view`/`edit`/`take`/`share`. `view` and `take` are ratified ownership keywords
@@ -2387,6 +2400,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.compress.zstd",
     // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
     "core.db",
+    // D-DEP-WASM1=A / D-PLUGIN1=B (c81): sandboxed WASM Component Model
+    // plugin loader (wasmtime, runtime-side only, I6).
+    "core.plugin",
     // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
     // derived values, and effects. Pure std runtime (no external crate).
     "core.reactive",
@@ -2470,6 +2486,9 @@ pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
         "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "db"
+            // D-DEP-WASM1=A (c81): `core.plugin` / internal `jet.plugin` — the
+            // wasmtime-backed plugin loader (`Plugin.load`/`.call`).
+            | "plugin"
     )
 }
 

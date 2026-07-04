@@ -1105,17 +1105,19 @@ uses `py.*`. **D-JPK-EXTPROV1 (=A)**: npm/PyPI/SwiftPM become first-class
 jetpack providers resolved by `<lib>: <lang>@"ref"` — fetched into the
 hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
 no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
-**D-PLUGIN-EXPORT1 (=A)**: a `plugin` target's exported surface is the `pub`
-items of its entry module, named by the manifest `export:` field and frozen
-via the existing D-CAP4 `api: stable` machinery [STALE: D-CAP4's `api:`
-field/freeze machinery is retired by D-MEM1/S2 — `plugin` is still reserved
-(unbuilt), so re-ground this on the S2 pub-metadata semver snapshot before
-building it]; the `.wit` world is generated from those signatures — no new
-in-source keyword (I8).
-**D-PLUGIN-VERSION1 (=A)**: plugin load-time compatibility is structural —
-the D-CAP4 freeze of the exported interface is the contract; a plugin
-rebuilt with an unchanged interface still loads; mismatch is a clean E-code
-naming the interface delta, never a loader crash (I2).
+**D-PLUGIN-EXPORT1 (=A, shipped c81)**: a `plugin` target's exported surface
+is the top-level `pub fn` items of its entry file, all-`Int` or all-`Float`
+(E1260) in v1, named by the manifest `export:` field (defaults to the package
+name) and frozen via `Sema::ApiFreeze`'s pub-metadata semver snapshot
+(re-grounded off the retired D-CAP4 `api: stable` machinery, which D-MEM1/S2
+deleted — same intent, the still-live mechanism); the `.wit` world is
+generated from those signatures — no new in-source keyword (I8).
+**D-PLUGIN-VERSION1 (=A, shipped c81)**: plugin load-time compatibility is
+structural — the `ApiFreeze` snapshot of the exported interface (keyed
+`plugin__<export>` in `.jet/cache/api/`, diffed at the plugin's own build
+time) is the contract; a plugin rebuilt with an unchanged interface still
+loads; an incompatible change is E1257, naming the interface delta, never a
+loader crash (I2).
 
 **D-DEP1 — Dependency law**: the compiler stays zero-external-crate (I6).
 Any crate-backed capability ships as a Jet package wrapping the crate via

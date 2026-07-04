@@ -121,6 +121,9 @@ pub(crate) fn run_compile_cmd(
     }
 
     let is_web = cross_target == Some(jet::Syntax::BUILD_TARGET_WEB);
+    // D-PLUGIN1=B / D-DEP-WASM1=A (c81): `--target=plugin` routes to the
+    // sandboxed WASM Component Model guest build instead of a native binary.
+    let is_plugin = cross_target == Some(jet::Syntax::TARGET_PLUGIN);
     if explain_partition && !is_web {
         let diag = jet::Diagnostics::Diagnostic::error(
             "E2102",
@@ -185,6 +188,8 @@ pub(crate) fn run_compile_cmd(
 
     let compile_result = if is_web {
         jet::compile_web(file)
+    } else if is_plugin {
+        jet::compile_plugin(file)
     } else if freestanding {
         jet::compile_freestanding(file)
     } else if allow_impure {
@@ -195,7 +200,7 @@ pub(crate) fn run_compile_cmd(
         // that triple builds for (host OS when the flag is absent).
         jet::compile_with_target(&src, file, cross_target)
     };
-    let (rust_code, ffi_link, clinks, capabilities, web_out, web_partition_report) =
+    let (rust_code, ffi_link, clinks, capabilities, web_out, web_partition_report, plugin_out) =
         match compile_result {
             Ok(out) => {
                 // D-A11YGATE1=B (c134 Phase 6): a11y lints (E2930/E2931) are opt-in
@@ -233,6 +238,7 @@ pub(crate) fn run_compile_cmd(
                     out.capabilities,
                     out.web,
                     out.web_partition_report,
+                    out.plugin,
                 )
             }
             Err(diags) => {
@@ -256,6 +262,20 @@ pub(crate) fn run_compile_cmd(
         if let Some(bundle) = &effect_bundle {
             let entries =
                 jet::Jetpack::EffectBudget::compute_package_effects(bundle, &effect_facts.solved);
+            // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
+            // host registers zero host imports, so any effect used by the
+            // plugin's own code would fail to instantiate at load time. Catch
+            // it here, at build time, with a clean diagnostic naming the
+            // effect, instead of deferring to that runtime failure (E1258).
+            if is_plugin {
+                if let Some(root) = entries.iter().find(|p| p.name == "root") {
+                    if !root.effects.is_empty() {
+                        let diag = jet::Manifest::e1258(&jet::Sema::show_set(&root.effects));
+                        report_problems(mode, file, &src, &[diag]);
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                }
+            }
             // Program stdout stays the program's (U7 / D-DEVMODE1); tool
             // chatter goes to stderr.
             eprintln!("{}", jet::Jetpack::EffectBudget::summary_line(&entries));
@@ -300,11 +320,14 @@ pub(crate) fn run_compile_cmd(
                 verbose,
                 cross_target,
                 web_out.as_ref(),
+                plugin_out.as_ref(),
                 mode,
                 native_key.clone(),
             );
             if is_web {
                 println!("built: build/app.wasm + build/app.js");
+            } else if is_plugin {
+                println!("built: build/{}.wasm (sandboxed plugin)", stem(file));
             } else {
                 println!("built: {}", bin_path(file).display());
             }
@@ -339,6 +362,7 @@ pub(crate) fn run_compile_cmd(
                 verbose,
                 cross_target,
                 web_out.as_ref(),
+                plugin_out.as_ref(),
                 mode,
                 native_key.clone(),
             );
@@ -410,6 +434,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
         out.ffi.as_ref(),
         &clinks,
         false,
+        None,
         None,
         None,
         mode,
@@ -662,6 +687,7 @@ fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
         false,
         None,
         None,
+        None,
         mode,
         // `jet test` caches on the same canonical-AST key, but in its own mode
         // space (the test-harness binary must never be served for a `jet run`);
@@ -744,6 +770,7 @@ fn run_doctests(shown: &str, src: &str, mode: OutputMode) -> bool {
             ffi_link.as_ref(),
             &[],
             false,
+            None,
             None,
             None,
             mode,
@@ -940,6 +967,11 @@ fn validate_target(triple: &str, mode: OutputMode) {
     if triple == "web" || triple == jet::Syntax::BUILD_TARGET_WEB {
         return;
     }
+    // D-PLUGIN1=B (c81): another Jet backend target, not a rustc triple — the
+    // guest build resolves its own `wasm32-unknown-unknown` triple internally.
+    if triple == jet::Syntax::TARGET_PLUGIN {
+        return;
+    }
     // rustc --print target-list gives the full list; if the output contains
     // the triple exactly (one per line), the target is known.
     let out = Command::new("rustc")
@@ -1113,6 +1145,168 @@ pub(crate) fn write_web_artifacts(
     })
 }
 
+/// Where `write_plugin_artifacts` put the final `.wasm` Component (and the
+/// intermediate `.wit`/guest-Rust files, kept for `-v` reporting).
+pub(crate) struct PluginBuildPaths {
+    pub(crate) wit: PathBuf,
+    pub(crate) guest_rust: PathBuf,
+    pub(crate) core_wasm: PathBuf,
+    pub(crate) component_wasm: PathBuf,
+}
+
+/// D-PLUGIN1=B / D-DEP-WASM1=A (c81): whether a plugin build step failed
+/// because a required external tool is missing/failed to run (a clean E1259,
+/// never an internal-compiler-error exit — I2 reserves ICE for our own
+/// generated code being rejected) or because `rustc` rejected the
+/// jet-generated guest Rust (a genuine internal compiler error — sema should
+/// have caught this before codegen ever ran).
+pub(crate) enum PluginBuildError {
+    ToolFailure(String),
+    GeneratedCodeRejected(String),
+}
+
+/// The ONE place that turns a compiled `PluginArtifacts` bundle into an actual
+/// `.wasm` Component Model file on disk (I8, mirrors `write_web_artifacts`):
+/// `rustc --target wasm32-unknown-unknown --crate-type cdylib` builds the core
+/// module from the guest Rust, then `wasm-tools component embed` + `component
+/// new` lift it into a typed component using the generated `.wit` world — no
+/// wit-bindgen crate, no adapter shims; v1's Int/Float-only scalar exports are
+/// already canonical-ABI-compatible at the core-wasm level (see
+/// `Codegen::Plugin` module doc).
+pub(crate) fn write_plugin_artifacts(
+    file: &str,
+    plugin: &jet::Codegen::PluginArtifacts,
+    verbose: bool,
+    out_dir: &Path,
+) -> Result<PluginBuildPaths, PluginBuildError> {
+    let step = |msg: String| {
+        if verbose {
+            eprintln!("[build] {}", msg);
+        }
+    };
+    fs::create_dir_all(out_dir).map_err(|e| {
+        PluginBuildError::ToolFailure(format!(
+            "couldn't create the {} folder: {}",
+            out_dir.display(),
+            e
+        ))
+    })?;
+    let name = stem(file);
+    let wit_dir = out_dir.join(format!("{name}_wit"));
+    fs::create_dir_all(&wit_dir).map_err(|e| {
+        PluginBuildError::ToolFailure(format!("couldn't create {}: {}", wit_dir.display(), e))
+    })?;
+    let wit_path = wit_dir.join("world.wit");
+    let guest_rust_path = out_dir.join(format!("{name}_plugin.rs"));
+    let core_wasm_path = out_dir.join(format!("{name}_core.wasm"));
+    let embedded_wasm_path = out_dir.join(format!("{name}_embedded.wasm"));
+    let component_wasm_path = out_dir.join(format!("{name}.wasm"));
+
+    fs::write(&wit_path, &plugin.wit).map_err(|e| {
+        PluginBuildError::ToolFailure(format!("couldn't write {}: {}", wit_path.display(), e))
+    })?;
+    fs::write(&guest_rust_path, &plugin.guest_rust).map_err(|e| {
+        PluginBuildError::ToolFailure(format!(
+            "couldn't write {}: {}",
+            guest_rust_path.display(),
+            e
+        ))
+    })?;
+
+    step(format!("wit emit    -> {}", wit_path.display()));
+    step(format!("guest rust  -> {}", guest_rust_path.display()));
+    step(format!(
+        "rustc wasm  {} -> {}",
+        guest_rust_path.display(),
+        core_wasm_path.display()
+    ));
+    let rustc = Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            guest_rust_path.to_str().unwrap(),
+            "-o",
+            core_wasm_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| {
+            PluginBuildError::ToolFailure(format!(
+                "couldn't run `rustc --target wasm32-unknown-unknown` ({e}) — is the wasm32-unknown-unknown target installed?"
+            ))
+        })?;
+    if !rustc.status.success() {
+        return Err(PluginBuildError::GeneratedCodeRejected(format!(
+            "rustc rejected the generated plugin guest module\n{}",
+            String::from_utf8_lossy(&rustc.stderr)
+        )));
+    }
+
+    step(format!(
+        "wit embed   {} -> {}",
+        core_wasm_path.display(),
+        embedded_wasm_path.display()
+    ));
+    let embed = Command::new("wasm-tools")
+        .args([
+            "component",
+            "embed",
+            wit_dir.to_str().unwrap(),
+            "--world",
+            &plugin.world_name,
+            core_wasm_path.to_str().unwrap(),
+            "-o",
+            embedded_wasm_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| {
+            PluginBuildError::ToolFailure(format!(
+                "couldn't run `wasm-tools` ({e}) — install it (ships in the project's `nix develop` shell) or add it to PATH"
+            ))
+        })?;
+    if !embed.status.success() {
+        return Err(PluginBuildError::ToolFailure(format!(
+            "`wasm-tools component embed` failed\n{}",
+            String::from_utf8_lossy(&embed.stderr)
+        )));
+    }
+
+    step(format!(
+        "wit lift    {} -> {}",
+        embedded_wasm_path.display(),
+        component_wasm_path.display()
+    ));
+    let new = Command::new("wasm-tools")
+        .args([
+            "component",
+            "new",
+            embedded_wasm_path.to_str().unwrap(),
+            "-o",
+            component_wasm_path.to_str().unwrap(),
+        ])
+        .output()
+        .map_err(|e| {
+            PluginBuildError::ToolFailure(format!("couldn't run `wasm-tools` ({e})"))
+        })?;
+    if !new.status.success() {
+        return Err(PluginBuildError::ToolFailure(format!(
+            "`wasm-tools component new` failed\n{}",
+            String::from_utf8_lossy(&new.stderr)
+        )));
+    }
+
+    Ok(PluginBuildPaths {
+        wit: wit_path,
+        guest_rust: guest_rust_path,
+        core_wasm: core_wasm_path,
+        component_wasm: component_wasm_path,
+    })
+}
+
 pub(crate) fn build(
     file: &str,
     rust_code: &str,
@@ -1123,6 +1317,7 @@ pub(crate) fn build(
     verbose: bool,
     cross_target: Option<&str>,
     web: Option<&jet::Codegen::WebArtifacts>,
+    plugin: Option<&jet::Codegen::PluginArtifacts>,
     mode: OutputMode,
     // D-BUILDNORM1=A (Tower #85): the content-addressed cache key, computed by
     // the caller from the *pre-sema* canonical AST bytes (+ profile + toolchain
@@ -1177,6 +1372,46 @@ pub(crate) fn build(
                 paths.js.display(),
                 paths.wasm.display(),
                 paths.html.display(),
+            );
+        }
+        return;
+    }
+
+    // D-PLUGIN1=B (c81): `plugin` is another Jet backend target — build the
+    // sandboxed wasm32 Component Model module instead of a native binary.
+    if cross_target == Some(jet::Syntax::TARGET_PLUGIN) {
+        let plugin = plugin.unwrap_or_else(|| {
+            eprintln!("error: internal compiler error: missing plugin codegen output");
+            exit(ExitCodes::ICE);
+        });
+        let paths = match write_plugin_artifacts(file, plugin, verbose, Path::new("build")) {
+            Ok(p) => p,
+            Err(PluginBuildError::GeneratedCodeRejected(msg)) => {
+                eprintln!(
+                    "error: rustc rejected generated code (internal compiler error)\n{}",
+                    msg
+                );
+                exit(ExitCodes::ICE);
+            }
+            Err(PluginBuildError::ToolFailure(msg)) => {
+                let diag = jet::Manifest::e1259(&msg);
+                let src = format!("// plugin build for {}", file);
+                report_problems(mode, "<plugin>", &src, &[diag]);
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+        let _ = rust_code;
+        let _ = bin;
+        let _ = profile;
+        let _ = ffi;
+        let _ = clinks;
+        if !mode.json {
+            eprintln!(
+                "note: `--target=plugin` wrote `{}`, `{}`, `{}`, `{}`",
+                paths.wit.display(),
+                paths.guest_rust.display(),
+                paths.core_wasm.display(),
+                paths.component_wasm.display(),
             );
         }
         return;
@@ -1391,6 +1626,7 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
         out.ffi.as_ref(),
         &clinks,
         false,
+        None,
         None,
         None,
         mode,

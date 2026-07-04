@@ -131,10 +131,12 @@ pub enum PackageKind {
     Executable,
 }
 
-/// One build target of a package (D-TGT1/D-TGT2, ratified 2026-06-21). The five
-/// shipped targets; `plugin` is still reserved and rejected at parse time (c81).
-/// `benchmark` (c80) routes `jet bench` at the package entry via the existing
-/// `#Bench`/`jet bench` engine — it is not a new mechanism (I8).
+/// One build target of a package (D-TGT1/D-TGT2, ratified 2026-06-21). The six
+/// shipped targets. `benchmark` (c80) routes `jet bench` at the package entry
+/// via the existing `#Bench`/`jet bench` engine — it is not a new mechanism
+/// (I8). `plugin` (c81, D-PLUGIN1=B/D-DEP-WASM1=A) builds a sandboxed `wasm32`
+/// Component Model module instead of a native binary — a package is *loaded*,
+/// not imported or PATH-installed, so it maps to no `PackageKind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     Library,
@@ -144,6 +146,11 @@ pub enum Target {
     /// c80 / D-TGT2: this package's entry is a benchmark; `jet bench` runs its
     /// `#Bench` regions via the shipped `compile_benches_with_path` path.
     Benchmark,
+    /// c81 / D-PLUGIN1=B: this package builds to a sandboxed WASM Component
+    /// Model module. `export` is the `.wit` world name (D-PLUGIN-EXPORT1=A,
+    /// `export:` target field) — `None` when omitted, defaulting to the
+    /// package name at build time.
+    Plugin { export: Option<String> },
 }
 
 /// One entry in the `packages: { … }` block (U10 + D-TGT1). `targets` is empty when
@@ -227,8 +234,11 @@ pub enum ManifestError {
     BadGitDep { name: String, reason: &'static str },
     /// A `packages:` entry names a target that is not a known shipped target (E1210).
     BadTarget { name: String, value: String },
-    /// A `packages:` entry names a reserved target (`benchmark`/`plugin`) whose
-    /// backend has not shipped yet (E1210, D-TGT2).
+    /// A `packages:` entry names a target reserved for a future increment whose
+    /// backend has not shipped yet (E1210, D-TGT2). `benchmark` (c80) and
+    /// `plugin` (c81) have both shipped; `TARGET_RESERVED` is empty until the
+    /// next reserved target is proposed — this variant stays as the generic
+    /// scaffold for it.
     ReservedTarget { name: String, value: String },
     /// A `packages:` block-form entry uses the removed `kind:` field; write
     /// `targets: [ … ]` instead (E1211, D-TGT1).
@@ -460,13 +470,46 @@ packages: {
     }
 
     #[test]
-    fn reserved_target_errors() {
-        // D-TGT2: `plugin` is reserved until c81 ships (D-DEP-WASM1).
+    fn plugin_target_parses() {
+        // c81 / D-PLUGIN1=B: `plugin` is no longer reserved — it now produces
+        // `Target::Plugin` and routes to the wasm32 Component Model backend.
         let src = "payload: { name: \"x\", version: \"1\" }\npackages: { web: plugin }";
+        let m = parse(src).unwrap();
+        assert_eq!(m.packages[0].targets, vec![Target::Plugin { export: None }]);
+        // A plugin-only package has no PackageKind — it is loaded, not
+        // imported or PATH-installed.
+        assert_eq!(m.package_kind("web"), None);
+    }
+
+    #[test]
+    fn plugin_target_export_field() {
+        // D-PLUGIN-EXPORT1=A: `export:` names the `.wit` world.
+        let src = r#"
+payload: { name: "x", version: "1" }
+packages: {
+    mathkit: { targets: [plugin { export: "mathkit" }] },
+}
+"#;
+        let m = parse(src).unwrap();
+        assert_eq!(
+            m.packages[0].targets,
+            vec![Target::Plugin {
+                export: Some("mathkit".to_string())
+            }]
+        );
+    }
+
+    #[test]
+    fn plugin_target_rejects_unknown_field() {
+        let src = r#"
+payload: { name: "x", version: "1" }
+packages: {
+    mathkit: { targets: [plugin { api: stable }] },
+}
+"#;
         let err = parse(src).unwrap_err();
         assert!(
-            matches!(err, ManifestError::ReservedTarget { ref name, ref value }
-                if name == "web" && value == "plugin"),
+            matches!(err, ManifestError::BadTargetField { ref name, .. } if name == "mathkit"),
             "{err:?}"
         );
     }

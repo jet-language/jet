@@ -178,7 +178,8 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
 
 /// Parse one target keyword and validate its optional config block
 /// (`executable { entry: "…" }`; D-TGT3/D-TGT4). The keyword must be a shipped
-/// target; the block may carry only `entry:`/`name:`.
+/// target; the block may carry only `entry:`/`name:` (plus `export:` on
+/// `plugin`, D-PLUGIN-EXPORT1).
 fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
     let (keyword, block) = match value.split_once('{') {
         Some((kw, rest)) => {
@@ -187,6 +188,16 @@ fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
         }
         None => (value.trim(), None),
     };
+    // c81 / D-PLUGIN1=B: `plugin` carries its own optional `export:` field, so
+    // it parses its block separately rather than through the generic
+    // entry/name-only `validate_target_block`.
+    if keyword == Syntax::TARGET_PLUGIN {
+        let export = match block {
+            Some(body) => validate_plugin_block(name, body)?,
+            None => None,
+        };
+        return Ok(Target::Plugin { export });
+    }
     let kind = match keyword {
         k if k == Syntax::TARGET_LIBRARY => Target::Library,
         k if k == Syntax::TARGET_EXECUTABLE => Target::Executable,
@@ -233,6 +244,32 @@ fn validate_target_block(name: &str, body: &str) -> Result<(), ManifestError> {
         }
     }
     Ok(())
+}
+
+/// A `plugin { entry: …, name: …, export: … }` target block — same
+/// entry/name fields as any other target, plus `export:` (D-PLUGIN-EXPORT1=A),
+/// which names the `.wit` world generated from the plugin's `pub` surface.
+/// Returns the parsed `export:` value, or `None` when omitted.
+fn validate_plugin_block(name: &str, body: &str) -> Result<Option<String>, ManifestError> {
+    let mut export = None;
+    for (key, value) in key_value_entries(body) {
+        if key == Syntax::TARGET_FIELD_ENTRY || key == Syntax::TARGET_FIELD_NAME {
+            // entry/name are free-form strings consumed by the build pipeline.
+        } else if key == Syntax::TARGET_FIELD_EXPORT {
+            export = Some(unquote(&value));
+        } else {
+            return Err(ManifestError::BadTargetField {
+                name: name.to_string(),
+                detail: format!(
+                    "unknown target field `{key}` on `plugin` (allowed: `{}`, `{}`, `{}`)",
+                    Syntax::TARGET_FIELD_ENTRY,
+                    Syntax::TARGET_FIELD_NAME,
+                    Syntax::TARGET_FIELD_EXPORT,
+                ),
+            });
+        }
+    }
+    Ok(export)
 }
 
 fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, ManifestError> {

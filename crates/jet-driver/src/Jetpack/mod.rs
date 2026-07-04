@@ -23,6 +23,7 @@ pub mod Merge;
 pub mod ModuleEval;
 pub mod Output;
 pub mod PackageManifest;
+pub mod PluginExport;
 pub mod Provider;
 pub mod Recipe;
 pub mod RefSpec;

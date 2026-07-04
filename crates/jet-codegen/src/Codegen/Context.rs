@@ -259,6 +259,8 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "Path" => Some("JetPath"),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
         "DbConnection" => Some("JetDbConnection"),
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
+        "Plugin" => Some("JetPlugin"),
         _ => None,
     }
 }
