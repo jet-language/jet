@@ -15,6 +15,17 @@
 //!
 //! D-WASM1=A amends D-EFF4 with `Browser` — DOM / browser API use (c123).
 //!
+//! U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates) amends D-EFF4/5 with
+//! `Secret` — reading a decrypted repo secret (`core.vault.get`). Modeled as a
+//! bare root, not a leaf under an existing root: the compiler's own
+//! Core-call-to-effect inference (`core_effect`) only ever tags a call with a
+//! bare `Effect` (leaf precision is a user-declared-contract concept, never
+//! inferred from a real call — see the D-EFFTREE1 note below), so a genuinely
+//! *inferred* new effect can only ever be a new root, the same shape D-WASM1
+//! already used for `Browser`. Unlike every other root, reaching it is denied
+//! by default even with a matching declared bound absent — see
+//! `check_secret_grants`.
+//!
 //! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the ten flat names below
 //! become tree **roots**. A user-written effect name may now be a dotted path
 //! rooted at one of them (`Fs.Read`, `Net.Http.Get`) — the root is validated
@@ -26,9 +37,9 @@
 //! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
 //! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
 //! `variant.starts_with(&format!("{c}."))`). `Effect` itself stays the closed
-//! eleven-root enum, unchanged, used for root validation/classification and by
-//! the small set of call sites (D-TXN2, D-TAINT1, D-WASM1) that only ever care
-//! about a whole root regardless of leaf.
+//! twelve-root enum (U13 added `Secret`), used for root validation/
+//! classification and by the small set of call sites (D-TXN2, D-TAINT1,
+//! D-WASM1) that only ever care about a whole root regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{BTreeSet, HashMap};
@@ -49,6 +60,11 @@ pub enum Effect {
     Gpu,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
+    /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
+    /// (`core.vault.get`). Denied by default even with no declared bound at
+    /// all — see `check_secret_grants` — and always denied in a comptime
+    /// build-tier context (E1265), with no `#Impure` escape hatch.
+    Secret,
 }
 
 impl Effect {
@@ -66,6 +82,7 @@ impl Effect {
             Effect::Log => "Log",
             Effect::Gpu => "Gpu",
             Effect::Browser => "Browser",
+            Effect::Secret => "Secret",
         }
     }
 
@@ -83,6 +100,7 @@ impl Effect {
             "Log" => Effect::Log,
             "Gpu" => Effect::Gpu,
             "Browser" => Effect::Browser,
+            "Secret" => Effect::Secret,
             _ => return None,
         })
     }
@@ -104,6 +122,7 @@ impl Effect {
             Effect::Log,
             Effect::Gpu,
             Effect::Browser,
+            Effect::Secret,
         ]
         .into_iter()
         .map(|e| e.name().to_string())
@@ -305,6 +324,10 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.plugin" | "jet.plugin" => Effect::Exec,
         "jet.log" => Effect::Log,
         "core.ui" => Effect::Browser,
+        // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` reads a decrypted repo
+        // secret — never `core.secrets` (D-TTLVAL1's in-memory
+        // Expiring/Rotting<T> wrapper already owns that module name).
+        "core.vault" => Effect::Secret,
         _ => return None,
     })
 }
@@ -1117,6 +1140,138 @@ pub fn check_trait_obligations(
             diags.push(e0742(trait_name, method, &over, bound, *span));
         }
     }
+}
+
+/// U13 (D-JPK-SECRETCRYPTO1): unlike every other effect, `Secret` is denied
+/// even with no declared bound at all — `core.vault.get` demands an explicit
+/// `#(Secret)` (or a wider declared bound covering it) on the calling
+/// function; a bare `fn` with no `#(…)` list, or one that omits `Secret`, is
+/// E1264. A helper fn two calls deep from the actual `core.vault.get` still
+/// requires the grant on itself — the same call-graph reach E0740 checks —
+/// but this deliberately does **not** use the general `solved` (whole-program)
+/// set: `solve()` inflates a function's set to the maximal (all-effects) set
+/// the instant it reaches *any* un-inspectable foreign (`extern rust`) call
+/// (`fx_maximal`), which would force `#(Secret)` onto every FFI-using function
+/// in the program regardless of whether it goes near a secret. So this walks
+/// its own small fixpoint over `direct`/`edges` only — real, syntactically
+/// traceable `core.vault.get` reaches, the same thing `apply_effect_via`/
+/// `record_edge` already track, just excluding the `maximal` blanket.
+pub(crate) fn check_secret_grants(
+    items: &[crate::AST::Item],
+    summaries: &HashMap<String, EffectSummary>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let reaches_secret = solve_secret_reach(summaries);
+    fn declared_set(f: &crate::AST::Func) -> EffectSet {
+        let mut declared = EffectSet::new();
+        let Some(list) = &f.declared_effects else {
+            return declared;
+        };
+        for (name, _span) in list {
+            if let Some(base) = name.strip_prefix('!') {
+                // Prohibitions don't grant anything.
+                let _ = base;
+                continue;
+            }
+            if let Some(e) = parse_effect_name(name) {
+                declared.insert(e);
+            }
+        }
+        declared
+    }
+    fn check_one(
+        f: &crate::AST::Func,
+        owner: Option<&str>,
+        reaches_secret: &std::collections::HashSet<String>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let key = super::effect_key(owner, &f.name);
+        if !reaches_secret.contains(&key) {
+            return;
+        }
+        let declared = declared_set(f);
+        if !declared.iter().any(|e| effect_root(e) == Effect::Secret.name()) {
+            let span = f
+                .declared_effects
+                .as_ref()
+                .and_then(|list| list.first())
+                .map(|(_, s)| *s)
+                .unwrap_or(f.name_span);
+            diags.push(e1264(&f.name, span));
+        }
+    }
+    use crate::AST::Item;
+    for item in items {
+        match item {
+            Item::Func(f) => check_one(f, None, &reaches_secret, diags),
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    check_one(m, Some(&i.type_name), &reaches_secret, diags);
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    check_one(m, Some(&s.name), &reaches_secret, diags);
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        check_one(m, Some(&s.name), &reaches_secret, diags);
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    check_one(m, Some(&e.name), &reaches_secret, diags);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// U13: the set of function keys whose body reaches `Secret` through a real,
+/// syntactically traceable path — direct effects and call-graph edges only,
+/// deliberately ignoring `EffectSummary.maximal` (an opaque `extern rust`
+/// call is not "reading a secret" for this specific mandatory-grant purpose;
+/// see `check_secret_grants`'s doc comment).
+fn solve_secret_reach(summaries: &HashMap<String, EffectSummary>) -> std::collections::HashSet<String> {
+    let mut reaches: std::collections::HashSet<String> = summaries
+        .iter()
+        .filter(|(_, s)| effect_set_has_root(&s.direct, Effect::Secret))
+        .map(|(k, _)| k.clone())
+        .collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (k, s) in summaries {
+            if reaches.contains(k) {
+                continue;
+            }
+            if s.edges.iter().any(|callee| reaches.contains(callee)) {
+                reaches.insert(k.clone());
+                changed = true;
+            }
+        }
+    }
+    reaches
+}
+
+/// E1264 (U13, D-JPK-SECRETCRYPTO1): a function reaches `core.vault.get`
+/// (transitively) without `Secret` in its own declared `#(…)` bound.
+pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1264",
+        format!(
+            "`{}` reads a secret but doesn't declare the `Secret` effect",
+            fn_name
+        ),
+        "reading a secret (`core.vault.get`) always requires an explicit grant — unlike other \
+         effects, there is no silently-inferred default here, so a function must opt in even with \
+         no other `#(…)` bound at all."
+            .to_string(),
+        format!("add `#(Secret)` to `{}`'s signature (or widen an existing `#(…)` list to cover it)", fn_name),
+        Some(span),
+    )
 }
 
 /// E0745: a `@Pure fn` also carries a non-empty `#(…)` bound — a contradiction.

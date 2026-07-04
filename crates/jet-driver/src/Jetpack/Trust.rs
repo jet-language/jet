@@ -84,13 +84,22 @@ pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable) -> String {
 }
 
 /// Whether this env definition is trust-sensitive at all — i.e. whether
-/// entering it should ever prompt. Today: it declares at least one package
-/// ref (any external code/binary a project pulls in is a supply-chain
-/// decision). This is the extension point U12 (any `services:`) and U13 (any
-/// `secrets:`) add their own `||` arm to once those env fields exist — no
-/// call site above this function needs to change when they do.
+/// entering it should ever prompt. It declares at least one package ref (any
+/// external code/binary a project pulls in is a supply-chain decision), or
+/// (U13) at least one declared `secrets:` name — reading a repo's encrypted
+/// secrets is its own trust decision, independent of whether the env also
+/// declares any packages.
 pub fn is_trust_sensitive(refs: &[RefSpec]) -> bool {
-    !refs.is_empty()
+    is_trust_sensitive_ext(refs, false)
+}
+
+/// U13: the general form — `secrets_declared` is whether any evaluated
+/// `env.<name>` role-module in this project declares a non-empty `secrets:`
+/// list. Kept as a separate function (rather than changing
+/// [`is_trust_sensitive`]'s signature) so existing call sites that don't yet
+/// thread a secrets flag through keep compiling unchanged.
+pub fn is_trust_sensitive_ext(refs: &[RefSpec], secrets_declared: bool) -> bool {
+    !refs.is_empty() || secrets_declared
 }
 
 /// Already trusted: an exact hash grant, or a pattern matching `project_dir`.

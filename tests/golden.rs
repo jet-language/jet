@@ -87,6 +87,7 @@ fn examples_compile_and_run() {
             || stem == "crypto/crypto_envelope"
             || stem == "crypto/crypto_sign"
             || stem == "crypto/crypto_migration"
+            || stem == "crypto/vault_secret"
             || stem == "io/compress_gzip"
             || stem == "io/compress_zstd";
 

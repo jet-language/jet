@@ -1151,6 +1151,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     check_region_caps(&effect_summaries, &solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
     check_callback_bounds(&effect_summaries, &solved, &mut diags);
+    // U13 (D-JPK-SECRETCRYPTO1): a `core.vault.get` reach requires `Secret` in
+    // the reaching function's own declared `#(…)` bound — E1264.
+    check_secret_grants(&prog.items, &effect_summaries, &mut diags);
 
     // D-TAINT1: taint tracking — `#Tainted` value-facts propagate, a `#Sanitizer
     // fn` clears taint, and a tainted value reaching a sink effect (Db/Exec/Net)

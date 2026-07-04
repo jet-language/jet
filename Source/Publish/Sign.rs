@@ -66,7 +66,7 @@ pub fn read_public_key(registry: &str) -> Option<String> {
 /// an instant cache hit.
 pub fn ensure_bridge_helper() -> Result<PathBuf, Diagnostic> {
     // needs_crypto = true, everything else off, no extern entries.
-    let link = crate::FFI::build_bridge(&[], false, false, false, false, true, false, false)
+    let link = crate::FFI::build_bridge(&[], false, false, false, false, true, false, false, false)
         .map_err(|mut ds| {
             ds.drain(..)
                 .next()

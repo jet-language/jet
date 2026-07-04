@@ -74,11 +74,13 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     let mut images: Vec<ImagePlan> = Vec::new();
     let mut fleets: Vec<FleetPlan> = Vec::new();
     let mut dev_services: Vec<super::Types::DevServicePlan> = Vec::new();
+    let mut secrets: Vec<String> = Vec::new();
     for module in &modules {
         systems.extend(module.systems.iter().cloned());
         images.extend(module.images.iter().cloned());
         fleets.extend(module.fleets.iter().cloned());
         dev_services.extend(module.dev_services.iter().cloned());
+        secrets.extend(module.secrets.iter().cloned());
     }
     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
     for image in &images {
@@ -136,6 +138,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         images,
         fleets,
         dev_services,
+        secrets,
     })
 }
 

@@ -91,7 +91,14 @@ fn all_example_stems() -> Vec<String> {
 ///     `core.env`/…) reached with no `#Impure` gate, or a gate present but
 ///     `--allow-impure` not passed — an honest, named boundary (the golden
 ///     corpus runs with neither), not a silent skip.
-const BOUNDARY_CODES: &[&str] = &["E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411"];
+///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.vault.get` reached through the
+///     same comptime/interpreter evaluation path — unconditionally denied
+///     (no `#Impure` escape hatch), so an example exercising it always stops
+///     here under the interpreter/JIT tiers even though the AOT-compiled
+///     binary runs it fine (it never goes through this evaluator).
+const BOUNDARY_CODES: &[&str] = &[
+    "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265",
+];
 
 /// c77 widened battery: EVERY example either runs (interpreted stdout ==
 /// compiled-binary stdout, byte for byte — I2) or stops at a named boundary

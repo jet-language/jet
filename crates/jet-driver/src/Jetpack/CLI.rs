@@ -9,6 +9,7 @@ use super::ManifestTOML;
 use super::Output::{self, Theme};
 use super::Provider::{self, ProviderError};
 use super::RefSpec::{self, ProviderKind};
+use super::Secrets;
 use super::Services;
 use super::Shell::{self, Env, ShellKind};
 use super::Store::{self, Roots};
@@ -129,6 +130,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
         v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
+        v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             0
@@ -1014,6 +1016,140 @@ fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 &format!("`{other}` is not a `jetpack services` verb"),
                 &format!("known verbs: {}.", Syntax::SERVICES_VERBS.join(", ")),
                 "try `jetpack services up`.",
+            );
+            2
+        }
+    }
+}
+
+/// `jetpack secrets keygen|set|get|recipients` (U13, D-JPK-SECRETCRYPTO1).
+fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(verb) = parsed.positional.first().cloned() else {
+        theme.error(
+            "`jetpack secrets` needs a verb",
+            &format!("known verbs: {}.", Syntax::SECRETS_VERBS.join(", ")),
+            "try `jetpack secrets keygen`.",
+        );
+        return 2;
+    };
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    match verb.as_str() {
+        v if v == Syntax::SECRETS_VERB_KEYGEN => {
+            let force = parsed
+                .positional
+                .iter()
+                .any(|a| a == Syntax::SECRETS_FLAG_FORCE);
+            match Secrets::keygen(force) {
+                Ok((path, recipient)) => {
+                    theme.ok(&format!("wrote identity to `{}`", path.display()));
+                    theme.detail(&format!("recipient: {recipient}"));
+                    theme.detail("add it with `jetpack secrets recipients add <recipient>`");
+                    0
+                }
+                Err(msg) => {
+                    theme.error("couldn't generate a secrets identity", &msg, "");
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_RECIPIENTS => {
+            let Some(sub) = parsed.positional.get(1).cloned() else {
+                theme.error(
+                    "`jetpack secrets recipients` needs a verb",
+                    &format!("known verbs: {}.", Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")),
+                    "try `jetpack secrets recipients list`.",
+                );
+                return 2;
+            };
+            match sub.as_str() {
+                v if v == Syntax::SECRETS_RECIPIENTS_VERB_ADD => {
+                    let Some(recipient) = parsed.positional.get(2) else {
+                        theme.error(
+                            "`jetpack secrets recipients add` needs a recipient",
+                            "an `age1...` public key.",
+                            "try `jetpack secrets recipients add age1...`.",
+                        );
+                        return 2;
+                    };
+                    if Secrets::add_recipient(&project_dir, recipient) {
+                        theme.ok(&format!("added recipient `{recipient}`"));
+                    } else {
+                        theme.detail(&format!("recipient `{recipient}` already present"));
+                    }
+                    0
+                }
+                v if v == Syntax::SECRETS_RECIPIENTS_VERB_LIST => {
+                    for r in Secrets::list_recipients(&project_dir) {
+                        println!("{r}");
+                    }
+                    0
+                }
+                other => {
+                    theme.error(
+                        &format!("`{other}` is not a `jetpack secrets recipients` verb"),
+                        &format!("known verbs: {}.", Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")),
+                        "try `jetpack secrets recipients list`.",
+                    );
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_SET => {
+            let (Some(name), Some(value)) =
+                (parsed.positional.get(1), parsed.positional.get(2))
+            else {
+                theme.error(
+                    "`jetpack secrets set` needs a name and a value",
+                    "",
+                    "try `jetpack secrets set db_password hunter2`.",
+                );
+                return 2;
+            };
+            match Secrets::set(&project_dir, name, value) {
+                Ok(()) => {
+                    theme.ok(&format!("set `{name}`"));
+                    0
+                }
+                Err(msg) => {
+                    theme.error(&format!("couldn't set `{name}`"), &msg, "");
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_GET => {
+            let Some(name) = parsed.positional.get(1) else {
+                theme.error(
+                    "`jetpack secrets get` needs a name",
+                    "",
+                    "try `jetpack secrets get db_password`.",
+                );
+                return 2;
+            };
+            match Secrets::get(&project_dir, name) {
+                Ok(Some(value)) => {
+                    println!("{value}");
+                    0
+                }
+                Ok(None) => {
+                    theme.error_coded(
+                        "E1263",
+                        &format!("no secret named `{name}`"),
+                        "the encrypted store doesn't have an entry with this name.",
+                        &format!("set it first with `jetpack secrets set {name} <value>`, or check the spelling."),
+                    );
+                    2
+                }
+                Err(msg) => {
+                    theme.error(&format!("couldn't read `{name}`"), &msg, "");
+                    2
+                }
+            }
+        }
+        other => {
+            theme.error(
+                &format!("`{other}` is not a `jetpack secrets` verb"),
+                &format!("known verbs: {}.", Syntax::SECRETS_VERBS.join(", ")),
+                "try `jetpack secrets keygen`.",
             );
             2
         }

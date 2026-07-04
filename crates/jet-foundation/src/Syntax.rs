@@ -1305,6 +1305,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     CONFIG_SUBCOMMAND,
     BRIDGE_SUBCOMMAND,
     SERVICES_SUBCOMMAND,
+    SECRETS_SUBCOMMAND,
 ];
 
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
@@ -1362,6 +1363,40 @@ pub const SERVICES_VERBS: &[&str] = &[
 /// project's `.jet/` managed folder — `.jet/services/<name>/{pid,stdout.log,
 /// stderr.log,data/}`.
 pub const SERVICES_STATE_DIR: &str = "services";
+
+/// U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `jetpack secrets <verb>` —
+/// the encrypted-repo-secrets engine (`.jet/secrets.age`, age-style crypto
+/// bridge). `keygen` mints a local identity, `recipients add/list` manage the
+/// committed recipients file, `set`/`get` upsert/read one entry (re-encrypting
+/// the whole store each `set`).
+pub const SECRETS_SUBCOMMAND: &str = "secrets";
+pub const SECRETS_VERB_KEYGEN: &str = "keygen";
+pub const SECRETS_VERB_SET: &str = "set";
+pub const SECRETS_VERB_GET: &str = "get";
+pub const SECRETS_VERB_RECIPIENTS: &str = "recipients";
+pub const SECRETS_VERBS: &[&str] = &[
+    SECRETS_VERB_KEYGEN,
+    SECRETS_VERB_SET,
+    SECRETS_VERB_GET,
+    SECRETS_VERB_RECIPIENTS,
+];
+pub const SECRETS_RECIPIENTS_VERB_ADD: &str = "add";
+pub const SECRETS_RECIPIENTS_VERB_LIST: &str = "list";
+pub const SECRETS_RECIPIENTS_VERBS: &[&str] = &[
+    SECRETS_RECIPIENTS_VERB_ADD,
+    SECRETS_RECIPIENTS_VERB_LIST,
+];
+/// U13: the `--force` flag on `jetpack secrets keygen`, overwriting an
+/// existing identity. Reuses the bare string rather than minting a new flag
+/// constant family — mirrors `jet keygen --force`'s own flag spelling
+/// (`Source/CLI.rs`), kept a plain literal there too.
+pub const SECRETS_FLAG_FORCE: &str = "--force";
+
+/// U13: env-namespace field name — `secrets: ["name", …]` under an
+/// `env.<name>` role-module, the names this env expects to find in the
+/// project's encrypted store (validated at env entry, E1263 if any is
+/// missing).
+pub const ENV_FIELD_SECRETS: &str = "secrets";
 
 /// U19: `jetpack config <verb>` — today only `trust` pattern management.
 pub const CONFIG_SUBCOMMAND: &str = "config";
@@ -2489,6 +2524,12 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // c-devserver (owner-directed 2026-07-01): a `.jet` file's own `jet dev`
     // behavior — a configurable server value (`for_app`/`.html`/`.port`/`.serve`).
     "core.devserver",
+    // U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `core.vault.get` reads a
+    // secret decrypted from the project's encrypted repo file (`.jet/secrets.age`),
+    // via an age-style crypto FFI bridge. Named `vault`, not `secrets` — that
+    // name is already `core.secrets` (D-TTLVAL1's in-memory Expiring/Rotting<T>
+    // TTL wrapper), an unrelated feature.
+    "core.vault",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

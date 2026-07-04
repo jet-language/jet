@@ -85,16 +85,19 @@ fn evaluate_module<'a>(
     let mut images = Vec::new();
     let mut fleets = Vec::new();
     let mut dev_services = Vec::new();
+    let mut secrets = Vec::new();
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
-                let entry = evaluate_env_contribution(c, src, base_dir, funcs)?;
+                let (entry, names) = evaluate_env_contribution(c, src, base_dir, funcs)?;
                 entries.push(((c.namespace, c.path.clone()), entry));
+                secrets.extend(names);
             }
             (Namespace::Env, ContribValue::Env(lit)) => {
-                let (entry, services) = evaluate_env_role(lit, src, base_dir, funcs)?;
+                let (entry, services, names) = evaluate_env_role(lit, src, base_dir, funcs)?;
                 entries.push(((c.namespace, c.path.clone()), entry));
                 dev_services.extend(services);
+                secrets.extend(names);
             }
             (Namespace::System, ContribValue::System(lit)) => {
                 systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs)?);
@@ -117,6 +120,7 @@ fn evaluate_module<'a>(
         images,
         fleets,
         dev_services,
+        secrets,
     })
 }
 
@@ -167,7 +171,7 @@ fn evaluate_env_contribution(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<EntryContribution, Diagnostic> {
+) -> Result<(EntryContribution, Vec<String>), Diagnostic> {
     let expected = namespace_type(c.namespace);
     let ContribValue::Expr(value) = &c.value else {
         unreachable!("evaluate_env_contribution called on a non-env contribution")
@@ -197,13 +201,32 @@ fn evaluate_env_fields(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<EntryContribution, Diagnostic> {
+) -> Result<(EntryContribution, Vec<String>), Diagnostic> {
     let mut entry = EntryContribution::default();
+    let mut secrets = Vec::new();
     let extern_names = HashSet::new();
     let globals = HashMap::new();
     for (name, _span, value) in fields {
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
             entry.packages.extend(extract_packages(value, src)?);
+        } else if name == Syntax::ENV_FIELD_SECRETS {
+            // U13: `secrets: ["name", …]` — a plain list of strings, no Pkg
+            // sugar. Evaluated as an ordinary comptime expression; anything
+            // that isn't a `[String]` is captured as a scalar setting instead
+            // (E1242-style "wrong shape" surfaces at env-entry validation,
+            // not here — this stays a pure capture step, no field-check).
+            check_build_io(value)?;
+            let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
+            match names_from(&v) {
+                Some(names) => secrets.extend(names),
+                None => {
+                    entry
+                        .settings
+                        .entry(name.clone())
+                        .or_default()
+                        .push(Scalar::normal(v.jet_show()));
+                }
+            }
         } else {
             check_build_io(value)?;
             let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
@@ -214,7 +237,21 @@ fn evaluate_env_fields(
                 .push(Scalar::normal(v.jet_show()));
         }
     }
-    Ok(entry)
+    Ok((entry, secrets))
+}
+
+/// U13: `[String]` → `Vec<String>`, or `None` if `v` isn't a list of strings
+/// (caller falls back to capturing it as an opaque scalar setting).
+fn names_from(v: &crate::Comptime::CtValue) -> Option<Vec<String>> {
+    let crate::Comptime::CtValue::List(xs) = v else {
+        return None;
+    };
+    xs.iter()
+        .map(|x| match x {
+            crate::Comptime::CtValue::Str(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// U12/D-JPK-MODBODY1=A: evaluate a canonical `env.<name>: { … }` role-module
@@ -226,13 +263,13 @@ fn evaluate_env_role(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<(EntryContribution, Vec<DevServicePlan>), Diagnostic> {
-    let entry = evaluate_env_fields(&lit.fields, src, base_dir, funcs)?;
+) -> Result<(EntryContribution, Vec<DevServicePlan>, Vec<String>), Diagnostic> {
+    let (entry, secrets) = evaluate_env_fields(&lit.fields, src, base_dir, funcs)?;
     let mut services = Vec::new();
     for s in &lit.services {
         services.push(evaluate_dev_service(s, base_dir, funcs)?);
     }
-    Ok((entry, services))
+    Ok((entry, services, secrets))
 }
 
 /// Pull the package list out of a `packages: [ … ]` field by slicing its

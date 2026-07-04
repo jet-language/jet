@@ -3607,6 +3607,13 @@ pub fn core_fixed_sig(
         ("core.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
         ("core.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("core.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get(name)` — a decrypted repo
+        // secret, `None` if `name` isn't in the store. Same "may be missing"
+        // shape as `core.env.get`.
+        ("core.vault", "get") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
         ("core.process", "exit") => Some((vec![(read, int)], None)),
         ("core.process", "run") => Some((
             vec![(read, Type::List(Box::new(Type::String)))],
@@ -4531,6 +4538,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
         "core.http.client" => &["get", "post", "request"],
         "core.http.server" => &["mux", "serve", "response"],
+        // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
+        // crypto FFI bridge.
+        "core.vault" => &["get"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -4544,6 +4554,9 @@ pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
             | "core.process" | "core.time" | "jet.http" | "jet.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"
+            // U13 (D-JPK-SECRETCRYPTO1): reading the encrypted repo store is
+            // filesystem I/O — same OS dependency as `core.files`.
+            | "core.vault"
     )
 }
 

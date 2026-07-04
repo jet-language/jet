@@ -3611,4 +3611,9 @@ pub struct FfiLink {
     /// bridge was built with `needs_crypto` (card c146 — package signing shells
     /// out to this helper for Ed25519 keygen/sign/verify). `None` otherwise.
     pub helper_bin_path: Option<PathBuf>,
+    /// U13 (D-JPK-SECRETCRYPTO1): path to the built `jet-secrets-helper`
+    /// binary, present only when the bridge was built with `needs_secrets` —
+    /// `jetpack secrets set/get/recipients/keygen` shells out to this for the
+    /// age-style encrypt/decrypt/keygen operations. `None` otherwise.
+    pub secrets_helper_bin_path: Option<PathBuf>,
 }

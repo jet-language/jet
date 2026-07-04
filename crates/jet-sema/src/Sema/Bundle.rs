@@ -1669,6 +1669,11 @@ pub(crate) fn check_bundle_opts(
     check_region_caps(&effect_summaries, &solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
     check_callback_bounds(&effect_summaries, &solved, &mut diags);
+    // U13 (D-JPK-SECRETCRYPTO1): a `core.vault.get` reach requires `Secret` in
+    // the reaching function's own declared `#(…)` bound — E1264.
+    for module in &bundle.modules {
+        check_secret_grants(&module.items, &effect_summaries, &mut diags);
+    }
 
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
     diags.extend(check_web_partition(bundle, &effect_summaries, &solved));

@@ -1227,6 +1227,14 @@ image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S84 name 
 - **U12 — `Service` is an open record.** Each service under `services:` is a bare
   `{ … }` (type inferred, U18) whose first field is `enable: Bool` (required —
   missing is **E0975**, non-Bool is **E0975**); any further fields are allowed.
+- **U13 — `secrets:` (D-JPK-SECRETCRYPTO1).** An `env.<name>` role-module may
+  declare `secrets: ["name", …]` — a plain `[String]` list, no dedicated
+  grammar. Each name is one this env expects to find in the project's
+  encrypted repo store (`.jet/secrets.age`, managed by `jetpack secrets
+  set/get/recipients/keygen`); reading one at runtime is `core.vault.get`,
+  gated by the `Secret` effect (**E1264** if ungranted) and unconditionally
+  denied at build/comptime time (**E1265**, no `#Impure` escape hatch).
+  `jetpack secrets get <name>` on a name absent from the store is **E1263**.
 - **U14 — `Image` derives from a `System`.** An `Image` has `from: system.<name>`
   (required — missing is **E0977**; an unknown system is **E0978**) and an
   optional `format:` ∈ {`iso`, `qcow`, `raw`}, default `iso` (anything else is

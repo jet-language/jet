@@ -671,6 +671,23 @@ impl<'a> Interp<'a> {
                 if module == "core.net" && method == "fetch" {
                     return self.eval_net_fetch(argv, span);
                 }
+                // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` is denied at build time
+                // unconditionally — unlike the Tier-2 effects below, there is no
+                // `#Impure`/`--allow-impure` escape hatch, because a build artifact
+                // must never bake in a decrypted secret (I1).
+                if module == "core.vault" {
+                    return Err(Diagnostic::error(
+                        "E1265",
+                        format!("`{}.{}()` can't be reached from a build-time context", module, method),
+                        "module-field/comptime evaluation runs before secrets are ever decrypted; \
+                         a repo's encrypted store is only ever opened at ordinary runtime, and — \
+                         unlike the Tier-2 comptime effect gate — there is no `#Impure` escape hatch \
+                         here.".to_string(),
+                        "move the secret read out of comptime/module-field evaluation and into \
+                         ordinary runtime code.".to_string(),
+                        Some(span),
+                    ));
+                }
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = matches!(
                     module.as_str(),

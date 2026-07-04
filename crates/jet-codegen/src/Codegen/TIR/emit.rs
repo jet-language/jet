@@ -3390,6 +3390,13 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — reads `.jet/secrets.age`
+        // (project-relative) and decrypts with the local identity, via the
+        // age-style crypto FFI bridge. Already the exact `Option<String>` shape
+        // (`None` on any failure — missing file, missing entry, bad identity).
+        ("core.vault", "get") => {
+            format!("{}(&({}))", regex_fn("jet_vault_get_impl"), arg(0))
+        }
         // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors.
         ("core.time.expiring", "new") => format!(
             "{}jet_expiring_new({}, {}jet_duration_millis(&({})), {}jet_clock_now(&({})))",

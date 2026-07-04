@@ -27,6 +27,12 @@ pub struct EvaluatedModule {
     /// Rust type and evaluator (`ModuleEval::DevService`), even though the
     /// `Service` grammar itself is the one ratified shape (U12).
     pub dev_services: Vec<DevServicePlan>,
+    /// U13 (D-JPK-SECRETCRYPTO1): declared `secrets: ["name", …]` names from
+    /// every `env.<name>` role-module in this module, in source order — the
+    /// names this env expects to find in the project's encrypted store
+    /// (`.jet/secrets.age`). Validated (every name present) at env entry;
+    /// `Jetpack::Secrets` is the only consumer.
+    pub secrets: Vec<String>,
 }
 
 /// U11: a field-checked `system.<name>: { … }` contribution, captured so the
@@ -162,4 +168,9 @@ pub struct EnvPlan {
     /// modules, in source order. `jetpack services <verb>`/`jetpack dev`'s
     /// health gate are the only consumers — the jetos tier never reads this.
     pub dev_services: Vec<DevServicePlan>,
+    /// U13 (D-JPK-SECRETCRYPTO1): every declared `secrets:` name, across all
+    /// evaluated modules, in source order. `jetpack enter`/`jetpack dev`
+    /// validate every name exists in the encrypted store at env entry
+    /// (E1263); the jetos tier never reads this.
+    pub secrets: Vec<String>,
 }

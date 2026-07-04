@@ -29,6 +29,7 @@ pub mod Recipe;
 pub mod RefSpec;
 pub mod ScriptDeps;
 pub mod ScriptLock;
+pub mod Secrets;
 pub mod Services;
 pub mod Shell;
 pub mod Store;
