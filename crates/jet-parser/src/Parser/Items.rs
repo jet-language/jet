@@ -142,7 +142,7 @@ impl<'a> Parser<'a> {
                                     inline_version: None,
                                 })
                             } else {
-                                // use core.fs as fs — Module path with dots
+                                // use core.files as fs — Module path with dots
                                 self.import_decl_module_path(start, first, first_span)
                             }
                         }
@@ -166,7 +166,7 @@ impl<'a> Parser<'a> {
                     }
                     // U11 (D-JPK-SCRIPTDEP1=A): `use pkg#version;` — an inline
                     // script dependency. Only the bare (no-dot) module-name
-                    // form takes a version; `use core.fs#1.0;` is nonsensical
+                    // form takes a version; `use core.files#1.0;` is nonsensical
                     // and isn't accepted here (the stray `#` falls through to
                     // a normal "expected `;`" parse error).
                     let inline_version = if matches!(self.peek().kind, TokKind::Hash) {
@@ -272,7 +272,7 @@ impl<'a> Parser<'a> {
             span: Span::new(start.start, end),
             is_pub: false,
             is_package_pub: false,
-            // A dotted module path (`use core.fs;`) never takes U11's `#version`
+            // A dotted module path (`use core.files;`) never takes U11's `#version`
             // — that's the single-segment `pkg` form only.
             inline_version: None,
         })

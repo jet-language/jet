@@ -208,7 +208,7 @@ fn native_module_feature(name: &str) -> Option<&'static str> {
     match name {
         "core.tasks" => Some("spawns a task or uses a channel"),
         "core.mem" => Some("uses the low-level `core.mem` tier"),
-        "core.fs" => Some("reads or writes files"),
+        "core.files" => Some("reads or writes files"),
         "core.env" => Some("reads the environment"),
         "core.process" => Some("runs another process or exits early"),
         "core.random" => Some("uses random numbers"),

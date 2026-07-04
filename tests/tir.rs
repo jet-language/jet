@@ -1219,12 +1219,12 @@ fn run() {
 /// `match { Ok(v) => v, Err(_) => fb }` fallback. The missing file takes the
 /// fallback branch — proving the composition runs.
 #[test]
-fn core_fs_read_with_fallback() {
+fn core_files_read_with_fallback() {
     if !have_rustc() {
         return;
     }
     let src = "\
-use core.fs as fs
+use core.files as fs
 fn read_or(p: String) -> String {
     return (fs.read(copy p) ?? \"missing\")
 }
@@ -1652,7 +1652,7 @@ fn handle_methods_file_writer() {
     let src = format!(
         "\
 use core.files as files
-use core.fs as fs
+use core.files as fs
 fn write_file(path: String, text: String) -> Int {{
     w := files.create(copy path) ?? return 0
     _r :: w.write_line(text)

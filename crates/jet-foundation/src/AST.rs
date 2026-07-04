@@ -488,7 +488,7 @@ impl ImportDecl {
     }
 
     /// If this import refers to a compiler-known core/ring module, return its
-    /// canonical path (e.g. `"core.fs"`, `"jet.http"`). Returns `None` for
+    /// canonical path (e.g. `"core.files"`, `"jet.http"`). Returns `None` for
     /// file/unqualified imports and unknown module names.
     pub fn core_module_path(&self) -> Option<String> {
         let ImportKind::Module(name, _) = &self.kind else {

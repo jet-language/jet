@@ -87,7 +87,7 @@ fn all_example_stems() -> Vec<String> {
 ///   - E0956: a construct not yet supported at comptime (hit during execution),
 ///   - E0953: a deliberate user-authored panic (`require(false, …)`), which is
 ///     the program legitimately failing, not a silent skip.
-///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.fs`/`core.io`/
+///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.io`/
 ///     `core.env`/…) reached with no `#Impure` gate, or a gate present but
 ///     `--allow-impure` not passed — an honest, named boundary (the golden
 ///     corpus runs with neither), not a silent skip.

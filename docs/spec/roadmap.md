@@ -117,7 +117,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **M7** — FFI: `extern rust` inline crate deps.
 - **M8** — closures and lambdas.
 - **M9** — generics and traits; **M9.5** — comptime evaluation and `@embed`.
-- **M10** — Core library: `core.fs`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.encoding.json`. Frozen API in `docs/reference/core-library.md`.
+- **M10** — Core library: `core.files`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.encoding.json`. Frozen API in `docs/reference/core-library.md`.
 - **M11** — tasks and channels (Epoch-2 concurrency work; shipped as part of the v1 arc).
 - **M12** — package manager: `pkg.jet`, `.jet/lock`, content-addressed store (D-PM1…8). M12.1 verified; M12.2 (registry/semver) is Epoch 1 tail.
 - **M13** — LSP: incremental front end, go-to-definition, diagnostics, hover.

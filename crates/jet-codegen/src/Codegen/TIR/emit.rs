@@ -2975,32 +2975,40 @@ pub(crate) fn emit_tir_core_call(
         ("core.async.loadable", "failed") => {
             format!("JetLoadable::<(), _>::Failed({})", arg(0))
         }
-        ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
-        ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
-        ("core.fs", "write") => format!(
+        // D-FILES-WRITE1 (merge, was `core.fs`): whole-file convenience helpers now
+        // live in `core.files` alongside the streaming handle constructors below.
+        // D-FILES-APPEND1=A: whole-file one-shot is `append_all`, not `append` —
+        // that name stays reserved for the streaming handle's `.append(text)`.
+        ("core.files", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
+        ("core.files", "read_bytes") => {
+            format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0))
+        }
+        ("core.files", "write") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_write"),
             arg(0),
             arg(1)
         ),
-        ("core.fs", "append") => format!(
+        ("core.files", "append_all") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_append"),
             arg(0),
             arg(1)
         ),
-        ("core.fs", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
-        ("core.fs", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
-        ("core.fs", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
-        ("core.fs", "create_dir") => format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0)),
-        ("core.fs", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
-        ("core.fs", "copy") => format!(
+        ("core.files", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
+        ("core.files", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
+        ("core.files", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
+        ("core.files", "create_dir") => {
+            format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0))
+        }
+        ("core.files", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
+        ("core.files", "copy") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_copy"),
             arg(0),
             arg(1)
         ),
-        ("core.fs", "rename") => format!(
+        ("core.files", "rename") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_rename"),
             arg(0),

@@ -88,7 +88,7 @@ fn canonical_core_import_resolves() {
     let out = compile_temp(
         "core_imports.jet",
         r#"
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     print(fs.exists("/tmp"))
@@ -103,7 +103,7 @@ fn importing_core_without_calls_is_free_in_codegen() {
     let out = compile_temp(
         "core_import_only.jet",
         r#"
-use core.fs as fs
+use core.files as fs
 use core.io as io
 use core.env as env
 use core.process as process
@@ -246,7 +246,7 @@ fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
     fs::write(
         dir.join("core_import_only.jet"),
         r#"
-use core.fs as fs
+use core.files as fs
 use core.io as io
 use core.env as env
 use core.process as process
@@ -714,7 +714,7 @@ fn core_module_items_covers_known_core_modules() {
     let mut items_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for line in fn_body.lines() {
         let trimmed = line.trim();
-        // A match arm head: `"core.fs" => &[` or `"core.log" | "jet.log" => &[`
+        // A match arm head: `"core.files" => &[` or `"core.log" | "jet.log" => &[`
         if trimmed.starts_with('"') && trimmed.contains("=>") {
             let arm_head = trimmed.split("=>").next().unwrap_or("");
             let mut rest = arm_head;

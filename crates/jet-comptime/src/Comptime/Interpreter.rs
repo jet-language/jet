@@ -115,7 +115,7 @@ pub(super) struct Interp<'a> {
     /// swaps it.
     pub(super) cur_func: String,
     /// D-CTEFFECT1: nesting depth of active `#Impure("reason") { … }` blocks.
-    /// Tier-2 comptime effect calls (core.fs/env/exec/io) are allowed only
+    /// Tier-2 comptime effect calls (core.files/env/exec/io) are allowed only
     /// while this is `> 0` AND `allow_impure` is true.
     pub(super) impure_depth: usize,
     /// D-CTEFFECT1: true when the caller compiled with `--allow-impure`.
@@ -418,7 +418,7 @@ impl<'a> Interp<'a> {
                 // fine — it just marks Tier-2 comptime effects as *reachable*.
                 // The actual `--allow-impure` requirement is enforced per call
                 // in `eval_method` (E3411 there names the specific call, e.g.
-                // `core.fs.read()`), which also correctly leaves a gate whose
+                // `core.files.read()`), which also correctly leaves a gate whose
                 // body never attempts a Tier-2 effect (e.g. only `print`s, or
                 // a nested `#Impure` demo block) needing no flag at all —
                 // matching the doc comment on D-CTEFFECT1's own example.

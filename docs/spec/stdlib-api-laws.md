@@ -101,7 +101,7 @@ Tower card tracking the fix; this list is the authoritative inventory.
 
 | Gap | API | Law | Follow-up |
 |-----|-----|-----|-----------|
-| L1 | `core.fs.read` / `core.fs.write` use short names | 1 | c44-follow-1 |
+| L1 | `core.files.read` / `core.files.write` use short names | 1 | c44-follow-1 |
 | L6 | Several `core.math` functions lack UI snapshots for type mismatch | 6 | c44-follow-2 |
 | L7 | `core.json` functions have no standalone golden example | 7 | c44-follow-3 |
 

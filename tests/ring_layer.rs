@@ -74,7 +74,7 @@ fn fs_import_infers_std_layer() {
     )
     .unwrap();
     let main = r#"
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     print("ok")
@@ -104,7 +104,7 @@ fn ceiling_blocks_std_import() {
     )
     .unwrap();
     let main = r#"
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     print("ok")

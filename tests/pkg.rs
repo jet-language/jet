@@ -312,7 +312,7 @@ fn cli_build_prints_effect_summary() {
     write(
         &tmp,
         "hello.jet",
-        "use core.fs as fs\nfn run() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\"); }\n",
+        "use core.files as fs\nfn run() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\"); }\n",
     );
 
     let out = jet_cmd(&["build", "hello.jet"], &tmp, &store);

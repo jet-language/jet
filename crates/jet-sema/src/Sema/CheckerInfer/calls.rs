@@ -1021,9 +1021,10 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0038",
                     "`File.open` is not the M10 file API".to_string(),
-                    "M10 uses whole-file helpers in `core.fs`; file handles are out of scope"
+                    "M10 uses whole-file helpers in `core.files`, not a `File.open` handle type"
                         .to_string(),
-                    "import `core.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                    "import `core.files as fs` and call `fs.read(path)` or `fs.write(path, text)` \
+                     (or `fs.open(path)` for a streaming handle)"
                         .to_string(),
                     Some(span),
                 ));
@@ -2616,9 +2617,10 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0038",
                 "`open` is not the M10 file API".to_string(),
-                "M10 uses whole-file helpers in `core.fs`; file handles are out of scope"
+                "M10 uses whole-file helpers in `core.files`, not a bare `open` handle call"
                     .to_string(),
-                "import `core.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                "import `core.files as fs` and call `fs.read(path)` or `fs.write(path, text)` \
+                 (or `fs.open(path)` for a streaming handle)"
                     .to_string(),
                 Some(call.name_span),
             ));

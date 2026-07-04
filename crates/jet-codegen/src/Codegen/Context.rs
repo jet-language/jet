@@ -79,7 +79,7 @@ pub(crate) struct Cx {
     /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
     /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
     pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
-    /// Import alias -> compiler-known core module (`core.fs`, `core.json`, ...).
+    /// Import alias -> compiler-known core module (`core.files`, `core.json`, ...).
     pub(crate) core_imports: HashMap<String, String>,
     /// M10 helpers proven reachable by sema.
     pub(crate) used_core: HashSet<String>,

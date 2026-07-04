@@ -273,7 +273,7 @@ pub fn show_set(set: &EffectSet) -> String {
 
 /// The effect carried by a Core call `module.method`, or `None` if pure.
 /// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
-/// fully-resolved name (`core.fs`, `jet.http`, …).
+/// fully-resolved name (`core.files`, `jet.http`, …).
 pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     // D-DET1: the deterministic capability constructors carry NO ambient effect —
     // `time.clock(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
@@ -291,7 +291,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         return None;
     }
     Some(match module {
-        "core.fs" | "core.files" => Effect::Fs,
+        "core.files" => Effect::Fs,
         "core.net" | "jet.http" | "core.http.client" | "core.http.server" => Effect::Net,
         "core.time" => Effect::Time,
         "core.random" | "core.crypto.random" => Effect::Rand,

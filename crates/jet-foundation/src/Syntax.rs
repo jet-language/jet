@@ -2333,7 +2333,6 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 /// key set equals this slice.
 pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
-    "core.fs",
     "core.io",
     "core.env",
     "core.process",

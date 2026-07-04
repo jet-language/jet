@@ -85,7 +85,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "jet.regex" => RuntimeLayer::Alloc,
 
         // ── std: OS I/O, networking, processes ─────────────────────────────
-        "core.fs" | "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
+        "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
         | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
         | "core.compress.gzip" | "core.compress.zstd" | "jet.db"
@@ -99,7 +99,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
     }
 }
 
-/// Classify a sema/codegen helper-usage key (`core.io::input`, `core.fs::read`, …)
+/// Classify a sema/codegen helper-usage key (`core.io::input`, `core.files::read`, …)
 /// to its minimum runtime layer.
 pub fn core_usage_layer(usage: &str) -> Option<RuntimeLayer> {
     if let Some(rest) = usage.strip_prefix("core::") {

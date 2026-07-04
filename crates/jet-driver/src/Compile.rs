@@ -56,7 +56,7 @@ impl Capabilities {
         };
         Capabilities {
             uses_network: any(&["core.net", "jet.http"]),
-            uses_file_io: any(&["core.fs", "core.io", "core.files", "core.path"]),
+            uses_file_io: any(&["core.io", "core.files", "core.path"]),
             uses_unsafe: has_unsafe || any(&["core.mem"]),
             uses_ffi: has_ffi,
             uses_crypto: any(&["jet.crypto", "core.crypto.expert"]),

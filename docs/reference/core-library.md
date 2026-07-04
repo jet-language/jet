@@ -14,7 +14,7 @@ built-in modules below and the ring packages — lives under the single `core.*`
 namespace. There is no `jet.*` or `std.*` library namespace.
 
 **Naming (S54):** types and error enums are PascalCase (`String`, `IOError`,
-`JSON`); functions and module segments are snake_case (`read`, `core.fs`).
+`JSON`); functions and module segments are snake_case (`read`, `core.files`).
 See S66 for acronym capitalization.
 
 ---
@@ -22,7 +22,7 @@ See S66 for acronym capitalization.
 ## Quick start
 
 ```jet
-use core.fs as fs
+use core.files as fs
 use core.io as io
 use core.env as env
 
@@ -53,30 +53,31 @@ nix develop -c jet run tool.jet World
 Core modules use `use` — no quotes, unlike file imports.
 
 ```jet
-use core.fs as fs                    // one submodule
+use core.files as fs                 // one submodule
 use core.encoding.json as json       // a nested submodule
 ```
 
-`use core.fs` and `use core.encoding.json` each resolve to a
+`use core.files` and `use core.encoding.json` each resolve to a
 compiler-known module under the `core` root.
 
 **Not allowed:**
 
 ```jet
-import core.fs as fs        // teaching error E0015 — use `use core.fs`
+import core.files as fs     // teaching error E0015 — use `use core.files`
 use "std/fs"               // quoted paths are for .jet files only
 ```
 
 If you name a local file or folder `core`, `jet`, `http`, `regex`, `csv`, `toml`,
 `crypto`, or `archive`, the compiler rejects it — those names are reserved for
 first-party packages (**E1002**). An unknown core module is **E1001**;
-selective imports (`use core.fs.{read}`) are rejected — keep qualified access
+selective imports (`use core.files.{read}`) are rejected — keep qualified access
 through an alias. An unknown item in a known core module is **E1004**, with a
 did-you-mean suggestion when possible.
 
 Fallible core functions return `T ? E` and must be handled with `?`, `??`, or
-a pattern test like any other Jet result. File APIs are whole-file only (no
-streaming handles); paths are plain `String`; binary APIs use `U8` and `[U8]`.
+a pattern test like any other Jet result. `core.files` has both whole-file
+helpers (`read`/`write`/…) and streaming handles (`open`/`create`); paths are
+plain `String`; binary APIs use `U8` and `[U8]`.
 
 ---
 
@@ -86,7 +87,7 @@ Fallible Core functions return `T ? E`. Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     text :: fs.read("data.txt") ?? return   // stop on error
@@ -133,7 +134,7 @@ See `examples/features/types/option_combinators.jet`.
 
 ## Pay for what you call
 
-Using `core.fs` costs nothing in the generated binary until you **call**
+Using `core.files` costs nothing in the generated binary until you **call**
 something from it. A program that uses every Core module but only calls
 `print` stays hello-world sized. Only the helpers your program can reach are
 compiled in.
@@ -142,18 +143,18 @@ compiled in.
 
 ## Modules
 
-### `core.fs` — files and folders
+### `core.files` — files and folders
 
-Whole-file helpers only (streaming I/O added in E2-M7). Paths are plain
-`String`s.
+One module for both whole-file convenience helpers and streaming handles
+(D-FILES-WRITE1). Paths are plain `String`s.
 
 ```jet
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     path :: "/tmp/notes.txt"
     fs.write(path, "hello\n") ?? return
-    fs.append(path, "world\n") ?? return
+    fs.append_all(path, "world\n") ?? return
     print(fs.read(path) ?? return)        // "hello\nworld\n"
     print(fs.exists(path))                // true
     print(fs.is_dir("/tmp"))              // true
@@ -162,12 +163,14 @@ fn run() {
 }
 ```
 
+Whole-file helpers:
+
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `read(path)` | `String ? IOError` | Read entire file as UTF-8 text |
 | `read_bytes(path)` | `[U8] ? IOError` | Read entire file as bytes |
 | `write(path, text)` | `() ? IOError` | Create or overwrite a text file |
-| `append(path, text)` | `() ? IOError` | Append text to a file |
+| `append_all(path, text)` | `() ? IOError` | Append text to a file, one shot |
 | `exists(path)` | `Bool` | Whether the path exists |
 | `remove(path)` | `() ? IOError` | Delete a file |
 | `list_dir(path)` | `[DirEntry] ? IOError` | One entry per directory member, sorted by name (D-LSDIR1) |
@@ -177,6 +180,37 @@ fn run() {
 | `rename(from, to)` | `() ? IOError` | Rename or move a file |
 
 **`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
+
+Streaming handles (E2-M7/D-IO2) — for bounded-memory reads/writes instead of
+loading the whole file:
+
+```jet
+use core.files as files
+
+fn count_lines(path: String) -> Int ? IOError {
+    handle :: files.open(copy path)?
+    n := 0
+    loop line in handle.lines() {
+        n = (n + 1)
+    }
+    return ok(n)
+}
+```
+
+| Function/method | Returns | What it does |
+|------------------|---------|--------------|
+| `open(path)` | `FileReader ? IOError` | Open a file for buffered line-by-line reading |
+| `create(path)` | `FileWriter ? IOError` | Create/overwrite a file for buffered writing |
+| `append(path)` | `FileWriter ? IOError` | Open a file for buffered appending |
+| `reader.read_line()` | `String? ? IOError` | One line (no newline), `null` at EOF |
+| `reader.lines()` | iterator of `String` | `loop line in handle.lines()` |
+| `writer.write_line(text)` | `() ? IOError` | Write `text` plus a trailing newline |
+| `writer.flush()` | `() ? IOError` | Force buffered bytes to disk |
+
+Handles close automatically on every exit path (RAII), including early `?`
+returns. `append_all` (whole-file) and `append` (streaming handle
+constructor/method) are deliberately different names — D-FILES-APPEND1 — so
+the same module can offer both without a name collision.
 
 **`DirEntry`** (D-LSDIR1) has three readable fields:
 
@@ -1214,7 +1248,7 @@ shift count past the type's width traps (no leaked Rust panic).
 | `eprintln(...)` | `io.eprint(...)` |
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
-| `import core.fs` | `use core.fs` (teaching error E0015) |
+| `import core.files` | `use core.files` (teaching error E0015) |
 | `val x = …` / `var x = …` | `x :: …` (immutable) / `x := …` (mutable) |
 
 ---

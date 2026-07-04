@@ -3536,7 +3536,7 @@ fn consume(ch: Receiver<Int>) -> Int {
         ));
         // A non-closure core call is not a closure-core-call.
         assert!(!core_closure_call_in_subset(
-            "core.fs",
+            "core.files",
             "read",
             &guard_args,
             &cx,

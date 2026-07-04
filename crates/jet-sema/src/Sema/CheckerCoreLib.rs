@@ -915,7 +915,7 @@ impl<'a> Checker<'a> {
             // emitted here: `fs.read` is kept as sugar (D-IO3) and firing on every call
             // site is too noisy (breaks showcase golden tests via path-specific output).
             // Revisit when the test harness can normalise paths in exact comparisons.
-            ("core.fs", "read") => {}
+            ("core.files", "read") => {}
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns the `(Sender<T>,
             // Receiver<T>)` pair directly — mirrors the turbofish `decode<T>` pattern
             // above (the element type `T` comes from the explicit call-site type
@@ -3561,29 +3561,36 @@ pub fn core_fixed_sig(
     let list_u8 = Type::List(Box::new(u8_ty()));
     let io_unit = result_ty(unit.clone(), io.clone());
     match (module, name) {
-        ("core.fs", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
-        ("core.fs", "read_bytes") => Some((
+        ("core.files", "read") => {
+            Some((vec![(read, string.clone())], Some(result_ty(string, io))))
+        }
+        ("core.files", "read_bytes") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8, io_error_ty())),
         )),
-        ("core.fs", "write" | "append") => Some((
+        // D-FILES-WRITE1 (merge) + D-FILES-APPEND1=A: `write`/`append_all` are the
+        // whole-file convenience twins of the streaming `open`/`create`/`append`
+        // handle constructors below. `append_all` (not `append`) so it doesn't
+        // collide with the streaming handle's `.append(text)` method in the same
+        // `core.files` namespace.
+        ("core.files", "write" | "append_all") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(io_unit),
         )),
-        ("core.fs", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
-        ("core.fs", "remove" | "create_dir") => Some((
+        ("core.files", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
+        ("core.files", "remove" | "create_dir") => Some((
             vec![(read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         // D-LSDIR1=A: returns [DirEntry] ({name, path, is_dir}) — full path + type in one step.
-        ("core.fs", "list_dir") => Some((
+        ("core.files", "list_dir") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::List(Box::new(Type::Named("DirEntry".to_string()))),
                 io_error_ty(),
             )),
         )),
-        ("core.fs", "copy" | "rename") => Some((
+        ("core.files", "copy" | "rename") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
@@ -4325,19 +4332,6 @@ pub(crate) fn devserver_method_return(
 
 pub(crate) fn core_module_items(module: &str) -> Vec<String> {
     let items: &[&str] = match module {
-        "core.fs" => &[
-            "read",
-            "read_bytes",
-            "write",
-            "append",
-            "exists",
-            "remove",
-            "list_dir",
-            "create_dir",
-            "is_dir",
-            "copy",
-            "rename",
-        ],
         "core.io" => &["args", "input", "read_all_input", "eprint", "stdin"],
         "core.env" => &["get", "set", "current_dir", "home_dir"],
         "core.process" => &["exit", "run"],
@@ -4390,7 +4384,26 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.gc" => &["Gc", "collect"],
         "core.tasks" => &["spawn", "channel"],
-        "core.files" => &["open", "create", "append"],
+        // D-FILES-WRITE1 (merge, was `core.fs` + `core.files`): one module for
+        // both whole-file convenience helpers and streaming handle constructors.
+        // D-FILES-APPEND1=A: whole-file one-shot append is `append_all`, kept
+        // distinct from the streaming handle's `.append(text)` method.
+        "core.files" => &[
+            "read",
+            "read_bytes",
+            "write",
+            "append_all",
+            "exists",
+            "remove",
+            "list_dir",
+            "create_dir",
+            "is_dir",
+            "copy",
+            "rename",
+            "open",
+            "create",
+            "append",
+        ],
         "core.path" => &["join", "parent", "extension", "normalize"],
         // D-DEFER1 option B: scope-exit guard.
         "core.scope" => &["guard"],
@@ -4527,7 +4540,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
         module,
-        "core.fs" | "core.files" | "core.io" | "core.net" | "core.tasks"
+        "core.files" | "core.io" | "core.net" | "core.tasks"
             | "core.process" | "core.time" | "jet.http" | "jet.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"
@@ -4542,7 +4555,7 @@ pub(crate) fn module_short_name(module: &str) -> &str {
 /// Fix hint for E3301 depending on the forbidden module.
 pub(crate) fn freestanding_hint(module: &str) -> &'static str {
     match module {
-        "core.fs" | "core.files" => {
+        "core.files" => {
             "Embed the data at compile time with `@embed(\"file\")`, or build without `--freestanding`."
         }
         "core.net" | "jet.http" => {
@@ -4570,7 +4583,7 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
 pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnostic {
     let items = core_module_items(module);
     let mut fix = if items.is_empty() {
-        "import a specific core module, like `import core.fs as fs;`".to_string()
+        "import a specific core module, like `import core.files as fs;`".to_string()
     } else {
         format!("use one of: {}", items.join(", "))
     };

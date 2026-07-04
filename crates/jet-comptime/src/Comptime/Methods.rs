@@ -660,7 +660,7 @@ impl<'a> Interp<'a> {
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = matches!(
                     module.as_str(),
-                    "core.fs" | "core.env" | "core.io" | "core.exec" | "core.net" | "core.process"
+                    "core.files" | "core.env" | "core.io" | "core.exec" | "core.net" | "core.process"
                 );
                 if is_tier2 {
                     if self.impure_depth == 0 {
@@ -1448,7 +1448,7 @@ fn apply_core_call(
         )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when
         // no #Impure gate intercepts first in eval_method) ---
-        ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {
+        ("core.files", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {
             Err(Diagnostic::error(
                 "E3410",
                 format!(
@@ -1609,7 +1609,7 @@ fn apply_impure_core_call(
         })
     };
     match (module, method) {
-        ("core.fs", "read") => {
+        ("core.files", "read") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::read_to_string(&path) {
@@ -1620,7 +1620,7 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "read_bytes") => {
+        ("core.files", "read_bytes") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::read(&path) {
@@ -1631,11 +1631,13 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "write" | "append") => {
+        // D-FILES-APPEND1=A: whole-file one-shot is `append_all` (not `append`,
+        // which names the streaming handle's method).
+        ("core.files", "write" | "append_all") => {
             let path_str = as_string(one(0)?, span)?;
             let content = as_string(one(1)?, span)?;
             let path = base_dir.join(path_str);
-            let result = if method == "append" {
+            let result = if method == "append_all" {
                 use std::io::Write;
                 std::fs::OpenOptions::new()
                     .create(true)
@@ -1653,7 +1655,7 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "exists" | "is_dir") => {
+        ("core.files", "exists" | "is_dir") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             let meta = std::fs::metadata(&path);
@@ -1665,7 +1667,7 @@ fn apply_impure_core_call(
                 _ => false,
             }))
         }
-        ("core.fs", "create_dir") => {
+        ("core.files", "create_dir") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::create_dir_all(&path) {
@@ -1676,7 +1678,7 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "remove") => {
+        ("core.files", "remove") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             let result = if path.is_dir() {

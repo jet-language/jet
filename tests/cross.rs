@@ -22,7 +22,7 @@ fn check_freestanding_src(src: &str, label: &str) -> String {
 
 #[test]
 fn e3301_fs_read_in_freestanding() {
-    let src = r#"use core.fs as fs
+    let src = r#"use core.files as fs
 
 fn run() {
     _ :: fs.read("config.txt")

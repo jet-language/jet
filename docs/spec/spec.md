@@ -825,7 +825,7 @@ Two use forms (S16): **quotes = file path, no quotes = module.**
 **`use "path/to/file";`** — quoted path to a `.jet` file, relative to
 the using file's directory (`use "./lib";` for a sibling file;
 default namespace = last path segment). **`use name;`** or
-**`use core.fs;`** — unquoted module name (searches recursively from
+**`use core.files;`** — unquoted module name (searches recursively from
 the project root for `name.jet` or `name/{name,main}.jet`; `core` is a
 compiler-exported module per S51). Optional **`as alias`** in both forms.
 
@@ -1287,7 +1287,7 @@ function's set when the function reaches an operation that carries it.
 | Effect  | Carried by |
 |---------|-----------|
 | `Io`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
-| `Fs`    | `core.fs.*`, `files.*` streaming handles |
+| `Fs`    | `core.files.*` (whole-file helpers and streaming handles) |
 | `Net`   | `core.net.*`, `core.http.*` |
 | `Time`  | `core.time.now`/`sleep`/`start`, `core.time.now` |
 | `Rand`  | `core.random.*` |
@@ -1313,7 +1313,7 @@ fn_effects = "fn" ident "(" params ")" [ "#(" [ effect { "," effect } ] ")" ]
 
 ```jet
 fn load(path: String) #(Fs) -> String {
-    return core.fs.read(path)?;        // OK: Fs ⊆ {Fs}
+    return core.files.read(path)?;     // OK: Fs ⊆ {Fs}
 }
 ```
 
@@ -1346,7 +1346,7 @@ caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 ```jet
 fn run() {
     #Caps(Fs, Io) {
-        text :: core.fs.read("x") ?? "";   // Fs — allowed
+        text :: core.files.read("x") ?? "";   // Fs — allowed
         print(text);                            // Io — allowed
     }
 }
@@ -1705,7 +1705,7 @@ fn run() {
 `pkg#version` is the `#` directive plane's version-selector form
 (D-MARKER-FAMILY1); the version is a dotted numeric selector (`1.4`, `1.4.2`),
 never a range operator. Only a single-segment module name takes one — `use
-core.fs#1.0` is nonsensical and isn't accepted.
+core.files#1.0` is nonsensical and isn't accepted.
 
 `jet run stats.jet` collects every inline ref from the entry file, resolves
 each, and wires the resolved directory into module search exactly like a

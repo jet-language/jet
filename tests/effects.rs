@@ -73,7 +73,7 @@ fn run() {
 #[test]
 fn declared_bound_matching_body_ok() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn load(path: String) #(Fs) -> String {
     return fs.read(copy path) ?? "";
 }
@@ -90,7 +90,7 @@ fn run() { print(load("x")); }
 #[test]
 fn out_of_set_effect_is_e0740() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn load(path: String) #(Net) -> String {
     return fs.read(path) ?? "";
 }
@@ -108,7 +108,7 @@ fn run() { print(load("x")); }
 #[test]
 fn effects_propagate_transitively() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn load(path: String) #(Net) -> String { return helper(path); }
 fn run() { print(load("x")); }
@@ -124,7 +124,7 @@ fn run() { print(load("x")); }
 #[test]
 fn wider_bound_than_body_ok() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn load(path: String) #(Fs, Net) -> String {
     return fs.read(copy path) ?? "";
 }
@@ -155,7 +155,7 @@ fn run() { announce(1); }
 #[test]
 fn unannotated_function_never_trips_e0740() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn load(path: String) -> String { return fs.read(path) ?? ""; }
 fn run() { print(load("x")); }
 "#;
@@ -184,7 +184,7 @@ fn run() { print(calc()); }
 #[test]
 fn trait_impl_exceeding_bound_is_e0742() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 trait Hasher { @Pure fn hash(self) -> Int; }
 struct Doc { path: String }
 impl Doc.Hasher {
@@ -222,7 +222,7 @@ fn run() { s :: Square.{ side: 5 }; print("{s.area()}"); }
 #[test]
 fn named_callback_flows_through_to_caller() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn readit() -> String { return fs.read("x") ?? ""; }
 fn apply(f: fn() -> String) -> String { return f(); }
 fn caller() #(Net) -> String { return apply(readit); }
@@ -240,7 +240,7 @@ fn run() { print(caller()); }
 #[test]
 fn lambda_callback_flows_into_region() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn apply(f: fn() -> String) -> String { return f(); }
 fn run() {
     #Caps(Net) {
@@ -278,7 +278,7 @@ fn run() { caller(); }
 #[test]
 fn pure_fn_with_core_effect_is_e3401() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 @Pure fn readit(p: String) -> String { return fs.read(p) ?? ""; }
 fn run() { print(readit("x")); }
 "#;
@@ -311,7 +311,7 @@ fn run() {
 #[test]
 fn caps_region_out_of_set_is_e0741() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn run() {
     #Caps(Net) {
         text :: fs.read("x") ?? "";
@@ -331,7 +331,7 @@ fn run() {
 #[test]
 fn caps_region_transitive_is_e0741() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn run() {
     #Caps(Io) {
@@ -370,7 +370,7 @@ fn run() { work(); }
 #[test]
 fn grant_within_set_ok() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn run() {
     #Grant(Fs, Io) { caps ->
         text :: fs.read("x") ?? "";
@@ -390,7 +390,7 @@ fn run() {
 #[test]
 fn grant_out_of_set_is_e0712() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn run() {
     #Grant(Net) { caps ->
         text :: fs.read("x") ?? "";
@@ -410,7 +410,7 @@ fn run() {
 #[test]
 fn grant_transitive_is_e0712() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn run() {
     #Grant(Io) { caps ->
@@ -556,7 +556,7 @@ fn run() {
 #[test]
 fn transact_irreversible_fs_is_e0746() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn run() {
     #Transact(tx) {
         text :: fs.read("x") ?? "";
@@ -613,7 +613,7 @@ fn run() {
 #[test]
 fn transact_fs_in_on_commit_ok() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn run() {
     #Transact(tx) {
         print("reversible work");
@@ -890,7 +890,7 @@ fn run() { invoke(5, show); }
 #[test]
 fn callback_set_bound_exceeded_is_e0747() {
     let src = r#"
-use core.fs as fs
+use core.files as fs
 fn invoke(p: String, act: #(Io) fn(String)) {
     act(p);
 }

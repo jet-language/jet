@@ -1137,9 +1137,21 @@ waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 **S9 — Print**: `print` (adds newline).
 
-**S51 — Core library**: exported as the `core` module — `use core.fs`,
+**S51 — Core library**: exported as the `core` module — `use core.files`,
 `use core.io as io`; dot paths select submodules; never quoted paths. `core`
 is compiler-reserved (see D-CORENS1).
+
+**D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
+2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file
+convenience helpers (`read`/`read_bytes`/`write`/`append_all`/`exists`/
+`remove`/`list_dir`/`create_dir`/`is_dir`/`copy`/`rename`) and streaming
+handle constructors (`open`/`create`/`append` → `FileReader`/`FileWriter`,
+D-IO2); `core.fs` no longer exists (greenfield — `use core.fs` is an ordinary
+unknown-module error). Blocked on ballot **D-FILES-APPEND1 = A**: the merge
+collided the whole-file one-shot `append(path, text)` with the streaming
+handle's `.append(text)` method on the same name/module. Resolution: the
+whole-file function is renamed `append_all(path, text)`; the streaming
+handle's `.append(…)` is untouched.
 
 **Serde & encoding** *(D-SERDE1–12, D-ENC1, D-JSONVERB1, D-SERDE-ACCESS,
 D-ENC-YAML1)*: one format-agnostic data model. `@Codable` (≡
