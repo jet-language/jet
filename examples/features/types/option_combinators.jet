@@ -1,22 +1,22 @@
 // D-HOLE1: `.zip`/`Option.lift2` — Option composition without a general
 // "hole"/absent-propagating value type. A sensor reading only has a total
 // price when BOTH price and quantity are present; either missing makes the
-// total unknown (`null`), never a silent zero or a distinct "hole" type.
+// total unknown (`None`), never a silent zero or a distinct "hole" type.
 fn lookup_price(id: Int) -> (Float?) {
     if id == 1 {
-        return value(19.99)
+        return Val(19.99)
     }
-    return null
+    return None
 }
 
 fn lookup_qty(id: Int) -> (Float?) {
     if id == 1 {
-        return value(3.0)
+        return Val(3.0)
     }
     if id == 2 {
-        return value(5.0)
+        return Val(5.0)
     }
-    return null
+    return None
 }
 
 fn run() {
@@ -28,12 +28,12 @@ fn run() {
     // `Option.lift2` does the same combination without an explicit pair.
     total2 :: Option.lift2((p, q) => p * q, price, qty)
     print(total2)
-    // One absent (id 2 has a quantity but no price) -> null, not a partial total.
+    // One absent (id 2 has a quantity but no price) -> None, not a partial total.
     price2: Float? :: lookup_price(2)
     qty2: Float? :: lookup_qty(2)
     total3 :: price2.zip(qty2).map((pair) => pair.a * pair.b)
     print(total3)
-    // Both absent (id 3 has neither) -> null.
+    // Both absent (id 3 has neither) -> None.
     price3: Float? :: lookup_price(3)
     qty3: Float? :: lookup_qty(3)
     total4 :: Option.lift2((p, q) => p * q, price3, qty3)

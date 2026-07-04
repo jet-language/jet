@@ -214,7 +214,7 @@ before continuing.
 | E0305 | sema  | pattern doesn't belong to value's type    |
 | E0306 | sema  | pattern binding count mismatch            |
 | E0307 | sema  | `switch` not exhaustive (lists missing)   |
-| E0308 | sema  | bare `null` needs a known `T?` type       |
+| E0308 | sema  | bare `None` needs a known `T?` type       |
 | E0309 | sema  | nested `T??` rejected                     |
 | E0310 | sema  | `T?` used where plain `T` expected        |
 | E0311 | sema  | static/instance method confusion          |
@@ -272,7 +272,7 @@ before continuing.
 | E0424 | sema  | `:= uninit` used without `use core.mem` (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name: Type := uninit` (D-UNINIT-SENTINEL1) |
 | E0427 | parse | teaching: retired `#Ref(owner) name: T` field form → `name: &T` (the `&` on the type is the stored-reference marker; D-REF-SHORTHAND1) |
-| E0501 | sema  | empty `[]` / `[:]` needs a context type   |
+| E0501 | sema  | empty `[]` needs a context type           |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
 | E0504 | sema  | mixed-type list/map literal               |

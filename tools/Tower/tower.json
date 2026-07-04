@@ -2,7 +2,7 @@
   "meta": {
     "version": 3,
     "currentEpoch": "e3",
-    "nextNum": 189,
+    "nextNum": 190,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7958,12 +7958,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "workOrder": null,
       "log": [
+        {
+          "at": "2026-07-04",
+          "by": "agent",
+          "text": "3 of 6 decrees shipped + independently re-verified (orchestrator): D-EMPTYLIT1 ([:] retired, [] type-directed to List/Map via sema rewrite), D-OPT-SPELL1 (Val(x)/None real, value/null retired, FOREIGN_NONE deleted since None is real now, FOREIGN_SOME still points at Val), D-LAMBDA-INFER1 (bare m => expr parses+infers wherever expected type known, typed form stays for ambiguity). Migrated ~35 example/test files + editor grammars (vscode/tree-sitter/tmGrammar) + docs. Full nix develop -c cargo test --workspace: one failure (tests/web_dev.rs::jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save, 404 vs 200) - CONFIRMED PRE-EXISTING via git stash to prior commit db62a784, not a regression from these decrees; carded separately as c9webdevfn404. D-TUPLE-DESTRUCT1: NOT STARTED, not blocked - (a,b) := expr binding already fully implemented end-to-end, only gap is tasks.channel() needs to return (Sender<T>, Receiver<T>) instead of one Channel<T> (no Receiver<T> type exists yet). D-STR-AFTER1: NOT STARTED, not blocked - String has no existing not-found convention to mirror (only jet.regex.find returns Option<String>), implementer picks the convention per card's own 'exact set minted at impl' framing. D-FILES-WRITE1: BLOCKED on new ballot D-FILES-APPEND1 (tools/Tower/docs/ballots/decision-ballots.md) - core.fs and core.files both already exist separately and both use the name 'append' with different arity/meaning; merging per D-FILES-WRITE1 needs one renamed, card body didn't pin this down. Next: implement D-TUPLE-DESTRUCT1 + D-STR-AFTER1 (unblocked), wait on D-FILES-APPEND1 ballot for D-FILES-WRITE1."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -7974,7 +7979,30 @@
           "by": "agent",
           "text": "Owner: greenfield rule — greenfield: former spellings are simply absent from the grammar and fail as ordinary unknown syntax; no diagnostic mentions them. Card body, decree texts, and migration plan scrubbed accordingly."
         }
-      ]
+      ],
+      "updated": "2026-07-04"
+    },
+    {
+      "id": "c9webdevfn404",
+      "num": 189,
+      "title": "jet dev (fn-dev web mode) serves 404 for /app.js — pre-existing bug",
+      "body": "Discovered 2026-07-04 while verifying cv5syntaxdecrees (confirmed pre-existing via git stash to db62a784, unrelated to that card's changes). tests/web_dev.rs::jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save fails deterministically: GET /app.js returns 404 (expected 200) against a fn dev() server started via devserver.for_app(...).serve(). Fails fast (~0.01-0.02s), meaning the dev server comes up and answers /__jet_dev_version fine, but /app.js routing/build isn't wired or the web build isn't completing before serving. Needs root-cause: check crates/jet-codegen/src/Prelude/DevServer.rs's for_app/serve flow and whatever triggers the web-target build+route registration for app.js.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "log": [
+        {
+          "at": "2026-07-04",
+          "by": "agent",
+          "text": "Filed during cv5syntaxdecrees verification. Reproduced deterministically 3x in isolation; confirmed pre-existing on db62a784 (before any v5 syntax decree work) via git stash. Not blocking any current card's checkpoint since it predates them, but real user-facing bug in jet dev's fn-dev web mode."
+        }
+      ],
+      "created": "2026-07-04",
+      "updated": "2026-07-04"
     }
   ],
   "decisions": [

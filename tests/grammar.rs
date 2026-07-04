@@ -249,10 +249,10 @@ fn parse_option_fn() {
 fn find_even(limit: Int) -> (Int?) {
     loop i in 1..limit {
         if i % 2 == 0 {
-            return value(i);
+            return Val(i);
         }
     }
-    return null;
+    return None;
 }
 fn run() {}
 "#;

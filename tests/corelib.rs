@@ -858,7 +858,7 @@ fn run() {
     print(json.to_string(wi))
     back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
-    id :: Id<Wrap<Int>>.{ raw: 9, marker: null }
+    id :: Id<Wrap<Int>>.{ raw: 9, marker: None }
     print(json.to_string(id))
     rid :: json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
@@ -1306,7 +1306,7 @@ fn run() {
 #[test]
 fn option_zip_and_lift2_combinators() {
     // D-HOLE1: `.zip`/`Option.lift2` — both present -> a present result; either
-    // absent -> `null`. No general "hole" type; these are plain library combinators
+    // absent -> `None`. No general "hole" type; these are plain library combinators
     // on `T?`.
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
@@ -1321,18 +1321,18 @@ fn option_zip_and_lift2_combinators() {
         "option_combinators",
         r#"
 fn run() {
-    both_a: Float? :: value(2.0)
-    both_b: Float? :: value(5.0)
+    both_a: Float? :: Val(2.0)
+    both_b: Float? :: Val(5.0)
     print(both_a.zip(both_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_a, both_b))
 
-    a_only: Float? :: value(2.0)
-    b_missing: Float? :: null
+    a_only: Float? :: Val(2.0)
+    b_missing: Float? :: None
     print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, a_only, b_missing))
 
-    both_missing_a: Float? :: null
-    both_missing_b: Float? :: null
+    both_missing_a: Float? :: None
+    both_missing_b: Float? :: None
     print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
 }

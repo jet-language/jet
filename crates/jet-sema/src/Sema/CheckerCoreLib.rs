@@ -4135,8 +4135,10 @@ pub(crate) fn parsed_args_method_return(
                     "`ParsedArgs.option` expects 1 argument (option name), got {}",
                     n_args
                 ),
-                "`parsed.option(\"output\")` returns the value of `--output VALUE`, or `null`"
-                    .to_string(),
+                format!(
+                    "`parsed.option(\"output\")` returns the value of `--output VALUE`, or `{}`",
+                    Syntax::LIT_NULL
+                ),
                 "pass exactly one string: the option name (without leading `--`)".to_string(),
                 Some(span),
             ));
@@ -4149,8 +4151,10 @@ pub(crate) fn parsed_args_method_return(
                     "`ParsedArgs.positional` expects 1 argument (index), got {}",
                     n_args
                 ),
-                "`parsed.positional(0)` returns the first positional argument, or `null`"
-                    .to_string(),
+                format!(
+                    "`parsed.positional(0)` returns the first positional argument, or `{}`",
+                    Syntax::LIT_NULL
+                ),
                 "pass exactly one Int: the zero-based positional argument index".to_string(),
                 Some(span),
             ));

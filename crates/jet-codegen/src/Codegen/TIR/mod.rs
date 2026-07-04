@@ -2684,7 +2684,7 @@ fn mk() {
     #[test]
     fn covers_map_literal_and_param() {
         // An empty and a non-empty map literal, plus a map-typed param.
-        let src = "fn empty() -> [String, Int] {\n return [:]\n}\nfn one() -> [String, Int] {\n return [\"a\": 1]\n}\nfn accept(m: [String, Int]) -> Int {\n return 0\n}\n";
+        let src = "fn empty() -> [String, Int] {\n return []\n}\nfn one() -> [String, Int] {\n return [\"a\": 1]\n}\nfn accept(m: [String, Int]) -> Int {\n return 0\n}\n";
         assert!(covers(src, "empty"));
         assert!(covers(src, "one"));
         assert!(covers(src, "accept"));
@@ -3940,7 +3940,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [:] }
+    s := S.{ scores: [] }
     s.scores["a"] = 1
     print(s.scores["a"])
 }
@@ -3966,7 +3966,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [:] }
+    s := S.{ scores: [] }
     print(s.scores.len())
 }
 "#;

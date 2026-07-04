@@ -21,7 +21,7 @@ fn run() {
     }
     // Prove the table survived the "injection": still exactly 2 rows.
     count_opt :: conn.query_one("SELECT COUNT(*) AS n FROM greet", []) ?? panic("count failed")
-    if count_opt == value(count_row) {
+    if count_opt == Val(count_row) {
         n_val :: count_row.get("n") ?? panic("missing n")
         n :: n_val.int() ?? panic("n is not an int")
         print("row count: {n}")
@@ -31,7 +31,7 @@ fn run() {
     _ins3 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DbValue.Text("temporary")]) ?? panic("insert failed")
     _rolledback :: conn.rollback()
     after_opt :: conn.query_one("SELECT COUNT(*) AS n FROM greet", []) ?? panic("count failed")
-    if after_opt == value(after_row) {
+    if after_opt == Val(after_row) {
         n_val :: after_row.get("n") ?? panic("missing n")
         n :: n_val.int() ?? panic("n is not an int")
         print("row count after rollback: {n}")

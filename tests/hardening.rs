@@ -93,11 +93,11 @@ fn run() {
 fn or_fallback_keeps_sema_rewrites() {
     let src = r#"
 fn maybe() -> (Int?) {
-    return null
+    return None
 }
 
 fn run() {
-    m: Map<String, Int> := [:]
+    m: Map<String, Int> := []
     m["k"] = 7
     x :: maybe() ?? m["k"]
     print(x)
@@ -142,7 +142,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [:] }
+    s := S.{ scores: [] }
     s.scores["a"] = 1
     print(s.scores["a"])
 }
@@ -157,14 +157,14 @@ fn run() {
 
 #[test]
 fn struct_literal_field_knows_expected_type() {
-    // `[:]` in a struct literal used to fail with a spurious E0501.
+    // `[]` in a struct literal used to fail with a spurious E0501.
     let src = r#"
 struct S {
     scores: Map<String, Int>
 }
 
 fn run() {
-    s := S.{ scores: [:] }
+    s := S.{ scores: [] }
     print(s.scores.len())
 }
 "#;
@@ -240,8 +240,8 @@ fn if_pattern_binding_moves_subject() {
     expect_error(
         r#"
 fn run() {
-o: String? :: value("hi")
-    if o == value(n) {
+o: String? :: Val("hi")
+    if o == Val(n) {
         print(n)
     }
     print(o ?? "none")

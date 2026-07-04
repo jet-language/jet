@@ -339,8 +339,8 @@ Access capabilities use sigils only: bare `T`, `~T`, `^T`, and `&T`.
 Structs and enums carry fields; methods attach behavior (S27). Ratified
 surface (Group 2): struct literals **`Type.{f: v}`** (S29; flush, S29-FLUSH; dot-prefixed by D-DOTCTOR2); enums with
 **`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
-**`T?`** with **`value(v)`** / **`null`** (S32); generic args
-**`Type<Args>`** (S33). `null` is only legal for `T?`, never plain `T`.
+**`T?`** with **`Val(v)`** / **`None`** (S32); generic args
+**`Type<Args>`** (S33). `None` is only legal for `T?`, never plain `T`.
 
 ```
 struct Circle {
@@ -536,7 +536,7 @@ Cross-type **`?`** conversion supports two forms:
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
-  `?` propagates `null` when the function returns an optional.
+  `?` propagates `None` when the function returns an optional.
 - In a function return type, **`T?`** parses as **`T ?`** and the formatter
   writes the space. A function that returns an optional writes
   **`-> (T?)`**.
@@ -1567,7 +1567,7 @@ one flag, by this rule (checked top to bottom, first match wins):
 | Field shape | Flag | Absent at runtime |
 |---|---|---|
 | `Bool` | `--name` (boolean flag) | `false` |
-| `T?` (`T` a supported scalar) | `--name VALUE` (optional) | `null` |
+| `T?` (`T` a supported scalar) | `--name VALUE` (optional) | `None` |
 | scalar with `#[Default(expr)]` | `--name VALUE` (optional) | `expr` |
 | any other supported scalar | `--name VALUE` (**required**) | runtime error, `core.args` voice — no new diagnostic code |
 

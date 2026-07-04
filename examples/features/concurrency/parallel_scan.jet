@@ -36,7 +36,7 @@ fn paths_from_args() -> [String] {
     out: [String] := []
     i := 1
     loop i < args.len() {
-        if args.get(i) == value(path) {
+        if args.get(i) == Val(path) {
             out.push(path)
         }
         i += 1
@@ -73,7 +73,7 @@ fn scan_parallel(paths: [String]) -> [String] {
     workers: [Task<Unit>] := []
     i := 0
     loop i < paths.len() {
-        if paths.get(i) == value(path) {
+        if paths.get(i) == Val(path) {
             sender :: ch.sender()
             file :: path.clone()
             workers.push(tasks.spawn(take(sender) () => {

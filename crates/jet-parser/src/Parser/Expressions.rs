@@ -1235,9 +1235,15 @@ impl<'a> Parser<'a> {
                     ) =>
             {
                 let span = self.bump().span;
-                self.expect(TokKind::LParen, "after `value`")?;
+                self.expect(
+                    TokKind::LParen,
+                    &format!("after `{}`", Syntax::LIT_VALUE),
+                )?;
                 let inner = self.expr()?;
-                self.expect(TokKind::RParen, "after the value inside `value(...)`")?;
+                self.expect(
+                    TokKind::RParen,
+                    &format!("after the value inside `{}(...)`", Syntax::LIT_VALUE),
+                )?;
                 let full = Span::new(span.start, inner.span().end);
                 Ok(Expr::Present(Box::new(inner), full))
             }
@@ -1379,11 +1385,14 @@ impl<'a> Parser<'a> {
                 ));
                 return self.expr_primary(allow_struct_lit);
             }
+            // D-OPT-SPELL1: `None` is retired from this list — it's the real
+            // absent spelling now (lexed as `TokKind::KwNull` above), not a
+            // foreign guess. `Some`/`nil`/`none`/`some` are still wrong; all
+            // point learners at `Val`/`None`.
             TokKind::Ident(name)
                 if matches!(
                     name.as_str(),
-                    Syntax::FOREIGN_NONE
-                        | Syntax::FOREIGN_SOME
+                    Syntax::FOREIGN_SOME
                         | Syntax::FOREIGN_NIL
                         | Syntax::FOREIGN_NONE_LOWER
                         | Syntax::FOREIGN_SOME_LOWER
@@ -1396,7 +1405,7 @@ impl<'a> Parser<'a> {
                     unreachable!()
                 };
                 let (canonical, fix) = match foreign.as_str() {
-                    Syntax::FOREIGN_NONE | Syntax::FOREIGN_NONE_LOWER | Syntax::FOREIGN_NIL => {
+                    Syntax::FOREIGN_NONE_LOWER | Syntax::FOREIGN_NIL => {
                         (Syntax::LIT_NULL, Syntax::LIT_NULL)
                     }
                     _ => (Syntax::LIT_VALUE, Syntax::LIT_VALUE),
@@ -1419,9 +1428,15 @@ impl<'a> Parser<'a> {
                 if canonical == Syntax::LIT_NULL {
                     Ok(Expr::Absent(t.span))
                 } else {
-                    self.expect(TokKind::LParen, "after `value`")?;
+                    self.expect(
+                        TokKind::LParen,
+                        &format!("after `{}`", Syntax::LIT_VALUE),
+                    )?;
                     let inner = self.expr()?;
-                    self.expect(TokKind::RParen, "after the value inside `value(...)`")?;
+                    self.expect(
+                        TokKind::RParen,
+                        &format!("after the value inside `{}(...)`", Syntax::LIT_VALUE),
+                    )?;
                     let full = Span::new(t.span.start, inner.span().end);
                     Ok(Expr::Present(Box::new(inner), full))
                 }
@@ -1542,6 +1557,12 @@ impl<'a> Parser<'a> {
             }
             TokKind::LParen if self.after_lparen_is_lambda() => {
                 Ok(Expr::Lambda(self.parse_lambda(vec![])?))
+            }
+            // D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param
+            // lambda with no parens — `m => m.hp > 0`. Sema accepts it only
+            // where the expected type fixes the param type (E0801 elsewhere).
+            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LambdaArrow) => {
+                Ok(Expr::Lambda(self.parse_bare_lambda()?))
             }
             TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
             TokKind::Pipe => {
@@ -1812,18 +1833,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// S37/S38: `[a, b]` or `["k": v]` or `[]` / `[:]`.
+    /// S37/S38: `[a, b]` or `["k": v]` or `[]`. D-EMPTYLIT1: `[]` is the one
+    /// empty-collection spelling — type-directed, list or map decided by the
+    /// expected-type context (sema). `[:]` is gone; `[` immediately followed
+    /// by `:` falls through to an ordinary expression-expected parse error.
     fn list_or_map_lit(&mut self) -> Result<Expr, Diagnostic> {
         let open = self.bump().span;
         if matches!(self.peek().kind, TokKind::RBracket) {
             let close = self.bump().span;
             return Ok(Expr::ListLit(Vec::new(), Span::new(open.start, close.end)));
-        }
-        if matches!(self.peek().kind, TokKind::Colon) {
-            self.bump();
-            self.expect(TokKind::RBracket, "after `[:]`")?;
-            let close = self.toks[self.pos - 1].span;
-            return Ok(Expr::MapLit(Vec::new(), Span::new(open.start, close.end)));
         }
         let first = self.list_elem()?;
         if matches!(self.peek().kind, TokKind::Colon) {
@@ -2013,7 +2031,7 @@ impl<'a> Parser<'a> {
 
     /// S31: try to parse a pattern on the right of `==`.
     ///
-    /// Only unambiguous pattern spellings: `null`, `value(n)`, and
+    /// Only unambiguous pattern spellings: `None`, `Val(n)`, and
     /// `Variant(bindings)`. A bare identifier is ordinary value equality
     /// (`a == b`); unit-variant tests like `light == Red` are resolved in
     /// sema when `Red` is not a variable but is a variant on the subject.
@@ -2053,9 +2071,13 @@ impl<'a> Parser<'a> {
             }
             TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
                 let start = self.bump().span;
-                self.expect(TokKind::LParen, "after `value`")?;
-                let (binding, binding_span) = self.expect_ident("inside `value(...)`")?;
-                self.expect(TokKind::RParen, "after the binding in `value(...)`")?;
+                self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
+                let (binding, binding_span) = self
+                    .expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
+                self.expect(
+                    TokKind::RParen,
+                    &format!("after the binding in `{}(...)`", Syntax::LIT_VALUE),
+                )?;
                 return Ok(Some(Pattern::Present {
                     binding,
                     span: Span::new(start.start, binding_span.end),
@@ -2626,6 +2648,44 @@ impl<'a> Parser<'a> {
         let close_paren = self.peek().span;
         self.expect(TokKind::RParen, "after lambda parameters")?;
         self.expect(TokKind::LambdaArrow, "after `)` in a lambda")?;
+        let (body, end) = self.lambda_arrow_body(close_paren.end)?;
+        Ok(Lambda {
+            take_names,
+            params,
+            body,
+            span: Span::new(open.start, end),
+            meta: LambdaMeta::default(),
+        })
+    }
+
+    /// D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param lambda with
+    /// no parens and no type — `m => m.hp > 0`. Legal wherever the expected
+    /// closure/fn type fixes the param type (sema rejects it elsewhere, same
+    /// as the existing omitted-type `(m) => …` form under S46/D-LAMBDAINFER1).
+    /// No `take` prefix on the bare form — write `(take x) (x) => …` when a
+    /// capture list is needed.
+    fn parse_bare_lambda(&mut self) -> Result<Lambda, Diagnostic> {
+        let (name, name_span) = self.expect_ident("as a lambda parameter")?;
+        self.expect(TokKind::LambdaArrow, "after a bare lambda parameter")?;
+        let (body, end) = self.lambda_arrow_body(name_span.end)?;
+        Ok(Lambda {
+            take_names: vec![],
+            params: vec![LambdaParam {
+                name,
+                name_span,
+                ty: None,
+                ty_span: None,
+            }],
+            body,
+            span: Span::new(name_span.start, end),
+            meta: LambdaMeta::default(),
+        })
+    }
+
+    /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `=>` and
+    /// the lambda's overall end offset. `fallback_end` is used only for an
+    /// empty block body (no statements to read an end span from).
+    fn lambda_arrow_body(&mut self, fallback_end: usize) -> Result<(LambdaBody, usize), Diagnostic> {
         let body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.expect(TokKind::LBrace, "to open the lambda body")?;
             LambdaBody::Block(self.block_stmts())
@@ -2674,17 +2734,11 @@ impl<'a> Parser<'a> {
                         Stmt::Yield(e, _) => e.span().end,
                     }
                 } else {
-                    close_paren.end
+                    fallback_end
                 }
             }
         };
-        Ok(Lambda {
-            take_names,
-            params,
-            body,
-            span: Span::new(open.start, end),
-            meta: LambdaMeta::default(),
-        })
+        Ok((body, end))
     }
 
     /// D-TASKSCOPE1=A: `{ stmts }` after `.task` → `() => { stmts }`.

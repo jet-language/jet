@@ -79,7 +79,7 @@ fn text_array(items: ^[String]) -> [Json] {
     return out
 }
 fn source_json(s: ^Source) -> Json {
-    m: [String, Json] = [:]
+    m: [String, Json] = []
     m["kind"] = Json.Text("source")
     m["name"] = Json.Text(s.name)
     m["upstream"] = Json.Text(s.upstream)
@@ -87,13 +87,13 @@ fn source_json(s: ^Source) -> Json {
     return Json.Object(m)
 }
 fn packages_json(pack: ^Pack) -> Json {
-    m: [String, Json] = [:]
+    m: [String, Json] = []
     m["kind"] = Json.Text("packages")
     m["items"] = Json.Array(text_array(package_refs(^pack)))
     return Json.Object(m)
 }
 fn prompt_json(label: ^String) -> Json {
-    m: [String, Json] = [:]
+    m: [String, Json] = []
     m["kind"] = Json.Text("prompt")
     m["label"] = Json.Text(label)
     return Json.Object(m)

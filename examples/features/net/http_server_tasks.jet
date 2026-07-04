@@ -7,7 +7,7 @@ use core.tasks as tasks
 
 fn handle(req: HttpRequest) -> HttpResponse {
     greeting :: "hello from Jet! method={req.method()} path={req.path()}"
-    return HttpResponse.{status: "200 OK", body: greeting, headers: [:]}
+    return HttpResponse.{status: "200 OK", body: greeting, headers: []}
 }
 
 fn run() {
@@ -20,7 +20,7 @@ fn run() {
         sender.send(addr)
         stream :: listener.accept() ?? panic("accept failed")
         _req_raw :: stream.read() ?? panic("read failed")
-        req :: HttpRequest.{method: "GET", path: "/", body: "", headers: [:]}
+        req :: HttpRequest.{method: "GET", path: "/", body: "", headers: []}
         resp :: handle(req)
         net.tcp_reply(stream, resp.status(), resp.body())
     })

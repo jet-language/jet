@@ -1000,8 +1000,9 @@ fn c40_is_keyword_real_keywords_recognized() {
 
 #[test]
 fn c40_is_keyword_value_is_not_a_keyword() {
-    // `value` is LIT_VALUE (a literal, like `true`/`false`/`null`), not a keyword.
-    // Rename to "value" should NOT be rejected as a keyword.
+    // `Val` is LIT_VALUE (a literal, like `true`/`false`/`None`), not a keyword
+    // (D-OPT-SPELL1: renamed from `value`). Rename to "Val" should NOT be
+    // rejected as a keyword.
     // (It may or may not succeed for other reasons, but not because it's a keyword.)
     let jet = jet_bin();
     if !jet.exists() {
@@ -1029,10 +1030,10 @@ fn c40_is_keyword_value_is_not_a_keyword() {
             },
             TranscriptStep::Send {
                 msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"value"}}}}"#,
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"Val"}}}}"#,
                     uri
                 ),
-                // Must NOT say "value is a keyword" — value is a literal, not a keyword
+                // Must NOT say "Val is a keyword" — Val is a literal, not a keyword
                 expect_contains: Some(vec!["result".to_string()]),
             },
             TranscriptStep::Send {

@@ -119,7 +119,7 @@ struct Holder {
     items: [String, Int]
 }
 fn run() {
-    h := Holder.{ items: [:] }
+    h := Holder.{ items: [] }
     h.items["x"] = 1
     loop k, v in h.items {
         print(k)

@@ -511,7 +511,7 @@ fn run() {
     assert_eq!(stdout, "1\n99\n3\n");
 }
 
-/// A map literal (`[:]`), map indexing, map insert (`m[k] = v`), and two-binding
+/// A map literal (`[]`), map indexing, map insert (`m[k] = v`), and two-binding
 /// `loop k, v in map` iteration — the map-specific helpers and the `.iter()` clone
 /// form. BTreeMap iterates in sorted key order, so output is deterministic.
 #[test]
@@ -521,7 +521,7 @@ fn map_literal_index_insert_and_iteration() {
     }
     let src = "\
 fn run() {
-    counts: [String, Int] := [:]
+    counts: [String, Int] := []
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
@@ -907,7 +907,7 @@ fn run() {
     assert_eq!(stdout, "25\n-1\n");
 }
 
-/// An optional `T?` with `value`/`null` constructors and a `??` fallback.
+/// An optional `T?` with `value`/`None` constructors and a `??` fallback.
 #[test]
 fn optional_value_null_and_fallback() {
     if !have_rustc() {
@@ -917,10 +917,10 @@ fn optional_value_null_and_fallback() {
 fn first_even(limit: Int) -> (Int?) {
     loop i in 1..limit {
         if (i % 2) == 0 {
-            return value(i)
+            return Val(i)
         }
     }
-    return null
+    return None
 }
 fn run() {
     print(first_even(9) ?? 0)
@@ -929,7 +929,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_optional", src);
     assert_eq!(code, 0);
-    // first_even(9)→value(2); first_even(1)→null → 0.
+    // first_even(9)→Val(2); first_even(1)→None → 0.
     assert_eq!(stdout, "2\n0\n");
 }
 
@@ -951,10 +951,10 @@ fn handle_of(a: (Account?)) -> (String?) {
     return a?.profile?.handle
 }
 fn run() {
-    p :: Profile.{ handle: value(\"jay\") }
+    p :: Profile.{ handle: Val(\"jay\") }
     acct :: Account.{ profile: p }
-    print(handle_of(value(acct)) ?? \"none\")
-missing: (Account?) :: null
+    print(handle_of(Val(acct)) ?? \"none\")
+missing: (Account?) :: None
     print(handle_of(missing) ?? \"none\")
 }
 ";
@@ -1042,7 +1042,7 @@ fn map_builtin_methods() {
     }
     let src = "\
 fn run() {
-    m: [String, Int] := [:]
+    m: [String, Int] := []
     m.insert(\"banana\", 3)
     m.insert(\"apple\", 5)
     print(m.len())
@@ -1080,7 +1080,7 @@ fn drop_key(m: [String, Int]) -> Int {
 }
 fn run() {
     print(drop_first([10, 20, 30]))
-    counts: [String, Int] := [:]
+    counts: [String, Int] := []
     counts[\"a\"] = 1
     counts[\"b\"] = 2
     print(drop_key(counts))
@@ -1975,9 +1975,9 @@ fn or_fallback_panic_form() {
     let src = "\
 fn maybe(n: Int) -> (Int?) {
     if n > 0 {
-        return value(n)
+        return Val(n)
     }
-    return null
+    return None
 }
 fn risky(count: Int, ratio: Float) -> Int {
     base := count + 1
@@ -2206,10 +2206,10 @@ fn run() {
 fn prelude_struct_construction() {
     let src = "\
 fn build_resp(body: String) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: body, headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: body, headers: []}
 }
 fn build_req() -> HttpRequest {
-    return HttpRequest.{method: \"GET\", path: \"/\", body: \"\", headers: [:]}
+    return HttpRequest.{method: \"GET\", path: \"/\", body: \"\", headers: []}
 }
 fn run() {
     r :: build_resp(\"hi\")
@@ -2648,7 +2648,7 @@ fn handle(req: HttpRequest) -> HttpResponse {
     h :: req.header(\"host\")
     q :: req.param(\"id\")
     body :: \"m={m} p={p}\"
-    return HttpResponse.{status: \"200 OK\", body: body, headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: body, headers: []}
 }
 fn describe(resp: HttpResponse) -> String {
     s :: resp.status()
@@ -2782,8 +2782,8 @@ fn run() {
     assert_eq!(stdout, "5\n[a][b][c]\n");
 }
 
-/// c109 Phase 22: the optional-binding `if` condition — `if x == value(b) { … b … }`
-/// lowers to `if let Some(b) = x`, and `x == null` lowers to `.is_none()`. Reproduces
+/// c109 Phase 22: the optional-binding `if` condition — `if x == Val(b) { … b … }`
+/// lowers to `if let Some(b) = x`, and `x == None` lowers to `.is_none()`. Reproduces
 /// `emit_if`'s if-let / is_none condition shapes byte-for-byte.
 #[test]
 fn optional_binding_if_condition() {
@@ -2792,10 +2792,10 @@ fn optional_binding_if_condition() {
     }
     let src = "\
 fn describe(x: Int?) -> String {
-    if x == value(n) {
+    if x == Val(n) {
         return \"got {n}\"
     }
-    if x == null {
+    if x == None {
         return \"nothing\"
     }
     return \"?\"
@@ -2804,7 +2804,7 @@ fn first_even(xs: [Int]) -> Int {
     out: [Int] := []
     i := 0
     loop i < xs.len() {
-        if xs.get(i) == value(v) {
+        if xs.get(i) == Val(v) {
             out.push(v)
         }
         i+= 1
@@ -2812,8 +2812,8 @@ fn first_even(xs: [Int]) -> Int {
     return out.len()
 }
 fn run() {
-    nothing: Int? :: null
-    print(describe(value(7)))
+    nothing: Int? :: None
+    print(describe(Val(7)))
     print(describe(nothing))
     print(first_even([1, 2, 3]))
 }
@@ -3025,7 +3025,7 @@ fn run() {
     if data == Object(entries) {
         print(entries.len())
     }
-    obj: [String, Json] := [:]
+    obj: [String, Json] := []
     obj[\"name\"] = Json.Text(\"jet\")
     obj[\"ok\"] = Json.Bool(true)
     obj[\"none\"] = Json.Null
@@ -3068,7 +3068,7 @@ fn run() {
 }
 
 /// c109 Phase 24: regex `Match` value type + `.group(n)` accessor (`74_regex`). The
-/// `Match?` value (`if m == value(mat)` binds `mat: Match`) and `mat.group(0)` route.
+/// `Match?` value (`if m == Val(mat)` binds `mat: Match`) and `mat.group(0)` route.
 /// Regex needs the FFI bridge crate (not linkable from a standalone `rustc`), so this
 /// is a COMPILE-only check that the `Match.group` lowering emits the AST's
 /// `.get((n) as usize).cloned().flatten()` form (byte-parity is proven by the
@@ -3080,7 +3080,7 @@ use core.regex as re
 fn run() {
     text :: \"order 42 shipped\"
     m :: re.match(\"(\\\\d+) shipped\", text) ?? panic(\"bad pattern\")
-    if m == value(mat) {
+    if m == Val(mat) {
         whole :: mat.group(0) ?? \"none\"
         print(whole)
     }
@@ -3151,7 +3151,7 @@ pub struct Note {
     pub parent: String?
 }
 pub fn make_note(name: ^String, t: ^NoteType) -> Note {
-    return Note.{name: name, note_type: t, parent: null}
+    return Note.{name: name, note_type: t, parent: None}
 }
 pub fn kind_str(n: Note) -> String {
     k :: n.note_type
@@ -3270,11 +3270,11 @@ fn http_router_dispatch() {
     let src = "\
 use core.http as http
 fn handle_root(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"welcome\", headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: \"welcome\", headers: []}
 }
 fn handle_user(req: HttpRequest) -> HttpResponse {
     id :: req.param(\"id\") ?? \"unknown\"
-    return HttpResponse.{status: \"200 OK\", body: \"user={id}\", headers: [:]}
+    return HttpResponse.{status: \"200 OK\", body: \"user={id}\", headers: []}
 }
 fn run() {
     router :: http.router()
@@ -3575,7 +3575,7 @@ fn run() {
 
 /// c109 Phase 30: GENERIC functions + TRAIT-OBJECT dispatch (surface (G), 25_traits).
 /// Three covered fns: a generic `largest<T: Comparable>(xs: [T]) -> (T?)` (a `>` on a
-/// `Comparable`-bound type var, `[T]` indexing, a `T?` return with `value`/`null`); a
+/// `Comparable`-bound type var, `[T]` indexing, a `T?` return with `value`/`None`); a
 /// trait-OBJECT param `print_area(s: Shape)` (dynamic dispatch `s.name()`/`s.area()`
 /// through a `Box<dyn user_Shape>`); and `main` — a `[Shape]` trait-object list built from
 /// `Box::new(<lit>) as Box<dyn user_Shape>` element coercions, iterated via `.each`
@@ -3617,7 +3617,7 @@ impl Square.Shape {
 }
 fn largest<T: Comparable>(xs: [T]) -> (T?) {
     if xs.len() == 0 {
-        return null
+        return None
     }
     best := xs[0]
     i := 1
@@ -3627,7 +3627,7 @@ fn largest<T: Comparable>(xs: [T]) -> (T?) {
         }
         i+= 1
     }
-    return value(best)
+    return Val(best)
 }
 fn print_area(s: Shape) {
     print(\"{s.name()}: {s.area()}\")
@@ -3810,7 +3810,7 @@ fn run() {
 /// c109 (recursive struct): a self-referential struct field has Rust type
 /// `Box<…>` (`cx.boxed_edges`), so its construction value must be wrapped
 /// `Box::new(…)` (E0308 otherwise — the AST `emit_struct_lit` was not wrapping).
-/// A nested inline `Tree.{ value, child: value(Tree { … }) }` exercises the boxed
+/// A nested inline `Tree.{ value, child: Val(Tree { … }) }` exercises the boxed
 /// wrap at multiple levels; the boxed field READ stays on the AST path (deref), so
 /// `main` reads only the non-boxed scalar `value`. Both construction levels and
 /// `main` route through the TIR.
@@ -3827,9 +3827,9 @@ struct Tree {
 fn run() {
     root :: Tree.{
         value: 3,
-        child: value(Tree.{
+        child: Val(Tree.{
             value: 2,
-            child: value(Tree.{ value: 1, child: null })
+            child: Val(Tree.{ value: 1, child: None })
         })
     }
     print(root.value)
@@ -3986,19 +3986,19 @@ fn sum(t: Tree) -> Int {
     total := t.value
 kid: Tree? :: t.child
     if kid == {
-        value(c) -> {
+        Val(c) -> {
             total = total + sum(c)
         }
-        null -> {}
+        None -> {}
     }
     return total
 }
 fn run() {
     root :: Tree.{
         value: 3,
-        child: value(Tree.{
+        child: Val(Tree.{
             value: 2,
-            child: value(Tree.{ value: 1, child: null })
+            child: Val(Tree.{ value: 1, child: None })
         })
     }
     print(sum(root))
@@ -4122,14 +4122,14 @@ fn mixed_switch_non_ident_subject_binds_payload() {
 struct Holder { val: Int? }
 fn f(h: Holder) -> Int {
     if h.val == {
-        value(c) -> { return c }
+        Val(c) -> { return c }
         else -> { return 0 }
     }
 }
 fn run() {
-    hold :: Holder.{ val: value(5) }
+    hold :: Holder.{ val: Val(5) }
     print(f(hold))
-    empty :: Holder.{ val: null }
+    empty :: Holder.{ val: None }
     print(f(empty))
 }
 ";
@@ -4322,7 +4322,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [:] }
+    s := S.{ scores: [] }
     s.scores[\"a\"] = 1
     print(s.scores[\"a\"])
 }
@@ -4341,7 +4341,7 @@ fn run() {
 
 /// c109: a map builtin (`.len()`) on a struct-FIELD-read receiver
 /// (`s.scores.len()`), where the field came from an empty-map struct-literal
-/// field (`scores: [:]` takes its type from the struct field). The builtin gate
+/// field (`scores: []` takes its type from the struct field). The builtin gate
 /// admits a field-read receiver; `main` routes through the TIR and emits
 /// `((user_s).user_scores).len() as i64` byte-for-byte. Runs (empty map → 0).
 #[test]
@@ -4355,7 +4355,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [:] }
+    s := S.{ scores: [] }
     print(s.scores.len())
 }
 ";
@@ -4438,7 +4438,7 @@ fn wildcard_enum_payload_if_let() {
     let src = "\
 enum Wrapper {
     Some(Int)
-    None
+    Empty
 }
 fn run() {
     w :: Wrapper.Some(42)

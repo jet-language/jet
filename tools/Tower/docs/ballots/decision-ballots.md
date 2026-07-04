@@ -25,7 +25,106 @@ it's time to decide it.
 
 ## Open decisions
 
-None right now. The 2026-07-03 quick round (STYLEUNIT1=A, UIDEVSHELL1=A,
+**D-FILES-APPEND1 — `core.fs`/`core.files` merge: the `append` name collides (board card cv5syntaxdecrees, D-FILES-WRITE1).**
+
+**Gist:** Two different stdlib modules both want the method name `append`, with different meanings — merging them under `core.files` needs one renamed.
+
+**Story.** Walter Higgins is porting a log-rotation script to Jet. He already has whole-file code using `core.fs.append(path, "line\n")` to tack one line onto a file, and now wants to switch a long-running job to `core.files.open(path)` streaming handles for a hot loop — he expects both to live under the same module name once D-FILES-WRITE1 lands (`core.files` is decreed as *the* file module).
+
+**In the wild:**
+```jet
+use core.files as fs
+
+// Whole-file convenience — one call, opens+writes+closes:
+fs.append("audit.log", "user logged in\n")
+
+// Streaming handle — many writes, one open/close:
+h :: fs.open("audit.log")
+h.append("user logged in\n")   // same method name, different receiver/arity
+h.close()
+```
+Both spellings already exist in the compiler today, in two separate modules
+(`core.fs.append(path, text)` — 2-arg whole-file; `core.files`'s handle type
+has a 1-arg `.append(text)` method after `.open`/`.create`). D-FILES-WRITE1
+(ratified) says `core.files` becomes the one file module and folds `core.fs`
+into it — but a single Rust match arm can't dispatch `(module="files",
+method="append")` two different ways by argument count without a form of
+overloading the language doesn't otherwise use (I8 risk).
+
+**Other languages:**
+```rust
+// Rust: two different types own "append" — no collision, because the whole-
+// file convenience doesn't exist as a free function; it's OpenOptions::append.
+std::fs::OpenOptions::new().append(true).open(path)?;
+```
+```typescript
+// Node fs/promises: whole-file convenience is a different verb (appendFile),
+// handle-based writes use write() — no collision because names differ.
+await fs.appendFile(path, text);
+await handle.write(text);
+```
+```python
+# Python: no whole-file one-shot append built in; open(path, "a") then write().
+with open(path, "a") as f:
+    f.write(text)
+```
+Prior art leans toward *different verbs* rather than same-name overload by
+receiver — none of Rust/Node/Python overload one method name across a
+one-shot free function and a handle method the way the current two Jet
+modules do.
+
+**Tradeoffs:**
+
+| Option | One-way-to-mean-it (I8) | Migration cost | Reads naturally |
+|---|---|---|---|
+| A — rename whole-file to `append_all` (recommended) | Clean: `append` is always the handle method, `append_all` is always whole-file | Low — only 1 stdlib fn + any examples/tests using `core.fs.append(path, text)` | `fs.append_all(path, text)` vs `h.append(text)` — clear at a glance |
+| B — rename handle method to `write` (drop `append` from handles) | Clean, but `.write` already means "overwrite from start" elsewhere in `core.files` per D-FILES-WRITE1's own text ("handle method is `.write`") — would collide with THAT | Low | Ambiguous — does `.write` append or overwrite? |
+| C — keep both named `append`, dispatch by arity | Violates I8 (silent overloading, no precedent elsewhere in Jet) | Zero | Confusing — same name, different behavior class |
+
+**Worked example of every option:**
+
+- **Option A — rename whole-file convenience to `append_all` (recommended).**
+```jet
+use core.files as fs
+
+fs.append_all("audit.log", "user logged in\n")   // one-shot, opens+writes+closes
+
+h :: fs.open("audit.log")
+h.append("more\n")                                // streaming handle, unchanged
+h.close()
+```
+- **Option B — rename handle method, keep whole-file `append`.**
+```jet
+use core.files as fs
+
+fs.append("audit.log", "user logged in\n")        // whole-file, unchanged name
+
+h :: fs.open("audit.log")
+h.write("more\n")                                  // but D-FILES-WRITE1 already
+                                                    // says .write is the OPEN/
+                                                    // OVERWRITE handle method —
+                                                    // this collides with that
+h.close()
+```
+- **Option C — keep one name, dispatch by argument count (rejected, shown for completeness).**
+```jet
+use core.files as fs
+
+fs.append("audit.log", "user logged in\n")   // 2-arg: whole file
+h :: fs.open("audit.log")
+h.append("more\n")                            // 1-arg: handle — same name, silently different job
+```
+
+**Recommendation:** A. Rename the whole-file one-shot function to `append_all`;
+keep `append` as the streaming-handle method (unchanged). Zero ambiguity, one
+name change, smallest migration, no collision with D-FILES-WRITE1's own
+`.write` decision for handle overwrite. Blocks: card cv5syntaxdecrees /
+D-FILES-WRITE1 core.fs→core.files merge (found 2026-07-04, decrees 1-3 of
+that card ship independently, this is decree 5's only blocker).
+
+---
+
+The 2026-07-03 quick round (STYLEUNIT1=A, UIDEVSHELL1=A,
 OSTARGET2=B, EXPANDCLI1=A, MIGRATE4=A) is ratified in `syntax-decisions.md`;
 D-FLAGSHIP1–4 deferred to end of Epoch 4 by owner directive.
 (D-E4EXIT1 / D-BUILDFLAGS1 on card #95 stay ratified-pending-build.)

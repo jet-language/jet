@@ -270,10 +270,11 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::MapLit(pairs, _) => {
+                // D-EMPTYLIT1: an empty map is spelled `[]`, same as an empty
+                // list — sema (not the formatter) is the only thing that
+                // knows an empty `MapLit` node came from that shared spelling.
                 self.write("[");
-                if pairs.is_empty() {
-                    self.write(":");
-                } else {
+                if !pairs.is_empty() {
                     for (i, (k, v)) in pairs.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
@@ -526,11 +527,12 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(inner, Prec::Unary);
             }
             Expr::Present(inner, _) => {
-                self.write("value(");
+                self.write(Syntax::LIT_VALUE);
+                self.write("(");
                 self.fmt_expr(inner, Prec::OrFallback);
                 self.write(")");
             }
-            Expr::Absent(_) => self.write("null"),
+            Expr::Absent(_) => self.write(Syntax::LIT_NULL),
             // D-SIMD2: a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max` (inside `.reduce(…)`).
             Expr::ReduceMarker(name, _) => self.write(&format!("#{}", name)),
             Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
@@ -702,11 +704,12 @@ impl<'a> Fmt<'a> {
                 }
             }
             Pattern::Present { binding, .. } => {
-                self.write("value(");
+                self.write(Syntax::LIT_VALUE);
+                self.write("(");
                 self.write(binding);
                 self.write(")");
             }
-            Pattern::Absent(_) => self.write("null"),
+            Pattern::Absent(_) => self.write(Syntax::LIT_NULL),
             Pattern::Ok { binding, .. } => {
                 self.write("ok(");
                 self.write(binding);

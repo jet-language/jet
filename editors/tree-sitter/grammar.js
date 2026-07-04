@@ -735,7 +735,7 @@ module.exports = grammar({
       ),
     float_literal: (_) => token(/[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9]+)?/),
     boolean_literal: (_) => choice("true", "false"),
-    null_literal: (_) => "null",
+    null_literal: (_) => "None",
     ok_err_literal: (_) => choice("ok", "err"),
     char_literal: (_) => token(seq("'", /[^'\\]|\\./, "'")),
 

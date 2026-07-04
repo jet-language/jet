@@ -165,9 +165,11 @@ pub const KW_ALIAS: &str = "alias";
 /// S32 (ratified M3): optional type suffix — `Int?` is “maybe an Int”.
 pub const TYPE_OPTION_SUFFIX: &str = "?";
 
-/// S32 (ratified M3): present / absent spellings for `T?` (lowercase like `true`).
-pub const LIT_VALUE: &str = "value";
-pub const LIT_NULL: &str = "null";
+/// S32 (ratified M3) / D-OPT-SPELL1 (ratified 2026-07-04): present / absent
+/// spellings for `T?`. `Val(x)` is a PascalCase constructor call (matches
+/// enum-variant-construction style), `None` is a bare keyword-like literal.
+pub const LIT_VALUE: &str = "Val";
+pub const LIT_NULL: &str = "None";
 
 /// S27 (ratified M3): method receiver name.
 pub const KW_SELF: &str = "self";
@@ -788,8 +790,10 @@ pub const FOREIGN_MATCH: &str = "match";
 /// (the keyword was `switch` before the 2026-06-15 rename).
 pub const FOREIGN_SWITCH: &str = "switch";
 
-/// S32 (ratified M3): foreign optional spellings for teaching error E0020.
-pub const FOREIGN_NONE: &str = "None";
+/// S32 / D-OPT-SPELL1 (ratified 2026-07-04): foreign optional spellings for
+/// teaching error E0020. `None` is RETIRED from this list — it's the real
+/// absent spelling now, not a foreign guess. `Some`/`nil`/`none`/`some`
+/// remain wrong; all point learners at `Val`/`None`.
 pub const FOREIGN_SOME: &str = "Some";
 pub const FOREIGN_NIL: &str = "nil";
 pub const FOREIGN_NONE_LOWER: &str = "none";

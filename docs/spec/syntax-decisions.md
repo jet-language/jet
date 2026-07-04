@@ -114,7 +114,12 @@ No marker keyword — return-type-is-the-type identifies a constructor (D-CTOR2)
 the lambda arrow; `->` is return types and dispatch arms. **D-LAMBDAINFER1**:
 a lambda param type may be omitted where the expected type fixes it
 (`xs.filter((i) => i.state == .Open)`); required elsewhere (E0801);
-one-directional inference only.
+one-directional inference only. **D-LAMBDA-INFER1** *(ratified 2026-07-04)*:
+a single bare param may ALSO drop the parens — `xs.filter(m => m.hp > 0)` —
+wherever the expected type fixes it (same E0801/one-directional rule); no
+`take` prefix on the bare form (write `(take x) (x) => …`). The
+parenthesized/typed forms stay available for anywhere the type can't be
+inferred.
 
 **S47 — Function types & captures**: fn type `fn(T1, T2) -> R`. Named `fn`s
 coerce to function values. Captures follow M2: shared read for read-only
@@ -211,7 +216,7 @@ typestate transition graph itself — no separate surface (D-ROLE1).
 ### Patterns & matching
 
 **S31 — Pattern tests**: `==` with a pattern RHS when the LHS is an enum or
-`T?` — `if s == Rect(w, h)`, `x == null` — yields Bool. Patterns nest to any
+`T?` — `if s == Rect(w, h)`, `x == None` — yields Bool. Patterns nest to any
 depth (`r == ok(Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
 in scope for the rest of the same condition. No `is`, no Rust `match`.
 
@@ -238,7 +243,7 @@ destructure structs, tuples, and lists:
 .{ kind, .. } :: event                  // partial needs mandatory `..` (E0326)
 (x, y) :: point                         // named tuple, canonical order
 [a, b] :: xs                            // list, runtime length check (E0315)
-value(n) :: maybe_port() ?? return      // refutable bind needs ?? fallback
+Val(n) :: maybe_port() ?? return      // refutable bind needs ?? fallback
 ```
 
 Redundant `..` on a full pattern is E0327. Nesting one level.
@@ -265,7 +270,7 @@ of `<`/`<=`/`>`/`>=` only; mixed direction is a compile error (E0333);
 
 **S71 / S35 — Optional chaining & fallback**: `?.` chains fields and methods
 (`user?.address?.city`, `user?.display_name()`) yielding `T?`,
-short-circuiting on null; non-optional left side E0047. `??` is the single
+short-circuiting on None; non-optional left side E0047. `??` is the single
 fallback for both `T?` and `T ? E`: `x ?? default`, `x ?? return`,
 `x ?? panic("…")`. `or` is not an operator.
 
@@ -295,9 +300,14 @@ a compile error with a convert fix-it.
 
 **S21 — Float display**: a `Float` always prints a decimal part (`-5.0`).
 
-**S32 — Option**: `T?`; `value(expr)` present, `null` absent; no nullable
-plain `T`. **D-RESULT-OPTION-CANON1**: `T?` always means Optional; fallible is
-spaced `T ? E` / `T ?` (S34).
+**S32 / D-OPT-SPELL1 — Option** *(ratified 2026-07-04)*: `T?`; `Val(expr)`
+present, `None` absent; no nullable plain `T`. `Val` is a PascalCase
+constructor call (not a keyword — same non-keyword-identifier mechanism the
+old `value` spelling used); `None` is a real keyword. Old `value`/`null` are
+retired (greenfield: an ordinary unknown-identifier/parse error, no teaching
+text). `Some`/`nil`/`none`/`some` remain foreign guesses for E0020, now
+pointing at `Val`/`None`. **D-RESULT-OPTION-CANON1**: `T?` always means
+Optional; fallible is spaced `T ? E` / `T ?` (S34).
 
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
 reserved for collections/indexing/shorthands. No call-site type args in
@@ -396,7 +406,12 @@ content-addressed definitions (D-CADEFS1, frozen).
 **S37 — List literal**: `[a, b, c]`; empty `[]` needs a context type
 (**S78**: `[]` infers from expected type; explicit `[]: [T]` always accepted).
 
-**S38 — Map literal**: `["key": value, …]`; empty `[:]`.
+**S38 / D-EMPTYLIT1 — Map literal**: `["key": value, …]`. **D-EMPTYLIT1**
+*(ratified 2026-07-04)*: `[]` is the ONE empty-collection spelling for both
+list and map — type-directed from the expected-type context (a `[K, V]`
+binding/field/return/arg makes empty `[]` a map, same as `[T]` makes it a
+list). `[:]` is retired; `[` immediately followed by `:` is an ordinary
+parse error (E0003), no special-cased teaching text.
 
 **S65 — List type shorthand**: `[T]` is the canonical list-type spelling.
 

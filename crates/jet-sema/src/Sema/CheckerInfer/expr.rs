@@ -90,6 +90,20 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
+        // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
+        // expected-type context says Map, rewrite the node to an empty
+        // `Expr::MapLit` here so every downstream pass (codegen, comptime,
+        // formatter-after-sema) sees the AST kind it already knows how to
+        // lower — the exact same shape the retired `[:]` literal produced.
+        if let Expr::ListLit(elems, span) = e {
+            if elems.is_empty() {
+                if let Some(Type::Map { key, value }) = self.expected_type.clone() {
+                    let span = *span;
+                    *e = Expr::MapLit(Vec::new(), span);
+                    return Some(Type::Map { key, value });
+                }
+            }
+        }
         match e {
             // S68 (D-SG2): `if` in expression position. Condition is Bool; each
             // branch's trailing expression is its value, and both must agree.
@@ -848,13 +862,15 @@ impl<'a> Checker<'a> {
                     } else {
                         self.diags.push(Diagnostic::error(
                             "E0308",
-                            "bare `null` needs a known optional type here".to_string(),
+                            format!("bare `{}` needs a known optional type here", Syntax::LIT_NULL),
                             format!(
                                 "`{}` only fits where a `T?` is expected (S32)",
                                 Syntax::LIT_NULL
                             ),
-                            "add a type annotation, or use `null` where the type is already known"
-                                .to_string(),
+                            format!(
+                                "add a type annotation, or use `{}` where the type is already known",
+                                Syntax::LIT_NULL
+                            ),
                             Some(*span),
                         ));
                         None
@@ -862,13 +878,15 @@ impl<'a> Checker<'a> {
                 } else {
                     self.diags.push(Diagnostic::error(
                         "E0308",
-                        "bare `null` needs a known optional type here".to_string(),
+                        format!("bare `{}` needs a known optional type here", Syntax::LIT_NULL),
                         format!(
                             "`{}` only fits where a `T?` is expected (S32)",
                             Syntax::LIT_NULL
                         ),
-                        "add a type annotation, or use `null` where the type is already known"
-                            .to_string(),
+                        format!(
+                            "add a type annotation, or use `{}` where the type is already known",
+                            Syntax::LIT_NULL
+                        ),
                         Some(*span),
                     ));
                     None
@@ -1295,6 +1313,10 @@ impl<'a> Checker<'a> {
             self.diags.push(e3303(span));
         }
         if entries.is_empty() {
+            // D-EMPTYLIT1: the parser never produces an empty `Expr::MapLit`
+            // directly anymore (`[:]` is retired) — this only runs if some
+            // other rewrite reaches here without first resolving a Map
+            // expected type. Kept as a defensive fallback with `[]` wording.
             if let Some(expected) = self.expected_type.clone() {
                 if let Type::Map { key, value } = expected {
                     return Some(Type::Map { key, value });
@@ -1303,7 +1325,7 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0501",
                 "an empty map needs a type".to_string(),
-                    "write `[:]` only where the map type is already known, like `var m: [String, Int] = [:]`"
+                "write `[]` only where the map type is already known, like `var m: [String, Int] = []`"
                     .to_string(),
                 "add a type annotation on the binding".to_string(),
                 Some(span),

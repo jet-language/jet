@@ -83,7 +83,7 @@ fn run() {
 
     // match + capture groups: whole + each group
     m :: re.match("(\\d{{4}})-(\\d{{2}})-(\\d{{2}})", text) ?? panic("p")
-    if m == value(mat) {
+    if m == Val(mat) {
         print(mat.group(0) ?? "x")
         print(mat.group(1) ?? "x")
         print(mat.group(2) ?? "x")
@@ -92,9 +92,9 @@ fn run() {
         print(mat.group(9) ?? "none")
     }
 
-    // no match -> null optional
+    // no match -> None optional
     none_match :: re.match("zzz", text) ?? panic("p")
-    if none_match == null {
+    if none_match == None {
         print("no-match")
     }
 
@@ -121,7 +121,7 @@ fn run() {
     assert_eq!(lines[3], "06", "group(2)");
     assert_eq!(lines[4], "21", "group(3)");
     assert_eq!(lines[5], "none", "out-of-range group is none");
-    assert_eq!(lines[6], "no-match", "non-matching pattern yields null");
+    assert_eq!(lines[6], "no-match", "non-matching pattern yields None");
     assert_eq!(lines[7], "2024", "find first match");
     assert_eq!(lines[8], "3", "find_all count (2024, 06, 21)");
     assert_eq!(lines[9], "2024-06-21 build done", "replace first");
